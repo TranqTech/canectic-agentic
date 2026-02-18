@@ -1,0 +1,90 @@
+//requires
+
+//internal modules
+import chalk from 'chalk';
+import * as alogger from "../src/utils/alogger.js"
+import {WsManager, WsPool} from "../src/servers/websock-server.js"
+import * as dotenv from 'dotenv';
+import * as systeminfo from "../src/utils/systeminfo.js"
+import {CallManager, CallPool} from "../src/managers/callmanager.js"
+import {nodeManager} from "../src/managers/nodemanager.js"
+
+
+//variable setup
+const systemver = systeminfo.softwareVersion()
+const vsoftwarename = systeminfo.softwareName()
+const systemvermsg = systeminfo.versionMsg()
+var systemstartupmsg = systemvermsg + "\n  System Startup"
+var systemshutdownmsg = systemvermsg + "\n  System Shutdown"
+dotenv.config();
+const DefaultWsServPort = process.env.dwsport || 8086;
+var runwssrv = true
+var servercount = 0
+var callservcount = 0
+var lastservercount = 0
+var connectionpools = []
+var wsManager
+var primaryWsPool
+var callManager
+var primaryCallPool
+var primaryNodeManager
+
+
+async function startNodeManager(){
+	primaryNodeManager = new nodeManager
+	alogger.writeAlog(1, "Starting NodeManager", "yellowbright", true)
+	primaryNodeManager.listUsedNodes()
+}
+
+async function startWsSrv(){
+	//open Websocks here
+	alogger.writeAlog(1, "Creating Websocket Server(s)", "cyanbright")
+	wsManager = await new WsManager();
+	primaryWsPool = await wsManager.createNewPool(DefaultWsServPort, "Primary Websocket Pool")
+	connectionpools.push(primaryWsPool)
+	//console.log(connectionpools)
+}
+
+async function startCallManager(){
+	alogger.writeAlog(1, "Starting Call Manager", "cyanbright", true)
+	callManager = await new CallManager(primaryNodeManager)
+	primaryCallPool = await callManager.createNewPool("Primary Pool")
+	callManager.listPools()
+	//add to servers. Need to check and do this programmatically, but manually coding in for right now
+	primaryWsPool.setCallPool(primaryCallPool)
+	//primaryCallPool.floworder = "Standard"
+}
+
+async function exitWatch(){
+	//console.log("There are ", servercount, lastservercount)
+	if (servercount != lastservercount){
+		var servercountmsg = systemvermsg + "\n  There are now " + servercount + " server(s) running"
+		alogger.writeAlog(1, servercountmsg, "yellowbright", true)
+		lastservercount = servercount
+	}
+	if (servercount < 1){
+		if (!logtoconsole){
+			console.log("\n", chalk.yellowBright.bold(systemshutdownmsg))
+		}
+		alogger.writeAlog(1, systemshutdownmsg, "yellowbright", true)
+		return;		
+	}
+	setTimeout(exitWatch, 1000)
+}
+
+
+async function main(){
+	await startNodeManager()
+	if (runwssrv){
+		await startWsSrv()
+		servercount += 1
+		callservcount += 1
+	}
+	if (callservcount > 0){
+		await startCallManager()
+	}
+}
+
+await main()
+//exitwatch()
+setTimeout(exitWatch, 4000)
