@@ -13,10 +13,10 @@ const valid_escape_chars = new RegExp("[0-9:;?= ]")
 const df_esc_timeout = 50
 
 class ansiInputParser{
-	constructor(){
+	constructor(call){
+		this.call = call
 		this.emitter = new EventEmitter();
 		this.hexbuffer = ""
-		this.outputTarget
 		this.output_array = []
 		this.runningparser = false
 		this.escapemode = false
@@ -24,51 +24,51 @@ class ansiInputParser{
 		this.escapebuffer = ""
 		this.zombieTO
 	}
-	sendOutput(data){
-		if (this.outputTarget){
-			this.outputTarget.input_array.push(data)
-			this.outputTarget.handleData()
-			return;
+	queueOutput(data){
+		this.output_array.push(data)
+	}
+	flushOutput(){
+		if (this.output_array.length > 0 && this.call){
+			var batch = this.output_array
+			this.output_array = []
+			// Route through the call's handleData which sends to the current handler
+			if (this.call.currentHandler && this.call.currentHandler.active){
+				this.call.currentHandler.handleInput(batch)
+			}
 		}
 	}
 	parseHexByte(hexbyte){
 		clearTimeout(this.escTO)
-		//var stringchar = hexbyte.toString()
 		var stringchar = String.fromCharCode(parseInt(hexbyte, 16))
 		if (this.escapemode){
 			if ((this.escapebuffer.length == 0) && (stringchar == "[")){
-				//console.log("intermediate [")
 				this.escapebuffer += stringchar
 				return;
 			}
-			//console.log("Checking escape char", stringchar)
 			if (escape_intermed.test(stringchar)){
 				this.escapebuffer += stringchar
 				return;
 			}
 			if (valid_escape_chars.test(stringchar)){
-				//console.log("Popping on", stringchar)
 				this.escapebuffer += stringchar
 				return;
 			}
 			if (escape_terminator1.test(stringchar)){
-				//console.log("Terminating With", stringchar)
 				this.escapebuffer += stringchar
 				this.doEscape()
 				return;
 			}
 			if (escape_terminator2.test(stringchar)){
-				//console.log("Terminating With", stringchar)
 				this.escapebuffer += stringchar
 				this.doEscape()
 				return;
 			}
-			if (stringchar = "\x1b"){
+			if (stringchar == "\x1b"){
 				if (this.escapebuffer.length < 1){
-					this.sendOutput("KEY_ESC")
-					this.escTO = setTimeout(this.doEscape.bind(this), this.esc_timeout)
+					this.queueOutput("KEY_ESC")
 				}
 				this.escapebuffer = ""
+				this.escTO = setTimeout(this.doEscape.bind(this), this.esc_timeout)
 				return;
 			}
 			console.log(stringchar, "Not valid ESC")
@@ -79,8 +79,6 @@ class ansiInputParser{
 			this.escapemode = true
 			return;
 		}
-		//space for other test cases on non ascii chars here. Probably just convert to number and check value
-		//console.log("Hitting switch check")
 		var keyname = ""
 		switch (stringchar){
 			case "\t":
@@ -92,77 +90,72 @@ class ansiInputParser{
 			case "\b":
 				keyname = "KEY_Backspace"
 				break;
+			case "\x7f":
+				keyname = "KEY_Backspace"
+				break;
 			case "\x01":
 				keyname = "KEY_^A"
-				console.log("Control A!")
 				break;
 			case "\x13":
-				console.log("Control S?")
 				keyname = "KEY_^S"
 				break;
 			case "\x1a":
-				console.log("Control Z?")
 				keyname = "KEY_^Z"
 				break;
 			default:
 				keyname = "CHAR_" + stringchar
 				break;
-		}		
+		}
 		if (keyname){
-			//console.log("Sending", keyname)
-			this.sendOutput(keyname);
+			this.queueOutput(keyname);
 		}else{
 			console.log("No Key Parsed")
-		}	
-		
+		}
 	}
 	doEscape(){
 		if (this.escapemode){
 			this.escapemode = false
 			if (this.escapebuffer.length < 1){
-				this.sendOutput("KEY_ESC")
+				this.queueOutput("KEY_ESC")
+				this.flushOutput()
 				return;
 			}
+			var keyname = ""
 			switch (this.escapebuffer){
 				case "[A":
-					//console.log("Arrows!")
-					var keyname = "KEY_UpArrow"
+					keyname = "KEY_UpArrow"
 					break;
 				case "[B":
-					//console.log("Arrows!")
-					var keyname = "KEY_DownArrow"
+					keyname = "KEY_DownArrow"
 					break;
 				case "[C":
-					//console.log("Arrows!")
-					var keyname = "KEY_RightArrow"
+					keyname = "KEY_RightArrow"
 					break;
 				case "[D":
-					//console.log("Arrows!")
-					var keyname = "KEY_LeftArrow"
+					keyname = "KEY_LeftArrow"
+					break;
+				case "[3~":
+					keyname = "KEY_Delete"
+					break;
+				case "[H":
+					keyname = "KEY_Home"
+					break;
+				case "[F":
+					keyname = "KEY_End"
 					break;
 				default:
-					console.log("Unknown Character")
-					console.log(this.escapebuffer.length)
-					console.log(this.escapebuffer)
+					console.log("Unknown Escape Sequence:", this.escapebuffer)
 					break;
 			}
 			this.escapebuffer = ""
 			if (keyname){
-				this.sendOutput(keyname)
+				this.queueOutput(keyname)
 			}
+			// Flush here since this may fire from a timeout
+			this.flushOutput()
 		}
 	}
 	doHexBuffer(){
-		if (this.outputTarget){
-			if (this.outputTarget.takes == "HexBuffer"){
-				this.outputTarget.hexbuffer += this.hexbuffer
-				this.hexbuffer = ""
-				this.outputTarget.handleData()
-				return;
-			}
-			//can add handling for additional special case formats here.
-			//default to converting to key_ char_ and cmd_ setup if not.
-		}
 		while (this.hexbuffer.length > 0){
 			var hexbyte = this.hexbuffer.substr(0,2)
 			this.hexbuffer = this.hexbuffer.slice(2)
@@ -173,12 +166,16 @@ class ansiInputParser{
 		if (!this.runningparser){
 			this.runningparser = true
 			this.doHexBuffer()
+			// Flush any non-escape tokens that were queued during the parse
+			if (!this.escapemode){
+				this.flushOutput()
+			}
 			this.runningparser = false
 		}
 	}
 	clearParser(){
-		this.outputTarget = null
-
+		clearTimeout(this.escTO)
+		this.call = null
 	}
 }
 
@@ -484,6 +481,9 @@ class websockCommands{
 	}
 	senddata(data){
 		this.socket.send(Buffer.from(data))
+	}
+	sendstring(string){
+		this.socket.send(Buffer.from(string))
 	}
 	sendbeep(){
 		this.socket.send(Buffer.from("\x07"))

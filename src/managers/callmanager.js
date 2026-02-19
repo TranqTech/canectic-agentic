@@ -9,13 +9,15 @@ import {appendFileSync, existsSync, mkdirSync, readdir, readdirSync, readFile} f
 //internal modules
 import * as alogger from "../utils/alogger.js"
 import * as systeminfo from "../utils/systeminfo.js"
-//import {stageManager} from "./stagemanager.js"
 import {ansiInputParser, tcpCommands, websockCommands, telnetCommands} from "../commandsets/terminalcommands.js"
-//import {logCall, logCallDuration, getLastCallers} from "../db/callers.js"
+
+//handler modules
+import {LoginHandler} from "../handlers/loginhandler.js"
+import { DoorAuthHandler } from "../handlers/doorauthhandler.js"
+import { DoorRunner, LAUNCH_TYPES } from "../handlers/doorrunner.js";
+import { OutputRingBuffer } from "../handlers/ringbuffer.js";
 
 //setup
-//const callEvent = new EventEmitter();
-//variable definitions
 dotenv.config()
 const system_ver_msg = systeminfo.versionMsg()
 const connect_msg = system_ver_msg
@@ -23,13 +25,31 @@ const theme = process.env.theme
 const configdir = path.join(path.dirname("./"), 'config');
 const configcount = 1
 
+// handler registry
+const handlerRegistry = {
+	"login":        (call) => new LoginHandler(call, process.env.system_name || "BBS"),
+	"door_auth":    (call) => new DoorAuthHandler(call),
+	//"main_menu":    (call) => new MainMenuHandler(call),
+	//"top":    (call) => new MainMenuHandler(call),
+	//"menu":    (call) => new MenuHandler(call, this.currentmenu),
+	//"message_viewer": (call) => new MessageViewHandler(call),
+	//"message_editor": (call) => new MessageEditHandler(call),
+	//"terminal_negotiator": (call) => new terminalNegotiationHandler(call),
+};
+
 //function space
 
 class IncomingCall{
 	constructor(connection, callpool, newnodenum, floworder){
 		console.log("Creating Call!")
 		this.floworder = floworder || "Standard"
+		this.socatManager = callpool.socatManager
+		this.outputBuffer = new OutputRingBuffer(2000);
+		this.overrideBuffer = false
+		this.currentMenu = "Main"
+		this.previousMenu = "Main"
 		this.rawmode = false
+		this.sockethandle = 75
 		this.rawtarget
 		this.rawformat = "Buffer"
 		this.receiveEmitter = new EventEmitter
@@ -48,7 +68,7 @@ class IncomingCall{
 		this.term_rip_string = ""
 		this.use_rip = false
 		this.call_type = "Incoming";
-		this.call_status = "Seting Up";
+		this.call_status = "Setting Up";
 		this.call_stage = 0
 		this.caller_username = "";
 		this.caller_fullname = ""
@@ -66,14 +86,14 @@ class IncomingCall{
 		this.escapebuffer = ""
 		this.nodenum = newnodenum
 		this.stringbuffer
-		this.currentHandler
+		this.currentHandler = null
 		this.inputParser
 		this.user_record
 		this.timeleft = 9999
 		this.hangupnow = false
 		this.loggedend = false
 		if (connection.reportBaud){
-			this.baudRate = connection.reportBaud	
+			this.baudRate = connection.reportBaud
 		}
 		else{
 			this.baudRate = 38400
@@ -84,16 +104,134 @@ class IncomingCall{
 		this.loggingId = "Call From " + this.callerId
 		this.callEvent = new EventEmitter();
 	}
+	//writes to the output buffer for sysop nodespy - do this on connection send. Checks for override bit when subprocess takes over writes
+	writeOutputBuffer(data){
+		if (!this.overrideBuffer){
+			this.outputBuffer.write(data)
+		}
+	}
+	//The alternative method to the above for use on dosemu children, or other subprocesses that need to write a different sysop view.
+	writeOverrideBuffer(data) {
+		if (this.overrideBuffer) {
+			this.outputBuffer.write(data);
+		}
+	}
+	// --- Handler lifecycle ---
+	loadHandler(stageName){
+		// Clean up previous handler
+		if (this.currentHandler){
+			try{
+				this.currentHandler.clearHandler();
+			}catch(_){}
+			this.currentHandler = null;
+		}
+
+		// Look up factory
+		const factory = handlerRegistry[stageName];
+		if (!factory){
+			var logmsg = this.loggingId + "\n  Unknown or null stage: " + stageName;
+			alogger.writeAlog(3, logmsg, "redbright");
+			this.hangUpCall();
+			return;
+		}
+
+		try{
+			const handler = factory(this);
+			this.currentHandler = handler;
+			this.call_status = stageName;
+
+			// Wire handler events to call flow routing
+			this._wireHandlerEvents(handler, stageName);
+
+			handler.startStage();
+		}catch(err){
+			var logmsg = this.loggingId + "\n  Failed to load stage: " + stageName + "\n  " + (err?.stack || err);
+			alogger.writeAlog(3, logmsg, "redbright");
+			this.hangUpCall();
+		}
+	}
+
+	_wireHandlerEvents(handler, stageName){
+		// Login-specific events
+		handler.emitter.on("LoginOK", () => {
+			var logmsg = this.loggingId + "\n  Login successful for " + this.caller_username;
+			alogger.writeAlog(4, logmsg, "greenbright");
+			this._onHandlerComplete("main_menu");
+		});
+
+		handler.emitter.on("LoginLimit", () => {
+			var logmsg = this.loggingId + "\n  Login limit reached.";
+			alogger.writeAlog(4, logmsg, "yellowbright");
+			this.hangUpCall();
+		});
+		//door auth
+		handler.emitter.on("DoorAuthOK", () => {
+			var logmsg = this.loggingId + "\n  Door auth complete, loading door session";
+			alogger.writeAlog(4, logmsg, "greenbright");
+			this._onHandlerComplete("door_session");
+		});
+
+		handler.emitter.on("AuthFailed", () => {
+			this.hangUpCall();
+		});
+		// Generic events any handler can use
+		handler.emitter.on("ModuleReturn", () => {
+			this._onHandlerReturn(stageName);
+		});
+
+		handler.emitter.on("NextStage", (nextStage) => {
+			this._onHandlerComplete(nextStage);
+		});
+	}
+
+	_onHandlerComplete(nextStage){
+		if (!nextStage){
+			this.hangUpCall();
+			return;
+		}
+		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + nextStage;
+		alogger.writeAlog(5, logmsg, "greenbright");
+		this.loadHandler(nextStage);
+	}
+
+	_onHandlerReturn(fromStage){
+		// Handler exited without advancing (ESC from login, back from a menu, etc.)
+		// Could implement a stage stack here later for back-navigation
+		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage;
+		alogger.writeAlog(4, logmsg, "cyanbright");
+		this.hangUpCall();
+	}
+
+	// --- Data routing ---
+	handleData(data){
+		if (!this.connection) return;
+		try{
+			if (this.rawmode && this.rawtarget){
+				this.rawtarget(data);
+				return;
+			}
+			//do check for raw, otherwise add to parser
+			this.inputParser.hexbuffer += data.toString('hex')
+			this.inputParser.handleData()
+		}catch(err){
+			var logmsg = this.loggingId + "\n  Data handling error\n  " + (err?.stack || err);
+			alogger.writeAlog(3, logmsg, "redbright");
+		}
+	}
+
+	// --- Connection management ---
 	setCommandSet(){
 		switch (this.connection_type){
 			case "TCP":
 				this.cmds = new tcpCommands(this.connection.socket)
 				break;
 			case "Websock":
-				this.cmds = new websockCommands(this.connection.socket)
-				break;
 			case "Websocket":
 				this.cmds = new websockCommands(this.connection.socket)
+
+				if (!this.inputParser){
+					this.inputParser = new ansiInputParser(this);
+				}
 				break;
 			case "Telnet":
 				this.cmds = new telnetCommands(this.connection.socket)
@@ -107,6 +245,7 @@ class IncomingCall{
 			console.log("Did not set command set.... this is a problem")
 		}
 	}
+
 	handleNoSocket(){
 		var closemsg = this.loggingId + "\n  Could not find a valid socket for call. Cancelling call."
 		alogger.writeAlog(3, closemsg, "cyanbright")
@@ -115,6 +254,7 @@ class IncomingCall{
 		}
 		this.connectionClosed()
 	}
+
 	sendString(stringdata){
 		if ((!this.connection)||(!this.connection.socket)){
 			this.handleNoSocket()
@@ -122,60 +262,97 @@ class IncomingCall{
 		}
 		this.connection.sendString(stringdata)
 	}
+
 	connectionClosed(){
-		if (this.callStatus != "Finished"){
+		if (this.call_status !== "Finished"){
 			var closemsg = this.loggingId + "\n  Connection dropped. Cancelling call."
 			alogger.writeAlog(3, closemsg, "cyanbright")
 		}
+		// Clean up handler safely
+		if (this.currentHandler){
+			try{
+				this.currentHandler.clearHandler();
+			}catch(_){}
+			this.currentHandler = null;
+		}
 		this.logCallEnd()
 		this.connection = null
-		if (this.currentHandler){
-			this.currentHandler.clearHandler()
-		}
 		this.callPool.removeCall(this)
 	}
+
 	hangUpCall(){
+		if (this.call_status === "Finished") return;
 		var callfinishmsg = this.loggingId + "\n  Call Finished. Hanging Up."
-		alogger.writeAlog(4, callfinishmsg, "cyanbright")
-		//console.log("Call flow finished. Hangup.")
-		this.cmds.drawrandomscreen("Goodbye", true)
-		this.callStatus = "Finished"
+		alogger.writeAlog(3, callfinishmsg, "cyanbright")
+		this.call_status = "Finished"
+		// Clean up handler before goodbye
+		if (this.currentHandler){
+			try{
+				this.currentHandler.clearHandler();
+			}catch(_){}
+			this.currentHandler = null;
+		}
+		try{
+			this.cmds.sendstring("\r\nEnding Call...\r\n")
+			this.cmds.drawrandomscreen("Goodbye", true)
+		}catch(_){}
 		this.logCallEnd()
 		if (this.connection){
 			this.connection.hangUpCall()
-		}		
+		}
 	}
+
 	notifyRemoteHangup(){
 		this.connectionClosed()
-		return;
 	}
+
 	setupCall(){
 		this.setCommandSet()
-		//Do Authentication and door/menu selection stuff here.
 		console.log("Connected on Node", this.nodenum)
 		console.log("Sending Welcome")
 		this.connection.welcomeMessage()
-		//this.sendString("Hello there!")
+		// Start the call flow
+		this.loadHandler("door_auth")
+		//this.loadHandler("login")
 	}
+
 	logCallStart(){
 		//
 	}
+
 	logCallEnd(){
-		console.log("Call Ended!")
+		if (this.loggedend) return;
+		this.loggedend = true;
+		alogger.writeAlog(4, this.loggingId + "\n  Call Ended.", "cyanbright");
 	}
-	handleWebsockData(data){
-		if (this.currentHandler != null){
-			//do stuff
-		}else{
-			if (data.toString() == "q"){
-				this.hangUpCall()
-				return;
-			}
+	// Call helper for launching doors from menus
+	launchDoor(doorConfig) {
+		// Clean up current handler (the menu)
+		if (this.currentHandler) {
+			try { this.currentHandler.clearHandler(); } catch (_) {}
+			this.currentHandler = null;
 		}
-		if (this.echo_on){
-			this.connection.sendData(data)
+
+		try {
+			var handler = new DoorRunner(this, doorConfig, this.socatManager);
+			this.currentHandler = handler;
+			this.call_status = "Door: " + doorConfig.cmd;
+
+			handler.emitter.on("ModuleReturn", () => {
+				// Door exited — go back to menu
+				this._onHandlerComplete("main_menu");
+			});
+
+			handler.emitter.on("NextStage", (nextStage) => {
+				this._onHandlerComplete(nextStage);
+			});
+
+			handler.startStage();
+		} catch (err) {
+			var logmsg = this.loggingId + "\n  Failed to launch door: " + (err?.stack || err);
+			alogger.writeAlog(3, logmsg, "redbright");
+			this._onHandlerComplete("main_menu");
 		}
-		console.log(data.toString())
 	}
 }
 
@@ -184,7 +361,7 @@ class CallPool{
 		this.name = name;
 		this.uuid = uuidv4()
 		if (connectsto){
-			this.connectto = connectsto	
+			this.connectto = connectsto
 		}else{
 			this.connectto = "Internal"
 		}
@@ -197,18 +374,13 @@ class CallPool{
 	}
 	setNodeManager(nodemanager){
 		this.nodeManager = nodemanager
-		//console.log("Set nodemanager")
 		this.nodeManager.listUsedNodes()
 	}
 	createCall(connection){
-		//console.log(connection)
 		if (this.connectto == "Internal"){
-			//console.log("Creating new Incoming Call Type")
 			var newnodenum = this.nodeManager.getAvailNodeNum()
 			var newcall = new IncomingCall(connection, this, newnodenum, this.floworder);
 			this.connectedcalls.push(newcall)
-			//console.log(newcall.uuid)
-			//newcall.showcallstats()
 			var callcountmsg = this.loggingId + "\n  There are now " + this.connectedcalls.length + " active calls on this pool"
 			alogger.writeAlog(4, callcountmsg, "bluebright")
 			return newcall
@@ -221,12 +393,12 @@ class CallPool{
 			console.log("Can't remove a null call")
 			return;
 		}
-		for( var i = 0; i < this.connectedcalls.length; i++){
+		for (var i = 0; i < this.connectedcalls.length; i++){
 			if (this.connectedcalls[i] == call){
 				this.nodeManager.releaseNodeNum(call.nodenum)
 				call.callPool = null;
 				this.connectedcalls[i] = null;
-				this.connectedcalls.splice(i,1)
+				this.connectedcalls.splice(i, 1)
 				var callcountmsg = this.loggingId + "\n  There are now " + this.connectedcalls.length + " active calls on this pool"
 				alogger.writeAlog(4, callcountmsg, "bluebright")
 				call = null;

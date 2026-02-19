@@ -103,16 +103,19 @@ class WsConnection{
 	}
 	sendtext(text){
 		this.socket.send(text)
+		this.call.writeOutputBuffer(text)
 	}
 	sendString(stringdata){
 		this.socket.send(stringdata)
+		this.call.writeOutputBuffer(stringdata)
 	}
 	sendData(data){
 		this.socket.send(data)
+		this.call.writeOutputBuffer(data)
 	}
 	handleData(data){
 		if (this.callhandler){
-			this.callhandler.handleWebsockData(data)
+			this.callhandler.handleData(data)
 			return;
 		}
 	}

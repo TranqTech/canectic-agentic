@@ -8,6 +8,7 @@ import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import {CallManager, CallPool} from "../src/managers/callmanager.js"
 import {nodeManager} from "../src/managers/nodemanager.js"
+import { SocatManager } from "../src/managers/socatmanager.js";
 
 
 //variable setup
@@ -28,7 +29,32 @@ var primaryWsPool
 var callManager
 var primaryCallPool
 var primaryNodeManager
+var socatManager
 
+//global safety catch
+process.on('uncaughtException', (err) => {
+	alogger.writeAlog(0, `Uncaught exception: ${err.stack}`, "redbright");
+	// Don't exit — keep the BBS running
+});
+
+process.on('unhandledRejection', (reason) => {
+	alogger.writeAlog(0, `Unhandled rejection: ${reason}`, "redbright");
+});
+
+// On clean shutdown
+process.on('SIGINT', () => {
+	socatManager.shutdown();
+	process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+	socatManager.shutdown();
+	process.exit(0);
+});
+
+async function startSocatManager(){
+	 socatManager = new SocatManager();
+}
 
 async function startNodeManager(){
 	primaryNodeManager = new nodeManager
@@ -53,6 +79,8 @@ async function startCallManager(){
 	//add to servers. Need to check and do this programmatically, but manually coding in for right now
 	primaryWsPool.setCallPool(primaryCallPool)
 	//primaryCallPool.floworder = "Standard"
+	callManager.socatManager = socatManager;
+	primaryCallPool.socatManager = socatManager;
 }
 
 async function exitWatch(){
@@ -75,6 +103,7 @@ async function exitWatch(){
 
 async function main(){
 	await startNodeManager()
+	await startSocatManager()
 	if (runwssrv){
 		await startWsSrv()
 		servercount += 1
