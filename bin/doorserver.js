@@ -3,12 +3,15 @@
 //internal modules
 import chalk from 'chalk';
 import * as alogger from "../src/utils/alogger.js"
-import {WsManager, WsPool} from "../src/servers/websock-server.js"
+//import {WsManager, WsPool} from "../src/servers/websock-server.js"
+import {WsManager, WsPool} from "../src/servers/websockets.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
+import * as http from "http"
 import {CallManager, CallPool} from "../src/managers/callmanager.js"
 import {nodeManager} from "../src/managers/nodemanager.js"
 import { SocatManager } from "../src/managers/socatmanager.js";
+import {webserver} from "../src/servers/webserver.js"
 
 
 //variable setup
@@ -19,6 +22,7 @@ var systemstartupmsg = systemvermsg + "\n  System Startup"
 var systemshutdownmsg = systemvermsg + "\n  System Shutdown"
 dotenv.config();
 const DefaultWsServPort = process.env.dwsport || 8086;
+const webport = process.env.webport || 8080
 var runwssrv = true
 var servercount = 0
 var callservcount = 0
@@ -30,6 +34,7 @@ var callManager
 var primaryCallPool
 var primaryNodeManager
 var socatManager
+var httpServer
 
 //global safety catch
 process.on('uncaughtException', (err) => {
@@ -62,6 +67,17 @@ async function startNodeManager(){
 	primaryNodeManager.listUsedNodes()
 }
 
+async function startWebServer(){
+	//do express config here
+	httpServer = http.createServer(webserver);
+	alogger.writeAlog(1, "Starting Public Webserver", "bluebright")
+
+	httpServer.listen(webport, () => {
+	  alogger.writeAlog(1, "HTTP running on port " + webport, "bluebright");
+	  servercount += 1
+	})
+}
+
 async function startWsSrv(){
 	//open Websocks here
 	alogger.writeAlog(1, "Creating Websocket Server(s)", "cyanbright")
@@ -69,6 +85,16 @@ async function startWsSrv(){
 	primaryWsPool = await wsManager.createNewPool(DefaultWsServPort, "Primary Websocket Pool")
 	connectionpools.push(primaryWsPool)
 	//console.log(connectionpools)
+}
+
+async function startWebsockets(){
+	wsManager = await new WsManager(httpServer);
+	primaryWsPool = await wsManager.createNewPool('/ws/doorserver', "Doorserver Websocket Pool")
+	const catchallWsPool = await wsManager.createNewPool('/', "Catchall Websocket Pool")
+	connectionpools.push(primaryWsPool)
+	connectionpools.push(catchallWsPool)
+	servercount += 1
+	callservcount += 1
 }
 
 async function startCallManager(){
@@ -104,10 +130,9 @@ async function exitWatch(){
 async function main(){
 	await startNodeManager()
 	await startSocatManager()
+	await startWebServer()
 	if (runwssrv){
-		await startWsSrv()
-		servercount += 1
-		callservcount += 1
+		await startWebsockets()
 	}
 	if (callservcount > 0){
 		await startCallManager()

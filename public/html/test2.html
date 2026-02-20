@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Lumina Flux</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>body {margin: 0; overflow: hidden;}</style>
+</head>
+<body>
+    <script>
+/*
+ Cosmic Reverie  — generative flow-field mirror study
+ ----------------------------------------------------
+ • 1 200 luminous “wisps” drift through a Perlin-noise flow field
+ • Mirror rendering + additive colour bloom evoke quiet symmetry
+ • Drag / slide anywhere:
+      – warps the flow in real-time (noiseScale)
+      – spawns a handful of new wisps at your finger
+ • Works smoothly on mobile (pixelDensity capped, no heavy shaders)
+ ----------------------------------------------------
+ Author: ChatGPT 2024
+*/
+
+let particles = [];
+const NUM = 1200;         // more = denser star-dust
+let noiseScale = 0.002;   // live-tuned by touch
+let zoff = 0;
+let palette;
+
+function setup() {
+  pixelDensity(1);                  // keep iPhones happy
+  createCanvas(windowWidth, windowHeight);
+  background(5, 5, 10);             // near-black canvas
+  // Soft pastel fog colours (alpha 10 for trails)
+  palette = [
+    color(255, 230, 204, 10),   // peach
+    color(204, 229, 255, 10),   // sky
+    color(242, 204, 255, 10),   // lavender
+    color(255, 204, 229, 10)    // rose
+  ];
+
+  for (let i = 0; i < NUM; i++) particles.push(new Particle());
+}
+
+function draw() {
+  // Slow global fade — like memory dissolving
+  noStroke();
+  fill(0, 10);
+  rect(0, 0, width, height);
+
+  // update + paint every wisp
+  for (const p of particles) {
+    p.update();
+    p.show();
+  }
+  zoff += 0.0004;      // gentle temporal drift
+}
+
+// Subtle interactivity — drag to reshape the field
+function touchMoved() {
+  noiseScale = map(mouseX, 0, width, 0.0005, 0.008);      // live warp
+  // Sprinkle a few newborn wisps at finger position
+  for (let i = 0; i < 10; i++) {
+    particles[int(random(NUM))].reset(createVector(mouseX, mouseY));
+  }
+  return false;   // stop iOS from scrolling the page
+}
+
+// ----------  PARTICLE CLASS  ----------
+class Particle {
+  constructor() { this.reset(); }
+
+  reset(pos) {
+    this.pos = pos ? pos.copy() : createVector(random(width), random(height));
+    this.prev = this.pos.copy();
+    this.speed = random(0.5, 2);
+    this.colIndex = int(random(palette.length));
+  }
+
+  update() {
+    this.prev = this.pos.copy();
+    // Flow-field angle from 3-D Perlin noise
+    const angle = noise(this.pos.x * noiseScale,
+                        this.pos.y * noiseScale,
+                        zoff) * TWO_PI * 4;
+    const vel = p5.Vector.fromAngle(angle).mult(this.speed);
+    this.pos.add(vel);
+
+    // Re-spawn off-screen particles to keep density constant
+    if (this.outOfBounds()) this.reset();
+  }
+
+  show() {
+    strokeWeight(1.2);
+    const c = palette[this.colIndex];
+    stroke(red(c), green(c), blue(c), alpha(c));     // maintain original alpha
+    // draw actual & mirrored line segments
+    line(this.prev.x, this.prev.y, this.pos.x, this.pos.y);
+    line(width - this.prev.x, this.prev.y, width - this.pos.x, this.pos.y);
+  }
+
+  outOfBounds() {
+    return (this.pos.x < -10 || this.pos.x > width + 10 ||
+            this.pos.y < -10 || this.pos.y > height + 10);
+  }
+}
+
+// Handle orientation change / resizing
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  background(5, 5, 10);   // reset backdrop to avoid edge artefacts
+}
+
+    </script>
+</body>
+</html>

@@ -1,3 +1,5 @@
+//old port-based websocket server attempt. Obsoleted by new portless websocket server.
+
 //imports
 import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';

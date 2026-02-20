@@ -1,0 +1,372 @@
+.main-wrapper {
+  height: 100vh;
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.main-wrapper::-webkit-scrollbar {
+  display: none; /* for Chrome, Safari, and Opera */
+}
+
+.mh-50 {
+  max-height: 50vh !important;
+  overflow-y: auto;
+}
+
+.vh-20 {
+  height: 20vh !important;
+  overflow-y: auto;
+}
+
+.vh-25 {
+  height: 25vh !important;
+  overflow-y: auto;
+}
+
+.vh-30 {
+  height: 30vh !important;
+  overflow-y: auto;
+}
+
+.vh-35 {
+  height: 35vh !important;
+  overflow-y: auto;
+}
+
+.vh-50 {
+  height: 50vh !important;
+  overflow-y: auto;
+}
+
+.vh-60 {
+  height: 60vh !important;
+  overflow-y: auto;
+}
+
+.vh-75 {
+  height: 75vh !important;
+  overflow-y: auto;
+}
+
+.vh-80 {
+  height: 80vh !important;
+  overflow-y: auto;
+}
+
+.bg-ksbg {
+  background-color: #272b30;
+}
+
+.bg-superhero {
+  background-color: #0f2537;
+}
+
+.bg-solarized {
+  background-color: #002b36;
+}
+
+.bg-vapor {
+  background-color: #231042;
+}
+
+.bg-vapor-bright{
+  background-color: #6f42c1;
+}
+
+.bg-vapor-teal{
+  background-color: #3f81a2;
+}
+
+.nobott{
+  border: none;
+}
+
+.ks_corners {
+  -moz-border-radius: 8px;
+  -webkit-border-radius: 8px;
+  border-radius: 8px;
+}
+
+.fg-yellow {
+	color: #ffaf00;
+	display: inline;
+}
+
+.fg-brightyellow {
+	color: #ffff00;
+	filter: brightness(200%);
+	display: inline;
+}
+
+.fg-cyan {
+	color: #00d7ff;
+	display: inline;
+}
+
+.fg-brightcyan {
+	color: #00ffff;
+	display: inline;
+}
+
+.fg-red {
+	color: #800000;
+	display: inline;
+}
+
+.fg-brightred {
+	color:#ff0000;
+	display: inline;
+}
+
+.fg-magenta{
+	color:#800080;
+	display: inline;
+}
+
+.fg-brightmagenta{
+	color:#ff00ff;
+	display: inline;
+}
+.fg-black{
+	color:#000000;
+	display: inline;
+}
+
+.fg-brightblack{
+	color:#808080;
+	display: inline;
+}
+
+.fg-green {
+	color:#00af00;
+	stroke: #00af00;
+	display: inline;	
+}
+
+.fg-white {
+	color:#ffffff;
+	display: inline;
+}
+
+.fg-grey {
+	color:#808080;
+	display: inline;
+}
+
+.fg-brightgrey {
+	color:#c0c0c0;
+	display: inline;
+}
+
+.fg-brightwhite {
+	color:#ffffff;
+	display: inline;
+}
+.fg-brightblue {
+	color:#0087ff;
+	display: inline;
+}
+.fg-blue {
+	color:#005fd7;
+	display: inline;
+}
+
+.fg-darkblue {
+	color:#000080;
+	display: inline;
+}
+.fg-brightgreen {
+	color:#00ff00;
+	display: inline;
+}
+
+
+.bg-yellow {
+	background: #808000;
+	display: inline;
+}
+
+.bg-brightyellow {
+	background: #ffff00;
+	display: inline;
+}
+
+.bg-cyan {
+	background: #00d7ff;
+	display: inline;
+}
+
+.bg-brightcyan {
+	background: #00ffff;
+	display: inline;
+}
+
+.bg-red {
+	background: #800000;
+	display: inline;
+}
+
+.bg-brightred {
+	background:#ff0000;
+	display: inline;
+}
+
+.bg-magenta{
+	background:#800080;
+	display: inline;
+}
+
+.bg-brightmagenta{
+	background:#ff00ff;
+	display: inline;
+}
+.bg-black{
+	background:#000000;
+	display: inline;
+}
+
+.bg-brightblack{
+	background:#808080;
+	display: inline;
+}
+
+.bg-darkblue {
+	background:#000080;
+	display: inline;
+}
+
+.bg-blue {
+	background:#005fd7;
+	display: inline;
+}
+
+.bg-green {
+	color:#008000;
+	display: inline;
+}
+
+.bg-white {
+	color:#ffffff;
+	display: inline;
+}
+
+.bg-grey {
+	color:#808080;
+	display: inline;
+}
+
+.bg-brightgrey {
+	color:#c0c0c0;
+	display: inline;
+}
+
+.bg-brightwhite {
+	color:#ffffff;
+	display: inline;
+}
+
+.bg-brightblue {
+	color:#0000ff;
+	display: inline;
+}
+
+.bg-brightgreen {
+	color:#00ff00;
+	display: inline;
+}
+
+.fg-green:focus {
+  color: #00ff00;
+}
+
+.fg-brightgreen:focus {
+  color: #00ff00;
+}
+
+.fg-yellow:focus {
+  color: #ffff00;
+}
+
+.fg-brightyellow:focus {
+  color: #ffff00;
+}
+
+.fg-blue:focus {
+  color: #0087ff;
+}
+
+.fg-brightblue:focus {
+  color: #0087ff;
+}
+
+.fg-cyan:focus {
+  color: #00ffff;
+}
+
+.fg-brightcyan:focus {
+  color: #00ffff;
+}
+
+.fg-red:focus {
+  color: #ff0000;
+}
+
+.fg-brightred:focus {
+  color: #ff0000;
+}
+
+.fg-magenta:focus {
+  color: #ff00ff;
+}
+
+.fg-brightmagenta:focus {
+  color: #ff00ff;
+}
+
+.fg-white:focus {
+  color: #ffffff;
+}
+
+.fg-brightwhite:focus {
+  color: #ffffff;
+}
+
+.fg-grey:focus {
+  color: #c0c0c0;
+}
+
+.fg-brightgrey:focus {
+  color: #c0c0c0;
+}
+
+.monospace {
+	font-family: "Consolas", monospace;
+}
+
+.text-08{
+	font-size: 0.8em;
+}
+
+.text-10{
+	font-size: 1em;
+}
+
+.text-11 {
+	font-size: 1.1em;	
+}
+
+.text-12 {
+	font-size: 1.2em;
+}
+
+.text-14 {
+	font-size: 1.4em;
+}
+
+.messagebody{
+	line-height: 1.1;
+}
+
+.ansi{
+	line-height: 1.0;
+}
