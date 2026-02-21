@@ -190,7 +190,7 @@ class IncomingCall{
 			return;
 		}
 		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + nextStage;
-		alogger.writeAlog(5, logmsg, "greenbright");
+		alogger.writeAlog(3, logmsg, "greenbright");
 		this.loadHandler(nextStage);
 	}
 
@@ -198,7 +198,7 @@ class IncomingCall{
 		// Handler exited without advancing (ESC from login, back from a menu, etc.)
 		// Could implement a stage stack here later for back-navigation
 		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage;
-		alogger.writeAlog(4, logmsg, "cyanbright");
+		alogger.writeAlog(3, logmsg, "cyanbright");
 		this.hangUpCall();
 	}
 
@@ -312,6 +312,7 @@ class IncomingCall{
 		console.log("Sending Welcome")
 		this.connection.welcomeMessage()
 		// Start the call flow
+		//add something to handle flow order
 		this.loadHandler("door_auth")
 		//this.loadHandler("login")
 	}

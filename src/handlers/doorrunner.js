@@ -7,6 +7,7 @@ import { homedir } from "os";
 import * as dotenv from 'dotenv';
 
 import { BaseHandler } from "./basehandler.js";
+import { DoorOutputParser } from "../helpers/outputParser.js"
 import * as alogger from "../utils/alogger.js";
 import * as dropfile_handler from "./dropfile_handler.js";
 
@@ -27,6 +28,9 @@ class DoorRunner extends BaseHandler {
 		super(call, "DoorRunner");
 		this._socatManager = socatManager;
 		this._allocatedPortNum = null;
+		this._previousRawmode = false;
+		this._previousRawtarget = null;
+		this._outputParser = null;
 
 		// Door configuration
 		this.doorConfig = doorConfig || {};
@@ -60,7 +64,50 @@ class DoorRunner extends BaseHandler {
 
 		this.loggingId = "DoorRunner (Node " + this.call.nodenum + ") [" + this.doorCmd + "]";
 	}
+	_enableRawMode() {
+		if (!this.call) return;
+		this._previousRawmode = this.call.rawmode;
+		this._previousRawtarget = this.call.rawtarget;
+		this.call.rawmode = true;
+		this.call.rawtarget = (data) => {
+			this._onRawInput(data);
+		};
+	}
 
+	_disableRawMode() {
+		if (!this.call) return;
+		this.call.rawmode = this._previousRawmode;
+		this.call.rawtarget = this._previousRawtarget;
+	}
+
+	_onRawInput(data) {
+		if (!this.active) return;
+		if (this._waitingForKeypress) {
+			this._waitingForKeypress = false;
+			this.finished = true;
+			this._disableRawMode();
+			this.signalReturn();
+			return;
+		}
+		if (this._doorExited) {
+			this._disableRawMode();
+			this.finished = true;
+			this.signalReturn();
+			return;
+		}
+		try {
+			if (this._outputSocket) {
+				this._outputSocket.write(data);
+			} else if (this._child && this._child.stdin) {
+				this._child.stdin.write(data);
+			} else if (this._ptySocket) {
+				this._ptySocket.write(data);
+			}
+		} catch (err) {
+			var logmsg = this.loggingId + "\n  Raw write to process failed: " + err.message;
+			alogger.writeAlog(4, logmsg, "yellow");
+		}
+	}
 	// --- Input handling ---
 	onKey(key) {
 		if (this._waitingForKeypress || this._doorExited) {
@@ -202,6 +249,7 @@ class DoorRunner extends BaseHandler {
 			this._ptySocket.on('close', () => {
 				this._onDoorExit(0);
 			});
+			this._enableRawMode();
 		} catch (err) {
 			this._handleError("NativeShell launch failed", err);
 		}
@@ -235,6 +283,7 @@ class DoorRunner extends BaseHandler {
 			this._child.on('close', (code) => {
 				this._onDoorExit(code);
 			});
+			this._enableRawMode();
 		} catch (err) {
 			this._handleError("ExecNative launch failed", err);
 		}
@@ -269,6 +318,7 @@ class DoorRunner extends BaseHandler {
 			this._child.on('close', (code) => {
 				this._onDoorExit(code);
 			});
+			this._enableRawMode();
 		} catch (err) {
 			this._handleError("SpawnNative launch failed", err);
 		}
@@ -297,6 +347,7 @@ class DoorRunner extends BaseHandler {
 			this._child.on('close', (code) => {
 				this._onDoorExit(code);
 			});
+			this._enableRawMode();
 		} catch (err) {
 			this._handleError("Dosemu launch failed", err);
 		}
@@ -335,9 +386,35 @@ class DoorRunner extends BaseHandler {
 
 		this._outputSocket = this._serialport;
 
+		// Set up output parser if needed
+		var needsUTF8 = this.call.term_encoding === "utf8" || this.call.term_encoding === "utf-8";
+		//setting the centering check to slightly above the standard 80x25 to prevent triggering in case of odd terminals with just an extra line or column
+		var needsCenter = (this.call.term_width > 90) || (this.call.term_height > 30);
+
+		if (needsUTF8 || needsCenter) {
+			this._outputParser = new DoorOutputParser({
+				convertCP437: needsCP437,
+				centerOutput: needsCenter,
+				srcCols: 80,
+				srcRows: 25,
+				destCols: this.call.term_width || 80,
+				destRows: this.call.term_height || 25,
+			});
+
+			this._outputParser.emitter.on("data", (processed) => {
+				if (this.call) {
+					this.call.cmds.senddata(processed);
+				}
+			});
+		}
+
 		this._serialport.on('data', (data) => {
 			if (this.call) {
-				this.call.cmds.senddata(data);
+				if (this._outputParser) {
+					this._outputParser.process(data);
+				} else {
+					this.call.cmds.senddata(data);
+				}
 			}
 		});
 
@@ -378,6 +455,7 @@ class DoorRunner extends BaseHandler {
 			this._child.on('close', (code) => {
 				this._onDoorExit(code);
 			});
+			this._enableRawMode();
 		} catch (err) {
 			this._handleError("PTY Dosemu launch failed", err);
 		}
@@ -393,12 +471,16 @@ class DoorRunner extends BaseHandler {
 
 		if (!this.call) return;
 
+		this._disableRawMode();
 		this.call.overrideBuffer = false;
 		this.call.cmds.resetcolors();
 
 		if (this.pauseOnExit) {
 			this.call.cmds.senddata("\r\n Press any key to continue...");
 			this._waitingForKeypress = true;
+			// Stay in raw mode for the keypress so we don't
+			// need the parser just for one key
+			this._enableRawMode();
 			this.resetInactivityTimeouts();
 		} else {
 			this.finished = true;
@@ -414,6 +496,11 @@ class DoorRunner extends BaseHandler {
 
 	// --- Process cleanup ---
 	_killProcesses() {
+		this._disableRawMode();
+		if (this._outputParser) {
+			this._outputParser.destroy();
+			this._outputParser = null;
+		}
 		if (this.call) {
 			this.call.overrideBuffer = false;
 		}

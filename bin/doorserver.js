@@ -102,8 +102,11 @@ async function startCallManager(){
 	callManager = await new CallManager(primaryNodeManager)
 	primaryCallPool = await callManager.createNewPool("Primary Pool")
 	callManager.listPools()
-	//add to servers. Need to check and do this programmatically, but manually coding in for right now
-	primaryWsPool.setCallPool(primaryCallPool)
+	//add to servers. Just assign all connection pools to the primary call pool until better pool organization logic exists
+	for await (var pool of connectionpools){
+		pool.setCallPool(primaryCallPool)
+	}
+	//primaryWsPool.setCallPool(primaryCallPool)
 	//primaryCallPool.floworder = "Standard"
 	callManager.socatManager = socatManager;
 	primaryCallPool.socatManager = socatManager;
