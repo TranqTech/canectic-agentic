@@ -140,6 +140,7 @@ class DoorAuthHandler extends BaseHandler {
 			age: authData.age,
 			lastlogon: new Date()
 		}
+		this.call.doorsession = true;
 		this.call.caller_username = authData.username
 		this.call.caller_fullname = authData.real_name
 		this.call.caller_location = "BBS Name or Location"
@@ -147,14 +148,8 @@ class DoorAuthHandler extends BaseHandler {
 		this.call.term_type = authData.term_type
 		this.call.term_width = authData.term_width
 		this.call.term_height = authData.term_height
-		this.call.launchDoor({
-			cmd: "\"c:\\bat\\test.bat\"",
-			launchType: "DosemuPty",
-			dropfileType: "doorsys",
-			dropfileDir: "/home/kostie/.dosemu/drive_c/doors/LOD",
-			pauseOnExit: true,
-			returnStage: "main_menu",
-		});
+		this.call.use_sixel = true
+		this.call.launchDoor("testdoor");
 		return { valid: false, reason: "Not implemented" };
 	}
 
@@ -165,7 +160,7 @@ class DoorAuthHandler extends BaseHandler {
 		alogger.writeAlog(4, logmsg, "greenbright");
 
 		// Store relevant info on the call
-		this.call.call_type = "DoorClient";
+		this.call.doorsession = true;
 		this.call.caller_bbs = authData.system_id;
 		if (authData.username) this.call.caller_username = authData.username;
 		if (authData.term_type) this.call.term_type = authData.term_type;

@@ -228,7 +228,7 @@ class DoorRunner extends BaseHandler {
 	_launchNativeShell() {
 		var runCmd = doordir + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching NativeShell: " + runCmd;
-		alogger.writeAlog(5, logmsg, "greenbright");
+		alogger.writeAlog(4, logmsg, "greenbright");
 
 		try {
 			this._ptySocket = pty.spawn(runCmd, [], {
@@ -258,7 +258,7 @@ class DoorRunner extends BaseHandler {
 	_launchExecNative() {
 		var runCmd = doordir + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching ExecNative: " + runCmd;
-		alogger.writeAlog(5, logmsg, "greenbright");
+		alogger.writeAlog(4, logmsg, "greenbright");
 
 		try {
 			this._child = exec(runCmd, {
@@ -292,7 +292,7 @@ class DoorRunner extends BaseHandler {
 	_launchSpawnNative() {
 		var runCmd = doordir + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching SpawnNative: " + runCmd;
-		alogger.writeAlog(5, logmsg, "greenbright");
+		alogger.writeAlog(4, logmsg, "greenbright");
 
 		try {
 			this.call.cmds.clearscreen();
@@ -327,7 +327,7 @@ class DoorRunner extends BaseHandler {
 	_launchDosemu() {
 		var doscmd = "dosemu -E " + this.doorCmd + " -t";
 		var logmsg = this.loggingId + "\n  Launching Dosemu: " + doscmd;
-		alogger.writeAlog(5, logmsg, "greenbright");
+		alogger.writeAlog(4, logmsg, "greenbright");
 
 		try {
 			this._child = exec(doscmd);
@@ -355,7 +355,7 @@ class DoorRunner extends BaseHandler {
 
 	_launchDosemuPty() {
 		var logmsg = this.loggingId + "\n  Launching DosemuPty via SocatManager";
-		alogger.writeAlog(3, logmsg, "greenbright");
+		alogger.writeAlog(4, logmsg, "greenbright");
 
 		this._socatManager.allocate(this.launchTO)
 			.then(ports => {
@@ -420,7 +420,7 @@ class DoorRunner extends BaseHandler {
 
 		this._serialport.on('error', (err) => {
 			var logmsg = this.loggingId + "\n  Serial error: " + err.message;
-			alogger.writeAlog(3, logmsg, "red");
+			alogger.writeAlog(4, logmsg, "red");
 		});
 
 		this._serialport.on('close', () => {
@@ -435,7 +435,7 @@ class DoorRunner extends BaseHandler {
 	_startPtyDosemu(port2) {
 		var doscmd = 'dosemu -I"serial { pseudo com 5 device ' + port2 + '}" -E ' + this.doorCmd + ' -t';
 		var logmsg = this.loggingId + "\n  Launching PTY Dosemu: " + doscmd;
-		alogger.writeAlog(3, logmsg, "greenbright");
+		alogger.writeAlog(5, logmsg, "greenbright");
 
 		try {
 			this.call.overrideBuffer = true;

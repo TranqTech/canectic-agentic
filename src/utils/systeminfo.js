@@ -9,8 +9,8 @@ dotenv.config();
 const vsoftwarename = "Canectic BBS Door Server"
 const vsystemver = "0.02a"
 const vsystemvermsg = vsoftwarename + " v" + vsystemver
-const boardname = process.env.boardname
-const boardlocation = process.env.boardlocation
+const boardname = process.env.boardname || "Canectic BBS"
+const boardlocation = process.env.boardlocation || "The Ether"
 
 
 function versionMsg(){

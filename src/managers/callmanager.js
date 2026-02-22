@@ -13,29 +13,77 @@ import {ansiInputParser, tcpCommands, websockCommands, telnetCommands} from "../
 
 //handler modules
 import {LoginHandler} from "../handlers/loginhandler.js"
+import {LogonHandler} from "../handlers/logonhandler.js"
 import { DoorAuthHandler } from "../handlers/doorauthhandler.js"
 import { DoorRunner, LAUNCH_TYPES } from "../handlers/doorrunner.js";
 import { OutputRingBuffer } from "../handlers/ringbuffer.js";
+import { TerminalNegotiator } from "../handlers/terminalnegotiator.js";
+import { MenuHandler } from "../handlers/menuhandler.js";
+
+//models
+import {getDoorConfig} from "../models/doors.js"
 
 //setup
 dotenv.config()
 const system_ver_msg = systeminfo.versionMsg()
 const connect_msg = system_ver_msg
-const theme = process.env.theme
+const theme = process.env.theme || "canectic"
 const configdir = path.join(path.dirname("./"), 'config');
 const configcount = 1
 
-// handler registry
+// --- Handler registry ---
+// Maps stage names to factory functions
 const handlerRegistry = {
-	"login":        (call) => new LoginHandler(call, process.env.system_name || "BBS"),
+	"negotiate":    (call) => new TerminalNegotiator(call),
+	"logon":        (call) => new LogonHandler(call),
+	"login":        (call) => new LoginHandler(call, process.env.system_name || "Canectic BBS"),
 	"door_auth":    (call) => new DoorAuthHandler(call),
+	"event_login":  (call) => new DoorAuthHandler(call),
+	"menu":         (call) => new MenuHandler(call),
+	//"last_callers": (call) => new LastCallersHandler(call),
+	//"announcements": (call) => new AnnouncementHandler(call),
 	//"main_menu":    (call) => new MainMenuHandler(call),
-	//"top":    (call) => new MainMenuHandler(call),
-	//"menu":    (call) => new MenuHandler(call, this.currentmenu),
-	//"message_viewer": (call) => new MessageViewHandler(call),
-	//"message_editor": (call) => new MessageEditHandler(call),
-	//"terminal_negotiator": (call) => new terminalNegotiationHandler(call),
+	//"top":          (call) => new TopMenuHandler(call),
+	//"logoff":       (call) => new LogoffHandler(call),
 };
+
+// --- Call flow definitions ---
+// Ordered arrays of stage names. "goodbye" is a reserved name that triggers hangup.
+// Handlers that emit a specific next stage (e.g. doors returning to a menu) override the flow.
+// Handlers that emit ModuleReturn without a next stage advance to the next flow entry.
+const callFlows = {
+	"Standard": [
+		"negotiate",
+		"logon",
+		//"last_callers",
+		//"announcements",
+		"menu",
+		"goodbye",
+	],
+	"Doorserver": [
+		"door_auth",
+		//"door_session",
+		"goodbye",
+	],
+	"Test": [
+		"negotiate",
+		//"set_test_user",
+		//"main_menu",
+		"goodbye",
+	],
+};
+
+// --- Resolve the flow name, with fallback ---
+function getCallFlow(floworder) {
+	// Case-insensitive lookup
+	for (var key in callFlows) {
+		if (key.toLowerCase() === floworder.toLowerCase()) {
+			return callFlows[key];
+		}
+	}
+	alogger.writeAlog(3, "Unknown flow order: " + floworder + ", falling back to Standard", "yellowbright");
+	return callFlows["Standard"];
+}
 
 //function space
 
@@ -43,6 +91,9 @@ class IncomingCall{
 	constructor(connection, callpool, newnodenum, floworder){
 		console.log("Creating Call!")
 		this.floworder = floworder || "Standard"
+		this.doorsession = false
+		this.flow = getCallFlow(this.floworder)
+		this.flowPosition = 0
 		this.socatManager = callpool.socatManager
 		this.outputBuffer = new OutputRingBuffer(2000);
 		this.overrideBuffer = false
@@ -59,14 +110,17 @@ class IncomingCall{
 		this.config_load_count = 0;
 		this.port = connection.port;
 		this.callPool = callpool;
-		this.term_type = "Unknown"
 		this.term_encoding = "Unknown"
+		this.term_id = ""
+		this.term_version = ""
+		this.term_type = "Unknown"
 		this.term_width = 0
 		this.term_height = 0
 		this.term_rip_major = 0
 		this.term_rip_minor = 0
 		this.term_rip_string = ""
 		this.use_rip = false
+		this.use_sixel = false
 		this.call_type = "Incoming";
 		this.call_status = "Setting Up";
 		this.call_stage = 0
@@ -104,20 +158,97 @@ class IncomingCall{
 		this.loggingId = "Call From " + this.callerId
 		this.callEvent = new EventEmitter();
 	}
-	//writes to the output buffer for sysop nodespy - do this on connection send. Checks for override bit when subprocess takes over writes
+
+	// --- Flow management ---
+	// Returns the next stage name from the flow, or null if exhausted
+	_getNextFlowStage() {
+		this.flowPosition++;
+		if (this.flowPosition < this.flow.length) {
+			return this.flow[this.flowPosition];
+		}
+		return null;
+	}
+
+	// Find a stage in the flow by name and set position to it
+	// Returns true if found, false if not
+	_seekFlowTo(stageName) {
+		for (var i = 0; i < this.flow.length; i++) {
+			if (this.flow[i] === stageName) {
+				this.flowPosition = i;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Resolve what stage to load next.
+	// If nextStage is provided (handler requested a specific destination), use that.
+	// Otherwise advance through the flow.
+	_resolveNextStage(nextStage) {
+		if (nextStage) {
+			// Handler explicitly requested a stage — honour it
+			// Also sync flow position if the stage exists in the flow
+			this._seekFlowTo(nextStage);
+			return nextStage;
+		}
+		// No explicit next stage — advance through the flow
+		return this._getNextFlowStage();
+	}
+
+	loadConfigs(){
+		console.log("Loading Call Config")
+		var cfwpath = configdir + "/system.json"
+		readFile(cfwpath, 'utf8', (error, data) => {
+			if(error){
+				console.log(error);
+				return;
+			}
+			this.config = JSON.parse(data)
+			this.config_load_count += 1
+			if (this.config_load_count >= configcount){
+				this.loadTheme();
+			}
+		})
+	}
+	loadTheme(){
+		console.log("Loading Theme")
+		if (this.config.theme){
+			var themename = theme
+		}else{
+			var themename = "canectic"
+		}
+		var tfwpath = configdir + "/themes/" + themename + ".json"
+		readFile(tfwpath, 'utf8', (error, data) => {
+			if(error){
+				console.log(error);
+				return;
+			}
+			this.theme = JSON.parse(data)
+		})
+	}
+
+	// Writes to the output buffer for sysop nodespy
 	writeOutputBuffer(data){
 		if (!this.overrideBuffer){
 			this.outputBuffer.write(data)
 		}
 	}
-	//The alternative method to the above for use on dosemu children, or other subprocesses that need to write a different sysop view.
+
+	// Alternative method for dosemu children or other subprocesses
 	writeOverrideBuffer(data) {
 		if (this.overrideBuffer) {
 			this.outputBuffer.write(data);
 		}
 	}
+
 	// --- Handler lifecycle ---
 	loadHandler(stageName){
+		// "goodbye" is a reserved directive — always triggers hangup
+		if (stageName === "goodbye") {
+			this.hangUpCall();
+			return;
+		}
+
 		// Clean up previous handler
 		if (this.currentHandler){
 			try{
@@ -129,7 +260,7 @@ class IncomingCall{
 		// Look up factory
 		const factory = handlerRegistry[stageName];
 		if (!factory){
-			var logmsg = this.loggingId + "\n  Unknown or null stage: " + stageName;
+			var logmsg = this.loggingId + "\n  Unknown or null stage: " + stageName + " — hanging up";
 			alogger.writeAlog(3, logmsg, "redbright");
 			this.hangUpCall();
 			return;
@@ -156,7 +287,8 @@ class IncomingCall{
 		handler.emitter.on("LoginOK", () => {
 			var logmsg = this.loggingId + "\n  Login successful for " + this.caller_username;
 			alogger.writeAlog(4, logmsg, "greenbright");
-			this._onHandlerComplete("main_menu");
+			// LoginOK advances through the flow (no explicit override)
+			this._onHandlerComplete(null);
 		});
 
 		handler.emitter.on("LoginLimit", () => {
@@ -164,42 +296,77 @@ class IncomingCall{
 			alogger.writeAlog(4, logmsg, "yellowbright");
 			this.hangUpCall();
 		});
-		//door auth
+
+		// Door auth
 		handler.emitter.on("DoorAuthOK", () => {
-			var logmsg = this.loggingId + "\n  Door auth complete, loading door session";
+			var logmsg = this.loggingId + "\n  Door auth complete";
 			alogger.writeAlog(4, logmsg, "greenbright");
-			this._onHandlerComplete("door_session");
+			this._onHandlerComplete(null);
+		});
+
+		handler.emitter.on("HangupSignal", () => {
+			this.hangUpCall();
 		});
 
 		handler.emitter.on("AuthFailed", () => {
 			this.hangUpCall();
 		});
+
 		// Generic events any handler can use
 		handler.emitter.on("ModuleReturn", () => {
 			this._onHandlerReturn(stageName);
 		});
 
+		// Handler explicitly requests a specific next stage
 		handler.emitter.on("NextStage", (nextStage) => {
 			this._onHandlerComplete(nextStage);
+		});
+
+		handler.emitter.on("NegotiateComplete", () => {
+			var logmsg = this.loggingId + "\n  Terminal negotiation complete";
+			alogger.writeAlog(4, logmsg, "greenbright");
+			// Advance through flow
+			this._onHandlerComplete(null);
+		});
+
+		handler.emitter.on("RegistrationOK", () => {
+			var logmsg = this.loggingId + "\n  Registration successful for " + this.caller_username;
+			alogger.writeAlog(4, logmsg, "greenbright");
+			this._onHandlerComplete(null);
 		});
 	}
 
 	_onHandlerComplete(nextStage){
-		if (!nextStage){
+		var resolved = this._resolveNextStage(nextStage);
+
+		if (!resolved) {
+			// Fell off the end of the flow
+			var logmsg = this.loggingId + "\n  Flow exhausted. Hanging up.";
+			alogger.writeAlog(4, logmsg, "cyanbright");
 			this.hangUpCall();
 			return;
 		}
-		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + nextStage;
-		alogger.writeAlog(3, logmsg, "greenbright");
-		this.loadHandler(nextStage);
+
+		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + resolved;
+		alogger.writeAlog(5, logmsg, "greenbright");
+		this.loadHandler(resolved);
 	}
 
 	_onHandlerReturn(fromStage){
 		// Handler exited without advancing (ESC from login, back from a menu, etc.)
-		// Could implement a stage stack here later for back-navigation
-		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage;
-		alogger.writeAlog(3, logmsg, "cyanbright");
-		this.hangUpCall();
+		// Advance through the flow rather than hanging up
+		var resolved = this._getNextFlowStage();
+
+		if (!resolved) {
+			var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage + " — flow exhausted, hanging up.";
+			alogger.writeAlog(3, logmsg, "cyanbright");
+			this.hangUpCall();
+			return;
+		}
+
+		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage + ". Advancing to: " + resolved;
+		alogger.writeAlog(4, logmsg, "cyanbright");
+		this.loadHandler(resolved);
 	}
 
 	// --- Data routing ---
@@ -210,7 +377,6 @@ class IncomingCall{
 				this.rawtarget(data);
 				return;
 			}
-			//do check for raw, otherwise add to parser
 			this.inputParser.hexbuffer += data.toString('hex')
 			this.inputParser.handleData()
 		}catch(err){
@@ -220,29 +386,31 @@ class IncomingCall{
 	}
 
 	// --- Connection management ---
-	setCommandSet(){
-		switch (this.connection_type){
+	setCommandSet() {
+		switch (this.connection_type) {
 			case "TCP":
-				this.cmds = new tcpCommands(this.connection.socket)
+				this.cmds = new tcpCommands(this.connection.socket, this);
+				if (!this.inputParser) {
+					this.inputParser = new ansiInputParser(this);
+				}
 				break;
 			case "Websock":
 			case "Websocket":
-				this.cmds = new websockCommands(this.connection.socket)
-
-				if (!this.inputParser){
+				this.cmds = new websockCommands(this.connection.socket, this);
+				if (!this.inputParser) {
 					this.inputParser = new ansiInputParser(this);
 				}
 				break;
 			case "Telnet":
-				this.cmds = new telnetCommands(this.connection.socket)
+				this.cmds = new telnetCommands(this.connection.socket, this);
 				break;
 			default:
-				console.log("Could not determine connection type. Assuming TCP")
-				this.cmds = new tcpCommands(this.connection.socket)
-				return;
+				console.log("Could not determine connection type. Assuming TCP");
+				this.cmds = new tcpCommands(this.connection.socket, this);
+				break;
 		}
-		if (this.cmds == null){
-			console.log("Did not set command set.... this is a problem")
+		if (this.cmds == null) {
+			console.log("Did not set command set.... this is a problem");
 		}
 	}
 
@@ -268,7 +436,6 @@ class IncomingCall{
 			var closemsg = this.loggingId + "\n  Connection dropped. Cancelling call."
 			alogger.writeAlog(3, closemsg, "cyanbright")
 		}
-		// Clean up handler safely
 		if (this.currentHandler){
 			try{
 				this.currentHandler.clearHandler();
@@ -285,7 +452,6 @@ class IncomingCall{
 		var callfinishmsg = this.loggingId + "\n  Call Finished. Hanging Up."
 		alogger.writeAlog(3, callfinishmsg, "cyanbright")
 		this.call_status = "Finished"
-		// Clean up handler before goodbye
 		if (this.currentHandler){
 			try{
 				this.currentHandler.clearHandler();
@@ -295,11 +461,15 @@ class IncomingCall{
 		try{
 			this.cmds.sendstring("\r\nEnding Call...\r\n")
 			this.cmds.drawrandomscreen("Goodbye", true)
+			this.cmds.setfgcolorname("yellowBright")
 		}catch(_){}
+
 		this.logCallEnd()
-		if (this.connection){
-			this.connection.hangUpCall()
-		}
+		setTimeout(() => {
+			if (this.connection){
+				this.connection.hangUpCall()
+			}
+		}, 500)
 	}
 
 	notifyRemoteHangup(){
@@ -309,12 +479,16 @@ class IncomingCall{
 	setupCall(){
 		this.setCommandSet()
 		console.log("Connected on Node", this.nodenum)
-		console.log("Sending Welcome")
-		this.connection.welcomeMessage()
-		// Start the call flow
-		//add something to handle flow order
-		this.loadHandler("door_auth")
-		//this.loadHandler("login")
+		this.loadConfigs()
+		// Start at position 0 in the flow
+		this.flowPosition = 0;
+		var firstStage = this.flow[0];
+		if (!firstStage) {
+			alogger.writeAlog(3, this.loggingId + "\n  Empty flow for: " + this.floworder, "redbright");
+			this.hangUpCall();
+			return;
+		}
+		this.loadHandler(firstStage);
 	}
 
 	logCallStart(){
@@ -326,8 +500,35 @@ class IncomingCall{
 		this.loggedend = true;
 		alogger.writeAlog(4, this.loggingId + "\n  Call Ended.", "cyanbright");
 	}
-	// Call helper for launching doors from menus
-	launchDoor(doorConfig) {
+
+	// Launch a door by slug name — async because getDoorConfig hits the DB
+	async launchDoor(slugname) {
+		console.log("Launch Door with slug", slugname)
+
+		var doorConfig
+		try {
+			doorConfig = await getDoorConfig(slugname)			
+			//check if we are in a doorserver session or not and set the return to menu if not
+			//set menu as default return and goodbye if doorsession
+			console.log("Setting return val")
+			doorConfig.returnStage = "menu"
+			if (this.doorsession){
+				console.log("Door Session")
+				doorConfig.returnStage = "goodbye"
+			}
+		} catch (err) {
+			var logmsg = this.loggingId + "\n  Failed to get door config for: " + slugname + "\n  " + (err?.stack || err)
+			alogger.writeAlog(3, logmsg, "redbright")
+			this._onHandlerComplete("main_menu")
+			return
+		}
+
+		if (!doorConfig) {
+			alogger.writeAlog(3, this.loggingId + "\n  No door config found for: " + slugname, "yellowbright")
+			this._onHandlerComplete("main_menu")
+			return
+		}
+
 		// Clean up current handler (the menu)
 		if (this.currentHandler) {
 			try { this.currentHandler.clearHandler(); } catch (_) {}
@@ -340,7 +541,6 @@ class IncomingCall{
 			this.call_status = "Door: " + doorConfig.cmd;
 
 			handler.emitter.on("ModuleReturn", () => {
-				// Door exited — go back to menu
 				this._onHandlerComplete("main_menu");
 			});
 
@@ -358,7 +558,7 @@ class IncomingCall{
 }
 
 class CallPool{
-	constructor(name, connectsto, connectedpool){
+	constructor(name, connectsto, connectedpool, floworder){
 		this.name = name;
 		this.uuid = uuidv4()
 		if (connectsto){
@@ -371,7 +571,7 @@ class CallPool{
 		this.connectedcalls = []
 		this.loggingId = "Call Pool " + name
 		this.nodeManager
-		this.floworder = "Standard"
+		this.floworder = floworder || "Standard"
 	}
 	setNodeManager(nodemanager){
 		this.nodeManager = nodemanager

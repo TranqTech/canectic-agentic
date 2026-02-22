@@ -1,0 +1,8 @@
+{
+	"board_name": "Example BBS",
+	"board_location": "Calgary, AB",
+	"theme": "canectic",
+	"pw_min": 6,
+	"login_TO": 30,
+	"logon_TO": 60
+}
