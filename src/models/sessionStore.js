@@ -1,3 +1,5 @@
+//Obsolete - use new sessionstore.js in middleware
+
 import * as bcrypt from 'bcrypt';
 const saltRounds = 10;
 import { v4 as uuidv4 } from 'uuid';

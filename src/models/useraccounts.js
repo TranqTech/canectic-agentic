@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 //internal modules
 import * as alogger from "../utils/alogger.js";
 import * as postgres from '../middleware/db/postgres.js';
+import { sessionUpdateUser } from '../middleware/db/sessionstore.js';
 
 //setup
 dotenv.config();
@@ -269,6 +270,7 @@ async function updateUserSecurity(username, securityLevel) {
 		alogger.writeAlog(3, "Security update error for " + username + ": " + err.message, "redbright");
 		return false;
 	}
+	await sessionUpdateUser(username, { security: String(securityLevel) });
 	return true;
 }
 
@@ -296,7 +298,7 @@ async function makeSysop(username) {
 	}
 
 	await updateUserSecurity(username, 255);
-	await addUserPermissions(username, ["Sysop", "Admin"]);
+	await addUserPermissions(username, ["Sysop"]);
 
 	// Clear all existing restriction flags
 	var existing = userobj.restrictionflags || [];
@@ -331,6 +333,9 @@ async function _addFlags(username, column, flagsToAdd) {
 		alogger.writeAlog(3, "Error adding " + column + " for " + username + ": " + err.message, "redbright");
 		return false;
 	}
+	var sessionField = {};
+	sessionField[column] = JSON.stringify(merged);
+	await sessionUpdateUser(username, sessionField);
 	return true;
 }
 
@@ -352,6 +357,9 @@ async function _removeFlags(username, column, flagsToRemove) {
 		alogger.writeAlog(3, "Error removing " + column + " for " + username + ": " + err.message, "redbright");
 		return false;
 	}
+	var sessionField = {};
+	sessionField[column] = JSON.stringify(filtered);
+	await sessionUpdateUser(username, sessionField);
 	return true;
 }
 
