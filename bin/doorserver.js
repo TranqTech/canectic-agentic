@@ -11,6 +11,7 @@ import {CallManager, CallPool} from "../src/managers/callmanager.js"
 import {nodeManager} from "../src/managers/nodemanager.js"
 import { SocatManager } from "../src/managers/socatmanager.js";
 import {webserver} from "../src/servers/webserver.js"
+import { pgpool } from "../src/middleware/db/postgres.js";
 
 
 //variable setup
@@ -59,6 +60,7 @@ process.on('unhandledRejection', (reason) => {
 
 process.on('SIGINT', () => {
 	socatManager.shutdown();
+	pgpool.end();
 	process.exit(0);
 });
 

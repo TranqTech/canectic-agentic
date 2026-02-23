@@ -64,7 +64,8 @@ class RegistrationHandler extends BaseHandler {
 		this.birth_day = "";
 		this.birth_year = "";
 		this.birthdate = "";
-		this.netmail = "";
+		this.mailaddress = "";
+		this.mailtype = "";
 
 		// Form state
 		this.inputbuffer = "";
@@ -350,10 +351,10 @@ class RegistrationHandler extends BaseHandler {
 				}
 				break;
 			case "Netmail":
-				if (this.netmail) {
-					this.inputbuffer = this.netmail;
-					this.call.cmds.senddata(this.netmail);
-					this.cursor_x += this.netmail.length;
+				if (this.mailaddress) {
+					this.inputbuffer = this.mailaddress;
+					this.call.cmds.senddata(this.mailaddress);
+					this.cursor_x += this.mailaddress.length;
 				}
 				break;
 		}
@@ -468,7 +469,7 @@ class RegistrationHandler extends BaseHandler {
 			this.call.cmds.senddata("  Username : " + this.username + "\r\n");
 			this.call.cmds.senddata("  Location : " + this.location + "\r\n");
 			this.call.cmds.senddata("  Password : *********\r\n");
-			this.call.cmds.senddata("  Netmail  : " + this.netmail + "\r\n");
+			this.call.cmds.senddata("  Netmail  : " + this.mailaddress + "\r\n");
 			this.call.cmds.senddata("  Birthday : " + this.birthdate + "\r\n");
 			this.call.cmds.senddata("\r\nDo you wish to complete registration?\r\n");
 			this.call.cmds.senddata("Y/N/Q: ");
@@ -488,7 +489,7 @@ class RegistrationHandler extends BaseHandler {
 			{ label: "Username : ", value: this.username },
 			{ label: "Location : ", value: this.location },
 			{ label: "Password : ", value: "*********" },
-			{ label: "Netmail  : ", value: this.netmail },
+			{ label: "Netmail  : ", value: this.mailaddress },
 			{ label: "Birthday : ", value: this.birthdate },
 		];
 
@@ -946,7 +947,8 @@ class RegistrationHandler extends BaseHandler {
 							if (!this.active) return;
 							if (res.status) {
 								this._showSuccess("");
-								this.netmail = checkaddr;
+								this.mailaddress = checkaddr;
+								this.mailtype = res.mailtype;
 								this.inputbuffer = "";
 								this.current_field++;
 								this._sendPrompt();
@@ -1028,7 +1030,7 @@ class RegistrationHandler extends BaseHandler {
 			lastname: this.lastname,
 			fullname: this.firstname + " " + this.lastname,
 			password: this.password,
-			netmail: this.netmail,
+			mailaddress: this.mailaddress,
 			location: this.location,
 			birthdate: this.birthdate,
 			birth_day: this.birth_day,

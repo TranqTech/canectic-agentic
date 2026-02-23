@@ -19,9 +19,11 @@ import { DoorRunner, LAUNCH_TYPES } from "../handlers/doorrunner.js";
 import { OutputRingBuffer } from "../handlers/ringbuffer.js";
 import { TerminalNegotiator } from "../handlers/terminalnegotiator.js";
 import { MenuHandler } from "../handlers/menuhandler.js";
+import { LastCallers } from "../handlers/lastcallers.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
+import {logCall, logCallDuration} from "../models/callers.js"
 
 //setup
 dotenv.config()
@@ -40,7 +42,7 @@ const handlerRegistry = {
 	"door_auth":    (call) => new DoorAuthHandler(call),
 	"event_login":  (call) => new DoorAuthHandler(call),
 	"menu":         (call) => new MenuHandler(call),
-	//"last_callers": (call) => new LastCallersHandler(call),
+	"last_callers": (call) => new LastCallers(call),
 	//"announcements": (call) => new AnnouncementHandler(call),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
@@ -55,7 +57,7 @@ const callFlows = {
 	"Standard": [
 		"negotiate",
 		"logon",
-		//"last_callers",
+		"last_callers",
 		//"announcements",
 		"menu",
 		"goodbye",
@@ -90,8 +92,8 @@ function getCallFlow(floworder) {
 class IncomingCall{
 	constructor(connection, callpool, newnodenum, floworder){
 		console.log("Creating Call!")
+		this.call_id
 		this.floworder = floworder || "Standard"
-		this.doorsession = false
 		this.flow = getCallFlow(this.floworder)
 		this.flowPosition = 0
 		this.socatManager = callpool.socatManager
@@ -288,6 +290,7 @@ class IncomingCall{
 			var logmsg = this.loggingId + "\n  Login successful for " + this.caller_username;
 			alogger.writeAlog(4, logmsg, "greenbright");
 			// LoginOK advances through the flow (no explicit override)
+			this.logCallStart()
 			this._onHandlerComplete(null);
 		});
 
@@ -492,12 +495,26 @@ class IncomingCall{
 	}
 
 	logCallStart(){
-		//
+		if (this.user_record){
+			logCall(this.user_record, this.connection_type, this.callerId, this.caller_location)
+				.then(res =>{
+					if (res){
+						this.call_id = res;
+						return
+					}					
+				}).catch(err =>{
+					console.log(err)
+				})
+			
+		}
 	}
 
 	logCallEnd(){
 		if (this.loggedend) return;
-		this.loggedend = true;
+		if ((this.user_record)&&(this.call_id)){
+			this.loggedend = true	;		
+			logCallDuration(this.call_id)
+		}
 		alogger.writeAlog(4, this.loggingId + "\n  Call Ended.", "cyanbright");
 	}
 
@@ -507,15 +524,7 @@ class IncomingCall{
 
 		var doorConfig
 		try {
-			doorConfig = await getDoorConfig(slugname)			
-			//check if we are in a doorserver session or not and set the return to menu if not
-			//set menu as default return and goodbye if doorsession
-			console.log("Setting return val")
-			doorConfig.returnStage = "menu"
-			if (this.doorsession){
-				console.log("Door Session")
-				doorConfig.returnStage = "goodbye"
-			}
+			doorConfig = await getDoorConfig(slugname)
 		} catch (err) {
 			var logmsg = this.loggingId + "\n  Failed to get door config for: " + slugname + "\n  " + (err?.stack || err)
 			alogger.writeAlog(3, logmsg, "redbright")

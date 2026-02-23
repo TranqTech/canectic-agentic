@@ -1,18 +1,15 @@
-//import { Pool } from "pg";
-//import { Pool, Client } from 'pg';
-//const { Pool } = pg;
 import pkg from 'pg';
 const { Pool } = pkg;
 import * as dotenv from 'dotenv';
+import * as alogger from "../../utils/alogger.js";
 
-dotenv.config()
+dotenv.config();
 
-
-const dbuser = process.env.dbuser || "canectic"
-const dbhost = process.env.dbhost || "localhost"
-const dbname = process.env.dbname || "canectic_bbs"
+const dbuser = process.env.dbuser || "canectic";
+const dbhost = process.env.dbhost || "localhost";
+const dbname = process.env.dbname || "canectic_bbs";
 const dbpass = process.env.dbpass;
-const dbport = process.env.dbport || 5432
+const dbport = process.env.dbport || 5432;
 
 const pgpool = new Pool({
   user: dbuser,
@@ -20,199 +17,145 @@ const pgpool = new Pool({
   database: dbname,
   password: dbpass,
   port: dbport,
-})
+});
 
-async function readquery(text, params){
-  try{
-    var {rows} = await pgpool.query(text, params)
-  }catch(error){
-    console.log(error);
+// --- Table/column name validation ---
+// Only names matching typical SQL identifiers are allowed
+const validNameRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+function validateName(name, label) {
+  if (!validNameRegex.test(name)) {
+    throw new Error("Invalid " + label + " name: " + name);
   }
-  if(rows){
-    return rows;
-  }else{
-    return null;
+  return name;
+}
+
+// --- Core query helpers ---
+
+// Returns rows array (empty array if no results)
+async function query(text, params) {
+  try {
+    var { rows } = await pgpool.query(text, params);
+    return rows || [];
+  } catch (error) {
+    alogger.writeAlog(2, "DB query error: " + error.message, "redbright");
+    throw error;
   }
 }
 
-async function singlereadquery(text, params){
-  try{
-    var {rows} = await pgpool.query(text, params)
-  }catch(error){
-    console.log(error);
-  }
-  if(rows){
-    return rows[0];
-  }else{
-    return null;
-  }
+// Returns first row, or null if no results
+async function queryOne(text, params) {
+  var rows = await query(text, params);
+  return rows[0] || null;
 }
 
-async function writequery(text, params){
-  try{
-    await pgpool.query(text, params)
-  }catch(error){
-    console.log(error)
-  }
-}
-
-async function checkedwritequery(text, params){
-  try{
-    await pgpool.query(text, params)
+// Executes a write and returns null on success, or the error on failure
+async function write(text, params) {
+  try {
+    await pgpool.query(text, params);
     return null;
-  }catch(error){
-    console.log(error)
+  } catch (error) {
+    alogger.writeAlog(2, "DB write error: " + error.message, "redbright");
     return error;
   }
 }
 
-async function query(text, params){
-  try{
-    var {rows} = await pgpool.query(text, params)
-    if(rows){
-      //console.log("Got a result")
-      //console.log(rows)
-      return rows
-    }else{
-      console.log("No result")
-      return null;
-    }
-  }catch(error){
-    console.log(error)
-    return null;
-  }  
-}
+// --- Parameterized object helpers ---
 
-async function updateParamsById(objectId, params, tablename){
-  var paramlist = Object.keys(params)
-  var updatevalues = [objectId]
-  var paramcount = paramlist.length
-  var updatetext = 'WITH rows AS (UPDATE ' + tablename + " SET "
-  var i = 2
-  for await (var parm of paramlist){
-    if (i > 2){
-      updatetext += ", "
-    }
-    updatetext += parm + "=$" + i
-    updatevalues.push(params[`${parm}`])
-    i++
-  }
-  updatetext += " WHERE id=$1 RETURNING 1) SELECT count(*) FROM rows"
-  try{
-    var dbres = await query(updatetext, updatevalues)
-    console.log(dbres)
-    if ((dbres)&&(dbres[0])){
-      if (dbres[0].count){
-        return dbres[0].count
-      }else{
-        return 0
-      }
-    }else{
-      return 0
-    }
-  }catch(error){
-    console.log(error)
-    return 0
-  }
-}
-
-async function insertByParams(params, tablename){
-  var paramlist = Object.keys(params)
-  var insertvalues = []
-  var paramcount = paramlist.length
-  var inserttext = 'INSERT INTO ' + tablename + " ("
-  var itext2 = ") VALUES("
-  var i = 1
-  for await (var parm of paramlist){
-    if (i>1){
-      inserttext += ", "
-      itext2 += ", "
-    }
-    inserttext += parm
-    itext2 += "$"
-    itext2 += i
-    insertvalues.push(params[`${parm}`])
-    i++
-  }
-  inserttext += itext2
-  inserttext += ") RETURNING id"
-  console.log("Final Query:", inserttext)
-  try{
-    var dbres = await query(inserttext, insertvalues)
-    if ((dbres)&&(dbres[0])){
-      return dbres[0]
-    }else{
-      return null
-    }
-  }catch(error){
-    console.log(error)
-    return null
-  }
-  
-}
-
-async function insertObject(insertObj, tablename){
+// INSERT an object into a table, returns { status, result, insertId, errormessages }
+async function insertObject(insertObj, tablename) {
+  validateName(tablename, "table");
   var retObj = {
     status: false,
     result: "",
     insertId: "",
     errormessages: []
+  };
+
+  var paramlist = Object.keys(insertObj);
+  var insertvalues = [];
+  var columns = [];
+  var placeholders = [];
+  var i = 1;
+
+  for (var parm of paramlist) {
+    validateName(parm, "column");
+    columns.push(parm);
+    placeholders.push("$" + i);
+    insertvalues.push(insertObj[parm]);
+    i++;
   }
-  var paramlist = Object.keys(insertObj)
-  var insertvalues = []
-  var paramcount = paramlist.length
-  var inserttext = 'INSERT INTO ' + tablename + " ("
-  var itext2 = ") VALUES("
-  var i = 1
-  for await (var parm of paramlist){
-    if (i>1){
-      inserttext += ", "
-      itext2 += ", "
-    }
-    inserttext += parm
-    itext2 += "$"
-    itext2 += i
-    insertvalues.push(insertObj[`${parm}`])
-    i++
-  }
-  inserttext += itext2
-  inserttext += ") RETURNING id"
-  //console.log("Final Query:", inserttext)
-  try{
-    var dbres = await query(inserttext, insertvalues)
-    //console.log("Object insert result:", dbres)
-    if ((dbres)&&(dbres[0])){
-      retObj.status = true
-      retObj.result = dbres[0]
-      if (dbres[0].id){
-        console.log("Got returned ID!")
-        retObj.insertId = dbres[0].id
+
+  var inserttext = "INSERT INTO " + tablename + " (" + columns.join(", ") + ") VALUES(" + placeholders.join(", ") + ") RETURNING id";
+
+  try {
+    var rows = await query(inserttext, insertvalues);
+    if (rows[0]) {
+      retObj.status = true;
+      retObj.result = rows[0];
+      if (rows[0].id) {
+        retObj.insertId = rows[0].id;
       }
-    }else{
-      //
     }
-  }catch(error){
-    retObj.errormessages.push("Error Writing to Database")
-    console.log(error)    
+  } catch (error) {
+    retObj.errormessages.push("Error writing to database: " + error.message);
   }
-  return retObj
-  
+
+  return retObj;
 }
 
-async function checkValueUnique(param, value, tablename){
-  var isunique = true
-  var valupper = value.toUpperCase()
-  var querytext = "SELECT COUNT(*) FROM " + tablename + " WHERE UPPER(" + param + ") LIKE UPPER($1)"
-  //console.log(querytext, value)
-  var dbcount = await query(querytext, [valupper])
-  if ((dbcount)&&(dbcount[0])&&(dbcount[0].count)){
-    var count = dbcount[0].count
-    //console.log("Count", count)
-    if (count > 0){
-      isunique = false
+// UPDATE by id, returns count of affected rows (0 on failure)
+async function updateById(objectId, params, tablename) {
+  validateName(tablename, "table");
+  var paramlist = Object.keys(params);
+  var updatevalues = [objectId];
+  var setClauses = [];
+  var i = 2;
+
+  for (var parm of paramlist) {
+    validateName(parm, "column");
+    setClauses.push(parm + "=$" + i);
+    updatevalues.push(params[parm]);
+    i++;
+  }
+
+  var updatetext = "WITH rows AS (UPDATE " + tablename + " SET " + setClauses.join(", ") + " WHERE id=$1 RETURNING 1) SELECT count(*) FROM rows";
+
+  try {
+    var rows = await query(updatetext, updatevalues);
+    if (rows[0] && rows[0].count) {
+      return parseInt(rows[0].count);
     }
-  }  
-  return isunique
+    return 0;
+  } catch (error) {
+    return 0;
+  }
 }
 
-export{checkValueUnique, query, readquery, singlereadquery, writequery, checkedwritequery, pgpool, insertByParams, updateParamsById, insertObject}
+// Check if a value is unique in a table column (case-insensitive)
+async function checkValueUnique(column, value, tablename) {
+  validateName(tablename, "table");
+  validateName(column, "column");
+  var querytext = "SELECT COUNT(*) FROM " + tablename + " WHERE UPPER(" + column + ") LIKE UPPER($1)";
+
+  try {
+    var rows = await query(querytext, [value.toUpperCase()]);
+    if (rows[0] && rows[0].count) {
+      return parseInt(rows[0].count) === 0;
+    }
+    return true;
+  } catch (error) {
+    // On error, assume not unique to be safe
+    return false;
+  }
+}
+
+export {
+  pgpool,
+  query,
+  queryOne,
+  write,
+  insertObject,
+  updateById,
+  checkValueUnique
+};

@@ -1,86 +1,76 @@
 //imports
-
 //internal modules
-import {checkNetmailUnique} from "../models/useraccounts.js";
+import { checkMailUnique } from "../models/useraccounts.js";
 
 //class and function space
-function evaluateNetmail(address){
-	if (!address){
-		console.log("Emty netmail string")
-		return false
-	}
-	console.log("Evaluating", address, "as netmail")
-	var comparr = address.split("@")
-	if (comparr.length != 2){
-		return false
-	}
-	var harr = comparr[1].split(":")
-	if (harr.length != 2){
-		return false
-	}
-	var narr = harr[1].split("/")
-	if (narr.length != 2){
-		return false
-	}
-	var parr = narr[1].split(".")
-	if (parr.length > 2){
-		return false
-	}
-	console.log("Appears valid")
+
+function evaluateNetmail(address) {
+	if (!address) return false;
+	var comparr = address.split("@");
+	if (comparr.length !== 2) return false;
+	var harr = comparr[1].split(":");
+	if (harr.length !== 2) return false;
+	var narr = harr[1].split("/");
+	if (narr.length !== 2) return false;
+	var parr = narr[1].split(".");
+	if (parr.length > 2) return false;
 	return true;
 }
 
-
-function evaluateEmail(address){
-	if (!address){
-		console.log("Empty string")
-		return false
-	}
-	console.log("Evaluating", address, "as email")
-	var comparr = address.split("@")
-	if (comparr.length != 2){
-		return false
-	}
-	var subarr = comparr[1].split(".")
-	if (subarr.length < 2){
-		return false
-	}
-	if (comparr[1].endsWith(".")){
-		return false
-	}
-	console.log("Appears valid")
+function evaluateEmail(address) {
+	if (!address) return false;
+	var comparr = address.split("@");
+	if (comparr.length !== 2) return false;
+	var subarr = comparr[1].split(".");
+	if (subarr.length < 2) return false;
+	if (comparr[1].endsWith(".")) return false;
 	return true;
 }
 
-async function checkRegMailAddress(address){
-	var returnobj = {}
-	returnobj.status = false
-	returnobj.isvalid = false
-	returnobj.errormessages = []
-	returnobj.resultmsg = ""
-	if (address.includes("/")){
-		console.log("Checking", address)
-		var isvalid = evaluateNetmail(address)
-	}else{
-		console.log("Checking", address)
-		var isvalid = evaluateEmail(address)
+// Determines if an address is netmail or email format.
+// Returns "netmail", "email", or null if neither.
+function getMailType(address) {
+	if (!address) return null;
+	if (address.includes("/") && evaluateNetmail(address)) {
+		return "netmail";
 	}
-	if (isvalid){
-		returnobj.isvalid = true
-		//check if it's unique
-		var isunique = await checkNetmailUnique(address)
-		if (isunique){
-			returnobj.inuse = false
-			returnobj.status = true
-			returnobj.resultmsg = "Valid format, and Appears unique."
-			return returnobj;
-		}
-		returnobj.inuse = true
-		returnobj.resultmsg = "Valid format, but is already in use"
+	if (evaluateEmail(address)) {
+		return "email";
 	}
-	returnobj.errormessages.push("Address is not formatted correctly")
-	return returnobj
+	return null;
 }
 
+async function checkRegMailAddress(address) {
+	var returnobj = {
+		status: false,
+		isvalid: false,
+		inuse: false,
+		mailtype: null,
+		errormessages: [],
+		resultmsg: ""
+	};
 
-export{evaluateNetmail, evaluateEmail, checkRegMailAddress}
+	var mailtype = getMailType(address);
+
+	if (!mailtype) {
+		returnobj.errormessages.push("Address is not formatted correctly");
+		return returnobj;
+	}
+
+	returnobj.isvalid = true;
+	returnobj.mailtype = mailtype;
+
+	var isunique = await checkMailUnique(address);
+	if (isunique) {
+		returnobj.inuse = false;
+		returnobj.status = true;
+		returnobj.resultmsg = "Valid " + mailtype + " format, and appears unique.";
+	} else {
+		returnobj.inuse = true;
+		returnobj.resultmsg = "Valid " + mailtype + " format, but is already in use";
+	}
+
+	return returnobj;
+}
+
+export { evaluateNetmail, evaluateEmail, getMailType, checkRegMailAddress };

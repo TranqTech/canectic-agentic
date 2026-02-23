@@ -3,7 +3,7 @@ import * as alogger from "../utils/alogger.js";
 
 // Sub-module commands (simple, stay within menu)
 import { userList } from "./menucommands/userlist.js";
-import { lastCallers } from "./menucommands/lastcallers.js";
+import { LastCallers } from "./lastcallers.js";
 import { msgGroupChange } from "./menucommands/msggroups.js";
 import { msgAreaChange } from "./menucommands/msgareas.js";
 import { listMessages } from "./menucommands/msglister.js";
@@ -214,18 +214,18 @@ class MenuHandler extends BaseHandler {
 
 		// Route to sub-module if running
 		if (this.running_module && this.currentModule) {
-			if (this.currentModule.active !== undefined && !this.currentModule.active) {
+			if (this.currentModule.active === false) {
 				// Module was cleared but flag not reset — clean up
 				this._doModuleReturn();
 			} else if (this.currentModule.handleInput) {
 				this.currentModule.handleInput(inputArray);
 				return;
 			} else if (this.currentModule.input_array) {
-				// Legacy sub-module with input_array/handleData pattern
+				// Legacy sub-module fallback
 				for (var i = 0; i < inputArray.length; i++) {
 					this.currentModule.input_array.push(inputArray[i]);
 				}
-				this.currentModule.handleData();
+				if (this.currentModule.handleData) this.currentModule.handleData();
 				return;
 			}
 		}
@@ -294,19 +294,19 @@ class MenuHandler extends BaseHandler {
 
 			// --- Simple commands: run as sub-modules ---
 			case "msgGroupChange":
-				this._runSubModule(new msgGroupChange(this.call, true, "Menu"));
+				this._runSubModule(new msgGroupChange(this.call));
 				return;
 
 			case "msgAreaChange":
-				this._runSubModule(new msgAreaChange(this.call, true, "Menu"));
+				this._runSubModule(new msgAreaChange(this.call));
 				return;
 
 			case "listMessages":
-				this._runSubModule(new listMessages(this.call, true, "Menu"));
+				this._runSubModule(new listMessages(this.call));
 				return;
 
 			case "readMessages":
-				this._runSubModule(new readMessages(this.call, true, "Menu"));
+				this._runSubModule(new readMessages(this.call));
 				return;
 
 			case "postMessage":
@@ -315,15 +315,15 @@ class MenuHandler extends BaseHandler {
 				return;
 
 			case "userList":
-				this._runSubModule(new userList(this.call, true, "Menu"));
+				this._runSubModule(new userList(this.call));
 				return;
 
 			case "lastCallers":
-				this._runSubModule(new lastCallers(this.call, true, "Menu"));
+				this._runSubModule(new LastCallers(this.call));
 				return;
 
 			case "testDownload":
-				this._runSubModule(new testDownloader(this.call, true, "Menu"));
+				this._runSubModule(new testDownloader(this.call));
 				return;
 
 			default:

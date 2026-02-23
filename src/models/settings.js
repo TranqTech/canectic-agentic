@@ -1,0 +1,1 @@
+//pull all settings from db and cache to redis?
