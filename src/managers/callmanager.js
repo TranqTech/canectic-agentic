@@ -130,6 +130,9 @@ class IncomingCall{
 		this.caller_fullname = ""
 		this.caller_location = ""
 		this.caller_bbs = ""
+		this.security = 0
+		this.permissionflags = []
+		this.restrictionflags = []
 		this.msg_group = ""
 		this.msg_group_title = ""
 		this.msg_area = ""

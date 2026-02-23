@@ -372,6 +372,9 @@ class LoginHandler extends BaseHandler {
         this.call.caller_fullname = useraccount.fullname;
         this.call.caller_location = useraccount.location;
         this.call.user_record = useraccount;
+        this.call.security = useraccount.security
+        if (useraccount.permissionflags) this.call.permissionflags = useraccount.permissionflags
+        if (useraccount.restrictionflags) this.call.restrictionflags = useraccount.restrictionflags
         if (useraccount.msg_group) this.call.msg_group = useraccount.msg_group;
         if (useraccount.msg_area) this.call.msg_area = useraccount.msg_area;
         if (useraccount.file_group) this.call.file_group = useraccount.file_group;

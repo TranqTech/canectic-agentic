@@ -12,7 +12,7 @@ import { writeMessage } from "./menucommands/writemsg.js";
 import { testDownloader } from "./menucommands/testdownload.js";
 
 // Models
-import { getMenu } from "../models/menus.js";
+import { getMenu, menuExists } from "../models/menus.js";
 
 class MenuHandler extends BaseHandler {
 	constructor(call) {
@@ -24,12 +24,13 @@ class MenuHandler extends BaseHandler {
 		this.menuName = call.currentMenu || "Main";
 		this.menuConfig = null;
 		this.title = "";
-		this.menu_options = [];
-		this.display_options = false;
+		this.menu_entries = [];
+		this.visible_entries = [];
+		this.display_entries = false;
 		this.display_file = "";
 		this.display_file_type = "";
-		this.options_x_offset = 0;
-		this.options_y_offset = 0;
+		this.entries_x_offset = 0;
+		this.entries_y_offset = 0;
 
 		// Hotkeys
 		this.hotkey_arr = [];
@@ -48,6 +49,7 @@ class MenuHandler extends BaseHandler {
 		this.error_x = this.menu_start_x;
 		this.error_y = this.menu_start_y + 3;
 		this.haserror = false;
+		this.hasstatus = false;
 		this.menu_prompt = "";
 
 		// Sub-module tracking
@@ -65,16 +67,59 @@ class MenuHandler extends BaseHandler {
 		this.loggingId = "Menu:" + this.menuName + " (Node " + this.call.nodenum + ")";
 	}
 
+	// --- Access control ---
+	// Check if a menu entry is accessible to the current caller.
+	// An entry is accessible if:
+	//   - The caller's security level meets min_security (if set)
+	//   - The caller has ALL required_flags (if any)
+	//   - The caller has NONE of the prohibited_flags
+	_isEntryAccessible(entry) {
+		var callerSecurity = this.call.security || 0;
+		var callerPerms = this.call.permissionflags || [];
+		var callerRestrictions = this.call.restrictionflags || [];
+
+		// Check minimum security level
+		if (entry.min_security !== undefined && entry.min_security !== null) {
+			if (callerSecurity < entry.min_security) return false;
+		}
+
+		// Check required flags — caller must have ALL of them
+		var required = entry.required_flags || [];
+		for (var i = 0; i < required.length; i++) {
+			if (!callerPerms.includes(required[i])) return false;
+		}
+
+		// Check prohibited flags — if the caller has ANY (in either perms or restrictions), deny
+		var prohibited = entry.prohibited_flags || [];
+		for (var i = 0; i < prohibited.length; i++) {
+			if (callerPerms.includes(prohibited[i]) || callerRestrictions.includes(prohibited[i])) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	// Filter the full entry list down to what this caller can see/use
+	_filterEntries() {
+		this.visible_entries = [];
+		for (var i = 0; i < this.menu_entries.length; i++) {
+			if (this._isEntryAccessible(this.menu_entries[i])) {
+				this.visible_entries.push(this.menu_entries[i]);
+			}
+		}
+	}
+
 	// --- Config loading ---
 	_applyConfig(config) {
 		this.menuConfig = config;
 		this.title = config.title || this.menuName;
-		this.menu_options = config.menu_options || [];
-		this.display_options = config.display_options || false;
+		this.menu_entries = config.menu_entries || [];
+		this.display_entries = config.display_entries || false;
 		this.display_file = config.display_file || "";
 		this.display_file_type = config.display_file_type || "";
-		this.options_x_offset = config.menu_options_x_offset || 0;
-		this.options_y_offset = config.menu_options_y_offset || 0;
+		this.entries_x_offset = config.entries_x_offset || 0;
+		this.entries_y_offset = config.entries_y_offset || 0;
 		this.menu_prompt = this.title + " -> " + this.call.caller_username + ":";
 
 		// Override theme colors from config if present
@@ -84,6 +129,7 @@ class MenuHandler extends BaseHandler {
 		if (config.error_clr !== undefined) this.error_clr = config.error_clr;
 		if (config.hotkey_clr !== undefined) this.hotkey_clr = config.hotkey_clr;
 
+		this._filterEntries();
 		this._popHotkeys();
 		this._calcMenuPos();
 	}
@@ -92,8 +138,8 @@ class MenuHandler extends BaseHandler {
 	_popHotkeys() {
 		this.hotkey_arr = [];
 		this.hotkey_msg = "Active Hotkeys: ";
-		for (var i = 0; i < this.menu_options.length; i++) {
-			var hk = this.menu_options[i].hotkey;
+		for (var i = 0; i < this.visible_entries.length; i++) {
+			var hk = this.visible_entries[i].hotkey;
 			if (hk && !this.hotkey_arr.includes(hk.toUpperCase())) {
 				if (this.hotkey_arr.length > 0) {
 					this.hotkey_msg += ",";
@@ -123,10 +169,10 @@ class MenuHandler extends BaseHandler {
 			this.call.cmds.senddata("\r\n\r\n\r\n");
 			this.call.cmds.senddata(this.title);
 			this.call.cmds.senddata("\r\n");
-			for (var i = 0; i < this.menu_options.length; i++) {
-				if (this.menu_options[i].display) {
+			for (var i = 0; i < this.visible_entries.length; i++) {
+				if (this.visible_entries[i].display) {
 					this.call.cmds.senddata("\r\n");
-					this.call.cmds.senddata(this.menu_options[i].display);
+					this.call.cmds.senddata(this.visible_entries[i].display);
 				}
 			}
 			this.call.cmds.senddata("\r\n\r\n");
@@ -139,8 +185,8 @@ class MenuHandler extends BaseHandler {
 		// Draw display file if configured
 		if (this.display_file.length > 0) {
 			this.call.cmds.drawscreen(this.display_file, this.display_file_type, true);
-			if (!this.display_options) {
-				// File-only menu, skip option rendering
+			if (!this.display_entries) {
+				// File-only menu, skip entry rendering
 				this._drawPromptArea();
 				return;
 			}
@@ -157,14 +203,14 @@ class MenuHandler extends BaseHandler {
 		this.call.cmds.senddata(this.title);
 		currY += 2;
 
-		// Menu options
-		for (var i = 0; i < this.menu_options.length; i++) {
-			var menopt = this.menu_options[i];
-			if (menopt.display) {
+		// Menu entries
+		for (var i = 0; i < this.visible_entries.length; i++) {
+			var entry = this.visible_entries[i];
+			if (entry.display) {
 				this.call.cmds.movecursor(currX, currY);
-				if (menopt.bg_clr !== undefined) this.call.cmds.setbgcolor(menopt.bg_clr);
-				if (menopt.fg_clr !== undefined) this.call.cmds.setfgcolor(menopt.fg_clr);
-				this.call.cmds.senddata(menopt.display);
+				if (entry.bg_clr !== undefined) this.call.cmds.setbgcolor(entry.bg_clr);
+				if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+				this.call.cmds.senddata(entry.display);
 				currY++;
 			}
 		}
@@ -208,6 +254,30 @@ class MenuHandler extends BaseHandler {
 		this.call.cmds.movecursor(this.input_x, this.input_y);
 	}
 
+	_drawStatus(msg) {
+		this.hasstatus = true;
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  " + msg + "\r\n");
+			return;
+		}
+		this.call.cmds.movecursor(this.error_x, this.error_y);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.setfgcolor(this.error_clr);
+		this.call.cmds.senddata(msg);
+		this.call.cmds.setfgcolor(this.input_clr);
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+	}
+
+	_eraseStatus() {
+		if (!this.hasstatus) return;
+		this.hasstatus = false;
+		if (this.dumb) return;
+		this.call.cmds.movecursor(this.error_x, this.error_y);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.setfgcolor(this.input_clr);
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+	}
+
 	// --- Input handling ---
 	handleInput(inputArray) {
 		if (!this.active) return;
@@ -233,6 +303,9 @@ class MenuHandler extends BaseHandler {
 		if (this.haserror) {
 			this._eraseError();
 		}
+		if (this.hasstatus) {
+			this._eraseStatus();
+		}
 		super.handleInput(inputArray);
 	}
 
@@ -242,18 +315,24 @@ class MenuHandler extends BaseHandler {
 
 	onChar(ch) {
 		if (this.hotkey_arr.includes(ch.toUpperCase())) {
-			var hotkey_opt = this.menu_options.find(obj => {
+			// Find from the FULL entry list so we can distinguish
+			// "not accessible" from "doesn't exist"
+			var matched_entry = this.menu_entries.find(obj => {
 				return obj.hotkey && obj.hotkey.toUpperCase() === ch.toUpperCase();
 			});
-			if (hotkey_opt) {
-				this._doMenuCommand(hotkey_opt);
+			if (matched_entry) {
+				if (!this._isEntryAccessible(matched_entry)) {
+					this._drawStatus("Access denied");
+					return;
+				}
+				this._doMenuCommand(matched_entry);
 			}
 		}
 	}
 
 	// --- Command dispatch ---
-	_doMenuCommand(menu_option) {
-		var cmd = menu_option.command_name;
+	async _doMenuCommand(entry) {
+		var cmd = entry.command_name;
 		alogger.writeAlog(5, this.loggingId + "\n  Command: " + cmd, "green");
 
 		switch (cmd) {
@@ -264,19 +343,22 @@ class MenuHandler extends BaseHandler {
 				return;
 
 			case "runXtrn":
-				// Use call.launchDoor with the slug name
-				if (menu_option.command_arg) {
-					this.call.launchDoor(menu_option.command_arg);
+				if (entry.command_arg) {
+					this.call.launchDoor(entry.command_arg);
 				} else {
 					this._drawError("No door configured");
 				}
 				return;
 
 			case "loadMenu":
-				// Navigate to a different menu
-				if (menu_option.command_arg) {
+				if (entry.command_arg) {
+					var exists = await menuExists(entry.command_arg);
+					if (!exists) {
+						this._drawStatus("Menu not found");
+						return;
+					}
 					this.call.previousMenu = this.call.currentMenu;
-					this.call.currentMenu = menu_option.command_arg;
+					this.call.currentMenu = entry.command_arg;
 					this.emitter.emit("NextStage", "menu");
 				} else {
 					this._drawError("No menu specified");
@@ -423,6 +505,8 @@ class MenuHandler extends BaseHandler {
 		}
 		this.theme = null;
 		this.menuConfig = null;
+		this.menu_entries = [];
+		this.visible_entries = [];
 		super.clearHandler();
 	}
 }
