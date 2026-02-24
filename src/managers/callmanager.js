@@ -19,7 +19,10 @@ import { DoorRunner, LAUNCH_TYPES } from "../handlers/doorrunner.js";
 import { OutputRingBuffer } from "../handlers/ringbuffer.js";
 import { TerminalNegotiator } from "../handlers/terminalnegotiator.js";
 import { MenuHandler } from "../handlers/menuhandler.js";
+import { DoorLaunchHandler } from "../handlers/doorlaunchhandler.js";
+import { SubModuleAdapter } from "../handlers/submoduleadapter.js";
 import { LastCallers } from "../handlers/lastcallers.js";
+import { WhosOnline } from "../handlers/whosonline.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
@@ -42,7 +45,9 @@ const handlerRegistry = {
 	"door_auth":    (call) => new DoorAuthHandler(call),
 	"event_login":  (call) => new DoorAuthHandler(call),
 	"menu":         (call) => new MenuHandler(call),
-	"last_callers": (call) => new LastCallers(call),
+	"door_launch":  (call) => new DoorLaunchHandler(call, false),
+	"last_callers": (call) => new SubModuleAdapter(call, LastCallers, "LastCallers"),
+	"whos_online":  (call) => new SubModuleAdapter(call, WhosOnline, "WhosOnline"),
 	//"announcements": (call) => new AnnouncementHandler(call),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
@@ -64,7 +69,7 @@ const callFlows = {
 	],
 	"Doorserver": [
 		"door_auth",
-		//"door_session",
+		"door_launch",
 		"goodbye",
 	],
 	"Test": [
@@ -100,7 +105,8 @@ class IncomingCall{
 		this.outputBuffer = new OutputRingBuffer(2000);
 		this.overrideBuffer = false
 		this.currentMenu = "Main"
-		this.previousMenu = "Main"
+		this.menuHistory = []
+		this.menuHistoryMax = 20
 		this.rawmode = false
 		this.sockethandle = 75
 		this.rawtarget
@@ -112,6 +118,7 @@ class IncomingCall{
 		this.config_load_count = 0;
 		this.port = connection.port;
 		this.callPool = callpool;
+		this.nodeManager = callpool.nodeManager;
 		this.term_encoding = "Unknown"
 		this.term_id = ""
 		this.term_version = ""
@@ -133,6 +140,8 @@ class IncomingCall{
 		this.security = 0
 		this.permissionflags = []
 		this.restrictionflags = []
+		this.doorTarget = null
+		this._doorFromMenu = false
 		this.msg_group = ""
 		this.msg_group_title = ""
 		this.msg_area = ""
@@ -166,10 +175,30 @@ class IncomingCall{
 
 	// --- Flow management ---
 	// Returns the next stage name from the flow, or null if exhausted
+	// Normalize a flow entry — returns { stage, args } whether entry is a string or object
+	_normalizeFlowEntry(entry) {
+		if (!entry) return null;
+		if (typeof entry === "string") return { stage: entry, args: null };
+		if (typeof entry === "object" && entry.stage) {
+			var args = Object.assign({}, entry);
+			delete args.stage;
+			return { stage: entry.stage, args: Object.keys(args).length > 0 ? args : null };
+		}
+		return null;
+	}
+
+	// Extract just the stage name from a flow entry (string or object)
+	_flowEntryName(entry) {
+		if (!entry) return null;
+		if (typeof entry === "string") return entry;
+		if (typeof entry === "object" && entry.stage) return entry.stage;
+		return null;
+	}
+
 	_getNextFlowStage() {
 		this.flowPosition++;
 		if (this.flowPosition < this.flow.length) {
-			return this.flow[this.flowPosition];
+			return this._normalizeFlowEntry(this.flow[this.flowPosition]);
 		}
 		return null;
 	}
@@ -178,7 +207,7 @@ class IncomingCall{
 	// Returns true if found, false if not
 	_seekFlowTo(stageName) {
 		for (var i = 0; i < this.flow.length; i++) {
-			if (this.flow[i] === stageName) {
+			if (this._flowEntryName(this.flow[i]) === stageName) {
 				this.flowPosition = i;
 				return true;
 			}
@@ -194,7 +223,7 @@ class IncomingCall{
 			// Handler explicitly requested a stage — honour it
 			// Also sync flow position if the stage exists in the flow
 			this._seekFlowTo(nextStage);
-			return nextStage;
+			return { stage: nextStage, args: null };
 		}
 		// No explicit next stage — advance through the flow
 		return this._getNextFlowStage();
@@ -246,6 +275,13 @@ class IncomingCall{
 		}
 	}
 
+	// --- Node status ---
+	updateNodeStatus(status, detail, detailDisplay) {
+		if (this.nodeManager) {
+			this.nodeManager.updateNode(this.nodenum, status, detail, detailDisplay);
+		}
+	}
+
 	// --- Handler lifecycle ---
 	loadHandler(stageName){
 		// "goodbye" is a reserved directive — always triggers hangup
@@ -276,6 +312,10 @@ class IncomingCall{
 			this.currentHandler = handler;
 			this.call_status = stageName;
 
+			// Update node registry with current activity
+			var detail = (stageName === "menu") ? this.currentMenu : "";
+			this.updateNodeStatus(stageName, detail);
+
 			// Wire handler events to call flow routing
 			this._wireHandlerEvents(handler, stageName);
 
@@ -292,6 +332,11 @@ class IncomingCall{
 		handler.emitter.on("LoginOK", () => {
 			var logmsg = this.loggingId + "\n  Login successful for " + this.caller_username;
 			alogger.writeAlog(4, logmsg, "greenbright");
+			// Update node registry with the logged-in username
+			if (this.nodeManager) {
+				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
+				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
+			}
 			// LoginOK advances through the flow (no explicit override)
 			this.logCallStart()
 			this._onHandlerComplete(null);
@@ -307,6 +352,11 @@ class IncomingCall{
 		handler.emitter.on("DoorAuthOK", () => {
 			var logmsg = this.loggingId + "\n  Door auth complete";
 			alogger.writeAlog(4, logmsg, "greenbright");
+			// Update node registry with the door session username
+			if (this.nodeManager) {
+				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
+				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
+			}
 			this._onHandlerComplete(null);
 		});
 
@@ -338,6 +388,11 @@ class IncomingCall{
 		handler.emitter.on("RegistrationOK", () => {
 			var logmsg = this.loggingId + "\n  Registration successful for " + this.caller_username;
 			alogger.writeAlog(4, logmsg, "greenbright");
+			// Update node registry with the newly registered username
+			if (this.nodeManager) {
+				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
+				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
+			}
 			this._onHandlerComplete(null);
 		});
 	}
@@ -353,9 +408,16 @@ class IncomingCall{
 			return;
 		}
 
-		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + resolved;
+		// Apply any args from the flow entry to the call object
+		if (resolved.args) {
+			for (var key in resolved.args) {
+				this[key] = resolved.args[key];
+			}
+		}
+
+		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + resolved.stage;
 		alogger.writeAlog(5, logmsg, "greenbright");
-		this.loadHandler(resolved);
+		this.loadHandler(resolved.stage);
 	}
 
 	_onHandlerReturn(fromStage){
@@ -370,9 +432,16 @@ class IncomingCall{
 			return;
 		}
 
-		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage + ". Advancing to: " + resolved;
+		// Apply any args from the flow entry
+		if (resolved.args) {
+			for (var key in resolved.args) {
+				this[key] = resolved.args[key];
+			}
+		}
+
+		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage + ". Advancing to: " + resolved.stage;
 		alogger.writeAlog(4, logmsg, "cyanbright");
-		this.loadHandler(resolved);
+		this.loadHandler(resolved.stage);
 	}
 
 	// --- Data routing ---
@@ -458,6 +527,7 @@ class IncomingCall{
 		var callfinishmsg = this.loggingId + "\n  Call Finished. Hanging Up."
 		alogger.writeAlog(3, callfinishmsg, "cyanbright")
 		this.call_status = "Finished"
+		this.updateNodeStatus("disconnecting", "");
 		if (this.currentHandler){
 			try{
 				this.currentHandler.clearHandler();
@@ -486,15 +556,25 @@ class IncomingCall{
 		this.setCommandSet()
 		console.log("Connected on Node", this.nodenum)
 		this.loadConfigs()
+		// Register the connection type on the node
+		if (this.nodeManager) {
+			this.nodeManager.setNodeConnectionType(this.nodenum, this.connection_type);
+		}
 		// Start at position 0 in the flow
 		this.flowPosition = 0;
-		var firstStage = this.flow[0];
-		if (!firstStage) {
+		var firstEntry = this._normalizeFlowEntry(this.flow[0]);
+		if (!firstEntry) {
 			alogger.writeAlog(3, this.loggingId + "\n  Empty flow for: " + this.floworder, "redbright");
 			this.hangUpCall();
 			return;
 		}
-		this.loadHandler(firstStage);
+		// Apply any args from the first flow entry
+		if (firstEntry.args) {
+			for (var key in firstEntry.args) {
+				this[key] = firstEntry.args[key];
+			}
+		}
+		this.loadHandler(firstEntry.stage);
 	}
 
 	logCallStart(){
@@ -522,8 +602,9 @@ class IncomingCall{
 	}
 
 	// Launch a door by slug name — async because getDoorConfig hits the DB
-	async launchDoor(slugname) {
-		console.log("Launch Door with slug", slugname)
+	async launchDoor(slugname, fromMenu) {
+		alogger.writeAlog(5, this.loggingId + "\n  Launch door: " + slugname + (fromMenu ? " (from menu)" : " (from flow)"), "greenbright");
+		this._doorFromMenu = fromMenu || false;
 
 		var doorConfig
 		try {
@@ -531,21 +612,40 @@ class IncomingCall{
 		} catch (err) {
 			var logmsg = this.loggingId + "\n  Failed to get door config for: " + slugname + "\n  " + (err?.stack || err)
 			alogger.writeAlog(3, logmsg, "redbright")
-			this._onHandlerComplete("main_menu")
+			this._doorReturn()
 			return
 		}
 
 		if (!doorConfig) {
 			alogger.writeAlog(3, this.loggingId + "\n  No door config found for: " + slugname, "yellowbright")
-			this._onHandlerComplete("main_menu")
+			this._doorReturn()
 			return
 		}
 
-		// Clean up current handler (the menu)
+		// Check door capacity
+		var maxnodes = doorConfig.maxnodes || 0;
+		if (this.nodeManager && !this.nodeManager.doorHasCapacity(slugname, maxnodes)) {
+			alogger.writeAlog(4, this.loggingId + "\n  Door at capacity: " + slugname + " (" + maxnodes + " max)", "yellowbright");
+			try {
+				this.cmds.senddata("\r\nThat door is currently at capacity. Please try again later.");
+				this.cmds.senddata("\r\nPress any key to continue...");
+			} catch (_) {}
+			this._waitForKeyThen(() => {
+				this._doorReturn();
+			});
+			return;
+		}
+
+		// Clean up current handler
 		if (this.currentHandler) {
 			try { this.currentHandler.clearHandler(); } catch (_) {}
 			this.currentHandler = null;
 		}
+
+		// Update node status to show we're in a door
+		// Pass the friendly display name (from config) alongside the slug
+		var doorDisplayName = doorConfig.name || doorConfig.title || slugname;
+		this.updateNodeStatus("door", slugname, doorDisplayName);
 
 		try {
 			var handler = new DoorRunner(this, doorConfig, this.socatManager);
@@ -553,7 +653,7 @@ class IncomingCall{
 			this.call_status = "Door: " + doorConfig.cmd;
 
 			handler.emitter.on("ModuleReturn", () => {
-				this._onHandlerComplete("main_menu");
+				this._doorReturn();
 			});
 
 			handler.emitter.on("NextStage", (nextStage) => {
@@ -564,7 +664,29 @@ class IncomingCall{
 		} catch (err) {
 			var logmsg = this.loggingId + "\n  Failed to launch door: " + (err?.stack || err);
 			alogger.writeAlog(3, logmsg, "redbright");
-			this._onHandlerComplete("main_menu");
+			this._doorReturn();
+		}
+	}
+
+	// Temporarily enters raw mode to wait for a single keypress, then calls the callback
+	_waitForKeyThen(callback) {
+		var prevRawmode = this.rawmode;
+		var prevRawtarget = this.rawtarget;
+		this.rawmode = true;
+		this.rawtarget = () => {
+			this.rawmode = prevRawmode;
+			this.rawtarget = prevRawtarget;
+			callback();
+		};
+	}
+
+	_doorReturn() {
+		if (this._doorFromMenu) {
+			// Launched from a menu — return to that menu
+			this._onHandlerComplete("menu");
+		} else {
+			// Launched from call flow — advance to next flow stage
+			this._onHandlerComplete(null);
 		}
 	}
 }

@@ -95,6 +95,7 @@ class BaseSubModule {
 		this.active = false;
 		this.finished = true;
 		clearTimeout(this.zombieTO);
+		this.emitter.removeAllListeners();
 		this.call = null;
 	}
 }

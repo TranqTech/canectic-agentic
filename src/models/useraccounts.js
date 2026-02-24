@@ -14,6 +14,9 @@ const defaultsecurity = process.env.defaultsecurity || 50;
 const saltRounds = 10;
 const storeplain = process.env.storeplainindev_yesimsure;
 
+// Reserved usernumbers — these are never assigned to real user accounts
+const RESERVED_USERNUMBERS = [512]; // 512 = guest/doorsession placeholder
+
 // --- UUID helpers ---
 
 async function checkUuidUnique(uuid) {
@@ -128,6 +131,9 @@ async function createNewUser(newrecord) {
 	var timenow = new Date();
 	var assignuuid = await genUUID();
 	var usernumber = await getHighestUserNumber() + 1;
+	while (RESERVED_USERNUMBERS.includes(usernumber)) {
+		usernumber++;
+	}
 
 	try {
 		var rec = {

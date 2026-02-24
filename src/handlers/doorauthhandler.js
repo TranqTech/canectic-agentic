@@ -1,6 +1,8 @@
 import { BaseHandler } from "./basehandler.js";
 import * as alogger from "../utils/alogger.js";
 
+import { getClientBBS } from "../models/doorserver.js";
+
 const doorAuthTO = Number(process.env.doorAuthTO) || 15000;
 const maxAuthBuffer = 4096; // Max bytes we'll accept before giving up
 
@@ -40,7 +42,7 @@ class DoorAuthHandler extends BaseHandler {
 			this.resetInactivityTimeouts();
 
 			// Append incoming buffer to our auth string
-			this.authBuffer += data.toString('utf8');
+			this.authBuffer += data.toString("utf8");
 
 			// Guard against oversized payloads
 			if (this.authBuffer.length > maxAuthBuffer) {
@@ -99,7 +101,7 @@ class DoorAuthHandler extends BaseHandler {
 			return;
 		}
 
-		// Hook for actual credential validation
+		// Validate credentials
 		this._validateDoorAuth(authData)
 			.then(result => {
 				if (!this.active) return;
@@ -115,42 +117,35 @@ class DoorAuthHandler extends BaseHandler {
 			});
 	}
 
-	// Stub — implement actual door server auth
 	async _validateDoorAuth(authData) {
-		console.log(authData)
-		// TODO: Implement actual validation
-		// authData will contain at minimum:
+		// authData contains at minimum:
 		//   system_id   - the remote BBS system identifier
 		//   auth_token  - shared secret or session token
 		//
 		// May also contain:
 		//   username    - the remote user's name
-		//   door_id     - which door game they want to launch
+		//   real_name   - user's real/full name
+		//   door_id     - which door game they want to launch (sets doorTarget)
 		//   term_type   - remote terminal capabilities
 		//   term_width  - remote terminal width
 		//   term_height - remote terminal height
 		//
-		// Should return: { valid: true/false, reason: "...", session: {...} }
-		//try running door
-		this.call.user_record = {
-			username: authData.username,
-			fullname: authData.real_name,
-			location: "Unknown",
-			usernumber: 123,
-			age: authData.age,
-			lastlogon: new Date()
+		// Returns: { valid: true/false, reason: "...", bbs: {...} }
+
+		if (!authData.system_id || !authData.auth_token) {
+			return { valid: false, reason: "Missing System ID or Auth Token" };
 		}
-		this.call.doorsession = true;
-		this.call.caller_username = authData.username
-		this.call.caller_fullname = authData.real_name
-		this.call.caller_location = "BBS Name or Location"
-		this.call.term_encoding = authData.term_type
-		this.call.term_type = authData.term_type
-		this.call.term_width = authData.term_width
-		this.call.term_height = authData.term_height
-		this.call.use_sixel = true
-		this.call.launchDoor("testdoor");
-		return { valid: false, reason: "Not implemented" };
+
+		var bbs = await getClientBBS(authData.system_id);
+		if (!bbs) {
+			return { valid: false, reason: "Unknown System ID" };
+		}
+
+		if (authData.auth_token !== bbs.auth_token) {
+			return { valid: false, reason: "Auth Token Incorrect" };
+		}
+
+		return { valid: true, bbs: bbs };
 	}
 
 	// --- Auth results ---
@@ -159,17 +154,26 @@ class DoorAuthHandler extends BaseHandler {
 		var logmsg = this.loggingId + "\n  Door auth successful from system: " + authData.system_id;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
-		// Store relevant info on the call
+		var bbs = result.bbs || {};
+
+		// Store connection info on the call object
 		this.call.doorsession = true;
 		this.call.caller_bbs = authData.system_id;
-		if (authData.username) this.call.caller_username = authData.username;
-		if (authData.term_type) this.call.term_type = authData.term_type;
+		this.call.term_type = "Door Client";
+		this.call.term_encoding = "CP437";
+
+		// Build caller identity from BBS prefix + remote username
+		var prefix = bbs.username_prefix ? bbs.username_prefix + "_" : "";
+		this.call.caller_username = prefix + (authData.username || "Guest");
+		if (authData.real_name) this.call.caller_fullname = authData.real_name;
+		if (bbs.name) this.call.caller_location = bbs.name;
+
+		// Door target — if the client requested a specific door
+		if (authData.door_id) this.call.doorTarget = authData.door_id;
+
+		// Terminal dimensions from client
 		if (authData.term_width) this.call.term_width = authData.term_width;
 		if (authData.term_height) this.call.term_height = authData.term_height;
-
-		// Store session/door info for the next handler
-		this.call.door_session = result.session || {};
-		this.call.door_id = authData.door_id || null;
 
 		// Send success response
 		this._sendResponse({

@@ -1,4 +1,4 @@
-import { BaseHandler } from "./basehandler.js";
+import { BaseSubModule } from "./basesubmodule.js";
 import { DateTime } from "luxon";
 import { getLastCallers } from "../models/callers.js";
 
@@ -9,10 +9,9 @@ const ccntclr = 14;
 const headclr = 11;
 const msgclr = 10;
 
-class LastCallers extends BaseHandler {
+class LastCallers extends BaseSubModule {
 	constructor(call) {
 		super(call, "LastCallers");
-		this.dumb = (call.term_type === "Dumb");
 		this.callerlist = [];
 		this.currntidx = 0;
 		this.pausedlist = false;
@@ -196,29 +195,20 @@ class LastCallers extends BaseHandler {
 	}
 
 	// --- Lifecycle ---
-	signalReturn() {
-		this.emitter.emit("ModuleReturn");
-	}
-
-	startStage() {
+	run() {
 		if (!this.call) return;
-		try {
-			this._calcPos();
-			getLastCallers()
-				.then(res => {
-					if (!this.active) return;
-					this.callerlist = res.reverse();
-					this._showList();
-					this.setInactivityTimeouts();
-				})
-				.catch(err => {
-					if (!this.active) return;
-					console.log(err);
-					this.signalReturn();
-				});
-		} catch (err) {
-			this._handleError("startStage error", err);
-		}
+		this._calcPos();
+		getLastCallers()
+			.then(res => {
+				if (!this.active) return;
+				this.callerlist = res.reverse();
+				this._showList();
+			})
+			.catch(err => {
+				if (!this.active) return;
+				console.log(err);
+				this.signalReturn();
+			});
 	}
 }
 

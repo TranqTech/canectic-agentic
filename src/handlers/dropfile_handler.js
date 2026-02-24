@@ -1,533 +1,491 @@
-//imports
-import { EventEmitter } from 'node:events';
-import { spawn, spawnSync, exec, execSync } from "child_process"
-import {homedir} from "os";
+// dropfile_handler.js
+// Generates BBS drop files for external door programs.
+// Supported formats: door.sys, door32.sys, dorinfox.def, doorfile.sr, canectic.sys
+
+import { EventEmitter } from "node:events";
 import { DateTime } from "luxon";
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
+import * as fs from "fs";
+import * as path from "path";
+import * as dotenv from "dotenv";
 
-//internal modules
-import * as alogger from "../utils/alogger.js"
+import * as alogger from "../utils/alogger.js";
 
-//setup
 dotenv.config();
-const pauseonxtrn = true
-const vdevdir = homedir() + "/vdev"
-const socatpref = vdevdir + "/p"
-const doordir = process.env.doordir
-const xtrnTO = process.env.extrnTO || 10000
-const sysopname = process.env.sysopname || "John Doe"
-const sysopalias = process.env.sysopalias || "Sysop"
 
+const bbsname = process.env.bbsname || "BBS";
+const sysopname = process.env.sysopname || "Sysop";
+const sysopalias = process.env.sysopalias || sysopname;
 
-async function set_doorsys(call, runnersettings){
-	console.log("Getting Door.sys Array")
-	console.log(call.user_record)
-	//records that need some luxon parsing
-	var lastlogon = Date.parse(call.user_record.lastlogon)
-	lastlogon = DateTime.fromMillis(lastlogon)
-	var lastcalldate = lastlogon.toFormat('MM/dd/yy')
-	var lastcalltime = lastlogon.toFormat('HH:mm')
-	var callrawtime = Date.parse(call.connect_time)
-	callrawtime = DateTime.fromMillis(callrawtime)
-	var calltime = callrawtime.toFormat('HH:mm')
-	var shortbirthdate = "00/00/00"
-	if (call.user_record.birthdate){
-		var prepbirthdate = call.user_record.birthdate.slice(2)
-		var bdayarray = prepbirthdate.split("/")
-		shortbirthdate = bdayarray[2] + "/" + bdayarray[1] + "/" + bdayarray[0]
-	}
-	var rundir = process.cwd()
-	var dfarray = []
-	var comstring = "COM" + runnersettings.comport + ":"
-	dfarray.push(comstring)
-	dfarray.push(call.baudRate)
-	//parity (7 or 8)
-	dfarray.push(8)	
-	dfarray.push(call.nodenum)
-	dfarray.push(call.baudRate)
-	//Screen Display
-	dfarray.push("Y")
-	//Printer Toggle
-	dfarray.push("Y")
-	//Page Bell
-	dfarray.push("Y")
-	//Caller Alarm
-	dfarray.push("Y")
-	//Full Name
-	dfarray.push(call.caller_fullname)
-	//calling from
-	dfarray.push(call.user_record.location)
-	//home phone
-	dfarray.push("")
-	//work/data phone
-	dfarray.push("")
-	//password
-	dfarray.push("PASSWORD")
-	//Security
-	dfarray.push(call.user_record.security)
-	//Call Count - right?
-	dfarray.push(call.user_record.logoncount)
-	//Last Call (mm/dd/yy)
-	dfarray.push(lastcalldate)
-	//seconds remaining - Might need to need set limit of 32767?
-	dfarray.push(call.timeleft)
-	//minutes remaining - Might need to need set limit of 32767
-	var minleft = Math.round(call.timeleft / 60)
-	dfarray.push(minleft)
-	//graphics mode
-	dfarray.push("GR")
-	//page length
-	dfarray.push(call.term_height)
-	//user mode (Y- expert n- novice)
-	dfarray.push("N")
-	//Forums registerd in
-	dfarray.push("")
-	//Conference door loaded from
-	dfarray.push("0")
-	//User expiration date
-	dfarray.push("00/00/00")
-	//user file record number
-	if (call.user_record.usernumber){
-		dfarray.push(call.user_record.usernumber)
-	}else{
-		dfarray.push("42")
-	}	
-	//default protocol
-	if (call.user_record.defaultprotocol){
-		dfarray.push(call.user_record.defaultprotocol)
-	}else{
-		dfarray.push("Z")
-	}	
-	//total uploads
-	if (call.user_record.uploadcount){
-		dfarray.push(call.user_record.uploadcount)
-	}else{
-		dfarray.push("0")
-	}
-	//total downloads
-	if (call.user_record.downloadcount){
-		dfarray.push(call.user_record.downloadcount)
-	}else{
-		dfarray.push("0")
-	}
-	//daily download k total
-	if (call.user_record.dailydownloadktotal){
-		dfarray.push(call.user_record.dailydownloadktotal)
-	}else{
-		dfarray.push("0")
-	}
-	//daily download k limit
-	if (call.user_record.dailydownloadklimit){
-		dfarray.push(call.user_record.dailydownloadklimit)
-	}else{
-		dfarray.push("0")
-	}
-	//caller birthday (mm/dd/yy)	
-	dfarray.push(shortbirthdate)
-	//Userfile dir (Node?)
-	var nodedir = rundir + "/nodes/" + call.nodenum
-	dfarray.push(nodedir)
-	//GEN directory (Data)
-	var datadir = rundir + "/data"
-	dfarray.push(datadir)
-	//Sysop Name
-	dfarray.push(sysopalias)
-	//User Alias
-	dfarray.push(call.user_record.username)
-	//Event Time (hh:mm)
-	dfarray.push("00:00")
-	//Error Correcting Connection
-	dfarray.push("Y")
-	//Ansi Support and Caller using NG Mode
-	dfarray.push("N")
-	//User Record Locking
-	dfarray.push("Y")
-	//BBS Default Color (CGA 1-15)
-	dfarray.push("15")
-	//Time Credits (minutes)
-	dfarray.push("0")
-	//Last new file scan date
-	if (call.user_record.lastnewfilescan_short){
-		dfarray.push(call.user_record.lastnewfilescan_short)
-	}else{
-		dfarray.push("00/00/00")
-	}
-	//Call time (hh:mm)
-	dfarray.push(calltime)
-	//Last call time (hh:mm)
-	dfarray.push(lastcalltime)
-	//Max daily files
-	if (call.user_record.maxdailyfiles){
-		dfarray.push(call.user_record.maxdailyfiles)
-	}else{
-		dfarray.push("0")
-	}
-	//daily download count
-	if (call.user_record.dailydownloadcount){
-		dfarray.push(call.user_record.dailydownloadcount)
-	}else{
-		dfarray.push("0")
-	}
-	//Total K uploaded
-	if (call.user_record.totaluploadk){
-		dfarray.push(call.user_record.totaluploadk)
-	}else{
-		dfarray.push("0")
-	}
-	//Total K downloaded
-	if (call.user_record.totaldownloadk){
-		dfarray.push(call.user_record.totaldownloadk)
-	}else{
-		dfarray.push("0")
-	}
-	//User Comment
-	if (call.user_record.user_comment){
-		dfarray.push(call.user_record.user_comment)
-	}else{
-		dfarray.push("Canectic Rules")
-	}
-	//Total Doors Opened
-	if (call.user_record.lifetimedoortotal){
-		dfarray.push(call.user_record.lifetimedoortotal)
-	}else{
-		dfarray.push("0")
-	}
-	//Total Messages Left
-	dfarray.push("9999")
+// ============================================================================
+// Safe accessors — pull from call and user_record with defaults for
+// doorsession-type calls or any missing fields
+// ============================================================================
 
-	return dfarray
+function safeUser(call) {
+	var ur = call.user_record || {};
+	return {
+		username:       ur.username       || call.caller_username || "Guest",
+		fullname:       ur.fullname       || call.caller_fullname || "Guest User",
+		firstname:      ur.firstname      || (ur.fullname || call.caller_fullname || "Guest").split(" ")[0],
+		lastname:       ur.lastname       || (ur.fullname || call.caller_fullname || "User").split(" ").slice(1).join(" ") || "User",
+		location:       ur.location       || "Unknown",
+		security:       ur.security       ?? call.security ?? 10,
+		usernumber:     ur.usernumber     ?? 512,
+		logoncount:     ur.logoncount     ?? 0,
+		birthdate:      ur.birthdate      || null,
+		lastlogon:      ur.lastlogon      || null,
+		defaultprotocol: ur.defaultprotocol || "Z",
+		uploadcount:    ur.uploadcount    ?? 0,
+		downloadcount:  ur.downloadcount  ?? 0,
+		totaluploadk:   ur.totaluploadk   ?? 0,
+		totaldownloadk: ur.totaldownloadk ?? 0,
+		dailydownloadktotal: ur.dailydownloadktotal ?? 0,
+		dailydownloadklimit: ur.dailydownloadklimit ?? 0,
+		dailydownloadcount:  ur.dailydownloadcount  ?? 0,
+		maxdailyfiles:       ur.maxdailyfiles       ?? 0,
+		lastnewfilescan_short: ur.lastnewfilescan_short || "00/00/00",
+		user_comment:   ur.user_comment   || "",
+		lifetimedoortotal: ur.lifetimedoortotal ?? 0
+	};
 }
 
-async function set_door32(call, runnersettings){
-	var dfarray = []
-	//line 1 - comm type (0=local, 1=serial, 2=telnet)
-	dfarray.push(runnersettings.comtype)
-	//comm or socket handle
-	if (call.sockethandle){
-		dfarray.push(call.sockethandle)
-	}else{
-		dfarray.push(0)
-	}	
-	//baud rate
-	dfarray.push(call.baudRate)
-	//bbsid
-	dfarray.push("Canectic BBS")
-	//user record
-	if (call.user_record.usernumber){
-		dfarray.push(call.user_record.usernumber)
-	}else{
-		dfarray.push(0)
-	}	
-	//real name
-	dfarray.push(call.user_record.fullname)
-	//alias
-	dfarray.push(call.caller_username)
-	//security level
-	dfarray.push(call.user_record.security)
-	//time left
-	dfarray.push(call.timeleft)
-	//terminal emulation. Check for Ansi and use this table. Setting Ansi by default for testing
-	//0 = Ascii
-	//1 = Ansi
-	//2 = Avatar
-	//3 = RIP
-	//4 = Max Graphics
-	if (call.use_rip == true){
-		dfarray.push(3)
-	}else{
-		if ((call.term_encoding == "CP437")||(call.term_encoding == "UTF8")){
-			dfarray.push(1)
-		}else{
-			dfarray.push(0)
+function safeCall(call) {
+	return {
+		nodenum:        call.nodenum       ?? 1,
+		baudRate:       call.baudRate      ?? 115200,
+		timeleft:       call.timeleft      ?? 3600,
+		term_height:    call.term_height   ?? 24,
+		term_width:     call.term_width    ?? 80,
+		term_encoding:  call.term_encoding || "CP437",
+		term_type:      call.term_type     || "ansi",
+		use_rip:        call.use_rip       || false,
+		connect_time:   call.connect_time  || new Date(),
+		sockethandle:   call.sockethandle  ?? 0,
+		caller_fullname: call.caller_fullname || "Guest User",
+		caller_username: call.caller_username || "Guest"
+	};
+}
+
+// ============================================================================
+// Date helpers — never throw on bad data
+// ============================================================================
+
+function formatDate(value, fmt) {
+	if (!value) return "00/00/00";
+	try {
+		var ms = (value instanceof Date) ? value.getTime() : Date.parse(value);
+		if (isNaN(ms)) return "00/00/00";
+		return DateTime.fromMillis(ms).toFormat(fmt);
+	} catch (err) {
+		return "00/00/00";
+	}
+}
+
+function formatTime(value, fmt) {
+	if (!value) return "00:00";
+	try {
+		var ms = (value instanceof Date) ? value.getTime() : Date.parse(value);
+		if (isNaN(ms)) return "00:00";
+		return DateTime.fromMillis(ms).toFormat(fmt);
+	} catch (err) {
+		return "00:00";
+	}
+}
+
+function formatBirthdate(value) {
+	// Accept ISO date (YYYY-MM-DD), Date objects, or MM/DD/YY strings
+	if (!value) return "00/00/00";
+	try {
+		if (value instanceof Date) {
+			return DateTime.fromJSDate(value).toFormat("MM/dd/yy");
 		}
+		// ISO date: YYYY-MM-DD
+		if (typeof value === "string" && value.match(/^\d{4}-\d{2}-\d{2}/)) {
+			return DateTime.fromISO(value).toFormat("MM/dd/yy");
+		}
+		// Already short format
+		if (typeof value === "string" && value.match(/^\d{2}\/\d{2}\/\d{2,4}$/)) {
+			return value.length > 8 ? value.slice(0, 6) + value.slice(-2) : value;
+		}
+		return "00/00/00";
+	} catch (err) {
+		return "00/00/00";
 	}
-	//node number
-	dfarray.push(call.nodenum)
-	//dfarray.push(call.term_type)
-
-	return dfarray
 }
 
-async function set_canectic(call, runnersettings){
-	var dfarray = []
-	dfarray.push(call.nodenum)
-	dfarray.push(call.term_encoding)
-	dfarray.push(call.caller_username)
-	dfarray.push(call.user_record.fullname)	
-	dfarray.push(call.user_record.security)
-	dfarray.push("Canectic BBS")
-	dfarray.push(call.term_type)	
-	dfarray.push(call.timeleft)
-	return dfarray
+// ============================================================================
+// Terminal emulation code for door32/doorfile.sr
+// 0=Ascii, 1=Ansi, 2=Avatar, 3=RIP, 4=Max Graphics
+// ============================================================================
+
+function getEmulationCode(call) {
+	if (call.use_rip) return 3;
+	var enc = (call.term_encoding || "").toUpperCase();
+	if (enc === "CP437" || enc === "UTF8" || enc === "UTF-8") return 1;
+	var term = (call.term_type || "").toLowerCase();
+	if (term === "ansi" || term === "ansi-bbs" || term === "xterm") return 1;
+	return 0;
 }
 
-async function set_dorinfo(call, runnersettings){
-	var dfarray = []
+// ============================================================================
+// ANSI graphics mode for door.sys: "GR" or "NG"
+// ============================================================================
 
-	return dfarray
+function getGraphicsMode(call) {
+	var enc = (call.term_encoding || "").toUpperCase();
+	if (enc === "CP437" || enc === "UTF8" || enc === "UTF-8") return "GR";
+	var term = (call.term_type || "").toLowerCase();
+	if (term === "ansi" || term === "ansi-bbs" || term === "xterm") return "GR";
+	return "NG";
 }
 
-async function dfarray_setter(call, filetype, runnersettings){
-	var dfobj = {}
-	//console.log("Checking filetype", filetype, runnersettings)
-	if (!filetype){
-		filetype = ""
+// ============================================================================
+// DORINFO node suffix — nodes 1-9 use digit, 10 uses 0, 11-36 use A-Z
+// ============================================================================
+
+function getDorInfoNodeSuffix(nodenum) {
+	if (nodenum >= 1 && nodenum <= 9) return nodenum.toString();
+	if (nodenum === 10) return "0";
+	if (nodenum >= 11 && nodenum <= 36) return String.fromCharCode(64 + (nodenum - 10));
+	// Fallback for nodes > 36
+	return nodenum.toString();
+}
+
+// ============================================================================
+// Format builders — each returns an object { filename, lines[] }
+// All values are coerced to strings at write time, so push raw values.
+// ============================================================================
+
+function buildDoorSys(call, rs, useRealNames) {
+	var c = safeCall(call);
+	var u = safeUser(call);
+	var rundir = process.cwd();
+	var lastcalldate = formatDate(u.lastlogon, "MM/dd/yy");
+	var lastcalltime = formatTime(u.lastlogon, "HH:mm");
+	var calltime     = formatTime(c.connect_time, "HH:mm");
+	var birthdate    = formatBirthdate(u.birthdate);
+	var secsLeft     = Math.min(c.timeleft, 32767);
+	var minsLeft     = Math.min(Math.round(c.timeleft / 60), 32767);
+	var displayName  = useRealNames ? u.fullname : u.username;
+
+	var lines = [
+		/* 01 */ "COM" + (rs.comport || 0) + ":",
+		/* 02 */ c.baudRate,
+		/* 03 */ 8,
+		/* 04 */ c.nodenum,
+		/* 05 */ c.baudRate,
+		/* 06 */ "Y",
+		/* 07 */ "Y",
+		/* 08 */ "Y",
+		/* 09 */ "Y",
+		/* 10 */ displayName,
+		/* 11 */ u.location,
+		/* 12 */ "",
+		/* 13 */ "",
+		/* 14 */ "PASSWORD",
+		/* 15 */ u.security,
+		/* 16 */ u.logoncount,
+		/* 17 */ lastcalldate,
+		/* 18 */ secsLeft,
+		/* 19 */ minsLeft,
+		/* 20 */ getGraphicsMode(c),
+		/* 21 */ c.term_height,
+		/* 22 */ "N",
+		/* 23 */ "",
+		/* 24 */ "0",
+		/* 25 */ "00/00/00",
+		/* 26 */ u.usernumber,
+		/* 27 */ u.defaultprotocol,
+		/* 28 */ u.uploadcount,
+		/* 29 */ u.downloadcount,
+		/* 30 */ u.dailydownloadktotal,
+		/* 31 */ u.dailydownloadklimit,
+		/* 32 */ birthdate,
+		/* 33 */ rundir + "/nodes/" + c.nodenum,
+		/* 34 */ rundir + "/data",
+		/* 35 */ sysopalias,
+		/* 36 */ u.username,
+		/* 37 */ "00:00",
+		/* 38 */ "Y",
+		/* 39 */ "N",
+		/* 40 */ "Y",
+		/* 41 */ "15",
+		/* 42 */ "0",
+		/* 43 */ u.lastnewfilescan_short,
+		/* 44 */ calltime,
+		/* 45 */ lastcalltime,
+		/* 46 */ u.maxdailyfiles,
+		/* 47 */ u.dailydownloadcount,
+		/* 48 */ u.totaluploadk,
+		/* 49 */ u.totaldownloadk,
+		/* 50 */ u.user_comment || bbsname,
+		/* 51 */ u.lifetimedoortotal,
+		/* 52 */ "0"
+	];
+
+	return { filename: "door.sys", lines: lines };
+}
+
+function buildDoor32(call, rs, useRealNames) {
+	var c = safeCall(call);
+	var u = safeUser(call);
+	var minsLeft = Math.round(c.timeleft / 60);
+	var displayName = useRealNames ? u.fullname : u.username;
+
+	var lines = [
+		/* 01 */ rs.comtype ?? 2,
+		/* 02 */ c.sockethandle,
+		/* 03 */ c.baudRate,
+		/* 04 */ bbsname,
+		/* 05 */ u.usernumber,
+		/* 06 */ displayName,
+		/* 07 */ u.username,
+		/* 08 */ u.security,
+		/* 09 */ minsLeft,
+		/* 10 */ getEmulationCode(c),
+		/* 11 */ c.nodenum
+	];
+
+	return { filename: "door32.sys", lines: lines };
+}
+
+function buildDorInfo(call, rs, useRealNames) {
+	var c = safeCall(call);
+	var u = safeUser(call);
+	var minsLeft = Math.round(c.timeleft / 60);
+	var ansi = (getGraphicsMode(c) === "GR") ? 1 : 0;
+
+	// DORINFO spec (RBBS v2 / QuickBBS / RemoteAccess):
+	//  1: BBS name
+	//  2: Sysop first name
+	//  3: Sysop last name
+	//  4: COM port (COM0 = local, COM1, etc.)
+	//  5: Baud rate (or 0 for local)
+	//  6: Networked (0 = not networked)
+	//  7: User first name
+	//  8: User last name
+	//  9: User location
+	// 10: ANSI (1 = yes, 0 = no)
+	// 11: Security level
+	// 12: Minutes remaining
+
+	var sysopParts = sysopname.split(" ");
+	var sysopFirst = sysopParts[0] || "Sysop";
+	var sysopLast  = sysopParts.slice(1).join(" ") || "";
+
+	var comPort = "COM" + (rs.comport || 0);
+
+	// When not using real names, put username in first name and leave last blank
+	var userFirst, userLast;
+	if (useRealNames) {
+		userFirst = u.firstname;
+		userLast = u.lastname;
+	} else {
+		userFirst = u.username;
+		userLast = "";
 	}
-	switch(filetype.toLowerCase()){
-		case "doorsys":
-			dfobj.filename = "door.sys"
-			dfobj.dfarray = await set_doorsys(call, runnersettings)
-			dfobj.status = true
-			break;
-		case "door32":
-			dfobj.filename = "door32.sys"
-			dfobj.dfarray = await set_door32(call, runnersettings)
-			dfobj.status = true
-			break;
-		case "canectic":
-			dfobj.filename = "canectic.sys"
-			dfobj.dfarray = await set_canectic(call, runnersettings)
-			dfobj.status = true
-			break;
-		case "dorinfo":
-			dfobj.filename = "dorinfo" + call.nodenum + ".def"
-			dfobj.dfarray = await set_dorinfo(call, runnersettings)
-			dfobj.status = true
-			break;
-		default:
-			var msgstring = "Unable to determine dropfile type. Cannot continue"
-			dfobj.status = false
-			alogger.writeAlog(1, msgstring, "redbright", true)
-	}
-	return dfobj
 
+	var comPort = "COM" + (rs.comport || 0);
+
+	var lines = [
+		/* 01 */ bbsname,
+		/* 02 */ sysopFirst,
+		/* 03 */ sysopLast,
+		/* 04 */ comPort,
+		/* 05 */ c.baudRate,
+		/* 06 */ 0,
+		/* 07 */ userFirst,
+		/* 08 */ userLast,
+		/* 09 */ u.location,
+		/* 10 */ ansi,
+		/* 11 */ u.security,
+		/* 12 */ minsLeft
+	];
+
+	var suffix = getDorInfoNodeSuffix(c.nodenum);
+	return { filename: "dorinfo" + suffix + ".def", lines: lines };
 }
 
+function buildDoorfileSR(call, rs, useRealNames) {
+	// DOORFILE.SR — Solar Realms / John Dailey Software format
+	// Used by BRE, SRE, Falcon's Eye, Arcadian Legends, etc.
+	// Very similar to DOOR32.SYS with slightly different field ordering.
+	//
+	// Line format from Synchronet source + fsxNet docs:
+	//  1: User's name
+	//  2: COM port (1-based, 0 for local)
+	//  3: Baud rate
+	//  4: BBS name
+	//  5: User record number
+	//  6: User's time left in minutes
+	//  7: ANSI (1=yes, 0=no)
+	//  8: Node number
 
-class dropfileWriter{
-	constructor(call, filetype, dfdir, runnersettings){
-		//console.log("Setting", dfdir, runnersettings)
-		this.call = call
+	var c = safeCall(call);
+	var u = safeUser(call);
+	var minsLeft = Math.round(c.timeleft / 60);
+	var ansi = (getGraphicsMode(c) === "GR") ? 1 : 0;
+	var displayName = useRealNames ? u.fullname : u.username;
+
+	var lines = [
+		/* 01 */ displayName,
+		/* 02 */ rs.comport || 0,
+		/* 03 */ c.baudRate,
+		/* 04 */ bbsname,
+		/* 05 */ u.usernumber,
+		/* 06 */ minsLeft,
+		/* 07 */ ansi,
+		/* 08 */ c.nodenum
+	];
+
+	return { filename: "doorfile.sr", lines: lines };
+}
+
+function buildCanectic(call, rs, useRealNames) {
+	var c = safeCall(call);
+	var u = safeUser(call);
+	var displayName = useRealNames ? u.fullname : u.username;
+
+	var lines = [
+		c.nodenum,
+		c.term_encoding,
+		u.username,
+		displayName,
+		u.security,
+		bbsname,
+		c.term_type,
+		c.timeleft
+	];
+
+	return { filename: "canectic.sys", lines: lines };
+}
+
+// ============================================================================
+// Format registry — maps type string to builder function and filename
+// ============================================================================
+
+var FORMAT_BUILDERS = {
+	doorsys:    buildDoorSys,
+	door32:     buildDoor32,
+	dorinfo:    buildDorInfo,
+	doorfilesr: buildDoorfileSR,
+	canectic:   buildCanectic
+};
+
+// ============================================================================
+// Directory resolution — shortcodes, absolute paths, and subpaths
+// ============================================================================
+
+var SHORTCODES = {
+	Node:    (nodenum) => process.cwd() + "/nodes/" + nodenum,
+	DosNode: (nodenum) => process.cwd() + "/doors/Dos/nodes/" + nodenum,
+	Doors:   ()        => process.cwd() + "/doors"
+};
+
+function resolveDropDir(dfdir, nodenum) {
+	if (!dfdir) return null;
+
+	// Absolute path
+	if (dfdir.charAt(0) === "/") return dfdir;
+
+	// Split on / to check for shortcode prefix
+	var parts = dfdir.split("/");
+	var shortcode = parts[0];
+
+	if (SHORTCODES[shortcode]) {
+		var base = SHORTCODES[shortcode](nodenum);
+		if (parts.length > 1) {
+			return base + "/" + parts.slice(1).join("/");
+		}
+		return base;
+	}
+
+	// Not a shortcode and not absolute — treat as relative to cwd
+	return process.cwd() + "/" + dfdir;
+}
+
+// ============================================================================
+// dropfileWriter class
+// ============================================================================
+
+class dropfileWriter {
+	constructor(call, filetype, dfdir, runnersettings, useRealNames) {
+		this.call = call;
 		this.emitter = new EventEmitter();
-		this.type = filetype
-		this.stringbuffer = ""
-		this.input_array = []
-		this.finished = false
-		this.exitready = false
-		this.xtrnexit = false
-		this.dfarray = []
-		this.filename = ""
-		this.dfdir = dfdir
-		this.runnersettings = runnersettings
-		this.isrunning = false
-		this.runningparser = false
-		//this.set_Array()
+		this.type = filetype || "";
+		this.dfdir = dfdir || "";
+		this.runnersettings = runnersettings || {};
+		this.useRealNames = useRealNames || false;
+		this.logId = "Dropfile (Node " + (call.nodenum || "?") + ")";
 	}
-	doSetup(){
-		//console.log("Setting dropfile array")
-		if ((this.type == "")||(this.type == "None")||(!this.type)){
-			//console.log("No Dropfile Specified. Assuming not required")
-			this.emitter.emit('NoDropfileNeeded')
-			//this.emitter.emit('DropfileError')
-		}else{
-			dfarray_setter(this.call, this.type, this.runnersettings).then(res =>{
-				if (res.status == true){
-					this.dfarray = res.dfarray
-					this.filename = res.filename
-					try{
-						this.writeFile()
-					}catch(err){
-						console.log(err)
-						this.emitter.emit('DropfileError')
-					}
-					
-				}else{
-					//do something if no dropfile data
-					console.log("Cannot write dropfile.")
-					this.emitter.emit('DropfileError')
-				}
-			}).catch(err =>{
-				console.log(err)
-			})
-		}		
-	}
-	getDosNodeDir(){
-		var nodedir = process.cwd()
-		nodedir += "/doors/Dos/nodes/" + this.call.nodenum
-		//console.log("Current dir", process.cwd())
-		//console.log("Dos Node Dir", nodedir)
-		return nodedir
-	}
-	getNodeDir(){
-		var nodedir = process.cwd()
-		nodedir += "/nodes/" + this.call.nodenum
-		//console.log("Current dir", process.cwd())
-		//console.log("Node Dir", nodedir)
-		return nodedir
-	}
-	getDoorsDir(){
-		var doorsdir = process.cwd()
-		doorsdir += "/doors"
-		//console.log("Current dir", process.cwd())
-		//console.log("Doors Dir", doorsdir)
-		return doorsdir
-	}
-	getShortcodeDir(dircode){
-		var dirobj = {}
-		dirobj.status = false
-		//console.log("Checking shortcode", this.dfdir, this.runnersettings)
-		switch(dircode){			
-			case "Node":
-				//console.log("Setting Node Directory")
-				var dir = this.getNodeDir()
-				if (dir){
-					dirobj.dir = dir
-					dirobj.status = true
-				}
-				break;
-			case "DosNode":
-				//console.log("Setting Dos Node Directory")
-				var dir = this.getDosNodeDir()
-				if (dir){
-					dirobj.dir = dir
-					dirobj.status = true
-				}
-				break;
-			case "Doors":
-				//console.log("Setting Doors Directory")
-				var dir = this.getDoorsDir()
-				if (dir){
-					dirobj.dir = dir
-					dirobj.status = true
-				}
-				break;
-			default:
-				//console.log("Could not find shortcode")
-		}
-		return dirobj
-	}
-	getShortcodeSub(){
-		var dirobj = {}
-		dirobj.status = false
-		var dirobjarr = this.dfdir.split("/")
-		var sdirobj = this.getShortcodeDir(dirobjarr[0])
-		if (sdirobj.status == true){
-			dirobj.status = true
-			dirobj.dir = sdirobj.dir
-			var i = 0
-			for (var ai of dirobjarr){
-				if (i != 0){
-					dirobj.dir += "/"
-					dirobj.dir += ai
-				}
-				i += 1
-			}
-		}
-		return dirobj
-	}
-	getDropDir(){
-		var dirobj = {}
-		dirobj.status = false
-		if (this.dfdir){
-			//console.log("Checking dfdir stage one", this.dfdir)
-			//check dir for shortcodes and set directory
-			//else check for preceding /, and set either as subdir or full path
-			if (!this.dfdir.includes("/")){
-				var sdirobj = this.getShortcodeDir(this.dfdir)
-				if (sdirobj.status == true){
-					dirobj.status = true
-					dirobj.dir = sdirobj.dir
-				}
-			}else{
-				//console.log("DF needs additional checking")
-				if (this.dfdir.charAt(0) == "/"){
-					dirobj.dir = this.dfdir
-					dirobj.status = true
-				}else{
-					var sdirobj = this.getShortcodeSub()
-					if (sdirobj.status == true){
-						dirobj.status = true
-						dirobj.dir = sdirobj.dir
-					}
-				}
-			}
-		}else{
-			//console.log("DFdir not set")
-		}
 
-		return dirobj
-	}
-	fatalError(){
-		this.emitter.emit('DropfileError')
-	}
-	writeFile(){
-		//console.log(this.dfarray)
-		//console.log("Writing dropfile")
-		var dfmsg = "Dropfile"
-		var dirobj = this.getDropDir()
-		
-		if (dirobj.status == true){
-			//check if directory exists. Attempt to create if not
-			//console.log("Checking if", dirobj.dir, "Exists")
-			if (fs.existsSync(dirobj.dir)) {
-				//console.log("Dir exists")
-			}else{
-				//console.log("Dir does not exist. Attempting to create")
-				try{
-					fs.mkdirSync(dirobj.dir)
-				}catch(error){
-					//console.log("Unable to create directory")
-					//console.log(error)
-					//handle errors
-					this.fatalError()
-					return;
-				}		
-			}
-			//add filename to get full pathfile
-			var dfpath = dirobj.dir + "/" + this.filename
-			//check if file exists and delete for overwrite if so
-			if (fs.existsSync(dfpath)) {
-				//console.log("File exists. Attempting to clear for overwrite")
-				//delete or empty file here
-				try{
-					fs.unlinkSync(dfpath);
-				}catch(error){
-					//console.log("Error overwriting file")
-					this.fatalError()
-					return;
-				}				
+	doSetup() {
+		try {
+			// No dropfile needed
+			if (!this.type || this.type === "None" || this.type === "none") {
+				this.emitter.emit("NoDropfileNeeded");
+				return;
 			}
 
-			//write each element of array to new line of file
-			//console.log("Writing to file")
-			var i = 0
-			for (var dfline of this.dfarray){
-				//
-				var fileline = ""
-				if (i != 0){
-					fileline += "\r\n"
-				}
-				if (dfline){
-					fileline += dfline.toString()
-				}				
-				fs.appendFileSync(dfpath, fileline, 'utf8');
-				i += 1
+			// Look up the builder
+			var typeKey = this.type.toLowerCase().replace(/[^a-z0-9]/g, "");
+			var builder = FORMAT_BUILDERS[typeKey];
+
+			if (!builder) {
+				alogger.writeAlog(3, this.logId + " Unknown dropfile type: " + this.type, "redbright");
+				this.emitter.emit("DropfileError");
+				return;
 			}
-			//console.log("Completed")
-			dfmsg += " " + dfpath + " written successfully."
 
-		}else{
-			//console.log("Could not find directory information.")
-			//handle errors
-			this.fatalError()
-			return;
+			// Build the lines
+			var result = builder(this.call, this.runnersettings, this.useRealNames);
+
+			// Resolve directory
+			var nodenum = this.call.nodenum || 1;
+			var dir = resolveDropDir(this.dfdir, nodenum);
+			if (!dir) {
+				alogger.writeAlog(3, this.logId + " No drop directory specified", "redbright");
+				this.emitter.emit("DropfileError");
+				return;
+			}
+
+			// Write
+			this._writeFile(dir, result.filename, result.lines);
+
+		} catch (err) {
+			alogger.writeAlog(3, this.logId + " Setup error: " + err.message, "redbright");
+			this.emitter.emit("DropfileError");
 		}
-		alogger.writeAlog(1, dfmsg, "yellowbright", true)
-		this.emitter.emit('DropfileCompleted')
-		console.log("Complete Emmitted")
+	}
 
+	_writeFile(dir, filename, lines) {
+		try {
+			// Ensure directory exists (recursive handles nested paths)
+			if (!fs.existsSync(dir)) {
+				fs.mkdirSync(dir, { recursive: true });
+			}
+
+			var filepath = path.join(dir, filename);
+
+			// Build content — all lines joined with CR/LF, values coerced to string
+			var content = "";
+			for (var i = 0; i < lines.length; i++) {
+				if (i > 0) content += "\r\n";
+				var val = lines[i];
+				content += (val !== undefined && val !== null) ? val.toString() : "";
+			}
+
+			// Single atomic write (overwrites if exists)
+			fs.writeFileSync(filepath, content, "utf8");
+
+			alogger.writeAlog(5, this.logId + " " + filepath + " written", "yellowbright");
+			this.emitter.emit("DropfileCompleted");
+
+		} catch (err) {
+			alogger.writeAlog(3, this.logId + " Write error: " + err.message, "redbright");
+			this.emitter.emit("DropfileError");
+		}
 	}
 }
 
-export{dropfileWriter}
+export { dropfileWriter };

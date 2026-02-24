@@ -165,11 +165,21 @@ class DoorRunner extends BaseHandler {
 				resolve();
 				return;
 			}
+
+			// Determine whether to use real names in the dropfile
+			var useRealNames = false;			
+			if (this.call.doorsession) {
+				useRealNames = !!this.doorConfig.usereal_doorsession;
+			} else {
+				useRealNames = !!this.doorConfig.usereal_local;
+			}
+
 			var writer = new dropfile_handler.dropfileWriter(
 				this.call,
 				this.dropfileType,
 				this.dropfileDir,
-				this.runnerSettings
+				this.runnerSettings,
+				useRealNames
 			);
 			writer.emitter.on('DropfileCompleted', () => {
 				resolve();

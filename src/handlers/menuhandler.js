@@ -4,6 +4,7 @@ import * as alogger from "../utils/alogger.js";
 // Sub-module commands (simple, stay within menu)
 import { userList } from "./menucommands/userlist.js";
 import { LastCallers } from "./lastcallers.js";
+import { WhosOnline } from "./whosonline.js";
 import { msgGroupChange } from "./menucommands/msggroups.js";
 import { msgAreaChange } from "./menucommands/msgareas.js";
 import { listMessages } from "./menucommands/msglister.js";
@@ -31,6 +32,16 @@ class MenuHandler extends BaseHandler {
 		this.display_file_type = "";
 		this.entries_x_offset = 0;
 		this.entries_y_offset = 0;
+		this.max_columns = 3;
+		this.col_gap = 2;
+
+		// Computed layout
+		this.layout_columns = 1;
+		this.layout_col_width = 0;
+		this.layout_rows_per_page = 0;
+		this.layout_pages = [];
+		this.currentPage = 0;
+		this.paged = false;
 
 		// Hotkeys
 		this.hotkey_arr = [];
@@ -50,6 +61,7 @@ class MenuHandler extends BaseHandler {
 		this.error_y = this.menu_start_y + 3;
 		this.haserror = false;
 		this.hasstatus = false;
+		this.haswarn = false;
 		this.menu_prompt = "";
 
 		// Sub-module tracking
@@ -120,6 +132,8 @@ class MenuHandler extends BaseHandler {
 		this.display_file_type = config.display_file_type || "";
 		this.entries_x_offset = config.entries_x_offset || 0;
 		this.entries_y_offset = config.entries_y_offset || 0;
+		this.max_columns = config.max_columns || 3;
+		this.col_gap = config.col_gap || 2;
 		this.menu_prompt = this.title + " -> " + this.call.caller_username + ":";
 
 		// Override theme colors from config if present
@@ -161,24 +175,87 @@ class MenuHandler extends BaseHandler {
 		this.input_x = this.prompt_x + this.menu_prompt.length + 1;
 		this.error_x = this.hotkey_x + this.hotkey_msg.length + 2;
 		this.error_y = this.hotkey_y;
+
+		this._calcLayout();
+	}
+
+	// Calculate column count, column width, rows per page, and paginate entries
+	_calcLayout() {
+		this.layout_pages = [];
+		this.currentPage = 0;
+		this.paged = false;
+
+		// Get displayable entries only (those with display text)
+		var displayable = this.visible_entries.filter(e => e.display);
+		if (displayable.length === 0) return;
+
+		if (this.dumb) {
+			// Dumb terminals get a single page of everything
+			this.layout_columns = 1;
+			this.layout_pages = [displayable];
+			return;
+		}
+
+		var termWidth = this.call.term_width || 80;
+
+		// Available area for entries
+		// entries_y_offset shifts the start down (for header/display file space)
+		// Reserve: title (2 lines) + offset + 3 bottom lines (hotkey, prompt, status)
+		var entryStartY = this.menu_start_y + 2 + this.entries_y_offset;
+		var availRows = this.hotkey_y - entryStartY - 1;
+		if (availRows < 1) availRows = 1;
+
+		// Available width for entries (account for x offset and margins)
+		var entryStartX = this.menu_start_x + this.entries_x_offset;
+		var availWidth = termWidth - entryStartX - 1;
+		if (availWidth < 10) availWidth = 10;
+
+		// Find the widest display string
+		var maxDisplayLen = 0;
+		for (var i = 0; i < displayable.length; i++) {
+			if (displayable[i].display.length > maxDisplayLen) {
+				maxDisplayLen = displayable[i].display.length;
+			}
+		}
+
+		// Determine how many columns we can fit without truncating any entry
+		// Each column needs maxDisplayLen width plus col_gap (except the last)
+		var colWidthWithGap = maxDisplayLen + this.col_gap;
+		var fitCols = Math.floor((availWidth + this.col_gap) / colWidthWithGap);
+		if (fitCols < 1) fitCols = 1;
+		if (fitCols > this.max_columns) fitCols = this.max_columns;
+
+		// Now determine how many columns we actually need
+		// Start with 1 column, increase only if entries don't fit in available rows
+		var neededCols = 1;
+		while (neededCols < fitCols) {
+			var rowsNeeded = Math.ceil(displayable.length / neededCols);
+			if (rowsNeeded <= availRows) break;
+			neededCols++;
+		}
+
+		this.layout_columns = neededCols;
+		this.layout_col_width = maxDisplayLen;
+
+		// Rows per page with this column count
+		this.layout_rows_per_page = availRows;
+		var entriesPerPage = this.layout_rows_per_page * this.layout_columns;
+
+		// Build pages
+		if (displayable.length <= entriesPerPage) {
+			this.layout_pages = [displayable];
+		} else {
+			this.paged = true;
+			for (var start = 0; start < displayable.length; start += entriesPerPage) {
+				this.layout_pages.push(displayable.slice(start, start + entriesPerPage));
+			}
+		}
 	}
 
 	// --- Drawing ---
 	_drawMenu() {
 		if (this.dumb) {
-			this.call.cmds.senddata("\r\n\r\n\r\n");
-			this.call.cmds.senddata(this.title);
-			this.call.cmds.senddata("\r\n");
-			for (var i = 0; i < this.visible_entries.length; i++) {
-				if (this.visible_entries[i].display) {
-					this.call.cmds.senddata("\r\n");
-					this.call.cmds.senddata(this.visible_entries[i].display);
-				}
-			}
-			this.call.cmds.senddata("\r\n\r\n");
-			this.call.cmds.senddata(this.hotkey_msg);
-			this.call.cmds.senddata("\r\n");
-			this.call.cmds.senddata(this.menu_prompt);
+			this._drawMenuDumb();
 			return;
 		}
 
@@ -186,7 +263,6 @@ class MenuHandler extends BaseHandler {
 		if (this.display_file.length > 0) {
 			this.call.cmds.drawscreen(this.display_file, this.display_file_type, true);
 			if (!this.display_entries) {
-				// File-only menu, skip entry rendering
 				this._drawPromptArea();
 				return;
 			}
@@ -201,22 +277,83 @@ class MenuHandler extends BaseHandler {
 		this.call.cmds.movecursor(currX, currY);
 		this.call.cmds.setfgcolor(this.title_clr);
 		this.call.cmds.senddata(this.title);
-		currY += 2;
 
-		// Menu entries
-		for (var i = 0; i < this.visible_entries.length; i++) {
-			var entry = this.visible_entries[i];
-			if (entry.display) {
-				this.call.cmds.movecursor(currX, currY);
-				if (entry.bg_clr !== undefined) this.call.cmds.setbgcolor(entry.bg_clr);
-				if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
-				this.call.cmds.senddata(entry.display);
-				currY++;
+		this._drawEntryPage();
+		this.call.cmds.resetcolors();
+		this._drawPromptArea();
+	}
+
+	_drawEntryPage() {
+		if (this.layout_pages.length === 0) return;
+		var page = this.layout_pages[this.currentPage] || [];
+		if (page.length === 0) return;
+
+		var entryStartY = this.menu_start_y + 2 + this.entries_y_offset;
+		var entryStartX = this.menu_start_x + this.entries_x_offset;
+
+		// Clear the entry area (for redraws / page changes)
+		if (!this.dumb) {
+			for (var clearY = entryStartY; clearY < this.hotkey_y - 1; clearY++) {
+				this.call.cmds.movecursor(entryStartX, clearY);
+				this.call.cmds.cleartoeol();
 			}
 		}
 
-		this.call.cmds.resetcolors();
-		this._drawPromptArea();
+		// Lay entries out column-first: fill column 0 top-to-bottom, then column 1, etc.
+		var rowsThisPage = Math.ceil(page.length / this.layout_columns);
+
+		for (var i = 0; i < page.length; i++) {
+			var col = Math.floor(i / rowsThisPage);
+			var row = i % rowsThisPage;
+			var drawX = entryStartX + col * (this.layout_col_width + this.col_gap);
+			var drawY = entryStartY + row;
+			var entry = page[i];
+
+			this.call.cmds.movecursor(drawX, drawY);
+			if (entry.bg_clr !== undefined) this.call.cmds.setbgcolor(entry.bg_clr);
+			if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+			this.call.cmds.senddata(entry.display);
+			this.call.cmds.resetcolors();
+		}
+
+		// Page indicator if paged
+		if (this.paged) {
+			var pageY = this.hotkey_y - 1;
+			this.call.cmds.movecursor(entryStartX, pageY);
+			this.call.cmds.setfgcolor(this.prompt_clr);
+			var pageMsg = "Page " + (this.currentPage + 1) + "/" + this.layout_pages.length + "  [PgUp/PgDn to navigate]";
+			this.call.cmds.senddata(pageMsg);
+			this.call.cmds.resetcolors();
+		}
+	}
+
+	_drawMenuDumb() {
+		this.call.cmds.senddata("\r\n\r\n\r\n");
+		this.call.cmds.senddata(this.title);
+		this.call.cmds.senddata("\r\n");
+
+		var page = this.layout_pages[this.currentPage] || this.visible_entries;
+		var lineCount = 0;
+		for (var i = 0; i < page.length; i++) {
+			if (page[i].display) {
+				this.call.cmds.senddata("\r\n");
+				this.call.cmds.senddata(page[i].display);
+				lineCount++;
+				// Pause on dumb terminals if we run out of space
+				if (this.paged && lineCount >= 22) {
+					this.call.cmds.senddata("\r\n[More - Enter to continue]");
+					return;
+				}
+			}
+		}
+
+		if (this.paged) {
+			this.call.cmds.senddata("\r\nPage " + (this.currentPage + 1) + "/" + this.layout_pages.length);
+		}
+		this.call.cmds.senddata("\r\n\r\n");
+		this.call.cmds.senddata(this.hotkey_msg);
+		this.call.cmds.senddata("\r\n");
+		this.call.cmds.senddata(this.menu_prompt);
 	}
 
 	_drawPromptArea() {
@@ -278,6 +415,35 @@ class MenuHandler extends BaseHandler {
 		this.call.cmds.movecursor(this.input_x, this.input_y);
 	}
 
+	_drawWarn(msg) {
+		this.haswarn = true;
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  " + msg + "\r\n");
+			return;
+		}
+		this.call.cmds.movecursor(this.error_x, this.error_y);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.setfgcolor(this.error_clr);
+		this.call.cmds.senddata(msg);
+		this.call.cmds.setfgcolor(this.input_clr);
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+	}
+
+	_eraseWarn() {
+		if (!this.haswarn) return;
+		this.haswarn = false;
+		if (this.dumb) return;
+		this.call.cmds.movecursor(this.error_x, this.error_y);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.setfgcolor(this.input_clr);
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+	}
+
+	onInactivityWarn() {
+		if (!this.call || !this.active) return;
+		this._drawWarn(this.warnMsg);
+	}
+
 	// --- Input handling ---
 	handleInput(inputArray) {
 		if (!this.active) return;
@@ -288,10 +454,17 @@ class MenuHandler extends BaseHandler {
 				// Module was cleared but flag not reset — clean up
 				this._doModuleReturn();
 			} else if (this.currentModule.handleInput) {
+				// Reset the menu's inactivity timeouts on every input,
+				// even when a sub-module is handling it — the menu handler
+				// owns the inactivity lifecycle for the entire session
+				this.resetInactivityTimeouts();
+				if (this.haswarn) this._eraseWarn();
 				this.currentModule.handleInput(inputArray);
 				return;
 			} else if (this.currentModule.input_array) {
 				// Legacy sub-module fallback
+				this.resetInactivityTimeouts();
+				if (this.haswarn) this._eraseWarn();
 				for (var i = 0; i < inputArray.length; i++) {
 					this.currentModule.input_array.push(inputArray[i]);
 				}
@@ -306,11 +479,28 @@ class MenuHandler extends BaseHandler {
 		if (this.hasstatus) {
 			this._eraseStatus();
 		}
+		if (this.haswarn) {
+			this._eraseWarn();
+		}
 		super.handleInput(inputArray);
 	}
 
 	onKey(key) {
-		// No key-based navigation for now — hotkeys are character-based
+		if (!this.paged) return;
+		if (key === "PgDn" || key === "DownArrow") {
+			if (this.currentPage < this.layout_pages.length - 1) {
+				this.currentPage++;
+				this._drawEntryPage();
+			}
+			return;
+		}
+		if (key === "PgUp" || key === "UpArrow") {
+			if (this.currentPage > 0) {
+				this.currentPage--;
+				this._drawEntryPage();
+			}
+			return;
+		}
 	}
 
 	onChar(ch) {
@@ -344,7 +534,7 @@ class MenuHandler extends BaseHandler {
 
 			case "runXtrn":
 				if (entry.command_arg) {
-					this.call.launchDoor(entry.command_arg);
+					this.call.launchDoor(entry.command_arg, true);
 				} else {
 					this._drawError("No door configured");
 				}
@@ -357,12 +547,14 @@ class MenuHandler extends BaseHandler {
 						this._drawStatus("Menu not found");
 						return;
 					}
-					this.call.previousMenu = this.call.currentMenu;
-					this.call.currentMenu = entry.command_arg;
-					this.emitter.emit("NextStage", "menu");
+					this._navigateToMenu(entry.command_arg);
 				} else {
 					this._drawError("No menu specified");
 				}
+				return;
+
+			case "previousMenu":
+				this._navigateBack();
 				return;
 
 			case "exitStage":
@@ -404,6 +596,10 @@ class MenuHandler extends BaseHandler {
 				this._runSubModule(new LastCallers(this.call));
 				return;
 
+			case "whosOnline":
+				this._runSubModule(new WhosOnline(this.call));
+				return;
+
 			case "testDownload":
 				this._runSubModule(new testDownloader(this.call));
 				return;
@@ -431,6 +627,12 @@ class MenuHandler extends BaseHandler {
 		});
 
 		module.startStage();
+
+		// Menu handler owns the inactivity lifecycle — keep
+		// timeouts running even while a sub-module is active
+		if (this.active && !this.finished) {
+			this.setInactivityTimeouts();
+		}
 	}
 
 	_doModuleReturn() {
@@ -456,7 +658,55 @@ class MenuHandler extends BaseHandler {
 	_restartMenu() {
 		if (!this.active || !this.call) return;
 		this._drawMenu();
-		this.setInactivityTimeouts();
+		this.resetInactivityTimeouts();
+	}
+
+	// --- Menu navigation ---
+	// Root menus clear the history stack when landed on
+	_isRootMenu(menuName) {
+		return menuName === "Main";
+	}
+
+	_navigateToMenu(targetMenu) {
+		// Push current menu onto history
+		var history = this.call.menuHistory;
+		var maxLen = this.call.menuHistoryMax || 20;
+
+		// Don't push if already navigating to the same menu
+		if (targetMenu !== this.call.currentMenu) {
+			history.push(this.call.currentMenu);
+			// Cap the stack — drop oldest if exceeded
+			while (history.length > maxLen) {
+				history.shift();
+			}
+		}
+
+		this.call.currentMenu = targetMenu;
+
+		// Root menus clear the breadcrumb trail
+		if (this._isRootMenu(targetMenu)) {
+			this.call.menuHistory = [];
+		}
+
+		this.emitter.emit("NextStage", "menu");
+	}
+
+	_navigateBack() {
+		var history = this.call.menuHistory;
+
+		if (history.length > 0) {
+			this.call.currentMenu = history.pop();
+			this.emitter.emit("NextStage", "menu");
+		} else {
+			// Nothing to go back to — go to Main if we're not already there
+			if (this.call.currentMenu !== "Main") {
+				this.call.currentMenu = "Main";
+				this.call.menuHistory = [];
+				this.emitter.emit("NextStage", "menu");
+			} else {
+				this._drawStatus("Already at top menu");
+			}
+		}
 	}
 
 	// --- Lifecycle ---
@@ -474,11 +724,10 @@ class MenuHandler extends BaseHandler {
 
 			if (!config) {
 				alogger.writeAlog(3, this.loggingId + "\n  No config found for menu: " + this.menuName, "redbright");
-				// Fall back to previous menu or hang up
-				if (this.call.previousMenu && this.call.previousMenu !== this.menuName) {
-					this.call.currentMenu = this.call.previousMenu;
-					this.emitter.emit("NextStage", "menu");
-				} else {
+				// Fall back to previous menu in history, or hang up
+				this._navigateBack();
+				if (this.call.currentMenu === this.menuName) {
+					// navigateBack had nowhere to go — hang up
 					this.emitter.emit("HangupSignal");
 				}
 				return;
@@ -507,6 +756,7 @@ class MenuHandler extends BaseHandler {
 		this.menuConfig = null;
 		this.menu_entries = [];
 		this.visible_entries = [];
+		this.layout_pages = [];
 		super.clearHandler();
 	}
 }

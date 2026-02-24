@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import * as alogger from "../utils/alogger.js";
 
-const defaultInactivityTO = Number(process.env.connectTO) || 60000;
+const defaultInactivityTO = Number(process.env.inactivityTO) || 60000;
 const defaultWarnBuff = Number(process.env.warnbuff) || 10000;
 const defaultWarnMsg = process.env.warnmsg || "Are you there?";
 const defaultInactiveMsg = process.env.inactivemsg || "You have been inactive too long";
