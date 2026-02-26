@@ -59,6 +59,12 @@ const defaultmenuarray = [
 		{"display": "Q) Quit Menu", "fg_clr": 13, "bg_clr": 0, "hotkey": "Q", "command_name": "previousMenu", "command_arg": "", "required_flags": [], "prohibited_flags": []},
 		{"display": "1) Door Game 1", "fg_clr": 7, "bg_clr": 0, "hotkey": "1", "command_name": "runXtrn", "command_arg": "testdoor", "required_flags": [], "prohibited_flags": []},
 		{"display": "2) Door Game 2", "fg_clr": 7, "bg_clr": 0, "hotkey": "2", "command_name": "runXtrn", "command_arg": "test", "required_flags": [], "prohibited_flags": []},
+		{"display": "3) Dicewars", "fg_clr": 7, "bg_clr": 0, "hotkey": "3", "command_name": "runXtrn", "command_arg": "dice", "required_flags": [], "prohibited_flags": []},
+		{"display": "4) Dicewars2", "fg_clr": 7, "bg_clr": 0, "hotkey": "4", "command_name": "runXtrn", "command_arg": "dice2", "required_flags": [], "prohibited_flags": []},
+		{"display": "D) Druglord", "fg_clr": 7, "bg_clr": 0, "hotkey": "D", "command_name": "runXtrn", "command_arg": "druglord", "required_flags": [], "prohibited_flags": []},
+		{"display": "H) Ham Test", "fg_clr": 7, "bg_clr": 0, "hotkey": "H", "command_name": "runXtrn", "command_arg": "hamtest", "required_flags": [], "prohibited_flags": []},
+		{"display": "L) LoRD", "fg_clr": 7, "bg_clr": 0, "hotkey": "L", "command_name": "runXtrn", "command_arg": "lord", "required_flags": [], "prohibited_flags": []},
+		{"display": "M) LoRD 2", "fg_clr": 7, "bg_clr": 0, "hotkey": "M", "command_name": "runXtrn", "command_arg": "lord2", "required_flags": [], "prohibited_flags": []},
 		{"display": "", "fg_clr": 4, "bg_clr": 0, "hotkey": "?", "command_name": "redrawMenu", "command_arg": "", "required_flags": [], "prohibited_flags": []}
 	]
 }

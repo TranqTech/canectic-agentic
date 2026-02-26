@@ -16,6 +16,7 @@ import {LoginHandler} from "../handlers/loginhandler.js"
 import {LogonHandler} from "../handlers/logonhandler.js"
 import { DoorAuthHandler } from "../handlers/doorauthhandler.js"
 import { DoorRunner, LAUNCH_TYPES } from "../handlers/doorrunner.js";
+import { SyncJSDoorRunner } from "../handlers/syncjsdoor_runner.js";
 import { OutputRingBuffer } from "../handlers/ringbuffer.js";
 import { TerminalNegotiator } from "../handlers/terminalnegotiator.js";
 import { MenuHandler } from "../handlers/menuhandler.js";
@@ -648,9 +649,14 @@ class IncomingCall{
 		this.updateNodeStatus("door", slugname, doorDisplayName);
 
 		try {
-			var handler = new DoorRunner(this, doorConfig, this.socatManager);
+			var handler;
+			if (doorConfig.launchType === "SyncJSDoor") {
+				handler = new SyncJSDoorRunner(this, doorConfig);
+			} else {
+				handler = new DoorRunner(this, doorConfig, this.socatManager);
+			}
 			this.currentHandler = handler;
-			this.call_status = "Door: " + doorConfig.cmd;
+			this.call_status = "Door: " + (doorConfig.cmd || doorConfig.doorScript);
 
 			handler.emitter.on("ModuleReturn", () => {
 				this._doorReturn();
