@@ -19,6 +19,52 @@
  *   The Attribute class manages this and generates ANSI escape sequences.
  */
 
+// ============================================================
+//  CP437 → Unicode mapping for bytes 0x00-0x1F and 0x80-0xFF
+// ============================================================
+// Terminals expect UTF-8 but ANSI art uses CP437 byte values.
+// Bytes 0x20-0x7E are identical in both encodings (ASCII printable).
+// Bytes 0x7F and above need mapping. Bytes 0x00-0x1F in CP437 are
+// graphical characters (smileys, card suits, etc.) but in ANSI data
+// streams they're control characters, so we only map 0x80-0xFF.
+var _cp437High = [
+	'\u00C7','\u00FC','\u00E9','\u00E2','\u00E4','\u00E0','\u00E5','\u00E7', // 80-87
+	'\u00EA','\u00EB','\u00E8','\u00EF','\u00EE','\u00EC','\u00C4','\u00C5', // 88-8F
+	'\u00C9','\u00E6','\u00C6','\u00F4','\u00F6','\u00F2','\u00FB','\u00F9', // 90-97
+	'\u00FF','\u00D6','\u00DC','\u00A2','\u00A3','\u00A5','\u20A7','\u0192', // 98-9F
+	'\u00E1','\u00ED','\u00F3','\u00FA','\u00F1','\u00D1','\u00AA','\u00BA', // A0-A7
+	'\u00BF','\u2310','\u00AC','\u00BD','\u00BC','\u00A1','\u00AB','\u00BB', // A8-AF
+	'\u2591','\u2592','\u2593','\u2502','\u2524','\u2561','\u2562','\u2556', // B0-B7
+	'\u2555','\u2563','\u2551','\u2557','\u255D','\u255C','\u255B','\u2510', // B8-BF
+	'\u2514','\u2534','\u252C','\u251C','\u2500','\u253C','\u255E','\u255F', // C0-C7
+	'\u255A','\u2554','\u2569','\u2566','\u2560','\u2550','\u256C','\u2567', // C8-CF
+	'\u2568','\u2564','\u2565','\u2559','\u2558','\u2552','\u2553','\u256B', // D0-D7
+	'\u256A','\u2518','\u250C','\u2588','\u2584','\u258C','\u2590','\u2580', // D8-DF
+	'\u03B1','\u00DF','\u0393','\u03C0','\u03A3','\u03C3','\u00B5','\u03C4', // E0-E7
+	'\u03A6','\u0398','\u03A9','\u03B4','\u221E','\u03C6','\u03B5','\u2229', // E8-EF
+	'\u2261','\u00B1','\u2265','\u2264','\u2320','\u2321','\u00F7','\u2248', // F0-F7
+	'\u00B0','\u2219','\u00B7','\u221A','\u207F','\u00B2','\u25A0','\u00A0'  // F8-FF
+];
+
+/**
+ * Convert a latin1/binary string containing CP437 art to UTF-8.
+ * Preserves ANSI escape sequences (ESC + 0x20-0x7E bytes) and
+ * control characters 0x00-0x1F (including ESC, CR, LF, BEL).
+ * Only remaps bytes 0x80-0xFF using the CP437 table.
+ */
+function cp437toUnicode(str) {
+	var out = '';
+	for (var i = 0; i < str.length; i++) {
+		var code = str.charCodeAt(i);
+		if (code >= 0x80 && code <= 0xFF) {
+			out += _cp437High[code - 0x80];
+		} else {
+			out += str[i];
+		}
+	}
+	return out;
+}
+
 
 // ============================================================
 //  Attribute class — matches Synchronet's Attribute
@@ -41,11 +87,11 @@ class Attribute {
 		}
 	}
 
-	// Foreground color (0-7, low 3 bits)
+	// Foreground color (0-7, low 3 bits) — CGA ordering
 	get fg() { return this._value & 0x07; }
 	set fg(v) { this._value = (this._value & 0xF8) | (v & 0x07); }
 
-	// Background color (0-7, bits 4-6)
+	// Background color (0-7, bits 4-6) — CGA ordering
 	get bg() { return (this._value >> 4) & 0x07; }
 	set bg(v) { this._value = (this._value & 0x8F) | ((v & 0x07) << 4); }
 
@@ -63,15 +109,21 @@ class Attribute {
 		else this._value &= ~0x80;
 	}
 
-	// Standard color constants
+	// CGA color constants — CGA order: 0=Black 1=Blue 2=Green 3=Cyan 4=Red 5=Magenta 6=Brown 7=White
 	static BLACK   = 0;
-	static RED     = 1;
+	static BLUE    = 1;
 	static GREEN   = 2;
-	static YELLOW  = 3;
-	static BLUE    = 4;
+	static CYAN    = 3;
+	static RED     = 4;
 	static MAGENTA = 5;
-	static CYAN    = 6;
+	static BROWN   = 6;
+	static YELLOW  = 6;
 	static WHITE   = 7;
+
+	// CGA index → ANSI SGR offset lookup table
+	// CGA: 0=Black 1=Blue  2=Green 3=Cyan 4=Red   5=Magenta 6=Brown 7=White
+	// ANSI: 0=Black 1=Red  2=Green 3=Yellow 4=Blue 5=Magenta 6=Cyan 7=White
+	static CGA2ANSI = [0, 4, 2, 6, 1, 5, 3, 7];
 
 	/**
 	 * Generate ANSI escape sequence to transition from prev attr to this attr.
@@ -108,15 +160,15 @@ class Attribute {
 			codes.push(5);
 		}
 
-		// Foreground (30-37)
-		var fgCode = 30 + this.fg;
+		// Foreground (30-37) — convert CGA index to ANSI SGR code
+		var fgCode = 30 + Attribute.CGA2ANSI[this.fg];
 		codes.push(fgCode);
 
-		// Background (40-47)
+		// Background (40-47) — convert CGA index to ANSI SGR code
 		// Must emit when: reset, bg is non-black, OR prev bg differs
 		var prevBg = (!needReset && prev) ? ((((prev instanceof Attribute) ? prev._value : prev) >> 4) & 0x07) : -1;
 		if (this.bg > 0 || needReset || prevBg !== this.bg) {
-			codes.push(40 + this.bg);
+			codes.push(40 + Attribute.CGA2ANSI[this.bg]);
 		}
 
 		if (codes.length === 0) return '';
@@ -319,6 +371,31 @@ class DorkitConsole {
 			}
 		});
 
+		// Expose attr as a direct property of the console (dk.console.attr).
+		// Original dorkit has this as the live Attribute object. Many doors
+		// access dk.console.attr.value, dk.console.attr.fg, etc.
+		// Setting to a string like 'HR' parses each char as a Ctrl-A code.
+		// Setting to a number sets the attribute value directly.
+		Object.defineProperty(this, 'attr', {
+			get: function() { return self._currentAttr; },
+			set: function(val) {
+				if (typeof val === 'string') {
+					// Parse as Ctrl-A code string: 'HR' = High + Red
+					// Build target attribute in a temp object, then assign
+					var tmp = new Attribute(self._currentAttr._value);
+					for (var i = 0; i < val.length; i++) {
+						self._ctrla_attr(val[i], tmp);
+					}
+					self._currentAttr.value = tmp._value;
+				} else if (typeof val === 'number') {
+					self._currentAttr.value = val;
+				} else if (val instanceof Attribute) {
+					self._currentAttr.value = val._value;
+				}
+			},
+			enumerable: true, configurable: true
+		});
+
 		// Key constants (must match dorkit)
 		this.key = {
 			CTRL_A: '\x01', CTRL_B: '\x02', CTRL_C: '\x03',
@@ -413,22 +490,22 @@ class DorkitConsole {
 	 */
 	_ctrla_attr(code, attr) {
 		switch (code.toUpperCase()) {
-			case 'K': attr.fg = Attribute.BLACK; break;
-			case 'R': attr.fg = Attribute.RED; break;
-			case 'G': attr.fg = Attribute.GREEN; break;
-			case 'Y': attr.fg = Attribute.YELLOW; break;
-			case 'B': attr.fg = Attribute.BLUE; break;
-			case 'M': attr.fg = Attribute.MAGENTA; break;
-			case 'C': attr.fg = Attribute.CYAN; break;
-			case 'W': attr.fg = Attribute.WHITE; break;
-			case '0': attr.bg = Attribute.BLACK; break;
-			case '1': attr.bg = Attribute.RED; break;
-			case '2': attr.bg = Attribute.GREEN; break;
-			case '3': attr.bg = Attribute.YELLOW; break;
-			case '4': attr.bg = Attribute.BLUE; break;
-			case '5': attr.bg = Attribute.MAGENTA; break;
-			case '6': attr.bg = Attribute.CYAN; break;
-			case '7': attr.bg = Attribute.WHITE; break;
+			case 'K': attr.fg = Attribute.BLACK; break;    // 0
+			case 'B': attr.fg = Attribute.BLUE; break;     // 1
+			case 'G': attr.fg = Attribute.GREEN; break;    // 2
+			case 'C': attr.fg = Attribute.CYAN; break;     // 3
+			case 'R': attr.fg = Attribute.RED; break;      // 4
+			case 'M': attr.fg = Attribute.MAGENTA; break;  // 5
+			case 'Y': attr.fg = Attribute.YELLOW; break;   // 6
+			case 'W': attr.fg = Attribute.WHITE; break;    // 7
+			case '0': attr.bg = Attribute.BLACK; break;    // 0
+			case '1': attr.bg = Attribute.RED; break;      // 4
+			case '2': attr.bg = Attribute.GREEN; break;    // 2
+			case '3': attr.bg = Attribute.YELLOW; break;   // 6
+			case '4': attr.bg = Attribute.BLUE; break;     // 1
+			case '5': attr.bg = Attribute.MAGENTA; break;  // 5
+			case '6': attr.bg = Attribute.CYAN; break;     // 3
+			case '7': attr.bg = Attribute.WHITE; break;    // 7
 			case 'H': attr.bright = true; break;
 			case 'I': attr.blink = true; break;
 			case 'N': attr.value = 7; break;
@@ -488,6 +565,17 @@ class DorkitConsole {
 	print(str) {
 		if (typeof str !== 'string') str = String(str);
 
+		// Strip ANSI music sequences. Synchronet ANSI music: ESC[M followed
+		// by MML note data (letters A-G, O, T, L, P, N, digits, #, +, -, ., ;).
+		// Only strip when followed by MML chars — bare ESC[M (ANSI "Delete Line")
+		// followed by ESC is left alone to not corrupt real ANSI sequences.
+		str = str.replace(/\x1b\[M([A-GOTLPNRSV0-9#\+\-\.\;<> ]+)/gi, '');
+
+		// Strip BEL (0x07) characters embedded in output strings.
+		str = str.replace(/\x07/g, '');
+
+		if (str.length === 0) return;
+
 		// Auto-pause: check before printing, pause if a screenful has scrolled
 		if (this.auto_pause && this.remote_screen && this.remote_screen.new_lines >= this.rows) {
 			this.pause();
@@ -530,6 +618,66 @@ class DorkitConsole {
 		this.print(this.parse_ctrla(str, this._currentAttr));
 	}
 
+	/**
+	 * Parse Synchronet pipe codes (|XX) in a string.
+	 * |00-|07: normal foreground, |08-|15: bright foreground, |16-|23: background.
+	 */
+	parse_pipe(str) {
+		var _cgaToAnsi = [30, 34, 32, 36, 31, 35, 33, 37]; // CGA→ANSI fg
+		return str.replace(/\|(\d{2})/g, function(match, digits) {
+			var n = parseInt(digits, 10);
+			if (n >= 0 && n <= 7) {
+				// Normal foreground
+				return '\x1b[0;' + _cgaToAnsi[n] + 'm';
+			} else if (n >= 8 && n <= 15) {
+				// Bright foreground
+				return '\x1b[1;' + _cgaToAnsi[n - 8] + 'm';
+			} else if (n >= 16 && n <= 23) {
+				// Background
+				return '\x1b[' + (_cgaToAnsi[n - 16] + 10) + 'm';
+			}
+			return match; // Not a valid pipe code, leave as-is
+		});
+	}
+
+	/**
+	 * Expand Synchronet @-codes in a string.
+	 * @USER@, @SYSOP@, @BBS@, @ROWS@, @COLS@, etc.
+	 */
+	expand_atcodes(str) {
+		var self = this;
+		return str.replace(/@([A-Z_]+)@/g, function(match, code) {
+			switch (code) {
+				case 'USER':
+				case 'ALIAS': return globalThis.user ? (globalThis.user.alias || globalThis.user.name || 'User') : 'User';
+				case 'NAME': return globalThis.user ? (globalThis.user.name || '') : '';
+				case 'SYSOP': return globalThis.system ? (globalThis.system.operator || 'Sysop') : 'Sysop';
+				case 'BBS': return globalThis.system ? (globalThis.system.name || 'BBS') : 'BBS';
+				case 'ROWS': return String(self.rows);
+				case 'COLS':
+				case 'COLUMNS': return String(self.cols);
+				case 'NODE': return String(globalThis.bbs ? globalThis.bbs.node_num : 1);
+				case 'TIME_LEFT': return '60'; // stub
+				case 'DATE': return new Date().toLocaleDateString('en-US');
+				case 'TIME': return new Date().toLocaleTimeString('en-US');
+				case 'CLS': self.clear(); return '';
+				case 'PAUSE': self.pause(); return '';
+				default: return match; // Unknown — leave as-is
+			}
+		});
+	}
+
+	/**
+	 * putmsg — full Synchronet-style output processing.
+	 * Processes @-codes, pipe codes, AND Ctrl-A codes.
+	 */
+	putmsg(str, mode) {
+		if (typeof str !== 'string') str = String(str);
+		str = this.expand_atcodes(str);
+		str = this.parse_pipe(str);
+		this.aprint(str);
+	}
+
 	/** Print with ^A parsing + CRLF */
 	aprintln(line) {
 		this.println(this.parse_ctrla(line, this._currentAttr));
@@ -545,7 +693,7 @@ class DorkitConsole {
 	}
 	center(str) { this.centre(str); }
 
-	beep() { this.print('\x07'); }
+	beep() { this._sendOutput('\x07'); }
 
 	// --- Screen control ---
 

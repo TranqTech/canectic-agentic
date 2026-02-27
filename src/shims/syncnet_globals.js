@@ -244,15 +244,140 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 	};
 
 	// ---- Synchronet bbs object ----
+	var _sysStatus = 0;
 	globalThis.bbs = {
-		sys_status: 0,
 		node_num: dk.connection ? dk.connection.node : 1,
 		online: true
 	};
+	// sys_status as getter/setter — monitors SS_PAUSEOFF/SS_PAUSEON
+	Object.defineProperty(globalThis.bbs, 'sys_status', {
+		get: function() { return _sysStatus; },
+		set: function(v) {
+			_sysStatus = v;
+			// SS_PAUSEOFF (1<<2) = 4: door wants to suppress auto-pause
+			if (dk.console && (v & 4)) {
+				dk.console.auto_pause = false;
+			}
+		},
+		enumerable: true, configurable: true
+	});
 
 	// ---- Argv / Argc ----
 	globalThis.argv = [];
 	globalThis.argc = 0;
+
+	// ---- Synchronet sbbsdefs constants (pre-defined) ----
+	// Many doors expect these without explicitly load('sbbsdefs.js').
+	// In real Synchronet, sbbsdefs is almost universally loaded.
+	// Define the most commonly used ones here; load('sbbsdefs.js')
+	// will re-define them (harmlessly) if called.
+
+	// System status flags
+	globalThis.SS_MOFF      = (1<<1);
+	globalThis.SS_PAUSEOFF  = (1<<2);
+	globalThis.SS_PAUSEON   = (1<<3);
+	globalThis.SS_USERON    = (1<<13);
+	globalThis.SS_TMOUT     = (1<<14);
+	globalThis.SS_ABORT     = (1<<15);
+	globalThis.SS_SYSPAGE   = (1<<16);
+	globalThis.SS_EVENT     = (1<<17);
+	globalThis.SS_SPLITP    = (1<<18);
+	globalThis.SS_NEWDAY    = (1<<19);
+
+	// Print mode flags
+	globalThis.P_NONE       = 0;
+	globalThis.P_NOPAUSE    = (1<<0);
+	globalThis.P_SAVEATR    = (1<<1);
+	globalThis.P_NOATCODES  = (1<<2);
+	globalThis.P_NOCRLF     = (1<<3);
+	globalThis.P_WORDWRAP   = (1<<4);
+	globalThis.P_TRUNCATE   = (1<<5);
+	globalThis.P_NOERROR    = (1<<6);
+	globalThis.P_PETSCII    = (1<<7);
+	globalThis.P_CPM_EOF    = (1<<8);
+
+	// Getkey mode flags
+	globalThis.K_NONE       = 0;
+	globalThis.K_UPPER      = (1<<0);
+	globalThis.K_UPRLWR     = (1<<1);
+	globalThis.K_NUMBER     = (1<<2);
+	globalThis.K_WRAP       = (1<<3);
+	globalThis.K_MSG        = (1<<4);
+	globalThis.K_SPIN       = (1<<5);
+	globalThis.K_LINE       = (1<<6);
+	globalThis.K_EDIT       = (1<<7);
+	globalThis.K_NOCRLF     = (1<<8);
+	globalThis.K_ALPHA      = (1<<9);
+	globalThis.K_NOECHO     = (1<<10);
+	globalThis.K_NOSPIN     = 0;
+
+	// Log levels
+	globalThis.LOG_EMERG    = 0;
+	globalThis.LOG_ALERT    = 1;
+	globalThis.LOG_CRIT     = 2;
+	globalThis.LOG_ERR      = 3;
+	globalThis.LOG_ERROR    = 3;
+	globalThis.LOG_WARNING  = 4;
+	globalThis.LOG_NOTICE   = 5;
+	globalThis.LOG_INFO     = 6;
+	globalThis.LOG_DEBUG    = 7;
+
+	// Connection/node types
+	globalThis.NODE_WFC     = 0;
+	globalThis.NODE_LOGON   = 1;
+	globalThis.NODE_NEWUSER = 2;
+	globalThis.NODE_INUSE   = 3;
+	globalThis.NODE_QUIET   = 4;
+
+	// User settings bits
+	globalThis.ANSI         = (1<<0);
+	globalThis.COLOR        = (1<<10);
+	globalThis.USER_PAUSE   = (1<<3);
+
+	// CGA color attributes
+	globalThis.BLACK        = 0;
+	globalThis.BLUE         = 1;
+	globalThis.GREEN        = 2;
+	globalThis.CYAN         = 3;
+	globalThis.RED          = 4;
+	globalThis.MAGENTA      = 5;
+	globalThis.BROWN        = 6;
+	globalThis.LIGHTGRAY    = 7;
+	globalThis.DARKGRAY     = 8;
+	globalThis.LIGHTBLUE    = 9;
+	globalThis.LIGHTGREEN   = 10;
+	globalThis.LIGHTCYAN    = 11;
+	globalThis.LIGHTRED     = 12;
+	globalThis.LIGHTMAGENTA = 13;
+	globalThis.YELLOW       = 14;
+	globalThis.WHITE        = 15;
+	globalThis.BG_BLACK     = 0;
+	globalThis.BG_BLUE      = (1<<4);
+	globalThis.BG_GREEN     = (2<<4);
+	globalThis.BG_CYAN      = (3<<4);
+	globalThis.BG_RED       = (4<<4);
+	globalThis.BG_MAGENTA   = (5<<4);
+	globalThis.BG_BROWN     = (6<<4);
+	globalThis.BG_LIGHTGRAY = (7<<4);
+	globalThis.HIGH         = (1<<3);
+	globalThis.BLINK        = (1<<7);
+	globalThis.ANSI_NORMAL  = 7;
+
+	// Keyboard constants
+	globalThis.KEY_UP       = 'KEY_UP';
+	globalThis.KEY_DOWN     = 'KEY_DOWN';
+	globalThis.KEY_LEFT     = 'KEY_LEFT';
+	globalThis.KEY_RIGHT    = 'KEY_RIGHT';
+	globalThis.KEY_HOME     = 'KEY_HOME';
+	globalThis.KEY_END      = 'KEY_END';
+	globalThis.KEY_DEL      = 'KEY_DEL';
+	globalThis.KEY_INS      = 'KEY_INS';
+	globalThis.KEY_PAGEUP   = 'KEY_PGUP';
+	globalThis.KEY_PAGEDN   = 'KEY_PGDOWN';
+
+	// Misc
+	globalThis.LEN_ALIAS    = 25;
+	globalThis.SYS_CLOSED   = (1<<0);
 
 	// ---- Synchronet native console methods ----
 	// Some doors (e.g. hamtest) use Synchronet's console object directly
@@ -281,7 +406,7 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 		_con.print('\r\n');
 		globalThis.console.line_counter++;
 	};
-	globalThis.console.putmsg = function(str) { _con.aprint(String(str)); };
+	globalThis.console.putmsg = function(str, mode) { _con.putmsg(String(str), mode); };
 
 	/**
 	 * console.mnemonics(str) — prints with ~X hotkey highlighting.
@@ -476,6 +601,30 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 	globalThis.console.line_counter = 0;
 	globalThis.console.screen_rows = _con.rows;
 	globalThis.console.screen_columns = _con.cols;
+
+	// console.attributes — get/set current CGA text attribute.
+	// Reading returns the current attribute value, setting sends ANSI escape.
+	Object.defineProperty(globalThis.console, 'attributes', {
+		get: function() {
+			return _con._currentAttr ? _con._currentAttr._value : 7;
+		},
+		set: function(val) {
+			if (_con._currentAttr) {
+				_con._currentAttr.value = val;
+			}
+		},
+		enumerable: true, configurable: true
+	});
+
+	// console.current_column / console.current_row — cursor position
+	Object.defineProperty(globalThis.console, 'current_column', {
+		get: function() { return _con.x || 1; },
+		enumerable: true, configurable: true
+	});
+	Object.defineProperty(globalThis.console, 'current_row', {
+		get: function() { return _con.y || 1; },
+		enumerable: true, configurable: true
+	});
 
 	/**
 	 * console.ansi(attr) — convert a CGA attribute value to an ANSI escape
@@ -716,11 +865,6 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 		if (num > maxnum) return maxnum;
 		return num;
 	};
-
-	Object.defineProperty(globalThis.console, 'attributes', {
-		get: function() { return _con._currentAttr._value; },
-		set: function(v) { _con.attr = v; }
-	});
 
 	// console.strlen — visible length excluding control codes
 	globalThis.console.strlen = function(str) {
@@ -1101,6 +1245,164 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 		this.poll = function(timeout) { return this._items.length > 0; };
 	};
 
+	// ---- Synchronet TUI Libraries (Frame, Layout, InputLine) ----
+	// Define these early so they're available regardless of load chain.
+	// Synchronet's frame.js, layout.js, and inputline.js are system libraries
+	// that doors expect to be loadable. Some doors load them directly, others
+	// rely on layout.js loading frame.js internally. Defining them here
+	// ensures they survive any broken load chains.
+
+	globalThis.Frame = function(x, y, width, height, attr, parent) {
+		this.x = x || 1;
+		this.y = y || 1;
+		this.width = width || _con.cols;
+		this.height = height || _con.rows;
+		this.attr = attr || 7;
+		this.parent = parent || null;
+		this.is_open = false;
+		this.scrolling = false;
+		this.word_wrap = false;
+		this.transparent = false;
+		this.lf_strict = false;
+		this.v_scroll = false;
+		this.h_scroll = false;
+		this.checkbounds = true;
+		this.id = 0;
+		this.data_width = this.width;
+		this.data_height = this.height;
+		this._cx = 0;
+		this._cy = 0;
+		this._children = [];
+		if (parent && parent._children) parent._children.push(this);
+	};
+	globalThis.Frame.prototype.open = function() { this.is_open = true; };
+	globalThis.Frame.prototype.close = function() { this.is_open = false; };
+	globalThis.Frame.prototype.delete = function() {
+		this.is_open = false;
+		if (this.parent && this.parent._children) {
+			var idx = this.parent._children.indexOf(this);
+			if (idx >= 0) this.parent._children.splice(idx, 1);
+		}
+	};
+	globalThis.Frame.prototype.move = function(x, y) { this.x = x; this.y = y; };
+	globalThis.Frame.prototype.moveTo = function(x, y) { this.x = x; this.y = y; };
+	globalThis.Frame.prototype.gotoxy = function(x, y) { this._cx = x - 1; this._cy = y - 1; };
+	globalThis.Frame.prototype.home = function() { this._cx = 0; this._cy = 0; };
+	globalThis.Frame.prototype.end = function() { this._cy = this.height - 1; };
+	globalThis.Frame.prototype.clear = function(attr) {
+		this._cx = 0; this._cy = 0;
+		var blank = ' '.repeat(this.width);
+		for (var row = 0; row < this.height; row++) {
+			_con.gotoxy(this.x, this.y + row);
+			_con.print(blank);
+		}
+	};
+	globalThis.Frame.prototype.clearline = function(attr) {
+		_con.gotoxy(this.x + this._cx, this.y + this._cy);
+		_con.print(' '.repeat(this.width - this._cx));
+		_con.gotoxy(this.x + this._cx, this.y + this._cy);
+	};
+	globalThis.Frame.prototype.putmsg = function(str, attr) {
+		if (!str) return;
+		var s = String(str);
+		// Apply frame's attribute (or explicit attr) as default color.
+		var useAttr = (attr !== undefined) ? attr : this.attr;
+		if (useAttr !== undefined && _con._currentAttr) {
+			_con._currentAttr.value = useAttr;
+		}
+		_con.gotoxy(this.x + this._cx, this.y + this._cy);
+		// Frame.putmsg only processes Ctrl-A codes (not pipe or @-codes)
+		_con.aprint(s);
+		// Track cursor position through visible output
+		var visible = s.replace(/\x01./g, '').replace(/\x1b\[[^a-zA-Z]*[a-zA-Z]/g, '');
+		for (var i = 0; i < visible.length; i++) {
+			if (visible[i] === '\r') { this._cx = 0; continue; }
+			if (visible[i] === '\n') { this._cy++; this._cx = 0; continue; }
+			this._cx++;
+			if (this._cx >= this.width) { this._cx = 0; this._cy++; }
+		}
+	};
+	globalThis.Frame.prototype.center = function(str) {
+		var visible = String(str).replace(/\x01./g, '');
+		this._cx = Math.max(0, Math.floor((this.width - visible.length) / 2));
+		this.putmsg(str);
+	};
+	globalThis.Frame.prototype.draw = function() {};
+	globalThis.Frame.prototype.cycle = function() { return false; };
+	globalThis.Frame.prototype.load = function(filename) {
+		try {
+			var buf = readFileSync(filename);
+			for (var i = buf.length - 1; i >= 0; i--) {
+				if (buf[i] === 0x1A && i + 6 <= buf.length &&
+					buf.subarray(i + 1, i + 6).toString() === 'SAUCE') {
+					buf = buf.subarray(0, i); break;
+				}
+			}
+			_con.gotoxy(this.x, this.y);
+			_con.print(buf.toString('binary').replace(/\r?\n/g, '\r\n'));
+		} catch (e) {}
+	};
+	globalThis.Frame.prototype.scroll = function(dir, count) {};
+	globalThis.Frame.prototype.screenShot = function(file, append) {};
+	globalThis.Frame.prototype.getData = function(x, y) { return { ch: ' ', attr: this.attr }; };
+	globalThis.Frame.prototype.setData = function(x, y, ch, attr) {};
+	globalThis.Frame.prototype.bottom = function() { this._cy = this.height - 1; };
+	globalThis.Frame.prototype.top = function() { this._cy = 0; };
+	globalThis.Frame.prototype.invalidate = function() {};
+	Object.defineProperties(globalThis.Frame.prototype, {
+		columns: { get: function() { return this.width; } },
+		rows: { get: function() { return this.height; } },
+		cursor_x: {
+			get: function() { return this._cx; },
+			set: function(v) { this._cx = v; }
+		},
+		cursor_y: {
+			get: function() { return this._cy; },
+			set: function(v) { this._cy = v; }
+		}
+	});
+
+	globalThis.Layout = function(frame) {
+		this.frame = frame || null;
+		this._tabs = {};
+	};
+	globalThis.Layout.prototype.addTab = function(name, frame) {
+		this._tabs[name] = frame;
+	};
+	globalThis.Layout.prototype.open = function() {};
+	globalThis.Layout.prototype.close = function() {};
+	globalThis.Layout.prototype.cycle = function() { return false; };
+	globalThis.Layout.prototype.draw = function() {};
+
+	globalThis.InputLine = function(x, y, width, height, attr, frame) {
+		this.x = x || (frame ? frame.x : 1);
+		this.y = y || (frame ? frame.y : 1);
+		this.width = width || 40;
+		this.height = height || 1;
+		this.attr = attr || 7;
+		this.frame = frame || null;
+		this.value = '';
+		this.max = this.width;
+	};
+	globalThis.InputLine.prototype.getkey = function(key) {
+		if (key === '\r' || key === '\n') return true;
+		if (key === '\b' || key === '\x7f') {
+			if (this.value.length > 0) {
+				this.value = this.value.substring(0, this.value.length - 1);
+				_con.print('\b \b');
+			}
+			return false;
+		}
+		if (typeof key === 'string' && key.length === 1 && key.charCodeAt(0) >= 32) {
+			if (this.value.length < this.max) {
+				this.value += key;
+				_con.print(key);
+			}
+		}
+		return false;
+	};
+	globalThis.InputLine.prototype.clear = function() { this.value = ''; };
+
 	// ---- Synchronet require/load ----
 
 	// Track what's been loaded (Synchronet's require checks a global)
@@ -1226,7 +1528,8 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 		// Skip known shimmed/polyfilled modules (already handled or native)
 		var _shimmedModules = {
 			'dorkit.js': true, 'recordfile.js': true,
-			'array.js': true, 'string.js': true, 'math.js': true
+			'array.js': true, 'string.js': true, 'math.js': true,
+			'frame.js': true, 'inputline.js': true, 'layout.js': true
 		};
 		if (_shimmedModules[filename]) return;
 
@@ -1396,6 +1699,60 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 			return;
 		}
 
+		// frame.js, inputline.js, layout.js — Already defined early in
+		// installSyncnetGlobals (Frame, InputLine, Layout constructors).
+		// Just return to prevent file-not-found errors.
+		if (filename === 'frame.js') return;
+		if (filename === 'inputline.js') return;
+		if (filename === 'layout.js') return;
+
+		// json-chat.js — Synchronet JSON-based chat system.
+		// Dicewarz2 loads it but can function without it.
+		if (filename === 'json-chat.js') {
+			globalThis.JSONChat = function(client) {
+				this.client = client;
+				this.channels = [];
+			};
+			globalThis.JSONChat.prototype.submit = function(channel, msg) {};
+			globalThis.JSONChat.prototype.receive = function(channel) { return []; };
+			globalThis.JSONChat.prototype.join = function(channel) {};
+			globalThis.JSONChat.prototype.part = function(channel) {};
+			globalThis.JSONChat.prototype.cycle = function() {};
+			globalThis.JSONChat.prototype.close = function() {};
+			return;
+		}
+
+		// funclib.js — Synchronet common function library.
+		// Provides utility functions. Define the commonly used ones.
+		if (filename === 'funclib.js') {
+			globalThis.getColor = function(str) {
+				// Parse Synchronet color string like "WHI ON BLU" → ANSI attr
+				return 7; // Default to lightgray
+			};
+			globalThis.printPadded = function(str, len, ch, right) {
+				var s = String(str || '');
+				ch = ch || ' ';
+				while (s.length < len) {
+					if (right) s = ch + s;
+					else s = s + ch;
+				}
+				return s.substring(0, len);
+			};
+			globalThis.centerString = function(str, width) {
+				var s = String(str || '');
+				width = width || _con.cols;
+				var pad = Math.max(0, Math.floor((width - s.length) / 2));
+				return ' '.repeat(pad) + s;
+			};
+			globalThis.stripCtrl = function(str) {
+				return String(str || '').replace(/[\x00-\x1f]/g, '');
+			};
+			globalThis.getKeyStr = function(str) {
+				return (str && str.length > 0) ? str.charAt(0).toUpperCase() : '';
+			};
+			return;
+		}
+
 		// sbbsdefs.js — Synchronet system-wide constants.
 		// Provide the commonly used ones directly.
 		if (filename === 'sbbsdefs.js') {
@@ -1500,6 +1857,15 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 
 			// System settings
 			globalThis.SS_MOFF      = (1<<1);   // Disable message offline notification
+			globalThis.SS_PAUSEOFF  = (1<<2);   // Pause off (disable pause)
+			globalThis.SS_PAUSEON   = (1<<3);   // Pause on (force pause)
+			globalThis.SS_USERON    = (1<<13);  // User is online
+			globalThis.SS_TMOUT     = (1<<14);  // Time-out warning has been given
+			globalThis.SS_ABORT     = (1<<15);  // Ctrl-C abort
+			globalThis.SS_SYSPAGE   = (1<<16);  // Sysop page active
+			globalThis.SS_EVENT     = (1<<17);  // Timed event active
+			globalThis.SS_SPLITP    = (1<<18);  // Split-screen private chat
+			globalThis.SS_NEWDAY    = (1<<19);  // New day since logon
 
 			// Misc
 			globalThis.LEN_ALIAS    = 25;
