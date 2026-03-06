@@ -1,0 +1,1285 @@
+//imports
+import * as fs from 'fs';
+import * as  fileType from 'file-type';
+import { exec } from 'child_process';
+import * as path from 'path';
+import * as dotenv from 'dotenv';
+import * as  util  from 'util';
+
+const pexec = util.promisify(exec);
+
+//internals
+import {Message, Packet} from '../models/ftnClasses.js'
+import * as netmail from '../models/netmail.js'
+import * as echomail from '../models/echomail.js'
+import * as ftnUtils from "../utils/ftnUtils.js"
+import * as linkedNodes from '../models/linkedNodes.js'
+import * as codepageConversions from "../utils/codepageConversions.js"
+
+
+//setup and variables
+const TosserName = "Canectic Tosser v0.1"
+const SystemTZUTC = "-0600"
+const defaultInbound = "/var/bbs/ftn/inbound"
+const defaultOutbound = "/var/bbs/ftn/outbound"
+const moveDir = "/var/bbs/ftn/tossed"
+const defaultZone = 1
+const removeProcessed = false
+const moveProcessed = true
+const netmailkeys = ["SourceZone", "DestinationZone", "SourceNode", "SourceNet", "DestinationNode", "DestinationNet", "Subject", "FromUser", "ToUser", "DateTime", "BodyText", "Id", "OriginLine"]
+const testpwd = process.env.PacketPwd || ""
+//set max msg count per pkt
+//typically this has been a size constraint, but should be less of an issue with modern systems.
+//this is here more to keep things debuggable.
+//However, we may want to address this as a size limitation for radio based transfers of files in the future. (LoRa, etc.)
+const maxMsg = 256
+
+async function getFileType(filePath) {
+  try {
+    const buffer = await fs.promises.readFile(filePath);
+    const type = await fileType.fileTypeFromBuffer(buffer);
+    //return type && type.ext === 'zip';
+    if (type){
+    	return type.ext
+    }else{
+    	return null
+    }
+  } catch (error) {
+    console.error('Error checking file type:', error);
+    return false;
+  }
+}
+
+async function FindAndExtractArchives(inboundDir){
+	var inDir = defaultInbound
+	if (inboundDir){
+		inDir = inboundDir
+	}
+	var zipArray = []
+	var pktArray = []
+	const filelist = fs.readdirSync(inDir);
+	
+	//filelist.forEach(file => {	
+	for await (var file of filelist){
+		var filepath = inDir + "/" + file
+		var ftype = await getFileType(filepath)
+		if (ftype){
+			switch(ftype){
+				case "zip":
+					console.log(file, "is a zip file")
+					zipArray.push(filepath)
+					break;
+				case "arj":
+					console.log(file, "is an ARJ file")
+					break;
+				default:
+					pktArray.push(file)
+			}
+		}
+	}
+	if (zipArray.length > 0){
+		console.log("There are", zipArray.length, "Zip files to process")
+		for await (var filepath of zipArray){
+			//start
+			try{
+				const { stdout, stderr } = await pexec(`unzip -o ${filepath} && rm ${filepath}`)
+				console.log(stdout);
+				if (stderr){
+					console.error('stderr:', stderr);
+				}				
+			}catch(error){
+				console.log(error)
+			}
+		}
+	}
+}
+
+//ideally we should process non archives, extract archives, then run the process loop again.
+async function TossInbound(inboundDir){
+	console.log("\r\n-------------------\r\nTossing Inbound\r\n-------------------")
+	var successcount = 0
+	var importcount = 0
+	var dupecount = 0
+	var skipcount = 0
+	var processcount = 0
+	var pktcount = 0
+
+	var inDir = defaultInbound
+	if (inboundDir){
+		inDir = inboundDir
+	}
+	var zipArray = []
+	var arjArray = []
+	var pktArray = []
+	var ticArray = []
+	const filelist = await fs.readdirSync(inDir);
+	
+	//filelist.forEach(file => {	
+	for await (var file of filelist){
+		var filepath = inDir + "/" + file
+		var ftype = await getFileType(filepath)
+		if (ftype){
+			switch(ftype){
+				case "zip":
+					console.log(file, "is a zip file")
+					zipArray.push(filepath)
+					break;
+				case "arj":
+					console.log(file, "is an ARJ file")
+					arjArray.push(filePath)
+					break;
+				default:
+					console.log(ftype)
+					//TODO:
+					//do another call to a second switch function based on extension
+					//then we can call this both here and under the other else
+					//and prep arrays for other files like .tic etc.
+					if (path.extname(file).toUpperCase() === ".PKT"){
+						var fileobj = {filepath: filepath, movepath: moveDir + "/" + file}
+						pktArray.push(fileobj)
+					}
+			}
+		}else{
+			console.log("Unknown file type", file)
+			if (path.extname(file).toUpperCase() === ".PKT"){
+				var fileobj = {filepath: filepath, movepath: moveDir + "/" + file}
+				pktArray.push(fileobj)
+			}
+		}
+	}
+	if (pktArray.length > 0){
+		for await (var pkt of pktArray){
+			var returnObj = await TossInboundFile(pkt.filepath, pkt.movepath)
+			if (returnObj){
+				pktcount ++
+				importcount += returnObj.pktimportcount
+				dupecount += returnObj.pktdupecount
+				skipcount += returnObj.pktskipcount
+				processcount += returnObj.pktprocesscount
+				successcount += returnObj.pktsuccesscount
+			}
+		}
+	}
+	if (zipArray.length > 0){
+		console.log("There are", zipArray.length, "Zip files to process")
+		for await (var filepath of zipArray){
+			//start
+			try{
+				//const { stdout, stderr } = await pexec(`unzip -o ${filepath} && rm ${filepath}`)
+				const { stdout, stderr } = await pexec(`unzip -o ${filepath} -d ${inDir} && rm ${filepath}`)
+				console.log(stdout);
+				if (stderr){
+					console.error('stderr:', stderr);
+				}				
+			}catch(error){
+				console.log(error)
+			}
+		}
+	}
+	//read directory file list again.
+	const filelist2 = await fs.readdirSync(inDir)
+	for await (var file of filelist2){
+		//console.log(file)
+		if (path.extname(file).toUpperCase() === ".PKT"){
+			//console.log(file, "is pkt")
+			//try tossing all files again to catch newly unzipped.
+			//should check extension and only try if .pkt
+			var filepath = inDir + "/" + file
+			var movepath = moveDir + "/" + file
+			var returnObj = await TossInboundFile(filepath, movepath)
+			if (returnObj){
+				pktcount ++
+				importcount += returnObj.pktimportcount
+				dupecount += returnObj.pktdupecount
+				skipcount += returnObj.pktskipcount
+				processcount += returnObj.pktprocesscount
+				successcount += returnObj.pktsuccesscount
+			}else{
+				console.log("Could not process file")
+			}
+		}else{
+			console.log(file, "is not pkt")
+		}
+	}
+	//todo: write stats to db or similar
+	console.log("Completed. Stats:\r\n")
+	console.log("Packets:", pktcount)
+	console.log("Imported:", importcount)
+	console.log("Duplicate:", dupecount)
+	console.log("Skipped:", skipcount)
+	console.log("\r\nTotal Processed:", processcount)
+	var updatearray = []
+	for await (var thread of echomail.threadUpdateArray){
+		var uObj = {
+			id: thread.split("[")[0],
+			shortcode: thread.split("[")[1]
+		}
+		updatearray.push(uObj)		
+	}
+	if (updatearray.length > 0){
+		console.log("Updating", updatearray.length, "threads")
+		await echomail.updateThreadArray(updatearray)
+	}else{
+		console.log("No threads to update")
+	}
+}
+
+
+function ReadPkt(filepath) {
+	var buffer
+	let offset = 0;
+	try{
+		buffer = fs.readFileSync(filepath);		
+	}catch(error){
+		throw new Error(`Failed to open pkt file: ${error.message}`);
+		return null
+	}
+	try{
+		const packet = new Packet();
+		
+		// Read packet header according to FTS-0001 specification
+		packet.SourceNode = buffer.readUInt16LE(offset); offset += 2;
+		packet.DestinationNode = buffer.readUInt16LE(offset); offset += 2;
+		packet.Year = buffer.readUInt16LE(offset); offset += 2;
+		packet.Month = buffer.readUInt16LE(offset); offset += 2;
+		packet.Day = buffer.readUInt16LE(offset); offset += 2;
+		packet.Hour = buffer.readUInt16LE(offset); offset += 2;
+		packet.Minute = buffer.readUInt16LE(offset); offset += 2;
+		packet.Second = buffer.readUInt16LE(offset); offset += 2;
+		packet.Baud = buffer.readUInt16LE(offset); offset += 2;
+		packet.PacketType = buffer.readUInt16LE(offset); offset += 2;
+		packet.SourceNet = buffer.readUInt16LE(offset); offset += 2;
+		packet.DestinationNet = buffer.readUInt16LE(offset); offset += 2;
+		packet.ProdCode = buffer.readUInt8(offset); offset += 1;
+		packet.Serial = buffer.readUInt8(offset); offset += 1;
+		
+		// Read password (8 bytes, null padded)
+		packet.Password = buffer.toString('ascii', offset, offset + 8).split('\0')[0];
+		offset += 8;
+		
+		// Read optional zone fields. Default to zone 1 when not specified
+		packet.SourceZone = Math.max(1, buffer.readUInt16LE(offset)); offset += 2;
+		packet.DestinationZone = Math.max(1, buffer.readUInt16LE(offset)); offset += 2;
+		
+		// Skip fill bytes (20 bytes)
+		offset += 20;
+		
+		// Format addresses as zone:net/node
+		packet.Source = `${packet.SourceZone}:${packet.SourceNet}/${packet.SourceNode}`;
+		packet.Destination = `${packet.DestinationZone}:${packet.DestinationNet}/${packet.DestinationNode}`;
+		
+		// Set DateTime
+		packet.DateTime = new Date(packet.Year, packet.Month, packet.Day, packet.Hour, packet.Minute, packet.Second);
+		
+		// Read messages
+		packet.MessageCount = 0;
+		
+		while (offset < buffer.length - 1) {
+			// Check for end of packet marker (0000H)
+			const messageType = buffer.readUInt16LE(offset);
+			if (messageType === 0x0000) {
+				break;
+			}
+			
+			// Verify message type is 0200H
+			if (messageType !== 0x0002) {
+				throw new Error(`Invalid message type: ${messageType.toString(16)}`);
+			}
+			
+			offset += 2; // Skip message type
+			
+			const message = new Message();
+			
+			// Read packed message header
+			message.SourceNode = buffer.readUInt16LE(offset); offset += 2;
+			message.DestinationNode = buffer.readUInt16LE(offset); offset += 2;
+			message.SourceNet = buffer.readUInt16LE(offset); offset += 2;
+			message.DestinationNet = buffer.readUInt16LE(offset); offset += 2;
+			message.Attribute = buffer.readUInt16LE(offset); offset += 2;
+			message.Cost = buffer.readUInt16LE(offset); offset += 2;
+			
+			// Read DateTime (20 bytes, null terminated)
+			const dateTimeBytes = buffer.subarray(offset, offset + 20);
+			message.DateTime = dateTimeBytes.toString('ascii').replace(/\0.*$/, '');
+			offset += 20;
+			
+			// Read null-terminated strings
+			message.ToUser = readNullTerminatedString(buffer, offset);
+			offset += message.ToUser.length + 1;
+			
+			message.FromUser = readNullTerminatedString(buffer, offset);
+			offset += message.FromUser.length + 1;
+			
+			message.Subject = readNullTerminatedString(buffer, offset);
+			offset += message.Subject.length + 1;
+			
+			var TextBuffer = readNullTerminatedByteArray(buffer, offset);
+			
+			message.RawText = codepageConversions.cp437ToUtf8(TextBuffer);
+			offset += message.RawText.length + 1;
+			
+			// Process message text for control lines and body text
+			processMessageText(message);
+			
+			packet.Messages.push(message);
+			packet.MessageCount++;
+		}
+		
+		return packet;
+	}catch(error){
+		//throw new Error(`Error parsing file: ${error.message}`);
+		console.log(`Error parsing file: ${error.message}`)
+		return null
+	}
+
+}
+
+function readNullTerminatedByteArray(buffer, offset){
+	let end = offset;
+	while (end < buffer.length && buffer[end] !== 0) {
+		end++;
+	}
+	return buffer.subarray(offset, end);
+}
+
+function readNullTerminatedString(buffer, offset) {
+	let end = offset;
+	while (end < buffer.length && buffer[end] !== 0) {
+		end++;
+	}
+	return buffer.subarray(offset, end).toString('ascii');
+}
+
+function processMessageText(message) {
+	const lines = message.RawText.split(/\r/);
+	//message.utf8 = codepageConversions.cp437ToUtf8(message.TextBuffer)  //message.TextBuffer
+	const bodyLines = [];
+	
+	for (const line of lines) {
+		if (line.startsWith('AREA')){
+			message.Type = "Echomail"
+			message.AreaTag = line.split(':')[1].trim()
+		}else if (line.startsWith('\x01')) {
+			// Control line - parse optional attributes
+			const controlLine = line.substring(1);
+			const colonIndex = controlLine.indexOf(':');
+			if (colonIndex > 0) {
+				const attribute = controlLine.substring(0, colonIndex).trim();
+				const value = controlLine.substring(colonIndex + 1).trim();
+				
+				switch (attribute) {
+					case 'MSGID':
+						message.MsgId = value;
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case "REPLY":
+						message.ReplyTo = value;
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case "THREAD":
+						message.ThreadId = value;
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case 'TID':
+						message.TosserId = value;
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case 'PID':
+						message.TosserId = value;
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case "TZUTC":
+						message.TZUTC = value
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case 'TOPT':
+					case 'FMPT':
+					case 'PATH':
+						message.Path = value
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case 'INTL':
+						//console.log("Process intl")
+						const split = line.substring(1).split(" ")
+						//console.log(split)
+						attribute = split[0]
+						value = split[1] + value
+						const destsource = value.split(" ")
+						message.source = destsource[0]
+						message.destination = destsource[1]
+						message.OptionalAttributes.push({ attribute, value });
+						break;
+					default:
+						if (attribute.startsWith("INTL")){
+							const split = line.substring(1).split(" ")
+							message.Source = split[2]
+							message.Destination = split[1]
+							const newval = split[1] + " " + split[2]
+							message.OptionalAttributes.push({ attribute: "INTL", value: newval });
+							break;
+						}
+						if ((attribute.startsWith("VIA"))||(attribute.startsWith("Via"))){
+							const split = line.substring(1).split(" ")
+							const newval = split[1] + " " + split[2]
+							message.OptionalAttributes.push({ attribute: split[0], value: newval });
+							break;
+						}
+						message.OptionalAttributes.push({ attribute, value });
+				}
+			}
+		}else if (line.startsWith('SEEN-BY')){
+			message.SeenBy = line.split(':')[1].trim()
+
+		}else {
+			// Regular message text
+			bodyLines.push(line);
+		}
+	}
+	
+	//Optional to maintain lack of \n from packed message. Should handle stripping \n on export in liklihood.
+	//message.BodyText = bodyLines.join('\r').replace(/\x8D/g, '').replace(/\n/g, ''); //remove newline and reverse cr chars	
+	message.BodyText = bodyLines.join('\r\n').replace(/\x8D/g, ''); //remove any reverse cr chars
+	if (!message.Source){
+		//console.log("Creating Source")
+		message.Source = defaultZone + ":" + message.SourceNet + "/" + message.SourceNode
+	}
+	if (!message.Destination){
+		//console.log("Creating Dest")
+		message.Destination = defaultZone + ":" + message.DestinationNet + "/" + message.DestinationNode
+	}
+	message.utf8 = message.BodyText
+}
+
+async function TossInboundFile(pktfilepath, movepktpath){
+	var returnObj = {
+		pktsuccesscount: 0,
+		pktimportcount: 0,
+		pktdupecount: 0,
+		pktskipcount: 0,
+		pktprocesscount: 0
+	}
+	const pkt = ReadPkt(pktfilepath)
+	if (!pkt){
+		return null;
+	}
+	//Todo: validate pkt src/dest and pass, etc
+	var targetsuccess = pkt.Messages.length
+	//pkt.Messages.forEach(message =>{
+	for await (var message of pkt.Messages){			
+		if (message.Type === "Netmail"){
+			var result = await netmail.newInboundNetmail(message)
+			if (result.status === true){
+				if (result.duplicate){
+					returnObj.pktdupecount ++
+				}else{
+					returnObj.pktimportcount ++
+				}
+				returnObj.pktsuccesscount ++
+			}else{
+				//
+			}
+		}else if (message.Type === "Echomail"){
+			//console.log("Echomail in", message.AreaTag, "Subject:", message.Subject)
+			//handle echomail
+			var result = await echomail.handleInboundEchoMessage(message)
+			//validate result
+			if (result.status === true){
+				if (result.duplicate){
+					returnObj.pktdupecount ++
+				}else if (result.imported){
+					returnObj.pktimportcount ++
+				}else{
+					//do something else here.
+				}
+				returnObj.pktsuccesscount ++
+			}else{
+				//handle non success potentials (Toss to badecho?)
+			}
+		}else{
+			//Add any additional type handlers.
+		}
+		returnObj.pktprocesscount ++
+	}
+	//remove pkt file if success
+	if (returnObj.pktsuccesscount >= targetsuccess){
+		if (removeProcessed){
+			await fs.promises.rm(pktfilepath)
+		}else if (moveProcessed){
+			console.log("Moving Completed Pkt...")
+			await fs.promises.rename(pktfilepath, movepktpath)
+		}
+	}
+	return returnObj
+}
+
+async function OldTossInbound(inboundDir){
+	var inDir = defaultInbound
+	if (inboundDir){
+		inDir = inboundDir
+	}
+	var importcount = 0
+	var dupecount = 0
+	var skipcount = 0
+	var processcount = 0
+	var pktcount = 0
+	const filelist = fs.readdirSync(inDir);
+	
+	//filelist.forEach(file => {	
+	for await (var file of filelist){
+		pktcount ++
+		var pktfilepath = inDir + "/" + file
+		var movepktpath = moveDir + "/" + file
+		const pkt = ReadPkt(pktfilepath)
+		if (!pkt){
+			break;
+		}
+		//Todo: validate pkt src/dest and pass, etc
+		var targetsuccess = pkt.Messages.length
+		var pktsuccesscount = 0
+		var pktdupecount = 0
+		var pktskipcount = 0
+		var pktimportcount = 0
+		var pktprocesscount = 0
+		//pkt.Messages.forEach(message =>{
+		for await (var message of pkt.Messages){			
+			if (message.Type === "Netmail"){
+				var result = await netmail.newInboundNetmail(message)
+				if (result.status === true){
+					if (result.duplicate){
+						pktdupecount ++
+					}else{
+						pktimportcount ++
+					}
+					pktsuccesscount ++
+				}else{
+					//
+				}
+			}else if (message.Type === "Echomail"){
+				//console.log("Echomail in", message.AreaTag, "Subject:", message.Subject)
+				//handle echomail
+				var result = await echomail.handleInboundEchoMessage(message)
+				//validate result
+				if (result.status === true){
+					if (result.duplicate){
+						pktdupecount ++
+					}else if (result.imported){
+						pktimportcount ++
+					}else{
+						//do something else here.
+					}
+					pktsuccesscount ++
+				}else{
+					//handle non success potentials (Toss to badecho?)
+				}
+			}else{
+				//Add any additional type handlers.
+			}
+			pktprocesscount ++
+		}
+		//remove pkt file if success
+		if (pktsuccesscount >= targetsuccess){
+			if (removeProcessed){
+				await fs.promises.rm(pktfilepath)
+			}else if (moveProcessed){
+				console.log("Moving Completed Pkts...")
+				await fs.promises.rename(pktfilepath, movepktpath)
+			}
+		}
+		importcount += pktimportcount
+		dupecount += pktdupecount
+		skipcount += pktskipcount
+		processcount += pktprocesscount
+	}
+	//todo: write stats to db or similar
+	console.log("\r\n------------------\r\nCompleted. Stats:")
+	console.log("Packets:", pktcount)
+	console.log("Imported:", importcount)
+	console.log("Duplicate:", dupecount)
+	console.log("Skipped:", skipcount)
+	console.log("\r\nTotal Processed:", processcount)
+	var updatearray = []
+	for await (var thread of echomail.threadUpdateArray){
+		var uObj = {
+			id: thread.split("[")[0],
+			shortcode: thread.split("[")[1]
+		}
+		updatearray.push(uObj)		
+	}
+	if (updatearray.length > 0){
+		console.log("Updating", updatearray.length, "threads")
+		await echomail.updateThreadArray(updatearray)
+	}else{
+		console.log("No threads to update")
+	}
+}
+
+function WritePktToNode(messageArray, linkedNode, systemaddress){
+	var returnObj = {
+		processedcount: 0,
+		processednetmail: [],
+		processedechomail: [],
+		processedother: [],
+		failedmsgs: []
+	}
+	//determine destination address.
+	var destinationAddress
+	if (!linkedNode.direct){
+		if (!linkedNode.route_to){
+			console.log("Cannot determine address for Packet!")
+			return false
+		}
+		destinationAddress = linkedNode.route_to
+	}else{
+		destinationAddress = linkedNode.address
+	}
+	if (!destinationAddress){
+		console.log("Panic! No packet to address")
+		return false
+	}else{
+		console.log("Using destination address", destinationAddress)
+		console.log("Using System Address", systemaddress)
+	}
+	
+	const packet = new Packet()
+	packet.SourceZone = systemaddress.zone
+	packet.DestinationZone = destinationAddress.split(":")[0]
+	packet.SourceNet = systemaddress.net
+	packet.SourceNode = systemaddress.node
+	packet.DestinationNet = destinationAddress.split(":")[1].split("/")[0]
+	packet.DestinationNode = destinationAddress.split(":")[1].split("/")[1]
+	packet.Source = systemaddress.address
+	packet.Destination = destinationAddress
+
+	// Set current time
+	const now = new Date();
+	packet.Year = now.getFullYear();
+	packet.Month = now.getMonth();
+	packet.Day = now.getDate();
+	packet.Hour = now.getHours();
+	packet.Minute = now.getMinutes();
+	packet.Second = now.getSeconds();
+	packet.DateTime = now;
+	packet.Baud = 0;
+	packet.PacketType = 2;
+	packet.ProdCode = 0xFE;
+	packet.Serial = 0x01;
+	packet.Password = '';
+	if (linkedNode.packet_password){
+		//do password lookup
+		packet.Password = linkedNode.packet_password
+	}
+	//packet.Messages = messageArray;
+	packet.MessageCount = messageArray.length;
+
+	// Build buffer
+	const bufferSize = 10000; // Sufficient size
+	const buffer = Buffer.alloc(bufferSize);
+	let offset = 0;
+
+	// Write packet header
+	buffer.writeUInt16LE(packet.SourceNode, offset); offset += 2;
+	buffer.writeUInt16LE(packet.DestinationNode, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Year, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Month, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Day, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Hour, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Minute, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Second, offset); offset += 2;
+	buffer.writeUInt16LE(packet.Baud, offset); offset += 2;
+	buffer.writeUInt16LE(packet.PacketType, offset); offset += 2;
+	buffer.writeUInt16LE(packet.SourceNet, offset); offset += 2;
+	buffer.writeUInt16LE(packet.DestinationNet, offset); offset += 2;
+	buffer.writeUInt8(packet.ProdCode, offset); offset += 1;
+	buffer.writeUInt8(packet.Serial, offset); offset += 1;
+
+	// Password (8 bytes, null-padded)
+	const pwdBuf = Buffer.from(packet.Password.padEnd(8, '\0'));
+	pwdBuf.copy(buffer, offset); offset += 8;
+
+	// Zones
+	buffer.writeUInt16LE(packet.SourceZone, offset); offset += 2;
+	buffer.writeUInt16LE(packet.DestinationZone, offset); offset += 2;
+
+	// Fill bytes (20 zeros)
+	for (let i = 0; i < 20; i++) {
+	    buffer.writeUInt8(0, offset++);
+	}
+
+	// Write messages
+	for (const msg of messageArray) {
+		// Parse and populate required attributes if empty.
+		var setattribs = {
+			msgid: false,
+			tid: false,
+			tz: false,
+		}
+
+		for (const attrib of msg.OptionalAttributes){
+			switch (attrib.attribute){
+				case "MSGID":
+					setattribs.msgid = true
+					if ((msg.MsgId) && (attrib.value != msg.MsgId)){
+						attrib.value = msg.MsgId
+					}
+					break;
+				case "TID":
+					setattribs.tid = true
+					attrib.value = TosserName
+					break;
+				case "TZUTC":
+					setattribs.tz = true
+					attrib.value = SystemTZUTC
+					break;
+				case "CHRS":
+					setattribs.chrs = true
+					break;
+				default:
+					//
+			}
+		}
+		if (!setattribs.msgid){
+			const newattrib = {
+				attribute: "MSGID",
+				value: msg.MsgId
+			}
+			msg.OptionalAttributes.push(newattrib)
+		}
+		if (!setattribs.tid){
+			const newattrib = {
+				attribute: "TID",
+				value: TosserName
+			}
+			msg.OptionalAttributes.push(newattrib)
+		}
+		if (!setattribs.tz){
+			const newattrib = {
+				attribute: "TZUTC",
+				value: SystemTZUTC
+			}
+			msg.OptionalAttributes.push(newattrib)
+		}
+
+		// Message type 0002
+		buffer.writeUInt16LE(0x0002, offset); offset += 2;
+
+		// Message header
+		buffer.writeUInt16LE(msg.SourceNode, offset); offset += 2;
+		buffer.writeUInt16LE(msg.DestinationNode, offset); offset += 2;
+		buffer.writeUInt16LE(msg.SourceNet, offset); offset += 2;
+		buffer.writeUInt16LE(msg.DestinationNet, offset); offset += 2;
+		buffer.writeUInt16LE(msg.Attribute, offset); offset += 2;
+		buffer.writeUInt16LE(msg.Cost, offset); offset += 2;
+
+		// DateTime (20 bytes)
+		const dtStr = (msg.DateTime || '').padEnd(20, '\0');
+		Buffer.from(dtStr).copy(buffer, offset); offset += 20;
+
+		// Null-terminated strings
+		const writeNullStr = (str) => {
+			const b = Buffer.from(str + '\0');
+			b.copy(buffer, offset);
+			offset += b.length;
+		};
+
+		writeNullStr(msg.ToUser || '');
+		writeNullStr(msg.FromUser || '');
+		writeNullStr(msg.Subject || '');
+
+		// Reconstruct RawText
+		let rawText = '';
+		if (msg.Type === 'Echomail' && msg.AreaTag) {
+			rawText += `AREA:${msg.AreaTag}\r`;
+		}
+		for (const attr of msg.OptionalAttributes || []) {
+			rawText += `\x01${attr.attribute}:${attr.value}\r`;
+		}
+		// Body text (join with \r)
+		const bodyLines = (msg.BodyText || '').split('\r\n');
+		rawText += bodyLines.join('\r');
+		var originsplit = "\r\r---"
+		if (msg.SignatureString){
+			originsplit += "\r" + msg.SignatureString + "\r"
+		}
+		if (msg.ProductLine){
+			originsplit += " " + msg.ProductLine
+		}
+		rawText += originsplit
+		//only apply origin line to echomail?
+		if (msg.Type === "Echomail"){
+			if (msg.OriginLine){
+				rawText += "\r * Origin: " + msg.OriginLine
+			}
+			if (msg.SeenBy) {
+				rawText += `\rSEEN-BY: ${msg.SeenBy}`;
+			}
+			if (msg.Path) {
+				rawText += `\r\x01PATH: ${msg.Path}`;
+			}
+		}
+		rawText += "\r"
+
+
+		writeNullStr(rawText);
+		console.log("Pushing processed", msg.Id)
+		if (msg.Type === "Echomail"){
+			returnObj.processedechomail.push(msg.Id)
+		}else if (msg.Type === "Netmail"){
+			returnObj.processednetmail.push(msg.Id)
+		}else{
+			returnObj.processedother.push(msg.Id)
+		}
+		returnObj.processedcount += 1
+		
+	}
+
+	// End of packet
+	buffer.writeUInt16LE(0x0000, offset); offset += 2;
+
+	// Trim buffer
+	const finalBuffer = buffer.subarray(0, offset);
+
+	// Filename
+	// const sourceNtHex = parseInt(packet.SourceNet).toString(16).padStart(4, '0');
+	// const sourceNoHex = parseInt(packet.SourceNode).toString(16).padStart(4, '0');
+	const millihex = ftnUtils.getMilliHex()
+	const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
+	const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
+	const filename = `${defaultOutbound}/${millihex}.pkt`;
+	// Write file
+	try {
+		fs.writeFileSync(filename, finalBuffer);
+		//increment pkt count
+		//count++;
+		const desthex = netHex + nodeHex
+		console.log(netHex, nodeHex)
+		UpcertMailerFile(filename, desthex, "Normal")
+	} catch (error) {
+		console.error(`Failed to write ${filename}: ${error.message}`);
+		return false;
+	}
+	return returnObj
+}
+
+async function WritePktsToNode(messageArray, linkedNode, systemaddress){
+	var returnObj = {
+		processedcount: 0,
+		processednetmail: [],
+		processedechomail: [],
+		failedmsgs: [],
+		pktcount: 0
+	}
+	if (!messageArray || !Array.isArray(messageArray)) {
+		throw new Error(`Invalid message data!`);
+		return false;
+	}
+	if (messageArray.length === 0){
+		return 0
+	}
+	//TODO: determine zone vs defaultzone and define directory to check before checking
+    try {
+		// Ensure export directory exists
+		if (!fs.existsSync('export')) {
+			fs.mkdirSync('export', { recursive: true });
+		}
+	}catch(error){
+		throw new Error(`Failure ensuring export directory present: ${error.message}`);
+		return false
+	}
+	//need loop to do pkts undil msgarray is empty
+	while (messageArray.length > 0){
+		//strip messages from array to new array until max count, then pass to write function
+		var pktmsgarray = messageArray.splice(0, maxMsg);
+		var pktres = await WritePktToNode(pktmsgarray, linkedNode, systemaddress)
+		if ((pktres)&&(pktres.processedcount)){
+			console.log(pktres)
+			//increment pkt count and concat processed lists.
+			returnObj.pktcount ++
+			returnObj.processedcount += pktres.processedcount
+			returnObj.processednetmail = returnObj.processednetmail.concat(pktres.processednetmail)
+			returnObj.processedechomail = returnObj.processedechomail.concat(pktres.processedechomail)			
+		}else{
+			if (pktres){
+				console.log("Semi noticed")
+				console.log(pktres)
+				returnObj.processedcount = 100
+			}else{
+				console.log("Sub process no result")
+			}
+			
+		}
+	}
+		
+	return returnObj
+}
+
+function WritePkts(messageArray){
+	var returnObj = {
+		processedmsgs: [],
+		failedmsgs: [],
+		pktcount: 0
+	}
+	if (!messageArray || !Array.isArray(messageArray)) {
+		throw new Error(`Invalid message data!`);
+		return false;
+	}
+	if (messageArray.length === 0){
+		return 0
+	}
+    try {
+		// Ensure export directory exists
+		if (!fs.existsSync('export')) {
+			fs.mkdirSync('export', { recursive: true });
+		}
+	}catch(error){
+		throw new Error(`Failure ensuring export directory present: ${error.message}`);
+		return false
+	}
+	//create groups by source and destination to group messages into separate packets
+	const packetGroups = new Map();
+
+	for (const message of messageArray){
+		var sourceZone = message.SourceZone || 1
+		var destinationZone = message.DestinationZone || 1
+		var SourceKey = `${sourceZone}:${message.SourceNet}/${message.SourceNode}`
+		var DestKey = `${destinationZone}:${message.DestinationNet}/${message.DestinationNode}`
+		for (const attrib of message.OptionalAttributes){
+			if (attrib.attribute == "INTL"){
+				var addresses = attrib.value.split(" ")
+				DestKey = addresses[0]
+				SourceKey = addresses[1]
+			}
+		}
+		message.Source = SourceKey
+		message.Destination = DestKey
+		if (!packetGroups.has(SourceKey)){
+			packetGroups.set(SourceKey, {})			
+		}
+		if (!packetGroups.get(SourceKey)[DestKey]){
+			packetGroups.get(SourceKey)[DestKey] = []
+		}
+		packetGroups.get(SourceKey)[DestKey].push(message)
+	}
+
+	let count = 0;
+	for (const sourceAddress of packetGroups.keys()){
+		const source = packetGroups.get(sourceAddress)
+		for (const destinationAddress of Object.keys(source)){
+			const destination = source[destinationAddress]
+			
+			//destination is array of messages for destination from source. We can now create a packet.
+			const packet = new Packet()
+			packet.SourceZone = sourceAddress.split(":")[0]
+			packet.DestinationZone = destinationAddress.split(":")[0]
+			packet.SourceNet = sourceAddress.split(":")[1].split("/")[0]
+			packet.SourceNode = sourceAddress.split(":")[1].split("/")[1]
+			packet.DestinationNet = destinationAddress.split(":")[1].split("/")[0]
+			packet.DestinationNode = destinationAddress.split(":")[1].split("/")[1]
+			packet.Source = sourceAddress
+			packet.Destination = destinationAddress
+
+			// Set current time
+			const now = new Date();
+			packet.Year = now.getFullYear();
+			packet.Month = now.getMonth();
+			packet.Day = now.getDate();
+			packet.Hour = now.getHours();
+			packet.Minute = now.getMinutes();
+			packet.Second = now.getSeconds();
+			packet.DateTime = now;
+			packet.Baud = 0;
+			packet.PacketType = 2;
+			packet.ProdCode = 0xFE;
+			packet.Serial = 0x01;
+			packet.Password = '';
+			if (testpwd){
+				//do password lookup
+				packet.Password = testpwd
+			}
+			packet.Messages = destination;
+			packet.MessageCount = destination.length;
+
+			// Build buffer
+			const bufferSize = 10000; // Sufficient size
+			const buffer = Buffer.alloc(bufferSize);
+			let offset = 0;
+
+			// Write packet header
+			buffer.writeUInt16LE(packet.SourceNode, offset); offset += 2;
+			buffer.writeUInt16LE(packet.DestinationNode, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Year, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Month, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Day, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Hour, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Minute, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Second, offset); offset += 2;
+			buffer.writeUInt16LE(packet.Baud, offset); offset += 2;
+			buffer.writeUInt16LE(packet.PacketType, offset); offset += 2;
+			buffer.writeUInt16LE(packet.SourceNet, offset); offset += 2;
+			buffer.writeUInt16LE(packet.DestinationNet, offset); offset += 2;
+			buffer.writeUInt8(packet.ProdCode, offset); offset += 1;
+			buffer.writeUInt8(packet.Serial, offset); offset += 1;
+
+			// Password (8 bytes, null-padded)
+			const pwdBuf = Buffer.from(packet.Password.padEnd(8, '\0'));
+			pwdBuf.copy(buffer, offset); offset += 8;
+
+			// Zones
+			buffer.writeUInt16LE(packet.SourceZone, offset); offset += 2;
+			buffer.writeUInt16LE(packet.DestinationZone, offset); offset += 2;
+
+			// Fill bytes (20 zeros)
+			for (let i = 0; i < 20; i++) {
+			    buffer.writeUInt8(0, offset++);
+			}
+
+			// Write messages
+			for (const msg of packet.Messages) {
+				// Parse and populate required attributes if empty.
+				var setattribs = {
+					msgid: false,
+					tid: false,
+					tz: false,
+				}
+
+				for (const attrib of msg.OptionalAttributes){
+					switch (attrib.attribute){
+						case "MSGID":
+							setattribs.msgid = true
+							if ((msg.MsgId) && (attrib.value != msg.MsgId)){
+								attrib.value = msg.MsgId
+							}
+							break;
+						case "TID":
+							setattribs.tid = true
+							attrib.value = TosserName
+							break;
+						case "TZUTC":
+							setattribs.tz = true
+							attrib.value = SystemTZUTC
+							break;
+						default:
+							//
+					}
+				}
+				if (!setattribs.msgid){
+					const newattrib = {
+						attribute: "MSGID",
+						value: msg.MsgId
+					}
+					msg.OptionalAttributes.push(newattrib)
+				}
+				if (!setattribs.tid){
+					const newattrib = {
+						attribute: "TID",
+						value: TosserName
+					}
+					msg.OptionalAttributes.push(newattrib)
+				}
+				if (!setattribs.tz){
+					const newattrib = {
+						attribute: "TZUTC",
+						value: SystemTZUTC
+					}
+					msg.OptionalAttributes.push(newattrib)
+				}
+
+				// Message type 0002
+				buffer.writeUInt16LE(0x0002, offset); offset += 2;
+
+				// Message header
+				buffer.writeUInt16LE(msg.SourceNode, offset); offset += 2;
+				buffer.writeUInt16LE(msg.DestinationNode, offset); offset += 2;
+				buffer.writeUInt16LE(msg.SourceNet, offset); offset += 2;
+				buffer.writeUInt16LE(msg.DestinationNet, offset); offset += 2;
+				buffer.writeUInt16LE(msg.Attribute, offset); offset += 2;
+				buffer.writeUInt16LE(msg.Cost, offset); offset += 2;
+
+				// DateTime (20 bytes)
+				const dtStr = (msg.DateTime || '').padEnd(20, '\0');
+				Buffer.from(dtStr).copy(buffer, offset); offset += 20;
+
+				// Null-terminated strings
+				const writeNullStr = (str) => {
+					const b = Buffer.from(str + '\0');
+					b.copy(buffer, offset);
+					offset += b.length;
+				};
+
+				writeNullStr(msg.ToUser || '');
+				writeNullStr(msg.FromUser || '');
+				writeNullStr(msg.Subject || '');
+
+				// Reconstruct RawText
+				let rawText = '';
+				if (msg.Type === 'Echomail' && msg.AreaTag) {
+					rawText += `AREA:${msg.AreaTag}\r`;
+				}
+				for (const attr of msg.OptionalAttributes || []) {
+					rawText += `\x01${attr.attribute}:${attr.value}\r`;
+				}
+				if (msg.SeenBy) {
+					rawText += `\x01SEEN-BY: ${msg.SeenBy}\r`;
+				}
+				// Body text (join with \r)
+				const bodyLines = (msg.BodyText || '').split('\r\n');
+				rawText += bodyLines.join('\r');
+				var originsplit = "\r\r---"
+				if (msg.SignatureString){
+					originsplit += "\r" + msg.SignatureString + "\r"
+				}
+				if (msg.ProductLine){
+					originsplit += " " + msg.ProductLine
+				}
+				rawText += originsplit
+				//only apply origin line to echomail?
+				if (msg.Type === "Echomail"){
+					if (msg.OriginLine){
+						rawText += "\r * Origin: " + msg.OriginLine
+					}
+					if (msg.SeenBy) {
+						rawText += `\rSEEN-BY: ${msg.SeenBy}`;
+					}
+					if (msg.Path) {
+						rawText += `\r\x01PATH: ${msg.Path}`;
+					}
+				}
+				rawText += "\r"
+
+				writeNullStr(rawText);
+				console.log("Pushing processed", msg.Id)
+				returnObj.processedmsgs.push(msg.Id)
+			}
+
+			// End of packet
+			buffer.writeUInt16LE(0x0000, offset); offset += 2;
+
+			// Trim buffer
+			const finalBuffer = buffer.subarray(0, offset);
+
+			// Filename
+			// const sourceNtHex = parseInt(packet.SourceNet).toString(16).padStart(4, '0');
+			// const sourceNoHex = parseInt(packet.SourceNode).toString(16).padStart(4, '0');
+			const millihex = ftnUtils.getMilliHex()
+			const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
+			const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
+			const filename = `${defaultOutbound}/${millihex}.pkt`;
+			// Write file
+			try {
+				fs.writeFileSync(filename, finalBuffer);
+				//increment pkt count
+				count++;
+				const desthex = netHex + nodeHex
+				console.log(netHex, nodeHex)
+				UpcertMailerFile(filename, desthex, "Normal")
+			} catch (error) {
+				console.error(`Failed to write ${filename}: ${error.message}`);
+				return false;
+			}
+		}
+		
+	}
+	returnObj.pktcount = count
+	return returnObj
+}
+
+async function UpcertMailerFile(filename, desthex, flavour){
+	//ut vs lo
+	var extension = ".flo"
+	if (flavour){
+		switch (flavour){
+			case "Normal":
+				extension = ".flo"
+				break;
+			case "Direct":
+				extension = ".dlo"
+				break;
+			//may be continuous instead of crash
+			case "Crash":
+				extension = ".clo"
+				break;
+			case "Immediate":
+				extension = ".ilo"
+				break;
+			case "Hold":
+				extension = ".hlo"
+				break;
+			default:
+				//normal
+				extension = ".flo"
+		}
+	}
+	var fline = "^" + filename + "\r\n"
+	console.log(fline)
+	var mfile = defaultOutbound + "/" + desthex + extension
+	try{
+		await fs.appendFileSync(mfile, fline)
+	}catch(error){
+		console.log(error)
+	}
+	
+
+}
+
+async function TossOutboundNetmail(){
+	console.log("\r\n-------------------\r\nOutbound Netmail\r\n-------------------")
+	var dblist = await netmail.getPendingNetmail()
+	var sendArray = []
+	for await (var msg of dblist){
+		console.log("Message from", msg.FromUser, "To", msg.ToUser)
+		//var netMessage = new Message()
+		// //map standard keys
+		// for await (var key of netmailkeys){
+		// 	netMessage[key] = msg[key]
+		// }
+		//setup optional attributes
+		var intlval = msg.Destination + " " + msg.Source
+		var hasintl = false
+		for await (var oa of msg.OptionalAttributes){
+			if (oi.attribute == "INTL"){
+				hasintl = true
+			}
+		}
+		if (!hasintl){
+			msg.OptionalAttributes.push({attribute: "INTL", value: intlval})
+		}		
+		sendArray.push(msg)
+	}
+	var pktresult = await WritePkts(sendArray)
+	if ((pktresult)&&(pktresult.processedmsgs)){
+		console.log("Wrote", pktresult.pktcount, "Packets")
+		await netmail.markMessageSentArray(pktresult.processedmsgs, TosserName)
+	}else{
+		console.log("No outbound msgs processed")
+	}
+}
+
+async function TossOutboundEchomail(){
+	console.log("\r\n-------------------\r\nOutbound Echomail\r\n-------------------")
+	var nodelist = await linkedNodes.getActiveNodes()
+	if ((!nodelist)||(nodelist.length < 1)){
+		console.log("No Linked Nodes!")
+		return
+	}
+	for await (var node of nodelist){
+		await echomail.getOutboundForNode(node)
+	}
+	console.log("Completed Echomail check\r\n\r\n")
+	return
+}
+
+async function TossOutbound(){
+	console.log("\r\n-------------------\r\nTossing Oubound\r\n-------------------")
+	await TossOutboundNetmail()
+	await TossOutboundEchomail()
+}
+
+export {
+	TossInbound,
+	TossOutbound,
+	ReadPkt,
+	WritePkts,
+	WritePktsToNode,
+	FindAndExtractArchives,
+	TossInboundFile,
+	processMessageText
+}

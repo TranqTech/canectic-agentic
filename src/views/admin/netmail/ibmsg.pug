@@ -1,0 +1,59 @@
+extends ../../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-3
+        .col-6              
+          .card.bg-light.border-primary
+            .card-header.text-white.bg-darkblue
+              .row
+                .col-8
+                  h2= title
+                .col-4
+                  .text-end
+                    a.button.btn.btn-lg.btn-info(href='/admin/netmail')
+                      |Exit
+            .card-body
+              if errormessages && errormessages.length > 0
+                ul.text-danger
+                  for error of errormessages
+                    li.text-danger
+                      =error
+                br
+              .row
+                .col-6
+                  h5
+                    |From:
+                  .fg-green
+                    =message.from_user
+                    | 
+                    |(
+                    =message.source
+                    |)
+                .col-6
+                  h5
+                    |To:
+                  .fg-darkblue
+                    =message.to_user
+                    | 
+                    |(
+                    =message.destination
+                    |)
+              .row
+                .col-12
+                  br
+                  h5
+                    |Subject:
+                  .fg-darkblue
+                    =message.subject
+                  hr
+                  .card
+                    .card-body.vh-50.bg-light
+                        !=ftext
+                  //

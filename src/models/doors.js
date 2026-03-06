@@ -45,6 +45,32 @@ var testingarray = [
 	maxnodes: 0
 },
 {
+	slug: "lordmaint",
+	name: "LoRD Maintenance",
+	doorScript: "lord.js",
+	doorDir: "/home/kostie/Doors/JS/lord",
+	doorArgs: ["-m"],
+	launchType: "SyncJSDoor",
+	dbSubdir: "DB",
+	usereal_local: false,
+	usereal_doorsession: false,
+	pauseOnExit: true,
+	maxnodes: 0
+},
+{
+	slug: "lordreset",
+	name: "LoRD reset",
+	doorScript: "lord.js",
+	doorDir: "/home/kostie/Doors/JS/lord",
+	doorArgs: ["RESET"],
+	launchType: "SyncJSDoor",
+	dbSubdir: "DB",
+	usereal_local: false,
+	usereal_doorsession: false,
+	pauseOnExit: true,
+	maxnodes: 0
+},
+{
 	slug: "lord2",
 	name: "LoRD 2",
 	doorScript: "lord2.js",

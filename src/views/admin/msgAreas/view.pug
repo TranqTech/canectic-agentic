@@ -1,0 +1,188 @@
+extends ../../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-3
+        .col-6
+          if !msgArea
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-lg.btn-info(href='/admin/msgGroups')
+                        |Exit
+              .card-body
+                br
+                h3
+                  |Data Not Found!
+                br
+          else
+            .card      
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      
+
+              .card-body.vh-75.bg-dark
+                if threadlist && threadlist.length > 0
+                  for thread of threadlist
+                    .card.border-primary.threadcard(data-bs-thread-uuid=thread.uuid, data-bs-shortcode=msgArea.shortcode)
+                      .card-header.bg-primary.fg-white
+                        .row
+                          .col-8
+                            h5
+                              = thread.subject
+                            .fg-yellow
+                              |  
+                              |- 
+                              =thread.started_by
+                          .col-4
+                            .text-end
+                              h6
+                                |Latest: 
+                                = thread.last_message_from
+                              - var e1date = Date.parse(thread.last_message)
+                              - var edate = DateTime.fromMillis(e1date)
+                              = edate.toFormat('MMMM dd, yyyy')
+                      .card-body
+                        .row
+                          .col-6
+                            h6
+                              - var mcount = thread.message_count.toLocaleString()
+                              //#{thread.message_count.toLocaleString()}
+                              //=thread.message_count
+                              = mcount
+                              | 
+                              if thread.message_count > 1
+                                |Messages
+                              else
+                                |Message
+                          .col-6
+                            .text-end
+                              h6
+                                |Started:
+                                | 
+                                - var e1date = Date.parse(thread.started_at)
+                                - var edate = DateTime.fromMillis(e1date)
+                                = edate.toFormat('MMMM dd, yyyy')
+                    br
+        .col-3
+          .row
+            .col-1
+            .col-8
+              .card.bg-light
+                .card-header.bg-darkblue.text-white
+                  .h4
+                    |Quick Actions
+                .card-body.bg-dark
+                  .d-grid.gap-2
+                    a.button.btn.btn-md.btn-danger(href=`/admin`)
+                        |Exit
+                    br
+                    h4
+                      |Change:
+                    a.button.btn.btn-lg.btn-info(href=`/admin/msggroup/${msgArea.group_shortcode}`)
+                      |Area
+                    a.button.btn.btn-lg.btn-info(href=`/admin/msgGroups`)
+                      |Group
+                    br
+                    button.btn.btn-lg.btn-success(data-bs-toggle='modal' data-bs-target="#newThreadModal")
+                      |New Thread
+
+      #newThreadModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title
+                  |New Thread
+              button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+            .modal-body
+              form(action=`/admin/msgArea/${msgArea.shortcode}/newthread` method="POST" class="form-registration")
+
+                .row
+                  .col-1
+                  .col-10
+                    label(for="from_user") From User:
+                    input(
+                      type="text"
+                      id="from_user"
+                      name="from_user"
+                      class="form-control"
+                      tabindex="1"
+                      required
+                    )
+                    br
+                    label(for="to_user") To User:
+                    input(
+                      type="text"
+                      id="to_user"
+                      name="to_user"
+                      class="form-control"
+                      tabindex="2"
+                      value="All"
+                      required
+                    )
+                    br
+                    label(for="subject") Subject:
+                    input(
+                      type="text"
+                      id="subject"
+                      name="subject"
+                      class="form-control"
+                      tabindex="3"
+                      required
+                    )
+                    br
+                    label(for="body_text") Message Body:
+                    textarea(
+                      type="text"
+                      id="body_text"
+                      rows=15
+                      name="body_text"
+                      class="form-control"
+                      required
+                    )
+                .row
+                  .col-1
+                  .col-10
+                    br
+                    .text-end
+                      input(
+                        type="submit"
+                        value="Submit"
+                        class="btn btn-lg btn-success btn-block"
+                        tabindex="3"
+                        )
+
+
+  script.
+    
+    document.addEventListener('DOMContentLoaded', function() {
+      const threadcards = document.querySelectorAll('.threadcard');
+      threadcards.forEach(card =>{
+        card.style.cursor = 'pointer'
+        card.addEventListener('click', function() {
+          //alert("Bang!")
+          const threaduuid = this.getAttribute('data-bs-thread-uuid')
+          const shortcode = this.getAttribute('data-bs-shortcode')
+          if ((threaduuid)&&(shortcode)){
+            //alert(threadid)
+            window.location.href = `/admin/msgArea/${shortcode}/thread/${threaduuid}`
+          }else{
+            alert("No ID!")
+          }
+        })
+      })
+    })

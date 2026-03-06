@@ -44,7 +44,7 @@ function sendOutput(data) {
 var dk = new DorkitShim(comm, sendOutput, userInfo);
 
 // --- Install Synchronet-compatible globals ---
-installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort);
+installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, workerData.doorArgs);
 
 // --- Signal ready ---
 parentPort.postMessage({ type: MSG_READY });

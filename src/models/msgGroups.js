@@ -1,42 +1,44 @@
 //imports
 import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
-import * as bcrypt from 'bcrypt';
 
 //internal modules
-import * as mongoquick from "../middleware/db/mongoquick.js"
-import * as postgres from '../middleware/db/postgres.js'
-import * as msgAreas from "./msgAreas.js"
+import * as postgres from '../middleware/db/postgres.js';
+import * as alogger from "../utils/alogger.js";
+import * as msgAreas from "./msgAreas.js";
 
-async function newGroup(formObj){
-	console.log("Creating Group")
+dotenv.config();
+
+async function newGroup(formObj) {
 	var returnObj = {
 		status: false,
 		errormessages: []
+	};
+
+	if (!formObj.name) {
+		returnObj.errormessages.push("Name cannot be empty!");
 	}
-	//validate
-	if (!formObj.name){
-		returnObj.errormessages.push("Name cannot be empty!")
+	if (!formObj.description) {
+		returnObj.errormessages.push("Description cannot be empty!");
 	}
-	if (!formObj.description){
-		returnObj.errormessages.push("Description cannot be empty!")
+	if (!formObj.shortcode) {
+		returnObj.errormessages.push("Must have a shortcode!");
 	}
-	if (!formObj.shortcode){
-		returnObj.errormessages.push("Must have a shortcode!")
+	if (returnObj.errormessages.length > 0) {
+		return returnObj;
 	}
-	if (returnObj.errormessages.length > 0){
-		return returnObj
+
+	var shorty = formObj.shortcode.toUpperCase().trim();
+	var uniqueShortcode = await postgres.checkValueUnique("shortcode", shorty, "message_groups");
+	if (!uniqueShortcode) {
+		returnObj.errormessages.push("Shortcode must be unique!");
+		return returnObj;
 	}
-	var shorty = formObj.shortcode.toUpperCase().trim()
-	var uniqueShortcode = await postgres.checkValueUnique("shortcode", shorty, "message_groups")
-	if (!uniqueShortcode){
-		returnObj.errormessages.push("Shortcode must be unique!")
-		console.log("shortcode must be unique!")
-		return returnObj
-	}
-	returnObj.shortcode = shorty
-	var currtime = await new Date()
-	var uuid = await uuidv4()
+
+	returnObj.shortcode = shorty;
+	var currtime = new Date();
+	var uuid = uuidv4();
+
 	var pgObj = {
 		uuid: uuid,
 		name: formObj.name,
@@ -49,91 +51,134 @@ async function newGroup(formObj){
 		created_by_uuid: formObj.createdByUUID,
 		created_by_name: formObj.createdByName,
 		active: true
-	}
-	var dbres = await postgres.insertObject(pgObj, "message_groups")
-	if (dbres.status == true){
-		returnObj.status = true
-	}else{
-		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages)
-	}
-	console.log("Returning")
-	return returnObj
-}
+	};
 
-async function isShortcodeUnique(shortcode){
-	var isUnique = true
-	console.log("Checking DB")
-	var dblist = await mongoquick.getCollectionByFilter({shortcode: shortcode}, "MessageGroups")
-	console.log("Checking results")
-	if (dblist && dblist.length > 0){
-		isUnique = false
-	}
-	return isUnique
-}
-
-async function getGroupByShortcode(shortcode){
-	var shorty = shortcode.toUpperCase().trim()
-	console.log("Finding group for shortcode", shortcode)
-	var dbgroup = await postgres.singlereadquery('SELECT * FROM message_groups WHERE UPPER(shortcode) LIKE UPPER($1)', [shorty])
-	return dbgroup
-}
-
-async function getAllGroups(){
-	var grouplist = []
-	//var dblist = await mongoquick.getCollectionByFilter({}, "MessageGroups")
-	var dblist = await postgres.readquery('SELECT * FROM message_groups ORDER BY name ASC')
-	if ((dblist)&&(dblist.length > 0)){
-		grouplist = dblist
+	var dbres = await postgres.insertObject(pgObj, "message_groups");
+	if (dbres.status === true) {
+		returnObj.status = true;
+		alogger.writeAlog(5, "Message group created: " + formObj.name + " (" + shorty + ")", "greenbright");
+	} else {
+		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
 
-	return grouplist
+	return returnObj;
 }
 
-async function getActiveGroups(){
-	var grouplist = []
-	//var dblist = await mongoquick.getCollectionByFilter({active: true}, "MessageGroups")
-	var dblist = await postgres.readquery('SELECT * FROM message_groups WHERE active ORDER BY name ASC')
-	if ((dblist)&&(dblist.length > 0)){
-		grouplist = dblist
-	}
-
-	return grouplist
+async function getGroupByShortcode(shortcode) {
+	var shorty = shortcode.toUpperCase().trim();
+	var dbgroup = await postgres.queryOne(
+		'SELECT * FROM message_groups WHERE UPPER(shortcode) LIKE UPPER($1)',
+		[shorty]
+	);
+	return dbgroup;
 }
 
-async function getInactiveGroups(){
-	var grouplist = []
-	//var dblist = await mongoquick.getCollectionByFilter({active: false}, "MessageGroups")
-	var dblist = await postgres.readquery('SELECT * FROM message_groups WHERE NOT active ORDER BY name ASC')
-	if ((dblist)&&(dblist.length > 0)){
-		grouplist = dblist
-	}
-
-	return grouplist
+async function getAllGroups() {
+	var dblist = await postgres.query(
+		'SELECT * FROM message_groups ORDER BY name ASC'
+	);
+	return dblist || [];
 }
 
-async function getAllGroupsWithAreas(){
-	var querytext = "SELECT id, name, description, shortcode FROM message_groups WHERE active ORDER BY name ASC"
-	var grouplist = await postgres.query(querytext, [])
-	if ((grouplist)&&(grouplist.length > 0)){
-		for await (var group of grouplist){
-			group.areas = []
-			group.areacount = 0
-			var dbareas = await postgres.query("SELECT id, name, description, areatag, shortcode FROM message_areas WHERE active AND networked AND group_id = $1 ORDER BY name ASC", [group.id])
-			if ((dbareas)&&(dbareas.length > 0)){
-				group.areas = dbareas
-				group.areacount = dbareas.length
-			}
+async function getActiveGroups() {
+	var dblist = await postgres.query(
+		'SELECT * FROM message_groups WHERE active ORDER BY name ASC'
+	);
+	return dblist || [];
+}
+
+async function getInactiveGroups() {
+	var dblist = await postgres.query(
+		'SELECT * FROM message_groups WHERE NOT active ORDER BY name ASC'
+	);
+	return dblist || [];
+}
+
+async function getAllGroupsWithAreas() {
+	var grouplist = await postgres.query(
+		'SELECT id, name, description, shortcode FROM message_groups WHERE active ORDER BY name ASC',
+		[]
+	);
+
+	if (grouplist && grouplist.length > 0) {
+		for (var group of grouplist) {
+			var dbareas = await postgres.query(
+				'SELECT id, name, description, areatag, shortcode FROM message_areas WHERE active AND networked AND group_id = $1 ORDER BY name ASC',
+				[group.id]
+			);
+			group.areas = dbareas || [];
+			group.areacount = group.areas.length;
 		}
 	}
-	//console.log(grouplist)
-	return grouplist
+
+	return grouplist || [];
 }
 
-export{
+async function removeGroup(shortcode, deleteTables) {
+	var returnObj = {
+		status: false,
+		errormessages: [],
+		areasRemoved: 0,
+		areasFailed: []
+	};
+
+	var shorty  = shortcode.toUpperCase().trim();
+	var dbgroup = await getGroupByShortcode(shorty);
+	if (!dbgroup) {
+		returnObj.errormessages.push("Group not found for shortcode " + shorty);
+		return returnObj;
+	}
+
+	// Get all child areas regardless of active state so nothing is left orphaned
+	var arealist = await postgres.query(
+		"SELECT shortcode FROM message_areas WHERE group_id = $1",
+		[dbgroup.id]
+	);
+
+	if (arealist && arealist.length > 0) {
+		alogger.writeAlog(5, "removeGroup: removing " + arealist.length + " areas from group " + shorty, "cyan");
+		for (var area of arealist) {
+			var areaResult = await msgAreas.removeArea(area.shortcode, deleteTables);
+			if (areaResult.status === true) {
+				returnObj.areasRemoved++;
+			} else {
+				// Collect failures but keep going — remove as many areas as possible
+				alogger.writeAlog(3, "removeGroup: failed to remove area " + area.shortcode + ": " + areaResult.errormessages.join(", "), "redbright");
+				returnObj.areasFailed.push({
+					shortcode:     area.shortcode,
+					errormessages: areaResult.errormessages
+				});
+			}
+		}
+
+		// If any areas failed, bail before removing the group record
+		if (returnObj.areasFailed.length > 0) {
+			returnObj.errormessages.push(
+				returnObj.areasFailed.length + " area(s) could not be removed — group record preserved. See areasFailed for details."
+			);
+			return returnObj;
+		}
+	}
+
+	// All areas cleared — remove the group record
+	try {
+		await postgres.write("DELETE FROM message_groups WHERE id = $1", [dbgroup.id]);
+	} catch (error) {
+		returnObj.errormessages.push("Failed to remove group record: " + error.message);
+		return returnObj;
+	}
+
+	alogger.writeAlog(5, "removeGroup: group " + shorty + " removed (" + returnObj.areasRemoved + " areas, deleteTables=" + deleteTables + ")", "greenbright");
+	returnObj.status = true;
+	return returnObj;
+}
+
+export {
 	newGroup,
+	removeGroup,
 	getGroupByShortcode,
 	getAllGroups,
 	getActiveGroups,
 	getInactiveGroups,
 	getAllGroupsWithAreas
-}
+};

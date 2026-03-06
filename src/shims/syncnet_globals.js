@@ -23,7 +23,7 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync,
 import * as nodePath from 'node:path';
 import { Script } from 'node:vm';
 import { Attribute } from './dorkit_shim.js';
-import { RecordFile, RecordFileRecord, GetRecordLength, getRecordLength, setDatabaseDir, importBinaryRecordFile } from './recordfile_sqlite.js';
+import { RecordFile, RecordFileRecord, GetRecordLength, getRecordLength, setDatabaseDir, importBinaryRecordFile, removeRecordFileData } from './recordfile_sqlite.js';
 
 
 /**
@@ -101,8 +101,9 @@ function _transpileSpiderMonkey(src) {
  * @param {string} doorDir — base directory for the door scripts
  * @param {string} dbSubdir — subdirectory (relative to doorDir) for the SQLite game database, or absolute path
  * @param {MessagePort} parentPort — for async messages to main thread
+ * @param {string[]} doorArgs — command-line arguments for the door script (populates argv/argc)
  */
-function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
+function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, doorArgs) {
 
 	// ---- Configure database directory ----
 	// If dbSubdir is set, resolve it relative to doorDir (unless absolute)
@@ -263,8 +264,10 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 	});
 
 	// ---- Argv / Argc ----
-	globalThis.argv = [];
-	globalThis.argc = 0;
+	// Populated from doorArgs passed by the runner (from door config).
+	// Synchronet doors read these globals to get command-line parameters.
+	globalThis.argv = Array.isArray(doorArgs) ? doorArgs.slice() : [];
+	globalThis.argc = globalThis.argv.length;
 
 	// ---- Synchronet sbbsdefs constants (pre-defined) ----
 	// Many doors expect these without explicitly load('sbbsdefs.js').
@@ -810,8 +813,8 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 	/**
 	 * console.noyes(prompt) — ask a yes/no question (default no).
 	 * Lightbar selector: arrow keys toggle, Y/N direct-select, Enter confirms.
-	 * Synchronet convention: returns true for No, false for Yes.
-	 * (Inverted from what you'd expect — matches Synchronet API.)
+	 * Synchronet convention: returns true for Yes, false for No.
+	 * Same return semantics as yesno() — only the default differs.
 	 */
 	globalThis.console.noyes = function(prompt) {
 		if (prompt) {
@@ -821,8 +824,30 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 			{ label: 'Yes', hotkey: 'Y' },
 			{ label: 'No',  hotkey: 'N' }
 		], 1);
-		if (result === -1) return true;
-		return result === 1;
+		if (result === -1) return false;
+		return result === 0;
+	};
+
+	// ---- Standalone yes/no globals ----
+	// Synchronet exposes these as top-level functions in addition to
+	// the console methods. Doors like LORD call deny() directly.
+
+	/**
+	 * deny(prompt) — standalone confirmation prompt, default No.
+	 * Synchronet's deny() = !console.noyes(). Returns true if user
+	 * denied (answered No), false if user confirmed (answered Yes).
+	 */
+	globalThis.deny = function(prompt) {
+		return !globalThis.console.noyes(prompt);
+	};
+
+	/**
+	 * confirm(prompt) — standalone confirmation prompt, default Yes.
+	 * Equivalent to console.yesno(). Returns true if user confirmed (Yes),
+	 * false if user denied (No).
+	 */
+	globalThis.confirm = function(prompt) {
+		return globalThis.console.yesno(prompt);
 	};
 
 	/**
@@ -1103,6 +1128,11 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort) {
 	};
 
 	globalThis.file_remove = function(path) {
+		// Also clear any corresponding SQLite RecordFile table.
+		// Our RecordFile shim stores data in gamedata.sqlite, not .bin files,
+		// so doors that delete .bin files to reset (e.g. LORD's RESET command)
+		// need the SQLite data removed too.
+		removeRecordFileData(path);
 		try { unlinkSync(path); return true; } catch (_) { return false; }
 	};
 

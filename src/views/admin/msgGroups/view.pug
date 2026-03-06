@@ -1,0 +1,253 @@
+extends ../../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-3
+        .col-6
+          if !msgGroup
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-lg.btn-info(href='/admin/msgGroups')
+                        |Exit
+              .card-body
+                br
+                h3
+                  |Data Not Found!
+                br
+          else
+            .card      
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-lg.btn-info(href='/admin/msgGroups')
+                        |Exit
+
+              .card-body
+                h4
+                  =msgGroup.description
+                h4
+                  |Required Security:
+                  | 
+                  =msgGroup.security
+                h4
+                  |Shortcode: 
+                  | 
+                  =msgGroup.shortcode
+            .card
+              .card-header.bg-darkblue.text-white
+                h4
+                  |Areas
+              .card-body
+                .row
+                  .col-1
+                  .col-10
+                    .text-end
+                      button.btn.btn-lg.btn-success(data-bs-toggle='modal' data-bs-target=`#newAreaModal`)
+                        |Add Area
+                    br
+                    if arealist && arealist.length > 0
+                      br
+                      table#msgAreas.table.table-hover
+                        thead
+                          tr
+                            th(scope='col') Name
+                            th(scope='col') Shortcode                      
+                            th(scope='col') Description
+                            th(scope='col') Type
+                            th(scope='col') Msg Count
+                            th(scope='col') Latest
+                          tbody
+                            for area of arealist
+                              tr(data-bs-shortcode=area.shortcode)
+                                td
+                                  =area.name
+                                td
+                                  =area.shortcode
+                                td
+                                  =area.description
+                                td
+                                  if area.networked
+                                    |Network
+                                  else
+                                    |Local
+                                td.text-end
+                                  - var mcount = area.msg_count.toLocaleString()
+                                  //=area.msg_count
+                                  = mcount
+                                td
+                                  if area.last_message
+                                    .text-end
+                                      - var e1date = Date.parse(area.last_message)
+                                      - var edate = DateTime.fromMillis(e1date)
+                                      = edate.toFormat('MMMM dd, yyyy')
+                                  else
+                                    center
+                                      |N/A
+                    else
+                      center
+                        h4
+                          |No Areas Found
+
+            #newAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+              .modal-dialog.modal-dialog-centered.modal-lg
+                .modal-content
+                  .modal-header.bg-dark.text-white
+                    h3.modal-title
+                        |Add Message Area
+                    button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+                  .modal-body
+                    form(action=`/admin/msgGroup/${msgGroup.shortcode}/newArea` method="POST" class="form-registration")
+                      .row
+                        .col-1
+                        .col-10
+                          label(for="name") Name:
+                          input(
+                            type="text"
+                            id="name"
+                            name="name"
+                            class="form-control"
+                            required
+                          )
+                          br
+                          label(for="description") Description:
+                          input(
+                            type="text"
+                            id="description"
+                            name="description"
+                            class="form-control"
+                            required
+                          )
+                          br
+                      .row
+                        .col-1
+                        .col-5
+                          label(for="shortcode") Short Code (Internal):
+                          input(
+                            type="text"
+                            id="shotcode"
+                            name="shortcode"
+                            class="form-control"
+                            required
+                          )
+                          br
+                          label(for="areatag") Area Tag (Network):
+                          input(
+                            type="text"
+                            id="areatag"
+                            name="areatag"
+                            class="form-control"
+                          )
+                          br
+                          label(for="default_address") Networked Area?:
+                          fieldset
+                            .form-check
+                              input#networkselectR1.form-check-input.sponsel(type='radio' name='networked' value='networked' checked=true)
+                              label.form-check-label(for='networkselectR1')
+                                | Yes
+                            .form-check
+                              input#networkselectR2.form-check-input.sponsel(type='radio' name='networked' value='local')
+                              label.form-check-label(for='networkselectR2')
+                                | No
+                          br
+                          label(for="minage") Minimum Participant Age:
+                          input(
+                            type="number"
+                            id="minage"
+                            min=13
+                            max=255
+                            name="minage"
+                            class="form-control S1field"
+                            value=13
+                          )
+                        .col-5
+                            label(for="readsecurity") Read Security:
+                            input(
+                              type="number"
+                              id="readsecurity"
+                              min=1
+                              max=255
+                              name="readsecurity"
+                              class="form-control S1field"
+                              value=msgGroup.security
+                              required
+                            )
+                            br
+                            label(for="postsecurity") Post Security:
+                            input(
+                              type="number"
+                              id="postsecurity"
+                              min=1
+                              max=255
+                              name="postsecurity"
+                              class="form-control S1field"
+                              value=msgGroup.security
+                              required
+                            )
+                            br
+                            label(for="default_address") Default Address (This System):
+                            input(
+                              type="text"
+                              id="default_address"
+                              name="default_address"
+                              class="form-control"
+                            )
+                            br
+                            label(for="maxage") Maximum Participant Age:
+                            input(
+                              type="number"
+                              id="maxage"
+                              min=13
+                              max=255
+                              name="maxage"
+                              class="form-control S1field"
+                              value=255
+                            )
+                      .row
+                        .col-1
+                        .col-10
+                          br
+                          .text-end
+                            input(
+                              type="submit"
+                              value="Submit"
+                              class="btn btn-lg btn-success btn-block"
+                              )
+
+  script.
+    // Add click event listener to table rows
+    document.addEventListener('DOMContentLoaded', function() {
+      const table = document.getElementById('msgAreas');
+
+      if (table) {
+        // Add click event to all tbody rows
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+          // Add pointer cursor to indicate clickable rows
+          row.style.cursor = 'pointer';
+          
+          row.addEventListener('click', function() {
+            const shortcode = this.getAttribute('data-bs-shortcode');
+            
+            if (shortcode) {
+              // Navigate to the msgGroup page
+              window.location.href = `/admin/msgarea/${shortcode}`;
+            }
+          });
+        });
+      }
+    });

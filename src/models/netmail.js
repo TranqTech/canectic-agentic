@@ -1,41 +1,58 @@
 //imports
 import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
-import { DateTime } from "luxon";
 
 //internal modules
 import * as postgres from '../middleware/db/postgres.js';
+import * as alogger from "../utils/alogger.js";
 import * as ftn from "./ftnClasses.js";
 import * as ftnUtils from "../utils/ftnUtils.js";
+
+dotenv.config();
 
 const DefaultAddress = process.env.DefaultAddress || "1:1/1";
 
 async function getInboundMsgByMsgId(msgId) {
 	var idupper = msgId.toUpperCase().trim();
-	var dbres = await postgres.queryOne('SELECT * FROM netmail_in WHERE UPPER(msg_id) LIKE UPPER($1)', [idupper]);
+	var dbres = await postgres.queryOne(
+		'SELECT * FROM netmail_in WHERE UPPER(msg_id) LIKE UPPER($1)',
+		[idupper]
+	);
 	return dbres;
 }
 
 async function getInboundMsgByUUID(uuid) {
 	var idupper = uuid.toUpperCase().trim();
-	var dbres = await postgres.queryOne('SELECT * FROM netmail_in WHERE UPPER(uuid) LIKE UPPER($1)', [idupper]);
+	var dbres = await postgres.queryOne(
+		'SELECT * FROM netmail_in WHERE UPPER(uuid) LIKE UPPER($1)',
+		[idupper]
+	);
 	return dbres;
 }
 
 async function getOutboundMsgByMsgId(msgId) {
 	var idupper = msgId.toUpperCase().trim();
-	var dbres = await postgres.queryOne('SELECT * FROM netmail_out WHERE UPPER(msg_id) LIKE UPPER($1)', [idupper]);
+	var dbres = await postgres.queryOne(
+		'SELECT * FROM netmail_out WHERE UPPER(msg_id) LIKE UPPER($1)',
+		[idupper]
+	);
 	return dbres;
 }
 
 async function getOutboundMsgByUUID(uuid) {
 	var idupper = uuid.toUpperCase().trim();
-	var dbres = await postgres.queryOne('SELECT * FROM netmail_out WHERE UPPER(uuid) LIKE UPPER($1)', [idupper]);
+	var dbres = await postgres.queryOne(
+		'SELECT * FROM netmail_out WHERE UPPER(uuid) LIKE UPPER($1)',
+		[idupper]
+	);
 	return dbres;
 }
 
 async function getOutboundMsgByID(id) {
-	var dbres = await postgres.queryOne('SELECT * FROM netmail_out WHERE id = $1', [id]);
+	var dbres = await postgres.queryOne(
+		'SELECT * FROM netmail_out WHERE id = $1',
+		[id]
+	);
 	return dbres;
 }
 
@@ -61,7 +78,6 @@ async function newInboundNetmail(message) {
 		}
 	}
 
-	// Save it
 	var dbObj = await ftnToDb(message);
 	var dbres = await postgres.insertObject(dbObj, "netmail_in");
 	if (dbres.status === true) {
@@ -79,24 +95,48 @@ async function newOutboundNetmail(formObj) {
 		errormessages: []
 	};
 
+	if (!formObj.Destination) {
+		returnObj.errormessages.push("Destination address cannot be empty");
+	} else {
+		// Validate FidoNet address format (zone:net/node)
+		var dzsplit  = formObj.Destination.split(":");
+		var dnnsplit = dzsplit[1] ? dzsplit[1].split("/") : [];
+		var dzone    = parseInt(dzsplit[0]);
+		var dnet     = parseInt(dnnsplit[0]);
+		var dnode    = parseInt(dnnsplit[1]);
+		if (!dzone || !Number.isInteger(dzone) || !dnet || !Number.isInteger(dnet) || isNaN(dnode)) {
+			returnObj.errormessages.push("Destination is not a valid FidoNet address");
+		}
+	}
+	if (!formObj.ToUser || formObj.ToUser.trim().length === 0) {
+		returnObj.errormessages.push("To field cannot be empty");
+	}
+	if (!formObj.FromUser || formObj.FromUser.trim().length === 0) {
+		returnObj.errormessages.push("From field cannot be empty");
+	}
+	if (!formObj.Subject || formObj.Subject.trim().length === 0) {
+		returnObj.errormessages.push("Subject cannot be empty");
+	}
+	if (!formObj.Message || formObj.Message.trim().length === 0) {
+		returnObj.errormessages.push("Message body cannot be empty");
+	}
 	if (returnObj.errormessages.length > 0) {
 		return returnObj;
 	}
 
-	var dSource = DefaultAddress;
-	if (formObj.Source) {
-		dSource = formObj.Source;
-	}
+	var dSource = formObj.Source || DefaultAddress;
 
 	var currtime = new Date();
-	var destsplit1 = formObj.Destination.split(":");
-	var destsplit2 = destsplit1[1].split("/");
+	var destsplit1  = formObj.Destination.split(":");
+	var destsplit2  = destsplit1[1].split("/");
 	var sourcesplit1 = dSource.split(":");
 	var sourcesplit2 = sourcesplit1[1].split("/");
-	var idtag = ftnUtils.genMsgId();
-	var uuid = uuidv4();
+
+	var idtag          = await ftnUtils.genMsgId();
+	var datetimestring = await ftnUtils.getDateTimeString();
+	var uuid           = uuidv4();
+
 	idtag = dSource + " " + idtag;
-	var datetimestring = ftnUtils.getDateTimeString();
 
 	var dbObj = {
 		msg_id: idtag,
@@ -141,17 +181,20 @@ async function checkMsgUnique(msgId) {
 
 async function getAllInbound() {
 	var dblist = await postgres.query('SELECT * FROM netmail_in', []);
-	return dblist;
+	return dblist || [];
 }
 
 async function getAllOutbound() {
 	var dblist = await postgres.query('SELECT * FROM netmail_out', []);
-	return dblist;
+	return dblist || [];
 }
 
 async function getPendingNetmail() {
 	var sendArray = [];
-	var dblist = await postgres.query('SELECT * FROM netmail_out WHERE sent is false OR sent is null', []);
+	var dblist = await postgres.query(
+		'SELECT * FROM netmail_out WHERE sent IS false OR sent IS null',
+		[]
+	);
 	for (var msg of dblist) {
 		var fmsg = await dbToFtn(msg);
 		sendArray.push(fmsg);
@@ -167,51 +210,52 @@ async function markMessageSentArray(idarray, tosserid) {
 
 async function markMessageSent(id, tosserid) {
 	var tosserstring = tosserid || "";
-	console.log("Marking sent with id", id);
 	var dbmessage = await getOutboundMsgByID(id);
-	if (dbmessage) {
-		if (!dbmessage.sent) {
-			var currtime = new Date();
-			await postgres.write('UPDATE netmail_out SET sent = true, sent_at = $1, tosser_id = $2 WHERE id = $3', [currtime, tosserstring, id]);
-		} else {
-			console.log("Already marked sent. Skipping.");
-		}
-	} else {
-		console.log("Message not found!");
+	if (!dbmessage) {
+		alogger.writeAlog(4, "markMessageSent: message not found for id " + id, "yellow");
+		return;
 	}
+	if (dbmessage.sent) {
+		alogger.writeAlog(5, "markMessageSent: already marked sent, skipping id " + id, "cyan");
+		return;
+	}
+	var currtime = new Date();
+	await postgres.write(
+		'UPDATE netmail_out SET sent = true, sent_at = $1, tosser_id = $2 WHERE id = $3',
+		[currtime, tosserstring, id]
+	);
 }
 
 async function dbToFtn(dbObj) {
 	var ftnMessage = new ftn.Message();
-	ftnMessage.Destination = dbObj.destination;
-	ftnMessage.ToUser = dbObj.to_user;
-	ftnMessage.FromUser = dbObj.from_user;
+	ftnMessage.Destination     = dbObj.destination;
+	ftnMessage.ToUser          = dbObj.to_user;
+	ftnMessage.FromUser        = dbObj.from_user;
 	ftnMessage.DestinationZone = dbObj.destination_zone;
-	ftnMessage.DestinationNet = dbObj.destination_net;
+	ftnMessage.DestinationNet  = dbObj.destination_net;
 	ftnMessage.DestinationNode = dbObj.destination_node;
-	ftnMessage.Source = dbObj.source;
-	ftnMessage.SourceZone = dbObj.source_zone;
-	ftnMessage.SourceNet = dbObj.source_net;
-	ftnMessage.SourceNode = dbObj.source_node;
-	ftnMessage.BodyText = dbObj.body_text;
-	ftnMessage.Subject = dbObj.subject;
-	ftnMessage.MsgId = dbObj.msg_id;
-	if (dbObj.optional_attributes && dbObj.optional_attributes.length > 0) {
-		ftnMessage.OptionalAttributes = dbObj.optional_attributes;
-	} else {
-		ftnMessage.OptionalAttributes = [];
-	}
+	ftnMessage.Source          = dbObj.source;
+	ftnMessage.SourceZone      = dbObj.source_zone;
+	ftnMessage.SourceNet       = dbObj.source_net;
+	ftnMessage.SourceNode      = dbObj.source_node;
+	ftnMessage.BodyText        = dbObj.body_text;
+	ftnMessage.Subject         = dbObj.subject;
+	ftnMessage.MsgId           = dbObj.msg_id;
+	ftnMessage.OptionalAttributes = (dbObj.optional_attributes && dbObj.optional_attributes.length > 0)
+		? dbObj.optional_attributes
+		: [];
 	ftnMessage.OriginLine = dbObj.origin_line;
-	ftnMessage.DateTime = dbObj.datetime_string;
-	ftnMessage.Id = dbObj.id;
-	ftnMessage.Domain = dbObj.domain;
+	ftnMessage.DateTime   = dbObj.datetime_string;
+	ftnMessage.Id         = dbObj.id;
+	ftnMessage.Domain     = dbObj.domain;
 	return ftnMessage;
 }
 
 async function ftnToDb(ftnMessage) {
-	var currtime = new Date();
-	var systemTime = ftnUtils.getSystemTime(ftnMessage.DateTime, ftnMessage.TZUTC);
-	var uuid = uuidv4();
+	var currtime   = new Date();
+	var systemTime = await ftnUtils.getSystemTime(ftnMessage.DateTime, ftnMessage.TZUTC);
+	var uuid       = uuidv4();
+
 	var dbObj = {
 		user_id: 0,
 		uuid: uuid,
@@ -221,10 +265,10 @@ async function ftnToDb(ftnMessage) {
 		source: ftnMessage.Source,
 		domain: "",
 		destination: ftnMessage.Destination,
-		source_zone: ftnMessage.Source.split(":")[0],
+		source_zone: ftnMessage.Source ? ftnMessage.Source.split(":")[0] : "",
 		source_net: ftnMessage.SourceNet,
 		source_node: ftnMessage.SourceNode,
-		destination_zone: ftnMessage.Destination.split(":")[0],
+		destination_zone: ftnMessage.Destination ? ftnMessage.Destination.split(":")[0] : "",
 		destination_net: ftnMessage.DestinationNet,
 		destination_node: ftnMessage.DestinationNode,
 		to_user: ftnMessage.ToUser,
@@ -241,6 +285,7 @@ async function ftnToDb(ftnMessage) {
 		created_at: currtime,
 		updated_at: null
 	};
+
 	return dbObj;
 }
 
@@ -249,10 +294,11 @@ export {
 	getOutboundMsgByUUID,
 	getInboundMsgByMsgId,
 	getOutboundMsgByMsgId,
+	getOutboundMsgByID,
 	newInboundNetmail,
+	newOutboundNetmail,
 	getAllInbound,
 	getAllOutbound,
-	newOutboundNetmail,
 	getPendingNetmail,
 	markMessageSentArray,
 	markMessageSent

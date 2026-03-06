@@ -163,6 +163,26 @@ class SyncJSDoorRunner extends BaseHandler {
 		return keyMap[keyName] !== undefined ? keyMap[keyName] : null;
 	}
 
+	// --- Resolve door arguments ---
+
+	/**
+	 * Normalize doorArgs from the door config into a string array.
+	 * Accepts:
+	 *   - An array of strings: ["arg1", "arg2"]
+	 *   - A single space-delimited string: "arg1 arg2"
+	 *   - undefined/null (returns empty array)
+	 */
+	_resolveDoorArgs() {
+		var rawArgs = this.doorConfig.doorArgs || [];
+		if (typeof rawArgs === 'string') {
+			return rawArgs.trim().length > 0 ? rawArgs.trim().split(/\s+/) : [];
+		}
+		if (Array.isArray(rawArgs)) {
+			return rawArgs.map(String);
+		}
+		return [];
+	}
+
 	// --- Worker management ---
 
 	/**
@@ -200,11 +220,20 @@ class SyncJSDoorRunner extends BaseHandler {
 		// dropfile_handler.js safeUser() accessor pattern.
 		var ur = this.call.user_record || {};
 
+		// Resolve command-line arguments for the door script.
+		// These become globalThis.argv / globalThis.argc in the worker,
+		// matching Synchronet's behavior for door command-line args.
+		var doorArgs = this._resolveDoorArgs();
+		if (doorArgs.length > 0) {
+			alogger.writeAlog(5, this.loggingId + "\n  Door args: " + JSON.stringify(doorArgs), "greenbright");
+		}
+
 		var workerData = {
 			sharedBuffer: this._comm.sharedBuffer,
 			doorScript: this.doorScript,
 			doorDir: this.doorDir,
 			dbSubdir: this.dbSubdir,
+			doorArgs: doorArgs,
 			doorConfig: {
 				name: this.doorConfig.name || "",
 				cmd: this.doorConfig.cmd || "",

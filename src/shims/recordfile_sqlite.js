@@ -740,6 +740,49 @@ function readBinaryField(buffer, offset, fieldtype) {
 //  Exports
 // ============================================================
 
+/**
+ * Remove the SQLite table corresponding to a record file path.
+ * Used by file_remove() in the globals shim so that deleting a .bin
+ * file also clears the corresponding game data from SQLite.
+ *
+ * Only acts if the gamedata.sqlite database already exists in the
+ * resolved directory — does not create a database just to drop a table.
+ *
+ * @param {string} filepath — the record file path (e.g. /path/to/player.bin)
+ * @returns {boolean} true if the table was dropped (or didn't exist), false on error
+ */
+function removeRecordFileData(filepath) {
+	try {
+		var dir = _dbDirOverride
+			? nodePath.resolve(_dbDirOverride)
+			: nodePath.dirname(nodePath.resolve(filepath));
+
+		var dbPath = nodePath.join(dir, 'gamedata.sqlite');
+
+		// Don't create a new database just to drop a table
+		if (!existsSync(dbPath)) return false;
+
+		var db;
+		if (_dbCache[dir]) {
+			db = _dbCache[dir];
+		} else {
+			db = new Database(dbPath);
+			// Don't cache — this is a one-off cleanup operation
+		}
+
+		var tableName = tableNameFromPath(filepath);
+		db.exec('DROP TABLE IF EXISTS "' + tableName.replace(/"/g, '""') + '"');
+
+		if (!_dbCache[dir]) {
+			try { db.close(); } catch (_) {}
+		}
+
+		return true;
+	} catch (_) {
+		return false;
+	}
+}
+
 export {
 	RecordFile,
 	RecordFileRecord,
@@ -747,4 +790,5 @@ export {
 	getRecordLength,
 	setDatabaseDir,
 	importBinaryRecordFile,
+	removeRecordFileData,
 };

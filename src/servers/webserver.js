@@ -7,7 +7,7 @@ import logger from 'morgan'
 import * as dotenv from 'dotenv';
 
 import {router as indexRouter} from '../routes/index.js';
-//import {router as adminRouter} from '../routes/admin.js';
+import {router as adminRouter} from '../routes/admin.js';
 //import {router as usersRouter} from '../routes/users.js';
 
 const node_env = process.env.NODE_ENV || "development"
@@ -24,7 +24,7 @@ webserver.use(cookieParser());
 webserver.use(express.static( path.join(path.dirname("./"), 'public'), { dotfiles: 'allow' }));
 
 webserver.use('/', indexRouter);
-//webserver.use('/admin', adminRouter);
+webserver.use('/admin', adminRouter);
 //webserver.use('/users', usersRouter);
 
 // catch 404 and forward to error handler

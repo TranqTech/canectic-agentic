@@ -1,0 +1,323 @@
+extends ../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-2
+        .col-8              
+          .card      
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2= title
+                .col-4
+                  .text-end
+                    a.button.btn.btn-lg.btn-info(href='/admin')
+                      |Exit
+            .card-body
+              if errormessages && errormessages.length > 0
+                ul.text-danger
+                  for error of errormessages
+                    li.text-danger
+                      =error
+                br
+
+              .row
+                .col-4
+                  .card
+                    .card-header
+                      .row
+                        .col-8
+                          h4
+                            |System Addresses
+                        .col-4
+                          .text-end
+                            button.btn.btn-md.btn-success(data-bs-toggle='modal' data-bs-target=`#newAddressModal`)
+                              |Add
+                    .card-body
+                      if systemaddresslist && systemaddresslist.length > 0
+                        table#addressTable.table.table-hover
+                          thead
+                            tr
+                              th(scope='col') Address
+                              th(scope='col') Domain
+                          tbody
+                            for address of systemaddresslist
+                              tr(data-bs-uuid)
+                                td
+                                  =address.address
+                                td
+                                  =address.domain
+                      else
+                        |No Addresses Found!
+                .col-8
+                  .card
+                    .card-header
+                      .row
+                        .col-8
+                          h4
+                            |Linked Nodes
+                        .col-4                          
+                          .text-end
+                            button.btn.btn-md.btn-success(data-bs-toggle='modal' data-bs-target=`#newNodeModal`)
+                              |Add Node
+                    .card-body
+                      if nodelist && nodelist.length > 0
+                        table#nodeTable.table.table-hover
+                          thead
+                            tr
+                              th(scope='col') Name
+                              th(scope='col') Address
+                              th(scope='col') Domain
+                          tbody
+                            for node of nodelist
+                              tr(data-bs-uuid=node.uuid)
+                                td
+                                  =node.name
+                                td
+                                  =node.address
+                                td
+                                  =node.domain
+                      else
+                        |No Nodes Found!
+
+      #newNodeModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title
+                  |New Node
+              button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+            .modal-body
+              form(action=`/admin/nodes/new` method="POST" class="form-registration")
+
+                .row
+                  .col-1
+                  .col-5
+                    label(for="name") Name:
+                    input(
+                      type="text"
+                      id="name"
+                      name="name"
+                      class="form-control"
+                      tabindex="1"
+                      required
+                    )
+                    br
+                    label(for="domain") Domain:
+                    input(
+                      type="text"
+                      id="domain"
+                      name="domain"
+                      class="form-control"
+                      tabindex="3"
+                      required
+                    )
+                    br
+                    label(for="packetpw") Packet Password:
+                    input(
+                      type="text"
+                      id="packetpw"
+                      name="packetpw"
+                      class="form-control"
+                      tabindex="5"
+                    )
+                    br
+                    label(for="enableareafix") Areafix Enabled:
+                    select#enableareafix(name="enableareafix"  tabindex="7").form-select                      
+                      option(selected="selected")
+                        |Yes
+                      option
+                        |No
+                    br
+                    label(for="connectiontype") Connection Type:
+                    select#connectiontype(name="connectiontype" tabindex="9").form-select                      
+                      option(selected="selected")
+                        |BinkP
+                      option
+                        |File Only
+                    br
+                    label(for="remoteport") Remote Port:
+                    input(
+                      tabindex="11"
+                      type="number"
+                      id="remoteport"
+                      name="remoteport"
+                      default=24554
+                      value=24554
+                      class="form-control"
+                    )
+                    br
+                    label(for="direct") Direct:
+                    select#direct(name="direct" tabindex="13").form-select                      
+                      option(selected="selected")
+                        |Yes
+                      option
+                        |No
+                    br
+                    .div(data-bs-toggle='tooltip' data-bs-placement='top' data-bs-title='Auto-determine if blank')
+                      label(for="useaddress") Local Address/aka to Use:                      
+                      input(
+                        type="text"
+                        id="useaddress"
+                        name="useaddress"
+                        class="form-control"
+                        tabindex="15"
+                      )
+
+
+                  .col-5
+                    label(for="address") Address:
+                    input(
+                      type="text"
+                      id="address"
+                      name="address"
+                      class="form-control"
+                      tabindex="2"
+                      required
+                    )
+                    br
+                    label(for="sessionpw") Session Password:
+                    input(
+                      type="text"
+                      id="sessionpw"
+                      name="sessionpw"
+                      class="form-control"
+                      tabindex="4"
+                      required                    )
+
+                    br
+                    label(for="ticpw") Tic File Password:
+                    input(
+                      type="text"
+                      id="ticpw"
+                      name="ticpw"
+                      class="form-control"
+                      tabindex="6"
+                    )
+                    br
+                    label(for="areafixpw") AreaFix Password:
+                    input(
+                      type="text"
+                      id="areafixpw"
+                      name="areafixpw"
+                      class="form-control"
+                      tabindex="8"
+                    )
+                    br
+                    label(for="remotehost") Remote Host Address:
+                    input(
+                      type="text"
+                      id="remotehost"
+                      name="remotehost"
+                      class="form-control"
+                      tabindex="10"
+                    )
+                    br
+                    label(for="status") Status:
+                    select#status(name="status" tabindex="12").form-select                      
+                      option(selected="selected")
+                        |Normal
+                      option
+                        |Crash
+                      option
+                        |Hold
+                    br
+                    label(for="routeto") Route To:
+                    input(
+                      tabindex="14"
+                      type="text"
+                      id="routeto"
+                      name="routeto"
+                      class="form-control"
+                    )
+
+                .row
+                  .col-1
+                  .col-10
+                    br
+                    .text-end
+                      input(
+                        type="submit"
+                        value="Submit"
+                        class="btn btn-lg btn-success btn-block"
+                        tabindex="16"
+                        )
+
+      #newAddressModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title
+                  |New System Address
+              button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+            .modal-body
+              form(action=`/admin/systemaddresses/new` method="POST" class="form-registration")
+
+                .row
+                  .col-1
+                  .col-5
+                    label(for="address") Address:
+                    input(
+                      type="text"
+                      id="address"
+                      name="address"
+                      class="form-control"
+                      tabindex="1"
+                      required
+                    )
+                  .col-5
+                    label(for="domain") Domain:
+                    input(
+                      type="text"
+                      id="domain"
+                      name="domain"
+                      class="form-control"
+                      tabindex="2"
+                      required
+                    )
+                .row
+                  .col-1
+                  .col-10
+                    br
+                    .text-end
+                      input(
+                        type="submit"
+                        value="Submit"
+                        class="btn btn-lg btn-success btn-block"
+                        tabindex="3"
+                        )
+
+  script.
+    // Add click event listener to table rows
+    document.addEventListener('DOMContentLoaded', function() {
+      var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+      var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl)
+      })
+      const table = document.getElementById('nodeTable');
+
+      if (table) {
+        // Add click event to all tbody rows
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+          // Add pointer cursor to indicate clickable rows
+          row.style.cursor = 'pointer';
+          
+          row.addEventListener('click', function() {
+            const uuid = this.getAttribute('data-bs-uuid');
+            
+            if (uuid) {
+              // Navigate to the msgGroup page
+              window.location.href = `/admin/node/${uuid}`;
+            }
+          });
+        });
+      }
+    });

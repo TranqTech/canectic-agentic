@@ -1,0 +1,260 @@
+extends ../../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-3
+        .col-6
+          if !msgArea
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-lg.btn-info(href='/admin/msgGroups')
+                        |Exit
+              .card-body
+                br
+                h3
+                  |Data Not Found!
+                br
+          else
+            .card      
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= msgArea.name
+                  .col-4
+                    .text-end
+                      
+                .row
+                  .col-12
+                    h3
+                      |Thread: 
+                      = thread.subject
+
+              .card-body.vh-75.bg-black
+                #topElement
+                if messages && messages.length > 0
+                  .text-end
+                    
+                  //br
+                  for message of messages
+                    .card.bg-black.fg-brightgrey.monospace.text-12
+                      .card-header.border-light
+                        .row                          
+                          .col-8
+                            .fg-yellow
+                              =message.from_user
+                            br
+                            if message.reply_to
+                              .fg-yellow
+                                |Reply To: 
+                            else
+                              .fg-yellow
+                                |To: 
+                            .fg-green
+                              =message.to_user
+                          .col-4
+                            .text-end
+                              button.btn.btn-sm.btn-primary.replybtn(data-bs-msgposter=message.from_user data-bs-msgid=message.msg_id data-bs-subject=message.subject)
+                                |Reply
+
+                      .card-body
+                        .row
+                          .col-6
+                            form(action=`/admin/deletemsg/${msgArea.shortcode}/${message.uuid}` method='post')
+                              button.btn.btn-sm.btn-danger.deletebtn
+                                |Delete                  
+                          .col-6
+                            .fg-yellow
+                              .text-end
+                                - var e1date = Date.parse(message.system_time)
+                                - var edate = DateTime.fromMillis(e1date)
+                                = edate.toFormat('MMMM dd, yyyy HH:mm')
+                            if message.isAnsi
+                              .fg-green
+                                .text-end
+                                  h4
+                                    |[ANSI]
+                        br
+                        .messagebody
+                          if message.isAnsi
+                            .ansi
+                              if message.body_html
+                                !=message.body_html
+                              else
+                                !=message.body_text
+                          else
+                            if message.body_html
+                              !=message.body_html
+                            else
+                              !=message.body_text
+                          //.code-block=message.body_text
+                          //pre!=message.body_text
+                          hr
+                        //- br
+                        //- if message.optional_attributes
+                        //-   if !message.reply_to
+                        //-     h5
+                        //-       |No RP Val
+                        //-     !=message.raw_text
+                        //-   ul
+                        //-     for oa of message.optional_attributes
+                        //-       li
+                        //-         =oa
+                    //br
+                  #targetElement
+                  br
+                  .text-end
+                    
+                else
+                  |No Messages
+        .col-3
+          .row
+            .col-1
+            .col-6
+              .card
+                .card-header.bg-darkblue.text-white                  
+                  center
+                    h4
+                      |Quick Action
+                .card-body.bg-dark
+                  .d-grid.gap-2                 
+                    h4
+                      |Jump to:
+                    button.btn.btn-md.btn-info#scrollToTopBtn Top
+                    button.btn.btn-md.btn-success#scrollToElementBtn Newest
+                    br
+                    h4
+                      |Change:
+                    a.button.btn.btn-lg.btn-primary(href=`/admin/msgArea/${msgArea.shortcode}`)
+                      |Thread
+                    a.button.btn.btn-lg.btn-primary(href=`/admin/msggroup/${msgArea.group_shortcode}`)
+                      |Area
+                    a.button.btn.btn-lg.btn-primary(href=`/admin/msgGroups`)
+                      |Group
+
+      #replyThreadModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title
+                  |Reply To Thread
+              button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+            .modal-body.bg-dark
+              form(action=`/admin/msgArea/${msgArea.shortcode}/thread/${thread.uuid}/newreply` method="POST" class="form-registration")
+
+                .row
+                  .col-1
+                  .col-10
+                    label(for="from_user") From User:
+                    input(
+                      type="text"
+                      id="from_user"
+                      name="from_user"
+                      class="form-control bg-black fg-cyan"
+                      tabindex="1"
+                      required
+                    )
+                    br
+                    br
+                    label(for="to_user") To User:
+                    input(
+                      type="text"
+                      id="to_user"
+                      name="to_user"
+                      class="form-control bg-black fg-green"
+                      tabindex="2"
+                      value="All"
+                      required
+                    )
+                    br
+                    br
+                    label(for="subject") Subject:
+                    input(
+                      type="text"
+                      id="subject"
+                      name="subject"
+                      class="form-control bg-black fg-yellow"
+                      tabindex="3"
+                      required
+                    )
+                    input(
+                      type="hidden"
+                      id="reply_to"
+                      name="reply_to"
+                      class="form-control"
+                      required
+                    )
+                    br
+                    br
+                    label(for="body_text") Message Body:
+                    textarea(
+                      type="text"
+                      id="body_text"
+                      rows=15
+                      name="body_text"
+                      class="form-control bg-black fg-brightgrey"
+                      required
+                    )
+                .row
+                  .col-1
+                  .col-10
+                    br
+                    .text-end
+                      input(
+                        type="submit"
+                        value="Submit"
+                        class="btn btn-lg btn-success btn-block"
+                        tabindex="3"
+                        )
+              
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      const scrollToElementBtn = document.getElementById('scrollToElementBtn');
+      const targetElement = document.getElementById('targetElement');
+      const scrollToTopBtn = document.getElementById('scrollToTopBtn');
+      const topElement = document.getElementById('topElement');
+      const replybuttons = document.querySelectorAll(".replybtn");
+      const replyModal = new bootstrap.Modal(document.getElementById('replyThreadModal'));
+      const replyToUser = document.getElementById('to_user');
+      const replyToMsg = document.getElementById('reply_to');
+      const subjectfield = document.getElementById('subject');
+
+
+      replybuttons.forEach(button => {
+        button.addEventListener('click', function() {
+          const msgposter = this.getAttribute('data-bs-msgposter')
+          const msgsubject = this.getAttribute('data-bs-subject')
+          const msgid = this.getAttribute('data-bs-msgid')
+          replyToMsg.value = msgid
+          replyToUser.value = msgposter
+          subjectfield.value = "Re: " + msgsubject
+          replyModal.show();
+        })
+      })
+
+      scrollToElementBtn.addEventListener('click', () => {
+          targetElement.scrollIntoView({
+              behavior: 'smooth', // Optional: for smooth scrolling animation
+              block: 'start'      // Optional: align the element to the top of the viewport
+          });
+      });
+      scrollToTopBtn.addEventListener('click', () => {
+          topElement.scrollIntoView({
+              behavior: 'smooth', // Optional: for smooth scrolling animation
+              block: 'start'      // Optional: align the element to the top of the viewport
+          });
+      });
+      parsePipeColorCodes();
+      //parseAnsiColorCodes();
+    })

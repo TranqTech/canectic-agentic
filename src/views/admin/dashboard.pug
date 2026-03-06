@@ -1,0 +1,76 @@
+extends ../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-3
+        .col-6              
+          .card      
+            .card-header.bg-secondary
+              h2= title
+            .card-body.bg-dark
+              .row
+                .col-1
+                .col-10
+                  .text-end
+                    .span.fg-brightblue
+                      |Test
+                      | 
+                    .span.fg-green
+                      |Something
+                    .span.fg-yellow
+                      |New
+              .row
+                .col-1
+                .col-5                  
+                  .d-grid.gap-2
+                    center
+                      h3
+                        |Messages
+                    a.button.btn.btn-lg.btn-primary(href='/admin/netmail')
+                      |Netmail
+                    a.button.btn.btn-lg.btn-primary(href='/admin/msgGroups')
+                      |Message Groups
+                    a.button.btn.btn-lg.btn-primary(href='/admin/msgAreas')
+                      |Message Areas
+                .col-5
+                  .d-grid.gap-2
+                    center
+                      .h3
+                        |Files
+                    a.button.btn.btn-lg.btn-primary(href='/admin/fileGroups')
+                      |File Groups
+                    a.button.btn.btn-lg.btn-primary(href='/admin/fileAreas')
+                      |File Areas
+              .row
+                .col-12
+                  br
+                  hr
+                  br
+              .row
+                .col-1
+                .col-5
+                  .d-grid.gap-2
+                    center
+                      .h3
+                        |External
+                    a.button.btn.btn-lg.btn-primary(href='/admin/doors')
+                      |Door Games
+                    a.button.btn.btn-lg.btn-primary(href='/admin/events')
+                      |Timed Events
+                .col-5
+                  .d-grid.gap-2
+                    center
+                      .h3
+                        |System
+                    a.button.btn.btn-lg.btn-primary(href='/admin/settings')
+                      |Settings
+                    a.button.btn.btn-lg.btn-primary(href='/admin/nodes')
+                      |Linked Nodes
+                    a.button.btn.btn-lg.btn-primary(href='/admin/users')
+                      |Users
