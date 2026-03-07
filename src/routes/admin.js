@@ -370,4 +370,62 @@ router.post('/deletemsg/:shortcode/:uuid', urlencodedParser, async (req, res) =>
 	}
 });
 
+router.post('/msgGroup/:shortcode/update', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var shortcode   = req.params.shortcode.toUpperCase().trim();
+	var resultObj   = await msgGroups.updateGroup(shortcode, req.body);
+	if (resultObj.status !== true) {
+		alogger.writeAlog(3, "updateGroup failed for " + shortcode + ": " + resultObj.errormessages.join(", "), "redbright");
+	}
+	res.redirect(`/admin/msgGroup/${shortcode}`);
+});
+
+router.post('/msgGroup/:shortcode/delete', urlencodedParser, async (req, res) => {
+	var currentuser  = await getCurrentUser(req);
+	var shortcode    = req.params.shortcode.toUpperCase().trim();
+	var deleteTables = req.body.delete_tables === 'true';
+	var resultObj    = await msgGroups.removeGroup(shortcode, deleteTables);
+	if (resultObj.status !== true) {
+		alogger.writeAlog(3, "removeGroup failed for " + shortcode + ": " + resultObj.errormessages.join(", "), "redbright");
+		res.redirect(`/admin/msgGroup/${shortcode}`);
+	} else {
+		res.redirect('/admin/msgGroups');
+	}
+});
+
+router.post('/msgArea/:shortcode/update', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var shortcode   = req.params.shortcode.toUpperCase().trim();
+	var msgGroup    = await msgAreas.getAreaByShortcode(shortcode);
+	var groupshort  = msgGroup ? msgGroup.group_shortcode : null;
+	var resultObj   = await msgAreas.updateArea(shortcode, req.body);
+	if (resultObj.status !== true) {
+		alogger.writeAlog(3, "updateArea failed for " + shortcode + ": " + resultObj.errormessages.join(", "), "redbright");
+	}
+	// Return to the parent group view
+	if (groupshort) {
+		res.redirect(`/admin/msgGroup/${groupshort}`);
+	} else {
+		res.redirect('/admin/msgGroups');
+	}
+});
+
+router.post('/msgArea/:shortcode/delete', urlencodedParser, async (req, res) => {
+	var currentuser  = await getCurrentUser(req);
+	var shortcode    = req.params.shortcode.toUpperCase().trim();
+	var deleteTables = req.body.delete_tables === 'true';
+	var dbarea       = await msgAreas.getAreaByShortcode(shortcode);
+	var groupshort   = dbarea ? dbarea.group_shortcode : null;
+	var resultObj    = await msgAreas.removeArea(shortcode, deleteTables);
+	if (resultObj.status !== true) {
+		alogger.writeAlog(3, "removeArea failed for " + shortcode + ": " + resultObj.errormessages.join(", "), "redbright");
+	}
+	// Return to parent group if we know it, otherwise fall back to groups list
+	if (groupshort) {
+		res.redirect(`/admin/msgGroup/${groupshort}`);
+	} else {
+		res.redirect('/admin/msgGroups');
+	}
+});
+
 export { router };

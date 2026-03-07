@@ -268,6 +268,69 @@ async function GetShortcodeList() {
 	return scarray;
 }
 
+async function updateArea(shortcode, formObj) {
+	var returnObj = {
+		status: false,
+		errormessages: []
+	};
+
+	var shorty = shortcode.toUpperCase().trim();
+	var dbarea = await getAreaByShortcode(shorty);
+	if (!dbarea) {
+		returnObj.errormessages.push("Area not found for shortcode " + shorty);
+		return returnObj;
+	}
+
+	// Validate areatag uniqueness only if one is provided and differs from the current value
+	if (formObj.areatag !== undefined) {
+		var areatag = formObj.areatag.toUpperCase().trim();
+		if (areatag && areatag !== (dbarea.areatag || "").toUpperCase().trim()) {
+			var uniquetag = await postgres.checkValueUnique("areatag", areatag, "message_areas");
+			if (!uniquetag) {
+				returnObj.errormessages.push("Area tag already in use");
+				return returnObj;
+			}
+		}
+		if (formObj.networked !== undefined) {
+			var isnetworked = (formObj.networked === "networked");
+			if (isnetworked && !areatag) {
+				returnObj.errormessages.push("You cannot have a networked area with no tag!");
+				return returnObj;
+			}
+		}
+	}
+
+	// Build update object from only the fields present in the form
+	var updateObj = {};
+	if (formObj.name        !== undefined) updateObj.name            = formObj.name.trim();
+	if (formObj.description !== undefined) updateObj.description     = formObj.description.trim();
+	if (formObj.areatag     !== undefined) updateObj.areatag         = formObj.areatag.toUpperCase().trim();
+	if (formObj.readsecurity  !== undefined) updateObj.read_security = parseInt(formObj.readsecurity);
+	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
+	if (formObj.minage        !== undefined) updateObj.min_age       = parseInt(formObj.minage);
+	if (formObj.maxage        !== undefined) updateObj.max_age       = parseInt(formObj.maxage);
+	if (formObj.default_address !== undefined) updateObj.default_address = formObj.default_address;
+	if (formObj.networked   !== undefined) updateObj.networked       = (formObj.networked === "networked");
+	if (formObj.active      !== undefined) updateObj.active          = (formObj.active === "true" || formObj.active === true);
+
+	if (Object.keys(updateObj).length === 0) {
+		returnObj.errormessages.push("No updatable fields provided");
+		return returnObj;
+	}
+
+	updateObj.updated_at = new Date();
+
+	var count = await postgres.updateById(dbarea.id, updateObj, "message_areas");
+	if (count > 0) {
+		alogger.writeAlog(5, "Message area updated: " + shorty, "greenbright");
+		returnObj.status = true;
+	} else {
+		returnObj.errormessages.push("No rows updated for area " + shorty);
+	}
+
+	return returnObj;
+}
+
 async function removeArea(shortcode, deleteTables) {
 	var returnObj = {
 		status: false,
@@ -349,6 +412,7 @@ async function removeArea(shortcode, deleteTables) {
 
 export {
 	newArea,
+	updateArea,
 	removeArea,
 	getAreaByShortcode,
 	getAreaByAreatag,

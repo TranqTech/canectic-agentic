@@ -8,8 +8,8 @@ block content
           br
           br
       .row
-        .col-3
-        .col-6
+        .col-1
+        .col-8
           if !msgGroup
             .card
               .card-header.bg-darkblue.text-white
@@ -18,7 +18,7 @@ block content
                     h2= title
                   .col-4
                     .text-end
-                      a.button.btn.btn-lg.btn-info(href='/admin/msgGroups')
+                      a.button.btn.btn-sm.btn-info(href='/admin/msgGroups')
                         |Exit
               .card-body
                 br
@@ -33,9 +33,8 @@ block content
                     h2= title
                   .col-4
                     .text-end
-                      a.button.btn.btn-lg.btn-info(href='/admin/msgGroups')
+                      a.button.btn.btn-sm.btn-info(href='/admin/msgGroups')
                         |Exit
-
               .card-body
                 h4
                   =msgGroup.description
@@ -55,10 +54,6 @@ block content
                 .row
                   .col-1
                   .col-10
-                    .text-end
-                      button.btn.btn-lg.btn-success(data-bs-toggle='modal' data-bs-target=`#newAreaModal`)
-                        |Add Area
-                    br
                     if arealist && arealist.length > 0
                       br
                       table#msgAreas.table.table-hover
@@ -72,7 +67,22 @@ block content
                             th(scope='col') Latest
                           tbody
                             for area of arealist
-                              tr(data-bs-shortcode=area.shortcode)
+                              tr(
+                                data-bs-shortcode=area.shortcode
+                                data-bs-name=area.name
+                                data-bs-description=area.description
+                                data-bs-networked=area.networked
+                                data-bs-areatag=area.areatag || ''
+                                data-bs-readsecurity=area.read_security
+                                data-bs-postsecurity=area.post_security
+                                data-bs-minage=area.min_age || 13
+                                data-bs-maxage=area.max_age || 255
+                                data-bs-defaultaddress=area.default_address || ''
+                                data-bs-active=area.active
+                                data-bs-msgcount=area.msg_count || 0
+                                data-bs-lastfrom=area.last_from || ''
+                                data-bs-lastmessage=area.last_message || ''
+                              )
                                 td
                                   =area.name
                                 td
@@ -86,7 +96,6 @@ block content
                                     |Local
                                 td.text-end
                                   - var mcount = area.msg_count.toLocaleString()
-                                  //=area.msg_count
                                   = mcount
                                 td
                                   if area.last_message
@@ -102,152 +111,632 @@ block content
                         h4
                           |No Areas Found
 
-            #newAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
-              .modal-dialog.modal-dialog-centered.modal-lg
-                .modal-content
-                  .modal-header.bg-dark.text-white
-                    h3.modal-title
-                        |Add Message Area
-                    button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
-                  .modal-body
-                    form(action=`/admin/msgGroup/${msgGroup.shortcode}/newArea` method="POST" class="form-registration")
-                      .row
-                        .col-1
-                        .col-10
-                          label(for="name") Name:
-                          input(
-                            type="text"
-                            id="name"
-                            name="name"
-                            class="form-control"
-                            required
+        .col-2
+          .row
+            .col-12
+              .card.bg-light
+                .card-header.bg-darkblue.text-white
+                  .h6
+                    |Quick Actions
+                .card-body.bg-dark
+                  .d-grid.gap-1
+                    a.button.btn.btn-danger(href='/admin/msgGroups')
+                      |Exit
+                    if msgGroup
+                      br
+                      h6.text-white.mb-1 Group:
+                      button.btn.btn-warning.w-100(data-bs-toggle='modal' data-bs-target='#editGroupModal')
+                        |Edit Group
+                      button.btn.btn-danger.w-100(data-bs-toggle='modal' data-bs-target='#deleteGroupModal')
+                        |Delete Group
+                      br
+                      h6.text-white.mb-1 Areas:
+                      button.btn.btn-success.w-100(data-bs-toggle='modal' data-bs-target='#newAreaModal')
+                        |Add Area
+
+      if msgGroup
+
+        // Area Info Modal (dynamically populated on row click)
+        #areaInfoModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title#areaInfoTitle
+                .row.w-100
+                  .col-12.text-end
+                    button.btn.btn-sm.btn-info#areaViewBtn View
+                    |  
+                    button.btn.btn-sm.btn-warning#areaEditBtn Edit
+                    |  
+                    button.btn.btn-sm.btn-danger#areaDeleteBtn Delete
+                    |  
+                    button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-6
+                    p
+                      strong Shortcode:
+                      |  
+                      span#areaInfoShortcode
+                    p
+                      strong Type:
+                      |  
+                      span#areaInfoType
+                    p
+                      strong Area Tag:
+                      |  
+                      span#areaInfoAreatag
+                    p
+                      strong Default Address:
+                      |  
+                      span#areaInfoAddress
+                    p
+                      strong Status:
+                      |  
+                      span#areaInfoActive
+                  .col-6
+                    p
+                      strong Read Security:
+                      |  
+                      span#areaInfoReadSec
+                    p
+                      strong Post Security:
+                      |  
+                      span#areaInfoPostSec
+                    p
+                      strong Min Age:
+                      |  
+                      span#areaInfoMinAge
+                    p
+                      strong Max Age:
+                      |  
+                      span#areaInfoMaxAge
+                    p
+                      strong Messages:
+                      |  
+                      span#areaInfoMsgCount
+                hr.border-secondary
+                .row
+                  .col-12
+                    p#areaInfoDescription
+                  .col-6
+                    p
+                      small Last From:
+                      |  
+                      span#areaInfoLastFrom
+                  .col-6.text-end
+                    p
+                      small Last Message:
+                      |  
+                      span#areaInfoLastMessage
+
+        // Edit Area Modal (dynamically populated)
+        #editAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title
+                  |Edit Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form#editAreaForm(method='POST' class='form-registration')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='ea_name') Name:
+                      input(
+                        type='text'
+                        id='ea_name'
+                        name='name'
+                        class='form-control'
+                        tabindex='1'
+                        required
+                      )
+                      br
+                      label(for='ea_description') Description:
+                      input(
+                        type='text'
+                        id='ea_description'
+                        name='description'
+                        class='form-control'
+                        tabindex='2'
+                        required
+                      )
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='ea_areatag') Area Tag (Network):
+                      input(
+                        type='text'
+                        id='ea_areatag'
+                        name='areatag'
+                        class='form-control'
+                        tabindex='3'
+                      )
+                      br
+                      label Networked Area?:
+                      fieldset
+                        .form-check
+                          input#ea_networkedY.form-check-input(type='radio' name='networked' value='networked')
+                          label.form-check-label(for='ea_networkedY') Yes
+                        .form-check
+                          input#ea_networkedN.form-check-input(type='radio' name='networked' value='local')
+                          label.form-check-label(for='ea_networkedN') No
+                      br
+                      label(for='ea_defaultaddress') Default Address:
+                      input(
+                        type='text'
+                        id='ea_defaultaddress'
+                        name='default_address'
+                        class='form-control'
+                        tabindex='4'
+                      )
+                      br
+                      label(for='ea_minage') Min Age:
+                      input(
+                        type='number'
+                        id='ea_minage'
+                        name='minage'
+                        class='form-control'
+                        min=13
+                        max=255
+                        tabindex='5'
+                      )
+                    .col-5
+                      label(for='ea_readsecurity') Read Security:
+                      input(
+                        type='number'
+                        id='ea_readsecurity'
+                        name='readsecurity'
+                        class='form-control'
+                        min=1
+                        max=255
+                        tabindex='6'
+                        required
+                      )
+                      br
+                      label(for='ea_postsecurity') Post Security:
+                      input(
+                        type='number'
+                        id='ea_postsecurity'
+                        name='postsecurity'
+                        class='form-control'
+                        min=1
+                        max=255
+                        tabindex='7'
+                        required
+                      )
+                      br
+                      label(for='ea_maxage') Max Age:
+                      input(
+                        type='number'
+                        id='ea_maxage'
+                        name='maxage'
+                        class='form-control'
+                        min=13
+                        max=255
+                        tabindex='8'
+                      )
+                      br
+                      label(for='ea_active') Status:
+                      select(
+                        id='ea_active'
+                        name='active'
+                        class='form-control'
+                        tabindex='9'
+                      )
+                        option(value='true') Active
+                        option(value='false') Inactive
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(
+                          type='submit'
+                          value='Save Changes'
+                          class='btn btn-lg btn-warning btn-block'
+                          tabindex='10'
+                        )
+
+        // Delete Area Modal (dynamically populated)
+        #deleteAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered
+            .modal-content
+              .modal-header.bg-danger.text-white
+                h3.modal-title
+                  |Delete Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-1
+                  .col-10
+                    .alert.alert-danger
+                      h5
+                        |⚠ Warning
+                      p
+                        |This will permanently delete the area 
+                        strong#deleteAreaName
+                        | .
+                    p This action cannot be undone.
+                    br
+                    label(for='da_delete_tables') Message &amp; Thread Tables:
+                    select(
+                      id='da_delete_tables'
+                      name='da_delete_tables'
+                      class='form-control'
+                    )
+                      option(value='false') Leave tables intact
+                      option(value='true') Delete tables and all data
+                    br
+                    .alert.alert-warning#da_deleteTablesWarning(style='display:none')
+                      |⚠ This will permanently destroy all messages and threads in this area.
+              .modal-footer.bg-dark
+                form#deleteAreaForm(method='POST')
+                  input(type='hidden' name='delete_tables' id='da_delete_tables_hidden' value='false')
+                  button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+                  |  
+                  input(
+                    type='submit'
+                    value='Delete Area'
+                    class='btn btn-danger'
+                  )
+
+        // New Area Modal
+        #newAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title
+                    |Add Message Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+              .modal-body
+                form(action=`/admin/msgGroup/${msgGroup.shortcode}/newArea` method="POST" class="form-registration")
+                  .row
+                    .col-1
+                    .col-10
+                      label(for="name") Name:
+                      input(
+                        type="text"
+                        id="name"
+                        name="name"
+                        class="form-control"
+                        required
+                      )
+                      br
+                      label(for="description") Description:
+                      input(
+                        type="text"
+                        id="description"
+                        name="description"
+                        class="form-control"
+                        required
+                      )
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for="shortcode") Short Code (Internal):
+                      input(
+                        type="text"
+                        id="shotcode"
+                        name="shortcode"
+                        class="form-control"
+                        required
+                      )
+                      br
+                      label(for="areatag") Area Tag (Network):
+                      input(
+                        type="text"
+                        id="areatag"
+                        name="areatag"
+                        class="form-control"
+                      )
+                      br
+                      label(for="default_address") Networked Area?:
+                      fieldset
+                        .form-check
+                          input#networkselectR1.form-check-input.sponsel(type='radio' name='networked' value='networked' checked=true)
+                          label.form-check-label(for='networkselectR1')
+                            | Yes
+                        .form-check
+                          input#networkselectR2.form-check-input.sponsel(type='radio' name='networked' value='local')
+                          label.form-check-label(for='networkselectR2')
+                            | No
+                      br
+                      label(for="minage") Minimum Participant Age:
+                      input(
+                        type="number"
+                        id="minage"
+                        min=13
+                        max=255
+                        name="minage"
+                        class="form-control S1field"
+                        value=13
+                      )
+                    .col-5
+                        label(for="readsecurity") Read Security:
+                        input(
+                          type="number"
+                          id="readsecurity"
+                          min=1
+                          max=255
+                          name="readsecurity"
+                          class="form-control S1field"
+                          value=msgGroup.security
+                          required
+                        )
+                        br
+                        label(for="postsecurity") Post Security:
+                        input(
+                          type="number"
+                          id="postsecurity"
+                          min=1
+                          max=255
+                          name="postsecurity"
+                          class="form-control S1field"
+                          value=msgGroup.security
+                          required
+                        )
+                        br
+                        label(for="default_address") Default Address (This System):
+                        input(
+                          type="text"
+                          id="default_address"
+                          name="default_address"
+                          class="form-control"
+                        )
+                        br
+                        label(for="maxage") Maximum Participant Age:
+                        input(
+                          type="number"
+                          id="maxage"
+                          min=13
+                          max=255
+                          name="maxage"
+                          class="form-control S1field"
+                          value=255
+                        )
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(
+                          type="submit"
+                          value="Submit"
+                          class="btn btn-lg btn-success btn-block"
                           )
-                          br
-                          label(for="description") Description:
-                          input(
-                            type="text"
-                            id="description"
-                            name="description"
-                            class="form-control"
-                            required
-                          )
-                          br
-                      .row
-                        .col-1
-                        .col-5
-                          label(for="shortcode") Short Code (Internal):
-                          input(
-                            type="text"
-                            id="shotcode"
-                            name="shortcode"
-                            class="form-control"
-                            required
-                          )
-                          br
-                          label(for="areatag") Area Tag (Network):
-                          input(
-                            type="text"
-                            id="areatag"
-                            name="areatag"
-                            class="form-control"
-                          )
-                          br
-                          label(for="default_address") Networked Area?:
-                          fieldset
-                            .form-check
-                              input#networkselectR1.form-check-input.sponsel(type='radio' name='networked' value='networked' checked=true)
-                              label.form-check-label(for='networkselectR1')
-                                | Yes
-                            .form-check
-                              input#networkselectR2.form-check-input.sponsel(type='radio' name='networked' value='local')
-                              label.form-check-label(for='networkselectR2')
-                                | No
-                          br
-                          label(for="minage") Minimum Participant Age:
-                          input(
-                            type="number"
-                            id="minage"
-                            min=13
-                            max=255
-                            name="minage"
-                            class="form-control S1field"
-                            value=13
-                          )
-                        .col-5
-                            label(for="readsecurity") Read Security:
-                            input(
-                              type="number"
-                              id="readsecurity"
-                              min=1
-                              max=255
-                              name="readsecurity"
-                              class="form-control S1field"
-                              value=msgGroup.security
-                              required
-                            )
-                            br
-                            label(for="postsecurity") Post Security:
-                            input(
-                              type="number"
-                              id="postsecurity"
-                              min=1
-                              max=255
-                              name="postsecurity"
-                              class="form-control S1field"
-                              value=msgGroup.security
-                              required
-                            )
-                            br
-                            label(for="default_address") Default Address (This System):
-                            input(
-                              type="text"
-                              id="default_address"
-                              name="default_address"
-                              class="form-control"
-                            )
-                            br
-                            label(for="maxage") Maximum Participant Age:
-                            input(
-                              type="number"
-                              id="maxage"
-                              min=13
-                              max=255
-                              name="maxage"
-                              class="form-control S1field"
-                              value=255
-                            )
-                      .row
-                        .col-1
-                        .col-10
-                          br
-                          .text-end
-                            input(
-                              type="submit"
-                              value="Submit"
-                              class="btn btn-lg btn-success btn-block"
-                              )
+
+        // Edit Group Modal
+        #editGroupModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title
+                  |Edit Group
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form(action=`/admin/msgGroup/${msgGroup.shortcode}/update` method='POST' class='form-registration')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='edit_name') Name:
+                      input(
+                        type='text'
+                        id='edit_name'
+                        name='name'
+                        class='form-control'
+                        tabindex='1'
+                        value=msgGroup.name
+                        required
+                      )
+                      br
+                      label(for='edit_description') Description:
+                      input(
+                        type='text'
+                        id='edit_description'
+                        name='description'
+                        class='form-control'
+                        tabindex='2'
+                        value=msgGroup.description
+                        required
+                      )
+                      br
+                      label(for='edit_security') Required Security Level:
+                      input(
+                        type='number'
+                        id='edit_security'
+                        name='security'
+                        class='form-control'
+                        tabindex='3'
+                        min=0
+                        max=255
+                        value=msgGroup.security || 0
+                      )
+                      br
+                      label(for='edit_active') Status:
+                      select(
+                        id='edit_active'
+                        name='active'
+                        class='form-control'
+                        tabindex='4'
+                      )
+                        option(value='true' selected=(msgGroup.active == true)) Active
+                        option(value='false' selected=(msgGroup.active == false)) Inactive
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(
+                          type='submit'
+                          value='Save Changes'
+                          class='btn btn-lg btn-warning btn-block'
+                          tabindex='5'
+                        )
+
+        // Delete Group Modal
+        #deleteGroupModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered
+            .modal-content
+              .modal-header.bg-danger.text-white
+                h3.modal-title
+                  |Delete Group
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-1
+                  .col-10
+                    .alert.alert-danger
+                      h5
+                        |⚠ Warning
+                      p
+                        |This will permanently delete the group 
+                        strong= msgGroup.name
+                        |  and all of its message areas.
+                    p
+                      |This action cannot be undone. All areas belonging to this group will be removed.
+                    br
+                    label(for='delete_tables') Message &amp; Thread Tables:
+                    select(
+                      id='delete_tables'
+                      name='delete_tables'
+                      class='form-control'
+                    )
+                      option(value='false') Leave tables intact
+                      option(value='true') Delete tables and all data
+                    br
+                    .alert.alert-warning(id='deleteTablesWarning' style='display:none')
+                      |⚠ Selecting this option will permanently destroy all messages and threads in every area of this group.
+              .modal-footer.bg-dark
+                form(action=`/admin/msgGroup/${msgGroup.shortcode}/delete` method='POST')
+                  input(type='hidden' name='delete_tables' id='delete_tables_hidden' value='false')
+                  button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+                  |  
+                  input(
+                    type='submit'
+                    value='Delete Group'
+                    class='btn btn-danger'
+                  )
 
   script.
-    // Add click event listener to table rows
     document.addEventListener('DOMContentLoaded', function() {
-      const table = document.getElementById('msgAreas');
 
+      // Bootstrap modal instances
+      const areaInfoModal   = new bootstrap.Modal(document.getElementById('areaInfoModal'));
+      const editAreaModal   = new bootstrap.Modal(document.getElementById('editAreaModal'));
+      const deleteAreaModal = new bootstrap.Modal(document.getElementById('deleteAreaModal'));
+
+      // Current area shortcode — used by edit/delete buttons in the info modal
+      var currentAreaShortcode = '';
+
+      // Area table row click — populate and open info modal
+      const table = document.getElementById('msgAreas');
       if (table) {
-        // Add click event to all tbody rows
         const rows = table.querySelectorAll('tbody tr');
-        
         rows.forEach(row => {
-          // Add pointer cursor to indicate clickable rows
           row.style.cursor = 'pointer';
-          
           row.addEventListener('click', function() {
-            const shortcode = this.getAttribute('data-bs-shortcode');
-            
-            if (shortcode) {
-              // Navigate to the msgGroup page
-              window.location.href = `/admin/msgarea/${shortcode}`;
-            }
+            const d = this.dataset;
+            currentAreaShortcode = d.bsShortcode;
+
+            document.getElementById('areaInfoTitle').textContent    = d.bsName;
+            document.getElementById('areaInfoShortcode').textContent = d.bsShortcode;
+            document.getElementById('areaInfoType').textContent     = d.bsNetworked === 'true' ? 'Networked' : 'Local';
+            document.getElementById('areaInfoAreatag').textContent  = d.bsAreatag   || '—';
+            document.getElementById('areaInfoAddress').textContent  = d.bsDefaultaddress || '—';
+            document.getElementById('areaInfoActive').textContent   = d.bsActive === 'true' ? 'Active' : 'Inactive';
+            document.getElementById('areaInfoReadSec').textContent  = d.bsReadsecurity;
+            document.getElementById('areaInfoPostSec').textContent  = d.bsPostsecurity;
+            document.getElementById('areaInfoMinAge').textContent   = d.bsMinage;
+            document.getElementById('areaInfoMaxAge').textContent   = d.bsMaxage;
+            document.getElementById('areaInfoMsgCount').textContent = parseInt(d.bsMsgcount || 0).toLocaleString();
+            document.getElementById('areaInfoDescription').textContent = d.bsDescription;
+            document.getElementById('areaInfoLastFrom').textContent = d.bsLastfrom    || '—';
+            document.getElementById('areaInfoLastMessage').textContent = d.bsLastmessage
+              ? new Date(d.bsLastmessage).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+              : '—';
+
+            areaInfoModal.show();
           });
         });
       }
+
+      // View button — navigate to area
+      document.getElementById('areaViewBtn').addEventListener('click', function() {
+        if (currentAreaShortcode) {
+          window.location.href = `/admin/msgArea/${currentAreaShortcode}`;
+        }
+      });
+
+      // Edit button — populate edit modal and open it
+      document.getElementById('areaEditBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        const row = document.querySelector(`tr[data-bs-shortcode="${currentAreaShortcode}"]`);
+        if (!row) return;
+        const d = row.dataset;
+
+        document.getElementById('editAreaForm').action = `/admin/msgArea/${currentAreaShortcode}/update`;
+        document.getElementById('ea_name').value          = d.bsName;
+        document.getElementById('ea_description').value   = d.bsDescription;
+        document.getElementById('ea_areatag').value       = d.bsAreatag || '';
+        document.getElementById('ea_defaultaddress').value = d.bsDefaultaddress || '';
+        document.getElementById('ea_readsecurity').value  = d.bsReadsecurity;
+        document.getElementById('ea_postsecurity').value  = d.bsPostsecurity;
+        document.getElementById('ea_minage').value        = d.bsMinage;
+        document.getElementById('ea_maxage').value        = d.bsMaxage;
+
+        // Networked radio
+        const isNetworked = d.bsNetworked === 'true';
+        document.getElementById('ea_networkedY').checked = isNetworked;
+        document.getElementById('ea_networkedN').checked = !isNetworked;
+
+        // Active select
+        const activeSelect = document.getElementById('ea_active');
+        activeSelect.value = d.bsActive === 'true' ? 'true' : 'false';
+
+        areaInfoModal.hide();
+        editAreaModal.show();
+      });
+
+      // Delete button — populate delete modal and open it
+      document.getElementById('areaDeleteBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        const row = document.querySelector(`tr[data-bs-shortcode="${currentAreaShortcode}"]`);
+        if (!row) return;
+
+        document.getElementById('deleteAreaName').textContent = row.dataset.bsName;
+        document.getElementById('deleteAreaForm').action = `/admin/msgArea/${currentAreaShortcode}/delete`;
+        document.getElementById('da_delete_tables_hidden').value = 'false';
+        document.getElementById('da_delete_tables').value = 'false';
+        document.getElementById('da_deleteTablesWarning').style.display = 'none';
+
+        areaInfoModal.hide();
+        deleteAreaModal.show();
+      });
+
+      // Delete area tables select warning
+      const daSelect  = document.getElementById('da_delete_tables');
+      const daHidden  = document.getElementById('da_delete_tables_hidden');
+      const daWarning = document.getElementById('da_deleteTablesWarning');
+      if (daSelect) {
+        daSelect.addEventListener('change', function() {
+          daHidden.value = this.value;
+          daWarning.style.display = this.value === 'true' ? 'block' : 'none';
+        });
+      }
+
+      // Delete group tables select warning
+      const deleteSelect  = document.getElementById('delete_tables');
+      const deleteHidden  = document.getElementById('delete_tables_hidden');
+      const deleteWarning = document.getElementById('deleteTablesWarning');
+      if (deleteSelect) {
+        deleteSelect.addEventListener('change', function() {
+          deleteHidden.value = this.value;
+          deleteWarning.style.display = this.value === 'true' ? 'block' : 'none';
+        });
+      }
+
     });

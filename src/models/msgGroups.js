@@ -114,6 +114,44 @@ async function getAllGroupsWithAreas() {
 	return grouplist || [];
 }
 
+async function updateGroup(shortcode, formObj) {
+	var returnObj = {
+		status: false,
+		errormessages: []
+	};
+
+	var shorty  = shortcode.toUpperCase().trim();
+	var dbgroup = await getGroupByShortcode(shorty);
+	if (!dbgroup) {
+		returnObj.errormessages.push("Group not found for shortcode " + shorty);
+		return returnObj;
+	}
+
+	// Build update object from only the fields present in the form
+	var updateObj = {};
+	if (formObj.name        !== undefined) updateObj.name        = formObj.name.trim();
+	if (formObj.description !== undefined) updateObj.description = formObj.description.trim();
+	if (formObj.security    !== undefined) updateObj.security    = parseInt(formObj.security) || 0;
+	if (formObj.active      !== undefined) updateObj.active      = (formObj.active === "true" || formObj.active === true);
+
+	if (Object.keys(updateObj).length === 0) {
+		returnObj.errormessages.push("No updatable fields provided");
+		return returnObj;
+	}
+
+	updateObj.updated_at = new Date();
+
+	var count = await postgres.updateById(dbgroup.id, updateObj, "message_groups");
+	if (count > 0) {
+		alogger.writeAlog(5, "Message group updated: " + shorty, "greenbright");
+		returnObj.status = true;
+	} else {
+		returnObj.errormessages.push("No rows updated for group " + shorty);
+	}
+
+	return returnObj;
+}
+
 async function removeGroup(shortcode, deleteTables) {
 	var returnObj = {
 		status: false,
@@ -175,6 +213,7 @@ async function removeGroup(shortcode, deleteTables) {
 
 export {
 	newGroup,
+	updateGroup,
 	removeGroup,
 	getGroupByShortcode,
 	getAllGroups,
