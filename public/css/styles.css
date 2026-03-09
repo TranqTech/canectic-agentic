@@ -370,3 +370,18 @@
 .ansi{
 	line-height: 1.0;
 }
+
+/* --- Error wiggle animation --- */
+@keyframes error-wiggle {
+	0%   { transform: translateX(0); }
+	15%  { transform: translateX(-6px); }
+	30%  { transform: translateX(6px); }
+	45%  { transform: translateX(-4px); }
+	60%  { transform: translateX(4px); }
+	75%  { transform: translateX(-2px); }
+	90%  { transform: translateX(2px); }
+	100% { transform: translateX(0); }
+}
+.error-wiggle {
+	animation: error-wiggle 0.5s ease-in-out 0.15s both;
+}

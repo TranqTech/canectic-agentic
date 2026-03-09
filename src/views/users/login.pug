@@ -1,0 +1,12 @@
+extends ../layouts/user
+block content
+	-data = data || {}
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+			br
+			br
+			br
+			br
+		include ../partials/users/login.pug

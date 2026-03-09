@@ -2,11 +2,19 @@ doctype html
 html
   head
     title= title
+    //link(rel='icon' href=faviconlink type='image/x-icon') 
     link(rel='stylesheet', href='/css/darkly/bootstrap.css')
     link(rel='stylesheet', href='/css/styles.css')
+    link(rel='stylesheet', href='/css/dataTables.bootstrap5.min.css')
+    link(rel='stylesheet', href='/css/Datatables.custom.css')
     script(src='/js/bootstrap.bundle.js')
     script(src='/js/console.parsers.js')
+    script(src='/js/jquery-3.7.0.js')
+    script(src='/js/jquery.dataTables.min.js')
+    script(src='/js/tinymce/tinymce.min.js')
     meta(charset='utf-8')
     meta(name='viewport' content='width=device-width, initial-scale=1')
-  body      
-    block content
+  body
+    include ../includes/admin-nav.pug
+    div(style='padding-top: 70px')
+      block content

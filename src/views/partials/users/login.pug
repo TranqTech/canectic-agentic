@@ -1,0 +1,164 @@
+-var _mode       = loginMode      || 'login'
+-var _redirect   = loginRedirect  || redirect  || '/'
+-var _errors     = loginErrors    || errors     || []
+-var _mainerror  = loginMainerror || mainerror  || null
+-var _isGuard    = _mode === 'guard'
+
+if ismobile
+	//- Mobile: no card, stacked fields
+	if _isGuard
+		.text-danger.text-center.mb-3
+			h4 You must be logged in to view this page
+	if _errors && _errors.length
+		ul.my-errors.error-wiggle
+			each error in _errors
+				li= error
+	if _mainerror
+		.text-danger.mb-2
+			ul.my-errors2.error-wiggle
+				li= _mainerror
+	form(action="/users/login" method="POST" class="form-login")
+		input(type="hidden" name="redirect" value=_redirect)
+		label(for="lp_username") User Name:
+		input(
+			type="text"
+			id="lp_username"
+			name="username"
+			class="form-control mb-2"
+			required
+		)
+		label(for="lp_password") Password:
+		input(
+			type="password"
+			id="lp_password"
+			name="password"
+			class="form-control mb-3"
+			required
+		)
+		.d-flex.justify-content-between.align-items-center
+			a(href='/users/register') Register Now
+			input(
+				type="submit"
+				value="Submit"
+				class="btn btn-primary"
+			)
+else
+	//- Desktop: card with columns
+	if _isGuard
+		.row
+			.col-4
+			.col-4
+				br
+				br
+				br
+				.card
+					.card-header.text-white.bg-danger
+						center
+							.h3 Not Logged In.
+					.card-body
+						br
+						br
+						center
+							h4 You must be logged in to view this page.
+						br
+						if _errors && _errors.length
+							ul.my-errors.error-wiggle
+								each error in _errors
+									li= error
+						if _mainerror
+							.text-danger
+								ul.my-errors2.error-wiggle
+									li= _mainerror
+						form(action="/users/login" method="POST" class="form-login")
+							input(type="hidden" name="redirect" value=_redirect)
+							.row
+								.col-1
+								.col-5
+									label(for="lp_username") User Name:
+									input(
+										type="text"
+										id="lp_username"
+										name="username"
+										class="form-control"
+										required
+									)
+								.col-5
+									label(for="lp_password") Password:
+									input(
+										type="password"
+										id="lp_password"
+										name="password"
+										class="form-control"
+										required
+									)
+							br
+							.row
+								.col-1
+								.col-5
+									br
+									|No account?
+									br
+									a(href='/users/register') Register Now
+								.col-5
+									br
+									.text-end
+										input(
+											type="submit"
+											value="Submit"
+											class="btn btn-lg btn-primary btn-block"
+										)
+	else
+		.row
+			.col-3
+			.col-6
+				.card
+					.card-header.text-white.bg-dark
+						.h3 User Login
+					.card-body
+						if _errors && _errors.length
+							ul.my-errors.error-wiggle
+								each error in _errors
+									li= error
+						if _mainerror
+							br
+							.text-danger
+								ul.my-errors2.error-wiggle
+									li= _mainerror
+						form(action="/users/login" method="POST" class="form-login")
+							input(type="hidden" name="redirect" value=_redirect)
+							.row
+								.col-1
+								.col-5
+									label(for="lp_username") User Name:
+									input(
+										type="text"
+										id="lp_username"
+										name="username"
+										class="form-control"
+										required
+									)
+								.col-5
+									label(for="lp_password") Password:
+									input(
+										type="password"
+										id="lp_password"
+										name="password"
+										class="form-control"
+										required
+									)
+							br
+							.row
+								.col-1
+								.col-5
+									br
+									|No account?
+									br
+									a(href='/users/register') Register Now
+								.col-5
+									br
+									.text-end
+										input(
+											type="submit"
+											value="Submit"
+											class="btn btn-lg btn-primary btn-block"
+										)

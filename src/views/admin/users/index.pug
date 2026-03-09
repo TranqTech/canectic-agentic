@@ -1,0 +1,566 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-9
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin')
+                        |Exit
+              .card-body
+                if userlist && userlist.length > 0
+                  br
+                  table#usersTable.table.table-hover.table-sm
+                    thead
+                      tr
+                        th(scope='col') #
+                        th(scope='col') Username
+                        th(scope='col') Full Name
+                        th(scope='col') Calls
+                        th(scope='col') Last On
+                        th(scope='col') Msgs
+                        th(scope='col') Downloads
+                        th(scope='col') Mail
+                        th(scope='col') Verified
+                        th(scope='col') Security
+                    tbody
+                      for user of userlist
+                        tr.userrow(
+                          data-uuid=user.uuid
+                          data-usernumber=user.usernumber
+                          data-username=user.username
+                          data-firstname=user.firstname || ''
+                          data-lastname=user.lastname || ''
+                          data-fullname=user.fullname || ''
+                          data-location=user.location || ''
+                          data-mailaddress=user.mailaddress || ''
+                          data-mailtype=user.mailtype || 'email'
+                          data-mailverified=user.mailverified
+                          data-security=user.security
+                          data-logoncount=user.logoncount || 0
+                          data-firstlogon=user.firstlogon || ''
+                          data-lastlogon=user.lastlogon || ''
+                          data-birthdate=user.birthdate || ''
+                          data-permissionflags=JSON.stringify(user.permissionflags || [])
+                          data-restrictionflags=JSON.stringify(user.restrictionflags || [])
+                          data-created=user.created_at || ''
+                        )
+                          td= user.usernumber
+                          td= user.username
+                          td= user.fullname || '—'
+                          td= user.logoncount || 0
+                          td
+                            if user.lastlogon
+                              - var ldate = DateTime.fromMillis(Date.parse(user.lastlogon))
+                              = ldate.toFormat('yyyy-MM-dd')
+                            else
+                              | —
+                          td —
+                          td —
+                          td= user.mailaddress || '—'
+                          td
+                            if user.mailverified
+                              span.badge.bg-success Yes
+                            else
+                              span.badge.bg-warning No
+                          td= user.security
+                else
+                  .text-center.py-4
+                    h5 No users found
+
+          .col-2
+            .row
+              .col-12
+                .card.bg-light
+                  .card-header.bg-darkblue.text-white
+                    .h6 Quick Actions
+                  .card-body.bg-dark
+                    .d-grid.gap-2
+                      a.button.btn.btn-danger(href='/admin')
+                        |Exit
+
+        // User View Modal
+        #userViewModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title#userViewTitle
+                .ms-auto.d-flex.gap-2
+                  button.btn.btn-sm.btn-secondary#userResetPassBtn Reset Password
+                  button.btn.btn-sm.btn-warning#userEditBtn Edit
+                  button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-6
+                    p
+                      strong User #:
+                      |  
+                      span#vw_usernumber
+                    p
+                      strong Username:
+                      |  
+                      span#vw_username
+                    p
+                      strong Full Name:
+                      |  
+                      span#vw_fullname
+                    p
+                      strong Location:
+                      |  
+                      span#vw_location
+                    p
+                      strong Birthdate:
+                      |  
+                      span#vw_birthdate
+                  .col-6
+                    p
+                      strong Mail:
+                      |  
+                      span#vw_mailaddress
+                    p
+                      strong Mail Type:
+                      |  
+                      span#vw_mailtype
+                    p
+                      strong Verified:
+                      |  
+                      span#vw_mailverified
+                    p
+                      strong Security:
+                      |  
+                      span#vw_security
+                    p
+                      strong Calls:
+                      |  
+                      span#vw_logoncount
+                hr.border-secondary
+                .row
+                  .col-6
+                    p
+                      strong First Logon:
+                      |  
+                      span#vw_firstlogon
+                    p
+                      strong Last Logon:
+                      |  
+                      span#vw_lastlogon
+                    p
+                      strong Created:
+                      |  
+                      span#vw_created
+                  .col-6
+                    p
+                      strong Permissions:
+                      |  
+                      span#vw_permissionflags
+                    p
+                      strong Restrictions:
+                      |  
+                      span#vw_restrictionflags
+
+        // User Edit Modal
+        #userEditModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-xl
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title
+                  |Edit User
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form#editUserForm(method='POST' class='form-registration')
+                  .row
+                    // Column 1 — identity
+                    .col-12.col-lg-4
+                      label(for='eu_username') Username:
+                      input(
+                        type='text'
+                        id='eu_username'
+                        name='username'
+                        class='form-control'
+                        tabindex='1'
+                      )
+                      br
+                      label(for='eu_firstname') First Name:
+                      input(
+                        type='text'
+                        id='eu_firstname'
+                        name='firstname'
+                        class='form-control'
+                        tabindex='2'
+                      )
+                      br
+                      label(for='eu_lastname') Last Name:
+                      input(
+                        type='text'
+                        id='eu_lastname'
+                        name='lastname'
+                        class='form-control'
+                        tabindex='3'
+                      )
+                      br
+                      label(for='eu_birthdate') Birthdate:
+                      input(
+                        type='date'
+                        id='eu_birthdate'
+                        name='birthdate'
+                        class='form-control'
+                        tabindex='4'
+                      )
+                    // Column 2 — contact and access
+                    .col-12.col-lg-4
+                      label(for='eu_location') Location:
+                      input(
+                        type='text'
+                        id='eu_location'
+                        name='location'
+                        class='form-control'
+                        tabindex='5'
+                      )
+                      br
+                      label(for='eu_mailaddress') Mail Address:
+                      input(
+                        type='text'
+                        id='eu_mailaddress'
+                        name='mailaddress'
+                        class='form-control'
+                        tabindex='6'
+                      )
+                      br
+                      label(for='eu_mailverified') Mail Verified:
+                      select(
+                        id='eu_mailverified'
+                        name='mailverified'
+                        class='form-control'
+                        tabindex='7'
+                      )
+                        option(value='true') Yes
+                        option(value='false') No
+                      br
+                      label(for='eu_security') Security Level (0-255):
+                      input(
+                        type='number'
+                        id='eu_security'
+                        name='security'
+                        class='form-control'
+                        min=0
+                        max=255
+                        tabindex='8'
+                      )
+                    // Column 3 — flags
+                    .col-12.col-lg-4
+                      // Hidden inputs — submitted as arrays, managed by JS
+                      #eu_perm_inputs
+                      #eu_restr_inputs
+                      label Permissions:
+                      .border.rounded.p-2.mb-2.bg-light#eu_perm_badges(style='min-height:2.5rem')
+                      .input-group.mb-3
+                        select#eu_perm_select.form-control(tabindex='9')
+                        button.btn.btn-sm.btn-success#eu_perm_add(type='button') Add
+                      br
+                      label Restrictions:
+                      .border.rounded.p-2.mb-2.bg-light#eu_restr_badges(style='min-height:2.5rem')
+                      .input-group
+                        select#eu_restr_select.form-control(tabindex='10')
+                        button.btn.btn-sm.btn-danger#eu_restr_add(type='button') Add
+                  .row
+                    .col-12
+                      br
+                      .text-end
+                        input(
+                          type='submit'
+                          value='Save Changes'
+                          class='btn btn-lg btn-warning btn-block'
+                          tabindex='11'
+                        )
+
+        // Password Reset Modal
+        #resetPassModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered
+            .modal-content
+              .modal-header.bg-danger.text-white
+                h3.modal-title
+                  |Reset Password
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-1
+                  .col-10
+                    .alert.alert-warning
+                      |⚠ This will immediately replace the user's password. They will not be notified automatically.
+                    br
+                    p
+                      |Resetting password for: 
+                      strong#rp_username
+                    br
+                    form#resetPassForm(method='POST' class='form-registration')
+                      label(for='rp_newpassword') New Password:
+                      input(
+                        type='password'
+                        id='rp_newpassword'
+                        name='newpassword'
+                        class='form-control'
+                        tabindex='1'
+                        required
+                      )
+                      br
+                      label(for='rp_confirm') Confirm Password:
+                      input(
+                        type='password'
+                        id='rp_confirm'
+                        class='form-control'
+                        tabindex='2'
+                        required
+                      )
+                      .text-danger.mt-1#rp_mismatch(style='display:none')
+                        |Passwords do not match
+                      br
+                      .text-end
+                        input(
+                          type='submit'
+                          value='Reset Password'
+                          class='btn btn-lg btn-danger btn-block'
+                          tabindex='3'
+                        )
+
+    script.
+      document.addEventListener('DOMContentLoaded', function() {
+
+        const userViewModal  = new bootstrap.Modal(document.getElementById('userViewModal'));
+        const userEditModal  = new bootstrap.Modal(document.getElementById('userEditModal'));
+        const resetPassModal = new bootstrap.Modal(document.getElementById('resetPassModal'));
+        var currentUUID = '';
+
+        // Init DataTable
+        const table = document.getElementById('usersTable');
+        if (table) {
+          $(table).DataTable({
+            pageLength: 25,
+            order: [[0, 'asc']],
+            pagingType: 'full_numbers',
+            drawCallback: function() {
+              var $pag = $(this.api().table().container()).find('.dataTables_paginate');
+              if ($pag.length === 0) return;
+
+              var $prev  = $pag.find('.previous').detach();
+              var $next  = $pag.find('.next').detach();
+              var $nums  = $pag.find('span:first').children().detach();
+
+              var $numRow = $('<div class="dt-page-numbers">').append($nums);
+              var $navRow = $('<div class="dt-page-nav">').append($prev, $next);
+              var $wrap   = $('<div class="dt-pagination-wrap">').append($numRow, $navRow);
+
+              $pag.empty().append($wrap);
+            }
+          });
+        }
+
+        function fmtDate(val) {
+          if (!val) return '—';
+          return new Date(val).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        // Format a date value as YYYY-MM-DD for date input fields
+        function fmtDateInput(val) {
+          if (!val) return '';
+          var d = new Date(val);
+          if (isNaN(d.getTime())) return '';
+          return d.toISOString().split('T')[0];
+        }
+
+        function fmtFlags(jsonstr) {
+          try {
+            var arr = JSON.parse(jsonstr);
+            return arr && arr.length > 0 ? arr.join(', ') : '—';
+          } catch(e) { return '—'; }
+        }
+
+        function parseFlags(jsonstr) {
+          try {
+            var result = JSON.parse(jsonstr);
+            return Array.isArray(result) ? result : [];
+          } catch(e) { return []; }
+        }
+
+        // Row click — open view modal
+        document.querySelectorAll('.userrow').forEach(row => {
+          row.style.cursor = 'pointer';
+          row.addEventListener('click', function() {
+            const d = this.dataset;
+            currentUUID = d.uuid;
+
+            document.getElementById('userViewTitle').textContent       = d.username;
+            document.getElementById('vw_usernumber').textContent       = d.usernumber;
+            document.getElementById('vw_username').textContent         = d.username;
+            document.getElementById('vw_fullname').textContent         = d.fullname    || '—';
+            document.getElementById('vw_location').textContent         = d.location    || '—';
+            document.getElementById('vw_birthdate').textContent        = fmtDate(d.birthdate);
+            document.getElementById('vw_mailaddress').textContent      = d.mailaddress || '—';
+            document.getElementById('vw_mailtype').textContent         = d.mailtype    || '—';
+            document.getElementById('vw_mailverified').textContent     = d.mailverified === 'true' ? 'Yes' : 'No';
+            document.getElementById('vw_security').textContent         = d.security;
+            document.getElementById('vw_logoncount').textContent       = d.logoncount;
+            document.getElementById('vw_firstlogon').textContent       = fmtDate(d.firstlogon);
+            document.getElementById('vw_lastlogon').textContent        = fmtDate(d.lastlogon);
+            document.getElementById('vw_created').textContent          = fmtDate(d.created);
+            document.getElementById('vw_permissionflags').textContent  = fmtFlags(d.permissionflags);
+            document.getElementById('vw_restrictionflags').textContent = fmtFlags(d.restrictionflags);
+
+            userViewModal.show();
+          });
+        });
+
+        // --- Flag manager ---
+        const allPerms  = !{JSON.stringify(availablePermissions)};
+        const allRestrs = !{JSON.stringify(availableRestrictions)};
+
+        // Renders badges and hidden inputs, rebuilds select options
+        function renderFlags(type, activeFlags) {
+          var badgeEl  = document.getElementById(`eu_${type}_badges`);
+          var inputEl  = document.getElementById(`eu_${type}_inputs`);
+          var selectEl = document.getElementById(`eu_${type}_select`);
+          var allFlags = type === 'perm' ? allPerms : allRestrs;
+          var inputName = type === 'perm' ? 'permissionflags' : 'restrictionflags';
+          var badgeClass = type === 'perm' ? 'bg-success' : 'bg-danger';
+
+          // Badges
+          badgeEl.innerHTML = '';
+          activeFlags.forEach(function(flag) {
+            var span = document.createElement('span');
+            span.className = 'badge ' + badgeClass + ' me-1 mb-1';
+            span.style.cursor = 'pointer';
+            span.title = 'Click to remove';
+            span.textContent = flag + ' ×';
+            span.addEventListener('click', function() {
+              var updated = activeFlags.filter(f => f !== flag);
+              renderFlags(type, updated);
+            });
+            badgeEl.appendChild(span);
+          });
+
+          // Hidden inputs
+          inputEl.innerHTML = '';
+          activeFlags.forEach(function(flag) {
+            var inp = document.createElement('input');
+            inp.type  = 'hidden';
+            inp.name  = inputName;
+            inp.value = flag;
+            inputEl.appendChild(inp);
+          });
+
+          // Select — only show flags not already active
+          var prevVal = selectEl.value;
+          selectEl.innerHTML = '';
+          var available = allFlags.filter(f => !activeFlags.includes(f));
+          if (available.length === 0) {
+            var opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '— none available —';
+            opt.disabled = true;
+            selectEl.appendChild(opt);
+            selectEl.disabled = true;
+            document.getElementById(`eu_${type}_add`).disabled = true;
+          } else {
+            selectEl.disabled = false;
+            document.getElementById(`eu_${type}_add`).disabled = false;
+            available.forEach(function(flag) {
+              var opt = document.createElement('option');
+              opt.value = flag;
+              opt.textContent = flag;
+              selectEl.appendChild(opt);
+            });
+            // Restore previous selection if still available
+            if (available.includes(prevVal)) selectEl.value = prevVal;
+          }
+        }
+
+        // Add button handlers
+        document.getElementById('eu_perm_add').addEventListener('click', function() {
+          var sel = document.getElementById('eu_perm_select');
+          if (!sel.value) return;
+          var current = Array.from(document.querySelectorAll('#eu_perm_inputs input')).map(i => i.value);
+          if (!current.includes(sel.value)) {
+            current.push(sel.value);
+            renderFlags('perm', current);
+          }
+        });
+
+        document.getElementById('eu_restr_add').addEventListener('click', function() {
+          var sel = document.getElementById('eu_restr_select');
+          if (!sel.value) return;
+          var current = Array.from(document.querySelectorAll('#eu_restr_inputs input')).map(i => i.value);
+          if (!current.includes(sel.value)) {
+            current.push(sel.value);
+            renderFlags('restr', current);
+          }
+        });
+
+        // Edit button — populate edit modal and switch
+        document.getElementById('userEditBtn').addEventListener('click', function() {
+          if (!currentUUID) return;
+          const row = document.querySelector(`.userrow[data-uuid="${currentUUID}"]`);
+          if (!row) return;
+          const d = row.dataset;
+
+          document.getElementById('editUserForm').action   = `/admin/users/${currentUUID}/update`;
+          document.getElementById('eu_username').value     = d.username    || '';
+          document.getElementById('eu_firstname').value    = d.firstname   || '';
+          document.getElementById('eu_lastname').value     = d.lastname    || '';
+          document.getElementById('eu_location').value     = d.location    || '';
+          document.getElementById('eu_birthdate').value    = fmtDateInput(d.birthdate);
+          document.getElementById('eu_mailaddress').value  = d.mailaddress || '';
+          document.getElementById('eu_mailverified').value = d.mailverified === 'true' ? 'true' : 'false';
+          document.getElementById('eu_security').value     = d.security;
+
+          renderFlags('perm',  parseFlags(d.permissionflags));
+          renderFlags('restr', parseFlags(d.restrictionflags));
+
+          userViewModal.hide();
+          userEditModal.show();
+        });
+
+        // Reset password button — open reset modal
+        document.getElementById('userResetPassBtn').addEventListener('click', function() {
+          if (!currentUUID) return;
+          const row = document.querySelector(`.userrow[data-uuid="${currentUUID}"]`);
+          if (!row) return;
+
+          document.getElementById('rp_username').textContent   = row.dataset.username;
+          document.getElementById('resetPassForm').action      = `/admin/users/${currentUUID}/resetpassword`;
+          document.getElementById('rp_newpassword').value      = '';
+          document.getElementById('rp_confirm').value          = '';
+          document.getElementById('rp_mismatch').style.display = 'none';
+
+          userViewModal.hide();
+          resetPassModal.show();
+        });
+
+        // Password match validation on reset form submit
+        document.getElementById('resetPassForm').addEventListener('submit', function(e) {
+          var pw  = document.getElementById('rp_newpassword').value;
+          var cfm = document.getElementById('rp_confirm').value;
+          if (pw !== cfm) {
+            e.preventDefault();
+            document.getElementById('rp_mismatch').style.display = 'block';
+          }
+        });
+
+      });

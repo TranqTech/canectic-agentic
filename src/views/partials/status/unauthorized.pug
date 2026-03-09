@@ -1,0 +1,44 @@
+-var _errors    = unauthErrors    || errors    || []
+-var _mainerror = unauthMainerror || mainerror || null
+
+if ismobile
+	//- Mobile: no card, stacked
+	.text-danger.text-center.mb-3
+		h4 You are not authorized to view this content.
+	p.text-center Your security level or permissions do not allow you to view this page.
+	if _errors && _errors.length
+		ul.my-errors.error-wiggle
+			each error in _errors
+				li.text-warning= error
+	if _mainerror
+		.text-danger
+			ul.my-errors2.error-wiggle
+				li= _mainerror
+else
+	.row
+		.col-12
+			br
+			br
+			br
+			br
+	.row
+		.col-3
+		.col-6
+			.card
+				.card-header.text-white.bg-danger
+					center
+						.h3 You are not authorized to view this content.
+				.card-body
+					br
+					center
+						h4 Your security level or permissions do not allow you to view this page.
+					br
+					if _errors && _errors.length
+						ul.my-errors.error-wiggle
+							each error in _errors
+								li.text-warning= error
+					if _mainerror
+						br
+						.text-danger
+							ul.my-errors2.error-wiggle
+								li= _mainerror

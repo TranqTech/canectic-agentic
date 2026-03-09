@@ -1,0 +1,8 @@
+extends ../layouts/user
+block content
+	-data = data || {}
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+		include ../partials/status/unauthorized.pug

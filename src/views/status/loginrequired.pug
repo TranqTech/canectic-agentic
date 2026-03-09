@@ -1,0 +1,88 @@
+//redundant and done better with /users/login call. 
+// TODO Remove file once ensured it is not being called anywhere.
+
+extends ../layouts/user
+block content
+	-data = data || {}
+	-title = "Not Signed In"
+	if !ismobile
+		.container-fluid.main-wrapper
+			.row
+				.col-3
+				.col-6
+					br
+					br
+					br
+					br
+					br
+					br
+					.card
+						.card-header.text-white.bg-dark
+							.h3
+								|You must be signed in to view this content
+						.card-body
+							if errors && errors.length
+								ul.my-errors.error-wiggle
+									each error in errors
+										li.text-warning= error
+							if mainerror
+								br
+								.text-danger
+									ul.my-errors2.error-wiggle
+										li= mainerror
+							form(action="/users/login" method="POST" class="form-login")
+								input(type="hidden" name="redirect" value=redirect || '/')
+								if !ismobile
+									.row
+										.col-1
+										.col-5
+											label(for="username") User Name:
+											input(
+												type="text"
+												id="username"
+												name="username"
+												class="form-control"
+												value=data.username
+												required
+											)
+										.col-5
+											label(for="password") Password:
+											input(
+												type="password"
+												id="password"
+												name="password"
+												class="form-control"
+												required
+											)
+									br
+									.row
+										.col-1
+										.col-5
+											br
+											|No account?
+											br
+											a(href='/users/register') Register Now
+										.col-5
+											br
+											.text-end
+												input(
+													type="submit"
+													value="Submit"
+													class="btn btn-lg btn-primary btn-block"
+												)
+
+	if errors && errors.length || mainerror
+		style.
+			@keyframes error-wiggle {
+				0%   { transform: translateX(0); }
+				15%  { transform: translateX(-6px); }
+				30%  { transform: translateX(6px); }
+				45%  { transform: translateX(-4px); }
+				60%  { transform: translateX(4px); }
+				75%  { transform: translateX(-2px); }
+				90%  { transform: translateX(2px); }
+				100% { transform: translateX(0); }
+			}
+			.error-wiggle {
+				animation: error-wiggle 0.5s ease-in-out 0.15s both;
+			}

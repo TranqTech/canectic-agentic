@@ -49,6 +49,14 @@ async function getUserRecord(pusername) {
 	return row;
 }
 
+async function getUserByUUID(uuid) {
+	var row = await postgres.queryOne(
+		'SELECT * FROM users WHERE uuid = $1',
+		[uuid.trim()]
+	);
+	return row;
+}
+
 async function getUserList() {
 	var rows = await postgres.query(
 		'SELECT * FROM users ORDER BY UPPER(username) ASC'
@@ -322,7 +330,7 @@ async function _addFlags(username, column, flagsToAdd) {
 	var userobj = await getUserRecord(username);
 	if (!userobj) return false;
 
-	var existing = userobj[column] || [];
+	var existing = Array.isArray(userobj[column]) ? userobj[column] : [];
 	var merged = [...existing];
 	for (var flag of flagsToAdd) {
 		if (!merged.includes(flag)) {
@@ -351,7 +359,7 @@ async function _removeFlags(username, column, flagsToRemove) {
 	var userobj = await getUserRecord(username);
 	if (!userobj) return false;
 
-	var existing = userobj[column] || [];
+	var existing = Array.isArray(userobj[column]) ? userobj[column] : [];
 	var filtered = existing.filter(flag => !flagsToRemove.includes(flag));
 
 	var currtime = new Date();
@@ -442,8 +450,151 @@ async function saveUser(user) {
 	var sql = "UPDATE users SET " + setClauses.join(", ") + " WHERE UPPER(" + lookupField + ") = UPPER($" + i + ")";
 	var err = await postgres.write(sql, values);
 	if (err) {
-		console.log("Error saving user:", err.message);
+		alogger.writeAlog(3, "saveUser error for " + (user.username || user.uuid) + ": " + err.message, "redbright");
 	}
+}
+
+// --- Mail type detection ---
+
+function detectMailType(mailaddress) {
+	if (!mailaddress) return "email";
+	// FidoNet netmail format: zone:net/node or zone:net/node.point
+	var fidoRegex = /^\d+:\d+\/\d+(\.\d+)?(@\S+)?$/;
+	return fidoRegex.test(mailaddress.trim()) ? "netmail" : "email";
+}
+
+// --- Admin user update ---
+
+async function updateUser(uuid, formObj) {
+	var returnObj = {
+		status: false,
+		errormessages: []
+	};
+
+	var userobj = await postgres.queryOne('SELECT * FROM users WHERE uuid = $1', [uuid]);
+	if (!userobj) {
+		returnObj.errormessages.push("User not found");
+		return returnObj;
+	}
+
+	// Build update object from only the fields present in the form
+	var updateObj = {};
+	if (formObj.firstname    !== undefined) updateObj.firstname    = formObj.firstname.trim()  || null;
+	if (formObj.lastname     !== undefined) updateObj.lastname     = formObj.lastname.trim()   || null;
+	if (formObj.location     !== undefined) updateObj.location     = formObj.location.trim()   || null;
+	if (formObj.mailverified !== undefined) updateObj.mailverified = (formObj.mailverified === "true" || formObj.mailverified === true);
+	if (formObj.birthdate    !== undefined) updateObj.birthdate    = formObj.birthdate || null;
+
+	// Derive fullname from first/last if either is being updated
+	if (formObj.firstname !== undefined || formObj.lastname !== undefined) {
+		var first = (formObj.firstname !== undefined ? formObj.firstname.trim() : userobj.firstname) || "";
+		var last  = (formObj.lastname  !== undefined ? formObj.lastname.trim()  : userobj.lastname)  || "";
+		updateObj.fullname = (first + " " + last).trim() || null;
+	}
+
+	// Username — validate uniqueness if changed
+	if (formObj.username !== undefined) {
+		var newusername = formObj.username.trim();
+		if (newusername && newusername.toUpperCase() !== (userobj.username || "").toUpperCase()) {
+			var usernameAvailable = await checkUsernameAvailable(newusername);
+			if (!usernameAvailable) {
+				returnObj.errormessages.push("Username already in use");
+				return returnObj;
+			}
+		}
+		if (newusername) updateObj.username = newusername;
+	}
+
+	if (formObj.security !== undefined) {
+		var sec = parseInt(formObj.security);
+		if (isNaN(sec) || sec < 0 || sec > 255) {
+			returnObj.errormessages.push("Security level must be between 0 and 255");
+			return returnObj;
+		}
+		updateObj.security = sec;
+	}
+
+	// Mail address — validate uniqueness if changed, auto-detect type
+	if (formObj.mailaddress !== undefined) {
+		var newmail = formObj.mailaddress.trim().toLowerCase() || null;
+		if (newmail && newmail !== (userobj.mailaddress || "").toLowerCase()) {
+			var mailunique = await checkMailUnique(newmail);
+			if (!mailunique) {
+				returnObj.errormessages.push("Mail address already in use");
+				return returnObj;
+			}
+		}
+		updateObj.mailaddress = newmail;
+		updateObj.mailtype    = detectMailType(newmail);
+	}
+
+	// Reconcile permission flags if submitted
+	if (formObj.permissionflags !== undefined) {
+		var desiredPerms = Array.isArray(formObj.permissionflags)
+			? formObj.permissionflags
+			: (formObj.permissionflags ? [formObj.permissionflags] : []);
+		var currentPerms = Array.isArray(userobj.permissionflags) ? userobj.permissionflags : [];
+		var permsToAdd    = desiredPerms.filter(f => !currentPerms.includes(f));
+		var permsToRemove = currentPerms.filter(f => !desiredPerms.includes(f));
+		if (permsToAdd.length > 0)    await addUserPermissions(userobj.username, permsToAdd);
+		if (permsToRemove.length > 0) await removeUserPermissions(userobj.username, permsToRemove);
+	}
+
+	// Reconcile restriction flags if submitted
+	if (formObj.restrictionflags !== undefined) {
+		var desiredRestrictions = Array.isArray(formObj.restrictionflags)
+			? formObj.restrictionflags
+			: (formObj.restrictionflags ? [formObj.restrictionflags] : []);
+		var currentRestrictions = Array.isArray(userobj.restrictionflags) ? userobj.restrictionflags : [];
+		var restrictToAdd    = desiredRestrictions.filter(f => !currentRestrictions.includes(f));
+		var restrictToRemove = currentRestrictions.filter(f => !desiredRestrictions.includes(f));
+		if (restrictToAdd.length > 0)    await addUserRestrictions(userobj.username, restrictToAdd);
+		if (restrictToRemove.length > 0) await removeUserRestrictions(userobj.username, restrictToRemove);
+	}
+
+	if (Object.keys(updateObj).length > 0) {
+		updateObj.updated_at = new Date();
+		var count = await postgres.updateById(userobj.id, updateObj, "users");
+		if (count > 0) {
+			alogger.writeAlog(5, "User updated: " + userobj.username, "greenbright");
+		} else {
+			returnObj.errormessages.push("No rows updated for user " + userobj.username);
+			return returnObj;
+		}
+	}
+
+	returnObj.status = true;
+	return returnObj;
+}
+
+// --- Admin password reset ---
+
+async function resetUserPassword(uuid, newpassword) {
+	var returnObj = {
+		status: false,
+		errormessages: []
+	};
+
+	if (!newpassword || newpassword.trim().length === 0) {
+		returnObj.errormessages.push("Password cannot be empty");
+		return returnObj;
+	}
+
+	var userobj = await postgres.queryOne('SELECT * FROM users WHERE uuid = $1', [uuid]);
+	if (!userobj) {
+		returnObj.errormessages.push("User not found");
+		return returnObj;
+	}
+
+	var success = await updateUserPassword(userobj.username, newpassword.trim());
+	if (success) {
+		alogger.writeAlog(4, "Password reset by admin for user: " + userobj.username, "yellow");
+		returnObj.status = true;
+	} else {
+		returnObj.errormessages.push("Password reset failed");
+	}
+
+	return returnObj;
 }
 
 export {
@@ -468,5 +619,8 @@ export {
 	getHighestUserNumber,
 	getCustomUserListByAge,
 	getCustomUserListByNumber,
-	saveUser
+	saveUser,
+	updateUser,
+	resetUserPassword,
+	getUserByUUID
 };
