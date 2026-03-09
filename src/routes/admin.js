@@ -9,6 +9,8 @@ import sanitizeHtml from 'sanitize-html';
 import mobile from 'is-mobile';
 
 //internals
+import * as msgNetworks from '../models/msgNetworks.js';
+import * as msgZones from '../models/msgZones.js';
 import * as msgGroups from '../models/msgGroups.js';
 import * as msgAreas from '../models/msgAreas.js';
 import * as netmail from '../models/netmail.js';
@@ -35,11 +37,14 @@ const defaultUser    = process.env.DefaultUser || "John Doe";
 const adminsecurity  = parseInt(process.env.adminsecurity) || 200;
 
 // Inject shared locals for all admin views
-router.use(function(req, res, next) {
+router.use(async function(req, res, next) {
 	res.locals.boardname    = boardname    || 'BBS Admin';
 	res.locals.faviconlink  = faviconlink  || '/images/favicon.ico';
 	res.locals.currentPath  = '/admin' + req.path;
 	res.locals.activelink   = '';
+	if (req.cookies.sessionid) {
+		await sessionStore.sessionRenew(req.cookies.sessionid);
+	}
 	next();
 });
 
@@ -63,7 +68,7 @@ async function requireAdmin(req, res, next) {
 	var sufficientAccess = checkAdminAccess(currentuser);
 	if (sufficientAccess) return next();
 	alogger.writeAlog(3, "Unauthorized admin POST attempt: " + req.path + " by " + (currentuser ? currentuser.username : 'unauthenticated'), "redbright");
-	return res.status(403).render('admin/status/unauthorized', {
+	return res.status(403).render('admin/unauthorized', {
 		title: 'Unauthorized',
 		activelink: '',
 		currentuser: currentuser
@@ -226,6 +231,59 @@ router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asyn
 	}
 });
 
+router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode        = req.params.shortcode.toUpperCase().trim();
+	var formObj          = req.body;
+	if (currentuser) {
+		formObj.updatedByName = currentuser.name;
+		formObj.updatedByUUID = currentuser.uuid;
+	}
+	var result = await msgGroups.updateGroup(shortcode, formObj);
+	if (result.status === true) {
+		res.redirect(`/admin/msgGroup/${shortcode}`);
+	} else {
+		alogger.writeAlog(3, "updateGroup failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		var msgGroup  = await msgGroups.getGroupByShortcode(shortcode);
+		var arealist  = await msgAreas.getListByGroupShortcode(shortcode);
+		res.render('admin/msgGroups/view', {
+			sufficientAccess: sufficientAccess,
+			title: msgGroup ? msgGroup.name : shortcode,
+			activelink: 'msgGroups',
+			currentuser: currentuser,
+			msgGroup: msgGroup,
+			arealist: arealist,
+			errormessages: result.errormessages,
+			DateTime: DateTime
+		});
+	}
+});
+
+router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser  = await getCurrentUser(req);
+	var deleteTables = (req.body.delete_tables === 'true');
+	var shortcode    = req.params.shortcode.toUpperCase().trim();
+	var result       = await msgGroups.removeGroup(shortcode, deleteTables);
+	if (result.status === true) {
+		res.redirect('/admin/msgGroups');
+	} else {
+		alogger.writeAlog(3, "removeGroup failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		var msgGroup  = await msgGroups.getGroupByShortcode(shortcode);
+		var arealist  = await msgAreas.getListByGroupShortcode(shortcode);
+		res.render('admin/msgGroups/view', {
+			sufficientAccess: true,
+			title: msgGroup ? msgGroup.name : shortcode,
+			activelink: 'msgGroups',
+			currentuser: currentuser,
+			msgGroup: msgGroup,
+			arealist: arealist,
+			errormessages: result.errormessages,
+			DateTime: DateTime
+		});
+	}
+});
+
 router.get('/msgGroup/:shortcode', async (req, res, next) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
@@ -272,22 +330,28 @@ router.get('/nodes', async (req, res, next) => {
 });
 
 router.get('/node/:uuid', async (req, res, next) => {
-	var currentuser = await getCurrentUser(req);
+	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
-	var uuid        = req.params.uuid.toLowerCase().trim();
-	var node        = await linkedNodes.getNodeByUUID(uuid);
-	var grouplist;
+	var uuid             = req.params.uuid.toLowerCase().trim();
+	var node             = await linkedNodes.getNodeByUUID(uuid);
+	var grouplist, network, networklist;
 	if (node) {
-		grouplist = await msgGroups.getAllGroupsWithAreas();
+		grouplist   = await msgGroups.getAllGroupsWithAreas();
+		networklist = await msgNetworks.getActiveNetworks();
+		if (node.network_id) {
+			network = await msgNetworks.getNetworkById(node.network_id);
+		}
 	}
 	res.render('admin/nodes/view', {
 		sufficientAccess: sufficientAccess,
 		title: 'Linked Node',
-		activelink: 'msgGroups',
+		activelink: 'networks',
 		currentuser: currentuser,
 		node: node,
-		DateTime: DateTime,
-		grouplist: grouplist
+		network: network || null,
+		networklist: networklist || [],
+		grouplist: grouplist || [],
+		DateTime: DateTime
 	});
 });
 
@@ -386,21 +450,45 @@ router.get('/msgArea/:shortcode/thread/:uuid', async (req, res, next) => {
 	});
 });
 
-router.get('/msgArea/:shortcode', async (req, res, next) => {
+router.post('/msgArea/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
-	var shortcode   = req.params.shortcode.toLowerCase().trim();
-	var msgArea     = await msgAreas.getAreaByShortcode(shortcode);
-	var threadlist  = await echomail.getRecentThreadsForArea(shortcode);
-	res.render('admin/msgAreas/view', {
-		sufficientAccess: sufficientAccess,
-		title: msgArea ? msgArea.name : shortcode,
-		activelink: 'msgGroups',
-		currentuser: currentuser,
-		msgArea: msgArea,
-		threadlist: threadlist,
-		DateTime: DateTime
-	});
+	var shortcode   = req.params.shortcode.toUpperCase().trim();
+	var formObj     = req.body;
+	var result      = await msgAreas.updateArea(shortcode, formObj);
+	if (result.status === true) {
+		res.redirect(`/admin/msgGroup/${formObj.groupshortcode || ''}`);
+	} else {
+		alogger.writeAlog(3, "updateArea failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		var msgArea    = await msgAreas.getAreaByShortcode(shortcode);
+		var threadlist = await echomail.getRecentThreadsForArea(shortcode);
+		res.render('admin/msgAreas/view', {
+			sufficientAccess: sufficientAccess,
+			title: msgArea ? msgArea.name : shortcode,
+			activelink: 'msgGroups',
+			currentuser: currentuser,
+			msgArea: msgArea,
+			threadlist: threadlist,
+			errormessages: result.errormessages,
+			DateTime: DateTime
+		});
+	}
+});
+
+router.post('/msgArea/:shortcode/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser   = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode     = req.params.shortcode.toUpperCase().trim();
+	var deleteTables  = (req.body.delete_tables === 'true');
+	var dbarea        = await msgAreas.getAreaByShortcode(shortcode);
+	var groupshortcode = dbarea ? dbarea.group_shortcode : null;
+	var result        = await msgAreas.removeArea(shortcode, deleteTables);
+	if (result.status === true) {
+		res.redirect(groupshortcode ? `/admin/msgGroup/${groupshortcode}` : '/admin/msgGroups');
+	} else {
+		alogger.writeAlog(3, "removeArea failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		res.redirect(groupshortcode ? `/admin/msgGroup/${groupshortcode}` : '/admin/msgGroups');
+	}
 });
 
 router.post('/msgArea/:shortcode/newthread', urlencodedParser, requireAdmin, async (req, res) => {
@@ -431,6 +519,23 @@ router.post('/msgArea/:shortcode/thread/:uuid/newreply', urlencodedParser, requi
 		alogger.writeAlog(3, "replyToThread failed for thread " + uuid + ": " + resultObj.errormessages.join(", "), "redbright");
 	}
 	res.redirect(`/admin/msgArea/${shortcode}/thread/${uuid}`);
+});
+
+router.get('/msgArea/:shortcode', async (req, res, next) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode   = req.params.shortcode.toLowerCase().trim();
+	var msgArea     = await msgAreas.getAreaByShortcode(shortcode);
+	var threadlist  = await echomail.getRecentThreadsForArea(shortcode);
+	res.render('admin/msgAreas/view', {
+		sufficientAccess: sufficientAccess,
+		title: msgArea ? msgArea.name : shortcode,
+		activelink: 'msgGroups',
+		currentuser: currentuser,
+		msgArea: msgArea,
+		threadlist: threadlist,
+		DateTime: DateTime
+	});
 });
 
 router.post('/deletemsg/:shortcode/:uuid', urlencodedParser, requireAdmin, async (req, res) => {
@@ -510,6 +615,166 @@ router.post('/users/:uuid/resetpassword', urlencodedParser, requireAdmin, async 
 		alogger.writeAlog(3, "resetUserPassword failed for " + uuid + ": " + resultObj.errormessages.join(", "), "redbright");
 	}
 	res.redirect('/admin/users');
+});
+
+router.get('/networks', async (req, res, next) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networklist      = await msgNetworks.getNetworksWithZoneCount();
+	res.render('admin/msgNets/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Message Networks',
+		activelink: 'networks',
+		currentuser: currentuser,
+		networklist: networklist
+	});
+});
+
+router.post('/networks/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var formObj     = req.body;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await msgNetworks.newNetwork(formObj);
+	if (result.status === true) {
+		res.redirect(`/admin/network/${result.insertUUID}`);
+	} else {
+		alogger.writeAlog(3, "newNetwork failed: " + result.errormessages.join(", "), "redbright");
+		var networklist = await msgNetworks.getNetworksWithZoneCount();
+		res.render('admin/msgNets/index', {
+			sufficientAccess: true,
+			title: 'Message Networks',
+			activelink: 'networks',
+			currentuser: currentuser,
+			networklist: networklist,
+			errormessages: result.errormessages
+		});
+	}
+});
+
+router.post('/network/zone/:zoneuuid/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var zoneuuid    = req.params.zoneuuid.toLowerCase().trim();
+	var formObj     = req.body;
+	if (currentuser) {
+		formObj.updatedByName = currentuser.name;
+		formObj.updatedByUUID = currentuser.uuid;
+	}
+	// Fetch zone first so we can redirect back to the right network
+	var dbzone = await msgZones.getZoneByUUID(zoneuuid);
+	if (!dbzone) {
+		alogger.writeAlog(3, "updateZone: zone not found for uuid " + zoneuuid, "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var network = await msgNetworks.getNetworkById(dbzone.network_id);
+	var result  = await msgZones.updateZone(zoneuuid, formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "updateZone failed for " + zoneuuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect(`/admin/network/${network ? network.uuid : ''}`);
+});
+
+router.get('/network/:uuid', async (req, res, next) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var uuid             = req.params.uuid.toLowerCase().trim();
+	var network          = await msgNetworks.getNetworkByUUID(uuid);
+	var zonelist, addresslist, nodelist;
+	if (network) {
+		zonelist    = await msgZones.getZonesByNetwork(network.id);
+		addresslist = await systemAddresses.getAddressesByNetwork(network.id);
+		nodelist    = await linkedNodes.getNodesByNetwork(network.id);
+	}
+	res.render('admin/msgNets/view', {
+		sufficientAccess: sufficientAccess,
+		title: 'Network',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		zonelist: zonelist || [],
+		addresslist: addresslist || [],
+		nodelist: nodelist || []
+	});
+});
+
+router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var formObj     = req.body;
+	if (currentuser) {
+		formObj.updatedByName = currentuser.name;
+		formObj.updatedByUUID = currentuser.uuid;
+	}
+	var result = await msgNetworks.updateNetwork(uuid, formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "updateNetwork failed for " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect(`/admin/network/${uuid}`);
+});
+
+router.post('/network/:uuid/newzone', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var network     = await msgNetworks.getNetworkByUUID(uuid);
+	if (!network) {
+		alogger.writeAlog(3, "newzone: network not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var formObj = req.body;
+	formObj.network_id = network.id;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await msgZones.newZone(formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "newZone failed for network " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect(`/admin/network/${uuid}`);
+});
+
+router.post('/network/:uuid/newaddress', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var network     = await msgNetworks.getNetworkByUUID(uuid);
+	if (!network) {
+		alogger.writeAlog(3, "newaddress: network not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var formObj = req.body;
+	formObj.network_id = network.id;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await systemAddresses.newAddress(formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "newAddress failed for network " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect(`/admin/network/${uuid}`);
+});
+
+router.post('/network/:uuid/newnode', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var network     = await msgNetworks.getNetworkByUUID(uuid);
+	if (!network) {
+		alogger.writeAlog(3, "newnode: network not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var formObj = req.body;
+	formObj.network_id = network.id;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await linkedNodes.newNode(formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "newNode failed for network " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect(`/admin/network/${uuid}`);
 });
 
 export { router };

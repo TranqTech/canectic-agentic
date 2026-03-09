@@ -4,6 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
 import * as postgres from '../middleware/db/postgres.js';
+import * as msgNetworks from './msgNetworks.js';
+import * as msgZones from './msgZones.js';
 import * as alogger from "../utils/alogger.js";
 
 dotenv.config();
@@ -15,13 +17,29 @@ async function newAddress(formObj) {
 		insertId: 0
 	};
 
-	if (!formObj.domain) {
-		returnObj.errormessages.push("Domain cannot be empty!");
-	}
 	if (!formObj.address) {
 		returnObj.errormessages.push("Address cannot be empty!");
 	}
+	if (!formObj.network_id && !formObj.domain) {
+		returnObj.errormessages.push("Network cannot be empty!");
+	}
 	if (returnObj.errormessages.length > 0) {
+		return returnObj;
+	}
+
+	// Resolve network
+	var dbnetwork;
+	if (formObj.network_id) {
+		dbnetwork = await msgNetworks.getNetworkById(parseInt(formObj.network_id));
+	} else {
+		dbnetwork = await msgNetworks.getNetworkByDomain(formObj.domain);
+	}
+	if (!dbnetwork) {
+		returnObj.errormessages.push("Network not found");
+		return returnObj;
+	}
+	if (!dbnetwork.active) {
+		returnObj.errormessages.push("Network is not active");
 		return returnObj;
 	}
 
@@ -58,17 +76,35 @@ async function newAddress(formObj) {
 		return returnObj;
 	}
 
+	// Validate zone belongs to this network.
+	// getCachedZonesByNetwork returns null if both Redis and DB are unavailable —
+	// reject the address in that case rather than allowing an unvalidated entry.
+	var zoneList = await msgZones.getCachedZonesByNetwork(dbnetwork.id);
+	if (!zoneList) {
+		alogger.writeAlog(3, "newAddress: zone validation unavailable for network_id " + dbnetwork.id, "redbright");
+		returnObj.errormessages.push("Zone validation is currently unavailable. Please try again or contact the system administrator.");
+		return returnObj;
+	}
+	if (zoneList.length > 0) {
+		var validZone = zoneList.some(z => z.zone_number === zone);
+		if (!validZone) {
+			returnObj.errormessages.push("Zone " + zone + " does not belong to network " + dbnetwork.name);
+			return returnObj;
+		}
+	}
+
 	var currtime = new Date();
 	var uuid = uuidv4();
 
 	var dbObj = {
 		uuid: uuid,
+		network_id: dbnetwork.id,
 		address: formObj.address,
 		address_zone: zone,
 		address_net: net,
 		address_node: node,
 		address_point: point,
-		domain: formObj.domain,
+		domain: dbnetwork.domain,
 		active: true,
 		created_at: currtime,
 		created_by_name: formObj.createdByName || "",
@@ -79,7 +115,7 @@ async function newAddress(formObj) {
 	if (dbres.status === true && dbres.insertId) {
 		returnObj.insertId = dbres.insertId;
 		returnObj.status = true;
-		alogger.writeAlog(5, "System address created: " + formObj.address + " (" + formObj.domain + ")", "greenbright");
+		alogger.writeAlog(5, "System address created: " + formObj.address + " on " + dbnetwork.domain, "greenbright");
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
@@ -104,6 +140,14 @@ async function getAllAddresses() {
 async function getInactiveAddresses() {
 	var dblist = await postgres.query(
 		"SELECT * FROM system_addresses WHERE NOT active ORDER BY address ASC"
+	);
+	return dblist || [];
+}
+
+async function getAddressesByNetwork(networkId) {
+	var dblist = await postgres.query(
+		"SELECT * FROM system_addresses WHERE network_id = $1 AND active ORDER BY address ASC",
+		[networkId]
 	);
 	return dblist || [];
 }
@@ -153,6 +197,7 @@ export {
 	getActiveAddresses,
 	getAllAddresses,
 	getInactiveAddresses,
+	getAddressesByNetwork,
 	getAddressesForZone,
 	getAddressesForDomain,
 	getAddressById,

@@ -224,7 +224,7 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 
 	if (message.threadid) {
 		querytext = "SELECT * FROM " + threadtable + " WHERE threadid = $1";
-		existingthread = await postgres.queryOne(querytext, [message.ThreadId]);
+		existingthread = await postgres.queryOne(querytext, [message.threadid]);
 		if (existingthread) {
 			message.thread_id = existingthread.id;
 			await pushThreadIdToUpdateQueue(existingthread.id, shortcode);

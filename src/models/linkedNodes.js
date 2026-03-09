@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
 import * as postgres from '../middleware/db/postgres.js';
+import * as msgNetworks from './msgNetworks.js';
 import * as alogger from "../utils/alogger.js";
 
 dotenv.config();
@@ -23,13 +24,29 @@ async function newNode(formObj) {
 	if (!formObj.address) {
 		returnObj.errormessages.push("Address cannot be empty");
 	}
-	if (!formObj.domain) {
-		returnObj.errormessages.push("Domain cannot be empty");
+	if (!formObj.network_id && !formObj.domain) {
+		returnObj.errormessages.push("Network cannot be empty");
 	}
 	if (!formObj.connectiontype) {
 		returnObj.errormessages.push("Could not determine connection type");
 	}
 	if (returnObj.errormessages.length > 0) {
+		return returnObj;
+	}
+
+	// Resolve network
+	var dbnetwork;
+	if (formObj.network_id) {
+		dbnetwork = await msgNetworks.getNetworkById(parseInt(formObj.network_id));
+	} else {
+		dbnetwork = await msgNetworks.getNetworkByDomain(formObj.domain);
+	}
+	if (!dbnetwork) {
+		returnObj.errormessages.push("Network not found");
+		return returnObj;
+	}
+	if (!dbnetwork.active) {
+		returnObj.errormessages.push("Network is not active");
 		return returnObj;
 	}
 
@@ -46,8 +63,9 @@ async function newNode(formObj) {
 	var dbObj = {
 		name: formObj.name,
 		uuid: uuid,
+		network_id: dbnetwork.id,
 		address: formObj.address.trim(),
-		domain: formObj.domain.trim(),
+		domain: dbnetwork.domain,
 		status: status,
 		session_password: formObj.sessionpw ? formObj.sessionpw.trim() : "",
 		packet_password: formObj.packetpw ? formObj.packetpw.trim() : "",
@@ -67,7 +85,7 @@ async function newNode(formObj) {
 	if (dbres.status === true && dbres.insertId) {
 		returnObj.insertId = dbres.insertId;
 		returnObj.status = true;
-		alogger.writeAlog(5, "Linked node created: " + formObj.name + " (" + formObj.address + ")", "greenbright");
+		alogger.writeAlog(5, "Linked node created: " + formObj.name + " (" + formObj.address + ") on " + dbnetwork.domain, "greenbright");
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
@@ -82,6 +100,14 @@ async function getAllNodes() {
 
 async function getActiveNodes() {
 	var nodelist = await postgres.query("SELECT * FROM linked_nodes WHERE active");
+	return nodelist || [];
+}
+
+async function getNodesByNetwork(networkId) {
+	var nodelist = await postgres.query(
+		"SELECT * FROM linked_nodes WHERE network_id = $1",
+		[networkId]
+	);
 	return nodelist || [];
 }
 
@@ -187,11 +213,24 @@ async function updateAddress(uuid, formObj) {
 	if (!formObj.name) {
 		returnObj.errormessages.push("Name cannot be empty");
 	}
-	if (!formObj.domain) {
-		returnObj.errormessages.push("Domain cannot be empty");
-	}
 	if (returnObj.errormessages.length > 0) {
 		return returnObj;
+	}
+
+	// If network_id is being updated, resolve and validate the new network
+	var networkFields = {};
+	if (formObj.network_id !== undefined) {
+		var dbnetwork = await msgNetworks.getNetworkById(parseInt(formObj.network_id));
+		if (!dbnetwork) {
+			returnObj.errormessages.push("Network not found");
+			return returnObj;
+		}
+		if (!dbnetwork.active) {
+			returnObj.errormessages.push("Network is not active");
+			return returnObj;
+		}
+		networkFields.network_id = dbnetwork.id;
+		networkFields.domain = dbnetwork.domain;
 	}
 
 	var direct = (formObj.direct !== "No");
@@ -201,8 +240,11 @@ async function updateAddress(uuid, formObj) {
 	}
 
 	var err = await postgres.write(
-		"UPDATE linked_nodes SET address = $1, status = $2, direct = $3, route_to = $4, name = $5, domain = $6 WHERE uuid = $7",
-		[formObj.address, status, direct, formObj.routeto, formObj.name, formObj.domain, uuid]
+		"UPDATE linked_nodes SET address = $1, status = $2, direct = $3, route_to = $4, name = $5" +
+		(networkFields.network_id ? ", network_id = $6, domain = $7 WHERE uuid = $8" : " WHERE uuid = $6"),
+		networkFields.network_id
+			? [formObj.address, status, direct, formObj.routeto, formObj.name, networkFields.network_id, networkFields.domain, uuid]
+			: [formObj.address, status, direct, formObj.routeto, formObj.name, uuid]
 	);
 	if (err) {
 		alogger.writeAlog(3, "updateAddress error for " + uuid + ": " + err.message, "redbright");
@@ -239,7 +281,23 @@ async function updateConnection(uuid, formObj) {
 		status: false,
 		errormessages: []
 	};
-	// TODO: implement connection type/host/port update
+
+	if (!formObj.connectiontype) {
+		returnObj.errormessages.push("Connection type cannot be empty");
+		return returnObj;
+	}
+
+	var err = await postgres.write(
+		"UPDATE linked_nodes SET connection_type = $1, remote_host = $2, remote_port = $3 WHERE uuid = $4",
+		[formObj.connectiontype, formObj.remotehost || "", parseInt(formObj.remoteport) || null, uuid]
+	);
+	if (err) {
+		alogger.writeAlog(3, "updateConnection error for " + uuid + ": " + err.message, "redbright");
+		returnObj.errormessages.push("Error updating DB entry");
+		return returnObj;
+	}
+
+	returnObj.status = true;
 	return returnObj;
 }
 
@@ -247,6 +305,7 @@ export {
 	newNode,
 	getAllNodes,
 	getActiveNodes,
+	getNodesByNetwork,
 	getNodeByAddress,
 	getNodeById,
 	getNodeByUUID,

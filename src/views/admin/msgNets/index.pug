@@ -1,0 +1,169 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-2
+          .col-8
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-lg.btn-info(href='/admin')
+                        |Exit
+              .card-body
+                if errormessages && errormessages.length > 0
+                  ul.text-danger
+                    for error of errormessages
+                      li.text-danger
+                        =error
+                  br
+
+                .row
+                  .col-12
+                    .card
+                      .card-header
+                        .row
+                          .col-8
+                            h4
+                              |Message Networks
+                          .col-4
+                            .text-end
+                              button.btn.btn-md.btn-success(data-bs-toggle='modal' data-bs-target='#newNetworkModal')
+                                |Add Network
+                      .card-body
+                        if networklist && networklist.length > 0
+                          table#networkTable.table.table-hover
+                            thead
+                              tr
+                                th(scope='col') Name
+                                th(scope='col') Domain
+                                th(scope='col') Type
+                                th(scope='col') Zones
+                                th(scope='col') Status
+                            tbody
+                              for network of networklist
+                                tr(
+                                  data-bs-uuid=network.uuid
+                                  data-bs-name=network.name
+                                  data-bs-domain=network.domain
+                                  data-bs-type=network.network_type || 'FTN'
+                                  data-bs-description=network.description || ''
+                                  data-bs-active=network.active
+                                )
+                                  td
+                                    =network.name
+                                  td
+                                    =network.domain
+                                  td
+                                    =network.network_type || 'FTN'
+                                  td.text-center
+                                    =network.zone_count || 0
+                                  td
+                                    if network.active
+                                      span.badge.bg-success Active
+                                    else
+                                      span.badge.bg-secondary Inactive
+                        else
+                          center
+                            h4
+                              |No Networks Found
+
+        // New Network Modal
+        #newNetworkModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title
+                  |New Message Network
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form(action='/admin/networks/new' method='POST' class='form-registration')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='nn_name') Name:
+                      input(
+                        type='text'
+                        id='nn_name'
+                        name='name'
+                        class='form-control'
+                        tabindex='1'
+                        required
+                      )
+                      br
+                      label(for='nn_description') Description:
+                      input(
+                        type='text'
+                        id='nn_description'
+                        name='description'
+                        class='form-control'
+                        tabindex='2'
+                        required
+                      )
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='nn_domain') Domain:
+                      input(
+                        type='text'
+                        id='nn_domain'
+                        name='domain'
+                        class='form-control'
+                        tabindex='3'
+                        required
+                      )
+                      br
+                      label(for='nn_type') Network Type:
+                      select#nn_type(name='network_type' tabindex='4').form-select
+                        option(value='FTN' selected) FTN
+                        option(value='Other') Other
+                    .col-5
+                      label(for='nn_active') Status:
+                      select#nn_active(name='active' tabindex='5').form-select
+                        option(value='true' selected) Active
+                        option(value='false') Inactive
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(
+                          type='submit'
+                          value='Submit'
+                          class='btn btn-lg btn-success btn-block'
+                          tabindex='6'
+                        )
+
+    script.
+      document.addEventListener('DOMContentLoaded', function() {
+        const table = document.getElementById('networkTable');
+        if (table) {
+          const rows = table.querySelectorAll('tbody tr');
+          rows.forEach(row => {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function() {
+              const uuid = this.getAttribute('data-bs-uuid');
+              if (uuid) {
+                window.location.href = `/admin/network/${uuid}`;
+              }
+            });
+          });
+        }
+      });
