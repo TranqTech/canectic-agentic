@@ -763,16 +763,11 @@ async function pullAllNNTP() {
 function formatNntpArticle(msg, areatag, domain) {
 	var hostPart = domain || 'bbs.local';
 
-	// Always generate a clean RFC 2822 Message-ID from the row uuid —
-	// msg_id contains FTN-style values like "1:234/567 a1b2c3d4" which are
-	// not valid NNTP Message-IDs.
 	var msgId = '<' + msg.uuid + '@' + hostPart + '>';
 
-	// From: "Name <name@domain>"
 	var fromAddr = msg.from_user +
 		' <' + msg.from_user.toLowerCase().replace(/\s+/g, '.') + '@' + hostPart + '>';
 
-	// Date: RFC 2822
 	var date = msg.system_time
 		? new Date(msg.system_time).toUTCString()
 		: new Date().toUTCString();
@@ -786,15 +781,21 @@ function formatNntpArticle(msg, areatag, domain) {
 		'Path: '       + hostPart
 	];
 
-	// References: use reply_to if set; also try to build a clean message-id from it
 	if (msg.reply_to) {
-		// reply_to may be a raw FTN msgid — wrap in <> only if it looks safe,
-		// otherwise skip it (a missing References is harmless; a malformed one breaks threading)
 		var ref = msg.reply_to.trim();
 		if (ref.startsWith('<') && ref.endsWith('>') && !ref.includes(' ')) {
 			headers.push('References: ' + ref);
 		}
 	}
+
+	alogger.writeAlog(5,
+		'formatNntpArticle: uuid=' + msg.uuid +
+		' newsgroup=' + areatag +
+		' domain=' + hostPart +
+		' from=' + fromAddr +
+		' msgid=' + msgId,
+		'cyan'
+	);
 
 	// Body: stored with \r line endings — convert to \n, then dot-stuff
 	var bodyText  = (msg.body_text || '').replace(/\r/g, '\n');
@@ -816,7 +817,7 @@ async function pushToNntpPeer(peerConnectionUUID) {
 		errormessages: []
 	};
 
-	var dbconn = await peerConnections.getConnectionByUUID(peerConnectionUUID);
+	var dbconn = await peerConnections.getConnectionByUUIDWithNetwork(peerConnectionUUID);
 	if (!dbconn || !dbconn.active) {
 		returnObj.errormessages.push('Connection not found or inactive: ' + peerConnectionUUID);
 		return returnObj;
@@ -856,9 +857,10 @@ async function pushToNntpPeer(peerConnectionUUID) {
 		return returnObj;
 	}
 
-	// Collect messages to post and idx updates to apply on success
-	var toPost       = [];  // { article, pas_id, area_id, newIdx }
-	var idxUpdateArray = [];
+	// Build ordered work list per subscription.
+	// Skipped messages (echo suppression) are included as { skip: true } so
+	// we can advance past them correctly without blocking on failed posts.
+	var workItems = [];  // { pas_id, area_id, msgtable, msgId, skip, article, nntpMsgId }
 
 	for (var sub of enabledSubs) {
 		var curIdx   = sub.msg_idx || 0;
@@ -880,36 +882,31 @@ async function pushToNntpPeer(peerConnectionUUID) {
 
 			if (msglist && msglist.length > 0) {
 				for (var msg of msglist) {
-					// Skip messages that were imported from this NNTP network —
-					// don't echo them back to the server they came from
+					// Echo suppression — mark as skip, still include so idx can advance past it
 					if (msg.source_network_id && msg.source_network_id === dbconn.network_id) {
-						curIdx = msg.id;
-						returnObj.totalSkipped++;
+						workItems.push({
+							pas_id: sub.id, area_id: sub.area_id, msgtable,
+							msgId: msg.id, skip: true
+						});
 						continue;
 					}
 
 					var nntpMsgId = '<' + msg.uuid + '@' + (domain || 'bbs.local') + '>';
-					var article   = formatNntpArticle(msg, sub.areatag, domain);
-					toPost.push({
-						article,
-						nntpMsgId,
-						msgId:    msg.id,
-						msgtable: msgtable,
-						pas_id:   sub.id,
-						area_id:  sub.area_id
+					workItems.push({
+						pas_id: sub.id, area_id: sub.area_id, msgtable,
+						msgId: msg.id, skip: false,
+						article:   formatNntpArticle(msg, sub.areatag, domain),
+						nntpMsgId: nntpMsgId
 					});
-					curIdx = msg.id;
 				}
 			}
 		}
-
-		idxUpdateArray.push({ pas_id: sub.id, area_id: sub.area_id, newIdx: curIdx });
 	}
 
-	if (toPost.length === 0) {
+	if (workItems.filter(i => !i.skip).length === 0) {
+		// Only skips — advance past them and return
 		alogger.writeAlog(5, 'pushToNntpPeer: nothing to post for ' + peerConnectionUUID, 'cyan');
-		// Still update indexes so we don't re-scan next time
-		await updateNntpMsgIndexes(idxUpdateArray);
+		await advanceNntpIdxForSkips(workItems);
 		returnObj.status = true;
 		return returnObj;
 	}
@@ -924,7 +921,6 @@ async function pushToNntpPeer(peerConnectionUUID) {
 		}
 
 		if (greeting.code === 201) {
-			// Server says posting not allowed in greeting
 			returnObj.errormessages.push('NNTP server ' + host + ' does not permit posting (201 greeting)');
 			await client.quit();
 			return returnObj;
@@ -939,21 +935,40 @@ async function pushToNntpPeer(peerConnectionUUID) {
 			}
 		}
 
-		for (var item of toPost) {
+		for (var item of workItems) {
+			if (item.skip) {
+				item.success = true;
+				returnObj.totalSkipped++;
+				continue;
+			}
+
+			alogger.writeAlog(5,
+				'pushToNntpPeer: POSTing msgId=' + item.msgId +
+				' nntpMsgId=' + item.nntpMsgId +
+				' to ' + host,
+				'cyan'
+			);
+
 			var result = await client.post(item.article);
+
+			alogger.writeAlog(5,
+				'pushToNntpPeer: POST response code=' + result.code +
+				' text=' + result.text,
+				result.code === 240 ? 'greenbright' : 'yellow'
+			);
+
 			if (result.code === 240) {
+				item.success = true;
 				returnObj.totalPosted++;
-				// Store the NNTP Message-ID we used in nntp_msg_id so the inbound
-				// dupe check can recognise our own posts when the server reflects them back.
-				// We don't touch msg_id — that preserves the FTN msgid for cross-posting.
 				await postgres.write(
 					'UPDATE ' + item.msgtable + ' SET nntp_msg_id = $1 WHERE id = $2',
 					[item.nntpMsgId, item.msgId]
 				);
 			} else {
+				item.success = false;
 				alogger.writeAlog(4,
-					'pushToNntpPeer: POST rejected by ' + host + ' code=' + result.code +
-					' text=' + result.text,
+					'pushToNntpPeer: POST rejected by ' + host +
+					' code=' + result.code + ' text=' + result.text,
 					'yellow'
 				);
 			}
@@ -964,10 +979,13 @@ async function pushToNntpPeer(peerConnectionUUID) {
 		alogger.writeAlog(3, 'pushToNntpPeer: connection error for ' + host + ': ' + err.message, 'redbright');
 		returnObj.errormessages.push(err.message);
 		try { await client.quit(); } catch (_) {}
-		return returnObj;
+		// Fall through to idx advancement — update based on whatever succeeded before the error
 	}
 
-	await updateNntpMsgIndexes(idxUpdateArray);
+	// Advance msg_idx per subscription up through the last consecutive success/skip.
+	// Stop at the first failure so unposted messages are retried next toss.
+	await advanceNntpIdxAfterPost(workItems, enabledSubs);
+
 	returnObj.status = true;
 	alogger.writeAlog(5,
 		'pushToNntpPeer: ' + peerConnectionUUID +
@@ -978,14 +996,82 @@ async function pushToNntpPeer(peerConnectionUUID) {
 	return returnObj;
 }
 
-// Update msg_idx on peer_area_subscriptions after a successful outbound push.
-async function updateNntpMsgIndexes(idxUpdateArray) {
-	for (var item of idxUpdateArray) {
+// Advance msg_idx for a list of work items that are all skips (no posts attempted).
+async function advanceNntpIdxForSkips(workItems) {
+	var byPas = {};
+	for (var item of workItems) {
+		if (!byPas[item.pas_id] || item.msgId > byPas[item.pas_id]) {
+			byPas[item.pas_id] = item.msgId;
+		}
+	}
+	for (var pasId of Object.keys(byPas)) {
 		await postgres.write(
 			'UPDATE peer_area_subscriptions SET msg_idx = $1 WHERE id = $2',
-			[item.newIdx, item.pas_id]
+			[byPas[pasId], parseInt(pasId)]
 		);
 	}
+}
+
+// Advance msg_idx per subscription up through the last consecutive success/skip.
+// Stops at the first failure so unposted messages are retried next toss cycle.
+// enabledSubs provides the baseline current idx for subs that had no work items.
+async function advanceNntpIdxAfterPost(workItems, enabledSubs) {
+	// Group items by pas_id preserving insertion order (already ordered by id ASC)
+	var byPas = {};
+	for (var item of workItems) {
+		if (!byPas[item.pas_id]) byPas[item.pas_id] = [];
+		byPas[item.pas_id].push(item);
+	}
+
+	for (var pasId of Object.keys(byPas)) {
+		var items   = byPas[pasId];
+		var newIdx  = null;
+
+		for (var item of items) {
+			if (item.success) {
+				newIdx = item.msgId;
+			} else {
+				break;  // stop at first failure — retry from here next time
+			}
+		}
+
+		if (newIdx !== null) {
+			await postgres.write(
+				'UPDATE peer_area_subscriptions SET msg_idx = $1 WHERE id = $2',
+				[newIdx, parseInt(pasId)]
+			);
+		}
+		// If newIdx is null (first item failed), leave msg_idx unchanged — full retry next toss
+	}
+}
+
+// Reset outbound msg_idx for all subscriptions on a connection, or optionally
+// a single area, so the next toss rescans from the beginning.
+// Called from the admin route when a manual reset is requested.
+async function resetNntpOutboundIdx(peerConnectionUUID, areaId) {
+	var dbconn = await peerConnections.getConnectionByUUID(peerConnectionUUID);
+	if (!dbconn) return { status: false, errormessages: ['Connection not found'] };
+
+	var sql    = 'UPDATE peer_area_subscriptions SET msg_idx = 0 WHERE peer_connection_id = $1';
+	var params = [dbconn.id];
+
+	if (areaId) {
+		sql    += ' AND area_id = $2';
+		params.push(parseInt(areaId));
+	}
+
+	var err = await postgres.write(sql, params);
+	if (err) {
+		alogger.writeAlog(3, 'resetNntpOutboundIdx: failed for ' + peerConnectionUUID + ': ' + err.message, 'redbright');
+		return { status: false, errormessages: [err.message] };
+	}
+
+	alogger.writeAlog(5,
+		'resetNntpOutboundIdx: reset msg_idx for connection ' + peerConnectionUUID +
+		(areaId ? ' area ' + areaId : ' all areas'),
+		'greenbright'
+	);
+	return { status: true, errormessages: [] };
 }
 
 // Push outbound messages to all active NNTP connections.
@@ -1021,5 +1107,6 @@ export {
 	pullFromPeer,
 	pullAllNNTP,
 	pushToNntpPeer,
-	pushAllNNTP
+	pushAllNNTP,
+	resetNntpOutboundIdx
 };

@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import * as pgdb from "../middleware/db/postgres.js";
 import * as fs from 'fs';
 import * as alogger from "../utils/alogger.js";
+import { maintainAllAreaTables } from "../models/messageMaint.js";
 
 //setup
 dotenv.config();
@@ -262,6 +263,10 @@ async function setupTables() {
 		console.log("  No changes needed.");
 	}
 	console.log("========================================\n");
+
+	// Apply template-driven schema maintenance to all dynamic message/thread tables
+	console.log("\n--- Message Table Maintenance ---");
+	await maintainAllAreaTables();
 }
 
 async function main() {

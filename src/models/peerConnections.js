@@ -474,6 +474,19 @@ async function getConnectionByUUID(uuid) {
 	return dbres;
 }
 
+// Like getConnectionByUUID but joins message_networks so network fields
+// (domain, network_type, network_name) are available on the returned row.
+async function getConnectionByUUIDWithNetwork(uuid) {
+	var dbres = await postgres.queryOne(
+		`SELECT pc.*, mn.name AS network_name, mn.network_type, mn.domain, mn.config AS network_config
+		 FROM peer_connections pc
+		 JOIN message_networks mn ON mn.id = pc.network_id
+		 WHERE pc.uuid = $1`,
+		[uuid]
+	);
+	return dbres;
+}
+
 async function getConnectionById(id) {
 	var dbres = await postgres.queryOne(
 		'SELECT * FROM peer_connections WHERE id = $1',
@@ -533,6 +546,7 @@ export {
 	getConnectionsByPeer,
 	getConnectionsByNetwork,
 	getConnectionByUUID,
+	getConnectionByUUIDWithNetwork,
 	getConnectionById,
 	getActiveConnectionsByNetworkType,
 	buildConnectionData,

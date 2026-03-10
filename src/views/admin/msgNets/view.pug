@@ -66,7 +66,7 @@ block content
                           table.table
                             tr
                               td
-                                h6 Domain:
+                                h6= network.network_type === 'NNTP' ? 'Local FQDN:' : 'Domain:'
                               td= network.domain
                             tr
                               td
@@ -85,46 +85,47 @@ block content
                                 else
                                   span.badge.bg-secondary Inactive
 
-                    .col-8
-                      .card
-                        .card-header
-                          .row
-                            .col-8
-                              h5 Zones
-                            .col-4
-                              .text-end
-                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newZoneModal')
-                                  | Add Zone
-                        .card-body
-                          if zonelist && zonelist.length > 0
-                            table#zoneTable.table.table-hover
-                              thead
-                                tr
-                                  th(scope='col') Zone
-                                  th(scope='col') Name
-                                  th(scope='col') Coordinator
-                                  th(scope='col') Status
-                              tbody
-                                for zone of zonelist
-                                  tr(
-                                    data-bs-uuid=zone.uuid
-                                    data-bs-zone=zone.zone_number
-                                    data-bs-name=zone.name || ''
-                                    data-bs-description=zone.description || ''
-                                    data-bs-coordinator=zone.coordinator_address || ''
-                                    data-bs-active=(zone.active ? 'true' : 'false')
-                                  )
-                                    td= zone.zone_number
-                                    td= zone.name || '—'
-                                    td= zone.coordinator_address || '—'
-                                    td
-                                      if zone.active
-                                        span.badge.bg-success Active
-                                      else
-                                        span.badge.bg-secondary Inactive
-                          else
-                            center
-                              h5 No Zones Configured
+                    if network.network_type === 'FTN'
+                      .col-8
+                        .card
+                          .card-header
+                            .row
+                              .col-8
+                                h5 Zones
+                              .col-4
+                                .text-end
+                                  button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newZoneModal')
+                                    | Add Zone
+                          .card-body
+                            if zonelist && zonelist.length > 0
+                              table#zoneTable.table.table-hover
+                                thead
+                                  tr
+                                    th(scope='col') Zone
+                                    th(scope='col') Name
+                                    th(scope='col') Coordinator
+                                    th(scope='col') Status
+                                tbody
+                                  for zone of zonelist
+                                    tr(
+                                      data-bs-uuid=zone.uuid
+                                      data-bs-zone=zone.zone_number
+                                      data-bs-name=zone.name || ''
+                                      data-bs-description=zone.description || ''
+                                      data-bs-coordinator=zone.coordinator_address || ''
+                                      data-bs-active=(zone.active ? 'true' : 'false')
+                                    )
+                                      td= zone.zone_number
+                                      td= zone.name || '—'
+                                      td= zone.coordinator_address || '—'
+                                      td
+                                        if zone.active
+                                          span.badge.bg-success Active
+                                        else
+                                          span.badge.bg-secondary Inactive
+                            else
+                              center
+                                h5 No Zones Configured
 
                   // System Addresses + Peer Connections row
                   .row
@@ -339,7 +340,12 @@ block content
                         .row
                           .col-1
                           .col-5
-                            label(for='en_domain') Domain:
+                            label#en_domain_label(for='en_domain')
+                              | Domain: 
+                              span(
+                                data-bs-toggle='tooltip'
+                                title='FTN: the fidonet domain (e.g. fidonet.net). NNTP: your BBS\'s own FQDN (e.g. yourbbs.net) — used in From and Message-ID headers on outbound posts.'
+                              ) ⓘ
                             input(
                               type='text'
                               id='en_domain'
@@ -805,5 +811,18 @@ block content
           document.getElementById('removeNetAreaForm').action = `/admin/network/area/${d.bsNaid}/remove`;
         });
       });
+
+      // Update domain field label when network type changes in edit modal.
+      // NNTP uses domain as our own FQDN; all other types use it as the network domain.
+      const domainLabels = { FTN: 'Domain:', NNTP: 'Local FQDN:', QWK: 'Domain:', LOCAL: 'Domain:' };
+      function updateDomainLabel() {
+        const type = (document.getElementById('en_type') || {}).value || 'FTN';
+        const lbl  = document.getElementById('en_domain_label');
+        if (lbl) lbl.firstChild.textContent = (domainLabels[type] || 'Domain:') + ' ';
+      }
+      const enType = document.getElementById('en_type');
+      if (enType) enType.addEventListener('change', updateDomainLabel);
+      const editNetModal = document.getElementById('editNetworkModal');
+      if (editNetModal) editNetModal.addEventListener('show.bs.modal', updateDomainLabel);
 
     });

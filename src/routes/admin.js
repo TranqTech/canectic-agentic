@@ -23,6 +23,7 @@ import * as systemAddresses from "../models/systemAddresses.js";
 import * as userAccounts from "../models/useraccounts.js";
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
+import * as nntpTosser from "../models/nntpTosser.js";
 
 //setup
 router.use(cookieParser());
@@ -743,6 +744,25 @@ router.post('/connection/:uuid/setenabled', urlencodedParser, requireAdmin, asyn
 	var result   = await peerAreaSubscriptions.setSubscriptions(conn.id, areaIds, 'enabled', formObj);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "setenabled failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	var peer = await peers.getPeerById(conn.peer_id);
+	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
+});
+
+// Reset NNTP outbound msg_idx for a connection (all areas, or a specific area)
+// so the next toss cycle rescans from the beginning.
+router.post('/connection/:uuid/resetnntpidx', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var areaId      = req.body.area_id ? parseInt(req.body.area_id) : null;
+	var conn        = await peerConnections.getConnectionByUUID(uuid);
+	if (!conn) {
+		alogger.writeAlog(3, "resetnntpidx: connection not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/peers');
+	}
+	var result = await nntpTosser.resetNntpOutboundIdx(uuid, areaId);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "resetnntpidx failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
 	var peer = await peers.getPeerById(conn.peer_id);
 	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
