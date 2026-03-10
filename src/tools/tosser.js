@@ -5,6 +5,8 @@ import * as ftn from "../models/ftnClasses.js"
 import * as ftnTosser from "../middleware/ftnTosser.js"
 import * as msgAreas from "../models/msgAreas.js"
 import * as echomail from "../models/echomail.js"
+import * as nntpTosser from "../models/nntpTosser.js"
+import * as peerConnections from "../models/peerConnections.js"
 import { DateTime } from "luxon";
 
 const PID_FILE = '/tmp/can_toss.pid';
@@ -47,9 +49,29 @@ async function postTossMaint(){
 
 async function runtosser(){
 	await currentTime()
-	//await ftnTosser.FindAndExtractArchives()
-	await ftnTosser.TossInbound()
-	await ftnTosser.TossOutbound()
+
+	// Discover which network types have active connections so we only
+	// invoke tossers that have work to do
+	var activeFTN  = await peerConnections.getActiveConnectionsByNetworkType("FTN");
+	var activeNNTP = await peerConnections.getActiveConnectionsByNetworkType("NNTP");
+
+	if (activeFTN && activeFTN.length > 0) {
+		console.log("FTN: " + activeFTN.length + " active connection(s) — running FTN toss");
+		//await ftnTosser.FindAndExtractArchives()
+		await ftnTosser.TossInbound()
+		await ftnTosser.TossOutbound()
+	} else {
+		console.log("FTN: no active connections — skipping FTN toss");
+	}
+
+	if (activeNNTP && activeNNTP.length > 0) {
+		console.log("NNTP: " + activeNNTP.length + " active connection(s) — running NNTP pull then push");
+		await nntpTosser.pullAllNNTP();
+		await nntpTosser.pushAllNNTP();
+	} else {
+		console.log("NNTP: no active connections — skipping NNTP toss");
+	}
+
 	await postTossMaint()
 }
 

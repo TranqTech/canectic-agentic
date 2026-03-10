@@ -6,7 +6,14 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as tableTools from '../middleware/db/tableTools.js';
 import * as msgGroups from "./msgGroups.js";
+import * as networkAreas from "./networkAreas.js";
 import * as alogger from "../utils/alogger.js";
+
+// peerConnections imported lazily to avoid circular risk via peerAreaSubscriptions
+async function getPeerConnections() {
+	var mod = await import('./peerConnections.js');
+	return mod;
+}
 
 dotenv.config();
 
@@ -73,14 +80,6 @@ async function newArea(formObj) {
 
 	var groupshort = formObj.groupshortcode.toUpperCase().trim();
 	var shorty     = formObj.shortcode.toUpperCase().trim();
-	var areatag    = formObj.areatag ? formObj.areatag.toUpperCase().trim() : "";
-
-	if (areatag) {
-		var uniquetag = await postgres.checkValueUnique("areatag", areatag, "message_areas");
-		if (!uniquetag) {
-			returnObj.errormessages.push("Area tag already in use");
-		}
-	}
 
 	var uniqueShortcode = await postgres.checkValueUnique("shortcode", shorty, "message_areas");
 	if (!uniqueShortcode) {
@@ -96,12 +95,6 @@ async function newArea(formObj) {
 		return returnObj;
 	}
 
-	var isnetworked = (formObj.networked === "networked");
-	if (isnetworked && !areatag) {
-		returnObj.errormessages.push("You cannot have a networked area with no tag!");
-		return returnObj;
-	}
-
 	returnObj.shortcode = shorty;
 	var currtime = new Date();
 	var uuid = uuidv4();
@@ -114,14 +107,11 @@ async function newArea(formObj) {
 		name: formObj.name,
 		description: formObj.description,
 		shortcode: shorty,
-		areatag: areatag,
 		read_security: formObj.readsecurity,
 		post_security: formObj.postsecurity,
 		min_age: formObj.minage,
 		max_age: formObj.maxage,
 		created_at: currtime,
-		default_address: formObj.default_address,
-		networked: isnetworked,
 		updated_at: null,
 		active: true,
 		created_by_uuid: formObj.createdByUUID,
@@ -136,6 +126,8 @@ async function newArea(formObj) {
 		return returnObj;
 	}
 
+	var areaId = dbres.insertId;
+
 	// Area record written — now create backing tables
 	var tableResult = await createTablesForArea(shorty.toLowerCase());
 	if (!tableResult.status) {
@@ -149,6 +141,42 @@ async function newArea(formObj) {
 		}
 		returnObj.errormessages = returnObj.errormessages.concat(tableResult.errormessages);
 		return returnObj;
+	}
+
+	// If a network_id and areatag were provided, map this area onto that network
+	// and bootstrap subscription rows for all existing connections on that network.
+	if (formObj.network_id && formObj.areatag) {
+		var netAreaResult = await networkAreas.addAreaToNetwork(
+			formObj.network_id,
+			areaId,
+			formObj.areatag,
+			{ createdByUUID: formObj.createdByUUID, createdByName: formObj.createdByName }
+		);
+		if (!netAreaResult.status) {
+			// Network mapping failure is non-fatal — area and tables are already
+			// created successfully. Log it and let the caller know.
+			alogger.writeAlog(3,
+				"newArea: network mapping failed for " + shorty + " on network " +
+				formObj.network_id + ": " + netAreaResult.errormessages.join(", "),
+				"redbright"
+			);
+			returnObj.networkMappingError = netAreaResult.errormessages.join(", ");
+		} else {
+			// Sync subscription rows for all existing connections on this network
+			var peerConns = await getPeerConnections();
+			var connections = await peerConns.getConnectionsByNetwork(parseInt(formObj.network_id));
+			var pasMod = await import('./peerAreaSubscriptions.js');
+			for (var conn of connections) {
+				var syncResult = await pasMod.syncConnectionToNetwork(conn.id);
+				if (!syncResult.status) {
+					alogger.writeAlog(3,
+						"newArea: subscription sync failed for connection " + conn.id +
+						" after adding area " + shorty + ": " + syncResult.errormessages.join(", "),
+						"redbright"
+					);
+				}
+			}
+		}
 	}
 
 	alogger.writeAlog(5, "Message area created: " + formObj.name + " (" + shorty + ")", "greenbright");
@@ -212,8 +240,13 @@ async function getAreaByShortcode(shortcode) {
 
 async function getAreaByAreatag(areatag) {
 	var taggy = areatag.toUpperCase().trim();
+	// areatag now lives in network_areas — join back to message_areas
 	var dbarea = await postgres.queryOne(
-		'SELECT * FROM message_areas WHERE UPPER(areatag) LIKE UPPER($1)',
+		`SELECT ma.*
+		 FROM message_areas ma
+		 JOIN network_areas na ON na.area_id = ma.id
+		 WHERE UPPER(na.areatag) = $1
+		 LIMIT 1`,
 		[taggy]
 	);
 	return dbarea;
@@ -281,36 +314,17 @@ async function updateArea(shortcode, formObj) {
 		return returnObj;
 	}
 
-	// Validate areatag uniqueness only if one is provided and differs from the current value
-	if (formObj.areatag !== undefined) {
-		var areatag = formObj.areatag.toUpperCase().trim();
-		if (areatag && areatag !== (dbarea.areatag || "").toUpperCase().trim()) {
-			var uniquetag = await postgres.checkValueUnique("areatag", areatag, "message_areas");
-			if (!uniquetag) {
-				returnObj.errormessages.push("Area tag already in use");
-				return returnObj;
-			}
-		}
-		if (formObj.networked !== undefined) {
-			var isnetworked = (formObj.networked === "networked");
-			if (isnetworked && !areatag) {
-				returnObj.errormessages.push("You cannot have a networked area with no tag!");
-				return returnObj;
-			}
-		}
-	}
-
 	// Build update object from only the fields present in the form
+	// areatag, networked, and default_address are retired from this table —
+	// areatag lives in network_areas; networked is implied by network_areas
+	// presence; default_address moved to peer_connections.connection_data.
 	var updateObj = {};
 	if (formObj.name        !== undefined) updateObj.name            = formObj.name.trim();
 	if (formObj.description !== undefined) updateObj.description     = formObj.description.trim();
-	if (formObj.areatag     !== undefined) updateObj.areatag         = formObj.areatag.toUpperCase().trim();
 	if (formObj.readsecurity  !== undefined) updateObj.read_security = parseInt(formObj.readsecurity);
 	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
 	if (formObj.minage        !== undefined) updateObj.min_age       = parseInt(formObj.minage);
 	if (formObj.maxage        !== undefined) updateObj.max_age       = parseInt(formObj.maxage);
-	if (formObj.default_address !== undefined) updateObj.default_address = formObj.default_address;
-	if (formObj.networked   !== undefined) updateObj.networked       = (formObj.networked === "networked");
 	if (formObj.active      !== undefined) updateObj.active          = (formObj.active === "true" || formObj.active === true);
 
 	if (Object.keys(updateObj).length === 0) {
@@ -386,6 +400,36 @@ async function removeArea(shortcode, deleteTables) {
 		alogger.writeAlog(5, "removeArea: tables dropped for " + shorty, "cyan");
 	}
 
+	// Remove peer_area_subscriptions rows for this area before removing the area record
+	var subErr = await postgres.write(
+		"DELETE FROM peer_area_subscriptions WHERE area_id = $1",
+		[dbarea.id]
+	);
+	if (subErr) {
+		alogger.writeAlog(3,
+			"removeArea: failed to remove peer_area_subscriptions for area " + shorty +
+			": " + subErr.message,
+			"redbright"
+		);
+		returnObj.errormessages.push("Failed to remove area subscriptions: " + subErr.message);
+		return returnObj;
+	}
+
+	// Remove network_areas rows for this area
+	var naErr = await postgres.write(
+		"DELETE FROM network_areas WHERE area_id = $1",
+		[dbarea.id]
+	);
+	if (naErr) {
+		alogger.writeAlog(3,
+			"removeArea: failed to remove network_areas for area " + shorty +
+			": " + naErr.message,
+			"redbright"
+		);
+		returnObj.errormessages.push("Failed to remove network area mappings: " + naErr.message);
+		return returnObj;
+	}
+
 	// Remove the area record
 	try {
 		await postgres.write("DELETE FROM message_areas WHERE id = $1", [dbarea.id]);
@@ -410,12 +454,21 @@ async function removeArea(shortcode, deleteTables) {
 	return returnObj;
 }
 
+async function getAllAreas() {
+	var dblist = await postgres.query(
+		'SELECT * FROM message_areas ORDER BY group_shortcode ASC, name ASC',
+		[]
+	);
+	return dblist || [];
+}
+
 export {
 	newArea,
 	updateArea,
 	removeArea,
 	getAreaByShortcode,
 	getAreaByAreatag,
+	getAllAreas,
 	getListByGroupShortcode,
 	createMsgTables,
 	createTablesForArea,

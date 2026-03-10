@@ -103,7 +103,13 @@ async function getAllGroupsWithAreas() {
 	if (grouplist && grouplist.length > 0) {
 		for (var group of grouplist) {
 			var dbareas = await postgres.query(
-				'SELECT id, name, description, areatag, shortcode FROM message_areas WHERE active AND networked AND group_id = $1 ORDER BY name ASC',
+				`SELECT ma.id, ma.name, ma.description, ma.shortcode,
+				        na.areatag, na.network_id, mn.name AS network_name
+				 FROM message_areas ma
+				 LEFT JOIN network_areas na ON na.area_id = ma.id AND na.active
+				 LEFT JOIN message_networks mn ON mn.id = na.network_id
+				 WHERE ma.active AND ma.group_id = $1
+				 ORDER BY ma.name ASC`,
 				[group.id]
 			);
 			group.areas = dbareas || [];

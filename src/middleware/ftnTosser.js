@@ -13,16 +13,16 @@ import {Message, Packet} from '../models/ftnClasses.js'
 import * as netmail from '../models/netmail.js'
 import * as echomail from '../models/echomail.js'
 import * as ftnUtils from "../utils/ftnUtils.js"
-import * as linkedNodes from '../models/linkedNodes.js'
+import * as peerConnections from '../models/peerConnections.js'
 import * as codepageConversions from "../utils/codepageConversions.js"
 
 
 //setup and variables
 const TosserName = "Canectic Tosser v0.1"
 const SystemTZUTC = "-0600"
-const defaultInbound = "/var/bbs/ftn/inbound"
-const defaultOutbound = "/var/bbs/ftn/outbound"
-const moveDir = "/var/bbs/ftn/tossed"
+const defaultInbound = process.env.ftninbound || "/var/bbs/ftn/inbound"
+const defaultOutbound = process.env.ftnoutbound || "/var/bbs/ftn/outbound"
+const moveDir = process.env.ftntossed || "/var/bbs/ftn/tossed"
 const defaultZone = 1
 const removeProcessed = false
 const moveProcessed = true
@@ -613,7 +613,7 @@ async function OldTossInbound(inboundDir){
 	}
 }
 
-function WritePktToNode(messageArray, linkedNode, systemaddress){
+function WritePktToNode(messageArray, conn, systemaddress){
 	var returnObj = {
 		processedcount: 0,
 		processednetmail: [],
@@ -621,16 +621,18 @@ function WritePktToNode(messageArray, linkedNode, systemaddress){
 		processedother: [],
 		failedmsgs: []
 	}
+	// connection_data holds FTN transport fields
+	var cd = conn.connection_data || {}
 	//determine destination address.
 	var destinationAddress
-	if (!linkedNode.direct){
-		if (!linkedNode.route_to){
+	if (!cd.direct){
+		if (!cd.route_to){
 			console.log("Cannot determine address for Packet!")
 			return false
 		}
-		destinationAddress = linkedNode.route_to
+		destinationAddress = cd.route_to
 	}else{
-		destinationAddress = linkedNode.address
+		destinationAddress = cd.address
 	}
 	if (!destinationAddress){
 		console.log("Panic! No packet to address")
@@ -664,9 +666,8 @@ function WritePktToNode(messageArray, linkedNode, systemaddress){
 	packet.ProdCode = 0xFE;
 	packet.Serial = 0x01;
 	packet.Password = '';
-	if (linkedNode.packet_password){
-		//do password lookup
-		packet.Password = linkedNode.packet_password
+	if (cd.packet_password){
+		packet.Password = cd.packet_password
 	}
 	//packet.Messages = messageArray;
 	packet.MessageCount = messageArray.length;
@@ -860,7 +861,7 @@ function WritePktToNode(messageArray, linkedNode, systemaddress){
 	return returnObj
 }
 
-async function WritePktsToNode(messageArray, linkedNode, systemaddress){
+async function WritePktsToNode(messageArray, conn, systemaddress){
 	var returnObj = {
 		processedcount: 0,
 		processednetmail: [],
@@ -889,7 +890,7 @@ async function WritePktsToNode(messageArray, linkedNode, systemaddress){
 	while (messageArray.length > 0){
 		//strip messages from array to new array until max count, then pass to write function
 		var pktmsgarray = messageArray.splice(0, maxMsg);
-		var pktres = await WritePktToNode(pktmsgarray, linkedNode, systemaddress)
+		var pktres = await WritePktToNode(pktmsgarray, conn, systemaddress)
 		if ((pktres)&&(pktres.processedcount)){
 			console.log(pktres)
 			//increment pkt count and concat processed lists.
@@ -1255,13 +1256,13 @@ async function TossOutboundNetmail(){
 
 async function TossOutboundEchomail(){
 	console.log("\r\n-------------------\r\nOutbound Echomail\r\n-------------------")
-	var nodelist = await linkedNodes.getActiveNodes()
-	if ((!nodelist)||(nodelist.length < 1)){
-		console.log("No Linked Nodes!")
+	var connlist = await peerConnections.getActiveConnectionsByNetworkType('FTN')
+	if ((!connlist)||(connlist.length < 1)){
+		console.log("No active FTN connections!")
 		return
 	}
-	for await (var node of nodelist){
-		await echomail.getOutboundForNode(node)
+	for await (var conn of connlist){
+		await echomail.getOutboundForConnection(conn)
 	}
 	console.log("Completed Echomail check\r\n\r\n")
 	return

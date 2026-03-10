@@ -1,0 +1,809 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            if !network
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/networks')
+                          | Exit
+                .card-body
+                  br
+                  h3 Data Not Found!
+                  br
+            else
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                        |  — 
+                        = network.name
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/networks')
+                          | Exit
+                .card-body
+                  if errormessages && errormessages.length > 0
+                    ul.text-danger
+                      for error of errormessages
+                        li.text-danger= error
+                    br
+
+                  // Network info + Zones row
+                  .row
+                    .col-4
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 Network Details
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-warning(data-bs-toggle='modal' data-bs-target='#editNetworkModal')
+                                  | Edit
+                        .card-body
+                          table.table
+                            tr
+                              td
+                                h6 Domain:
+                              td= network.domain
+                            tr
+                              td
+                                h6 Type:
+                              td= network.network_type || 'FTN'
+                            tr
+                              td
+                                h6 Description:
+                              td= network.description
+                            tr
+                              td
+                                h6 Status:
+                              td
+                                if network.active
+                                  span.badge.bg-success Active
+                                else
+                                  span.badge.bg-secondary Inactive
+
+                    .col-8
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 Zones
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newZoneModal')
+                                  | Add Zone
+                        .card-body
+                          if zonelist && zonelist.length > 0
+                            table#zoneTable.table.table-hover
+                              thead
+                                tr
+                                  th(scope='col') Zone
+                                  th(scope='col') Name
+                                  th(scope='col') Coordinator
+                                  th(scope='col') Status
+                              tbody
+                                for zone of zonelist
+                                  tr(
+                                    data-bs-uuid=zone.uuid
+                                    data-bs-zone=zone.zone_number
+                                    data-bs-name=zone.name || ''
+                                    data-bs-description=zone.description || ''
+                                    data-bs-coordinator=zone.coordinator_address || ''
+                                    data-bs-active=(zone.active ? 'true' : 'false')
+                                  )
+                                    td= zone.zone_number
+                                    td= zone.name || '—'
+                                    td= zone.coordinator_address || '—'
+                                    td
+                                      if zone.active
+                                        span.badge.bg-success Active
+                                      else
+                                        span.badge.bg-secondary Inactive
+                          else
+                            center
+                              h5 No Zones Configured
+
+                  // System Addresses + Peer Connections row
+                  .row
+                    .col-12
+                      br
+                  .row
+                    .col-4
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 System Addresses
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newAddressModal')
+                                  | Add
+                        .card-body
+                          if addresslist && addresslist.length > 0
+                            table.table
+                              thead
+                                tr
+                                  th(scope='col') Address
+                                  th(scope='col') Status
+                                  th(scope='col')
+                              tbody
+                                for address of addresslist
+                                  tr(
+                                    data-bs-uuid=address.uuid
+                                    data-bs-address=address.address
+                                    data-bs-active=(address.active ? 'true' : 'false')
+                                  )
+                                    td
+                                      = address.address
+                                      if address.is_default
+                                        |  
+                                        span.badge.bg-primary Default
+                                    td
+                                      if address.active
+                                        span.badge.bg-success Active
+                                      else
+                                        span.badge.bg-secondary Inactive
+                                    td.text-end
+                                      if !address.is_default
+                                        form(action=`/admin/address/${address.uuid}/setdefault` method='POST' style='display:inline')
+                                          button.btn.btn-xs.btn-sm.btn-primary(type='submit') Set Default
+                                        |  
+                                      button.btn.btn-xs.btn-sm.btn-warning(
+                                        data-bs-uuid=address.uuid
+                                        data-bs-address=address.address
+                                        data-bs-active=(address.active ? 'true' : 'false')
+                                        data-bs-origin-line=(address.origin_line || '')
+                                        data-bs-network-type=(network.network_type || 'FTN')
+                                        onclick='openEditAddress(this)'
+                                      )
+                                        | Edit
+                                      |  
+                                      button.btn.btn-xs.btn-sm.btn-danger(
+                                        data-bs-uuid=address.uuid
+                                        data-bs-address=address.address
+                                        onclick='openRemoveAddress(this)'
+                                      )
+                                        | Remove
+                          else
+                            center
+                              h5 No Addresses
+
+                    .col-8
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 Peer Connections
+                            .col-4
+                              .text-end
+                                a.btn.btn-sm.btn-success(href='/admin/peers')
+                                  | Manage Peers
+                        .card-body
+                          if connectionlist && connectionlist.length > 0
+                            table#connTable.table.table-hover
+                              thead
+                                tr
+                                  th(scope='col') Peer
+                                  th(scope='col') Type
+                                  th(scope='col') Address / Host
+                                  th(scope='col') Status
+                              tbody
+                                for conn of connectionlist
+                                  - var cd = conn.connection_data || {}
+                                  tr(
+                                    data-bs-uuid=conn.peer_uuid
+                                    style='cursor:pointer'
+                                  )
+                                    td= conn.peer_name || '—'
+                                    td
+                                      span.badge.bg-secondary= conn.connection_type
+                                    td= cd.address || cd.host || '—'
+                                    td
+                                      if conn.active
+                                        span.badge.bg-success Active
+                                      else
+                                        span.badge.bg-secondary Inactive
+                          else
+                            center
+                              h5 No Peer Connections
+                              p.text-muted
+                                | Add peers at 
+                                a(href='/admin/peers') Peer Management
+                                |  then add a connection from the peer detail page.
+
+                  // Network Areas row
+                  .row
+                    .col-12
+                      br
+                  .row
+                    .col-12
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 Network Areas
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addNetworkAreaModal')
+                                  | Add Area
+                        .card-body
+                          if networkareas && networkareas.length > 0
+                            table#netAreaTable.table.table-hover
+                              thead
+                                tr
+                                  th(scope='col') Area Tag
+                                  th(scope='col') Area Name
+                                  th(scope='col') Shortcode
+                                  th(scope='col') Status
+                                  th(scope='col')
+                              tbody
+                                for na of networkareas
+                                  tr(
+                                    data-bs-naid=na.id
+                                    data-bs-areatag=na.areatag
+                                    data-bs-areaname=(na.area_name || '')
+                                    data-bs-shortcode=(na.shortcode || '')
+                                    data-bs-active=(na.active ? 'true' : 'false')
+                                  )
+                                    td= na.areatag
+                                    td= na.area_name || '—'
+                                    td
+                                      span.badge.bg-dark= na.shortcode || '—'
+                                    td
+                                      if na.active
+                                        span.badge.bg-success Active
+                                      else
+                                        span.badge.bg-secondary Inactive
+                                    td.text-end
+                                      button.btn.btn-xs.btn-sm.btn-warning(
+                                        data-bs-toggle='modal'
+                                        data-bs-target='#editNetAreaModal'
+                                        data-bs-naid=na.id
+                                        data-bs-areatag=na.areatag
+                                        data-bs-active=(na.active ? 'true' : 'false')
+                                      )
+                                        | Edit
+                                      |  
+                                      button.btn.btn-xs.btn-sm.btn-danger(
+                                        data-bs-toggle='modal'
+                                        data-bs-target='#removeNetAreaModal'
+                                        data-bs-naid=na.id
+                                        data-bs-areatag=na.areatag
+                                      )
+                                        | Remove
+                          else
+                            center
+                              h5 No Areas Mapped to This Network
+
+              // -------------------------------------------------------
+              // Modals
+              // -------------------------------------------------------
+
+              // Edit Network Modal
+              #editNetworkModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Edit Network
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/network/${network.uuid}/update` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            label(for='en_name') Name:
+                            input(
+                              type='text'
+                              id='en_name'
+                              name='name'
+                              class='form-control'
+                              tabindex='1'
+                              value=network.name
+                              required
+                            )
+                            br
+                            label(for='en_description') Description:
+                            input(
+                              type='text'
+                              id='en_description'
+                              name='description'
+                              class='form-control'
+                              tabindex='2'
+                              value=network.description
+                              required
+                            )
+                            br
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='en_domain') Domain:
+                            input(
+                              type='text'
+                              id='en_domain'
+                              name='domain'
+                              class='form-control'
+                              tabindex='3'
+                              value=network.domain
+                              required
+                            )
+                            br
+                            label(for='en_type') Network Type:
+                            select#en_type(name='network_type' tabindex='4').form-select
+                              option(value='FTN'   selected=(network.network_type === 'FTN'))   FTN
+                              option(value='NNTP'  selected=(network.network_type === 'NNTP'))  NNTP
+                              option(value='QWK'   selected=(network.network_type === 'QWK'))   QWK
+                              option(value='LOCAL' selected=(network.network_type === 'LOCAL')) LOCAL
+                          .col-5
+                            label(for='en_active') Status:
+                            select#en_active(name='active' tabindex='5').form-select
+                              option(value='true'  selected=(network.active === true))  Active
+                              option(value='false' selected=(network.active === false)) Inactive
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='6'
+                              )
+
+              // New Zone Modal
+              #newZoneModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Add Zone
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/network/${network.uuid}/newzone` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='nz_number') Zone Number:
+                            input(
+                              type='number'
+                              id='nz_number'
+                              name='zone_number'
+                              class='form-control'
+                              tabindex='1'
+                              min=1
+                              required
+                            )
+                            br
+                            label(for='nz_name') Name:
+                            input(
+                              type='text'
+                              id='nz_name'
+                              name='name'
+                              class='form-control'
+                              tabindex='2'
+                            )
+                          .col-5
+                            label(for='nz_coordinator') Coordinator Address:
+                            input(
+                              type='text'
+                              id='nz_coordinator'
+                              name='coordinator_address'
+                              class='form-control'
+                              tabindex='3'
+                            )
+                            br
+                            label(for='nz_description') Description:
+                            input(
+                              type='text'
+                              id='nz_description'
+                              name='description'
+                              class='form-control'
+                              tabindex='4'
+                            )
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Add Zone'
+                                class='btn btn-lg btn-success btn-block'
+                                tabindex='5'
+                              )
+
+              // Edit Zone Modal (dynamically populated on row click)
+              #editZoneModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Edit Zone  
+                        span#editZoneTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#editZoneForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='ez_name') Name:
+                            input(type='text' id='ez_name' name='name' class='form-control' tabindex='1')
+                            br
+                            label(for='ez_coordinator') Coordinator Address:
+                            input(type='text' id='ez_coordinator' name='coordinator_address' class='form-control' tabindex='2')
+                          .col-5
+                            label(for='ez_description') Description:
+                            input(type='text' id='ez_description' name='description' class='form-control' tabindex='3')
+                            br
+                            label(for='ez_active') Status:
+                            select#ez_active(name='active' tabindex='4').form-select
+                              option(value='true') Active
+                              option(value='false') Inactive
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='5'
+                              )
+
+              // New System Address Modal
+              #newAddressModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Add System Address
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/network/${network.uuid}/newaddress` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            - var addrLabel = network.network_type === 'QWK' ? 'QWK ID:' : network.network_type === 'NNTP' ? 'NNTP Host:' : 'FTN Address:'
+                            - var addrPlaceholder = network.network_type === 'QWK' ? 'MYBBS' : network.network_type === 'NNTP' ? 'news.example.net' : '1:123/456'
+                            label(for='na_address')= addrLabel
+                            input(
+                              type='text'
+                              id='na_address'
+                              name='address'
+                              class='form-control'
+                              tabindex='1'
+                              placeholder=addrPlaceholder
+                              required
+                            )
+                            br
+                            if network.network_type === 'FTN'
+                              label(for='na_origin_line') Origin Line:
+                              input(
+                                type='text'
+                                id='na_origin_line'
+                                name='origin_line'
+                                class='form-control'
+                                tabindex='2'
+                                placeholder='My BBS — Somewhere, USA'
+                                maxlength='69'
+                              )
+                              small.form-text.text-muted
+                                | Optional. Appears in the Origin line of outgoing messages. Leave blank to use the BBS name and address.
+                              br
+                            p.text-muted.small
+                              | Domain will be inherited from this network (
+                              = network.domain
+                              |)
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Add Address'
+                                class='btn btn-lg btn-success btn-block'
+                                tabindex='3'
+                              )
+
+              // Add Network Area Modal
+              #addNetworkAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Map Area to Network
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/network/${network.uuid}/addarea` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='ana_area') Message Area:
+                            select#ana_area(name='area_id' tabindex='1').form-select
+                              if arealist && arealist.length > 0
+                                for area of arealist
+                                  option(value=area.id)= area.name + ' (' + area.shortcode + ')'
+                              else
+                                option(value='' disabled) No areas available
+                          .col-5
+                            label(for='ana_areatag') Area Tag:
+                            input(
+                              type='text'
+                              id='ana_areatag'
+                              name='areatag'
+                              class='form-control'
+                              tabindex='2'
+                              placeholder='FIDONET.GENERAL'
+                              required
+                            )
+                            br
+                            p.text-muted.small
+                              | The tag used to identify this area on the 
+                              = network.name
+                              |  network.
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Add Area'
+                                class='btn btn-lg btn-success btn-block'
+                                tabindex='3'
+                              )
+
+              // Edit Network Area Modal (dynamically populated)
+              #editNetAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-md
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Edit Area — 
+                        span#editNetAreaTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#editNetAreaForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            label(for='ena_areatag') Area Tag:
+                            input(
+                              type='text'
+                              id='ena_areatag'
+                              name='areatag'
+                              class='form-control'
+                              tabindex='1'
+                              required
+                            )
+                            br
+                            label(for='ena_active') Status:
+                            select#ena_active(name='active' tabindex='2').form-select
+                              option(value='true') Active
+                              option(value='false') Inactive
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='3'
+                              )
+
+              // Remove Network Area Modal
+              #removeNetAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered
+                  .modal-content
+                    .modal-header.bg-danger.text-white
+                      h3.modal-title Remove Area from Network
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body.bg-dark.text-white
+                      .row
+                        .col-1
+                        .col-10
+                          .alert.alert-danger
+                            h5 ⚠ Warning
+                            p
+                              | This will remove area 
+                              strong#removeNetAreaTag
+                              |  from this network and clear all subscription rows for this mapping.
+                    .modal-footer.bg-dark
+                      form#removeNetAreaForm(method='POST')
+                        button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                        |  
+                        input(
+                          type='submit'
+                          value='Remove Area'
+                          class='btn btn-danger'
+                        )
+
+              // Edit System Address Modal
+              #editAddressModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-md
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Edit Address — 
+                        span#editAddressTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#editAddressForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            label#ea_address_label(for='ea_address') Address:
+                            input(
+                              type='text'
+                              id='ea_address'
+                              name='address'
+                              class='form-control'
+                              tabindex='1'
+                              required
+                            )
+                            br
+                            #ea_origin_line_group
+                              label(for='ea_origin_line') Origin Line:
+                              input(
+                                type='text'
+                                id='ea_origin_line'
+                                name='origin_line'
+                                class='form-control'
+                                tabindex='2'
+                                placeholder='My BBS — Somewhere, USA'
+                                maxlength='69'
+                              )
+                              small.form-text.text-muted
+                                | Optional. Leave blank to use BBS name and address.
+                              br
+                            label(for='ea_active') Status:
+                            select#ea_active(name='active' tabindex='3').form-select
+                              option(value='true') Active
+                              option(value='false') Inactive
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='4'
+                              )
+
+              // Remove System Address Modal
+              #removeAddressModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered
+                  .modal-content
+                    .modal-header.bg-danger.text-white
+                      h3.modal-title Remove System Address
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body.bg-dark.text-white
+                      .row
+                        .col-1
+                        .col-10
+                          .alert.alert-danger
+                            h5 ⚠ Warning
+                            p
+                              | This will permanently remove address 
+                              strong#removeAddressDisplay
+                              | .
+                          p This action cannot be undone.
+                    .modal-footer.bg-dark
+                      form#removeAddressForm(method='POST')
+                        button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                        |  
+                        input(
+                          type='submit'
+                          value='Remove Address'
+                          class='btn btn-danger'
+                        )
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+
+      // Zone row click — populate and open edit modal
+      const zoneTable = document.getElementById('zoneTable');
+      if (zoneTable) {
+        zoneTable.querySelectorAll('tbody tr').forEach(row => {
+          row.style.cursor = 'pointer';
+          row.addEventListener('click', function() {
+            const d = this.dataset;
+            document.getElementById('editZoneTitle').textContent = 'Zone ' + d.bsZone;
+            document.getElementById('editZoneForm').action = `/admin/network/zone/${d.bsUuid}/update`;
+            document.getElementById('ez_name').value        = d.bsName || '';
+            document.getElementById('ez_coordinator').value = d.bsCoordinator || '';
+            document.getElementById('ez_description').value = d.bsDescription || '';
+            document.getElementById('ez_active').value      = d.bsActive === 'true' ? 'true' : 'false';
+            new bootstrap.Modal(document.getElementById('editZoneModal')).show();
+          });
+        });
+      }
+
+      // Peer connection row click — navigate to peer detail
+      const connTable = document.getElementById('connTable');
+      if (connTable) {
+        connTable.querySelectorAll('tbody tr').forEach(row => {
+          row.style.cursor = 'pointer';
+          row.addEventListener('click', function() {
+            const uuid = this.getAttribute('data-bs-uuid');
+            if (uuid) window.location.href = `/admin/peer/${uuid}`;
+          });
+        });
+      }
+
+      // Edit address button
+      window.openEditAddress = function(btn) {
+        const d = btn.dataset;
+        const networkType = (d.bsNetworktype || 'FTN').toUpperCase();
+        const addrLabels = { FTN: 'FTN Address:', NNTP: 'NNTP Host:', QWK: 'QWK ID:', LOCAL: 'Address:' };
+        const addrPlaceholders = { FTN: '1:123/456', NNTP: 'news.example.net', QWK: 'MYBBS', LOCAL: '' };
+        const isFtn = networkType === 'FTN';
+
+        document.getElementById('editAddressTitle').textContent        = d.bsAddress || '';
+        document.getElementById('ea_address').value                    = d.bsAddress || '';
+        document.getElementById('ea_address').placeholder              = addrPlaceholders[networkType] || '';
+        document.getElementById('ea_address_label').textContent        = addrLabels[networkType] || 'Address:';
+        document.getElementById('editAddressForm').action              = `/admin/address/${d.bsUuid}/update`;
+        document.getElementById('ea_active').value                     = d.bsActive === 'true' ? 'true' : 'false';
+        document.getElementById('ea_origin_line').value                = d.bsOriginLine || '';
+        document.getElementById('ea_origin_line_group').style.display  = isFtn ? '' : 'none';
+        new bootstrap.Modal(document.getElementById('editAddressModal')).show();
+      };
+
+      // Remove address button
+      window.openRemoveAddress = function(btn) {
+        const d = btn.dataset;
+        document.getElementById('removeAddressDisplay').textContent = d.bsAddress || '';
+        document.getElementById('removeAddressForm').action = `/admin/address/${d.bsUuid}/remove`;
+        new bootstrap.Modal(document.getElementById('removeAddressModal')).show();
+      };
+
+      // Edit network area button — populate modal
+      document.querySelectorAll('[data-bs-target="#editNetAreaModal"]').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const d = this.dataset;
+          document.getElementById('editNetAreaTitle').textContent = d.bsAreatag || '';
+          document.getElementById('editNetAreaForm').action = `/admin/network/area/${d.bsNaid}/update`;
+          document.getElementById('ena_areatag').value = d.bsAreatag || '';
+          document.getElementById('ena_active').value  = d.bsActive === 'true' ? 'true' : 'false';
+        });
+      });
+
+      // Remove network area button — populate modal
+      document.querySelectorAll('[data-bs-target="#removeNetAreaModal"]').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const d = this.dataset;
+          document.getElementById('removeNetAreaTag').textContent = d.bsAreatag || '';
+          document.getElementById('removeNetAreaForm').action = `/admin/network/area/${d.bsNaid}/remove`;
+        });
+      });
+
+    });

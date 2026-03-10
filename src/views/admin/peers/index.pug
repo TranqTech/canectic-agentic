@@ -1,0 +1,136 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-2
+          .col-8
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      button.btn.btn-lg.btn-success(data-bs-toggle='modal' data-bs-target='#newPeerModal')
+                        | Add Peer
+              .card-body
+                if errormessages && errormessages.length > 0
+                  ul.text-danger
+                    for error of errormessages
+                      li.text-danger= error
+                  br
+
+                if peerlist && peerlist.length > 0
+                  table#peerTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Name
+                        th(scope='col') Sysop
+                        th(scope='col') Contact
+                        th(scope='col') Status
+                    tbody
+                      for peer of peerlist
+                        tr(
+                          data-bs-uuid=peer.uuid
+                          style='cursor:pointer'
+                        )
+                          td= peer.name
+                          td= peer.sysop_name || '—'
+                          td= peer.contact || '—'
+                          td
+                            if peer.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-secondary Inactive
+                else
+                  center
+                    h5 No Peers Configured
+
+        // New Peer Modal
+        #newPeerModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title Add Peer System
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form(action='/admin/peers/new' method='POST' class='form-registration')
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='np_name') System Name:
+                      input(
+                        type='text'
+                        id='np_name'
+                        name='name'
+                        class='form-control'
+                        tabindex='1'
+                        required
+                      )
+                      br
+                      label(for='np_sysop') Sysop Name:
+                      input(
+                        type='text'
+                        id='np_sysop'
+                        name='sysop_name'
+                        class='form-control'
+                        tabindex='2'
+                      )
+                      br
+                      label(for='np_contact') Contact (email/address):
+                      input(
+                        type='text'
+                        id='np_contact'
+                        name='contact'
+                        class='form-control'
+                        tabindex='3'
+                      )
+                    .col-5
+                      label(for='np_notes') Notes:
+                      textarea#np_notes.form-control(
+                        name='notes'
+                        rows='5'
+                        tabindex='4'
+                      )
+                      br
+                      label(for='np_active') Status:
+                      select#np_active(name='active' tabindex='5').form-select
+                        option(value='true' selected) Active
+                        option(value='false') Inactive
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(
+                          type='submit'
+                          value='Add Peer'
+                          class='btn btn-lg btn-success btn-block'
+                          tabindex='6'
+                        )
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      const peerTable = document.getElementById('peerTable');
+      if (peerTable) {
+        peerTable.querySelectorAll('tbody tr').forEach(row => {
+          row.addEventListener('click', function() {
+            const uuid = this.getAttribute('data-bs-uuid');
+            if (uuid) window.location.href = `/admin/peer/${uuid}`;
+          });
+        });
+      }
+    });

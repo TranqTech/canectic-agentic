@@ -47,6 +47,7 @@ async function newNetwork(formObj) {
 		description: formObj.description.trim(),
 		network_type: formObj.network_type ? formObj.network_type.trim() : "FTN",
 		active: true,
+		config: formObj.config ? JSON.stringify(formObj.config) : null,
 		created_at: currtime,
 		updated_at: null,
 		created_by_name: formObj.createdByName || "",
@@ -150,6 +151,16 @@ async function updateNetwork(uuid, formObj) {
 	if (formObj.domain      !== undefined) updateObj.domain      = newDomain;
 
 	if (formObj.network_type !== undefined) updateObj.network_type = formObj.network_type.trim();
+	if (formObj.config       !== undefined) {
+		// Accept a raw object, a JSON string, or null to clear
+		if (formObj.config === null) {
+			updateObj.config = null;
+		} else if (typeof formObj.config === 'object') {
+			updateObj.config = JSON.stringify(formObj.config);
+		} else {
+			updateObj.config = formObj.config; // assume pre-serialised string
+		}
+	}
 
 	// zones is a managed cache owned by msgZones — never updated directly here
 
@@ -168,18 +179,10 @@ async function updateNetwork(uuid, formObj) {
 		return returnObj;
 	}
 
-	// Cascade domain change to linked_nodes and system_addresses
+	// Cascade domain change to system_addresses
+	// (linked_nodes retired — peer_connections.connection_data is transport-specific
+	// and does not store a redundant domain field)
 	if (domainChanging) {
-		var nodeErr = await postgres.write(
-			"UPDATE linked_nodes SET domain = $1 WHERE network_id = $2",
-			[newDomain, dbnetwork.id]
-		);
-		if (nodeErr) {
-			alogger.writeAlog(3, "updateNetwork: failed to cascade domain to linked_nodes for network_id " + dbnetwork.id + ": " + nodeErr.message, "redbright");
-			returnObj.errormessages.push("Network updated but domain cascade to linked nodes failed: " + nodeErr.message);
-			return returnObj;
-		}
-
 		var addrErr = await postgres.write(
 			"UPDATE system_addresses SET domain = $1 WHERE network_id = $2",
 			[newDomain, dbnetwork.id]
@@ -198,6 +201,14 @@ async function updateNetwork(uuid, formObj) {
 	return returnObj;
 }
 
+async function getNetworksByType(networkType) {
+	var dblist = await postgres.query(
+		"SELECT * FROM message_networks WHERE network_type = $1 ORDER BY name ASC",
+		[networkType]
+	);
+	return dblist || [];
+}
+
 export {
 	newNetwork,
 	getAllNetworks,
@@ -206,5 +217,6 @@ export {
 	getNetworkById,
 	getNetworkByUUID,
 	getNetworkByDomain,
+	getNetworksByType,
 	updateNetwork
 };

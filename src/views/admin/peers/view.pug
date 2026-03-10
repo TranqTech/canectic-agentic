@@ -1,0 +1,980 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-2
+          .col-8
+            if !peer
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/peers')
+                          | Exit
+                .card-body
+                  br
+                  h3 Data Not Found!
+                  br
+            else
+              // ---- Peer info card ----
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                        |  — 
+                        = peer.name
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/peers')
+                          | Exit
+                .card-body
+                  if errormessages && errormessages.length > 0
+                    ul.text-danger
+                      for error of errormessages
+                        li.text-danger= error
+                    br
+
+                  .row
+                    .col-6
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 Peer Details
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-warning(data-bs-toggle='modal' data-bs-target='#editPeerModal')
+                                  | Edit
+                        .card-body
+                          table.table
+                            tr
+                              td
+                                h6 Name:
+                              td= peer.name
+                            tr
+                              td
+                                h6 Sysop:
+                              td= peer.sysop_name || '—'
+                            tr
+                              td
+                                h6 Contact:
+                              td= peer.contact || '—'
+                            tr
+                              td
+                                h6 Notes:
+                              td= peer.notes || '—'
+                            tr
+                              td
+                                h6 Status:
+                              td
+                                if peer.active
+                                  span.badge.bg-success Active
+                                else
+                                  span.badge.bg-secondary Inactive
+                    .col-6
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 Connections
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newConnectionModal')
+                                  | Add
+                        .card-body
+                          if connections && connections.length > 0
+                            table#connTable.table.table-hover
+                              thead
+                                tr
+                                  th(scope='col') Network
+                                  th(scope='col') Type
+                                  th(scope='col') Status
+                              tbody
+                                for conn of connections
+                                  - var _cd = conn.connection_data || {}
+                                  tr(
+                                    data-bs-uuid=conn.uuid
+                                    data-bs-network-uuid=conn.network_uuid
+                                    data-bs-networkname=(conn.network_name || '')
+                                    data-bs-conntype=conn.connection_type
+                                    data-bs-active=(conn.active ? 'true' : 'false')
+                                    data-bs-cd=JSON.stringify(_cd)
+                                    data-bs-networkid=conn.network_id
+                                    data-bs-sysaddrid=(conn.system_address_id || '')
+                                    style='cursor:pointer'
+                                  )
+                                    td= conn.network_name || conn.network_id
+                                    td
+                                      span.badge.bg-secondary= conn.connection_type
+                                    td
+                                      if conn.active
+                                        span.badge.bg-success Active
+                                      else
+                                        span.badge.bg-secondary Inactive
+                          else
+                            center
+                              h6 No Connections
+
+              // ---- Per-connection detail cards ----
+              if connections && connections.length > 0
+                for conn in connections
+                  - var cd = conn.connection_data || {}
+                  br
+                  .card
+                    .card-header.bg-dark.text-white
+                      .row
+                        .col-8
+                          h5
+                            | Connection — 
+                            = conn.network_name || ('Network ' + conn.network_id)
+                            |  
+                            span.badge.bg-secondary= conn.connection_type
+                        .col-4
+                          .text-end
+                            button.btn.btn-sm.btn-warning(
+                              data-bs-toggle='modal'
+                              data-bs-target='#editConnModal'
+                              data-bs-uuid=conn.uuid
+                              data-bs-networkname=(conn.network_name || '')
+                              data-bs-conntype=conn.connection_type
+                              data-bs-active=(conn.active ? 'true' : 'false')
+                              data-bs-cd=JSON.stringify(cd)
+                              data-bs-networkid=conn.network_id
+                              data-bs-sysaddrid=(conn.system_address_id || '')
+                            )
+                              | Edit
+                            |  
+                            button.btn.btn-sm.btn-danger(
+                              data-bs-toggle='modal'
+                              data-bs-target='#removeConnModal'
+                              data-bs-uuid=conn.uuid
+                              data-bs-networkname=(conn.network_name || conn.network_id)
+                            )
+                              | Remove
+                    .card-body
+                      .row
+                        // Connection data fields — vary by type
+                        .col-4
+                          table.table.table-sm
+                            if conn.connection_type === 'FTN'
+                              tr
+                                td
+                                  small Address:
+                                td= cd.address || '—'
+                              tr
+                                td
+                                  small Status:
+                                td= cd.status || 'NORMAL'
+                              tr
+                                td
+                                  small Session PW:
+                                td= cd.session_password ? '••••' : '—'
+                              tr
+                                td
+                                  small Packet PW:
+                                td= cd.packet_password ? '••••' : '—'
+                            else if conn.connection_type === 'NNTP'
+                              tr
+                                td
+                                  small Host:
+                                td= cd.host || '—'
+                              tr
+                                td
+                                  small Port:
+                                td= cd.port || '—'
+                              tr
+                                td
+                                  small TLS:
+                                td= cd.use_tls ? 'Yes' : 'No'
+                              tr
+                                td
+                                  small Username:
+                                td= cd.username || '—'
+                            else if conn.connection_type === 'QWK'
+                              tr
+                                td
+                                  small Host:
+                                td= cd.host || '—'
+                              tr
+                                td
+                                  small Port:
+                                td= cd.port || '—'
+                              tr
+                                td
+                                  small Packet Name:
+                                td= cd.packet_name || '—'
+                            else
+                              tr
+                                td
+                                  small.text-muted Local connection — no transport settings
+                        // Allowed areas
+                        .col-4
+                          .card
+                            .card-header
+                              .row
+                                .col-7
+                                  h6 Allowed (AreaFix)
+                                .col-5
+                                  .text-end
+                                    button.btn.btn-xs.btn-sm.btn-success(
+                                      data-bs-toggle='modal'
+                                      data-bs-target='#setAllowedModal'
+                                      data-bs-connuuid=conn.uuid
+                                      data-bs-connname=(conn.network_name || conn.network_id)
+                                      data-bs-networkid=conn.network_id
+                                    )
+                                      | Edit
+                            .card-body
+                              if grouplist && grouplist.length > 0
+                                for group of grouplist
+                                  if group.areas && group.areas.length > 0
+                                    - var count = 0
+                                    h6.text-info= group.name
+                                    ul
+                                      for area of group.areas
+                                        - var sub = conn.subscriptions && conn.subscriptions.find(s => s.area_id === parseInt(area.id))
+                                        if sub && sub.allowed
+                                          - count++
+                                          li.text-success= area.name
+                                      if count < 1
+                                        li.text-danger None
+                              else
+                                p.text-muted No areas configured
+                        // Enabled areas
+                        .col-4
+                          .card
+                            .card-header
+                              .row
+                                .col-7
+                                  h6 Enabled (Toss)
+                                .col-5
+                                  .text-end
+                                    button.btn.btn-xs.btn-sm.btn-success(
+                                      data-bs-toggle='modal'
+                                      data-bs-target='#setEnabledModal'
+                                      data-bs-connuuid=conn.uuid
+                                      data-bs-connname=(conn.network_name || conn.network_id)
+                                      data-bs-networkid=conn.network_id
+                                    )
+                                      | Edit
+                            .card-body
+                              if grouplist && grouplist.length > 0
+                                for group of grouplist
+                                  if group.areas && group.areas.length > 0
+                                    - var count = 0
+                                    h6.text-info= group.name
+                                    ul
+                                      for area of group.areas
+                                        - var sub = conn.subscriptions && conn.subscriptions.find(s => s.area_id === parseInt(area.id))
+                                        if sub && sub.enabled
+                                          - count++
+                                          li.text-success= area.name
+                                      if count < 1
+                                        li.text-danger None
+                              else
+                                p.text-muted No areas configured
+
+              // -------------------------------------------------------
+              // Modals
+              // -------------------------------------------------------
+
+              // Edit Peer Modal
+              #editPeerModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Edit Peer
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/peer/${peer.uuid}/update` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='ep_name') System Name:
+                            input(
+                              type='text'
+                              id='ep_name'
+                              name='name'
+                              class='form-control'
+                              tabindex='1'
+                              value=peer.name
+                              required
+                            )
+                            br
+                            label(for='ep_sysop') Sysop Name:
+                            input(
+                              type='text'
+                              id='ep_sysop'
+                              name='sysop_name'
+                              class='form-control'
+                              tabindex='2'
+                              value=peer.sysop_name || ''
+                            )
+                            br
+                            label(for='ep_contact') Contact:
+                            input(
+                              type='text'
+                              id='ep_contact'
+                              name='contact'
+                              class='form-control'
+                              tabindex='3'
+                              value=peer.contact || ''
+                            )
+                          .col-5
+                            label(for='ep_notes') Notes:
+                            textarea#ep_notes.form-control(
+                              name='notes'
+                              rows='4'
+                              tabindex='4'
+                            )= peer.notes || ''
+                            br
+                            label(for='ep_active') Status:
+                            select#ep_active(name='active' tabindex='5').form-select
+                              option(value='true' selected=(peer.active === true)) Active
+                              option(value='false' selected=(peer.active !== true)) Inactive
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='6'
+                              )
+
+              // New Connection Modal
+              #newConnectionModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-xl
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Add Connection
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/peer/${peer.uuid}/newconnection` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='nc_network') Network:
+                            select#nc_network(name='network_id' tabindex='1').form-select
+                              if networklist && networklist.length > 0
+                                for net of networklist
+                                  option(value=net.id data-bs-type=net.network_type)
+                                    = net.name
+                                    |  (
+                                    = net.domain
+                                    |)
+                              else
+                                option(value='' disabled) No networks available
+                            br
+                            label(for='nc_type') Connection Type:
+                            select#nc_type(name='connection_type' tabindex='2').form-select
+                              option(value='FTN') FTN
+                              option(value='NNTP') NNTP
+                              option(value='QWK') QWK
+                              option(value='LOCAL') LOCAL
+                            br
+                            label(for='nc_system_address') System Address:
+                            select#nc_system_address(name='system_address_id' tabindex='3').form-select
+                              option(value='') — Use network default —
+                            small.form-text.text-muted Populated from selected network. Leave blank to use network default.
+                            br
+                            // FTN identity fields — left column (shown/hidden by showConnFields)
+                            #nc_left_ftn
+                              label(for='nc_ftn_address') FTN Address:
+                                |  
+                                span(
+                                  data-bs-toggle='tooltip'
+                                  data-bs-placement='right'
+                                  title='Format: zone:net/node or zone:net/node.point — e.g. 1:234/567 or 1:234/567.1'
+                                )
+                                  i.bi.bi-info-circle.text-muted
+                              input(
+                                type='text'
+                                id='nc_ftn_address'
+                                name='ftn_address'
+                                class='form-control'
+                                tabindex='3'
+                                placeholder='1:123/456'
+                              )
+                              br
+                              label(for='nc_ftn_status') FTN Status:
+                              select#nc_ftn_status(name='ftn_status' tabindex='4').form-select
+                                option(value='NORMAL' selected) Normal
+                                option(value='CRASH') Crash
+                                option(value='HOLD') Hold
+                              br
+                              label(for='nc_ftn_routing_rules') Routing Rules:
+                                |  
+                                span(
+                                  data-bs-toggle='tooltip'
+                                  data-bs-placement='right'
+                                  title='Comma-separated wildcards. * matches any segment. Examples: 1:* (all of zone 1), 2:234/* (all nodes in net 234), 3:512/100 (exact node)'
+                                )
+                                  i.bi.bi-info-circle.text-muted
+                              input(
+                                type='text'
+                                id='nc_ftn_routing_rules'
+                                name='ftn_routing_rules'
+                                class='form-control'
+                                tabindex='5'
+                                placeholder='1:*, 2:234/*, 3:512/100'
+                              )
+                              small.form-text.text-muted Comma-separated. Route matching addresses through this connection.
+                              br
+                          .col-5
+                            label(for='nc_active') Status:
+                            select#nc_active(name='active' tabindex='6').form-select
+                              option(value='true' selected) Active
+                              option(value='false') Inactive
+                            br
+                            // FTN password fields — right column
+                            #nc_fields_ftn
+                              label(for='nc_ftn_sessionpw') Session Password:
+                              input(
+                                type='text'
+                                id='nc_ftn_sessionpw'
+                                name='ftn_session_password'
+                                class='form-control'
+                                tabindex='7'
+                              )
+                              br
+                              label(for='nc_ftn_packetpw') Packet Password:
+                              input(
+                                type='text'
+                                id='nc_ftn_packetpw'
+                                name='ftn_packet_password'
+                                class='form-control'
+                                tabindex='8'
+                              )
+                              br
+                              label(for='nc_ftn_ticpw') Tic Password:
+                              input(
+                                type='text'
+                                id='nc_ftn_ticpw'
+                                name='ftn_tic_password'
+                                class='form-control'
+                                tabindex='9'
+                              )
+                              br
+                              label(for='nc_ftn_areafixpw') AreaFix Password:
+                              input(
+                                type='text'
+                                id='nc_ftn_areafixpw'
+                                name='ftn_areafix_password'
+                                class='form-control'
+                                tabindex='10'
+                              )
+                            // NNTP fields
+                            #nc_fields_nntp(style='display:none')
+                              label(for='nc_nntp_host') Host:
+                              input(
+                                type='text'
+                                id='nc_nntp_host'
+                                name='nntp_host'
+                                class='form-control'
+                                tabindex='7'
+                              )
+                              br
+                              label(for='nc_nntp_port') Port:
+                              input(
+                                type='number'
+                                id='nc_nntp_port'
+                                name='nntp_port'
+                                class='form-control'
+                                tabindex='8'
+                                value=119
+                              )
+                              br
+                              label(for='nc_nntp_tls') Use TLS:
+                              select#nc_nntp_tls(name='nntp_use_tls' tabindex='9').form-select
+                                option(value='false' selected) No
+                                option(value='true') Yes
+                              br
+                              label(for='nc_nntp_username') Username:
+                              input(
+                                type='text'
+                                id='nc_nntp_username'
+                                name='nntp_username'
+                                class='form-control'
+                                tabindex='10'
+                              )
+                              br
+                              label(for='nc_nntp_password') Password:
+                              input(
+                                type='password'
+                                id='nc_nntp_password'
+                                name='nntp_password'
+                                class='form-control'
+                                tabindex='11'
+                              )
+                            // QWK fields
+                            #nc_fields_qwk(style='display:none')
+                              label(for='nc_qwk_host') Host:
+                              input(
+                                type='text'
+                                id='nc_qwk_host'
+                                name='qwk_host'
+                                class='form-control'
+                                tabindex='7'
+                              )
+                              br
+                              label(for='nc_qwk_port') Port:
+                              input(
+                                type='number'
+                                id='nc_qwk_port'
+                                name='qwk_port'
+                                class='form-control'
+                                tabindex='8'
+                                value=7254
+                              )
+                              br
+                              label(for='nc_qwk_username') Username:
+                              input(
+                                type='text'
+                                id='nc_qwk_username'
+                                name='qwk_username'
+                                class='form-control'
+                                tabindex='9'
+                              )
+                              br
+                              label(for='nc_qwk_password') Password:
+                              input(
+                                type='password'
+                                id='nc_qwk_password'
+                                name='qwk_password'
+                                class='form-control'
+                                tabindex='10'
+                              )
+                              br
+                              label(for='nc_qwk_packet') Packet Name:
+                              input(
+                                type='text'
+                                id='nc_qwk_packet'
+                                name='qwk_packet_name'
+                                class='form-control'
+                                tabindex='11'
+                              )
+                            // LOCAL — no extra fields
+                            #nc_fields_local(style='display:none')
+                              p.text-muted Local connections have no transport settings.
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Add Connection'
+                                class='btn btn-lg btn-success btn-block'
+                                tabindex='12'
+                              )
+
+              // Edit Connection Modal (dynamically populated)
+              #editConnModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-xl
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Edit Connection — 
+                        span#editConnTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#editConnForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-5
+                            // FTN identity fields — left column (shown/hidden by showEditConnFields)
+                            #ec_left_ftn
+                              label(for='ec_ftn_address') FTN Address:
+                                |  
+                                span(
+                                  data-bs-toggle='tooltip'
+                                  data-bs-placement='right'
+                                  title='Format: zone:net/node or zone:net/node.point — e.g. 1:234/567 or 1:234/567.1'
+                                )
+                                  i.bi.bi-info-circle.text-muted
+                              input(type='text' id='ec_ftn_address' name='ftn_address' class='form-control' tabindex='2')
+                              br
+                              label(for='ec_ftn_status') FTN Status:
+                              select#ec_ftn_status(name='ftn_status' tabindex='3').form-select
+                                option(value='NORMAL') Normal
+                                option(value='CRASH') Crash
+                                option(value='HOLD') Hold
+                              br
+                              label(for='ec_ftn_routing_rules') Routing Rules:
+                                |  
+                                span(
+                                  data-bs-toggle='tooltip'
+                                  data-bs-placement='right'
+                                  title='Comma-separated wildcards. * matches any segment. Examples: 1:* (all of zone 1), 2:234/* (all nodes in net 234), 3:512/100 (exact node)'
+                                )
+                                  i.bi.bi-info-circle.text-muted
+                              input(type='text' id='ec_ftn_routing_rules' name='ftn_routing_rules' class='form-control' tabindex='4' placeholder='1:*, 2:234/*, 3:512/100')
+                              small.form-text.text-muted Comma-separated. Route matching addresses through this connection.
+                              br
+                            label(for='ec_system_address') System Address:
+                            select#ec_system_address(name='system_address_id' tabindex='5').form-select
+                              option(value='') — Use network default —
+                            small.form-text.text-muted Leave blank to use network default.
+                            br
+                          .col-5
+                            label(for='ec_active') Status:
+                            select#ec_active(name='active' tabindex='1').form-select
+                              option(value='true') Active
+                              option(value='false') Inactive
+                            br
+                            // FTN password fields — right column
+                            #ec_fields_ftn
+                              label(for='ec_ftn_sessionpw') Session Password:
+                              input(type='text' id='ec_ftn_sessionpw' name='ftn_session_password' class='form-control' tabindex='5')
+                              br
+                              label(for='ec_ftn_packetpw') Packet Password:
+                              input(type='text' id='ec_ftn_packetpw' name='ftn_packet_password' class='form-control' tabindex='6')
+                              br
+                              label(for='ec_ftn_ticpw') Tic Password:
+                              input(type='text' id='ec_ftn_ticpw' name='ftn_tic_password' class='form-control' tabindex='7')
+                              br
+                              label(for='ec_ftn_areafixpw') AreaFix Password:
+                              input(type='text' id='ec_ftn_areafixpw' name='ftn_areafix_password' class='form-control' tabindex='8')
+                            // NNTP edit fields
+                            #ec_fields_nntp(style='display:none')
+                              label(for='ec_nntp_host') Host:
+                              input(type='text' id='ec_nntp_host' name='nntp_host' class='form-control' tabindex='2')
+                              br
+                              label(for='ec_nntp_port') Port:
+                              input(type='number' id='ec_nntp_port' name='nntp_port' class='form-control' value='119' tabindex='3')
+                              br
+                              label(for='ec_nntp_tls') Use TLS:
+                              select#ec_nntp_tls(name='nntp_use_tls' tabindex='4').form-select
+                                option(value='false') No
+                                option(value='true') Yes
+                              br
+                              label(for='ec_nntp_username') Username:
+                              input(type='text' id='ec_nntp_username' name='nntp_username' class='form-control' tabindex='5')
+                              br
+                              label(for='ec_nntp_password') Password:
+                              input(type='password' id='ec_nntp_password' name='nntp_password' class='form-control' tabindex='6')
+                            // QWK edit fields
+                            #ec_fields_qwk(style='display:none')
+                              label(for='ec_qwk_host') Host:
+                              input(type='text' id='ec_qwk_host' name='qwk_host' class='form-control' tabindex='2')
+                              br
+                              label(for='ec_qwk_port') Port:
+                              input(type='number' id='ec_qwk_port' name='qwk_port' class='form-control' value='7254' tabindex='3')
+                              br
+                              label(for='ec_qwk_username') Username:
+                              input(type='text' id='ec_qwk_username' name='qwk_username' class='form-control' tabindex='4')
+                              br
+                              label(for='ec_qwk_password') Password:
+                              input(type='password' id='ec_qwk_password' name='qwk_password' class='form-control' tabindex='5')
+                              br
+                              label(for='ec_qwk_packet') Packet Name:
+                              input(type='text' id='ec_qwk_packet' name='qwk_packet_name' class='form-control' tabindex='6')
+                            // LOCAL edit
+                            #ec_fields_local(style='display:none')
+                              p.text-muted Local connections have no transport settings.
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='9'
+                              )
+
+              // Remove Connection Modal
+              #removeConnModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered
+                  .modal-content
+                    .modal-header.bg-danger.text-white
+                      h3.modal-title Remove Connection
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body.bg-dark.text-white
+                      .row
+                        .col-1
+                        .col-10
+                          .alert.alert-danger
+                            h5 ⚠ Warning
+                            p
+                              | This will remove the connection to 
+                              strong#removeConnName
+                              |  and all associated subscription data.
+                          p This action cannot be undone.
+                    .modal-footer.bg-dark
+                      form#removeConnForm(method='POST')
+                        button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                        |  
+                        input(
+                          type='submit'
+                          value='Remove Connection'
+                          class='btn btn-danger'
+                        )
+
+              // Set Allowed Areas Modal (dynamically populated)
+              #setAllowedModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Allowed Areas — 
+                        span#setAllowedTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#setAllowedForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            h5 Areas manageable via AreaFix
+                            hr
+                            fieldset#setAllowedFieldset
+                              p.text-muted.small.mb-0 Loading areas…
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save'
+                                class='btn btn-lg btn-success btn-block'
+                              )
+
+              // Set Enabled Areas Modal (dynamically populated)
+              #setEnabledModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Enabled Areas — 
+                        span#setEnabledTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#setEnabledForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            h5 Areas to toss to/from this connection
+                            hr
+                            fieldset#setEnabledFieldset
+                              p.text-muted.small.mb-0 Loading areas…
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save'
+                                class='btn btn-lg btn-success btn-block'
+                              )
+
+  - var _subData = (connections || []).reduce(function(acc, conn) { acc[conn.uuid] = (conn.subscriptions || []); return acc; }, {})
+  script!= 'const subscriptionData = ' + JSON.stringify(_subData) + ';'
+  script!= 'const networkAddressMap = ' + JSON.stringify(networkAddressMap || {}) + ';'
+  script!= 'const grouplistData = ' + JSON.stringify(grouplist || []) + ';'
+
+  script.
+    function populateSystemAddressSelect(selectEl, networkId, selectedId) {
+      const addresses = networkAddressMap[networkId] || [];
+      selectEl.innerHTML = '<option value="">— Use network default —</option>';
+      addresses.forEach(addr => {
+        const opt = document.createElement('option');
+        opt.value = addr.id;
+        opt.textContent = addr.address + (addr.is_default ? ' (default)' : '') + (!addr.active ? ' [inactive]' : '');
+        if (selectedId && parseInt(selectedId) === addr.id) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+    }
+
+    function showConnFields(type) {
+      ['ftn','nntp','qwk','local'].forEach(t => {
+        const el = document.getElementById('nc_fields_' + t);
+        if (el) el.style.display = (t === type.toLowerCase()) ? '' : 'none';
+      });
+      const leftFtn = document.getElementById('nc_left_ftn');
+      if (leftFtn) leftFtn.style.display = (type.toLowerCase() === 'ftn') ? '' : 'none';
+    }
+
+    function showEditConnFields(type) {
+      ['ftn','nntp','qwk','local'].forEach(t => {
+        const el = document.getElementById('ec_fields_' + t);
+        if (el) el.style.display = (t === type.toLowerCase()) ? '' : 'none';
+      });
+      const leftFtn = document.getElementById('ec_left_ftn');
+      if (leftFtn) leftFtn.style.display = (type.toLowerCase() === 'ftn') ? '' : 'none';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+
+      // New connection type switcher
+      const ncType = document.getElementById('nc_type');
+      if (ncType) {
+        ncType.addEventListener('change', function() { showConnFields(this.value); });
+        showConnFields(ncType.value);
+      }
+
+      // New connection network switcher — repopulate system address select
+      const ncNetwork = document.getElementById('nc_network');
+      const ncSysAddr = document.getElementById('nc_system_address');
+      if (ncNetwork && ncSysAddr) {
+        const repopulateNcAddr = () => populateSystemAddressSelect(ncSysAddr, ncNetwork.value, null);
+        ncNetwork.addEventListener('change', repopulateNcAddr);
+        repopulateNcAddr();
+      }
+
+      // Initialise Bootstrap tooltips
+      document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        new bootstrap.Tooltip(el, { trigger: 'hover focus' });
+      });
+
+      // Connection table row click — navigate to network view
+      const connTable = document.getElementById('connTable');
+      if (connTable) {
+        connTable.querySelectorAll('tbody tr').forEach(row => {
+          row.addEventListener('click', function() {
+            const networkUuid = this.dataset.bsNetworkUuid;
+            if (networkUuid) window.location.href = `/admin/network/${networkUuid}`;
+          });
+        });
+      }
+
+      // Edit connection modal — populate from data attributes
+      document.querySelectorAll('[data-bs-target="#editConnModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const d   = this.dataset;
+          const cd  = JSON.parse(d.bsCd || '{}');
+          const type = d.bsConntype || 'FTN';
+
+          document.getElementById('editConnTitle').textContent = d.bsNetworkname || '';
+          document.getElementById('editConnForm').action = `/admin/connection/${d.bsUuid}/update`;
+          document.getElementById('ec_active').value = d.bsActive === 'true' ? 'true' : 'false';
+
+          const ecSysAddr = document.getElementById('ec_system_address');
+          if (ecSysAddr) populateSystemAddressSelect(ecSysAddr, d.bsNetworkid, d.bsSysaddrid || null);
+
+          showEditConnFields(type);
+
+          if (type === 'FTN') {
+            document.getElementById('ec_ftn_address').value         = cd.address || '';
+            document.getElementById('ec_ftn_status').value          = cd.status || 'NORMAL';
+            document.getElementById('ec_ftn_routing_rules').value   = (cd.routing_rules || []).join(', ');
+            document.getElementById('ec_ftn_sessionpw').value       = cd.session_password || '';
+            document.getElementById('ec_ftn_packetpw').value        = cd.packet_password || '';
+            document.getElementById('ec_ftn_ticpw').value           = cd.tic_password || '';
+            document.getElementById('ec_ftn_areafixpw').value       = cd.areafix_password || '';
+          } else if (type === 'NNTP') {
+            document.getElementById('ec_nntp_host').value     = cd.host || '';
+            document.getElementById('ec_nntp_port').value     = cd.port || 119;
+            document.getElementById('ec_nntp_tls').value      = cd.use_tls ? 'true' : 'false';
+            document.getElementById('ec_nntp_username').value = cd.username || '';
+          } else if (type === 'QWK') {
+            document.getElementById('ec_qwk_host').value       = cd.host || '';
+            document.getElementById('ec_qwk_port').value       = cd.port || 7254;
+            document.getElementById('ec_qwk_username').value   = cd.username || '';
+            document.getElementById('ec_qwk_packet').value     = cd.packet_name || '';
+          }
+        });
+      });
+
+      // Remove connection modal — populate from data attributes
+      document.querySelectorAll('[data-bs-target="#removeConnModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const d = this.dataset;
+          document.getElementById('removeConnName').textContent = d.bsNetworkname || '';
+          document.getElementById('removeConnForm').action = `/admin/connection/${d.bsUuid}/remove`;
+        });
+      });
+
+      // Build checkbox list filtered to a specific network_id
+      function buildAreaCheckboxes(fieldsetId, checkClass, nameAttr, idPrefix, networkId, checkedIds) {
+        const fieldset = document.getElementById(fieldsetId);
+        fieldset.innerHTML = '';
+        const netId      = parseInt(networkId);
+        const checkedSet = new Set(checkedIds.map(id => parseInt(id)));
+        let anyShown = false;
+        grouplistData.forEach(group => {
+          const filtered = (group.areas || []).filter(a => a.network_id === netId);
+          if (filtered.length === 0) return;
+          anyShown = true;
+          const h = document.createElement('h6');
+          h.className = 'text-info';
+          h.textContent = group.name + ':';
+          fieldset.appendChild(h);
+          filtered.forEach(area => {
+            const wrap = document.createElement('div');
+            wrap.className = 'form-check';
+            const cb = document.createElement('input');
+            cb.className = 'form-check-input ' + checkClass;
+            cb.id = idPrefix + '-' + area.id;
+            cb.type = 'checkbox';
+            cb.name = nameAttr;
+            cb.value = area.id;
+            cb.checked = checkedSet.has(parseInt(area.id));
+            const lbl = document.createElement('label');
+            lbl.setAttribute('for', cb.id);
+            lbl.textContent = area.name;
+            wrap.appendChild(cb);
+            wrap.appendChild(lbl);
+            fieldset.appendChild(wrap);
+          });
+          fieldset.appendChild(document.createElement('br'));
+        });
+        if (!anyShown) {
+          const p = document.createElement('p');
+          p.className = 'text-muted';
+          p.textContent = 'No areas on this network';
+          fieldset.appendChild(p);
+        }
+      }
+
+      // Set Allowed modal
+      document.querySelectorAll('[data-bs-target="#setAllowedModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const uuid      = this.dataset.bsConnuuid;
+          const name      = this.dataset.bsConnname;
+          const networkId = this.dataset.bsNetworkid;
+          document.getElementById('setAllowedTitle').textContent = name || '';
+          document.getElementById('setAllowedForm').action = `/admin/connection/${uuid}/setallowed`;
+          const subs      = subscriptionData[uuid] || [];
+          const checkedIds = subs.filter(s => s.allowed).map(s => s.area_id);
+          buildAreaCheckboxes('setAllowedFieldset', 'allowed-check', 'allowedareas', 'sal', networkId, checkedIds);
+        });
+      });
+
+      // Set Enabled modal
+      document.querySelectorAll('[data-bs-target="#setEnabledModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const uuid      = this.dataset.bsConnuuid;
+          const name      = this.dataset.bsConnname;
+          const networkId = this.dataset.bsNetworkid;
+          document.getElementById('setEnabledTitle').textContent = name || '';
+          document.getElementById('setEnabledForm').action = `/admin/connection/${uuid}/setenabled`;
+          const subs       = subscriptionData[uuid] || [];
+          const checkedIds = subs.filter(s => s.enabled).map(s => s.area_id);
+          buildAreaCheckboxes('setEnabledFieldset', 'enabled-check', 'enabledareas', 'sen', networkId, checkedIds);
+        });
+      });
+
+    });
