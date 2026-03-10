@@ -50,42 +50,41 @@ block content
                         li.text-danger= error
                     br
 
-                  // Network info + Zones row
-                  .row
-                    .col-4
-                      .card
-                        .card-header
-                          .row
-                            .col-8
-                              h5 Network Details
-                            .col-4
-                              .text-end
-                                button.btn.btn-sm.btn-warning(data-bs-toggle='modal' data-bs-target='#editNetworkModal')
-                                  | Edit
-                        .card-body
-                          table.table
-                            tr
-                              td
-                                h6= network.network_type === 'NNTP' ? 'Local FQDN:' : 'Domain:'
-                              td= network.domain
-                            tr
-                              td
-                                h6 Type:
-                              td= network.network_type || 'FTN'
-                            tr
-                              td
-                                h6 Description:
-                              td= network.description
-                            tr
-                              td
-                                h6 Status:
-                              td
-                                if network.active
-                                  span.badge.bg-success Active
-                                else
-                                  span.badge.bg-secondary Inactive
-
-                    if network.network_type === 'FTN'
+                  if network.network_type === 'FTN'
+                    // FTN: row 1 — Network Details + Zones aligned
+                    .row
+                      .col-4
+                        .card
+                          .card-header
+                            .row
+                              .col-8
+                                h5 Network Details
+                              .col-4
+                                .text-end
+                                  button.btn.btn-sm.btn-warning(data-bs-toggle='modal' data-bs-target='#editNetworkModal')
+                                    | Edit
+                          .card-body
+                            table.table
+                              tr
+                                td
+                                  h6 Domain:
+                                td= network.domain
+                              tr
+                                td
+                                  h6 Type:
+                                td= network.network_type || 'FTN'
+                              tr
+                                td
+                                  h6 Description:
+                                td= network.description
+                              tr
+                                td
+                                  h6 Status:
+                                td
+                                  if network.active
+                                    span.badge.bg-success Active
+                                  else
+                                    span.badge.bg-secondary Inactive
                       .col-8
                         .card
                           .card-header
@@ -126,114 +125,247 @@ block content
                             else
                               center
                                 h5 No Zones Configured
-
-                  // System Addresses + Peer Connections row
-                  .row
-                    .col-12
-                      br
-                  .row
-                    .col-4
-                      .card
-                        .card-header
-                          .row
-                            .col-8
-                              h5 System Addresses
-                            .col-4
-                              .text-end
-                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newAddressModal')
-                                  | Add
-                        .card-body
-                          if addresslist && addresslist.length > 0
+                    br
+                    // FTN: row 2 — System Addresses + Peers aligned
+                    .row
+                      .col-4
+                        .card
+                          .card-header
+                            .row
+                              .col-8
+                                h5 System Addresses
+                              .col-4
+                                .text-end
+                                  button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newAddressModal')
+                                    | Add
+                          .card-body
+                            if addresslist && addresslist.length > 0
+                              table.table
+                                thead
+                                  tr
+                                    th(scope='col') Address
+                                    th(scope='col') Status
+                                    th(scope='col')
+                                tbody
+                                  for address of addresslist
+                                    tr(
+                                      data-bs-uuid=address.uuid
+                                      data-bs-address=address.address
+                                      data-bs-active=(address.active ? 'true' : 'false')
+                                    )
+                                      td
+                                        = address.address
+                                        if address.is_default
+                                          |  
+                                          span.badge.bg-primary Default
+                                      td
+                                        if address.active
+                                          span.badge.bg-success Active
+                                        else
+                                          span.badge.bg-secondary Inactive
+                                      td.text-end
+                                        if !address.is_default
+                                          form(action=`/admin/address/${address.uuid}/setdefault` method='POST' style='display:inline')
+                                            button.btn.btn-xs.btn-sm.btn-primary(type='submit') Set Default
+                                          |  
+                                        button.btn.btn-xs.btn-sm.btn-warning(
+                                          data-bs-uuid=address.uuid
+                                          data-bs-address=address.address
+                                          data-bs-active=(address.active ? 'true' : 'false')
+                                          data-bs-origin-line=(address.origin_line || '')
+                                          data-bs-network-type='FTN'
+                                          onclick='openEditAddress(this)'
+                                        )
+                                          | Edit
+                                        |  
+                                        button.btn.btn-xs.btn-sm.btn-danger(
+                                          data-bs-uuid=address.uuid
+                                          data-bs-address=address.address
+                                          onclick='openRemoveAddress(this)'
+                                        )
+                                          | Remove
+                            else
+                              center
+                                h5 No Addresses
+                      .col-8
+                        .card
+                          .card-header
+                            .row
+                              .col-8
+                                h5 Peer Connections
+                              .col-4
+                                .text-end
+                                  a.btn.btn-sm.btn-success(href='/admin/peers')
+                                    | Manage Peers
+                          .card-body
+                            if connectionlist && connectionlist.length > 0
+                              table#connTable.table.table-hover
+                                thead
+                                  tr
+                                    th(scope='col') Peer
+                                    th(scope='col') Type
+                                    th(scope='col') Address / Host
+                                    th(scope='col') Status
+                                tbody
+                                  for conn of connectionlist
+                                    - var cd = conn.connection_data || {}
+                                    tr(
+                                      data-bs-uuid=conn.peer_uuid
+                                      style='cursor:pointer'
+                                    )
+                                      td= conn.peer_name || '—'
+                                      td
+                                        span.badge.bg-secondary= conn.connection_type
+                                      td= cd.address || cd.host || '—'
+                                      td
+                                        if conn.active
+                                          span.badge.bg-success Active
+                                        else
+                                          span.badge.bg-secondary Inactive
+                            else
+                              center
+                                h5 No Peer Connections
+                                p.text-muted
+                                  | Add peers at 
+                                  a(href='/admin/peers') Peer Management
+                                  |  then add a connection from the peer detail page.
+                  else
+                    // Non-FTN: single row — Network Details (+ Addresses if not NNTP) + Peers
+                    .row
+                      .col-4
+                        .card
+                          .card-header
+                            .row
+                              .col-8
+                                h5 Network Details
+                              .col-4
+                                .text-end
+                                  button.btn.btn-sm.btn-warning(data-bs-toggle='modal' data-bs-target='#editNetworkModal')
+                                    | Edit
+                          .card-body
                             table.table
-                              thead
-                                tr
-                                  th(scope='col') Address
-                                  th(scope='col') Status
-                                  th(scope='col')
-                              tbody
-                                for address of addresslist
-                                  tr(
-                                    data-bs-uuid=address.uuid
-                                    data-bs-address=address.address
-                                    data-bs-active=(address.active ? 'true' : 'false')
-                                  )
-                                    td
-                                      = address.address
-                                      if address.is_default
-                                        |  
-                                        span.badge.bg-primary Default
-                                    td
-                                      if address.active
-                                        span.badge.bg-success Active
-                                      else
-                                        span.badge.bg-secondary Inactive
-                                    td.text-end
-                                      if !address.is_default
-                                        form(action=`/admin/address/${address.uuid}/setdefault` method='POST' style='display:inline')
-                                          button.btn.btn-xs.btn-sm.btn-primary(type='submit') Set Default
-                                        |  
-                                      button.btn.btn-xs.btn-sm.btn-warning(
+                              tr
+                                td
+                                  h6= network.network_type === 'NNTP' ? 'Local FQDN:' : 'Domain:'
+                                td= network.domain
+                              tr
+                                td
+                                  h6 Type:
+                                td= network.network_type || 'FTN'
+                              tr
+                                td
+                                  h6 Description:
+                                td= network.description
+                              tr
+                                td
+                                  h6 Status:
+                                td
+                                  if network.active
+                                    span.badge.bg-success Active
+                                  else
+                                    span.badge.bg-secondary Inactive
+                        if network.network_type !== 'NNTP'
+                          br
+                          .card
+                            .card-header
+                              .row
+                                .col-8
+                                  h5 System Addresses
+                                .col-4
+                                  .text-end
+                                    button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newAddressModal')
+                                      | Add
+                            .card-body
+                              if addresslist && addresslist.length > 0
+                                table.table
+                                  thead
+                                    tr
+                                      th(scope='col') Address
+                                      th(scope='col') Status
+                                      th(scope='col')
+                                  tbody
+                                    for address of addresslist
+                                      tr(
                                         data-bs-uuid=address.uuid
                                         data-bs-address=address.address
                                         data-bs-active=(address.active ? 'true' : 'false')
-                                        data-bs-origin-line=(address.origin_line || '')
-                                        data-bs-network-type=(network.network_type || 'FTN')
-                                        onclick='openEditAddress(this)'
                                       )
-                                        | Edit
-                                      |  
-                                      button.btn.btn-xs.btn-sm.btn-danger(
-                                        data-bs-uuid=address.uuid
-                                        data-bs-address=address.address
-                                        onclick='openRemoveAddress(this)'
-                                      )
-                                        | Remove
-                          else
-                            center
-                              h5 No Addresses
-
-                    .col-8
-                      .card
-                        .card-header
-                          .row
-                            .col-8
-                              h5 Peer Connections
-                            .col-4
-                              .text-end
-                                a.btn.btn-sm.btn-success(href='/admin/peers')
-                                  | Manage Peers
-                        .card-body
-                          if connectionlist && connectionlist.length > 0
-                            table#connTable.table.table-hover
-                              thead
-                                tr
-                                  th(scope='col') Peer
-                                  th(scope='col') Type
-                                  th(scope='col') Address / Host
-                                  th(scope='col') Status
-                              tbody
-                                for conn of connectionlist
-                                  - var cd = conn.connection_data || {}
-                                  tr(
-                                    data-bs-uuid=conn.peer_uuid
-                                    style='cursor:pointer'
-                                  )
-                                    td= conn.peer_name || '—'
-                                    td
-                                      span.badge.bg-secondary= conn.connection_type
-                                    td= cd.address || cd.host || '—'
-                                    td
-                                      if conn.active
-                                        span.badge.bg-success Active
-                                      else
-                                        span.badge.bg-secondary Inactive
-                          else
-                            center
-                              h5 No Peer Connections
-                              p.text-muted
-                                | Add peers at 
-                                a(href='/admin/peers') Peer Management
-                                |  then add a connection from the peer detail page.
+                                        td
+                                          = address.address
+                                          if address.is_default
+                                            |  
+                                            span.badge.bg-primary Default
+                                        td
+                                          if address.active
+                                            span.badge.bg-success Active
+                                          else
+                                            span.badge.bg-secondary Inactive
+                                        td.text-end
+                                          if !address.is_default
+                                            form(action=`/admin/address/${address.uuid}/setdefault` method='POST' style='display:inline')
+                                              button.btn.btn-xs.btn-sm.btn-primary(type='submit') Set Default
+                                            |  
+                                          button.btn.btn-xs.btn-sm.btn-warning(
+                                            data-bs-uuid=address.uuid
+                                            data-bs-address=address.address
+                                            data-bs-active=(address.active ? 'true' : 'false')
+                                            data-bs-origin-line=(address.origin_line || '')
+                                            data-bs-network-type=(network.network_type || 'FTN')
+                                            onclick='openEditAddress(this)'
+                                          )
+                                            | Edit
+                                          |  
+                                          button.btn.btn-xs.btn-sm.btn-danger(
+                                            data-bs-uuid=address.uuid
+                                            data-bs-address=address.address
+                                            onclick='openRemoveAddress(this)'
+                                          )
+                                            | Remove
+                              else
+                                center
+                                  h5 No Addresses
+                      .col-8
+                        .card
+                          .card-header
+                            .row
+                              .col-8
+                                h5 Peer Connections
+                              .col-4
+                                .text-end
+                                  a.btn.btn-sm.btn-success(href='/admin/peers')
+                                    | Manage Peers
+                          .card-body
+                            if connectionlist && connectionlist.length > 0
+                              table#connTable.table.table-hover
+                                thead
+                                  tr
+                                    th(scope='col') Peer
+                                    th(scope='col') Type
+                                    th(scope='col') Address / Host
+                                    th(scope='col') Status
+                                tbody
+                                  for conn of connectionlist
+                                    - var cd = conn.connection_data || {}
+                                    tr(
+                                      data-bs-uuid=conn.peer_uuid
+                                      style='cursor:pointer'
+                                    )
+                                      td= conn.peer_name || '—'
+                                      td
+                                        span.badge.bg-secondary= conn.connection_type
+                                      td= cd.address || cd.host || '—'
+                                      td
+                                        if conn.active
+                                          span.badge.bg-success Active
+                                        else
+                                          span.badge.bg-secondary Inactive
+                            else
+                              center
+                                h5 No Peer Connections
+                                p.text-muted
+                                  | Add peers at 
+                                  a(href='/admin/peers') Peer Management
+                                  |  then add a connection from the peer detail page.
 
                   // Network Areas row
                   .row
