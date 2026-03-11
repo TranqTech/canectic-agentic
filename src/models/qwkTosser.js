@@ -742,16 +742,56 @@ async function pushToQwkPeer(peerConnectionUUID) {
 
 	// Our local QWK-ID from system address — used in HEADERS.DAT ExportedFrom
 	var localQwkId = '';
+	var originLine = '';
+	var sysAddr = null;
 	if (dbconn.system_address_id) {
-		var sysAddr = await systemAddresses.getAddressById(dbconn.system_address_id);
-		if (sysAddr && sysAddr.address) {
+		sysAddr = await systemAddresses.getAddressById(dbconn.system_address_id);
+	}
+	if (!sysAddr && dbconn.network_id) {
+		// No explicit address on connection — fall back to network default
+		sysAddr = await systemAddresses.getDefaultAddress(dbconn.network_id);
+	}
+	if (sysAddr) {
+		alogger.writeAlog(5,
+			'pushToQwkPeer: system_address=' + sysAddr.address +
+			' origin_line=' + JSON.stringify(sysAddr.origin_line),
+			'cyan'
+		);
+		if (sysAddr.address) {
 			localQwkId = sysAddr.address.trim().toUpperCase();
 		}
+		if (sysAddr.origin_line) {
+			originLine = sysAddr.origin_line.trim();
+		}
+	} else {
+		alogger.writeAlog(5,
+			'pushToQwkPeer: no system address found (connection or network default)',
+			'yellow'
+		);
 	}
 	if (!localQwkId) {
 		// Fallback to FTP username if no system address configured
 		localQwkId = (cd.username || 'UNKNOWN').toUpperCase();
 	}
+
+	// Build tear line + origin for locally-originated messages.
+	// Format: "--- \r || Canectic || <origin text>\r"
+	// If origin_line is set on the system address, use it directly.
+	// If blank: "<BBS_NAME> - <localQwkId>" or just "<localQwkId>"
+	var bbsName = process.env.boardname || 'Canectic BBS';
+	var originText;
+	if (originLine) {
+		originText = originLine;
+	} else if (bbsName) {
+		originText = bbsName + ' - ' + localQwkId;
+	} else {
+		originText = localQwkId;
+	}
+	var tearOrigin = '\r--- \r || Canectic || ' + originText + '\r';
+	alogger.writeAlog(5,
+		'pushToQwkPeer: originText=' + JSON.stringify(originText),
+		'cyan'
+	);
 
 	// Get enabled subscriptions for this connection, joined with areatag
 	var enabledSubs = await postgres.query(
@@ -819,6 +859,38 @@ async function pushToQwkPeer(peerConnectionUUID) {
 						msg: msg,
 						conferenceNum: conferenceNum
 					});
+
+					// Tear/origin handling for outbound messages.
+					// Three cases:
+					// 1. Local message: append our network tear/origin, replacing any existing
+					// 2. Foreign message, origin stripped (in DB but not in body): re-append original
+					// 3. Foreign message, origin in body: leave as-is
+					var bodyText = msg.body_text || '';
+					var hasTear = /---\s*[\r\n]/.test(bodyText);
+
+					if (!msg.source_network_id) {
+						// Case 1: locally originated — strip any existing tear/origin, add ours
+						if (hasTear) {
+							bodyText = bodyText.replace(/\r?---\s*[\r\n][\s\S]*$/, '');
+						}
+						bodyText = bodyText + tearOrigin;
+						msg.body_text = bodyText;
+						if (msg.utf8) {
+							var utf8Text = msg.utf8 || '';
+							if (/---\s*[\r\n]/.test(utf8Text)) {
+								utf8Text = utf8Text.replace(/\r?---\s*[\r\n][\s\S]*$/, '');
+							}
+							msg.utf8 = utf8Text + tearOrigin;
+						}
+					} else if (msg.origin_line && !hasTear) {
+						// Case 2: foreign message, origin was stripped — re-append original
+						var restoredOrigin = '\r--- \r * Origin: ' + msg.origin_line + '\r';
+						msg.body_text = bodyText + restoredOrigin;
+						if (msg.utf8) {
+							msg.utf8 = (msg.utf8 || '') + restoredOrigin;
+						}
+					}
+					// Case 3: foreign with tear/origin in body — leave as-is
 				}
 			}
 		}

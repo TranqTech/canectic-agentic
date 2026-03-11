@@ -636,8 +636,8 @@ block content
                               required
                             )
                             br
-                            if network.network_type === 'FTN'
-                              label(for='na_origin_line') Origin Line:
+                            if network.network_type === 'FTN' || network.network_type === 'QWK'
+                              label(for='na_origin_line') Tagline / Origin:
                               input(
                                 type='text'
                                 id='na_origin_line'
@@ -648,7 +648,7 @@ block content
                                 maxlength='69'
                               )
                               small.form-text.text-muted
-                                | Optional. Appears in the Origin line of outgoing messages. Leave blank to use the BBS name and address.
+                                | Optional. Used in the tear/origin line on outgoing messages.
                               br
                             p.text-muted.small
                               | Domain will be inherited from this network (
@@ -819,7 +819,7 @@ block content
                             )
                             br
                             #ea_origin_line_group
-                              label(for='ea_origin_line') Origin Line:
+                              label(for='ea_origin_line') Tagline / Origin:
                               input(
                                 type='text'
                                 id='ea_origin_line'
@@ -912,7 +912,7 @@ block content
       // Edit address button
       window.openEditAddress = function(btn) {
         const d = btn.dataset;
-        const networkType = (d.bsNetworktype || 'FTN').toUpperCase();
+        const networkType = (d.bsNetworkType || 'FTN').toUpperCase();
         const addrLabels = { FTN: 'FTN Address:', NNTP: 'NNTP Host:', QWK: 'QWK ID:', LOCAL: 'Address:' };
         const addrPlaceholders = { FTN: '1:123/456', NNTP: 'news.example.net', QWK: 'MYBBS', LOCAL: '' };
         const isFtn = networkType === 'FTN';
@@ -924,7 +924,7 @@ block content
         document.getElementById('editAddressForm').action              = `/admin/address/${d.bsUuid}/update`;
         document.getElementById('ea_active').value                     = d.bsActive === 'true' ? 'true' : 'false';
         document.getElementById('ea_origin_line').value                = d.bsOriginLine || '';
-        document.getElementById('ea_origin_line_group').style.display  = isFtn ? '' : 'none';
+        document.getElementById('ea_origin_line_group').style.display  = (isFtn || networkType === 'QWK') ? '' : 'none';
         new bootstrap.Modal(document.getElementById('editAddressModal')).show();
       };
 
