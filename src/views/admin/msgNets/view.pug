@@ -686,21 +686,31 @@ block content
                               else
                                 option(value='' disabled) No areas available
                           .col-5
-                            label(for='ana_areatag') Area Tag:
+                            - var areatagLabel = network.network_type === 'QWK' ? 'Conference Number:' : 'Area Tag:'
+                            - var areatagPlaceholder = network.network_type === 'QWK' ? '100' : 'FIDONET.GENERAL'
+                            label(for='ana_areatag')= areatagLabel
                             input(
                               type='text'
                               id='ana_areatag'
                               name='areatag'
                               class='form-control'
                               tabindex='2'
-                              placeholder='FIDONET.GENERAL'
+                              placeholder=areatagPlaceholder
                               required
                             )
+                            if network.network_type === 'QWK'
+                              #ana_qwk_warning.text-warning.small(style='display:none')
+                                | ⚠ QWK conference numbers must be numeric.
                             br
                             p.text-muted.small
-                              | The tag used to identify this area on the 
-                              = network.name
-                              |  network.
+                              if network.network_type === 'QWK'
+                                | The QWK conference number for this area on the 
+                                = network.name
+                                |  network. Must be a whole number (e.g. 100, 200).
+                              else
+                                | The tag used to identify this area on the 
+                                = network.name
+                                |  network.
                         .row
                           .col-1
                           .col-10
@@ -727,7 +737,8 @@ block content
                         .row
                           .col-1
                           .col-10
-                            label(for='ena_areatag') Area Tag:
+                            - var enaLabel = network.network_type === 'QWK' ? 'Conference Number:' : 'Area Tag:'
+                            label(for='ena_areatag')= enaLabel
                             input(
                               type='text'
                               id='ena_areatag'
@@ -736,6 +747,9 @@ block content
                               tabindex='1'
                               required
                             )
+                            if network.network_type === 'QWK'
+                              #ena_qwk_warning.text-warning.small(style='display:none')
+                                | ⚠ QWK conference numbers must be numeric.
                             br
                             label(for='ena_active') Status:
                             select#ena_active(name='active' tabindex='2').form-select
@@ -931,6 +945,9 @@ block content
           document.getElementById('editNetAreaForm').action = `/admin/network/area/${d.bsNaid}/update`;
           document.getElementById('ena_areatag').value = d.bsAreatag || '';
           document.getElementById('ena_active').value  = d.bsActive === 'true' ? 'true' : 'false';
+          // Reset QWK warning on modal open
+          const enaWarn = document.getElementById('ena_qwk_warning');
+          if (enaWarn) enaWarn.style.display = 'none';
         });
       });
 
@@ -943,6 +960,23 @@ block content
           document.getElementById('removeNetAreaForm').action = `/admin/network/area/${d.bsNaid}/remove`;
         });
       });
+
+      // QWK areatag validation — show warning if areatag is not numeric
+      function validateQwkAreatag(inputId, warningId) {
+        const input   = document.getElementById(inputId);
+        const warning = document.getElementById(warningId);
+        if (!input || !warning) return;
+        input.addEventListener('input', function() {
+          const val = this.value.trim();
+          if (val.length > 0 && !/^\d+$/.test(val)) {
+            warning.style.display = '';
+          } else {
+            warning.style.display = 'none';
+          }
+        });
+      }
+      validateQwkAreatag('ana_areatag', 'ana_qwk_warning');
+      validateQwkAreatag('ena_areatag', 'ena_qwk_warning');
 
       // Update domain field label when network type changes in edit modal.
       // NNTP uses domain as our own FQDN; all other types use it as the network domain.

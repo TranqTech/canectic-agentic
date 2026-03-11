@@ -14,6 +14,7 @@ function formatTerminalText(text, options = {}) {
         replaceAllSpaces: true, // Convert all spaces to &nbsp;
         handlePipeCodes: true,  // Process |XX pipe codes
         handleAnsiCodes: true,  // Process ANSI escape codes
+        handleCtrlACodes: true, // Process Synchronet Ctrl-A attribute codes
         resetOnNewline: true,   // Reset pipe codes on newlines (\r)
         terminalWidth: 80       // Terminal width in characters (height is infinite)
     };
@@ -53,8 +54,30 @@ function formatTerminalText(text, options = {}) {
         '28': 'bg-brightred', '29': 'bg-brightmagenta', '30': 'bg-brightyellow', '31': 'bg-brightwhite'
     };
     
+    // Synchronet Ctrl-A attribute code mappings
+    // Foreground: letter codes (case-insensitive)
+    const ctrlAFgNormal = {
+        'K': 'fg-black',   'B': 'fg-darkblue', 'G': 'fg-green',   'C': 'fg-cyan',
+        'R': 'fg-red',     'M': 'fg-magenta',  'Y': 'fg-yellow',  'W': 'fg-grey'
+    };
+    const ctrlAFgBright = {
+        'K': 'fg-brightgrey',    'B': 'fg-brightblue',    'G': 'fg-brightgreen',
+        'C': 'fg-brightcyan',    'R': 'fg-brightred',     'M': 'fg-brightmagenta',
+        'Y': 'fg-brightyellow',  'W': 'fg-brightwhite'
+    };
+    // Background: digit codes 0-7
+    const ctrlABg = {
+        '0': 'bg-black',   '1': 'bg-darkblue', '2': 'bg-green',   '3': 'bg-cyan',
+        '4': 'bg-red',     '5': 'bg-magenta',  '6': 'bg-yellow',  '7': 'bg-grey'
+    };
+    
+    // Track Ctrl-A high intensity state
+    let ctrlAHighIntensity = false;
+    
     // Process text with all escape sequences
-    const escapeRegex = /(\x1b\[([0-9;]*)([ABCDEFGHJKfHlmsu])|\033\[([0-9;]*)([ABCDEFGHJKfHlmsu])|\|(\d{2}))/g;
+    // Groups: 1=full ANSI1, 2=ansiParams1, 3=ansiCmd1, 4=ansiParams2, 5=ansiCmd2,
+    //         6=pipeCode, 7=ctrlA char
+    const escapeRegex = /(\x1b\[([0-9;]*)([ABCDEFGHJKfHlmsu])|\033\[([0-9;]*)([ABCDEFGHJKfHlmsu])|\|(\d{2})|\x01(.))/g;
     
     let lastIndex = 0;
     let match;
@@ -72,6 +95,7 @@ function formatTerminalText(text, options = {}) {
         const ansiParams2 = match[4]; 
         const ansiCommand2 = match[5];
         const pipeCode = match[6];
+        const ctrlAChar = match[7];
         
         // Handle ANSI escape sequences
         if (opts.handleAnsiCodes && (ansiCommand1 || ansiCommand2)) {
@@ -132,6 +156,55 @@ function formatTerminalText(text, options = {}) {
                 } else if (cssClass.startsWith('bg-')) {
                     terminal.setColors(null, cssClass);
                 }
+            }
+        }
+        // Handle Synchronet Ctrl-A attribute codes
+        else if (opts.handleCtrlACodes && ctrlAChar) {
+            const ch = ctrlAChar.toUpperCase();
+            
+            if (ch === '\x01') {
+                // \x01\x01 = literal Ctrl-A character — write it as text
+                terminal.writeText('\x01', opts);
+            } else if (ch === 'N') {
+                // Normal — reset all attributes
+                terminal.setColors('', '');
+                ctrlAHighIntensity = false;
+            } else if (ch === 'H') {
+                // High intensity — subsequent fg colors become bright
+                ctrlAHighIntensity = true;
+                // If there's already an fg color active, promote it to bright
+                if (terminal.currentFg && !terminal.currentFg.includes('bright')) {
+                    const currentLetter = Object.keys(ctrlAFgNormal).find(
+                        k => ctrlAFgNormal[k] === terminal.currentFg
+                    );
+                    if (currentLetter) {
+                        terminal.setColors(ctrlAFgBright[currentLetter], null);
+                    }
+                }
+            } else if (ch === 'I') {
+                // Blink — no direct CSS equivalent, could map to a class
+                // For now, treat as no-op (most web renderers ignore blink)
+            } else if (ch === '-') {
+                // Normal if high — reset high intensity, keep colors at normal
+                if (ctrlAHighIntensity) {
+                    ctrlAHighIntensity = false;
+                    // Demote current bright fg back to normal if possible
+                    if (terminal.currentFg && terminal.currentFg.includes('bright')) {
+                        const currentLetter = Object.keys(ctrlAFgBright).find(
+                            k => ctrlAFgBright[k] === terminal.currentFg
+                        );
+                        if (currentLetter) {
+                            terminal.setColors(ctrlAFgNormal[currentLetter], null);
+                        }
+                    }
+                }
+            } else if (ctrlAFgNormal[ch]) {
+                // Foreground color letter — use bright or normal based on H state
+                const fgClass = ctrlAHighIntensity ? ctrlAFgBright[ch] : ctrlAFgNormal[ch];
+                terminal.setColors(fgClass, null);
+            } else if (ctrlABg[ctrlAChar]) {
+                // Background color digit (use original char, not uppercased)
+                terminal.setColors(null, ctrlABg[ctrlAChar]);
             }
         }
         
@@ -382,6 +455,10 @@ function stripTerminalCodes(text) {
         .replace(/\033\[[0-9;]*[ABCDEFGHJKfHlmsu]/g, '')
         // Remove pipe codes
         .replace(/\|(\d{2})/g, '')
+        // Remove Synchronet Ctrl-A codes (\x01 followed by any char)
+        // \x01\x01 (escaped literal) becomes a single \x01
+        .replace(/\x01\x01/g, '\x01')
+        .replace(/\x01./g, '')
         // Convert \r to \n for plain text output
         .replace(/\r/g, '\n');
 }

@@ -36,6 +36,10 @@ build/Release
 node_modules/
 jspm_packages/
 
+#Network/Message transfer directories
+qwk/
+ftn/
+
 # TypeScript v1 declaration files
 typings/
 

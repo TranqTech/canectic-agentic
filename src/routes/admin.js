@@ -24,6 +24,7 @@ import * as userAccounts from "../models/useraccounts.js";
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
 import * as nntpTosser from "../models/nntpTosser.js";
+import * as qwkTosser from "../models/qwkTosser.js";
 
 //setup
 router.use(cookieParser());
@@ -768,6 +769,24 @@ router.post('/connection/:uuid/resetnntpidx', urlencodedParser, requireAdmin, as
 	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
 });
 
+// Reset outbound QWK msg_idx — same pattern as NNTP reset above.
+router.post('/connection/:uuid/resetqwkidx', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var areaId      = req.body.area_id ? parseInt(req.body.area_id) : null;
+	var conn        = await peerConnections.getConnectionByUUID(uuid);
+	if (!conn) {
+		alogger.writeAlog(3, "resetqwkidx: connection not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/peers');
+	}
+	var result = await qwkTosser.resetQwkOutboundIdx(uuid, areaId);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "resetqwkidx failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	var peer = await peers.getPeerById(conn.peer_id);
+	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
+});
+
 // -------------------------------------------------------
 // Network Areas
 // -------------------------------------------------------
@@ -784,6 +803,13 @@ router.post('/network/:uuid/addarea', urlencodedParser, requireAdmin, async (req
 	if (currentuser) {
 		formObj.createdByName = currentuser.name;
 		formObj.createdByUUID = currentuser.uuid;
+	}
+	// QWK networks require numeric areatags (conference numbers)
+	if (network.network_type === 'QWK' && formObj.areatag) {
+		if (!/^\d+$/.test(formObj.areatag.trim())) {
+			alogger.writeAlog(3, "addarea: QWK areatag must be numeric, got '" + formObj.areatag + "'", "redbright");
+			return res.redirect('/admin/network/' + uuid);
+		}
 	}
 	var result = await networkAreas.addAreaToNetwork(
 		network.id,
@@ -805,13 +831,23 @@ router.post('/network/area/:id/update', urlencodedParser, requireAdmin, async (r
 		formObj.updatedByName = currentuser.name;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
-	var result = await networkAreas.updateNetworkArea(id, formObj);
+	// Pre-validate: QWK networks require numeric areatags
+	var naRow   = await networkAreas.getNetworkAreaById(id);
+	if (!naRow) {
+		alogger.writeAlog(3, "updateNetworkArea: network_area id " + id + " not found", "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var network = naRow ? await msgNetworks.getNetworkById(naRow.network_id) : null;
+	if (network && network.network_type === 'QWK' && formObj.areatag) {
+		if (!/^\d+$/.test(formObj.areatag.trim())) {
+			alogger.writeAlog(3, "updateNetworkArea: QWK areatag must be numeric, got '" + formObj.areatag + "'", "redbright");
+			return res.redirect(network ? '/admin/network/' + network.uuid : '/admin/networks');
+		}
+	}
+	var result = await networkAreas.updateNetworkArea(naRow.network_id, naRow.area_id, formObj);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "updateNetworkArea failed for id " + id + ": " + result.errormessages.join(", "), "redbright");
 	}
-	// Redirect back to the owning network's page
-	var naRow   = await networkAreas.getNetworkAreaById(id);
-	var network = naRow ? await msgNetworks.getNetworkById(naRow.network_id) : null;
 	res.redirect(network ? '/admin/network/' + network.uuid : '/admin/networks');
 });
 

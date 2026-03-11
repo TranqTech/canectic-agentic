@@ -101,13 +101,14 @@ async function getMessagesForThread(shortcode, threadid) {
 		// Prefer utf8 column for display when set (NNTP messages with non-UTF-8 charset).
 		// Fall back to body_text (FTN CP437 messages handled by conversion utils below).
 		var displayText = msg.utf8 || msg.body_text || '';
-		if (displayText.includes("\x1b[")) {
+		if (displayText.includes("\x1b[") || /\|\d{2}/.test(displayText) || displayText.includes("\x01")) {
 			msg.isAnsi = true;
 			msg.body_html = await terminalText.formatTerminalText(displayText, {
 				terminalWidth: 80,
 				replaceAllSpaces: true,
 				handlePipeCodes: true,
 				handleAnsiCodes: true,
+				handleCtrlACodes: true,
 				resetOnNewline: true
 			});
 		} else {

@@ -428,6 +428,16 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 
 	// Body processing:
 
+	// Decode transfer encoding (base64, quoted-printable, 7bit/8bit passthrough)
+	var decodedBody = decodeTransferEncoding(body, transferEncoding);
+
+	// Parse charset and convert to normalised text
+	var charset  = parseCharset(contentType);
+	var normBody = normaliseBodyText(decodedBody, charset);
+	var bodyText = normaliseLineEndings(normBody.bodyText);
+	var utf8Text = normBody.utf8 ? normaliseLineEndings(normBody.utf8) : null;
+	var rawText  = bodyText;
+
 	var fromUser   = parseFromName(from);
 	var systemTime = parseArticleDate(dateStr);
 	var currtime   = new Date();

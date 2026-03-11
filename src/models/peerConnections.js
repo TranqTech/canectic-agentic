@@ -84,17 +84,31 @@ function buildConnectionData(networkType, formObj) {
 			};
 		}
 		case 'QWK': {
-			var qHost = formObj.qwk_host        || formObj.host        || '';
-			var qPort = formObj.qwk_port        || formObj.port        || 21;
-			var qUser = formObj.qwk_username    || formObj.username    || '';
-			var qPass = formObj.qwk_password    || formObj.password    || '';
-			var qPkt  = formObj.qwk_packet_name || formObj.packet_name || '';
+			// Use explicit undefined checks so that empty strings from the form
+			// are preserved — an empty inbox/outbox means "use server default cwd".
+			var pick = function(/* ...candidates */) {
+				for (var i = 0; i < arguments.length; i++) {
+					if (arguments[i] !== undefined && arguments[i] !== null) return arguments[i];
+				}
+				return arguments[arguments.length - 1];
+			};
+			var qHost      = pick(formObj.qwk_host,           formObj.host,           '');
+			var qPort      = pick(formObj.qwk_port,           formObj.port,           21);
+			var qUser      = pick(formObj.qwk_username,       formObj.username,       '');
+			var qPass      = pick(formObj.qwk_password,       formObj.password,       '');
+			var qTransport = pick(formObj.qwk_transport,      formObj.transport,      'ftp');
+			var qInbox     = pick(formObj.qwk_remote_inbox,   formObj.remote_inbox,   '/');
+			var qOutbox    = pick(formObj.qwk_remote_outbox,  formObj.remote_outbox,  '/');
+			var qRemoteId  = pick(formObj.qwk_remote_qwk_id, formObj.remote_qwk_id,  '');
 			return {
-				host:        qHost ? qHost.trim() : '',
-				port:        qPort ? parseInt(qPort) : 21,
-				username:    qUser ? qUser.trim() : '',
-				password:    qPass ? qPass.trim() : '',
-				packet_name: qPkt  ? qPkt.trim()  : ''
+				transport:      qTransport ? qTransport.toString().trim().toLowerCase() : 'ftp',
+				host:           qHost ? qHost.toString().trim() : '',
+				port:           qPort ? parseInt(qPort) : 21,
+				username:       qUser ? qUser.toString().trim() : '',
+				password:       typeof qPass === 'string' ? qPass.trim() : '',
+				remote_inbox:   typeof qInbox === 'string'  ? qInbox.trim()  : '',
+				remote_outbox:  typeof qOutbox === 'string' ? qOutbox.trim() : '',
+				remote_qwk_id:  qRemoteId ? qRemoteId.toString().trim().toUpperCase() : ''
 			};
 		}
 		case 'LOCAL':
@@ -128,8 +142,8 @@ function validateConnectionData(networkType, data) {
 			}
 			break;
 		case 'QWK':
-			if (!data.host) {
-				errors.push('QWK host cannot be empty');
+			if (data.transport !== 'directory' && data.transport !== 'hub' && !data.host) {
+				errors.push('QWK host cannot be empty (not required for directory or hub transport)');
 			}
 			if (data.port && isNaN(data.port)) {
 				errors.push('QWK port must be a number');
@@ -199,7 +213,7 @@ async function newConnection(formObj) {
 		var saId = parseInt(formObj.system_address_id);
 		if (!isNaN(saId)) {
 			var saCheck = await systemAddresses.getAddressById(saId);
-			if (saCheck && saCheck.network_id === dbnetwork.id) {
+			if (saCheck && parseInt(saCheck.network_id) === parseInt(dbnetwork.id)) {
 				systemAddressId = saId;
 			} else {
 				returnObj.errormessages.push('Selected system address does not belong to this network');
@@ -297,7 +311,7 @@ async function updateConnection(uuid, formObj) {
 			: parseInt(formObj.system_address_id);
 		if (newSaId !== null) {
 			var saCheck = await systemAddresses.getAddressById(newSaId);
-			if (!saCheck || saCheck.network_id !== dbconn.network_id) {
+			if (!saCheck || parseInt(saCheck.network_id) !== parseInt(dbconn.network_id)) {
 				returnObj.errormessages.push('Selected system address does not belong to this network');
 				return returnObj;
 			}
@@ -306,12 +320,28 @@ async function updateConnection(uuid, formObj) {
 	}
 
 	// If any connection_data fields are present, rebuild the full data object
-	// from the existing stored data merged with the incoming form fields
+	// from the existing stored data merged with the incoming form fields.
+	// Includes both bare names (for programmatic callers) and prefixed names
+	// (ftn_, nntp_, qwk_) as submitted by the admin edit forms.
 	var dataKeys = [
+		// Bare names (programmatic callers / backward compat)
 		'address', 'direct', 'route_to', 'status', 'remote_host', 'remote_port',
 		'session_password', 'packet_password', 'tic_password', 'areafix_password',
-		'host', 'port', 'use_tls', 'username', 'password', 'pull_interval_minutes',
-		'packet_name'
+		'routing_rules', 'host', 'port', 'use_tls', 'username', 'password',
+		'pull_interval_minutes', 'transport', 'remote_inbox', 'remote_outbox',
+		'remote_qwk_id',
+		// FTN form fields
+		'ftn_address', 'ftn_direct', 'ftn_route_to', 'ftn_status',
+		'ftn_remote_host', 'ftn_remote_port', 'ftn_session_password',
+		'ftn_packet_password', 'ftn_tic_password', 'ftn_areafix_password',
+		'ftn_routing_rules',
+		// NNTP form fields
+		'nntp_host', 'nntp_port', 'nntp_use_tls', 'nntp_username',
+		'nntp_password', 'nntp_pull_interval_minutes',
+		// QWK form fields
+		'qwk_host', 'qwk_port', 'qwk_transport', 'qwk_username',
+		'qwk_password', 'qwk_remote_inbox', 'qwk_remote_outbox',
+		'qwk_remote_qwk_id'
 	];
 	var hasDataField = dataKeys.some(k => formObj[k] !== undefined);
 
@@ -538,6 +568,31 @@ async function clearNntpHwmForArea(networkId, areatag) {
 	}
 }
 
+// Same as clearNntpHwmForArea but for QWK connections on a network.
+// Removes the areatag (= conference number) key from high_water_marks in
+// connection_data for all connections on the given network.
+async function clearQwkHwmForArea(networkId, areatag) {
+	if (!areatag) return;
+	try {
+		await postgres.write(
+			`UPDATE peer_connections
+			 SET connection_data = connection_data #- ARRAY['high_water_marks', $1]
+			 WHERE network_id = $2`,
+			[areatag, parseInt(networkId)]
+		);
+		alogger.writeAlog(5,
+			'clearQwkHwmForArea: removed HWM for ' + areatag +
+			' on network_id ' + networkId,
+			'greenbright'
+		);
+	} catch (err) {
+		alogger.writeAlog(3,
+			'clearQwkHwmForArea: failed for ' + areatag + ': ' + err.message,
+			'redbright'
+		);
+	}
+}
+
 export {
 	newConnection,
 	updateConnection,
@@ -551,5 +606,6 @@ export {
 	getActiveConnectionsByNetworkType,
 	buildConnectionData,
 	validateConnectionData,
-	clearNntpHwmForArea
+	clearNntpHwmForArea,
+	clearQwkHwmForArea
 };

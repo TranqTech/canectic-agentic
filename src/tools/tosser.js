@@ -6,10 +6,73 @@ import * as ftnTosser from "../middleware/ftnTosser.js"
 import * as msgAreas from "../models/msgAreas.js"
 import * as echomail from "../models/echomail.js"
 import * as nntpTosser from "../models/nntpTosser.js"
+import * as qwkTosser from "../models/qwkTosser.js"
 import * as peerConnections from "../models/peerConnections.js"
 import { DateTime } from "luxon";
 
 const PID_FILE = '/tmp/can_toss.pid';
+
+// ---------------------------------------------------------------------------
+// Argument parsing
+// ---------------------------------------------------------------------------
+// Usage: node tosser.js [--in | --out] [--ftn] [--nntp] [--qwk]
+//
+// Direction flags (default: both):
+//   --in       Inbound only (pull/toss inbound)
+//   --out      Outbound only (push/toss outbound)
+//              If neither is specified, both directions run.
+//
+// Network type flags (default: all):
+//   --ftn      FTN connections only
+//   --nntp     NNTP connections only
+//   --qwk      QWK connections only
+//              Multiple can be combined: --ftn --qwk
+//              If none specified, all types run.
+//
+// Other:
+//   --help     Show usage and exit
+
+function parseArgs() {
+	var args = process.argv.slice(2);
+
+	if (args.includes('--help') || args.includes('-h')) {
+		console.log('Usage: node tosser.js [--in | --out] [--ftn] [--nntp] [--qwk]');
+		console.log('');
+		console.log('Direction:');
+		console.log('  --in       Inbound only');
+		console.log('  --out      Outbound only');
+		console.log('             (default: both)');
+		console.log('');
+		console.log('Network type (combinable, default: all):');
+		console.log('  --ftn      FTN connections');
+		console.log('  --nntp     NNTP connections');
+		console.log('  --qwk      QWK connections');
+		process.exit(0);
+	}
+
+	var hasIn  = args.includes('--in');
+	var hasOut = args.includes('--out');
+
+	// If neither direction specified, run both
+	var doInbound  = hasIn  || (!hasIn && !hasOut);
+	var doOutbound = hasOut || (!hasIn && !hasOut);
+
+	var hasFtn  = args.includes('--ftn');
+	var hasNntp = args.includes('--nntp');
+	var hasQwk  = args.includes('--qwk');
+	var anyType = hasFtn || hasNntp || hasQwk;
+
+	// If no type flags specified, run all types
+	var doFtn  = hasFtn  || !anyType;
+	var doNntp = hasNntp || !anyType;
+	var doQwk  = hasQwk  || !anyType;
+
+	return { doInbound, doOutbound, doFtn, doNntp, doQwk };
+}
+
+// ---------------------------------------------------------------------------
+// Toss functions
+// ---------------------------------------------------------------------------
 
 async function finalThreadUpdates(){
 	var updatearray = []
@@ -47,29 +110,65 @@ async function postTossMaint(){
 	await msgAreas.updateAreaStats()
 }
 
-async function runtosser(){
+async function runtosser(opts){
 	await currentTime()
 
-	// Discover which network types have active connections so we only
-	// invoke tossers that have work to do
-	var activeFTN  = await peerConnections.getActiveConnectionsByNetworkType("FTN");
-	var activeNNTP = await peerConnections.getActiveConnectionsByNetworkType("NNTP");
+	var dirLabel = (opts.doInbound && opts.doOutbound) ? 'in+out'
+		: opts.doInbound ? 'inbound only'
+		: 'outbound only';
+	var typeLabels = [];
+	if (opts.doFtn)  typeLabels.push('FTN');
+	if (opts.doNntp) typeLabels.push('NNTP');
+	if (opts.doQwk)  typeLabels.push('QWK');
+	console.log('Tosser running: ' + dirLabel + ' — types: ' + typeLabels.join(', '));
 
-	if (activeFTN && activeFTN.length > 0) {
-		console.log("FTN: " + activeFTN.length + " active connection(s) — running FTN toss");
-		//await ftnTosser.FindAndExtractArchives()
-		await ftnTosser.TossInbound()
-		await ftnTosser.TossOutbound()
-	} else {
-		console.log("FTN: no active connections — skipping FTN toss");
+	// FTN
+	if (opts.doFtn) {
+		var activeFTN = await peerConnections.getActiveConnectionsByNetworkType("FTN");
+		if (activeFTN && activeFTN.length > 0) {
+			console.log("FTN: " + activeFTN.length + " active connection(s)");
+			if (opts.doInbound) {
+				//await ftnTosser.FindAndExtractArchives()
+				await ftnTosser.TossInbound()
+			}
+			if (opts.doOutbound) {
+				await ftnTosser.TossOutbound()
+			}
+		} else {
+			console.log("FTN: no active connections — skipping");
+		}
 	}
 
-	if (activeNNTP && activeNNTP.length > 0) {
-		console.log("NNTP: " + activeNNTP.length + " active connection(s) — running NNTP pull then push");
-		await nntpTosser.pullAllNNTP();
-		await nntpTosser.pushAllNNTP();
-	} else {
-		console.log("NNTP: no active connections — skipping NNTP toss");
+	// NNTP
+	if (opts.doNntp) {
+		var activeNNTP = await peerConnections.getActiveConnectionsByNetworkType("NNTP");
+		if (activeNNTP && activeNNTP.length > 0) {
+			console.log("NNTP: " + activeNNTP.length + " active connection(s)");
+			if (opts.doInbound) {
+				await nntpTosser.pullAllNNTP();
+			}
+			if (opts.doOutbound) {
+				await nntpTosser.pushAllNNTP();
+			}
+		} else {
+			console.log("NNTP: no active connections — skipping");
+		}
+	}
+
+	// QWK
+	if (opts.doQwk) {
+		var activeQWK = await peerConnections.getActiveConnectionsByNetworkType("QWK");
+		if (activeQWK && activeQWK.length > 0) {
+			console.log("QWK: " + activeQWK.length + " active connection(s)");
+			if (opts.doInbound) {
+				await qwkTosser.pullAllQWK();
+			}
+			if (opts.doOutbound) {
+				await qwkTosser.pushAllQWK();
+			}
+		} else {
+			console.log("QWK: no active connections — skipping");
+		}
 	}
 
 	await postTossMaint()
@@ -77,6 +176,8 @@ async function runtosser(){
 
 
 async function main(){
+	var opts = parseArgs();
+
 	try {
 	  const existingPid = fs.readFileSync(PID_FILE, 'utf8');
 	  // Check if the process with this PID is still running
@@ -87,7 +188,7 @@ async function main(){
 	  if (err.code === 'ENOENT' || err.code === 'ESRCH') { // File not found or process not found
 	    console.log('No other instance found. Starting new instance...');
 	    await fs.writeFileSync(PID_FILE, process.pid.toString());
-	    await runtosser()
+	    await runtosser(opts)
 	    process.on('exit', () => {
 	    	console.log("Cleaning up PID")
 			fs.unlinkSync(PID_FILE); // Clean up PID file on exit
@@ -101,5 +202,3 @@ async function main(){
 
 await main()
 process.exit()
-
-//TODO: Add argument option to only run inbound or outbound when needed

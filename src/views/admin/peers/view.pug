@@ -165,6 +165,10 @@ block content
                               form(method='POST' action=`/admin/connection/${conn.uuid}/resetnntpidx` style='display:inline')
                                 button.btn.btn-sm.btn-secondary(type='submit' title='Reset outbound index — rescan all areas on next toss') Reset Idx
                               |  
+                            if conn.connection_type === 'QWK'
+                              form(method='POST' action=`/admin/connection/${conn.uuid}/resetqwkidx` style='display:inline')
+                                button.btn.btn-sm.btn-secondary(type='submit' title='Reset outbound index — rescan all areas on next toss') Reset Idx
+                              |  
                             button.btn.btn-sm.btn-danger(
                               data-bs-toggle='modal'
                               data-bs-target='#removeConnModal'
@@ -214,6 +218,10 @@ block content
                             else if conn.connection_type === 'QWK'
                               tr
                                 td
+                                  small Remote QWK ID:
+                                td= cd.remote_qwk_id || '—'
+                              tr
+                                td
                                   small Host:
                                 td= cd.host || '—'
                               tr
@@ -222,8 +230,20 @@ block content
                                 td= cd.port || '—'
                               tr
                                 td
-                                  small Packet Name:
-                                td= cd.packet_name || '—'
+                                  small Transport:
+                                td= cd.transport || 'ftp'
+                              tr
+                                td
+                                  small Username:
+                                td= cd.username || '—'
+                              tr
+                                td
+                                  small Inbox:
+                                td= cd.remote_inbox !== undefined && cd.remote_inbox !== '' ? cd.remote_inbox : '(server default)'
+                              tr
+                                td
+                                  small Outbox:
+                                td= cd.remote_outbox !== undefined && cd.remote_outbox !== '' ? cd.remote_outbox : '(server default)'
                             else
                               tr
                                 td
@@ -532,51 +552,89 @@ block content
                               )
                             // QWK fields
                             #nc_fields_qwk(style='display:none')
-                              label(for='nc_qwk_host') Host:
+                              label(for='nc_qwk_remote_qwk_id') Remote QWK ID:
                               input(
                                 type='text'
-                                id='nc_qwk_host'
-                                name='qwk_host'
+                                id='nc_qwk_remote_qwk_id'
+                                name='qwk_remote_qwk_id'
                                 class='form-control'
                                 tabindex='7'
+                                placeholder='VERT'
                               )
+                              small.form-text.text-muted#nc_qwk_id_help
+                                | The remote system's QWK BBS ID.
                               br
-                              label(for='nc_qwk_port') Port:
-                              input(
-                                type='number'
-                                id='nc_qwk_port'
-                                name='qwk_port'
-                                class='form-control'
-                                tabindex='8'
-                                value=7254
-                              )
-                              br
-                              label(for='nc_qwk_username') Username:
-                              input(
-                                type='text'
-                                id='nc_qwk_username'
-                                name='qwk_username'
+                              label(for='nc_qwk_transport') Transport:
+                              select(
+                                id='nc_qwk_transport'
+                                name='qwk_transport'
                                 class='form-control'
                                 tabindex='9'
                               )
+                                option(value='ftp' selected) FTP
+                                option(value='sftp') SFTP
+                                option(value='directory') Directory
+                                option(value='hub') Hub (Inbound)
                               br
-                              label(for='nc_qwk_password') Password:
-                              input(
-                                type='password'
-                                id='nc_qwk_password'
-                                name='qwk_password'
-                                class='form-control'
-                                tabindex='10'
-                              )
-                              br
-                              label(for='nc_qwk_packet') Packet Name:
-                              input(
-                                type='text'
-                                id='nc_qwk_packet'
-                                name='qwk_packet_name'
-                                class='form-control'
-                                tabindex='11'
-                              )
+                              #nc_qwk_client_fields
+                                label(for='nc_qwk_host') Host:
+                                input(
+                                  type='text'
+                                  id='nc_qwk_host'
+                                  name='qwk_host'
+                                  class='form-control'
+                                  tabindex='7'
+                                )
+                                br
+                                label(for='nc_qwk_port') Port:
+                                input(
+                                  type='number'
+                                  id='nc_qwk_port'
+                                  name='qwk_port'
+                                  class='form-control'
+                                  tabindex='8'
+                                  value=21
+                                )
+                                br
+                                label(for='nc_qwk_username') Username:
+                                input(
+                                  type='text'
+                                  id='nc_qwk_username'
+                                  name='qwk_username'
+                                  class='form-control'
+                                  tabindex='10'
+                                )
+                                br
+                                label(for='nc_qwk_password') Password:
+                                input(
+                                  type='password'
+                                  id='nc_qwk_password'
+                                  name='qwk_password'
+                                  class='form-control'
+                                  tabindex='11'
+                                )
+                                br
+                                label(for='nc_qwk_remote_inbox') Remote Inbox Path:
+                                input(
+                                  type='text'
+                                  id='nc_qwk_remote_inbox'
+                                  name='qwk_remote_inbox'
+                                  class='form-control'
+                                  tabindex='12'
+                                  value='/'
+                                  placeholder='/'
+                                )
+                                br
+                                label(for='nc_qwk_remote_outbox') Remote Outbox Path:
+                                input(
+                                  type='text'
+                                  id='nc_qwk_remote_outbox'
+                                  name='qwk_remote_outbox'
+                                  class='form-control'
+                                  tabindex='13'
+                                  value='/'
+                                  placeholder='/'
+                                )
                             // LOCAL — no extra fields
                             #nc_fields_local(style='display:none')
                               p.text-muted Local connections have no transport settings.
@@ -679,20 +737,35 @@ block content
                               input(type='password' id='ec_nntp_password' name='nntp_password' class='form-control' tabindex='6')
                             // QWK edit fields
                             #ec_fields_qwk(style='display:none')
-                              label(for='ec_qwk_host') Host:
-                              input(type='text' id='ec_qwk_host' name='qwk_host' class='form-control' tabindex='2')
+                              label(for='ec_qwk_remote_qwk_id') Remote QWK ID:
+                              input(type='text' id='ec_qwk_remote_qwk_id' name='qwk_remote_qwk_id' class='form-control' tabindex='2' placeholder='VERT')
+                              small.form-text.text-muted#ec_qwk_id_help The remote system's QWK BBS ID.
                               br
-                              label(for='ec_qwk_port') Port:
-                              input(type='number' id='ec_qwk_port' name='qwk_port' class='form-control' value='7254' tabindex='3')
+                              label(for='ec_qwk_transport') Transport:
+                              select(id='ec_qwk_transport' name='qwk_transport' class='form-control' tabindex='4')
+                                option(value='ftp') FTP
+                                option(value='sftp') SFTP
+                                option(value='directory') Directory
+                                option(value='hub') Hub (Inbound)
                               br
-                              label(for='ec_qwk_username') Username:
-                              input(type='text' id='ec_qwk_username' name='qwk_username' class='form-control' tabindex='4')
-                              br
-                              label(for='ec_qwk_password') Password:
-                              input(type='password' id='ec_qwk_password' name='qwk_password' class='form-control' tabindex='5')
-                              br
-                              label(for='ec_qwk_packet') Packet Name:
-                              input(type='text' id='ec_qwk_packet' name='qwk_packet_name' class='form-control' tabindex='6')
+                              #ec_qwk_client_fields
+                                label(for='ec_qwk_host') Host:
+                                input(type='text' id='ec_qwk_host' name='qwk_host' class='form-control' tabindex='2')
+                                br
+                                label(for='ec_qwk_port') Port:
+                                input(type='number' id='ec_qwk_port' name='qwk_port' class='form-control' value='21' tabindex='3')
+                                br
+                                label(for='ec_qwk_username') Username:
+                                input(type='text' id='ec_qwk_username' name='qwk_username' class='form-control' tabindex='5')
+                                br
+                                label(for='ec_qwk_password') Password:
+                                input(type='password' id='ec_qwk_password' name='qwk_password' class='form-control' tabindex='6')
+                                br
+                                label(for='ec_qwk_remote_inbox') Remote Inbox Path:
+                                input(type='text' id='ec_qwk_remote_inbox' name='qwk_remote_inbox' class='form-control' tabindex='7' placeholder='/')
+                                br
+                                label(for='ec_qwk_remote_outbox') Remote Outbox Path:
+                                input(type='text' id='ec_qwk_remote_outbox' name='qwk_remote_outbox' class='form-control' tabindex='8' placeholder='/')
                             // LOCAL edit
                             #ec_fields_local(style='display:none')
                               p.text-muted Local connections have no transport settings.
@@ -807,7 +880,7 @@ block content
         const opt = document.createElement('option');
         opt.value = addr.id;
         opt.textContent = addr.address + (addr.is_default ? ' (default)' : '') + (!addr.active ? ' [inactive]' : '');
-        if (selectedId && parseInt(selectedId) === addr.id) opt.selected = true;
+        if (selectedId && parseInt(selectedId) === parseInt(addr.id)) opt.selected = true;
         selectEl.appendChild(opt);
       });
     }
@@ -831,6 +904,28 @@ block content
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+
+      // Toggle QWK client fields based on transport selection
+      function toggleQwkClientFields(prefix) {
+        var sel = document.getElementById(prefix + '_qwk_transport');
+        if (!sel) return;
+        var isHub = (sel.value === 'hub');
+        var clientDiv = document.getElementById(prefix + '_qwk_client_fields');
+        if (clientDiv) clientDiv.style.display = isHub ? 'none' : '';
+      }
+
+      // New connection QWK transport change
+      var ncQwkTransport = document.getElementById('nc_qwk_transport');
+      if (ncQwkTransport) {
+        ncQwkTransport.addEventListener('change', function() { toggleQwkClientFields('nc'); });
+        toggleQwkClientFields('nc');
+      }
+
+      // Edit connection QWK transport change
+      var ecQwkTransport = document.getElementById('ec_qwk_transport');
+      if (ecQwkTransport) {
+        ecQwkTransport.addEventListener('change', function() { toggleQwkClientFields('ec'); });
+      }
 
       // New connection type switcher
       const ncType = document.getElementById('nc_type');
@@ -893,11 +988,17 @@ block content
             document.getElementById('ec_nntp_port').value     = cd.port || 119;
             document.getElementById('ec_nntp_tls').value      = cd.use_tls ? 'true' : 'false';
             document.getElementById('ec_nntp_username').value = cd.username || '';
+            document.getElementById('ec_nntp_password').value = cd.password || '';
           } else if (type === 'QWK') {
-            document.getElementById('ec_qwk_host').value       = cd.host || '';
-            document.getElementById('ec_qwk_port').value       = cd.port || 7254;
-            document.getElementById('ec_qwk_username').value   = cd.username || '';
-            document.getElementById('ec_qwk_packet').value     = cd.packet_name || '';
+            document.getElementById('ec_qwk_remote_qwk_id').value  = cd.remote_qwk_id || '';
+            document.getElementById('ec_qwk_host').value           = cd.host || '';
+            document.getElementById('ec_qwk_port').value           = cd.port || 21;
+            document.getElementById('ec_qwk_transport').value      = cd.transport || 'ftp';
+            document.getElementById('ec_qwk_username').value       = cd.username || '';
+            document.getElementById('ec_qwk_password').value       = cd.password || '';
+            document.getElementById('ec_qwk_remote_inbox').value   = cd.remote_inbox ?? '/';
+            document.getElementById('ec_qwk_remote_outbox').value  = cd.remote_outbox ?? '/';
+            toggleQwkClientFields('ec');
           }
         });
       });
