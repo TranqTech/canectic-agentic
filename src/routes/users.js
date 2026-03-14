@@ -46,24 +46,6 @@ function safeRedirect(target, fallback) {
 	return target;
 }
 
-// Helper: flatten a user record into Redis-safe strings
-// sessionGet will parse permissionflags, restrictionflags, isSysop, and security back out
-function buildSessionData(userobj) {
-	return {
-		uuid:             userobj.uuid             || '',
-		username:         userobj.username         || '',
-		firstname:        userobj.firstname        || '',
-		lastname:         userobj.lastname         || '',
-		fullname:         userobj.fullname         || '',
-		security:         String(userobj.security  || 0),
-		isSysop:          String(userobj.isSysop   || false),
-		permissionflags:  JSON.stringify(Array.isArray(userobj.permissionflags)  ? userobj.permissionflags  : []),
-		restrictionflags: JSON.stringify(Array.isArray(userobj.restrictionflags) ? userobj.restrictionflags : []),
-		mailaddress:      userobj.mailaddress      || '',
-		mailtype:         userobj.mailtype         || '',
-	};
-}
-
 /* -----------------------------------------------
    GET /users/login
    Renders login page. If already logged in, redirect to /
@@ -123,7 +105,7 @@ router.post('/login', urlencodedParser, async (req, res) => {
 	var userobj = result.useraccount;
 
 	var sessionid   = uuidv4();
-	var sessionData = buildSessionData(userobj);
+	var sessionData = userAccounts.buildSessionData(userobj);
 	var ok = await sessionStore.sessionStore(sessionid, sessionData);
 
 	if (!ok) {

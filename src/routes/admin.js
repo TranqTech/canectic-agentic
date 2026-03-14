@@ -14,7 +14,7 @@ import * as msgZones from '../models/msgZones.js';
 import * as msgGroups from '../models/msgGroups.js';
 import * as msgAreas from '../models/msgAreas.js';
 import * as netmail from '../models/netmail.js';
-import * as echomail from '../models/echomail.js';
+import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as peerAreaSubscriptions from '../models/peerAreaSubscriptions.js';
@@ -212,6 +212,12 @@ router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) =>
 	}
 });
 
+// Recalculate area counts for all groups
+router.post('/msgGroups/recalculateAreaCounts', urlencodedParser, requireAdmin, async (req, res) => {
+	await msgAreas.recalculateAreaCounts();
+	res.redirect('/admin/msgGroups');
+});
+
 router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
@@ -349,11 +355,31 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 router.get('/msgAreas', async (req, res, next) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
-	res.render('admin/msgAreas', {
+	var grouplist = await msgGroups.getAllGroups();
+	var allAreas  = await msgAreas.getAllAreas();
+	var networklist = await msgNetworks.getActiveNetworks();
+
+	// Augment areas with network info
+	if (allAreas && allAreas.length > 0) {
+		for (var area of allAreas) {
+			var netRows = await networkAreas.getNetworksByArea(area.id);
+			if (netRows && netRows.length > 0) {
+				var firstActive = netRows.find(nr => nr.active) || netRows[0];
+				area.network_name = firstActive.network_name || null;
+				area.areatag      = firstActive.areatag || null;
+			}
+		}
+	}
+
+	res.render('admin/msgAreas/index', {
 		sufficientAccess: sufficientAccess,
 		title: 'Message Areas',
 		activelink: 'msgGroups',
-		currentuser: currentuser
+		currentuser: currentuser,
+		grouplist: grouplist,
+		allAreas: allAreas || [],
+		networklist: networklist,
+		DateTime: DateTime
 	});
 });
 
@@ -405,10 +431,33 @@ router.get('/network/:uuid', async (req, res, next) => {
 		addresslist    = await systemAddresses.getAddressesByNetwork(network.id);
 		connectionlist = await peerConnections.getConnectionsByNetwork(network.id);
 		networkareas   = await networkAreas.getAreasByNetwork(network.id);
-		// arealist for the 'Add Area' modal — all areas not already mapped to this network
+		// arealist for the 'Add Area' modal — all areas not already mapped to this network,
+		// grouped by message group for the optgroup select
 		var allAreas  = await msgAreas.getAllAreas();
-		var mappedIds = (networkareas || []).map(na => na.area_id);
-		arealist      = (allAreas || []).filter(a => !mappedIds.includes(a.id));
+		var mappedIds = new Set((networkareas || []).map(na => parseInt(na.area_id)));
+		var unmapped  = (allAreas || []).filter(a => !mappedIds.has(parseInt(a.id)));
+
+		// Build grouped structure: [ { groupName, groupShortcode, areas: [...] }, ... ]
+		var allGroups   = await msgGroups.getAllGroups();
+		var groupMap    = {};
+		for (var g of (allGroups || [])) {
+			groupMap[g.shortcode] = g.name || g.shortcode;
+		}
+		var groupedAreas = {};
+		for (var a of unmapped) {
+			var gkey = a.group_shortcode || '_ungrouped';
+			if (!groupedAreas[gkey]) {
+				groupedAreas[gkey] = {
+					groupName: groupMap[gkey] || gkey,
+					groupShortcode: gkey,
+					areas: []
+				};
+			}
+			groupedAreas[gkey].areas.push(a);
+		}
+		arealist = Object.values(groupedAreas).sort((a, b) =>
+			a.groupName.localeCompare(b.groupName)
+		);
 	}
 	res.render('admin/msgNets/view', {
 		sufficientAccess: sufficientAccess,
@@ -819,6 +868,17 @@ router.post('/network/:uuid/addarea', urlencodedParser, requireAdmin, async (req
 	);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "addAreaToNetwork failed for network " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	} else {
+		// Sync all connections on this network — creates subscription rows for the
+		// new area and optionally sets allowed/enabled based on checkboxes.
+		await peerAreaSubscriptions.syncNetworkAreaToConnections(
+			network.id,
+			parseInt(formObj.area_id),
+			{
+				allowAll:  formObj.allow_all_peers === 'true',
+				enableAll: formObj.enable_all_peers === 'true'
+			}
+		);
 	}
 	res.redirect('/admin/network/' + uuid);
 });
@@ -863,6 +923,9 @@ router.post('/network/area/:id/remove', urlencodedParser, requireAdmin, async (r
 	var result = await networkAreas.removeAreaFromNetwork(naRow.network_id, naRow.area_id);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "removeAreaFromNetwork failed for id " + id + ": " + result.errormessages.join(", "), "redbright");
+	} else {
+		// Clean up subscription rows that referenced this area on this network
+		await peerAreaSubscriptions.removeSubscriptionsForNetworkArea(naRow.network_id, naRow.area_id);
 	}
 	res.redirect(network ? '/admin/network/' + network.uuid : '/admin/networks');
 });
@@ -883,11 +946,11 @@ router.get('/msgArea/:shortcode/thread/:uuid', async (req, res, next) => {
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var shortcode   = req.params.shortcode.toLowerCase().trim();
 	var uuid        = req.params.uuid.toLowerCase().trim();
-	var thread      = await echomail.getThreadByUUID(uuid, shortcode);
+	var thread      = await messages.getThreadByUUID(uuid, shortcode);
 	var msgArea, msglist;
 	if (thread) {
 		msgArea = await msgAreas.getAreaByShortcode(shortcode);
-		msglist = await echomail.getMessagesForThread(shortcode, thread.id);
+		msglist = await messages.getMessagesForThread(shortcode, thread.id);
 	}
 	var title = thread ? thread.subject : "Thread Not Found";
 	res.render('admin/msgAreas/thread', {
@@ -913,7 +976,7 @@ router.post('/msgArea/:shortcode/update', urlencodedParser, requireAdmin, async 
 	} else {
 		alogger.writeAlog(3, "updateArea failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
 		var msgArea    = await msgAreas.getAreaByShortcode(shortcode);
-		var threadlist = await echomail.getRecentThreadsForArea(shortcode);
+		var threadlist = await messages.getRecentThreadsForArea(shortcode);
 		res.render('admin/msgAreas/view', {
 			sufficientAccess: sufficientAccess,
 			title: msgArea ? msgArea.name : shortcode,
@@ -943,6 +1006,8 @@ router.post('/msgArea/:shortcode/delete', urlencodedParser, requireAdmin, async 
 			if (mapping.network_type === 'NNTP' && mapping.areatag) {
 				await peerConnections.clearNntpHwmForArea(mapping.network_id, mapping.areatag);
 			}
+			// Clean up subscription rows for this area on each network
+			await peerAreaSubscriptions.removeSubscriptionsForNetworkArea(mapping.network_id, dbarea.id);
 		}
 	}
 
@@ -962,7 +1027,7 @@ router.post('/msgArea/:shortcode/newthread', urlencodedParser, requireAdmin, asy
 	if (currentuser) {
 		formObj.from_user = formObj.from_user || currentuser.name;
 	}
-	var resultObj = await echomail.startNewThread(formObj, shortcode);
+	var resultObj = await messages.startNewThread(formObj, shortcode);
 	if (resultObj.status === true) {
 		res.redirect('/admin/msgArea/' + shortcode + '/thread/' + resultObj.threaduuid);
 	} else {
@@ -978,7 +1043,7 @@ router.post('/msgArea/:shortcode/thread/:uuid/newreply', urlencodedParser, requi
 	if (currentuser) {
 		formObj.from_user = formObj.from_user || currentuser.name;
 	}
-	var resultObj = await echomail.replyToThread(formObj, shortcode, uuid);
+	var resultObj = await messages.replyToThread(formObj, shortcode, uuid);
 	if (resultObj.status !== true) {
 		alogger.writeAlog(3, "replyToThread failed for thread " + uuid + ": " + resultObj.errormessages.join(", "), "redbright");
 	}
@@ -990,7 +1055,7 @@ router.get('/msgArea/:shortcode', async (req, res, next) => {
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var shortcode        = req.params.shortcode.toLowerCase().trim();
 	var msgArea          = await msgAreas.getAreaByShortcode(shortcode);
-	var threadlist       = await echomail.getRecentThreadsForArea(shortcode);
+	var threadlist       = await messages.getRecentThreadsForArea(shortcode);
 	res.render('admin/msgAreas/view', {
 		sufficientAccess: sufficientAccess,
 		title: msgArea ? msgArea.name : shortcode,
@@ -1010,7 +1075,7 @@ router.post('/deletemsg/:shortcode/:uuid', urlencodedParser, requireAdmin, async
 		res.redirect('/admin/');
 		return;
 	}
-	var delsuccess = await echomail.deleteMessageByUUID(uuid, shortcode);
+	var delsuccess = await messages.deleteMessageByUUID(uuid, shortcode);
 	if (delsuccess) {
 		res.redirect('/admin/msgArea/' + shortcode);
 	} else {

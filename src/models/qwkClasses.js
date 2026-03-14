@@ -244,6 +244,7 @@ function parseMessagesDAT(buffer) {
 		} catch (_) {}
 
 		messages.push({
+			msgOffset:     offset,
 			status,
 			msgNumber:     parseInt(msgNumber, 10) || 0,
 			date,
@@ -268,6 +269,158 @@ function parseMessagesDAT(buffer) {
 	}
 
 	return messages;
+}
+
+// ---------------------------------------------------------------------------
+// HEADERS.DAT parser
+// ---------------------------------------------------------------------------
+
+// Parses a Synchronet HEADERS.DAT file into a map keyed by byte offset.
+// Format: INI-like sections with [hex_offset] headers, LF line endings.
+// Returns { offset_decimal: { key: value, ... }, ... }
+function parseHeadersDat(text) {
+	var headers = {};
+	if (!text) return headers;
+
+	var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+	var currentOffset = null;
+
+	for (var i = 0; i < lines.length; i++) {
+		var line = lines[i];
+
+		// Section header: [hex_offset]
+		var sectionMatch = line.match(/^\[([0-9A-Fa-f]+)\]$/);
+		if (sectionMatch) {
+			currentOffset = parseInt(sectionMatch[1], 16);
+			if (!headers[currentOffset]) {
+				headers[currentOffset] = {};
+			}
+			continue;
+		}
+
+		// Blank line — end of section
+		if (line.trim() === '') {
+			currentOffset = null;
+			continue;
+		}
+
+		// Key: value or Key = value
+		if (currentOffset !== null) {
+			var eqIdx   = line.indexOf(' = ');
+			var colonIdx = line.indexOf(': ');
+			var sepIdx, key, val;
+
+			if (eqIdx !== -1 && (colonIdx === -1 || eqIdx < colonIdx)) {
+				key = line.substring(0, eqIdx).trim();
+				val = line.substring(eqIdx + 3).trim();
+			} else if (colonIdx !== -1) {
+				key = line.substring(0, colonIdx).trim();
+				val = line.substring(colonIdx + 2).trim();
+			} else {
+				continue; // unparseable line
+			}
+
+			if (key) {
+				headers[currentOffset][key] = val;
+			}
+		}
+	}
+
+	return headers;
+}
+
+// Overlay HEADERS.DAT data onto parsed messages from parseMessagesDAT.
+// HEADERS.DAT fields supersede the limited 128-byte header fields where
+// they provide richer data (full-length subjects, Message-IDs, etc).
+function applyHeadersDat(messages, headersDat) {
+	if (!headersDat || Object.keys(headersDat).length === 0) return;
+
+	for (var msg of messages) {
+		var hdr = headersDat[msg.msgOffset];
+		if (!hdr) continue;
+
+		// Full-length fields — override truncated 25-char header fields
+		if (hdr['Sender'])  msg.from    = hdr['Sender'];
+		if (hdr['To'])      msg.to      = hdr['To'];
+		if (hdr['Subject']) msg.subject = hdr['Subject'];
+
+		// Conference number override
+		if (hdr['Conference']) {
+			var confNum = parseInt(hdr['Conference'], 10);
+			if (!isNaN(confNum)) msg.conferenceNum = confNum;
+		}
+
+		// Message-ID — goes into kludges so importQwkMessage picks it up
+		if (hdr['Message-ID']) {
+			if (!msg.kludges) msg.kludges = {};
+			msg.kludges.MSGID = hdr['Message-ID'];
+		}
+
+		// Reply-ID — threading reference
+		if (hdr['Reply-ID']) {
+			if (!msg.kludges) msg.kludges = {};
+			msg.kludges.REPLY = hdr['Reply-ID'];
+		}
+
+		// Product ID
+		if (hdr['X-FTN-PID']) {
+			if (!msg.kludges) msg.kludges = {};
+			msg.kludges.PID = hdr['X-FTN-PID'];
+		}
+
+		// WhenWritten — more precise timestamp than the MM-DD-YY HH:MM header
+		// Format: YYYYMMDDHHMMSS+/-ZZZZ  tzhex
+		if (hdr['WhenWritten']) {
+			var parsed = parseHeadersTimestamp(hdr['WhenWritten']);
+			if (parsed.date) msg.date = parsed.date;
+			if (parsed.time) msg.time = parsed.time;
+			if (parsed.tz) {
+				if (!msg.kludges) msg.kludges = {};
+				msg.kludges.TZ = parsed.tz;
+			}
+		}
+
+		// UTF-8 flag — if true, body is already UTF-8, skip cp437 conversion
+		if (hdr['Utf8'] === 'true') {
+			// Body was decoded as cp437 by parseMessagesDAT — redo as UTF-8
+			// The raw binary body is in msg.rawBody as a binary string.
+			// Re-interpret the bodyText and utf8 fields.
+			msg.utf8 = msg.bodyText;
+			// Mark for import — utf8 field populated means "use this as display text"
+		}
+	}
+}
+
+// Parse a HEADERS.DAT timestamp: "YYYYMMDDHHMMSS+/-ZZZZ  tzhex"
+// Returns { date: 'MM-DD-YY', time: 'HH:MM', tz: 'tzhex' }
+function parseHeadersTimestamp(str) {
+	var result = { date: null, time: null, tz: null };
+	if (!str || str.length < 14) return result;
+
+	// Trim and split on whitespace to separate timestamp from tz hex
+	var parts = str.trim().split(/\s+/);
+	var ts = parts[0] || '';
+	var tzHex = parts[1] || null;
+
+	// Extract date/time components: YYYYMMDDHHMMSS
+	var yyyy = ts.substring(0, 4);
+	var mm   = ts.substring(4, 6);
+	var dd   = ts.substring(6, 8);
+	var hh   = ts.substring(8, 10);
+	var mi   = ts.substring(10, 12);
+
+	if (yyyy && mm && dd) {
+		var yy = yyyy.substring(2);
+		result.date = mm + '-' + dd + '-' + yy;
+	}
+	if (hh && mi) {
+		result.time = hh + ':' + mi;
+	}
+	if (tzHex) {
+		result.tz = tzHex;
+	}
+
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -546,6 +699,8 @@ export {
 	QWK_LINE_TERM,
 	parseControlDat,
 	parseMessagesDAT,
+	parseHeadersDat,
+	applyHeadersDat,
 	buildQwkHeader,
 	buildQwkBody,
 	buildRepPacket,

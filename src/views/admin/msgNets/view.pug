@@ -677,12 +677,40 @@ block content
                       form(action=`/admin/network/${network.uuid}/addarea` method='POST' class='form-registration')
                         .row
                           .col-1
+                          .col-10
+                            .form-check
+                              input#ana_allow_all.form-check-input(
+                                type='checkbox'
+                                name='allow_all_peers'
+                                value='true'
+                                checked
+                              )
+                              label.form-check-label(for='ana_allow_all')
+                                | Allow for all current peer connections on this network
+                            .form-check
+                              input#ana_enable_all.form-check-input(
+                                type='checkbox'
+                                name='enable_all_peers'
+                                value='true'
+                              )
+                              label.form-check-label(for='ana_enable_all')
+                                | Enable for all current peer connections on this network
+                            hr
+                        .row
+                          .col-1
                           .col-5
-                            label(for='ana_area') Message Area:
-                            select#ana_area(name='area_id' tabindex='1').form-select
+                            label(for='ana_search') Message Area:
+                            input#ana_search.form-control(
+                              type='text'
+                              placeholder='Search areas...'
+                              autocomplete='off'
+                            )
+                            select#ana_area.form-select(name='area_id' tabindex='1' size='8' style='margin-top:4px')
                               if arealist && arealist.length > 0
-                                for area of arealist
-                                  option(value=area.id)= area.name + ' (' + area.shortcode + ')'
+                                each grp in arealist
+                                  optgroup(label=grp.groupName)
+                                    each area in grp.areas
+                                      option(value=area.id)= area.name + ' (' + area.shortcode + ')'
                               else
                                 option(value='' disabled) No areas available
                           .col-5
@@ -977,6 +1005,44 @@ block content
       }
       validateQwkAreatag('ana_areatag', 'ana_qwk_warning');
       validateQwkAreatag('ena_areatag', 'ena_qwk_warning');
+
+      // Search filter for the area select in add-area modal
+      var anaSearch = document.getElementById('ana_search');
+      var anaSelect = document.getElementById('ana_area');
+      if (anaSearch && anaSelect) {
+        // Cache the original optgroups + options
+        var origGroups = [];
+        anaSelect.querySelectorAll('optgroup').forEach(function(og) {
+          var opts = [];
+          og.querySelectorAll('option').forEach(function(opt) {
+            opts.push({ value: opt.value, text: opt.textContent, el: opt });
+          });
+          origGroups.push({ label: og.label, options: opts });
+        });
+
+        anaSearch.addEventListener('input', function() {
+          var q = anaSearch.value.toLowerCase().trim();
+          // Clear current contents
+          while (anaSelect.firstChild) anaSelect.removeChild(anaSelect.firstChild);
+
+          origGroups.forEach(function(grp) {
+            var matches = grp.options.filter(function(o) {
+              return !q || o.text.toLowerCase().indexOf(q) !== -1;
+            });
+            if (matches.length > 0) {
+              var og = document.createElement('optgroup');
+              og.label = grp.label;
+              matches.forEach(function(o) {
+                var opt = document.createElement('option');
+                opt.value = o.value;
+                opt.textContent = o.text;
+                og.appendChild(opt);
+              });
+              anaSelect.appendChild(og);
+            }
+          });
+        });
+      }
 
       // Update domain field label when network type changes in edit modal.
       // NNTP uses domain as our own FQDN; all other types use it as the network domain.

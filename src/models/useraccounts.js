@@ -181,6 +181,14 @@ async function createNewUser(newrecord) {
 			resultobj.resultmsg = "User created with id: " + dbres.insertId;
 			resultobj.resultid = dbres.insertId;
 			alogger.writeAlog(5, "User created: " + rec.username + " (id: " + dbres.insertId + ")", "greenbright");
+
+			// Pre-populate message scan pointers for the new user
+			try {
+				var pointerMod = await import('./userMsgPointers.js');
+				await pointerMod.initPointersForUser(dbres.insertId);
+			} catch (e) {
+				alogger.writeAlog(3, "createNewUser: pointer init failed for user " + dbres.insertId + ": " + (e.message || e), "yellow");
+			}
 		} else {
 			resultobj.errormessages = resultobj.errormessages.concat(dbres.errormessages);
 		}
@@ -597,10 +605,33 @@ async function resetUserPassword(uuid, newpassword) {
 	return returnObj;
 }
 
+// --- Session data helper ---
+
+// Flatten a user record into Redis-safe strings for session storage.
+// sessionGet will parse permissionflags, restrictionflags, isSysop,
+// and security back out.
+function buildSessionData(userobj) {
+	return {
+		id:               userobj.id               || 0,
+		uuid:             userobj.uuid             || '',
+		username:         userobj.username         || '',
+		firstname:        userobj.firstname        || '',
+		lastname:         userobj.lastname         || '',
+		fullname:         userobj.fullname         || '',
+		security:         String(userobj.security  || 0),
+		isSysop:          String(userobj.isSysop   || false),
+		permissionflags:  JSON.stringify(Array.isArray(userobj.permissionflags)  ? userobj.permissionflags  : []),
+		restrictionflags: JSON.stringify(Array.isArray(userobj.restrictionflags) ? userobj.restrictionflags : []),
+		mailaddress:      userobj.mailaddress      || '',
+		mailtype:         userobj.mailtype         || '',
+	};
+}
+
 export {
 	checkUserPass,
 	getUserRecord,
 	createNewUser,
+	buildSessionData,
 	checkUsernameAvailable,
 	checkMailUnique,
 	getUserList,

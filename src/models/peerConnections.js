@@ -253,14 +253,16 @@ async function newConnection(formObj) {
 	// Bootstrap subscription rows for all areas already on this network
 	var syncResult = await peerAreaSubscriptions.syncConnectionToNetwork(dbres.insertId);
 	if (!syncResult.status) {
-		// Connection was created successfully — log the sync failure but don't
-		// roll back. Subscriptions can be repaired via syncConnectionToNetwork.
 		alogger.writeAlog(3,
 			'newConnection: subscription sync failed for new connection ' + uuid +
 			': ' + syncResult.errormessages.join(', '),
 			'redbright'
 		);
 	}
+
+	// Allow all areas that are currently on this network for the new connection.
+	// The admin can then selectively revoke areas they don't want this peer to have.
+	await peerAreaSubscriptions.allowAllNetworkAreas(dbres.insertId, dbnetwork.id);
 
 	alogger.writeAlog(5,
 		'Peer connection created: ' + formObj.connection_type +

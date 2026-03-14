@@ -39,6 +39,7 @@ jspm_packages/
 #Network/Message transfer directories
 qwk/
 ftn/
+qnet/
 
 # TypeScript v1 declaration files
 typings/

@@ -17,7 +17,9 @@ var webserver = express();
 webserver.set('views', path.join(path.dirname("./"), 'src', 'views'));
 webserver.set('view engine', 'pug');
 
-webserver.use(logger('dev'));
+//logs all http requests
+//webserver.use(logger('dev'));
+
 webserver.use(express.json());
 webserver.use(express.urlencoded({ extended: false }));
 webserver.use(cookieParser());

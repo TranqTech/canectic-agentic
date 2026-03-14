@@ -17,7 +17,8 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as networkAreas from './networkAreas.js';
-import { cp437ToUtf8 } from '../utils/codepageConversions.js';
+import * as terminalText from '../utils/terminalText.js';
+import { cp437ToUtf8, formatTextForHtml } from '../utils/codepageConversions.js';
 
 dotenv.config();
 
@@ -382,6 +383,36 @@ async function findThreadByReferences(references, msgtable, threadtable) {
 	return null;
 }
 
+// Generate body_html from display text. Detects ANSI/pipe/Ctrl-A codes
+// and routes to the appropriate formatter.
+// Non-fatal — returns null on failure so message import continues without HTML.
+async function formatBodyHtml(displayText) {
+	if (!displayText) return null;
+
+	try {
+		if (displayText.includes("\x1b[") ||
+			/\|\d{2}/.test(displayText) ||
+			displayText.includes("\x01")) {
+			return await terminalText.formatTerminalText(displayText, {
+				terminalWidth: 80,
+				replaceAllSpaces: true,
+				handlePipeCodes: true,
+				handleAnsiCodes: true,
+				handleCtrlACodes: true,
+				resetOnNewline: true
+			});
+		}
+
+		if (displayText.includes("   ")) {
+			return formatTextForHtml(displayText);
+		}
+
+		return displayText.replace(/\r/g, '<br>');
+	} catch (_) {
+		return null;
+	}
+}
+
 // Imports a single NNTP article into the message tables for the given area.
 // Returns { status, imported, duplicate, errormessages[] }
 async function importNntpArticle(articleData, area, peerConnectionId, networkId) {
@@ -484,6 +515,10 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 		threadidStr = messageId;
 	}
 
+	// Pre-format body as HTML for display (non-fatal)
+	var displayText = utf8Text || bodyText || '';
+	var bodyHtml = await formatBodyHtml(displayText);
+
 	var dbObj = {
 		uuid:             uuid,
 		msg_id:           messageId,
@@ -496,6 +531,7 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 		raw_text:         rawText,
 		body_text:        bodyText,
 		utf8:             utf8Text || null,
+		body_html:        bodyHtml,
 		datetime_string:  dateStr,
 		system_time:      systemTime,
 		created_at:       currtime,

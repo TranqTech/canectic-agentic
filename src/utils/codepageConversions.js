@@ -256,6 +256,14 @@ function formatTextForHtml(text, preserveNewlines = true) {
     
     let result = text;
     
+    // Escape HTML entities before any formatting to prevent XSS
+    result = result
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    
     // Process each line separately
     result = result.split('\r').map(line => replaceEdgeSpaces(line)).join("\r");
     result = replaceMultipleSpaces(result)

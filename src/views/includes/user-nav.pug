@@ -1,0 +1,57 @@
+- var activenav = activelink || ""
+nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
+  .container-fluid
+    a.navbar-brand(href='/')= boardname || 'BBS'
+    button.navbar-toggler(type='button' data-bs-toggle='collapse' data-bs-target='#userNavbar' aria-controls='userNavbar' aria-expanded='false' aria-label='Toggle navigation')
+      span.navbar-toggler-icon
+    #userNavbar.collapse.navbar-collapse
+      ul.navbar-nav.me-auto
+
+        //- Messages
+        li.nav-item
+          a.nav-link(
+            href='/messages'
+            class=activenav === 'messages' ? 'active' : ''
+          )
+            | Messages
+            if activenav === 'messages'
+              span.visually-hidden  (current)
+
+        //- Files
+        li.nav-item
+          a.nav-link(
+            href='/files'
+            class=activenav === 'files' ? 'active' : ''
+          )
+            | Files
+            if activenav === 'files'
+              span.visually-hidden  (current)
+
+        //- Doors
+        li.nav-item
+          a.nav-link(
+            href='/doors'
+            class=activenav === 'doors' ? 'active' : ''
+          )
+            | Doors
+            if activenav === 'doors'
+              span.visually-hidden  (current)
+
+      //- Right side — user dropdown or login
+      ul.navbar-nav.ms-auto
+        if currentuser
+          li.nav-item.dropdown
+            a.nav-link.dropdown-toggle(
+              data-bs-toggle='dropdown'
+              href='#'
+              role='button'
+              aria-haspopup='true'
+              aria-expanded='false'
+            )= currentuser.username
+            .dropdown-menu.dropdown-menu-end
+              a.dropdown-item(href='/users/profile') Profile
+              .dropdown-divider
+              a.dropdown-item(href='/users/logout') Logout
+        else
+          li.nav-item
+            a.nav-link(href='/users/login') Login

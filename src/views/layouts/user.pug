@@ -4,7 +4,8 @@ html
     title= title
     //link(rel='icon' href=faviconlink type='image/x-icon') 
     link(rel='stylesheet', href='/css/darkly/bootstrap.css')
-    link(rel='stylesheet', href='/css/styles.css')
+    link(rel='stylesheet', href='/css/bootstrap-icons.css')
+    link(rel='stylesheet', href='/css/styles.css')      
     link(rel='stylesheet', href='/css/dataTables.bootstrap5.min.css')
     link(rel='stylesheet', href='/css/Datatables.custom.css')
     script(src='/js/bootstrap.bundle.js')
@@ -15,6 +16,6 @@ html
     meta(charset='utf-8')
     meta(name='viewport' content='width=device-width, initial-scale=1')
   body
-    //include ../includes/admin-nav.pug
+    include ../includes/user-nav.pug
     div(style='padding-top: 70px')
       block content

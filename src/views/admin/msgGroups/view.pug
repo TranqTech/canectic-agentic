@@ -81,6 +81,8 @@ block content
                                 data-bs-minage=area.min_age || 13
                                 data-bs-maxage=area.max_age || 255
                                 data-bs-active=(area.active ? 'true' : 'false')
+                                data-bs-threadmode=area.thread_mode || 'standard'
+                                data-bs-postas=area.post_as || 'username'
                                 data-bs-msgcount=area.msg_count || 0
                                 data-bs-lastfrom=area.last_from || ''
                                 data-bs-lastmessage=area.last_message || ''
@@ -170,6 +172,14 @@ block content
                         strong Status:
                         |  
                         span#areaInfoActive
+                      p
+                        strong Thread Mode:
+                        |  
+                        span#areaInfoThreadMode
+                      p
+                        strong Post As:
+                        |  
+                        span#areaInfoPostAs
                     .col-6
                       p
                         strong Read Security:
@@ -297,6 +307,27 @@ block content
                         )
                           option(value='true') Active
                           option(value='false') Inactive
+                        br
+                        label(for='ea_thread_mode') Thread Mode:
+                        select(
+                          id='ea_thread_mode'
+                          name='thread_mode'
+                          class='form-control'
+                          tabindex='8'
+                        )
+                          option(value='standard') Standard (threaded)
+                          option(value='no_threads') No Threads (flat)
+                          option(value='subscribe_only') Subscribe Only
+                        br
+                        label(for='ea_post_as') Post As:
+                        select(
+                          id='ea_post_as'
+                          name='post_as'
+                          class='form-control'
+                          tabindex='9'
+                        )
+                          option(value='username') Username
+                          option(value='realname') Real Name
                     .row
                       .col-1
                       .col-10
@@ -310,7 +341,7 @@ block content
                             type='submit'
                             value='Save Changes'
                             class='btn btn-lg btn-warning btn-block'
-                            tabindex='8'
+                            tabindex='9'
                           )
 
           // Delete Area Modal (dynamically populated)
@@ -457,6 +488,17 @@ block content
                           class='form-control'
                           value=255
                         )
+                        br
+                        label(for='na_thread_mode') Thread Mode:
+                        select#na_thread_mode(name='thread_mode').form-select
+                          option(value='standard' selected) Standard (threaded)
+                          option(value='no_threads') No Threads (flat)
+                          option(value='subscribe_only') Subscribe Only
+                        br
+                        label(for='na_post_as') Post As:
+                        select#na_post_as(name='post_as').form-select
+                          option(value='username' selected) Username
+                          option(value='realname') Real Name
                     .row
                       .col-1
                       .col-10
@@ -595,6 +637,8 @@ block content
               document.getElementById('areaInfoNetwork').textContent     = d.bsNetworkname  || '— Local —';
               document.getElementById('areaInfoAreatag').textContent     = d.bsNetworktag   || '—';
               document.getElementById('areaInfoActive').textContent      = d.bsActive === 'true' ? 'Active' : 'Inactive';
+              document.getElementById('areaInfoThreadMode').textContent   = { standard: 'Standard (threaded)', no_threads: 'No Threads (flat)', subscribe_only: 'Subscribe Only' }[d.bsThreadmode] || d.bsThreadmode || 'Standard';
+              document.getElementById('areaInfoPostAs').textContent       = { username: 'Username', realname: 'Real Name' }[d.bsPostas] || d.bsPostas || 'Username';
               document.getElementById('areaInfoReadSec').textContent     = d.bsReadsecurity;
               document.getElementById('areaInfoPostSec').textContent     = d.bsPostsecurity;
               document.getElementById('areaInfoMinAge').textContent      = d.bsMinage;
@@ -631,6 +675,8 @@ block content
           document.getElementById('ea_minage').value         = d.bsMinage;
           document.getElementById('ea_maxage').value         = d.bsMaxage;
           document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
+          document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
+          document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
 
           areaInfoModal.hide();
           editAreaModal.show();

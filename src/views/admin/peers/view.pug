@@ -266,21 +266,29 @@ block content
                                     )
                                       | Edit
                             .card-body
+                              - var connSubIds = new Set((conn.subscriptions || []).map(s => s.area_id))
+                              - var anyAllowed = false
                               if grouplist && grouplist.length > 0
                                 for group of grouplist
                                   if group.areas && group.areas.length > 0
-                                    - var count = 0
-                                    h6.text-info= group.name
-                                    ul
-                                      for area of group.areas
-                                        - var sub = conn.subscriptions && conn.subscriptions.find(s => s.area_id === parseInt(area.id))
+                                    //- Filter to areas this connection subscribes to + allowed, deduplicate by area_id
+                                    - var seen = new Set()
+                                    - var allowedAreas = []
+                                    each area in group.areas
+                                      - var aid = parseInt(area.id)
+                                      if !seen.has(aid) && connSubIds.has(aid)
+                                        - seen.add(aid)
+                                        - var sub = conn.subscriptions.find(s => s.area_id === aid)
                                         if sub && sub.allowed
-                                          - count++
+                                          - allowedAreas.push(area)
+                                    if allowedAreas.length > 0
+                                      - anyAllowed = true
+                                      h6.text-info= group.name
+                                      ul
+                                        for area of allowedAreas
                                           li.text-success= area.name
-                                      if count < 1
-                                        li.text-danger None
-                              else
-                                p.text-muted No areas configured
+                              if !anyAllowed
+                                p.text-muted None
                         // Enabled areas
                         .col-4
                           .card
@@ -299,21 +307,28 @@ block content
                                     )
                                       | Edit
                             .card-body
+                              - var anyEnabled = false
                               if grouplist && grouplist.length > 0
                                 for group of grouplist
                                   if group.areas && group.areas.length > 0
-                                    - var count = 0
-                                    h6.text-info= group.name
-                                    ul
-                                      for area of group.areas
-                                        - var sub = conn.subscriptions && conn.subscriptions.find(s => s.area_id === parseInt(area.id))
+                                    //- Filter to areas this connection subscribes to + enabled, deduplicate by area_id
+                                    - var seen = new Set()
+                                    - var enabledAreas = []
+                                    each area in group.areas
+                                      - var aid = parseInt(area.id)
+                                      if !seen.has(aid) && connSubIds.has(aid)
+                                        - seen.add(aid)
+                                        - var sub = conn.subscriptions.find(s => s.area_id === aid)
                                         if sub && sub.enabled
-                                          - count++
+                                          - enabledAreas.push(area)
+                                    if enabledAreas.length > 0
+                                      - anyEnabled = true
+                                      h6.text-info= group.name
+                                      ul
+                                        for area of enabledAreas
                                           li.text-success= area.name
-                                      if count < 1
-                                        li.text-danger None
-                              else
-                                p.text-muted No areas configured
+                              if !anyEnabled
+                                p.text-muted None
 
               // -------------------------------------------------------
               // Modals

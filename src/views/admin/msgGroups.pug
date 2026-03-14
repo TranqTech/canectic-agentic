@@ -28,6 +28,12 @@ block content
                 br
 
               .text-end
+                form.d-inline(action='/admin/msgGroups/recalculateAreaCounts' method='POST')
+                  button.btn.btn-sm.btn-outline-warning.me-2(type='submit')
+                    i.bi.bi-arrow-repeat
+                    |  Recalculate Area Counts
+                a.btn.btn-lg.btn-info.me-2(href='/admin/msgAreas')
+                  | All Areas
                 button.btn.btn-lg.btn-success(data-bs-toggle='modal' data-bs-target=`#newGroupModal`)
                   |Add Group
               if grouplist && grouplist.length > 0

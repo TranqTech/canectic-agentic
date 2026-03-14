@@ -1,0 +1,150 @@
+extends ../layouts/admin
+
+block content  
+  .container-fluid.main-wrapper
+    if !ismobile
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-2
+        .col-8              
+          .card      
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2= title
+                .col-4
+                  .text-end
+                    a.button.btn.btn-lg.btn-info(href='/admin')
+                      |Exit
+            .card-body
+              if errormessages && errormessages.length > 0
+                ul.text-danger
+                  for error of errormessages
+                    li.text-danger
+                      =error
+                br
+
+              .text-end
+                form.d-inline(action='/admin/msgGroups/recalculateAreaCounts' method='POST')
+                  button.btn.btn-sm.btn-outline-warning.me-2(type='submit')
+                    i.bi.bi-arrow-repeat
+                    |  Recalculate Area Counts
+                a.btn.btn-lg.btn-info.me-2(href='/admin/msgAreas')
+                  | All Areas
+                button.btn.btn-lg.btn-success(data-bs-toggle='modal' data-bs-target=`#newGroupModal`)
+                  |Add Group
+              if grouplist && grouplist.length > 0
+                br
+                table#msgGroups.table.table-hover
+                  thead
+                    tr
+                      th(scope='col') Name
+                      th(scope='col') Shortcode                      
+                      th(scope='col') Description
+                      th(scope='col') Area Count
+                    tbody
+                      for group of grouplist
+                        tr(data-bs-shortcode=group.shortcode)
+                          td
+                            =group.name
+                          td
+                            =group.shortcode
+                          td
+                            =group.description
+                          td                            
+                            =group.area_count
+              else
+                center
+                  .h4
+                    |No Groups Found!
+
+      #newGroupModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title
+                  |Add New Group
+              button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
+            .modal-body
+              form(action=`/admin/msgGroup/new` method="POST" class="form-registration")
+                .row
+                  .col-1
+                  .col-10
+                    label(for="name") Name:
+                    input(
+                      type="text"
+                      id="name"
+                      name="name"
+                      class="form-control"
+                      required
+                    )
+                    br
+                    label(for="description") Description:
+                    input(
+                      type="text"
+                      id="description"
+                      name="description"
+                      class="form-control"
+                      required
+                    )
+                    br
+                .row
+                  .col-1
+                  .col-5
+                    label(for="shortcode") Short Code:
+                    input(
+                      type="text"
+                      id="shotcode"
+                      name="shortcode"
+                      class="form-control"
+                      required
+                    )
+                  .col-5
+                      label(for="security") Required Security:
+                      input(
+                        type="number"
+                        id="security"
+                        min=1
+                        max=255
+                        name="security"
+                        class="form-control S1field"
+                        value=50
+                        required
+                      )
+                .row
+                  .col-1
+                  .col-10
+                    br
+                    .text-end
+                      input(
+                        type="submit"
+                        value="Submit"
+                        class="btn btn-lg btn-success btn-block"
+                        )
+  script.
+    // Add click event listener to table rows
+    document.addEventListener('DOMContentLoaded', function() {
+      const table = document.getElementById('msgGroups');
+
+      if (table) {
+        // Add click event to all tbody rows
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(row => {
+          // Add pointer cursor to indicate clickable rows
+          row.style.cursor = 'pointer';
+          
+          row.addEventListener('click', function() {
+            const shortcode = this.getAttribute('data-bs-shortcode');
+            
+            if (shortcode) {
+              // Navigate to the msgGroup page
+              window.location.href = `/admin/msggroup/${shortcode}`;
+            }
+          });
+        });
+      }
+    });

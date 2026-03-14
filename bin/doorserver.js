@@ -13,6 +13,7 @@ import { SocatManager } from "../src/managers/socatmanager.js";
 import {webserver} from "../src/servers/webserver.js"
 import { pgpool } from "../src/middleware/db/postgres.js";
 import * as redis from "../src/middleware/db/redis.js";
+import * as userMsgPointers from '../src/models/userMsgPointers.js';
 
 
 //variable setup
@@ -147,6 +148,7 @@ async function exitWatch(){
 
 
 async function main(){
+	await userMsgPointers.ensureConstraintsAndIndexes();
 	await startNodeManager()
 	await startSocatManager()
 	await startCallPools()

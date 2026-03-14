@@ -116,7 +116,13 @@ async function newArea(formObj) {
 		active: true,
 		created_by_uuid: formObj.createdByUUID,
 		created_by_name: formObj.createdByName,
-		msg_count: 0
+		msg_count: 0,
+		thread_mode: ['standard', 'subscribe_only', 'no_threads'].includes((formObj.thread_mode || '').trim().toLowerCase())
+			? formObj.thread_mode.trim().toLowerCase()
+			: 'standard',
+		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
+			? formObj.post_as.trim().toLowerCase()
+			: 'username'
 	};
 
 	var dbres = await postgres.insertObject(pgObj, "message_areas");
@@ -141,6 +147,14 @@ async function newArea(formObj) {
 		}
 		returnObj.errormessages = returnObj.errormessages.concat(tableResult.errormessages);
 		return returnObj;
+	}
+
+	// Pre-populate message scan pointers for the new area (all active users)
+	try {
+		var pointerMod = await import('./userMsgPointers.js');
+		await pointerMod.initPointersForArea(shorty);
+	} catch (e) {
+		alogger.writeAlog(3, "newArea: pointer init failed for area " + shorty + ": " + (e.message || e), "yellow");
 	}
 
 	// If a network_id and areatag were provided, map this area onto that network
@@ -178,6 +192,8 @@ async function newArea(formObj) {
 			}
 		}
 	}
+
+	await recalculateAreaCounts();
 
 	alogger.writeAlog(5, "Message area created: " + formObj.name + " (" + shorty + ")", "greenbright");
 	returnObj.status = true;
@@ -326,6 +342,20 @@ async function updateArea(shortcode, formObj) {
 	if (formObj.minage        !== undefined) updateObj.min_age       = parseInt(formObj.minage);
 	if (formObj.maxage        !== undefined) updateObj.max_age       = parseInt(formObj.maxage);
 	if (formObj.active      !== undefined) updateObj.active          = (formObj.active === "true" || formObj.active === true);
+	if (formObj.thread_mode !== undefined) {
+		var validModes = ['standard', 'subscribe_only', 'no_threads'];
+		var mode = (formObj.thread_mode || '').trim().toLowerCase();
+		if (validModes.includes(mode)) {
+			updateObj.thread_mode = mode;
+		}
+	}
+	if (formObj.post_as !== undefined) {
+		var validPostAs = ['username', 'realname'];
+		var postAs = (formObj.post_as || '').trim().toLowerCase();
+		if (validPostAs.includes(postAs)) {
+			updateObj.post_as = postAs;
+		}
+	}
 
 	if (Object.keys(updateObj).length === 0) {
 		returnObj.errormessages.push("No updatable fields provided");
@@ -400,6 +430,14 @@ async function removeArea(shortcode, deleteTables) {
 		alogger.writeAlog(5, "removeArea: tables dropped for " + shorty, "cyan");
 	}
 
+	// Clean up message pointer/read-tracking rows for this area
+	try {
+		var pointerMod = await import('./userMsgPointers.js');
+		await pointerMod.removePointersForArea(shorty);
+	} catch (e) {
+		alogger.writeAlog(3, "removeArea: pointer cleanup failed for area " + shorty + ": " + (e.message || e), "yellow");
+	}
+
 	// Remove peer_area_subscriptions rows for this area before removing the area record
 	var subErr = await postgres.write(
 		"DELETE FROM peer_area_subscriptions WHERE area_id = $1",
@@ -438,16 +476,7 @@ async function removeArea(shortcode, deleteTables) {
 		return returnObj;
 	}
 
-	// Decrement area_count on parent group, guarding against going below zero
-	try {
-		await postgres.write(
-			"UPDATE message_groups SET area_count = GREATEST(area_count - 1, 0) WHERE id = $1",
-			[dbarea.group_id]
-		);
-	} catch (error) {
-		// Non-fatal — area is already deleted, just log it
-		alogger.writeAlog(4, "removeArea: could not decrement area_count for group_id " + dbarea.group_id + ": " + error.message, "yellow");
-	}
+	await recalculateAreaCounts();
 
 	alogger.writeAlog(5, "removeArea: area " + shorty + " removed (deleteTables=" + deleteTables + ")", "greenbright");
 	returnObj.status = true;
@@ -462,6 +491,21 @@ async function getAllAreas() {
 	return dblist || [];
 }
 
+// Recalculate area_count for all groups from actual data.
+// Call at startup or manually to fix drift.
+async function recalculateAreaCounts() {
+	try {
+		await postgres.write(
+			`UPDATE message_groups g SET area_count = (
+				SELECT COUNT(*) FROM message_areas a WHERE a.group_id = g.id
+			)`
+		);
+		alogger.writeAlog(5, "recalculateAreaCounts: all group area counts updated", "greenbright");
+	} catch (error) {
+		alogger.writeAlog(3, "recalculateAreaCounts failed: " + error.message, "redbright");
+	}
+}
+
 export {
 	newArea,
 	updateArea,
@@ -473,5 +517,6 @@ export {
 	createMsgTables,
 	createTablesForArea,
 	GetShortcodeList,
-	updateAreaStats
+	updateAreaStats,
+	recalculateAreaCounts
 };

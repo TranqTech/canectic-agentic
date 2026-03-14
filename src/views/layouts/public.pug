@@ -3,11 +3,12 @@ html
   .bg-black
     head
       title= title
-      link(rel='stylesheet', href='/css/cyborg/bootstrap.css')
+      link(rel='stylesheet', href='/css/darkly/bootstrap.css')
       link(rel='stylesheet', href='/css/styles.css')
       script(src='/js/bootstrap.min.js')
       meta(charset='utf-8')
       meta(name='viewport' content='width=device-width, initial-scale=1')
-    body
-      .bg-black
+  body
+    include ../includes/user-nav.pug
+    div(style='padding-top: 70px')
       block content

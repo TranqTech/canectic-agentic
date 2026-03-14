@@ -494,8 +494,15 @@ class ansiInputParser {
 				case "[C":  keyname = "KEY_RightArrow"; break;
 				case "[D":  keyname = "KEY_LeftArrow"; break;
 				case "[3~": keyname = "KEY_Delete"; break;
+				case "[5~": keyname = "KEY_PgUp"; break;
+				case "[6~": keyname = "KEY_PgDn"; break;
+				case "[V":  keyname = "KEY_PgUp"; break;   // SCO/VT100 variant
+				case "[U":  keyname = "KEY_PgDn"; break;   // SCO/VT100 variant
+				case "[2~": keyname = "KEY_Insert"; break;
 				case "[H":  keyname = "KEY_Home"; break;
 				case "[F":  keyname = "KEY_End"; break;
+				case "[1~": keyname = "KEY_Home"; break;   // Alternative Home
+				case "[4~": keyname = "KEY_End"; break;    // Alternative End
 				default:
 					console.log("Unknown Escape Sequence:", this.escapebuffer);
 					break;

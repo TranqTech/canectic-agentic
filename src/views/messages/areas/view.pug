@@ -1,0 +1,329 @@
+extends ../../layouts/user
+
+block content
+  style.
+    body { overflow: hidden; height: 100vh; }
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else
+      .row.mt-2
+        .col-1
+        .col-10
+          if !msgArea
+            .card
+              .card-header.bg-darkblue.text-white
+                h2= title
+              .card-body
+                h3 Data Not Found!
+          else
+            .card
+              .card-header.bg-darkblue.text-white
+                .row.align-items-center
+                  .col-6
+                    h2
+                      i.bi.bi-chat-left-text
+                      |  
+                      = msgArea.name
+                  .col-6
+                    .text-end
+                      button.btn.btn-sm.btn-success.me-2(data-bs-toggle='modal' data-bs-target='#newThreadModal')
+                        i.bi.bi-plus-lg
+                        |  New Thread
+                      form.d-inline(action=`/messages/area/${msgArea.shortcode}/markread` method='POST')
+                        button.btn.btn-sm.btn-outline-warning.me-2(type='submit' title='Mark all messages in this area as read')
+                          i.bi.bi-check2-all
+                          |  Mark Read
+                      if threadMode && threadMode !== 'no_threads'
+                        a.btn.btn-sm.btn-outline-info.me-2(href=`/messages/area/${msgArea.shortcode}?view=flat` title='View as flat message list')
+                          i.bi.bi-list-task
+                          |  Flat View
+                      a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
+                        i.bi.bi-arrow-left
+                        |  
+                        = msgArea.group_shortcode
+              if msgArea.description
+                .card-body.py-1.bg-dark.border-bottom.border-secondary
+                  .small.text-muted= msgArea.description
+
+              //- Progress bar
+              .card-body.py-1.bg-dark.border-bottom.border-secondary
+                .d-flex.align-items-center.justify-content-between
+                  .small.text-muted
+                    span#threadProgress
+                      = threadlist.length
+                      |  of 
+                      = totalThreads
+                      |  threads
+                  .flex-grow-1.mx-3
+                    .progress(style='height: 4px')
+                      .progress-bar.bg-info#threadProgressBar(
+                        role='progressbar'
+                        style=`width: ${totalThreads > 0 ? Math.round((threadlist.length / totalThreads) * 100) : 0}%`
+                        aria-valuenow=threadlist.length
+                        aria-valuemin='0'
+                        aria-valuemax=totalThreads
+                      )
+                  .small.text-muted
+                    span#threadPercent= totalThreads > 0 ? Math.round((threadlist.length / totalThreads) * 100) : 0
+                    | %
+
+              //- Thread container
+              #threadContainer.card-body.p-0(
+                style='overflow-y: auto; max-height: calc(100vh - 220px);'
+                data-shortcode=msgArea.shortcode
+                data-group-shortcode=msgArea.group_shortcode
+                data-total=totalThreads
+                data-loaded=threadlist.length
+                data-all-loaded=threadlist.length >= totalThreads ? 'true' : 'false'
+              )
+                if threadlist && threadlist.length > 0
+                  table.table.table-hover.mb-0(style='table-layout: fixed;')
+                    thead.sticky-top.bg-dark
+                      tr
+                        th(scope='col' style='width: 40%') Subject
+                        th.text-center(scope='col' style='width: 8%') Replies
+                        th.text-center(scope='col' style='width: 8%') Unread
+                        th(scope='col' style='width: 14%') Started By
+                        th(scope='col' style='width: 30%') Last Reply
+                    tbody#threadBody
+                      for thread of threadlist
+                        tr.clickable-row(
+                          data-href=`/messages/area/${msgArea.shortcode}/thread/${thread.uuid}`
+                          data-last-message=thread.last_message ? new Date(thread.last_message).toISOString() : ''
+                          data-thread-id=thread.id
+                        )
+                          td.text-truncate
+                            strong= thread.subject
+                          td.text-center= (thread.message_count || 1) - 1
+                          td.text-center
+                            if thread.unread_count && thread.unread_count > 0
+                              span.badge.bg-info= thread.unread_count
+                            else
+                              span.text-muted —
+                          td
+                            span.fg-green= thread.started_by || '—'
+                          td
+                            if thread.last_message
+                              .small
+                                - var ldate = Date.parse(thread.last_message)
+                                - var ld = DateTime.fromMillis(ldate)
+                                span.fg-yellow= ld.toFormat('MMM dd, yyyy HH:mm')
+                                if thread.last_message_from
+                                  |  by 
+                                  span.fg-green= thread.last_message_from
+                            else
+                              span.text-muted —
+
+                  //- Load-more sentinel
+                  #loadMoreSentinel.text-center.py-2
+                    if threadlist.length < totalThreads
+                      .spinner-border.spinner-border-sm.text-muted#loadSpinner(role='status' style='display:none')
+                      .small.text-muted#loadHint ↓ scroll for older threads
+                    else if totalThreads > 0
+                      .small.text-muted — all threads loaded —
+                else
+                  .text-center.py-4
+                    h5.text-muted No threads in this area
+
+      if msgArea
+        //- New Thread Modal
+        #newThreadModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered(style='max-width: 760px;')
+            .modal-content
+              .modal-header.bg-darkblue.text-white.d-flex.align-items-center
+                button.me-2(
+                  data-bs-dismiss='modal'
+                  style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+                ) ×
+                h4.modal-title.mb-0 New Thread
+              .modal-body.bg-dark
+                form(action=`/messages/area/${msgArea.shortcode}/newthread` method='POST')
+                  .px-3
+                    label.text-white(for='nt_from') From:
+                    input#nt_from.form-control.bg-black.fg-cyan(
+                      type='text' name='from_user' tabindex='1' required
+                      value=postFromName || ''
+                      readonly
+                    )
+                    br
+                    label.text-white(for='nt_to') To:
+                    input#nt_to.form-control.bg-black.fg-green(
+                      type='text' name='to_user' tabindex='2' value='All' required
+                    )
+                    br
+                    label.text-white(for='nt_subject') Subject:
+                    input#nt_subject.form-control.bg-black.fg-yellow(
+                      type='text' name='subject' tabindex='3' required
+                    )
+                    br
+                    label.text-white(for='nt_body') Message:
+                    textarea#nt_body.form-control.bg-black.fg-brightgrey.monospace(
+                      name='body_text' rows='16' tabindex='4' required
+                      style='width: 100%; font-size: 12px;'
+                    )
+                    br
+                    .text-end
+                      input.btn.btn-lg.btn-success(type='submit' value='Post' tabindex='5')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var container    = document.getElementById('threadContainer');
+      var tbody        = document.getElementById('threadBody');
+      var sentinel     = document.getElementById('loadMoreSentinel');
+      var spinner      = document.getElementById('loadSpinner');
+      var loadHint     = document.getElementById('loadHint');
+      var progressText = document.getElementById('threadProgress');
+      var progressBar  = document.getElementById('threadProgressBar');
+      var percentText  = document.getElementById('threadPercent');
+
+      var shortcode = container.dataset.shortcode;
+      var total     = parseInt(container.dataset.total) || 0;
+      var loaded    = parseInt(container.dataset.loaded) || 0;
+      var allLoaded = container.dataset.allLoaded === 'true';
+      var loading   = false;
+      var batchSize = 30;
+
+      window.scrollTo(0, 0);
+
+      // Clickable rows
+      function bindRows(scope) {
+        (scope || document).querySelectorAll('.clickable-row').forEach(function(row) {
+          if (row.dataset.bound) return;
+          row.style.cursor = 'pointer';
+          row.addEventListener('click', function() {
+            var href = this.getAttribute('data-href');
+            if (href) window.location.href = href;
+          });
+          row.dataset.bound = '1';
+        });
+      }
+      bindRows();
+
+      function updateProgress() {
+        var pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+        progressText.textContent = loaded + ' of ' + total + ' threads';
+        progressBar.style.width = pct + '%';
+        progressBar.setAttribute('aria-valuenow', loaded);
+        percentText.textContent = pct;
+      }
+
+      function getLastCursor() {
+        var rows = tbody.querySelectorAll('tr[data-last-message]');
+        if (rows.length === 0) return { beforeDate: null, beforeId: null };
+        var last = rows[rows.length - 1];
+        return {
+          beforeDate: last.dataset.lastMessage || null,
+          beforeId: last.dataset.threadId || null
+        };
+      }
+
+      function formatDate(isoStr) {
+        if (!isoStr) return '';
+        try {
+          var d = new Date(isoStr);
+          if (isNaN(d.getTime())) return isoStr;
+          var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          var mon = months[d.getMonth()];
+          var day = String(d.getDate()).padStart(2, '0');
+          var year = d.getFullYear();
+          var hh = String(d.getHours()).padStart(2, '0');
+          var mm = String(d.getMinutes()).padStart(2, '0');
+          return mon + ' ' + day + ', ' + year + ' ' + hh + ':' + mm;
+        } catch(e) {
+          return isoStr;
+        }
+      }
+
+      function escapeHtml(text) {
+        var d = document.createElement('div');
+        d.appendChild(document.createTextNode(text));
+        return d.innerHTML;
+      }
+
+      function buildRowHtml(t) {
+        var replies = Math.max((t.message_count || 1) - 1, 0);
+        var unreadBadge = (t.unread_count && t.unread_count > 0)
+          ? '<span class="badge bg-info">' + t.unread_count + '</span>'
+          : '<span class="text-muted">—</span>';
+        var lastReply = '';
+        if (t.last_message) {
+          lastReply = '<span class="fg-yellow">' + formatDate(t.last_message) + '</span>';
+          if (t.last_message_from) {
+            lastReply += ' by <span class="fg-green">' + escapeHtml(t.last_message_from) + '</span>';
+          }
+        } else {
+          lastReply = '<span class="text-muted">—</span>';
+        }
+
+        return '<tr class="clickable-row"'
+          + ' data-href="/messages/area/' + shortcode + '/thread/' + t.uuid + '"'
+          + ' data-last-message="' + (t.last_message ? new Date(t.last_message).toISOString() : '') + '"'
+          + ' data-thread-id="' + t.id + '">'
+          + '<td class="text-truncate"><strong>' + escapeHtml(t.subject || '') + '</strong></td>'
+          + '<td class="text-center">' + replies + '</td>'
+          + '<td class="text-center">' + unreadBadge + '</td>'
+          + '<td><span class="fg-green">' + escapeHtml(t.started_by || '—') + '</span></td>'
+          + '<td><div class="small">' + lastReply + '</div></td>'
+          + '</tr>';
+      }
+
+      async function loadMore() {
+        if (loading || allLoaded) return;
+        loading = true;
+        if (spinner) spinner.style.display = '';
+        if (loadHint) loadHint.style.display = 'none';
+
+        try {
+          var cursor = getLastCursor();
+          var params = 'limit=' + batchSize;
+          if (cursor.beforeDate) params += '&beforeDate=' + encodeURIComponent(cursor.beforeDate);
+          if (cursor.beforeId) params += '&beforeId=' + cursor.beforeId;
+
+          var url = '/messages/area/' + shortcode + '/threads/load?' + params;
+          var resp = await fetch(url);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          var data = await resp.json();
+
+          if (data.threads && data.threads.length > 0) {
+            var html = '';
+            for (var i = 0; i < data.threads.length; i++) {
+              html += buildRowHtml(data.threads[i]);
+            }
+            tbody.insertAdjacentHTML('beforeend', html);
+
+            loaded += data.threads.length;
+            container.dataset.loaded = loaded;
+            bindRows(tbody);
+          }
+
+          if (data.allLoaded || (data.threads && data.threads.length < batchSize)) {
+            allLoaded = true;
+            container.dataset.allLoaded = 'true';
+            if (loadHint) loadHint.textContent = '— all threads loaded —';
+            if (loadHint) loadHint.style.display = '';
+          }
+        } catch(err) {
+          console.error('Load error:', err);
+          if (loadHint) {
+            loadHint.textContent = 'Failed to load — scroll to retry';
+            loadHint.style.display = '';
+          }
+        }
+
+        if (spinner) spinner.style.display = 'none';
+        if (!allLoaded && loadHint) loadHint.style.display = '';
+        updateProgress();
+        loading = false;
+      }
+
+      // Scroll listener — trigger load when near bottom
+      container.addEventListener('scroll', function() {
+        var distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom < 200 && !allLoaded && !loading) {
+          loadMore();
+        }
+      });
+    });

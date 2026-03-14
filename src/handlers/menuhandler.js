@@ -5,11 +5,9 @@ import * as alogger from "../utils/alogger.js";
 import { userList } from "./menucommands/userlist.js";
 import { LastCallers } from "./lastcallers.js";
 import { WhosOnline } from "./whosonline.js";
-import { msgGroupChange } from "./menucommands/msggroups.js";
-import { msgAreaChange } from "./menucommands/msgareas.js";
-import { listMessages } from "./menucommands/msglister.js";
-import { readMessages } from "./menucommands/msgreader.js";
-import { writeMessage } from "./menucommands/writemsg.js";
+import { msgAreaSelector } from "./menucommands/msgAreaSelector.js";
+import { msgReader } from "./menucommands/msgReader.js";
+import { msgEditor } from "./menucommands/msgEditor.js";
 import { testDownloader } from "./menucommands/testdownload.js";
 
 // Models
@@ -567,25 +565,29 @@ class MenuHandler extends BaseHandler {
 				return;
 
 			// --- Simple commands: run as sub-modules ---
-			case "msgGroupChange":
-				this._runSubModule(new msgGroupChange(this.call));
-				return;
+			// In _doMenuCommand(), both cases use the same module:
 
 			case "msgAreaChange":
-				this._runSubModule(new msgAreaChange(this.call));
+				this._runSubModule(new msgAreaSelector(this.call));
+				return;
+
+		    case "msgGroupChange":
+		    	this._runSubModule(new msgAreaSelector(this.call));
 				return;
 
 			case "listMessages":
-				this._runSubModule(new listMessages(this.call));
+				this._runSubModule(new msgReader(this.call));
 				return;
 
 			case "readMessages":
-				this._runSubModule(new readMessages(this.call));
+				this._runSubModule(new msgReader(this.call));
 				return;
 
 			case "postMessage":
-				// TODO: move to loadHandler when a full MessageEditorHandler is built
-				this._runSubModule(new writeMessage(this.call, true, "Menu", "Message", this.call.msg_area, false));
+				this._runSubModule(new msgEditor(this.call, {
+					mode: "new",
+					shortcode: this.call.msg_area,
+				}));
 				return;
 
 			case "userList":

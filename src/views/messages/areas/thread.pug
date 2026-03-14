@@ -1,0 +1,547 @@
+extends ../../layouts/user
+
+block content
+  style.
+    body { overflow: hidden; height: 100vh; }
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else
+      .row.mt-2
+        .col-lg-1
+        .col-lg-7.col-12
+          if !msgArea || !thread
+            .card
+              .card-header.bg-darkblue.text-white
+                h2= title
+              .card-body
+                h3 Data Not Found!
+          else
+            .card
+              .card-header.bg-darkblue.text-white
+                .row.align-items-center
+                  .col-8
+                    h5.mb-0= msgArea.name
+                    .small.fg-cyan= thread.subject
+                  .col-4
+                    .text-end
+                      a.btn.btn-sm.btn-outline-light(href=`/messages/area/${msgArea.shortcode}`)
+                        i.bi.bi-arrow-left
+                        |  Threads
+
+              //- Position-aware progress bar
+              - var leftPct = totalMessages > 0 ? Math.round((messagesBefore / totalMessages) * 100) : 0
+              - var widthPct = totalMessages > 0 ? Math.max(Math.round((messages.length / totalMessages) * 100), 1) : 0
+              .card-body.py-1.bg-dark.border-bottom.border-secondary
+                .d-flex.align-items-center.justify-content-between
+                  .small.text-muted
+                    span#msgProgress
+                      = messages.length
+                      |  of 
+                      = totalMessages
+                      |  loaded
+                  .flex-grow-1.mx-3
+                    .progress(style='height: 6px; background: rgba(255,255,255,0.1);')
+                      .progress-bar.bg-info#msgProgressBar(
+                        role='progressbar'
+                        style=`margin-left: ${leftPct}%; width: ${widthPct}%;`
+                      )
+                  .small.text-muted
+                    span#msgRange
+                      = messagesBefore + 1
+                      | –
+                      = messagesBefore + messages.length
+                      |  of 
+                      = totalMessages
+
+              //- Message container
+              #messageContainer.card-body.bg-black(
+                style='overflow-y: auto; max-height: calc(100vh - 190px);'
+                data-shortcode=msgArea.shortcode
+                data-threaduuid=thread.uuid
+                data-total=totalMessages
+                data-loaded=messages.length
+                data-oldest-id=messages.length > 0 ? messages[0].id : 0
+                data-newest-id=messages.length > 0 ? messages[messages.length - 1].id : 0
+                data-has-older=hasOlder ? 'true' : 'false'
+                data-has-newer=hasNewer ? 'true' : 'false'
+                data-first-unread=firstUnreadId || 0
+                data-messages-before=messagesBefore
+              )
+                //- Top sentinel (older messages)
+                #topSentinel.text-center.py-2
+                  if hasOlder
+                    .spinner-border.spinner-border-sm.text-muted#topSpinner(role='status' style='display:none')
+                    .small.text-muted#topHint ↑ scroll for older messages
+                  else if messages.length > 0
+                    .small.text-muted — beginning of thread —
+
+                //- Messages
+                if messages && messages.length > 0
+                  for message of messages
+                    .msg-card(data-msgid=message.id)
+                      .msg-separator.border-top.border-info(style='border-width: 2px !important; opacity: 0.4;')
+                      .d-flex.justify-content-between.align-items-center.py-1.px-2.bg-darkblue
+                        .text-nowrap
+                          span.fg-yellow.fw-bold= message.from_user
+                          |  → 
+                          span.fg-green= message.to_user
+                        .text-nowrap
+                          .small.fg-yellow.d-inline.me-2
+                            - var mdate = Date.parse(message.system_time)
+                            - var md = DateTime.fromMillis(mdate)
+                            = md.toFormat('MMM dd, yyyy HH:mm')
+                          button.btn.btn-xs.btn-sm.btn-primary.replybtn(
+                            data-bs-msgposter=message.from_user
+                            data-bs-msgid=message.msg_id
+                            data-bs-subject=message.subject
+                          ) Reply
+                      .px-2.py-2
+                        .messagebody.monospace.text-12.fg-brightgrey
+                          if message.isAnsi
+                            .ansi
+                              if message.body_html
+                                != message.body_html
+                              else
+                                != message.body_text
+                          else
+                            if message.body_html
+                              != message.body_html
+                            else
+                              != message.body_text
+                else
+                  .text-center.py-4
+                    .text-muted No messages
+
+                //- Bottom sentinel (newer messages)
+                #bottomSentinel.text-center.py-2
+                  if hasNewer
+                    .spinner-border.spinner-border-sm.text-muted#bottomSpinner(role='status' style='display:none')
+                    .small.text-muted#bottomHint ↓ scroll for newer messages
+                  else if messages.length > 0
+                    .small.text-muted — end of thread —
+
+        //- Sidebar
+        .col-lg-3.col-12
+          .card.mt-lg-0.mt-3
+            .card-header.bg-darkblue.text-white
+              center
+                h5.mb-0 Navigate
+            .card-body.bg-dark
+              .d-grid.gap-2
+                button.btn.btn-sm.btn-info#scrollToTopBtn
+                  i.bi.bi-arrow-up
+                  |  Oldest
+                button.btn.btn-sm.btn-success#scrollToBottomBtn
+                  i.bi.bi-arrow-down
+                  |  Newest
+              hr.border-secondary
+              .d-grid.gap-2
+                button.btn.btn-sm.btn-success.replybtn(
+                  data-bs-msgposter='All'
+                  data-bs-msgid=thread.threadid
+                  data-bs-subject=thread.subject
+                )
+                  i.bi.bi-reply
+                  |  Reply to Thread
+              hr.border-secondary
+              .d-grid.gap-2
+                a.btn.btn-sm.btn-outline-light(href=`/messages/area/${msgArea.shortcode}`)
+                  i.bi.bi-list-ul
+                  |  Threads
+                a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
+                  i.bi.bi-folder2-open
+                  |  Area
+                a.btn.btn-sm.btn-outline-light(href='/messages')
+                  i.bi.bi-chat-dots
+                  |  Groups
+
+      if msgArea && thread
+        //- Reply Modal
+        #replyModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered(style='max-width: 760px;')
+            .modal-content
+              .modal-header.bg-darkblue.text-white.d-flex.align-items-center
+                button.me-2(
+                  data-bs-dismiss='modal'
+                  style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+                ) ×
+                h4.modal-title.mb-0 Reply
+              .modal-body.bg-dark
+                form#replyForm(action=`/messages/area/${msgArea.shortcode}/thread/${thread.uuid}/reply` method='POST')
+                  .px-3
+                    label.text-white(for='r_from') From:
+                    input#r_from.form-control.bg-black.fg-cyan(
+                      type='text' name='from_user' tabindex='1' required
+                      value=postFromName || ''
+                      readonly
+                    )
+                    br
+                    label.text-white(for='r_to') To:
+                    input#r_to.form-control.bg-black.fg-green(
+                      type='text' name='to_user' tabindex='2' required
+                    )
+                    br
+                    label.text-white(for='r_subject') Subject:
+                    input#r_subject.form-control.bg-black.fg-yellow(
+                      type='text' name='subject' tabindex='3' required
+                    )
+                    input#r_reply_to(type='hidden' name='reply_to')
+                    hr.border-secondary
+                    //- Quote panel
+                    #quotePanel.bg-black.rounded.border.border-secondary.p-2(style='display:none;')
+                      div(style='max-height: 250px; overflow-y: auto;')
+                        .fg-cyan.small.px-2.py-1 Click a line to quote it
+                        #quoteLines.monospace(style='font-size: 12px; padding: 4px;')
+                    .text-end
+                      button.btn.btn-sm.btn-outline-info#quoteToggleBtn(type='button' style='display:none;')
+                        i.bi.bi-quote
+                        |  Quote Original
+                    label.text-white(for='r_body') Message:
+                    textarea#r_body.form-control.bg-black.fg-brightgrey.monospace(
+                      name='body_text' rows='16' tabindex='4' required
+                      style='width: 100%; font-size: 12px;'
+                    )
+                    br
+                    .text-end
+                      input.btn.btn-lg.btn-success(type='submit' value='Post Reply' tabindex='5')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var container    = document.getElementById('messageContainer');
+      var topSentinel  = document.getElementById('topSentinel');
+      var topSpinner   = document.getElementById('topSpinner');
+      var topHint      = document.getElementById('topHint');
+      var bottomSentinel = document.getElementById('bottomSentinel');
+      var bottomSpinner  = document.getElementById('bottomSpinner');
+      var bottomHint     = document.getElementById('bottomHint');
+      var progressText = document.getElementById('msgProgress');
+      var progressBar  = document.getElementById('msgProgressBar');
+      var rangeText    = document.getElementById('msgRange');
+
+      var shortcode     = container.dataset.shortcode;
+      var threaduuid    = container.dataset.threaduuid;
+      var total         = parseInt(container.dataset.total) || 0;
+      var loaded        = parseInt(container.dataset.loaded) || 0;
+      var msgBefore     = parseInt(container.dataset.messagesBefore) || 0;
+      var oldestId      = parseInt(container.dataset.oldestId) || 0;
+      var newestId      = parseInt(container.dataset.newestId) || 0;
+      var hasOlder      = container.dataset.hasOlder === 'true';
+      var hasNewer      = container.dataset.hasNewer === 'true';
+      var firstUnreadId = parseInt(container.dataset.firstUnread) || 0;
+      var loading       = false;
+      var batchSize     = 30;
+
+      window.scrollTo(0, 0);
+
+      // Scroll to first unread message — always in the DOM now
+      if (firstUnreadId > 0) {
+        var unreadEl = container.querySelector('[data-msgid="' + firstUnreadId + '"]');
+        if (unreadEl) {
+          container.scrollTop = unreadEl.offsetTop - container.offsetTop;
+        }
+      } else {
+        // All read — scroll to bottom
+        container.scrollTop = container.scrollHeight;
+      }
+
+      function updateProgress() {
+        var leftPct  = total > 0 ? (msgBefore / total) * 100 : 0;
+        var widthPct = total > 0 ? Math.max((loaded / total) * 100, 1) : 0;
+        progressBar.style.marginLeft = leftPct + '%';
+        progressBar.style.width = widthPct + '%';
+        progressText.textContent = loaded + ' of ' + total + ' loaded';
+        rangeText.textContent = (msgBefore + 1) + '–' + (msgBefore + loaded) + ' of ' + total;
+      }
+
+      function formatDate(isoStr) {
+        if (!isoStr) return '';
+        try {
+          var d = new Date(isoStr);
+          if (isNaN(d.getTime())) return isoStr;
+          var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          var mon = months[d.getMonth()];
+          var day = String(d.getDate()).padStart(2, '0');
+          var year = d.getFullYear();
+          var hh = String(d.getHours()).padStart(2, '0');
+          var mm = String(d.getMinutes()).padStart(2, '0');
+          return mon + ' ' + day + ', ' + year + ' ' + hh + ':' + mm;
+        } catch(e) {
+          return isoStr;
+        }
+      }
+
+      function escapeHtml(text) {
+        var d = document.createElement('div');
+        d.appendChild(document.createTextNode(text));
+        return d.innerHTML;
+      }
+
+      function buildMsgHtml(msg) {
+        var dateStr = formatDate(msg.system_time);
+        var bodyContent = '';
+        if (msg.isAnsi) {
+          bodyContent = '<div class="ansi">' + (msg.body_html || msg.body_text || '') + '</div>';
+        } else {
+          bodyContent = msg.body_html || msg.body_text || '';
+        }
+
+        return '<div class="msg-card" data-msgid="' + msg.id + '">'
+          + '<div class="msg-separator border-top border-info" style="border-width: 2px !important; opacity: 0.4;"></div>'
+          + '<div class="d-flex justify-content-between align-items-center py-1 px-2 bg-darkblue">'
+          +   '<div class="text-nowrap">'
+          +     '<span class="fg-yellow fw-bold">' + escapeHtml(msg.from_user || '') + '</span>'
+          +     ' &rarr; '
+          +     '<span class="fg-green">' + escapeHtml(msg.to_user || '') + '</span>'
+          +   '</div>'
+          +   '<div class="text-nowrap">'
+          +     '<span class="small fg-yellow me-2">' + dateStr + '</span>'
+          +     '<button class="btn btn-xs btn-sm btn-primary replybtn"'
+          +       ' data-bs-msgposter="' + escapeHtml(msg.from_user || '') + '"'
+          +       ' data-bs-msgid="' + escapeHtml(msg.msg_id || '') + '"'
+          +       ' data-bs-subject="' + escapeHtml(msg.subject || '') + '"'
+          +     '>Reply</button>'
+          +   '</div>'
+          + '</div>'
+          + '<div class="px-2 py-2">'
+          +   '<div class="messagebody monospace text-12 fg-brightgrey">'
+          +     bodyContent
+          +   '</div>'
+          + '</div>'
+          + '</div>';
+      }
+
+      async function loadDirection(direction) {
+        if (loading) return;
+        if (direction === 'older' && !hasOlder) return;
+        if (direction === 'newer' && !hasNewer) return;
+        loading = true;
+
+        var spinner = direction === 'older' ? topSpinner : bottomSpinner;
+        var hint    = direction === 'older' ? topHint : bottomHint;
+        if (spinner) spinner.style.display = '';
+        if (hint) hint.style.display = 'none';
+
+        try {
+          var param = direction === 'older'
+            ? 'before=' + oldestId
+            : 'after=' + newestId;
+          var url = '/messages/area/' + shortcode + '/thread/' + threaduuid
+            + '/load?' + param + '&limit=' + batchSize;
+          var resp = await fetch(url);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          var data = await resp.json();
+
+          if (data.messages && data.messages.length > 0) {
+            var html = '';
+            for (var i = 0; i < data.messages.length; i++) {
+              html += buildMsgHtml(data.messages[i]);
+            }
+
+            if (direction === 'older') {
+              var prevScrollHeight = container.scrollHeight;
+              var prevScrollTop    = container.scrollTop;
+              topSentinel.insertAdjacentHTML('afterend', html);
+              var newScrollHeight = container.scrollHeight;
+              container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+              oldestId = data.messages[0].id;
+              msgBefore -= data.messages.length;
+              if (msgBefore < 0) msgBefore = 0;
+            } else {
+              bottomSentinel.insertAdjacentHTML('beforebegin', html);
+              newestId = data.messages[data.messages.length - 1].id;
+            }
+
+            loaded += data.messages.length;
+            container.dataset.loaded = loaded;
+            if (typeof parsePipeColorCodes === 'function') parsePipeColorCodes();
+          }
+
+          if (direction === 'older') {
+            hasOlder = data.hasMore;
+            if (!hasOlder && topHint) {
+              topHint.textContent = '— beginning of thread —';
+              topHint.style.display = '';
+            }
+          } else {
+            hasNewer = data.hasMore;
+            if (!hasNewer && bottomHint) {
+              bottomHint.textContent = '— end of thread —';
+              bottomHint.style.display = '';
+            }
+          }
+        } catch(err) {
+          console.error('Load error:', err);
+          if (hint) {
+            hint.textContent = 'Failed to load — scroll to retry';
+            hint.style.display = '';
+          }
+        }
+
+        if (spinner) spinner.style.display = 'none';
+        var activeHint = direction === 'older' ? topHint : bottomHint;
+        var activeFlag = direction === 'older' ? hasOlder : hasNewer;
+        if (activeFlag && activeHint) activeHint.style.display = '';
+        updateProgress();
+        loading = false;
+      }
+
+      // Bidirectional scroll listener
+      container.addEventListener('scroll', function() {
+        if (container.scrollTop < 200 && hasOlder && !loading) {
+          loadDirection('older');
+        }
+        var distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom < 200 && hasNewer && !loading) {
+          loadDirection('newer');
+        }
+      });
+
+      document.getElementById('scrollToTopBtn').addEventListener('click', function() {
+        container.scrollTop = 0;
+      });
+      document.getElementById('scrollToBottomBtn').addEventListener('click', function() {
+        container.scrollTop = container.scrollHeight;
+      });
+
+      // --- Quote system ---
+      var quoteToggleBtn  = document.getElementById('quoteToggleBtn');
+      var quotePanel      = document.getElementById('quotePanel');
+      var quoteLinesEl    = document.getElementById('quoteLines');
+      var replyTextarea   = document.getElementById('r_body');
+      var currentQuoteText = '';
+      var currentQuoteLines = [];
+
+      // Break text into lines, word-wrapping at maxLen chars.
+      // If a line is only a few chars over (<=5), truncate instead of wrapping.
+      function wrapTextLines(text, maxLen) {
+        if (!text) return [];
+        var clean = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+        clean = clean.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        var rawLines = clean.split(/\r\n|\r|\n/);
+        var result = [];
+        for (var i = 0; i < rawLines.length; i++) {
+          var line = rawLines[i];
+          while (line.length > maxLen) {
+            if (line.length <= maxLen + 5) {
+              // Just a couple chars over — truncate
+              result.push(line.substring(0, maxLen));
+              line = '';
+            } else {
+              // Significantly over — word wrap
+              var breakAt = line.lastIndexOf(' ', maxLen);
+              if (breakAt <= 0) breakAt = maxLen;
+              result.push(line.substring(0, breakAt));
+              line = line.substring(breakAt).replace(/^ /, '');
+            }
+          }
+          if (line.length > 0 || rawLines[i].length === 0) result.push(line);
+        }
+        return result;
+      }
+
+      function insertQuotedLines(indices) {
+        var quoted = [];
+        for (var i = 0; i < indices.length; i++) {
+          var idx = indices[i];
+          if (idx >= 0 && idx < currentQuoteLines.length) {
+            var qline = '  > ' + currentQuoteLines[idx];
+            if (qline.length > 80) qline = qline.substring(0, 80);
+            quoted.push(qline);
+          }
+        }
+        if (quoted.length === 0) return;
+        var insertText = quoted.join('\n') + '\n';
+        var pos = replyTextarea.selectionStart || 0;
+        var before = replyTextarea.value.substring(0, pos);
+        var after  = replyTextarea.value.substring(pos);
+        replyTextarea.value = before + insertText + after;
+        var newPos = pos + insertText.length;
+        replyTextarea.selectionStart = newPos;
+        replyTextarea.selectionEnd   = newPos;
+      }
+
+      function markInserted(el) {
+        el.classList.add('inserted');
+        el.style.opacity = '0.4';
+      }
+
+      function populateQuotePanel(text) {
+        quoteLinesEl.innerHTML = '';
+        currentQuoteLines = wrapTextLines(text, 80);
+        if (currentQuoteLines.length === 0) return;
+        for (var i = 0; i < currentQuoteLines.length; i++) {
+          var div = document.createElement('div');
+          div.className = 'quote-line fg-brightgrey';
+          div.dataset.line = i;
+          div.style.cssText = 'display: block; cursor: pointer; padding: 1px 4px; white-space: pre; user-select: none;';
+          var num = String(i + 1).padStart(3, ' ');
+          div.innerHTML = '<span class="fg-yellow" style="opacity:0.5">' + num + '</span> ' + escapeHtml(currentQuoteLines[i]);
+          div.addEventListener('click', handleLineClick);
+          quoteLinesEl.appendChild(div);
+        }
+      }
+
+      function handleLineClick(e) {
+        markInserted(this);
+        insertQuotedLines([parseInt(this.dataset.line)]);
+      }
+
+      quoteToggleBtn.addEventListener('click', function() {
+        if (quotePanel.style.display === 'none') {
+          populateQuotePanel(currentQuoteText);
+          quotePanel.style.display = 'block';
+          quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Finished Quoting';
+        } else {
+          quotePanel.style.display = 'none';
+          quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
+        }
+      });
+
+      // --- Reply button handler ---
+      var replyModal = new bootstrap.Modal(document.getElementById('replyModal'));
+      document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.replybtn');
+        if (!btn) return;
+        e.preventDefault();
+        document.getElementById('r_to').value      = btn.dataset.bsMsgposter || 'All';
+        document.getElementById('r_reply_to').value = btn.dataset.bsMsgid || '';
+        var subj = btn.dataset.bsSubject || '';
+        if (subj && !subj.toUpperCase().startsWith('RE:')) subj = 'Re: ' + subj;
+        document.getElementById('r_subject').value  = subj;
+        document.getElementById('r_body').value     = '';
+
+        // Extract plain text from message body, preserving line breaks
+        function getPlainText(el) {
+          var clone = el.cloneNode(true);
+          clone.querySelectorAll('br').forEach(function(br) {
+            br.replaceWith('\n');
+          });
+          clone.querySelectorAll('div, p').forEach(function(block) {
+            block.insertAdjacentText('beforebegin', '\n');
+          });
+          return clone.textContent || '';
+        }
+
+        // Find the original message text for quoting
+        var msgCard = btn.closest('.msg-card');
+        var bodyEl  = msgCard ? msgCard.querySelector('.messagebody') : null;
+        if (bodyEl) {
+          currentQuoteText = getPlainText(bodyEl);
+          quoteToggleBtn.style.display = '';
+        } else {
+          currentQuoteText = '';
+          quoteToggleBtn.style.display = 'none';
+        }
+        // Reset quote panel state
+        quotePanel.style.display = 'none';
+        quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
+        quoteLinesEl.innerHTML = '';
+
+        replyModal.show();
+      });
+
+      if (typeof parsePipeColorCodes === 'function') parsePipeColorCodes();
+    });

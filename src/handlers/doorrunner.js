@@ -403,7 +403,7 @@ class DoorRunner extends BaseHandler {
 
 		if (needsUTF8 || needsCenter) {
 			this._outputParser = new DoorOutputParser({
-				convertCP437: needsCP437,
+				convertCP437: needsUTF8,
 				centerOutput: needsCenter,
 				srcCols: 80,
 				srcRows: 25,

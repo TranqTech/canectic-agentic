@@ -140,7 +140,11 @@ async function boldchalked(chalkcolour, message){
 }
 
 //all purpose logging function
-async function writeAlog(level, message, chalkcolour, bold){
+async function writeAlog(level, message, chalkcolour, bold, filename){
+	var alogfile = logfile
+	if (filename){
+		alogfile = logpath + '/' + filename + ".log";
+	}
 	// attach timestamp to log message
 	var currenttime = await DateTime.now();
 	//Luxon sometimes puts a slim nbsp into time string. Replace with standard space for logging
@@ -167,7 +171,7 @@ async function writeAlog(level, message, chalkcolour, bold){
 					if (!existsSync(logpath)){
 						mkdirSync(logpath);
 					}
-					appendFileSync(logfile, messagewtime);	
+					appendFileSync(alogfile, messagewtime);	
 				}catch(error){
 					console.log(chalk.bold.red("Could not write to log file."));
 					console.log(chalk.red(error));
@@ -196,7 +200,7 @@ async function writeAlog(level, message, chalkcolour, bold){
 				if (!existsSync(logpath)){
 					mkdirSync(logpath);
 				}
-				appendFileSync(logfile, messagewtime);	
+				appendFileSync(alogfile, messagewtime);	
 			}catch(error){
 				console.log(chalk.bold.red("Could not write to log file."));
 				console.log(chalk.red(error));

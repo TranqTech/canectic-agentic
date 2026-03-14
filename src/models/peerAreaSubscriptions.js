@@ -239,10 +239,129 @@ async function syncConnectionToNetwork(peerConnectionId) {
 	return returnObj;
 }
 
+// Sets allowed = true for all areas currently on a network for a given connection.
+// Called when a new connection is created so it starts with all network areas allowed.
+async function allowAllNetworkAreas(connectionId, networkId) {
+	var connId = parseInt(connectionId);
+	var netId  = parseInt(networkId);
+	var currtime = new Date();
+
+	try {
+		var result = await postgres.write(
+			`UPDATE peer_area_subscriptions pas
+			 SET allowed = true, updated_at = $1
+			 FROM network_areas na
+			 WHERE pas.peer_connection_id = $2
+			   AND pas.area_id = na.area_id
+			   AND na.network_id = $3
+			   AND na.active = true`,
+			[currtime, connId, netId]
+		);
+		alogger.writeAlog(5,
+			'allowAllNetworkAreas: set allowed on all network areas for connection ' + connId,
+			'greenbright'
+		);
+	} catch (err) {
+		alogger.writeAlog(3,
+			'allowAllNetworkAreas: failed for connection ' + connId + ': ' + err.message,
+			'redbright'
+		);
+	}
+}
+
+// Syncs all connections on a network so they have a subscription row for a
+// newly added area, then optionally sets allowed/enabled on that area for
+// all connections.
+//
+// options:
+//   allowAll  — if true, set allowed = true for this area on all connections
+//   enableAll — if true, set enabled = true for this area on all connections
+async function syncNetworkAreaToConnections(networkId, areaId, options) {
+	var netId   = parseInt(networkId);
+	var aid     = parseInt(areaId);
+	var opts    = options || {};
+	var currtime = new Date();
+
+	var peerConnections = await getPeerConnections();
+
+	// Get all connections on this network
+	var connRows = await postgres.query(
+		'SELECT id FROM peer_connections WHERE network_id = $1 AND active = true',
+		[netId]
+	);
+	if (!connRows || connRows.length === 0) return;
+
+	for (var row of connRows) {
+		// Ensure subscription row exists
+		await syncConnectionToNetwork(row.id);
+
+		// Set allowed/enabled if requested
+		if (opts.allowAll || opts.enableAll) {
+			var setClauses = ['updated_at = $1'];
+			if (opts.allowAll)  setClauses.push('allowed = true');
+			if (opts.enableAll) setClauses.push('enabled = true');
+
+			try {
+				await postgres.write(
+					'UPDATE peer_area_subscriptions SET ' + setClauses.join(', ') +
+					' WHERE peer_connection_id = $2 AND area_id = $3',
+					[currtime, row.id, aid]
+				);
+			} catch (err) {
+				alogger.writeAlog(3,
+					'syncNetworkAreaToConnections: failed to update connection ' +
+					row.id + ' area ' + aid + ': ' + err.message,
+					'redbright'
+				);
+			}
+		}
+	}
+
+	alogger.writeAlog(5,
+		'syncNetworkAreaToConnections: synced area ' + aid + ' to ' +
+		connRows.length + ' connection(s) on network ' + netId +
+		(opts.allowAll ? ' [allowed]' : '') + (opts.enableAll ? ' [enabled]' : ''),
+		'greenbright'
+	);
+}
+
+// Removes subscription rows for a specific area from all connections on a network.
+// Called when an area is removed from a network so that orphaned allowed/enabled
+// rows don't linger.
+async function removeSubscriptionsForNetworkArea(networkId, areaId) {
+	var netId = parseInt(networkId);
+	var aid   = parseInt(areaId);
+
+	try {
+		await postgres.write(
+			`DELETE FROM peer_area_subscriptions
+			 WHERE area_id = $1
+			   AND peer_connection_id IN (
+			     SELECT id FROM peer_connections WHERE network_id = $2
+			   )`,
+			[aid, netId]
+		);
+		alogger.writeAlog(5,
+			'removeSubscriptionsForNetworkArea: cleaned up subscriptions for area ' +
+			aid + ' on network ' + netId,
+			'greenbright'
+		);
+	} catch (err) {
+		alogger.writeAlog(3,
+			'removeSubscriptionsForNetworkArea: failed for area ' + aid +
+			' on network ' + netId + ': ' + err.message,
+			'redbright'
+		);
+	}
+}
+
 export {
 	getSubscriptionsByConnection,
 	getEnabledByConnection,
 	getAllowedByConnection,
 	setSubscriptions,
-	syncConnectionToNetwork
+	syncConnectionToNetwork,
+	allowAllNetworkAreas,
+	syncNetworkAreaToConnections,
+	removeSubscriptionsForNetworkArea
 };

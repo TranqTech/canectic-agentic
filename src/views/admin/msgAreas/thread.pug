@@ -79,11 +79,11 @@ block content
                                 - var e1date = Date.parse(message.system_time)
                                 - var edate = DateTime.fromMillis(e1date)
                                 = edate.toFormat('MMMM dd, yyyy HH:mm')
-                            if message.isAnsi
-                              .fg-green
-                                .text-end
-                                  h4
-                                    |[ANSI]
+                            //- if message.isAnsi
+                            //-   .fg-green
+                            //-     .text-end
+                            //-       h4
+                            //-         |[ANSI]
                         br
                         .messagebody
                           if message.isAnsi

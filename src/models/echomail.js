@@ -27,6 +27,33 @@ const boardname       = process.env.boardname        || "Canectic BBS";
 
 var threadUpdateArray = [];
 
+// Generate body_html from display text. Detects ANSI/pipe/Ctrl-A codes
+// and routes to the appropriate formatter.
+// Non-fatal — returns null on failure so message import continues without HTML.
+async function formatBodyHtml(displayText) {
+	if (!displayText) return null;
+	try {
+		if (displayText.includes("\x1b[") ||
+			/\|\d{2}/.test(displayText) ||
+			displayText.includes("\x01")) {
+			return await terminalText.formatTerminalText(displayText, {
+				terminalWidth: 80,
+				replaceAllSpaces: true,
+				handlePipeCodes: true,
+				handleAnsiCodes: true,
+				handleCtrlACodes: true,
+				resetOnNewline: true
+			});
+		}
+		if (displayText.includes("   ")) {
+			return codepageConversions.formatTextForHtml(displayText);
+		}
+		return displayText.replace(/\r/g, '<br>');
+	} catch (_) {
+		return null;
+	}
+}
+
 function buildMessageTree(messages) {
 	const messageMap   = new Map();
 	const rootMessages = [];
@@ -90,7 +117,7 @@ async function getMessagesForThread(shortcode, threadid) {
 	var shorty = shortcode.toLowerCase();
 	var msgtablename = "mb_" + shorty + "_msgs";
 	var msglist = await postgres.query(
-		"SELECT optional_attributes, msg_id, from_user, to_user, system_time, subject, reply_to, id, uuid, body_text, utf8 FROM " +
+		"SELECT optional_attributes, msg_id, from_user, to_user, system_time, subject, reply_to, id, uuid, body_text, utf8, body_html FROM " +
 		msgtablename + " WHERE thread_id = $1 ORDER BY system_time ASC",
 		[threadid]
 	);
@@ -98,26 +125,20 @@ async function getMessagesForThread(shortcode, threadid) {
 	if (!msglist) return [];
 
 	for (var msg of msglist) {
-		// Prefer utf8 column for display when set (NNTP messages with non-UTF-8 charset).
-		// Fall back to body_text (FTN CP437 messages handled by conversion utils below).
-		var displayText = msg.utf8 || msg.body_text || '';
-		if (displayText.includes("\x1b[") || /\|\d{2}/.test(displayText) || displayText.includes("\x01")) {
-			msg.isAnsi = true;
-			msg.body_html = await terminalText.formatTerminalText(displayText, {
-				terminalWidth: 80,
-				replaceAllSpaces: true,
-				handlePipeCodes: true,
-				handleAnsiCodes: true,
-				handleCtrlACodes: true,
-				resetOnNewline: true
-			});
+		// Use pre-rendered body_html if available (populated at import time).
+		// Fall back to on-the-fly formatting for older messages.
+		if (!msg.body_html) {
+			var displayText = msg.utf8 || msg.body_text || '';
+			msg.body_html = await formatBodyHtml(displayText);
+			msg.isAnsi = displayText.includes("\x1b[") ||
+				/\|\d{2}/.test(displayText) ||
+				displayText.includes("\x01");
 		} else {
-			msg.isAnsi = false;
-			if (displayText.includes("   ")) {
-				msg.body_html = codepageConversions.formatTextForHtml(displayText);
-			} else {
-				msg.body_html = displayText.replace(/\r/g, '<br>');
-			}
+			// Pre-rendered — still need to detect if terminal rendering is needed
+			var checkText = msg.utf8 || msg.body_text || '';
+			msg.isAnsi = checkText.includes("\x1b[") ||
+				/\|\d{2}/.test(checkText) ||
+				checkText.includes("\x01");
 		}
 	}
 
@@ -175,6 +196,10 @@ async function handleInboundEchoMessage(message) {
 	if (message.utf8) {
 		dbObj.utf8 = message.utf8;
 	}
+
+	// Pre-format body as HTML for display (non-fatal)
+	var displayText = dbObj.utf8 || dbObj.body_text || '';
+	dbObj.body_html = await formatBodyHtml(displayText);
 
 	// Resolve source_network_id so outbound delivery can suppress re-sending
 	// a message back to the network it arrived from

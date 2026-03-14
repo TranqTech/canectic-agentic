@@ -23,10 +23,14 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
+import * as terminalText from '../utils/terminalText.js';
+import { formatTextForHtml } from '../utils/codepageConversions.js';
 import { makeTransport } from './qwkTransport.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
+	parseHeadersDat,
+	applyHeadersDat,
 	buildRepPacket,
 	unzipQwkPacket
 } from './qwkClasses.js';
@@ -36,6 +40,37 @@ dotenv.config();
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Generate body_html from display text. Detects ANSI/pipe/Ctrl-A codes
+// and routes to the appropriate formatter.
+// Non-fatal — returns null on failure so message import continues without HTML.
+async function formatBodyHtml(displayText) {
+	if (!displayText) return null;
+
+	try {
+		if (displayText.includes("\x1b[") ||
+			/\|\d{2}/.test(displayText) ||
+			displayText.includes("\x01")) {
+			return await terminalText.formatTerminalText(displayText, {
+				terminalWidth: 80,
+				replaceAllSpaces: true,
+				handlePipeCodes: true,
+				handleAnsiCodes: true,
+				handleCtrlACodes: true,
+				resetOnNewline: true
+			});
+		}
+
+		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces)
+		if (displayText.includes("   ")) {
+			return formatTextForHtml(displayText);
+		}
+
+		return displayText.replace(/\r/g, '<br>');
+	} catch (_) {
+		return null;
+	}
+}
 
 // Parse a QWK date "MM-DD-YY" + time "HH:MM" into a Date object.
 // Two-digit year: 00-79 → 2000-2079, 80-99 → 1980-1999.
@@ -205,17 +240,21 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		};
 		var tres = await postgres.insertObject(threadObj, threadtable);
 		if (!tres.status || !tres.insertId) {
-			alogger.writeAlog(3,
+			alogger.writeClog(3,
 				'importQwkMessage: could not create thread for ' + dupeId +
-				': ' + tres.errormessages.join(', '),
+				': ' + tres.errormessages.join(', '), 'tosser',
 				'redbright'
-			);
+			, false, false);
 			returnObj.errormessages.push('Failed to create thread');
 			return returnObj;
 		}
 		threadId    = tres.insertId;
 		threadidStr = msgId;
 	}
+
+	// Pre-format body as HTML for display (non-fatal)
+	var displayText = qwkMsg.utf8 || qwkMsg.bodyText || '';
+	var bodyHtml = await formatBodyHtml(displayText);
 
 	var dbObj = {
 		uuid:              uuid,
@@ -230,6 +269,7 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		body_text:         qwkMsg.bodyText,
 		raw_text:          qwkMsg.rawBody,
 		utf8:              qwkMsg.utf8 || null,
+		body_html:         bodyHtml,
 		origin_line:       originLine,
 		datetime_string:   (qwkMsg.date || '') + ' ' + (qwkMsg.time || ''),
 		tz_utc:            tzUtc,
@@ -253,11 +293,11 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 				[msgId]
 			);
 		}
-		alogger.writeAlog(3,
+		alogger.writeClog(3,
 			'importQwkMessage: failed to insert message ' + dupeId +
-			': ' + mres.errormessages.join(', '),
+			': ' + mres.errormessages.join(', '), 'tosser',
 			'redbright'
-		);
+		, false, false);
 		returnObj.errormessages = returnObj.errormessages.concat(mres.errormessages);
 		return returnObj;
 	}
@@ -320,7 +360,7 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 
 	// Working directory: cwd()/qwk/<REMOTE_QWK_ID>/in/
 	// Persistent so we can inspect downloads and support future filebox features
-	var qwkBaseDir = path.join(process.cwd(), 'qwk', remoteQwkId);
+	var qwkBaseDir = path.join(process.cwd(), 'qnet', remoteQwkId);
 	var inDir      = path.join(qwkBaseDir, 'in');
 	var extractDir = path.join(inDir, 'extracted');
 	fs.mkdirSync(inDir, { recursive: true });
@@ -333,10 +373,10 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			f.toUpperCase() === 'MESSAGES.DAT' || f.toUpperCase().endsWith('.MSG')
 		);
 		if (existingMsgs) {
-			alogger.writeAlog(5,
-				'pullFromQwkPeer: found existing message data from prior extraction — processing before pulling',
+			alogger.writeClog(5,
+				'pullFromQwkPeer: found existing message data from prior extraction — processing before pulling', 'tosser',
 				'cyan'
-			);
+			, false, false);
 			hasExisting = true;
 		}
 	}
@@ -349,39 +389,39 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			var repFile = inFiles.find(f => f.toLowerCase().endsWith('.rep'));
 
 			if (!repFile) {
-				alogger.writeAlog(5,
-					'pullFromQwkPeer: no REP packet in ' + inDir + ' — nothing to pull',
+				alogger.writeClog(5,
+					'pullFromQwkPeer: no REP packet in ' + inDir + ' — nothing to pull', 'tosser',
 					'cyan'
-				);
+				, false, false);
 				returnObj.status = true;
 				return returnObj;
 			}
 
 			var repPath = path.join(inDir, repFile);
-			alogger.writeAlog(5,
-				'pullFromQwkPeer: found REP from node: ' + repFile,
+			alogger.writeClog(5,
+				'pullFromQwkPeer: found REP from node: ' + repFile, 'tosser',
 				'cyan'
-			);
+			, false, false);
 
 			try {
 				unzipQwkPacket(repPath, extractDir);
 
 				var freshFiles = fs.readdirSync(extractDir);
-				alogger.writeAlog(5,
+				alogger.writeClog(5,
 					'pullFromQwkPeer: extracted ' + freshFiles.length + ' file(s): ' +
-					freshFiles.join(', '),
+					freshFiles.join(', '), 'tosser',
 					'cyan'
-				);
+				, false, false);
 
 				// Remove the .rep after successful extraction
 				fs.unlinkSync(repPath);
 
 			} catch (err) {
-				alogger.writeAlog(3,
+				alogger.writeClog(3,
 					'pullFromQwkPeer: REP extract error for ' + peerConnectionUUID +
-					': ' + err.message,
+					': ' + err.message, 'tosser',
 					'redbright'
-				);
+				, false, false);
 				returnObj.errormessages.push(err.message);
 				return returnObj;
 			}
@@ -405,11 +445,11 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 				// non-fatal — list is for debugging only
 			}
 
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pullFromQwkPeer: downloading ' + remotePath +
-				(cd.host ? ' from ' + cd.host + ':' + (cd.port || 21) : ''),
+				(cd.host ? ' from ' + cd.host + ':' + (cd.port || 21) : ''), 'tosser',
 				'cyan'
-			);
+			, false, false);
 
 			try {
 				await transport.downloadFile(remotePath, localQwk);
@@ -418,11 +458,11 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 				// 550 (FTP) or ENOENT (directory) = file not found — normal when no packet is waiting
 				if ((dlErr.message && dlErr.message.indexOf('550') !== -1) ||
 				    dlErr.code === 'ENOENT') {
-					alogger.writeAlog(5,
+					alogger.writeClog(5,
 						'pullFromQwkPeer: no QWK packet waiting at ' + remotePath +
-						' — nothing to pull',
+						' — nothing to pull', 'tosser',
 						'cyan'
-					);
+					, false, false);
 					returnObj.status = true;
 					return returnObj;
 				}
@@ -434,26 +474,26 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			transport = null;
 
 			// Extract fresh download
-			alogger.writeAlog(5,
-				'pullFromQwkPeer: extracting ' + localQwk + ' → ' + extractDir,
+			alogger.writeClog(5,
+				'pullFromQwkPeer: extracting ' + localQwk + ' → ' + extractDir, 'tosser',
 				'cyan'
-			);
+			, false, false);
 			unzipQwkPacket(localQwk, extractDir);
 
 			// Log what came out of the zip
 			var freshFiles = fs.readdirSync(extractDir);
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pullFromQwkPeer: extracted ' + freshFiles.length + ' file(s): ' +
-				freshFiles.join(', '),
+				freshFiles.join(', '), 'tosser',
 				'cyan'
-			);
+			, false, false);
 
 		} catch (err) {
-			alogger.writeAlog(3,
+			alogger.writeClog(3,
 				'pullFromQwkPeer: download/extract error for ' + peerConnectionUUID +
-				': ' + err.message,
+				': ' + err.message, 'tosser',
 				'redbright'
-			);
+			, false, false);
 			returnObj.errormessages.push(err.message);
 			if (transport) {
 				try { await transport.disconnect(); } catch (_) {}
@@ -466,7 +506,7 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 	// Phase 3: Process whatever is in the extracted directory
 	try {
 		if (!fs.existsSync(extractDir)) {
-			alogger.writeAlog(5, 'pullFromQwkPeer: no extracted directory — nothing to process', 'cyan');
+			alogger.writeClog(5, 'pullFromQwkPeer: no extracted directory — nothing to process', 'tosser', 'cyan', false, 'tosser', false, false, false);
 			returnObj.status = true;
 			return returnObj;
 		}
@@ -481,44 +521,66 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 		}
 
 		if (!messagesFile) {
-			alogger.writeAlog(5,
-				'pullFromQwkPeer: no message data in extracted directory — no new messages',
+			alogger.writeClog(5,
+				'pullFromQwkPeer: no message data in extracted directory — no new messages', 'tosser',
 				'cyan'
-			);
+			, false, false);
 			returnObj.status = true;
 			return returnObj;
 		}
 
-		alogger.writeAlog(5,
-			'pullFromQwkPeer: using message file: ' + messagesFile,
+		alogger.writeClog(5,
+			'pullFromQwkPeer: using message file: ' + messagesFile, 'tosser',
 			'cyan'
-		);
+		, false, false);
 
 		// CONTROL.DAT is optional — present in offline reader packets but often
 		// absent in QWK networking mode. Parse it for logging if available.
 		if (controlFile) {
 			var controlText = fs.readFileSync(path.join(extractDir, controlFile), 'ascii');
 			var controlDat  = parseControlDat(controlText);
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pullFromQwkPeer: CONTROL.DAT present — hub is ' +
 				controlDat.bbsName + ', ' + controlDat.conferences.length +
-				' conference(s) listed',
+				' conference(s) listed', 'tosser',
 				'cyan'
-			);
+			, false, false);
 		} else {
-			alogger.writeAlog(5,
-				'pullFromQwkPeer: no CONTROL.DAT — QWK net mode, using subscription map',
+			alogger.writeClog(5,
+				'pullFromQwkPeer: no CONTROL.DAT — QWK net mode, using subscription map', 'tosser',
 				'cyan'
-			);
+			, false, false);
 		}
 
 		var messagesBuf = fs.readFileSync(path.join(extractDir, messagesFile));
 		var messages    = parseMessagesDAT(messagesBuf);
 
-		alogger.writeAlog(5,
-			'pullFromQwkPeer: ' + messages.length + ' message(s) in MESSAGES.DAT',
+		alogger.writeClog(5,
+			'pullFromQwkPeer: ' + messages.length + ' message(s) in ' + messagesFile, 'tosser',
 			'cyan'
-		);
+		, false, false);
+
+		// Parse HEADERS.DAT if present — overlays richer metadata onto messages
+		// (full-length subjects, Message-IDs, timezone info, UTF-8 flag, etc)
+		if (headersFile) {
+			try {
+				var headersText = fs.readFileSync(path.join(extractDir, headersFile), 'utf8');
+				var headersDat  = parseHeadersDat(headersText);
+				var hdrCount    = Object.keys(headersDat).length;
+				alogger.writeClog(5,
+					'pullFromQwkPeer: HEADERS.DAT present — ' + hdrCount +
+					' entry(ies), applying overlays', 'tosser',
+					'cyan'
+				, false, false);
+				applyHeadersDat(messages, headersDat);
+			} catch (hdrErr) {
+				alogger.writeClog(3,
+					'pullFromQwkPeer: HEADERS.DAT parse error — ' + hdrErr.message +
+					' (continuing without header overlays)', 'tosser',
+					'yellow'
+				, false, false);
+			}
+		}
 
 		// Get enabled subscriptions for this connection joined with areatag
 		var enabledSubs = await postgres.query(
@@ -553,11 +615,11 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 
 		// Log the conference map for debugging
 		var confKeys = Object.keys(confMap);
-		alogger.writeAlog(5,
+		alogger.writeClog(5,
 			'pullFromQwkPeer: conference map has ' + confKeys.length +
-			' subscription(s): ' + confKeys.join(', '),
+			' subscription(s): ' + confKeys.join(', '), 'tosser',
 			'cyan'
-		);
+		, false, false);
 
 		var highWaterMarks = cd.high_water_marks || {};
 		var skippedConfs = {};
@@ -596,11 +658,11 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			}
 
 			if (result.errormessages.length > 0) {
-				alogger.writeAlog(3,
+				alogger.writeClog(3,
 					'pullFromQwkPeer: import error for conf ' + msg.conferenceNum +
-					' msg ' + msg.msgNumber + ': ' + result.errormessages.join(', '),
+					' msg ' + msg.msgNumber + ': ' + result.errormessages.join(', '), 'tosser',
 					'redbright'
-				);
+				, false, false);
 			}
 
 			// Track HWM per conference (areatag = conference number string)
@@ -617,10 +679,10 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			var skippedSummary = skippedKeys.map(function(k) {
 				return k + '(' + skippedConfs[k] + ')';
 			}).join(', ');
-			alogger.writeAlog(5,
-				'pullFromQwkPeer: skipped unsubscribed conferences: ' + skippedSummary,
+			alogger.writeClog(5,
+				'pullFromQwkPeer: skipped unsubscribed conferences: ' + skippedSummary, 'tosser',
 				'yellow'
-			);
+			, false, false);
 		}
 
 		// Persist high-water marks
@@ -629,28 +691,28 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			{ high_water_marks: highWaterMarks }
 		);
 
-		alogger.writeAlog(5,
+		alogger.writeClog(5,
 			'pullFromQwkPeer: ' + peerConnectionUUID +
 			' — imported=' + returnObj.totalImported +
-			' duplicate=' + returnObj.totalDuplicate,
+			' duplicate=' + returnObj.totalDuplicate, 'tosser',
 			'greenbright'
-		);
+		, false, false);
 
 		// Processing complete — remove the extracted directory so it isn't
 		// reprocessed next cycle. The .QWK file stays for reference.
 		fs.rmSync(extractDir, { recursive: true, force: true });
-		alogger.writeAlog(5,
-			'pullFromQwkPeer: cleaned up extracted directory',
+		alogger.writeClog(5,
+			'pullFromQwkPeer: cleaned up extracted directory', 'tosser',
 			'cyan'
-		);
+		, false, false);
 
 		returnObj.status = true;
 
 	} catch (err) {
-		alogger.writeAlog(3,
-			'pullFromQwkPeer: processing error for ' + peerConnectionUUID + ': ' + err.message,
+		alogger.writeClog(3,
+			'pullFromQwkPeer: processing error for ' + peerConnectionUUID + ': ' + err.message, 'tosser',
 			'redbright'
-		);
+		, false, false);
 		returnObj.errormessages.push(err.message);
 	}
 
@@ -661,34 +723,34 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 async function pullAllQWK() {
 	var connections = await peerConnections.getActiveConnectionsByNetworkType('QWK');
 	if (!connections || connections.length === 0) {
-		alogger.writeAlog(5, 'pullAllQWK: no active QWK connections found', 'cyan');
+		alogger.writeClog(5, 'pullAllQWK: no active QWK connections found', 'tosser', 'cyan', false, 'tosser', false, false, false);
 		return;
 	}
 
-	alogger.writeAlog(5,
-		'pullAllQWK: processing ' + connections.length + ' QWK connection(s)',
+	alogger.writeClog(5,
+		'pullAllQWK: processing ' + connections.length + ' QWK connection(s)', 'tosser',
 		'cyan'
-	);
+	, false, false);
 
 	for (var conn of connections) {
-		alogger.writeAlog(5,
-			'pullAllQWK: pulling from ' + conn.peer_name + ' (' + conn.uuid + ')',
+		alogger.writeClog(5,
+			'pullAllQWK: pulling from ' + conn.peer_name + ' (' + conn.uuid + ')', 'tosser',
 			'cyan'
-		);
+		, false, false);
 		var result = await pullFromQwkPeer(conn.uuid);
 		if (!result.status) {
-			alogger.writeAlog(3,
+			alogger.writeClog(3,
 				'pullAllQWK: pull failed for ' + conn.uuid + ': ' +
-				result.errormessages.join(', '),
+				result.errormessages.join(', '), 'tosser',
 				'redbright'
-			);
+			, false, false);
 		} else {
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pullAllQWK: completed ' + conn.uuid +
 				' — imported=' + result.totalImported +
-				' duplicate=' + result.totalDuplicate,
+				' duplicate=' + result.totalDuplicate, 'tosser',
 				'greenbright'
-			);
+			, false, false);
 		}
 	}
 }
@@ -714,14 +776,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 
 	var cd = dbconn.connection_data || {};
 
-	// Hub mode: outbound is QWK packet generation, not REP uploads.
-	// QWK generation will be handled by a separate module — skip for now.
+	// Hub mode: QWK packets are built on-demand when the node connects,
+	// not during the toss cycle. This ensures packets are always fresh.
+	// buildQwkForNode() is called by connection handlers (qnet-directory,
+	// FTP hooks, HTTP endpoints, etc.) when the node requests a packet.
 	if (cd.transport === 'hub') {
-		alogger.writeAlog(5,
-			'pushToQwkPeer: skipping hub connection ' + peerConnectionUUID +
-			' — QWK generation not yet implemented',
-			'cyan'
-		);
 		returnObj.status = true;
 		return returnObj;
 	}
@@ -752,11 +811,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 		sysAddr = await systemAddresses.getDefaultAddress(dbconn.network_id);
 	}
 	if (sysAddr) {
-		alogger.writeAlog(5,
+		alogger.writeClog(5,
 			'pushToQwkPeer: system_address=' + sysAddr.address +
-			' origin_line=' + JSON.stringify(sysAddr.origin_line),
+			' origin_line=' + JSON.stringify(sysAddr.origin_line), 'tosser',
 			'cyan'
-		);
+		, false, false);
 		if (sysAddr.address) {
 			localQwkId = sysAddr.address.trim().toUpperCase();
 		}
@@ -764,10 +823,10 @@ async function pushToQwkPeer(peerConnectionUUID) {
 			originLine = sysAddr.origin_line.trim();
 		}
 	} else {
-		alogger.writeAlog(5,
-			'pushToQwkPeer: no system address found (connection or network default)',
+		alogger.writeClog(5,
+			'pushToQwkPeer: no system address found (connection or network default)', 'tosser',
 			'yellow'
-		);
+		, false, false);
 	}
 	if (!localQwkId) {
 		// Fallback to FTP username if no system address configured
@@ -788,10 +847,10 @@ async function pushToQwkPeer(peerConnectionUUID) {
 		originText = localQwkId;
 	}
 	var tearOrigin = '\r--- \r || Canectic || ' + originText + '\r';
-	alogger.writeAlog(5,
-		'pushToQwkPeer: originText=' + JSON.stringify(originText),
+	alogger.writeClog(5,
+		'pushToQwkPeer: originText=' + JSON.stringify(originText), 'tosser',
 		'cyan'
-	);
+	, false, false);
 
 	// Get enabled subscriptions for this connection, joined with areatag
 	var enabledSubs = await postgres.query(
@@ -809,10 +868,10 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	);
 
 	if (!enabledSubs || enabledSubs.length === 0) {
-		alogger.writeAlog(5,
-			'pushToQwkPeer: no enabled subscriptions for ' + peerConnectionUUID,
+		alogger.writeClog(5,
+			'pushToQwkPeer: no enabled subscriptions for ' + peerConnectionUUID, 'tosser',
 			'cyan'
-		);
+		, false, false);
 		returnObj.status = true;
 		return returnObj;
 	}
@@ -898,17 +957,17 @@ async function pushToQwkPeer(peerConnectionUUID) {
 
 	if (workItems.filter(i => !i.skip).length === 0) {
 		// Only skips — advance past them and return
-		alogger.writeAlog(5,
-			'pushToQwkPeer: nothing to post for ' + peerConnectionUUID,
+		alogger.writeClog(5,
+			'pushToQwkPeer: nothing to post for ' + peerConnectionUUID, 'tosser',
 			'cyan'
-		);
+		, false, false);
 		await advanceQwkIdxForSkips(workItems);
 		returnObj.status = true;
 		return returnObj;
 	}
 
 	// Build REP packet
-	var outDir = path.join(process.cwd(), 'qwk', remoteQwkId, 'out');
+	var outDir = path.join(process.cwd(), 'qnet', remoteQwkId, 'out');
 	fs.mkdirSync(outDir, { recursive: true });
 
 	var repFileName = packetName + '.rep';
@@ -920,21 +979,21 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	// Phase 1: If a REP file already exists from a prior failed upload,
 	// try to deliver it first before building a new one.
 	if (fs.existsSync(repPath)) {
-		alogger.writeAlog(5,
-			'pushToQwkPeer: found existing REP from prior build — uploading before building new',
+		alogger.writeClog(5,
+			'pushToQwkPeer: found existing REP from prior build — uploading before building new', 'tosser',
 			'cyan'
-		);
+		, false, false);
 
 		var transport = null;
 		try {
 			transport = makeTransport(cd);
 			await transport.connect(cd);
 
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pushToQwkPeer: uploading existing ' + remotePath +
-				(cd.host ? ' to ' + cd.host + ':' + (cd.port || 21) : ''),
+				(cd.host ? ' to ' + cd.host + ':' + (cd.port || 21) : ''), 'tosser',
 				'cyan'
-			);
+			, false, false);
 
 			await transport.uploadFile(repPath, remotePath);
 			await transport.disconnect();
@@ -942,11 +1001,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 
 			// Existing REP delivered — remove it
 			fs.unlinkSync(repPath);
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pushToQwkPeer: existing REP delivered and removed — ' +
-				'skipping new build this cycle to let hub process',
+				'skipping new build this cycle to let hub process', 'tosser',
 				'greenbright'
-			);
+			, false, false);
 
 			// Don't immediately build and upload another REP — the hub needs
 			// time to process the one we just sent. New messages will be
@@ -954,12 +1013,12 @@ async function pushToQwkPeer(peerConnectionUUID) {
 			returnObj.status = true;
 			return returnObj;
 		} catch (err) {
-			alogger.writeAlog(3,
+			alogger.writeClog(3,
 				'pushToQwkPeer: failed to upload existing REP for ' +
 				peerConnectionUUID + ': ' + err.message +
-				' — will retry next cycle, skipping new build',
+				' — will retry next cycle, skipping new build', 'tosser',
 				'redbright'
-			);
+			, false, false);
 			returnObj.errormessages.push(err.message);
 			if (transport) {
 				try { await transport.disconnect(); } catch (_) {}
@@ -975,11 +1034,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	try {
 		var postItems = workItems.filter(i => !i.skip);
 
-		alogger.writeAlog(5,
+		alogger.writeClog(5,
 			'pushToQwkPeer: building REP with ' + postItems.length +
-			' message(s)' + (cd.host ? ' for ' + cd.host : ''),
+			' message(s)' + (cd.host ? ' for ' + cd.host : ''), 'tosser',
 			'cyan'
-		);
+		, false, false);
 
 		buildRepPacket(postItems, packetName, outDir, localQwkId);
 
@@ -987,11 +1046,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 		transport = makeTransport(cd);
 		await transport.connect(cd);
 
-		alogger.writeAlog(5,
+		alogger.writeClog(5,
 			'pushToQwkPeer: uploading ' + remotePath +
-			(cd.host ? ' to ' + cd.host + ':' + (cd.port || 21) : ''),
+			(cd.host ? ' to ' + cd.host + ':' + (cd.port || 21) : ''), 'tosser',
 			'cyan'
-		);
+		, false, false);
 
 		await transport.uploadFile(repPath, remotePath);
 		await transport.disconnect();
@@ -1019,10 +1078,10 @@ async function pushToQwkPeer(peerConnectionUUID) {
 		}
 
 	} catch (err) {
-		alogger.writeAlog(3,
-			'pushToQwkPeer: error for ' + peerConnectionUUID + ': ' + err.message,
+		alogger.writeClog(3,
+			'pushToQwkPeer: error for ' + peerConnectionUUID + ': ' + err.message, 'tosser',
 			'redbright'
-		);
+		, false, false);
 		returnObj.errormessages.push(err.message);
 		if (transport) {
 			try { await transport.disconnect(); } catch (_) {}
@@ -1035,12 +1094,12 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	await advanceQwkIdxAfterPost(workItems, enabledSubs);
 
 	returnObj.status = true;
-	alogger.writeAlog(5,
+	alogger.writeClog(5,
 		'pushToQwkPeer: ' + peerConnectionUUID +
 		' posted=' + returnObj.totalPosted +
-		' skipped=' + returnObj.totalSkipped,
+		' skipped=' + returnObj.totalSkipped, 'tosser',
 		'greenbright'
-	);
+	, false, false);
 	return returnObj;
 }
 
@@ -1094,34 +1153,34 @@ async function advanceQwkIdxAfterPost(workItems, enabledSubs) {
 async function pushAllQWK() {
 	var connections = await peerConnections.getActiveConnectionsByNetworkType('QWK');
 	if (!connections || connections.length === 0) {
-		alogger.writeAlog(5, 'pushAllQWK: no active QWK connections found', 'cyan');
+		alogger.writeClog(5, 'pushAllQWK: no active QWK connections found', 'tosser', 'cyan', false, 'tosser', false, false, false);
 		return;
 	}
 
-	alogger.writeAlog(5,
-		'pushAllQWK: processing ' + connections.length + ' QWK connection(s)',
+	alogger.writeClog(5,
+		'pushAllQWK: processing ' + connections.length + ' QWK connection(s)', 'tosser',
 		'cyan'
-	);
+	, false, false);
 
 	for (var conn of connections) {
-		alogger.writeAlog(5,
-			'pushAllQWK: pushing to ' + conn.peer_name + ' (' + conn.uuid + ')',
+		alogger.writeClog(5,
+			'pushAllQWK: pushing to ' + conn.peer_name + ' (' + conn.uuid + ')', 'tosser',
 			'cyan'
-		);
+		, false, false);
 		var result = await pushToQwkPeer(conn.uuid);
 		if (!result.status) {
-			alogger.writeAlog(3,
+			alogger.writeClog(3,
 				'pushAllQWK: push failed for ' + conn.uuid + ': ' +
-				result.errormessages.join(', '),
+				result.errormessages.join(', '), 'tosser',
 				'redbright'
-			);
+			, false, false);
 		} else {
-			alogger.writeAlog(5,
+			alogger.writeClog(5,
 				'pushAllQWK: completed ' + conn.uuid +
 				' — posted=' + result.totalPosted +
-				' skipped=' + result.totalSkipped,
+				' skipped=' + result.totalSkipped, 'tosser',
 				'greenbright'
-			);
+			, false, false);
 		}
 	}
 }
@@ -1146,18 +1205,18 @@ async function resetQwkOutboundIdx(peerConnectionUUID, areaId) {
 
 	var err = await postgres.write(sql, params);
 	if (err) {
-		alogger.writeAlog(3,
-			'resetQwkOutboundIdx: failed for ' + peerConnectionUUID + ': ' + err.message,
+		alogger.writeClog(3,
+			'resetQwkOutboundIdx: failed for ' + peerConnectionUUID + ': ' + err.message, 'tosser',
 			'redbright'
-		);
+		, false, false);
 		return { status: false, errormessages: [err.message] };
 	}
 
-	alogger.writeAlog(5,
+	alogger.writeClog(5,
 		'resetQwkOutboundIdx: reset msg_idx for connection ' + peerConnectionUUID +
-		(areaId ? ' area ' + areaId : ' all areas'),
+		(areaId ? ' area ' + areaId : ' all areas'), 'tosser',
 		'greenbright'
-	);
+	, false, false);
 	return { status: true, errormessages: [] };
 }
 

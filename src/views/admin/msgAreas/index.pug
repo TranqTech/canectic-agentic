@@ -1,0 +1,470 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row.align-items-center
+                  .col-6
+                    h2= title
+                  .col-6
+                    .text-end
+                      button.btn.btn-success.me-2(data-bs-toggle='modal' data-bs-target='#newAreaModal')
+                        | Add Area
+                      a.button.btn.btn-info.me-2(href='/admin/msgGroups')
+                        | Groups
+                      a.button.btn.btn-danger(href='/admin')
+                        | Exit
+              .card-body
+                if allAreas && allAreas.length > 0
+                  br
+                  table#areaTable.table.table-hover.table-sm(style='width:100%')
+                    thead
+                      tr
+                        th(scope='col') Group
+                        th(scope='col') Name
+                        th(scope='col') Shortcode
+                        th(scope='col') Description
+                        th(scope='col') Network
+                        th(scope='col') Tag
+                        th(scope='col') Msg Count
+                        th(scope='col') Latest
+                    tbody
+                      for area of allAreas
+                        tr.area-row(
+                          data-bs-id=area.id
+                          data-bs-shortcode=area.shortcode
+                          data-bs-name=area.name
+                          data-bs-description=area.description
+                          data-bs-groupshortcode=area.group_shortcode
+                          data-bs-networkname=(area.network_name || '')
+                          data-bs-networktag=(area.areatag || '')
+                          data-bs-readsecurity=area.read_security
+                          data-bs-postsecurity=area.post_security
+                          data-bs-minage=area.min_age || 13
+                          data-bs-maxage=area.max_age || 255
+                          data-bs-active=(area.active ? 'true' : 'false')
+                          data-bs-threadmode=area.thread_mode || 'standard'
+                          data-bs-postas=area.post_as || 'username'
+                          data-bs-msgcount=area.msg_count || 0
+                          data-bs-lastfrom=area.last_from || ''
+                          data-bs-lastmessage=area.last_message || ''
+                        )
+                          td= area.group_shortcode
+                          td= area.name
+                          td= area.shortcode
+                          td= area.description
+                          td
+                            if area.network_name
+                              span.badge.bg-info.text-dark= area.network_name
+                            else
+                              span.badge.bg-secondary Local
+                          td
+                            if area.areatag
+                              = area.areatag
+                          td.text-end
+                            - var mcount = (area.msg_count || 0).toLocaleString()
+                            = mcount
+                          td
+                            if area.last_message
+                              .text-end
+                                - var e1date = Date.parse(area.last_message)
+                                - var edate = DateTime.fromMillis(e1date)
+                                = edate.toFormat('MMMM dd, yyyy')
+                            else
+                              center
+                                | N/A
+                else
+                  center
+                    h4 No Areas Found
+
+        //- Area Info Modal
+        #areaInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title#areaInfoTitle
+                .ms-auto.d-flex.gap-2
+                  button.btn.btn-sm.btn-info#areaViewBtn View
+                  button.btn.btn-sm.btn-warning#areaEditBtn Edit
+                  button.btn.btn-sm.btn-danger#areaDeleteBtn Delete
+                  button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-6
+                    p
+                      strong Shortcode:
+                      |  
+                      span#areaInfoShortcode
+                    p
+                      strong Group:
+                      |  
+                      span#areaInfoGroup
+                    p
+                      strong Network:
+                      |  
+                      span#areaInfoNetwork
+                    p
+                      strong Area Tag:
+                      |  
+                      span#areaInfoAreatag
+                    p
+                      strong Status:
+                      |  
+                      span#areaInfoActive
+                    p
+                      strong Thread Mode:
+                      |  
+                      span#areaInfoThreadMode
+                    p
+                      strong Post As:
+                      |  
+                      span#areaInfoPostAs
+                  .col-6
+                    p
+                      strong Read Security:
+                      |  
+                      span#areaInfoReadSec
+                    p
+                      strong Post Security:
+                      |  
+                      span#areaInfoPostSec
+                    p
+                      strong Min Age:
+                      |  
+                      span#areaInfoMinAge
+                    p
+                      strong Max Age:
+                      |  
+                      span#areaInfoMaxAge
+                    p
+                      strong Messages:
+                      |  
+                      span#areaInfoMsgCount
+                hr.border-secondary
+                .row
+                  .col-12
+                    p#areaInfoDescription
+                  .col-6
+                    p
+                      small Last From:
+                      |  
+                      span#areaInfoLastFrom
+                  .col-6.text-end
+                    p
+                      small Last Message:
+                      |  
+                      span#areaInfoLastMessage
+
+        //- Edit Area Modal
+        #editAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title Edit Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form#editAreaForm(method='POST' class='form-registration')
+                  input#ea_groupshortcode(type='hidden' name='groupshortcode')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='ea_name') Name:
+                      input(type='text' id='ea_name' name='name' class='form-control' tabindex='1' required)
+                      br
+                      label(for='ea_description') Description:
+                      input(type='text' id='ea_description' name='description' class='form-control' tabindex='2' required)
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='ea_minage') Min Age:
+                      input(type='number' id='ea_minage' name='minage' class='form-control' min=13 max=255 tabindex='3')
+                      br
+                      label(for='ea_maxage') Max Age:
+                      input(type='number' id='ea_maxage' name='maxage' class='form-control' min=13 max=255 tabindex='4')
+                    .col-5
+                      label(for='ea_readsecurity') Read Security:
+                      input(type='number' id='ea_readsecurity' name='readsecurity' class='form-control' min=1 max=255 tabindex='5' required)
+                      br
+                      label(for='ea_postsecurity') Post Security:
+                      input(type='number' id='ea_postsecurity' name='postsecurity' class='form-control' min=1 max=255 tabindex='6' required)
+                      br
+                      label(for='ea_active') Status:
+                      select(id='ea_active' name='active' class='form-control' tabindex='7')
+                        option(value='true') Active
+                        option(value='false') Inactive
+                      br
+                      label(for='ea_thread_mode') Thread Mode:
+                      select(id='ea_thread_mode' name='thread_mode' class='form-control' tabindex='8')
+                        option(value='standard') Standard (threaded)
+                        option(value='no_threads') No Threads (flat)
+                        option(value='subscribe_only') Subscribe Only
+                      br
+                      label(for='ea_post_as') Post As:
+                      select(id='ea_post_as' name='post_as' class='form-control' tabindex='9')
+                        option(value='username') Username
+                        option(value='realname') Real Name
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      p.text-muted.small
+                        | To change this area's network mapping, use the 
+                        a(href='/admin/networks') Network Management
+                        |  page.
+                      .text-end
+                        input(type='submit' value='Save Changes' class='btn btn-lg btn-warning btn-block' tabindex='10')
+
+        //- Delete Area Modal
+        #deleteAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered
+            .modal-content
+              .modal-header.bg-danger.text-white
+                h3.modal-title Delete Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-1
+                  .col-10
+                    .alert.alert-danger
+                      h5 ⚠ Warning
+                      p
+                        | This will permanently delete the area 
+                        strong#deleteAreaName
+                        | .
+                    p This action cannot be undone.
+                    br
+                    label(for='da_delete_tables') Message &amp; Thread Tables:
+                    select#da_delete_tables.form-control
+                      option(value='false') Leave tables intact
+                      option(value='true') Delete tables and all data
+                    br
+                    .alert.alert-warning#da_deleteTablesWarning(style='display:none')
+                      | ⚠ This will permanently destroy all messages and threads in this area.
+              .modal-footer.bg-dark
+                form#deleteAreaForm(method='POST')
+                  input(type='hidden' name='delete_tables' id='da_delete_tables_hidden' value='false')
+                  button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+                  |  
+                  input(type='submit' value='Delete Area' class='btn btn-danger')
+
+        //- New Area Modal (with group selector)
+        #newAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title Add Message Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form#newAreaForm(method='POST' class='form-registration')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='na_group') Group:
+                      select#na_group(name='groupshortcode' class='form-select' required)
+                        option(value='') — Select a group —
+                        if grouplist && grouplist.length > 0
+                          for group of grouplist
+                            option(value=group.shortcode)= group.name + ' (' + group.shortcode + ')'
+                      br
+                      label(for='na_name') Name:
+                      input(type='text' id='na_name' name='name' class='form-control' required)
+                      br
+                      label(for='na_description') Description:
+                      input(type='text' id='na_description' name='description' class='form-control' required)
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='na_shortcode') Short Code (Internal):
+                      input(type='text' id='na_shortcode' name='shortcode' class='form-control' required)
+                      br
+                      label(for='na_network') Network (optional):
+                      select#na_network(name='network_id').form-select
+                        option(value='') — Local area, no network —
+                        if networklist && networklist.length > 0
+                          for net of networklist
+                            option(value=net.id)
+                              = net.name
+                              |  (
+                              = net.domain
+                              |)
+                      br
+                      label(for='na_areatag') Area Tag (if networked):
+                      input(type='text' id='na_areatag' name='areatag' class='form-control' placeholder='FIDONET.GENERAL')
+                      br
+                      label(for='na_minage') Minimum Participant Age:
+                      input(type='number' id='na_minage' min=13 max=255 name='minage' class='form-control' value=13)
+                    .col-5
+                      label(for='na_readsecurity') Read Security:
+                      input(type='number' id='na_readsecurity' min=1 max=255 name='readsecurity' class='form-control' value=50 required)
+                      br
+                      label(for='na_postsecurity') Post Security:
+                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=50 required)
+                      br
+                      label(for='na_maxage') Maximum Participant Age:
+                      input(type='number' id='na_maxage' min=13 max=255 name='maxage' class='form-control' value=255)
+                      br
+                      label(for='na_thread_mode') Thread Mode:
+                      select#na_thread_mode(name='thread_mode').form-select
+                        option(value='standard' selected) Standard (threaded)
+                        option(value='no_threads') No Threads (flat)
+                        option(value='subscribe_only') Subscribe Only
+                      br
+                      label(for='na_post_as') Post As:
+                      select#na_post_as(name='post_as').form-select
+                        option(value='username' selected) Username
+                        option(value='realname') Real Name
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(type='submit' value='Submit' class='btn btn-lg btn-success btn-block')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+
+      // Init DataTable
+      var table = document.getElementById('areaTable');
+      if (table) {
+        $(table).DataTable({
+          pageLength: 50,
+          order: [[0, 'asc'], [1, 'asc']],
+          pagingType: 'full_numbers',
+          columnDefs: [
+            { targets: 6, type: 'num' }
+          ],
+          drawCallback: function() {
+            var $pag = $(this.api().table().container()).find('.dataTables_paginate');
+            if ($pag.length === 0) return;
+
+            var $prev  = $pag.find('.previous').detach();
+            var $next  = $pag.find('.next').detach();
+            var $nums  = $pag.find('span:first').children().detach();
+
+            var $numRow = $('<div class="dt-page-numbers">').append($nums);
+            var $navRow = $('<div class="dt-page-nav">').append($prev, $next);
+            var $wrap   = $('<div class="dt-pagination-wrap">').append($numRow, $navRow);
+
+            $pag.empty().append($wrap);
+          }
+        });
+      }
+
+      var areaInfoModal   = new bootstrap.Modal(document.getElementById('areaInfoModal'));
+      var editAreaModal   = new bootstrap.Modal(document.getElementById('editAreaModal'));
+      var deleteAreaModal = new bootstrap.Modal(document.getElementById('deleteAreaModal'));
+      var currentAreaShortcode = '';
+
+      // Row click — event delegation on tbody (survives DataTables redraws)
+      var tableBody = document.querySelector('#areaTable tbody');
+      if (tableBody) {
+        tableBody.style.cursor = 'pointer';
+        tableBody.addEventListener('click', function(e) {
+          var row = e.target.closest('tr.area-row');
+          if (!row) return;
+          var d = row.dataset;
+          currentAreaShortcode = d.bsShortcode;
+
+          document.getElementById('areaInfoTitle').textContent       = d.bsName;
+          document.getElementById('areaInfoShortcode').textContent   = d.bsShortcode;
+          document.getElementById('areaInfoGroup').textContent       = d.bsGroupshortcode || '—';
+          document.getElementById('areaInfoNetwork').textContent     = d.bsNetworkname  || '— Local —';
+          document.getElementById('areaInfoAreatag').textContent     = d.bsNetworktag   || '—';
+          document.getElementById('areaInfoActive').textContent      = d.bsActive === 'true' ? 'Active' : 'Inactive';
+          document.getElementById('areaInfoThreadMode').textContent  = { standard: 'Standard (threaded)', no_threads: 'No Threads (flat)', subscribe_only: 'Subscribe Only' }[d.bsThreadmode] || 'Standard';
+          document.getElementById('areaInfoPostAs').textContent      = { username: 'Username', realname: 'Real Name' }[d.bsPostas] || 'Username';
+          document.getElementById('areaInfoReadSec').textContent     = d.bsReadsecurity;
+          document.getElementById('areaInfoPostSec').textContent     = d.bsPostsecurity;
+          document.getElementById('areaInfoMinAge').textContent      = d.bsMinage;
+          document.getElementById('areaInfoMaxAge').textContent      = d.bsMaxage;
+          document.getElementById('areaInfoMsgCount').textContent    = parseInt(d.bsMsgcount || 0).toLocaleString();
+          document.getElementById('areaInfoDescription').textContent = d.bsDescription;
+          document.getElementById('areaInfoLastFrom').textContent    = d.bsLastfrom || '—';
+          document.getElementById('areaInfoLastMessage').textContent = d.bsLastmessage
+            ? new Date(d.bsLastmessage).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+            : '—';
+
+          areaInfoModal.show();
+        });
+      }
+
+      // View
+      document.getElementById('areaViewBtn').addEventListener('click', function() {
+        if (currentAreaShortcode) window.location.href = '/admin/msgArea/' + currentAreaShortcode;
+      });
+
+      // Edit
+      document.getElementById('areaEditBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        var row = document.querySelector('tr[data-bs-shortcode="' + currentAreaShortcode + '"]');
+        if (!row) return;
+        var d = row.dataset;
+        document.getElementById('editAreaForm').action     = '/admin/msgArea/' + currentAreaShortcode + '/update';
+        document.getElementById('ea_groupshortcode').value = d.bsGroupshortcode || '';
+        document.getElementById('ea_name').value           = d.bsName;
+        document.getElementById('ea_description').value    = d.bsDescription;
+        document.getElementById('ea_readsecurity').value   = d.bsReadsecurity;
+        document.getElementById('ea_postsecurity').value   = d.bsPostsecurity;
+        document.getElementById('ea_minage').value         = d.bsMinage;
+        document.getElementById('ea_maxage').value         = d.bsMaxage;
+        document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
+        document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
+        document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
+        areaInfoModal.hide();
+        editAreaModal.show();
+      });
+
+      // Delete
+      document.getElementById('areaDeleteBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        var row = document.querySelector('tr[data-bs-shortcode="' + currentAreaShortcode + '"]');
+        if (!row) return;
+        document.getElementById('deleteAreaName').textContent           = row.dataset.bsName;
+        document.getElementById('deleteAreaForm').action                = '/admin/msgArea/' + currentAreaShortcode + '/delete';
+        document.getElementById('da_delete_tables_hidden').value        = 'false';
+        document.getElementById('da_delete_tables').value               = 'false';
+        document.getElementById('da_deleteTablesWarning').style.display = 'none';
+        areaInfoModal.hide();
+        deleteAreaModal.show();
+      });
+
+      // Delete tables warning
+      var daSelect  = document.getElementById('da_delete_tables');
+      var daHidden  = document.getElementById('da_delete_tables_hidden');
+      var daWarning = document.getElementById('da_deleteTablesWarning');
+      if (daSelect) {
+        daSelect.addEventListener('change', function() {
+          daHidden.value = this.value;
+          daWarning.style.display = this.value === 'true' ? 'block' : 'none';
+        });
+      }
+
+      // New area — set form action from group select
+      var newAreaForm = document.getElementById('newAreaForm');
+      var groupSelect = document.getElementById('na_group');
+      if (groupSelect && newAreaForm) {
+        groupSelect.addEventListener('change', function() {
+          var sc = this.value;
+          newAreaForm.action = sc ? '/admin/msgGroup/' + sc + '/newArea' : '';
+        });
+      }
+
+    });
