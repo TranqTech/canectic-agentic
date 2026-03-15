@@ -15,6 +15,19 @@ async function getPointerMod() {
 	return _pointerMod;
 }
 
+// Lazy-import subscription module
+var _subsMod = null;
+async function getSubsMod() {
+	if (!_subsMod) {
+		try {
+			_subsMod = await import("../../models/userAreaSubs.js");
+		} catch (_) {
+			_subsMod = {};
+		}
+	}
+	return _subsMod;
+}
+
 var _readerMod = null;
 async function getReaderMod() {
 	if (!_readerMod) {
@@ -43,6 +56,7 @@ const CLR_UNREAD = 10;
 const CLR_NONE = 8;
 const CLR_STATUS = 8;
 const CLR_NAV = 11;
+const CLR_NAV_LABEL = 7;
 const CLR_HIGHLIGHT_FG = 15;
 const CLR_HIGHLIGHT_BG = 4;
 const CLR_PROGRESS = 14;
@@ -110,6 +124,16 @@ class newscan extends BaseSubModule {
 		}
 	}
 
+	_navKey(key, label) {
+		if (!this.call) return;
+		this.call.cmds.setfgcolor(CLR_NAV);
+		this.call.cmds.senddata(key);
+		if (label) {
+			this.call.cmds.setfgcolor(CLR_NAV_LABEL);
+			this.call.cmds.senddata(" " + label);
+		}
+	}
+
 	_calcGeometry() {
 		this._navRow = this._termH;
 		this._statusRow = this._termH - 1;
@@ -142,13 +166,16 @@ class newscan extends BaseSubModule {
 			return;
 		}
 
-		var groups;
+		var subsMod = await getSubsMod();
+
 		if (this._scanMode === "group" && this.call.msg_group) {
 			// Scan only the current group
 			var areas = await getAreasInGroup(this.call.msg_group, this.call.security);
 			if (areas && areas.length > 0) {
+				var subscribedSet = await this._getSubscribedSet(subsMod, areas);
 				for (var a = 0; a < areas.length; a++) {
 					var area = areas[a];
+					if (!subscribedSet[area.shortcode]) continue;
 					try {
 						var count = await pm.getUnreadCount(this._userId, area.shortcode);
 						this._scanAreas.push({
@@ -171,15 +198,17 @@ class newscan extends BaseSubModule {
 			}
 		} else {
 			// Scan all groups
-			groups = await listMsgGroups(this.call.security);
+			var groups = await listMsgGroups(this.call.security);
 			if (groups) {
 				for (var g = 0; g < groups.length; g++) {
 					var group = groups[g];
 					var areas = await getAreasInGroup(group.shortcode, this.call.security);
 					if (!areas || areas.length === 0) continue;
 
+					var subscribedSet = await this._getSubscribedSet(subsMod, areas);
 					for (var a = 0; a < areas.length; a++) {
 						var area = areas[a];
+						if (!subscribedSet[area.shortcode]) continue;
 						try {
 							var count = await pm.getUnreadCount(this._userId, area.shortcode);
 							this._scanAreas.push({
@@ -212,6 +241,24 @@ class newscan extends BaseSubModule {
 				this._areasWithUnread++;
 			}
 		}
+	}
+
+	// Helper: get subscribed set for a list of areas
+	// Returns { shortcode: true/false } map. If no sub module, all areas are included.
+	async _getSubscribedSet(subsMod, areas) {
+		if (subsMod && subsMod.getSubscriptionMap) {
+			try {
+				var areasWithDefaults = areas.map(a => ({
+					shortcode: a.shortcode,
+					newscan_default: (a.newscan_default === undefined || a.newscan_default === null) ? true : a.newscan_default
+				}));
+				return await subsMod.getSubscriptionMap(this._userId, areasWithDefaults);
+			} catch (_) {}
+		}
+		// Fallback: include all areas
+		var result = {};
+		for (var i = 0; i < areas.length; i++) result[areas[i].shortcode] = true;
+		return result;
 	}
 
 	// ===========================================================================
@@ -344,8 +391,14 @@ class newscan extends BaseSubModule {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(1, this._navRow);
 		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_NAV);
-		this.call.cmds.senddata(" [Enter] Start Scan  [G] Go to Area  [M] Mark All Read  [ESC/Q] Back");
+		this.call.cmds.senddata(" ");
+		this._navKey("Enter", "Start Scan");
+		this.call.cmds.senddata("  ");
+		this._navKey("G", "Go to Area");
+		this.call.cmds.senddata("  ");
+		this._navKey("M", "Mark All Read");
+		this.call.cmds.senddata("  ");
+		this._navKey("Q", "Back");
 		this.call.cmds.resetcolors();
 	}
 

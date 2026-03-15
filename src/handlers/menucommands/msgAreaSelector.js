@@ -3,6 +3,19 @@ import { updateUserMsgGroup, updateUserMsgArea } from "../../models/useraccounts
 import { listMsgGroups, getAreasInGroup } from "../../models/messages.js";
 import * as alogger from "../../utils/alogger.js";
 
+// Lazy-import subscription module
+var _subsMod = null;
+async function getSubsMod() {
+	if (!_subsMod) {
+		try {
+			_subsMod = await import("../../models/userAreaSubs.js");
+		} catch (_) {
+			_subsMod = {};
+		}
+	}
+	return _subsMod;
+}
+
 // Row types in the flattened list
 const ROW_GROUP = "group";
 const ROW_AREA = "area";
@@ -17,6 +30,8 @@ const df_current_clr = 10;
 const df_prompt_clr = 11;
 const df_search_clr = 14;
 const df_status_clr = 8;
+const df_nav_clr = 11;
+const df_nav_label_clr = 7;
 const df_error_clr = 9;
 
 // CP437 bytes (extended range 0x80-0xFF — safe, won't be interpreted as control codes)
@@ -63,6 +78,8 @@ class msgAreaSelector extends BaseSubModule {
 		this.prompt_clr = theme.prompt_clr || df_prompt_clr;
 		this.search_clr = theme.search_clr || df_search_clr;
 		this.status_clr = theme.status_clr || df_status_clr;
+		this.nav_clr = theme.nav_clr || df_nav_clr;
+		this.nav_label_clr = theme.nav_label_clr || df_nav_label_clr;
 		this.error_clr = theme.error_clr || df_error_clr;
 
 		this.loggingId = "MsgAreaSelector (Node " + call.nodenum + ")";
@@ -70,6 +87,15 @@ class msgAreaSelector extends BaseSubModule {
 		// Encoding — determines which character set to use for glyphs
 		var enc = (call.term_encoding || "").toLowerCase();
 		this._isUTF8 = (enc === "utf8" || enc === "utf-8");
+
+		// User ID for subscription lookups
+		this._userId = null;
+		if (call.user_record) {
+			this._userId = call.user_record.id || call.user_record.user_id || null;
+		}
+
+		// Subscription state: { shortcode: true/false }
+		this._subMap = {};
 	}
 
 	// Send a display glyph that respects terminal encoding.
@@ -80,6 +106,16 @@ class msgAreaSelector extends BaseSubModule {
 			this.call.cmds.senddata(utf8Char);
 		} else {
 			this.call.cmds.senddata(Buffer.from([cp437Byte]));
+		}
+	}
+
+	_navKey(key, label) {
+		if (!this.call) return;
+		this.call.cmds.setfgcolor(this.nav_clr);
+		this.call.cmds.senddata(key);
+		if (label) {
+			this.call.cmds.setfgcolor(this.nav_label_clr);
+			this.call.cmds.senddata(" " + label);
 		}
 	}
 
@@ -119,9 +155,25 @@ class msgAreaSelector extends BaseSubModule {
 					description: area.description || "",
 					msgCount: area.msg_count || 0,
 					lastFrom: area.last_from || "",
-					lastMessage: area.last_message || null
+					lastMessage: area.last_message || null,
+					newscan_default: (area.newscan_default === undefined || area.newscan_default === null) ? true : area.newscan_default
 				});
 				this.areaCount++;
+			}
+		}
+
+		// Load subscription state
+		if (this._userId) {
+			var subsMod = await getSubsMod();
+			if (subsMod.getSubscriptionMap) {
+				try {
+					var areasWithDefaults = this.allRows
+						.filter(r => r.type === ROW_AREA)
+						.map(r => ({ shortcode: r.shortcode, newscan_default: r.newscan_default }));
+					this._subMap = await subsMod.getSubscriptionMap(this._userId, areasWithDefaults);
+				} catch (_) {
+					this._subMap = {};
+				}
 			}
 		}
 
@@ -336,12 +388,15 @@ class msgAreaSelector extends BaseSubModule {
 
 		var isCurrent = (this.call.msg_area &&
 			row.shortcode.toUpperCase() === this.call.msg_area.toUpperCase());
+		var isSubscribed = this._subMap[row.shortcode] !== undefined ? this._subMap[row.shortcode] : true;
 
 		if (isHighlighted) {
 			this.call.cmds.setfgcolor(this.highlight_fg);
 			this.call.cmds.setbgcolor(this.highlight_bg);
 		} else if (isCurrent) {
 			this.call.cmds.setfgcolor(this.current_clr);
+		} else if (!isSubscribed) {
+			this.call.cmds.setfgcolor(this.status_clr); // Dim unsubscribed areas
 		} else {
 			this.call.cmds.setfgcolor(this.area_clr);
 		}
@@ -390,15 +445,32 @@ class msgAreaSelector extends BaseSubModule {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(this.listStartCol, this.statusRow);
 		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(this.status_clr);
 
 		var areaIdx = this._countAreasBefore(this.cursorIdx) + 1;
-		var posStr = this.areaCount > 0 ? " " + areaIdx + "/" + this.areaCount + " " : "";
+		var posStr = this.areaCount > 0 ? " " + areaIdx + "/" + this.areaCount : "";
 
 		if (this.searchMode) {
-			this.call.cmds.senddata("[Enter] Select  [ESC] Cancel Search" + posStr);
+			this._navKey("Enter", "Select");
+			this.call.cmds.senddata("  ");
+			this._navKey("Esc", "Cancel Search");
 		} else {
-			this.call.cmds.senddata("[Enter] Select  [S] Search  [ESC/Q] Cancel" + posStr);
+			this._navKey("Enter", "Select");
+			this.call.cmds.senddata("  ");
+			this._navKey("S", "Search");
+			this.call.cmds.senddata("  ");
+			// Show toggle label based on current area's subscription state
+			var curRow = this.filteredRows[this.cursorIdx];
+			if (curRow && curRow.type === ROW_AREA) {
+				var isSub = this._subMap[curRow.shortcode] !== undefined ? this._subMap[curRow.shortcode] : true;
+				this._navKey("T", isSub ? "Unsub" : "Sub");
+				this.call.cmds.senddata("  ");
+			}
+			this._navKey("Q", "Cancel");
+		}
+
+		if (posStr) {
+			this.call.cmds.setfgcolor(this.status_clr);
+			this.call.cmds.senddata(posStr);
 		}
 
 		this.call.cmds.resetcolors();
@@ -494,6 +566,27 @@ class msgAreaSelector extends BaseSubModule {
 
 		alogger.writeAlog(5, this.loggingId + " Selected: " + row.groupShortcode + "/" + row.shortcode, "greenbright");
 		this.signalReturn();
+	}
+
+	// --- Subscription toggle ---
+
+	async _toggleSubscription() {
+		if (!this._userId) return;
+		if (this.cursorIdx < 0 || this.cursorIdx >= this.filteredRows.length) return;
+		var row = this.filteredRows[this.cursorIdx];
+		if (row.type !== ROW_AREA) return;
+
+		var subsMod = await getSubsMod();
+		if (!subsMod.toggleSubscription) return;
+
+		try {
+			var newState = await subsMod.toggleSubscription(this._userId, row.shortcode);
+			this._subMap[row.shortcode] = newState;
+			this._drawList();
+			this._drawStatusLine();
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " toggle subscription error: " + (err?.message || err), "redbright");
+		}
 	}
 
 	// --- Search mode ---
@@ -610,6 +703,10 @@ class msgAreaSelector extends BaseSubModule {
 		}
 		if (lower === "s") {
 			this._enterSearch();
+			return;
+		}
+		if (lower === "t") {
+			this._toggleSubscription();
 			return;
 		}
 	}

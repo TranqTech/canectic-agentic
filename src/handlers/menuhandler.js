@@ -8,6 +8,7 @@ import { WhosOnline } from "./whosonline.js";
 import { msgAreaSelector } from "./menucommands/msgAreaSelector.js";
 import { msgReader } from "./menucommands/msgReader.js";
 import { msgEditor } from "./menucommands/msgEditor.js";
+import { newscan } from "./menucommands/newscan.js";
 import { testDownloader } from "./menucommands/testdownload.js";
 
 // Models
@@ -588,6 +589,14 @@ class MenuHandler extends BaseHandler {
 					mode: "new",
 					shortcode: this.call.msg_area,
 				}));
+				return;
+
+			case "newScan":
+				this._runSubModule(new newscan(this.call, { scanMode: "all" }));
+				return;
+
+			case "newScanGroup":
+				this._runSubModule(new newscan(this.call, { scanMode: "group" }));
 				return;
 
 			case "userList":

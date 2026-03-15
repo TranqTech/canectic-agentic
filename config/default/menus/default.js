@@ -38,6 +38,7 @@ const defaultmenuarray = [
 		{"display": "J) Change Group", "fg_clr": 10, "bg_clr": 0, "hotkey": "J", "command_name": "msgGroupChange", "command_arg": "", "required_flags": [], "prohibited_flags": []},
 		{"display": "A) Change Area", "fg_clr": 4, "bg_clr": 0, "hotkey": "A", "command_name": "msgAreaChange", "command_arg": "", "required_flags": [], "prohibited_flags": []},
 		{"display": "L) List Messages", "fg_clr": 7, "bg_clr": 0, "hotkey": "L", "command_name": "listMessages", "command_arg": "", "required_flags": [], "prohibited_flags": []},
+		{"display": "N) New Messages", "fg_clr": 7, "bg_clr": 0, "hotkey": "N", "command_name": "newScan", "command_arg": "", "required_flags": [], "prohibited_flags": []},
 		{"display": "P) Post Message", "fg_clr": 10, "bg_clr": 0, "hotkey": "P", "command_name": "postMessage", "command_arg": "", "required_flags": [], "prohibited_flags": []},
 		{"display": "R) Read Messages", "fg_clr": 7, "bg_clr": 0, "hotkey": "R", "command_name": "readMessages", "command_arg": "", "required_flags": [], "prohibited_flags": []},
 		{"display": "G) Goodbye", "fg_clr": 10, "bg_clr": 0, "hotkey": "G", "command_name": "logOff", "command_arg": "", "required_flags": [], "prohibited_flags": []},

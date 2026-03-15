@@ -507,18 +507,51 @@ Row H:   [Left] Prev [Right] Next [R]eply [L]ast [[] []] Thd [T]oggle [Q]uit
 
 #### Body Text Processing
 
-Terminal display uses `msg.utf8 || msg.body_text` (never `body_html` which is for web).
+Handled by `termMsgFormat.js` utility module, called from `msgReader._prepareBodyLines()`.
 
-Processing pipeline per message:
+**Processing pipeline per message:**
 1. Get raw text: `msg.utf8 || msg.body_text || ''`
-2. Normalize line endings: `\r\n` → `\n`, lone `\r` → `\n`
-3. Split on `\n` into lines
-4. Word-wrap long lines to `(bodyWidth - 2)` columns (1 col margin each side within body zone)
-5. Store as `bodyLines[]` array
+2. **CP437 → UTF-8 conversion**: If terminal is UTF-8 and message has no `utf8` field (body is CP437), convert extended bytes (0x80-0xFF) to Unicode equivalents
+3. **Pipe code conversion**: `|XX` patterns (|00-|23) → ANSI SGR escape sequences
+4. **Ctrl-A code conversion**: `\x01X` patterns → ANSI SGR escape sequences (Synchronet-style)
+5. **ANSI passthrough**: Existing `\x1b[` escape sequences are preserved, never stripped
+6. Normalize line endings: `\r\n` → `\n`, lone `\r` → `\n`
+7. Split on `\n` into lines
+8. **Classify each line**: normal, quote, tear, origin, or kludge (kludge lines are hidden)
+9. **Word-wrap** plain text lines to `(bodyWidth - 2)` columns. Lines with embedded color codes are NOT wrapped (ANSI positioning would break)
+10. **Apply semantic color prefixes**: Each line gets an ANSI SGR prefix based on its type:
+    - Normal text: bright yellow (default, theme key `msg_body_clr`)
+    - Quote lines (`>`, `XX>`, `->`, `-=>`, `=>`, etc.): bright cyan (theme key `msg_quote_clr`)
+    - Tear lines (`---`): bright white (theme key `msg_tear_clr`)
+    - Tagline separators (`--`, `===`): bright green (theme key `msg_tagline_clr`)
+    - Origin lines (anything after a tear or tagline separator): bright blue (theme key `msg_origin_clr`)
+11. **Two-level footer tracking**: Tagline separator (`--`, `===`) and tear line (`---`) each trigger a different color cascade:
+    - After a tagline separator: subsequent lines get tagline color (bright green) — this covers the actual tagline text
+    - After a tear line: subsequent lines get origin color (bright blue) — tear overrides tagline, covering origin, SEEN-BY, PATH, etc.
+    - A message with both (tagline before tear) gets green tagline text between the separators, then blue origin text after the tear
+12. For messages WITH embedded color codes: semantic colors are still applied at the start of each line. Embedded codes naturally override as the terminal processes left to right. Exception: ANSI art (cursor positioning detected) gets no prefixes.
+13. Store as `bodyLines[]` array of `{ text, type, colorPrefix }` objects
 
-**ANSI passthrough**: If the message contains ANSI escape sequences (detected by `\x1b[`), pipe codes, or Ctrl-A codes, lines are sent as-is without word wrapping (the codes handle positioning). A flag `isAnsi` on the message controls this. ANSI messages may need a screen reset between messages.
+**Line classification rules:**
+- Quote: line starts with `>`, `>>`, or 1-3 letter initials followed by `>` or `>>` then space (e.g. `De> `, `JD>> `). Also any mix of `-` and `=` arrow indicators followed by `>` and space (e.g. `-> `, `-=> `, `=> `, `==> `).
+- Tear: line is exactly `---` or starts with `--- ` (FTN tear line)
+- Tagline: line is `--` (signature separator) or `===`+ (three or more equals signs)
+- Origin: line matches `* Origin:` (with optional leading whitespace), OR any line appearing after a tear or tagline separator
+- Kludge: line starts with `\x01` (SOH — FTN internal, never displayed)
+- Everything else: normal text
 
-**Dumb terminal fallback**: Strip all escape sequences, display as plain text with simple `\r\n` pagination and a "[More]" prompt every `term_height - 4` lines.
+**Theme color overrides** (in theme JSON config):
+```json
+{
+    "msg_body_clr": 11,
+    "msg_quote_clr": 14,
+    "msg_tear_clr": 15,
+    "msg_tagline_clr": 10,
+    "msg_origin_clr": 12
+}
+```
+
+**Dumb terminal fallback**: CP437 conversion and pipe/ctrl-a conversion are applied. Lines are paginated with `[More]` prompts. No semantic coloring.
 
 #### Pointer Advancement
 
@@ -1019,6 +1052,7 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 | `msgReader.js` | handlers/menucommands | Fullscreen message reader — thread list, message view, flat mode (Phase 2) |
 | `msgEditor.js` | handlers/menucommands | Message editor — fullscreen + dumb fallback, new thread + reply (Phase 3) |
 | `newscan.js` | handlers/menucommands | Cross-area newscan, wraps msgReader (Phase 2d) |
+| `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring |
 | **Shared models** | | |
 | `messages.js` | models | Message viewing, posting, sanitization |
 | `msgGroups.js` | models | Message group CRUD |

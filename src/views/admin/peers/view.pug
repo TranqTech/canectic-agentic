@@ -198,6 +198,20 @@ block content
                                 td
                                   small Packet PW:
                                 td= cd.packet_password ? '••••' : '—'
+                              if cd.remote_host
+                                tr
+                                  td
+                                    small Mailer Host:
+                                  td= cd.remote_host + ':' + (cd.remote_port || 24554)
+                              tr
+                                td
+                                  small Direct:
+                                td= cd.direct !== false ? 'Yes' : 'No'
+                              if !cd.direct && cd.route_to
+                                tr
+                                  td
+                                    small Route To:
+                                  td= cd.route_to
                             else if conn.connection_type === 'NNTP'
                               tr
                                 td
@@ -479,6 +493,45 @@ block content
                               )
                               small.form-text.text-muted Comma-separated. Route matching addresses through this connection.
                               br
+                              label(for='nc_ftn_direct') Direct Connection:
+                              select#nc_ftn_direct(name='ftn_direct' tabindex='6').form-select
+                                option(value='Yes' selected) Yes — packets addressed directly to this node
+                                option(value='No') No — route via another address
+                              br
+                              #nc_ftn_route_to_wrap(style='display:none')
+                                label(for='nc_ftn_route_to') Route To Address:
+                                input(
+                                  type='text'
+                                  id='nc_ftn_route_to'
+                                  name='ftn_route_to'
+                                  class='form-control'
+                                  placeholder='1:123/0'
+                                )
+                                small.form-text.text-muted Packet destination when not direct.
+                                br
+                              label(for='nc_ftn_remote_host') Mailer Host:
+                                |  
+                                span(data-bs-toggle='tooltip' data-bs-placement='right' title='Hostname or IP for outbound binkp connections. Leave blank if this peer calls us.')
+                                  i.bi.bi-info-circle.text-muted
+                              input(
+                                type='text'
+                                id='nc_ftn_remote_host'
+                                name='ftn_remote_host'
+                                class='form-control'
+                                placeholder='bbs.example.com'
+                              )
+                              br
+                              label(for='nc_ftn_remote_port') Mailer Port:
+                              input(
+                                type='number'
+                                id='nc_ftn_remote_port'
+                                name='ftn_remote_port'
+                                class='form-control'
+                                value='24554'
+                                min=1
+                                max=65535
+                              )
+                              br
                           .col-5
                             label(for='nc_active') Status:
                             select#nc_active(name='active' tabindex='6').form-select
@@ -707,6 +760,25 @@ block content
                                   i.bi.bi-info-circle.text-muted
                               input(type='text' id='ec_ftn_routing_rules' name='ftn_routing_rules' class='form-control' tabindex='4' placeholder='1:*, 2:234/*, 3:512/100')
                               small.form-text.text-muted Comma-separated. Route matching addresses through this connection.
+                              br
+                              label(for='ec_ftn_direct') Direct Connection:
+                              select#ec_ftn_direct(name='ftn_direct' tabindex='5').form-select
+                                option(value='Yes') Yes — packets addressed directly to this node
+                                option(value='No') No — route via another address
+                              br
+                              #ec_ftn_route_to_wrap(style='display:none')
+                                label(for='ec_ftn_route_to') Route To Address:
+                                input(type='text' id='ec_ftn_route_to' name='ftn_route_to' class='form-control' placeholder='1:123/0')
+                                small.form-text.text-muted Packet destination when not direct.
+                                br
+                              label(for='ec_ftn_remote_host') Mailer Host:
+                                |  
+                                span(data-bs-toggle='tooltip' data-bs-placement='right' title='Hostname or IP for outbound binkp connections. Leave blank if this peer calls us.')
+                                  i.bi.bi-info-circle.text-muted
+                              input(type='text' id='ec_ftn_remote_host' name='ftn_remote_host' class='form-control' placeholder='bbs.example.com')
+                              br
+                              label(for='ec_ftn_remote_port') Mailer Port:
+                              input(type='number' id='ec_ftn_remote_port' name='ftn_remote_port' class='form-control' value='24554' min=1 max=65535)
                               br
                             label(for='ec_system_address') System Address:
                             select#ec_system_address(name='system_address_id' tabindex='5').form-select
@@ -942,6 +1014,25 @@ block content
         ecQwkTransport.addEventListener('change', function() { toggleQwkClientFields('ec'); });
       }
 
+      // Toggle route_to field visibility based on direct selection
+      function toggleFtnRouteField(prefix) {
+        var sel  = document.getElementById(prefix + '_ftn_direct');
+        var wrap = document.getElementById(prefix + '_ftn_route_to_wrap');
+        if (sel && wrap) {
+          wrap.style.display = sel.value === 'No' ? '' : 'none';
+        }
+      }
+
+      // FTN direct select change events
+      var ncFtnDirect = document.getElementById('nc_ftn_direct');
+      if (ncFtnDirect) {
+        ncFtnDirect.addEventListener('change', function() { toggleFtnRouteField('nc'); });
+      }
+      var ecFtnDirect = document.getElementById('ec_ftn_direct');
+      if (ecFtnDirect) {
+        ecFtnDirect.addEventListener('change', function() { toggleFtnRouteField('ec'); });
+      }
+
       // New connection type switcher
       const ncType = document.getElementById('nc_type');
       if (ncType) {
@@ -998,6 +1089,11 @@ block content
             document.getElementById('ec_ftn_packetpw').value        = cd.packet_password || '';
             document.getElementById('ec_ftn_ticpw').value           = cd.tic_password || '';
             document.getElementById('ec_ftn_areafixpw').value       = cd.areafix_password || '';
+            document.getElementById('ec_ftn_direct').value          = cd.direct === false ? 'No' : 'Yes';
+            document.getElementById('ec_ftn_route_to').value        = cd.route_to || '';
+            document.getElementById('ec_ftn_remote_host').value     = cd.remote_host || '';
+            document.getElementById('ec_ftn_remote_port').value     = cd.remote_port || 24554;
+            toggleFtnRouteField('ec');
           } else if (type === 'NNTP') {
             document.getElementById('ec_nntp_host').value     = cd.host || '';
             document.getElementById('ec_nntp_port').value     = cd.port || 119;

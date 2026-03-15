@@ -24,16 +24,18 @@ const CLR_HEADER_VALUE = 15;
 const CLR_HEADER_DIM = 8;
 const CLR_FIELD_ACTIVE = 14;
 const CLR_FIELD_INACTIVE = 7;
-const CLR_BODY = 7;
-const CLR_QUOTE = 3;
 const CLR_STATUS = 8;
 const CLR_NAV = 11;
+const CLR_NAV_LABEL = 7;
 const CLR_SEPARATOR = 8;
 const CLR_ERROR = 9;
 const CLR_PROMPT = 14;
-const CLR_QUOTE_SELECT = 15;
 const CLR_QUOTE_BAR_FG = 15;
 const CLR_QUOTE_BAR_BG = 4;
+
+// Default body semantic colors (overridable via theme, matching reader)
+const DF_CLR_BODY = 11;      // Editing text — bright yellow
+const DF_CLR_QUOTE = 14;     // Quote lines — bright cyan
 
 // CP437 safe glyphs
 const CP437_HLINE = 0xC4;
@@ -100,6 +102,11 @@ class msgEditor extends BaseSubModule {
 		this._dumbBuf = "";
 		this._dumbLines = [];
 
+		// Body semantic colors (from theme, with defaults matching reader)
+		var theme = call.theme || {};
+		this._clrBody = theme.msg_body_clr !== undefined ? theme.msg_body_clr : DF_CLR_BODY;
+		this._clrQuote = theme.msg_quote_clr !== undefined ? theme.msg_quote_clr : DF_CLR_QUOTE;
+
 		this.loggingId = "MsgEditor (Node " + call.nodenum + ")";
 	}
 
@@ -112,6 +119,26 @@ class msgEditor extends BaseSubModule {
 		} else {
 			this.call.cmds.senddata(Buffer.from([cp437Byte]));
 		}
+	}
+
+	_navKey(key, label) {
+		if (!this.call) return;
+		this.call.cmds.setfgcolor(CLR_NAV);
+		this.call.cmds.senddata(key);
+		if (label) {
+			this.call.cmds.setfgcolor(CLR_NAV_LABEL);
+			this.call.cmds.senddata(" " + label);
+		}
+	}
+
+	// Detect quote lines — same patterns as termMsgFormat.classifyLine
+	_isQuoteLine(line) {
+		if (!line) return false;
+		var trimmed = line.trimStart();
+		if (/^\s*>/.test(trimmed)) return true;
+		if (/^\s*[A-Za-z]{1,3}>{1,2}\s/.test(trimmed)) return true;
+		if (/^\s*[-=]+>\s/.test(trimmed)) return true;
+		return false;
 	}
 
 	// --- Geometry ---
@@ -272,7 +299,8 @@ class msgEditor extends BaseSubModule {
 		this.call.cmds.movecursor(1, 4);
 		this.call.cmds.cleartoeol();
 		this.call.cmds.setfgcolor(CLR_SEPARATOR);
-		for (var i = 0; i < this._termW; i++) {
+		var count = this._termW - 1;
+		for (var i = 0; i < count; i++) {
 			this._sendGlyph("\u2500", CP437_HLINE);
 		}
 		this.call.cmds.resetcolors();
@@ -288,11 +316,11 @@ class msgEditor extends BaseSubModule {
 			this.call.cmds.cleartoeol();
 
 			if (lineIdx < this._lines.length) {
-				this.call.cmds.setfgcolor(CLR_BODY);
 				var displayLine = this._lines[lineIdx];
-				// Color quote lines
-				if (displayLine.startsWith("> ") || displayLine.startsWith(">")) {
-					this.call.cmds.setfgcolor(CLR_QUOTE);
+				if (this._isQuoteLine(displayLine)) {
+					this.call.cmds.setfgcolor(this._clrQuote);
+				} else {
+					this.call.cmds.setfgcolor(this._clrBody);
 				}
 				this.call.cmds.senddata(" " + this._truncate(displayLine, this._bodyWidth - 2));
 			}
@@ -311,10 +339,10 @@ class msgEditor extends BaseSubModule {
 
 		if (lineIdx < this._lines.length) {
 			var displayLine = this._lines[lineIdx];
-			if (displayLine.startsWith("> ") || displayLine.startsWith(">")) {
-				this.call.cmds.setfgcolor(CLR_QUOTE);
+			if (this._isQuoteLine(displayLine)) {
+				this.call.cmds.setfgcolor(this._clrQuote);
 			} else {
-				this.call.cmds.setfgcolor(CLR_BODY);
+				this.call.cmds.setfgcolor(this._clrBody);
 			}
 			this.call.cmds.senddata(" " + this._truncate(displayLine, this._bodyWidth - 2));
 		}
@@ -358,17 +386,27 @@ class msgEditor extends BaseSubModule {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(1, this._navRow);
 		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_NAV);
 
 		if (this._state === STATE.QUOTING) {
-			this.call.cmds.senddata(" [Enter] Toggle line  [A] Select All  [N] Clear  [Ctrl+Q/ESC] Insert & Return");
+			this.call.cmds.senddata(" ");
+			this._navKey("Enter", "Toggle");
+			this.call.cmds.senddata("  ");
+			this._navKey("A", "Select All");
+			this.call.cmds.senddata("  ");
+			this._navKey("N", "Clear");
+			this.call.cmds.senddata("  ");
+			this._navKey("Esc", "Insert & Return");
 		} else {
-			var parts = ["[Ctrl+Z] Save", "[Ctrl+A] Abort"];
+			this.call.cmds.senddata(" ");
+			this._navKey("^Z", "Save");
+			this.call.cmds.senddata("  ");
+			this._navKey("^A", "Abort");
 			if (this._mode === "reply" && this._quoteLines.length > 0) {
-				parts.push("[Ctrl+Q] Quote");
+				this.call.cmds.senddata("  ");
+				this._navKey("^Q", "Quote");
 			}
-			parts.push("[Tab] Cycle Fields");
-			this.call.cmds.senddata(" " + parts.join("  "));
+			this.call.cmds.senddata("  ");
+			this._navKey("Tab", "Fields");
 		}
 		this.call.cmds.resetcolors();
 	}
@@ -545,7 +583,7 @@ class msgEditor extends BaseSubModule {
 			// Prepend to the existing next line
 			var nextLine = this._lines[lineIdx + 1];
 			// Only merge if the next line isn't a blank separator or quote
-			if (nextLine.length > 0 && !nextLine.startsWith("> ")) {
+			if (nextLine.length > 0 && !this._isQuoteLine(nextLine)) {
 				this._lines[lineIdx + 1] = overflow + " " + nextLine;
 			} else {
 				// Insert a new line
@@ -753,10 +791,10 @@ class msgEditor extends BaseSubModule {
 			if (isHighlighted) {
 				this.call.cmds.setfgcolor(CLR_QUOTE_BAR_FG);
 				this.call.cmds.setbgcolor(CLR_QUOTE_BAR_BG);
-			} else if (isSelected) {
-				this.call.cmds.setfgcolor(CLR_QUOTE_SELECT);
 			} else {
-				this.call.cmds.setfgcolor(CLR_QUOTE);
+				// All source text in quote color — selected lines get bright white
+				// to distinguish "toggled on" from "not yet toggled"
+				this.call.cmds.setfgcolor(isSelected ? CLR_QUOTE_BAR_FG : this._clrQuote);
 			}
 
 			var marker = isSelected ? "* " : "  ";

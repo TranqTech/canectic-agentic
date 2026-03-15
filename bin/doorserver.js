@@ -9,6 +9,7 @@ import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
 import {CallManager, CallPool} from "../src/managers/callmanager.js"
 import {nodeManager} from "../src/managers/nodemanager.js"
+import {MailerManager} from "../src/mailer/manager.js"
 import { SocatManager } from "../src/managers/socatmanager.js";
 import {webserver} from "../src/servers/webserver.js"
 import { pgpool } from "../src/middleware/db/postgres.js";
@@ -22,6 +23,7 @@ const vsoftwarename = systeminfo.softwareName()
 const systemvermsg = systeminfo.versionMsg()
 var systemstartupmsg = systemvermsg + "\n  System Startup"
 var systemshutdownmsg = systemvermsg + "\n  System Shutdown"
+var mailerManager
 dotenv.config();
 const webport = process.env.webport || 8080
 var runwssrv = true
@@ -92,6 +94,11 @@ async function startWebServer(){
 	})
 }
 
+async function startMailerManager(){
+	mailerManager = new MailerManager
+	await mailerManager.start()
+}
+
 async function startCallPools(){
 	alogger.writeAlog(1, "Starting Call Manager", "cyanbright", true)
 	callManager = new CallManager(primaryNodeManager)
@@ -149,6 +156,7 @@ async function exitWatch(){
 
 async function main(){
 	await userMsgPointers.ensureConstraintsAndIndexes();
+	await startMailerManager()
 	await startNodeManager()
 	await startSocatManager()
 	await startCallPools()

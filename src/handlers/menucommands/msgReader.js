@@ -1,6 +1,6 @@
 import { BaseSubModule } from "../basesubmodule.js";
 import { getRecentThreadsForArea, getThreadsPage, getThreadCount,
-	getMessages, getMessageCount, getMessage } from "../../models/messages.js";
+	getMessages, getMessageCount, countMessagesBefore, getMessage } from "../../models/messages.js";
 import { getAreaByShortcode } from "../../models/msgAreas.js";
 import * as alogger from "../../utils/alogger.js";
 
@@ -10,7 +10,8 @@ async function getPointerMod() {
 	if (!_pointerMod) {
 		try {
 			_pointerMod = await import("../../models/userMsgPointers.js");
-		} catch (_) {
+		} catch (err) {
+			alogger.writeAlog(3, "MsgReader: pointer module load failed: " + (err?.message || err), "redbright");
 			_pointerMod = {};
 		}
 	}
@@ -28,6 +29,32 @@ async function getEditorMod() {
 		}
 	}
 	return _editorMod;
+}
+
+// Lazy-import area selector module
+var _selectorMod = null;
+async function getSelectorMod() {
+	if (!_selectorMod) {
+		try {
+			_selectorMod = await import("./msgAreaSelector.js");
+		} catch (_) {
+			_selectorMod = null;
+		}
+	}
+	return _selectorMod;
+}
+
+// Lazy-import terminal message formatter
+var _fmtMod = null;
+async function getFmtMod() {
+	if (!_fmtMod) {
+		try {
+			_fmtMod = await import("../../utils/termMsgFormat.js");
+		} catch (_) {
+			_fmtMod = null;
+		}
+	}
+	return _fmtMod;
 }
 
 // --- Constants ---
@@ -49,15 +76,30 @@ const CLR_THREAD = 15;
 const CLR_THREAD_UNREAD = 10;
 const CLR_BAR_FG = 15;
 const CLR_BAR_BG = 4;
-const CLR_HEADER_LABEL = 11;
-const CLR_HEADER_VALUE = 15;
-const CLR_HEADER_DIM = 8;
-const CLR_BODY = 7;
+const CLR_HDR_LABEL = 6;     // Header labels + colons + "of" — cyan
+const CLR_HDR_FROM = 10;     // From field — bright green (default)
+const CLR_HDR_FROM_ME = 11;  // From field when matches user — bright yellow
+const CLR_HDR_TO = 10;       // To field — bright green (default)
+const CLR_HDR_TO_ME = 11;    // To field when matches user or "All" — bright yellow
+const CLR_HDR_SUBJ = 3;      // Subject — yellow (dark)
+const CLR_HDR_AREA = 5;      // Area — magenta
+const CLR_HDR_DATE = 10;     // Date/Time — bright green
+const CLR_HDR_MODE = 3;      // Mode — yellow (dark)
+const CLR_HDR_MSG = 11;      // Msg position — bright yellow
 const CLR_STATUS = 8;
 const CLR_NAV = 11;
+const CLR_NAV_LABEL = 7;
 const CLR_ERROR = 9;
-const CLR_SEPARATOR = 8;
+const CLR_SEPARATOR = 4;       // Blue separator lines
+const CLR_SCROLL_IND = 11;    // Yellow scroll indicator block
 const CLR_COL_HEADER = 3;
+
+// Default body semantic colors (overridable via theme)
+const DF_CLR_BODY = 11;      // Normal text — bright yellow
+const DF_CLR_QUOTE = 14;     // Quote lines — bright cyan
+const DF_CLR_TEAR = 15;      // Tear lines — bright white
+const DF_CLR_TAGLINE = 10;   // Tagline separator lines — bright green
+const DF_CLR_ORIGIN = 12;    // Origin lines — bright blue
 
 // CP437 safe glyphs (extended range only)
 const CP437_HLINE  = 0xC4;
@@ -66,6 +108,8 @@ const CP437_ARROW  = 0xAF;
 const CP437_BULLET = 0xF9;
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS_FULL = ["January","February","March","April","May","June",
+	"July","August","September","October","November","December"];
 
 // =========================================================================
 
@@ -82,7 +126,10 @@ class msgReader extends BaseSubModule {
 		this._areaName = call.msg_area_title || call.msg_area || "";
 		this._areaConfig = null;     // loaded from DB
 		this._threadMode = "standard";
-		this._userId = (call.user_record && call.user_record.id) ? call.user_record.id : null;
+		this._userId = null;
+		if (call.user_record) {
+			this._userId = call.user_record.id || call.user_record.user_id || null;
+		}
 
 		// State machine
 		this._state = STATE.LOADING;
@@ -121,11 +168,22 @@ class msgReader extends BaseSubModule {
 		this._oldestId = null;
 		this._newestId = null;
 		this._currentThreadId = null; // DB thread.id for current threaded view
-		this._totalMsgCount = 0;
+		this._totalMsgCount = 0;      // Total messages in area
+		this._threadMsgTotal = 0;     // Total messages in current thread
+		this._msgOffset = 0;          // Messages before our loaded batch (for absolute position)
 
 		// Body scroll state
-		this._bodyLines = [];
+		this._bodyLines = [];   // Array of { text, type, colorPrefix }
 		this._bodyScroll = 0;
+		this._fmtModRef = null; // Cached reference to termMsgFormat module
+
+		// Body semantic colors (from theme, with defaults)
+		var theme = call.theme || {};
+		this._clrBody = theme.msg_body_clr !== undefined ? theme.msg_body_clr : DF_CLR_BODY;
+		this._clrQuote = theme.msg_quote_clr !== undefined ? theme.msg_quote_clr : DF_CLR_QUOTE;
+		this._clrTear = theme.msg_tear_clr !== undefined ? theme.msg_tear_clr : DF_CLR_TEAR;
+		this._clrTagline = theme.msg_tagline_clr !== undefined ? theme.msg_tagline_clr : DF_CLR_TAGLINE;
+		this._clrOrigin = theme.msg_origin_clr !== undefined ? theme.msg_origin_clr : DF_CLR_ORIGIN;
 
 		// Dumb terminal state
 		this._dumbPageLines = 0;
@@ -148,6 +206,23 @@ class msgReader extends BaseSubModule {
 		}
 	}
 
+	// Nav bar helpers: hotkey in bright yellow, label in grey
+	_navKey(key, label) {
+		if (!this.call) return;
+		this.call.cmds.setfgcolor(CLR_NAV);
+		this.call.cmds.senddata(key);
+		if (label) {
+			this.call.cmds.setfgcolor(CLR_NAV_LABEL);
+			this.call.cmds.senddata(" " + label);
+		}
+	}
+
+	_navArrow(utf8Char, cp437Byte) {
+		if (!this.call) return;
+		this.call.cmds.setfgcolor(CLR_NAV);
+		this._sendGlyph(utf8Char, cp437Byte);
+	}
+
 	// --- Geometry ---
 
 	_calcGeometry() {
@@ -158,8 +233,8 @@ class msgReader extends BaseSubModule {
 		this._navRow = this._termH;
 		this._statusRow = this._termH - 1;
 
-		// Message view: header rows 1-3, separator row 4, body 5 to H-2
-		this._bodyViewStart = 5;
+		// Message view: header rows 1-4, separator row 5, body 6 to H-2
+		this._bodyViewStart = 6;
 		this._bodyViewEnd = this._termH - 2;
 		this._bodyViewHeight = this._bodyViewEnd - this._bodyViewStart + 1;
 		if (this._bodyViewHeight < 3) this._bodyViewHeight = 3;
@@ -190,6 +265,31 @@ class msgReader extends BaseSubModule {
 		var hr = String(d.getHours()).padStart(2, "0");
 		var mn = String(d.getMinutes()).padStart(2, "0");
 		return yr + "-" + mo + "-" + dy + " " + hr + ":" + mn;
+	}
+
+	// "Today", "Yesterday", or "January 15, 2024"
+	_formatDatePart(date) {
+		if (!date) return "";
+		var d = new Date(date);
+		if (isNaN(d.getTime())) return "";
+
+		var now = new Date();
+		var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		var msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+		var diff = today.getTime() - msgDay.getTime();
+
+		if (diff === 0) return "Today";
+		if (diff === 86400000) return "Yesterday";
+
+		return MONTHS_FULL[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
+	}
+
+	// "14:32" (24hr)
+	_formatTimePart(date) {
+		if (!date) return "";
+		var d = new Date(date);
+		if (isNaN(d.getTime())) return "";
+		return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
 	}
 
 	// --- Word wrap ---
@@ -228,18 +328,41 @@ class msgReader extends BaseSubModule {
 
 	// --- Prepare body lines for a message ---
 
-	_prepareBodyLines(msg) {
-		var rawText = msg.utf8 || msg.body_text || "";
-		var isAnsi = msg.isAnsi || false;
+	async _prepareBodyLines(msg) {
+		var wrapWidth = this._bodyWidth - 2;
+		if (wrapWidth < 20) wrapWidth = 20;
 
-		if (isAnsi) {
-			// ANSI messages sent as-is; split on lines but don't wrap
-			rawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-			this._bodyLines = rawText.split("\n");
+		var fmtMod = await getFmtMod();
+		this._fmtModRef = fmtMod; // Stash for _sendBodyText to use
+		if (fmtMod && fmtMod.processMessageBody) {
+			this._bodyLines = fmtMod.processMessageBody(msg, {
+				isUTF8: this._isUTF8,
+				wrapWidth: wrapWidth,
+				colors: {
+					body: this._clrBody,
+					quote: this._clrQuote,
+					tear: this._clrTear,
+					tagline: this._clrTagline,
+					origin: this._clrOrigin,
+				}
+			});
 		} else {
-			var wrapWidth = this._bodyWidth - 2;
-			if (wrapWidth < 20) wrapWidth = 20;
-			this._bodyLines = this._wordWrap(rawText, wrapWidth);
+			// Fallback — no formatter available, basic display with body color
+			var rawText = msg.utf8 || msg.body_text || "";
+			rawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+			var lines = rawText.split("\n");
+			this._bodyLines = [];
+			// Build a basic color prefix from the body color setting
+			var bodyClr = this._clrBody;
+			var fallbackPrefix = bodyClr > 7
+				? "\x1b[1;" + (bodyClr + 30 - 8) + "m"
+				: "\x1b[" + (bodyClr + 30) + "m";
+			for (var i = 0; i < lines.length; i++) {
+				var wrapped = this._wordWrap(lines[i], wrapWidth);
+				for (var w = 0; w < wrapped.length; w++) {
+					this._bodyLines.push({ text: wrapped[w], type: "normal", colorPrefix: fallbackPrefix });
+				}
+			}
 		}
 		this._bodyScroll = 0;
 	}
@@ -329,8 +452,17 @@ class msgReader extends BaseSubModule {
 		this._currentThreadId = threadDbId;
 		this._viewMode = "threaded";
 
-		// Find first unread position
+		// Get thread total from the thread list data
+		if (this._filteredThreads[this._threadCursor] &&
+			this._filteredThreads[this._threadCursor].id === threadDbId) {
+			this._threadMsgTotal = this._filteredThreads[this._threadCursor].message_count || 0;
+		} else {
+			this._threadMsgTotal = 0;
+		}
+
+		// Find starting position from user's read pointer
 		var startAfterId = 0;
+		var allRead = false;
 		if (this._userId) {
 			var pm = await getPointerMod();
 			if (pm.getFirstUnreadInThread) {
@@ -338,29 +470,53 @@ class msgReader extends BaseSubModule {
 					var firstUnread = await pm.getFirstUnreadInThread(
 						this._userId, this._areaShortcode, threadDbId
 					);
-					if (firstUnread) startAfterId = firstUnread - 1;
-				} catch (_) {}
+					if (firstUnread > 0) {
+						startAfterId = firstUnread - 1;
+					} else {
+						allRead = true;
+					}
+				} catch (err) {
+					alogger.writeAlog(3, this.loggingId + " getFirstUnreadInThread error: " + (err?.message || err), "redbright");
+				}
 			}
 		}
 
-		this._messages = await getMessages(this._areaShortcode, {
-			threadId: threadDbId,
-			afterId: startAfterId > 0 ? startAfterId : undefined,
-			limit: MSG_BATCH,
-			order: "ASC"
-		});
-
-		// If we got nothing (pointer is past end), load from the start
-		if (this._messages.length === 0 && startAfterId > 0) {
+		if (allRead) {
+			// Everything read — load the most recent batch, position at last message
 			this._messages = await getMessages(this._areaShortcode, {
 				threadId: threadDbId,
 				limit: MSG_BATCH,
+				order: "DESC"
+			});
+			this._messages.reverse();
+			this._msgIdx = this._messages.length > 0 ? this._messages.length - 1 : 0;
+		} else {
+			this._messages = await getMessages(this._areaShortcode, {
+				threadId: threadDbId,
+				afterId: startAfterId > 0 ? startAfterId : undefined,
+				limit: MSG_BATCH,
 				order: "ASC"
 			});
+			if (this._messages.length === 0 && startAfterId > 0) {
+				this._messages = await getMessages(this._areaShortcode, {
+					threadId: threadDbId,
+					limit: MSG_BATCH,
+					order: "ASC"
+				});
+			}
+			this._msgIdx = 0;
 		}
-
-		this._msgIdx = 0;
 		this._updateMessageBounds();
+
+		// Compute absolute offset — how many messages exist before our batch
+		this._msgOffset = 0;
+		if (this._messages.length > 0 && this._oldestId) {
+			try {
+				this._msgOffset = await countMessagesBefore(
+					this._areaShortcode, this._oldestId, threadDbId
+				);
+			} catch (_) {}
+		}
 
 		// Check if there are older/newer messages
 		if (this._messages.length > 0) {
@@ -387,8 +543,10 @@ class msgReader extends BaseSubModule {
 	async _loadMessagesFlat() {
 		this._currentThreadId = null;
 		this._viewMode = "flat";
+		this._threadMsgTotal = 0;
 
 		var startAfterId = 0;
+		var allRead = false;
 		if (this._userId) {
 			var pm = await getPointerMod();
 			if (pm.getFirstUnreadInArea) {
@@ -396,28 +554,53 @@ class msgReader extends BaseSubModule {
 					var firstUnread = await pm.getFirstUnreadInArea(
 						this._userId, this._areaShortcode
 					);
-					if (firstUnread) startAfterId = firstUnread - 1;
-				} catch (_) {}
+					if (firstUnread > 0) {
+						startAfterId = firstUnread - 1;
+					} else {
+						allRead = true;
+					}
+				} catch (err) {
+					alogger.writeAlog(3, this.loggingId + " getFirstUnreadInArea error: " + (err?.message || err), "redbright");
+				}
 			}
 		}
 
-		this._messages = await getMessages(this._areaShortcode, {
-			afterId: startAfterId > 0 ? startAfterId : undefined,
-			limit: MSG_BATCH,
-			order: "ASC"
-		});
-
-		if (this._messages.length === 0 && startAfterId > 0) {
+		if (allRead) {
+			// Everything read — load the most recent batch, position at last message
 			this._messages = await getMessages(this._areaShortcode, {
+				limit: MSG_BATCH,
+				order: "DESC"
+			});
+			this._messages.reverse();
+			this._msgIdx = this._messages.length > 0 ? this._messages.length - 1 : 0;
+		} else {
+			this._messages = await getMessages(this._areaShortcode, {
+				afterId: startAfterId > 0 ? startAfterId : undefined,
 				limit: MSG_BATCH,
 				order: "ASC"
 			});
+			if (this._messages.length === 0 && startAfterId > 0) {
+				this._messages = await getMessages(this._areaShortcode, {
+					limit: MSG_BATCH,
+					order: "ASC"
+				});
+			}
+			this._msgIdx = 0;
 		}
 
-		this._msgIdx = 0;
 		this._updateMessageBounds();
 		await this._checkMessageBounds();
 		this._totalMsgCount = await getMessageCount(this._areaShortcode);
+
+		// Compute absolute offset
+		this._msgOffset = 0;
+		if (this._messages.length > 0 && this._oldestId) {
+			try {
+				this._msgOffset = await countMessagesBefore(
+					this._areaShortcode, this._oldestId
+				);
+			} catch (_) {}
+		}
 	}
 
 	_updateMessageBounds() {
@@ -466,6 +649,7 @@ class msgReader extends BaseSubModule {
 		older.reverse();
 		this._messages = older.concat(this._messages);
 		this._msgIdx += older.length;
+		this._msgOffset = Math.max(0, this._msgOffset - older.length);
 		this._updateMessageBounds();
 		// Check if there's still more
 		var check = { beforeId: this._oldestId, limit: 1, order: "DESC" };
@@ -529,7 +713,7 @@ class msgReader extends BaseSubModule {
 				await pm.advancePointer(this._userId, this._areaShortcode, msg.id);
 			}
 		} catch (err) {
-			alogger.writeAlog(4, this.loggingId + " pointer advance error: " + (err?.message || err), "yellow");
+			alogger.writeAlog(3, this.loggingId + " pointer advance error: " + (err?.stack || err), "redbright");
 		}
 	}
 
@@ -567,10 +751,10 @@ class msgReader extends BaseSubModule {
 		}
 	}
 
-	_showCurrentMessage() {
+	async _showCurrentMessage() {
 		if (this._msgIdx < 0 || this._msgIdx >= this._messages.length) return;
 		var msg = this._messages[this._msgIdx];
-		this._prepareBodyLines(msg);
+		await this._prepareBodyLines(msg);
 		this._drawMessageScreen();
 		this._advancePointers(msg);
 	}
@@ -756,9 +940,18 @@ class msgReader extends BaseSubModule {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(1, this._navRow);
 		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_NAV);
-		var nav = " [Enter] Read  [F] Flat View  [S] Search  [M] Mark Read  [ESC/Q] Back";
-		this.call.cmds.senddata(this._truncate(nav, this._termW));
+		this.call.cmds.senddata(" ");
+		this._navKey("Enter", "Read");
+		this.call.cmds.senddata("  ");
+		this._navKey("F", "Flat View");
+		this.call.cmds.senddata("  ");
+		this._navKey("S", "Search");
+		this.call.cmds.senddata("  ");
+		this._navKey("M", "Mark Read");
+		this.call.cmds.senddata("  ");
+		this._navKey("J", "Jump");
+		this.call.cmds.senddata("  ");
+		this._navKey("Q", "Back");
 		this.call.cmds.resetcolors();
 	}
 
@@ -866,9 +1059,8 @@ class msgReader extends BaseSubModule {
 		var msg = this._messages[this._msgIdx];
 
 		this._drawMessageHeader(msg);
-		this._drawSeparator();
 		this._drawBodyViewport();
-		this._drawMessageStatusBar();
+		this._drawSeparator();
 		this._drawMessageNavBar();
 
 		this.call.cmds.resetcolors();
@@ -876,62 +1068,144 @@ class msgReader extends BaseSubModule {
 
 	_drawMessageHeader(msg) {
 		if (this.dumb) return;
-		var dateStr = this._formatFullDate(msg.system_time);
+		var datePart = this._formatDatePart(msg.system_time);
+		var timePart = this._formatTimePart(msg.system_time);
+		var modeStr = (this._viewMode === "threaded") ? "Threaded" : "Flat";
+		var absPos = this._msgOffset + this._msgIdx + 1;
+		var total = (this._viewMode === "threaded" && this._threadMsgTotal > 0)
+			? this._threadMsgTotal
+			: (this._totalMsgCount || this._messages.length);
+		var msgVal = absPos + " of " + total;
 
-		// Row 1: From + Date
-		this.call.cmds.movecursor(1, 1);
-		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_HEADER_LABEL);
-		this.call.cmds.senddata(" From: ");
-		this.call.cmds.setfgcolor(CLR_HEADER_VALUE);
-		this.call.cmds.senddata(this._truncate(msg.from_user || "", this._termW - 30));
-		// Right-aligned date
-		if (dateStr) {
-			var dateLabel = "Date: " + dateStr;
-			var dateX = this._termW - dateLabel.length;
-			if (dateX > 0) {
-				this.call.cmds.movecursor(dateX, 1);
-				this.call.cmds.setfgcolor(CLR_HEADER_LABEL);
-				this.call.cmds.senddata("Date: ");
-				this.call.cmds.setfgcolor(CLR_HEADER_DIM);
-				this.call.cmds.senddata(dateStr);
+		// Determine from/to colors — highlight if matches current user
+		var fromVal = msg.from_user || "";
+		var toVal = msg.to_user || "All";
+		var fromClr = CLR_HDR_FROM;
+		var toClr = CLR_HDR_TO;
+		var uname = (this.call.caller_username || "").toLowerCase();
+		var rname = (this.call.caller_fullname || "").toLowerCase();
+		if (uname && (fromVal.toLowerCase() === uname || fromVal.toLowerCase() === rname)) {
+			fromClr = CLR_HDR_FROM_ME;
+		}
+		if (toVal.toLowerCase() === "all" ||
+			(uname && (toVal.toLowerCase() === uname || toVal.toLowerCase() === rname))) {
+			toClr = CLR_HDR_TO_ME;
+		}
+
+		// Left column: [label, value, valueColor]
+		var leftItems = [
+			["From", fromVal, fromClr],
+			["To", toVal, toClr],
+			["Subj", msg.subject || "", CLR_HDR_SUBJ],
+			["Area", this._areaName || "", CLR_HDR_AREA],
+		];
+
+		// Right column: [label, value, valueColor, parts?]
+		// parts is an optional array of {text, color} for multi-colored values
+		var rightItems = [
+			["Date", datePart, CLR_HDR_DATE],
+			["Time", timePart, CLR_HDR_DATE],
+			["Mode", modeStr, CLR_HDR_MODE],
+			["Msg", msgVal, CLR_HDR_MSG, [
+				{ text: String(absPos), color: CLR_HDR_MSG },
+				{ text: " of ", color: CLR_HDR_LABEL },
+				{ text: String(total), color: CLR_HDR_MSG },
+			]],
+		];
+
+		// Pad labels within each column so colons align
+		var leftLabelLen = 0;
+		for (var i = 0; i < leftItems.length; i++) {
+			if (leftItems[i][0].length > leftLabelLen) leftLabelLen = leftItems[i][0].length;
+		}
+		var rightLabelLen = 0;
+		for (var i = 0; i < rightItems.length; i++) {
+			if (rightItems[i][0].length > rightLabelLen) rightLabelLen = rightItems[i][0].length;
+		}
+
+		// Find max right-column width to compute start position
+		// Format: "Label : Value" where label is padded
+		var maxRightLen = 0;
+		for (var i = 0; i < rightItems.length; i++) {
+			var len = rightLabelLen + 3 + rightItems[i][1].length; // "Label : Value"
+			if (len > maxRightLen) maxRightLen = len;
+		}
+
+		var rightX = this._termW - maxRightLen;
+		if (rightX < 30) rightX = 30;
+
+		// Left column value max length: gap between left label end and right column start
+		var leftPrefixLen = 1 + leftLabelLen + 3; // " Label : "
+		var leftValMax = rightX - leftPrefixLen - 2; // 2 char gap
+		if (leftValMax < 10) leftValMax = 10;
+
+		// Draw all 4 rows
+		for (var row = 0; row < 4; row++) {
+			var screenRow = row + 1;
+			this.call.cmds.movecursor(1, screenRow);
+			this.call.cmds.cleartoeol();
+
+			// Left side
+			var lItem = leftItems[row];
+			var lLabel = this._padRight(lItem[0], leftLabelLen);
+			this.call.cmds.setfgcolor(CLR_HDR_LABEL);
+			this.call.cmds.senddata(" " + lLabel + " : ");
+			this.call.cmds.setfgcolor(lItem[2]);
+			this.call.cmds.senddata(this._truncate(lItem[1], leftValMax));
+
+			// Right side
+			var rItem = rightItems[row];
+			var rLabel = this._padRight(rItem[0], rightLabelLen);
+			this.call.cmds.movecursor(rightX, screenRow);
+			this.call.cmds.setfgcolor(CLR_HDR_LABEL);
+			this.call.cmds.senddata(rLabel + " : ");
+			if (rItem[3]) {
+				// Multi-colored value — render each part
+				for (var p = 0; p < rItem[3].length; p++) {
+					this.call.cmds.setfgcolor(rItem[3][p].color);
+					this.call.cmds.senddata(rItem[3][p].text);
+				}
+			} else {
+				this.call.cmds.setfgcolor(rItem[2]);
+				this.call.cmds.senddata(rItem[1]);
 			}
 		}
-
-		// Row 2: To + Area
-		this.call.cmds.movecursor(1, 2);
-		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_HEADER_LABEL);
-		this.call.cmds.senddata("   To: ");
-		this.call.cmds.setfgcolor(CLR_HEADER_VALUE);
-		this.call.cmds.senddata(this._truncate(msg.to_user || "All", this._termW - 30));
-		var areaLabel = "Area: " + this._areaName;
-		var areaX = this._termW - areaLabel.length;
-		if (areaX > 0) {
-			this.call.cmds.movecursor(areaX, 2);
-			this.call.cmds.setfgcolor(CLR_HEADER_LABEL);
-			this.call.cmds.senddata("Area: ");
-			this.call.cmds.setfgcolor(CLR_HEADER_DIM);
-			this.call.cmds.senddata(this._areaName);
-		}
-
-		// Row 3: Subject
-		this.call.cmds.movecursor(1, 3);
-		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_HEADER_LABEL);
-		this.call.cmds.senddata(" Subj: ");
-		this.call.cmds.setfgcolor(CLR_HEADER_VALUE);
-		this.call.cmds.senddata(this._truncate(msg.subject || "", this._termW - 8));
 	}
 
 	_drawSeparator() {
 		if (this.dumb) return;
-		this.call.cmds.movecursor(1, 4);
+		var canUp = this._bodyScroll > 0;
+		var canDown = this._bodyScroll + this._bodyViewHeight < this._bodyLines.length;
+		this._drawSepLine(5, canUp);
+		this._drawSepLine(this._statusRow, canDown);
+	}
+
+	// Draw a horizontal separator line with scroll indicator box at right end
+	// Format: ─────────────────────────────────────────────────────────[█]─
+	// The box contains a yellow block when hasMore is true, empty space when false
+	_drawSepLine(row, hasMore) {
+		if (this.dumb) return;
+		this.call.cmds.movecursor(1, row);
 		this.call.cmds.cleartoeol();
 		this.call.cmds.setfgcolor(CLR_SEPARATOR);
-		for (var i = 0; i < this._termW; i++) {
+
+		// Draw line chars up to the bracket position
+		var lineCount = this._termW - 5; // room for [X]─ at end
+		for (var i = 0; i < lineCount; i++) {
 			this._sendGlyph("\u2500", CP437_HLINE);
 		}
+
+		// Draw [indicator]─
+		this.call.cmds.senddata("[");
+		if (hasMore) {
+			this.call.cmds.setfgcolor(CLR_SCROLL_IND);
+			this._sendGlyph("\u25A0", 0xFE);
+			this.call.cmds.setfgcolor(CLR_SEPARATOR);
+		} else {
+			this.call.cmds.senddata(" ");
+		}
+		this.call.cmds.senddata("]");
+		this._sendGlyph("\u2500", CP437_HLINE);
 		this.call.cmds.resetcolors();
 	}
 
@@ -946,72 +1220,87 @@ class msgReader extends BaseSubModule {
 			this.call.cmds.movecursor(margin, screenY);
 			this.call.cmds.cleartoeol();
 
-			if (lineIdx < this._bodyLines.length) {
-				this.call.cmds.setfgcolor(CLR_BODY);
-				this.call.cmds.senddata(" " + this._truncate(this._bodyLines[lineIdx], this._bodyWidth - 2));
+			if (lineIdx >= this._bodyLines.length) continue;
+
+			var lineObj = this._bodyLines[lineIdx];
+			var text = lineObj.text || "";
+			var prefix = lineObj.colorPrefix || "";
+
+			// Reset colors before each line to prevent bleed from previous line's codes
+			this.call.cmds.resetcolors();
+			this.call.cmds.movecursor(margin, screenY);
+
+			// Send semantic color prefix (pure ASCII ANSI SGR — safe for any encoding)
+			if (prefix) {
+				this.call.cmds.senddata(prefix);
 			}
+
+			// Send line content with encoding conversion
+			this.call.cmds.senddata(" ");
+			this._sendBodyText(text);
 		}
 		this.call.cmds.resetcolors();
 	}
 
-	_drawMessageStatusBar() {
-		if (this.dumb) return;
-		this.call.cmds.movecursor(1, this._statusRow);
-		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_STATUS);
-
-		var parts = [];
-		parts.push("Msg " + (this._msgIdx + 1) + "/" + this._messages.length);
-
-		if (this._viewMode === "threaded" && this._filteredThreads.length > 0) {
-			var threadIdx = this._threadCursor + 1;
-			var threadSubj = this._filteredThreads[this._threadCursor]
-				? this._filteredThreads[this._threadCursor].subject || ""
-				: "";
-			if (threadSubj.length > 25) threadSubj = threadSubj.substring(0, 22) + "...";
-			parts.push("Thread: \"" + threadSubj + "\" (" + threadIdx + "/" + this._filteredThreads.length + ")");
+	// Send message body text with correct encoding.
+	// For UTF-8 terminals: send as-is (string → Buffer.from encodes as UTF-8).
+	// For CP437 terminals: convert Unicode chars to CP437 bytes so box drawing
+	// and accented characters display correctly instead of as UTF-8 garbage.
+	_sendBodyText(text) {
+		if (!this.call || !text) return;
+		if (this._isUTF8) {
+			this.call.cmds.senddata(text);
+		} else if (this._fmtModRef && this._fmtModRef.convertUTF8toCP437) {
+			this.call.cmds.senddata(this._fmtModRef.convertUTF8toCP437(text));
 		} else {
-			parts.push("Area: " + this._areaName);
+			// No formatter — send as-is, may show garbled extended chars
+			this.call.cmds.senddata(text);
 		}
+	}
 
-		// Scroll indicators
-		var canUp = this._bodyScroll > 0;
-		var canDown = this._bodyScroll + this._bodyViewHeight < this._bodyLines.length;
-		var scrollInd = "";
-		if (canUp && canDown) scrollInd = " ^v";
-		else if (canUp) scrollInd = " ^";
-		else if (canDown) scrollInd = " v";
-
-		var statusStr = " " + parts.join(" | ") + scrollInd;
-		this.call.cmds.senddata(this._truncate(statusStr, this._termW));
-		this.call.cmds.resetcolors();
+	// Build absolute message position string for display
+	_getMsgPositionStr() {
+		var absPos = this._msgOffset + this._msgIdx + 1;
+		if (this._viewMode === "threaded" && this._threadMsgTotal > 0) {
+			return "Msg " + absPos + " of " + this._threadMsgTotal;
+		}
+		var total = this._totalMsgCount || this._messages.length;
+		return "Msg " + absPos + " of " + total;
 	}
 
 	_drawMessageNavBar() {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(1, this._navRow);
 		this.call.cmds.cleartoeol();
-		this.call.cmds.setfgcolor(CLR_NAV);
-
-		var parts = ["[Left]Prev", "[Right]Next", "[R]eply", "[L]ast"];
+		this.call.cmds.senddata(" ");
+		this._navArrow("\u2190", 0x3C);  // ← or <
+		this.call.cmds.senddata("  ");
+		this._navArrow("\u2192", 0x3E);  // → or >
+		this.call.cmds.senddata("  ");
+		this._navKey("R", "Reply");
+		this.call.cmds.senddata("  ");
+		this._navKey("L", "Last");
 
 		if (this._viewMode === "threaded") {
-			parts.push("[[]PrevThd");
-			parts.push("[]]NextThd");
+			this.call.cmds.senddata("  ");
+			this._navKey("[", "PrevThd");
+			this.call.cmds.senddata("  ");
+			this._navKey("]", "NextThd");
 		}
 
 		if (this._threadMode === "standard") {
+			this.call.cmds.senddata("  ");
 			if (this._viewMode === "threaded") {
-				parts.push("[F]lat");
+				this._navKey("F", "Flat");
 			} else {
-				parts.push("[T]hreaded");
+				this._navKey("T", "Threaded");
 			}
 		}
 
-		parts.push("[Q]uit");
-
-		var nav = " " + parts.join("  ");
-		this.call.cmds.senddata(this._truncate(nav, this._termW));
+		this.call.cmds.senddata("  ");
+		this._navKey("J", "Jump");
+		this.call.cmds.senddata("  ");
+		this._navKey("Q", "Quit");
 		this.call.cmds.resetcolors();
 	}
 
@@ -1035,7 +1324,7 @@ class msgReader extends BaseSubModule {
 		if (this._bodyScroll <= 0) return;
 		this._bodyScroll = Math.max(0, this._bodyScroll - amount);
 		this._drawBodyViewport();
-		this._drawMessageStatusBar();
+		this._drawSeparator();
 	}
 
 	_scrollBodyDown(pages) {
@@ -1044,7 +1333,7 @@ class msgReader extends BaseSubModule {
 		if (this._bodyScroll >= maxScroll) return false; // signals "at bottom"
 		this._bodyScroll = Math.min(maxScroll, this._bodyScroll + amount);
 		this._drawBodyViewport();
-		this._drawMessageStatusBar();
+		this._drawSeparator();
 		return true;
 	}
 
@@ -1063,7 +1352,7 @@ class msgReader extends BaseSubModule {
 					this._msgIdx++;
 					this._showCurrentMessage();
 				}
-			}).catch(() => {});
+			}).catch(err => { alogger.writeAlog(3, "MsgReader catch: " + (err?.stack || err), "redbright"); });
 		}
 	}
 
@@ -1080,7 +1369,7 @@ class msgReader extends BaseSubModule {
 					this._msgIdx--;
 					this._showCurrentMessage();
 				}
-			}).catch(() => {});
+			}).catch(err => { alogger.writeAlog(3, "MsgReader catch: " + (err?.stack || err), "redbright"); });
 		}
 	}
 
@@ -1097,7 +1386,7 @@ class msgReader extends BaseSubModule {
 				if (!self.active) return;
 				self._msgIdx = self._messages.length - 1;
 				self._showCurrentMessage();
-			})().catch(() => {});
+			})().catch(err => { alogger.writeAlog(3, "MsgReader catch: " + (err?.stack || err), "redbright"); });
 		} else {
 			this._msgIdx = this._messages.length - 1;
 			this._showCurrentMessage();
@@ -1112,7 +1401,7 @@ class msgReader extends BaseSubModule {
 		this._loadMessagesForThread(thread.id).then(() => {
 			if (!this.active) return;
 			this._setState(STATE.MESSAGE_VIEW);
-		}).catch(() => {});
+		}).catch(err => { alogger.writeAlog(3, "MsgReader catch: " + (err?.stack || err), "redbright"); });
 	}
 
 	_prevThread() {
@@ -1123,7 +1412,7 @@ class msgReader extends BaseSubModule {
 		this._loadMessagesForThread(thread.id).then(() => {
 			if (!this.active) return;
 			this._setState(STATE.MESSAGE_VIEW);
-		}).catch(() => {});
+		}).catch(err => { alogger.writeAlog(3, "MsgReader catch: " + (err?.stack || err), "redbright"); });
 	}
 
 	_openSelectedThread() {
@@ -1142,7 +1431,7 @@ class msgReader extends BaseSubModule {
 		this._loadMessagesFlat().then(() => {
 			if (!this.active) return;
 			this._setState(STATE.MESSAGE_VIEW);
-		}).catch(() => {});
+		}).catch(err => { alogger.writeAlog(3, "MsgReader catch: " + (err?.stack || err), "redbright"); });
 	}
 
 	_switchToThreaded() {
@@ -1229,6 +1518,9 @@ class msgReader extends BaseSubModule {
 					this._drawThreadRows();
 					this._drawThreadStatusBar();
 				});
+				return;
+			case "j":
+				this._launchJump();
 				return;
 		}
 	}
@@ -1364,6 +1656,9 @@ class msgReader extends BaseSubModule {
 			case "[":
 				this._prevThread();
 				return;
+			case "j":
+				this._launchJump();
+				return;
 		}
 	}
 
@@ -1430,6 +1725,75 @@ class msgReader extends BaseSubModule {
 		editor.startStage();
 	}
 
+	async _launchJump() {
+		if (!this.call) return;
+		var selMod = await getSelectorMod();
+		if (!selMod || !selMod.msgAreaSelector) {
+			return;
+		}
+
+		var selector = new selMod.msgAreaSelector(this.call);
+		this._editorActive = true;
+		this._activeEditor = selector;
+
+		selector.emitter.on("ModuleReturn", () => {
+			this._editorActive = false;
+			this._activeEditor = null;
+			try { selector.clearHandler(); } catch (_) {}
+			if (!this.active || !this.call) return;
+
+			// Check if the user changed area
+			var newShortcode = this.call.msg_area || "";
+			if (newShortcode && newShortcode !== this._areaShortcode) {
+				// Area changed — reload everything
+				this._areaShortcode = newShortcode;
+				this._areaName = this.call.msg_area_title || newShortcode;
+				this._threads = [];
+				this._filteredThreads = [];
+				this._messages = [];
+				this._bodyLines = [];
+				this._threadUnreads = {};
+				this._threadCursor = 0;
+				this._threadScroll = 0;
+				this._msgIdx = 0;
+
+				this._loadAreaConfig()
+					.then(ok => {
+						if (!this.active || !ok) return;
+						if (this._threadMode === "no_threads") {
+							return this._loadMessagesFlat().then(() => {
+								if (this.active) this._setState(STATE.MESSAGE_VIEW);
+							});
+						} else {
+							return this._loadThreadList().then(() => {
+								if (this.active) this._setState(STATE.THREAD_LIST);
+							});
+						}
+					})
+					.catch(err => {
+						alogger.writeAlog(3, this.loggingId + " jump reload error: " + (err?.stack || err), "redbright");
+						if (this.active) this.signalReturn();
+					});
+			} else {
+				// Same area — just redraw current state
+				if (this._state === STATE.MESSAGE_VIEW) {
+					this._drawMessageScreen();
+				} else {
+					this._drawThreadListScreen();
+				}
+			}
+		});
+
+		selector.emitter.on("HangupSignal", () => {
+			this._editorActive = false;
+			this._activeEditor = null;
+			try { selector.clearHandler(); } catch (_) {}
+			this.signalHangup();
+		});
+
+		selector.startStage();
+	}
+
 	// ===========================================================================
 	// DUMB TERMINAL FALLBACK
 	// ===========================================================================
@@ -1450,7 +1814,7 @@ class msgReader extends BaseSubModule {
 		this._dumbBuf = "";
 	}
 
-	_drawMessageDumb() {
+	async _drawMessageDumb() {
 		if (this._messages.length === 0) {
 			this.call.cmds.senddata("\r\n  No messages.\r\n");
 			return;
@@ -1461,14 +1825,30 @@ class msgReader extends BaseSubModule {
 		this.call.cmds.senddata("    To: " + (msg.to_user || "All") + "\r\n");
 		this.call.cmds.senddata("  Subj: " + (msg.subject || "") + "\r\n");
 		this.call.cmds.senddata("  Date: " + this._formatFullDate(msg.system_time) + "\r\n");
-		this.call.cmds.senddata("  ─────────────────\r\n");
+		this.call.cmds.senddata("  -------------------\r\n");
 
 		var rawText = msg.utf8 || msg.body_text || "";
+
+		// Apply codepage conversions
+		var fmtMod = await getFmtMod();
+		this._fmtModRef = fmtMod;
+		if (fmtMod) {
+			if (this._isUTF8 && !msg.utf8 && msg.body_text) {
+				// Terminal is UTF-8, text is CP437 → convert to UTF-8
+				rawText = fmtMod.convertCP437toUTF8(rawText);
+			}
+			// Convert pipe/ctrl-a codes (they produce pure ASCII ANSI sequences)
+			if (fmtMod.hasPipeCodes(rawText)) rawText = fmtMod.convertPipeCodes(rawText);
+			if (fmtMod.hasCtrlACodes(rawText)) rawText = fmtMod.convertCtrlACodes(rawText);
+		}
+
 		rawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 		var lines = rawText.split("\n");
 		this._dumbPageLines = 0;
 		for (var i = 0; i < lines.length; i++) {
-			this.call.cmds.senddata("  " + lines[i] + "\r\n");
+			this.call.cmds.senddata("  ");
+			this._sendBodyText(lines[i]);
+			this.call.cmds.senddata("\r\n");
 			this._dumbPageLines++;
 			if (this._dumbPageLines >= this._termH - 4) {
 				this.call.cmds.senddata("  [More - Enter] ");
@@ -1477,7 +1857,7 @@ class msgReader extends BaseSubModule {
 				return;
 			}
 		}
-		this.call.cmds.senddata("\r\n  Msg " + (this._msgIdx + 1) + "/" + this._messages.length);
+		this.call.cmds.senddata("\r\n  " + this._getMsgPositionStr());
 		this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last, Q=Quit]: ");
 		this._dumbMode = "msgprompt";
 		this._dumbBuf = "";
@@ -1508,7 +1888,7 @@ class msgReader extends BaseSubModule {
 	_dumbContinueMore() {
 		if (!this._dumbMoreLines || this._dumbMoreLines.length === 0) {
 			var msg = this._messages[this._msgIdx];
-			this.call.cmds.senddata("\r\n  Msg " + (this._msgIdx + 1) + "/" + this._messages.length);
+			this.call.cmds.senddata("\r\n  " + this._getMsgPositionStr());
 			this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last, Q=Quit]: ");
 			this._dumbMode = "msgprompt";
 			this._advancePointers(msg);
@@ -1528,7 +1908,7 @@ class msgReader extends BaseSubModule {
 			}
 		}
 		var msg = this._messages[this._msgIdx];
-		this.call.cmds.senddata("\r\n  Msg " + (this._msgIdx + 1) + "/" + this._messages.length);
+		this.call.cmds.senddata("\r\n  " + this._getMsgPositionStr());
 		this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last, Q=Quit]: ");
 		this._dumbMode = "msgprompt";
 		this._advancePointers(msg);
