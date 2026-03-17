@@ -12,8 +12,7 @@ import * as systemAddresses from "./systemAddresses.js";
 import * as peerConnections from "./peerConnections.js";
 import * as peerAreaSubscriptions from "./peerAreaSubscriptions.js";
 import * as networkAreas from "./networkAreas.js";
-import * as codepageConversions from "../utils/codepageConversions.js";
-import * as terminalText from "../utils/terminalText.js";
+import { formatBodyHtml } from "../utils/terminalText.js";
 import * as alogger from "../utils/alogger.js";
 
 dotenv.config();
@@ -26,33 +25,6 @@ const product_string  = "Canectic BBS v" + currentversion;
 const boardname       = process.env.boardname        || "Canectic BBS";
 
 var threadUpdateArray = [];
-
-// Generate body_html from display text. Detects ANSI/pipe/Ctrl-A codes
-// and routes to the appropriate formatter.
-// Non-fatal — returns null on failure so message import continues without HTML.
-async function formatBodyHtml(displayText) {
-	if (!displayText) return null;
-	try {
-		if (displayText.includes("\x1b[") ||
-			/\|\d{2}/.test(displayText) ||
-			displayText.includes("\x01")) {
-			return await terminalText.formatTerminalText(displayText, {
-				terminalWidth: 80,
-				replaceAllSpaces: true,
-				handlePipeCodes: true,
-				handleAnsiCodes: true,
-				handleCtrlACodes: true,
-				resetOnNewline: true
-			});
-		}
-		if (displayText.includes("   ")) {
-			return codepageConversions.formatTextForHtml(displayText);
-		}
-		return displayText.replace(/\r/g, '<br>');
-	} catch (_) {
-		return null;
-	}
-}
 
 function buildMessageTree(messages) {
 	const messageMap   = new Map();
@@ -1166,6 +1138,53 @@ async function deleteMessageByUUID(uuid, shortcode) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Thread helpers — shared by all tossers (FTN, QWK, NNTP)
+// ---------------------------------------------------------------------------
+
+// Create a new thread row. Returns { threadId, threadidStr } on success, null on failure.
+async function createThreadRow(threadtable, threadidStr, subject, systemTime, fromUser) {
+	var uuid = uuidv4();
+	var threadObj = {
+		uuid:              uuid,
+		threadid:          threadidStr,
+		subject:           subject,
+		started_at:        systemTime,
+		started_by:        fromUser,
+		message_count:     1,
+		last_message:      systemTime,
+		last_message_from: fromUser
+	};
+	var result = await postgres.insertObject(threadObj, threadtable);
+	if (result.status && result.insertId) {
+		return { threadId: result.insertId, threadidStr: threadidStr };
+	}
+	return null;
+}
+
+// Update thread stats after inserting a reply. Bumps message_count and
+// advances last_message / last_message_from if this message is newer.
+async function updateThreadStats(threadtable, threadId, systemTime, fromUser) {
+	await postgres.write(
+		'UPDATE ' + threadtable +
+		' SET message_count = message_count + 1,' +
+		' last_message = GREATEST(last_message, $1),' +
+		' last_message_from = $2' +
+		' WHERE id = $3',
+		[systemTime, fromUser, threadId]
+	);
+}
+
+// Roll back a thread row when the message insert that created it fails.
+// Only removes threads matching the given threadid string (the message's
+// canonical ID) so we don't accidentally delete pre-existing threads.
+async function rollbackThread(threadtable, threadidStr) {
+	await postgres.write(
+		'DELETE FROM ' + threadtable + ' WHERE threadid = $1',
+		[threadidStr]
+	);
+}
+
 export {
 	deleteMessageByUUID,
 	handleInboundEchoMessage,
@@ -1184,5 +1203,9 @@ export {
 	mergeRecentThreads,
 	getOutboundForConnection,
 	startNewThread,
-	replyToThread
+	replyToThread,
+	// Thread helpers for tossers
+	createThreadRow,
+	updateThreadStats,
+	rollbackThread
 };

@@ -43,12 +43,18 @@ block content
                           | Exit
                 .card-body
                   h4= msgGroup.description
-                  h4
-                    | Required Security: 
-                    = msgGroup.security
-                  h4
-                    | Shortcode:  
-                    = msgGroup.shortcode
+                  .row
+                    .col-6
+                      h5
+                        | Shortcode:  
+                        = msgGroup.shortcode
+                      h5
+                        | Read Security: 
+                        = msgGroup.read_security || '—'
+                    .col-6
+                      h5
+                        | Post Security: 
+                        = msgGroup.post_security || '—'
               .card
                 .card-header.bg-darkblue.text-white
                   h4 Areas
@@ -86,6 +92,10 @@ block content
                                 data-bs-msgcount=area.msg_count || 0
                                 data-bs-lastfrom=area.last_from || ''
                                 data-bs-lastmessage=area.last_message || ''
+                                data-bs-readpermflags=JSON.stringify(area.read_perm_flags || [])
+                                data-bs-readrestflags=JSON.stringify(area.read_rest_flags || [])
+                                data-bs-postpermflags=JSON.stringify(area.post_perm_flags || [])
+                                data-bs-postrestflags=JSON.stringify(area.post_rest_flags || [])
                               )
                                 td= area.name
                                 td= area.shortcode
@@ -201,6 +211,26 @@ block content
                         strong Messages:
                         |  
                         span#areaInfoMsgCount
+                  hr.border-secondary
+                  .row
+                    .col-6
+                      p
+                        strong Read Perm Flags:
+                        |  
+                        span#areaInfoReadPermFlags
+                      p
+                        strong Post Perm Flags:
+                        |  
+                        span#areaInfoPostPermFlags
+                    .col-6
+                      p
+                        strong Read Restrict Flags:
+                        |  
+                        span#areaInfoReadRestFlags
+                      p
+                        strong Post Restrict Flags:
+                        |  
+                        span#areaInfoPostRestFlags
                   hr.border-secondary
                   .row
                     .col-12
@@ -328,6 +358,35 @@ block content
                         )
                           option(value='username') Username
                           option(value='realname') Real Name
+                    .row
+                      .col-1
+                      .col-5
+                        //- Hidden inputs for flags — managed by JS
+                        #ea_read_perm_inputs
+                        #ea_read_rest_inputs
+                        label Read Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ea_read_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ea_read_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ea_read_perm_add(type='button') Add
+                        label Read Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ea_read_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ea_read_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ea_read_rest_add(type='button') Add
+                      .col-5
+                        #ea_post_perm_inputs
+                        #ea_post_rest_inputs
+                        label Post Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ea_post_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ea_post_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ea_post_perm_add(type='button') Add
+                        label Post Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ea_post_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ea_post_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ea_post_rest_add(type='button') Add
                     .row
                       .col-1
                       .col-10
@@ -462,7 +521,7 @@ block content
                           max=255
                           name='readsecurity'
                           class='form-control'
-                          value=msgGroup.security
+                          value=(msgGroup.read_security || 50)
                           required
                         )
                         br
@@ -474,7 +533,7 @@ block content
                           max=255
                           name='postsecurity'
                           class='form-control'
-                          value=msgGroup.security
+                          value=(msgGroup.post_security || 50)
                           required
                         )
                         br
@@ -499,6 +558,34 @@ block content
                         select#na_post_as(name='post_as').form-select
                           option(value='username' selected) Username
                           option(value='realname') Real Name
+                    .row
+                      .col-1
+                      .col-5
+                        #na_read_perm_inputs
+                        #na_read_rest_inputs
+                        label Read Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#na_read_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#na_read_perm_select.form-control
+                          button.btn.btn-sm.btn-success#na_read_perm_add(type='button') Add
+                        label Read Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#na_read_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#na_read_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#na_read_rest_add(type='button') Add
+                      .col-5
+                        #na_post_perm_inputs
+                        #na_post_rest_inputs
+                        label Post Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#na_post_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#na_post_perm_select.form-control
+                          button.btn.btn-sm.btn-success#na_post_perm_add(type='button') Add
+                        label Post Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#na_post_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#na_post_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#na_post_rest_add(type='button') Add
                     .row
                       .col-1
                       .col-10
@@ -544,27 +631,72 @@ block content
                           required
                         )
                         br
-                        label(for='edit_security') Required Security Level:
+                    .row
+                      .col-1
+                      .col-5
+                        label(for='edit_readsecurity') Read Security:
                         input(
                           type='number'
-                          id='edit_security'
-                          name='security'
+                          id='edit_readsecurity'
+                          name='readsecurity'
                           class='form-control'
                           tabindex='3'
                           min=0
                           max=255
-                          value=msgGroup.security || 0
+                          value=msgGroup.read_security || 0
                         )
                         br
+                        label(for='edit_postsecurity') Post Security:
+                        input(
+                          type='number'
+                          id='edit_postsecurity'
+                          name='postsecurity'
+                          class='form-control'
+                          tabindex='4'
+                          min=0
+                          max=255
+                          value=msgGroup.post_security || 0
+                        )
+                      .col-5
                         label(for='edit_active') Status:
                         select(
                           id='edit_active'
                           name='active'
                           class='form-control'
-                          tabindex='4'
+                          tabindex='5'
                         )
                           option(value='true'  selected=(msgGroup.active == true))  Active
                           option(value='false' selected=(msgGroup.active == false)) Inactive
+                    .row
+                      .col-1
+                      .col-5
+                        #eg_read_perm_inputs
+                        #eg_read_rest_inputs
+                        br
+                        label Read Perm Flags (default for areas):
+                        .border.rounded.p-2.mb-2.bg-light#eg_read_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#eg_read_perm_select.form-control
+                          button.btn.btn-sm.btn-success#eg_read_perm_add(type='button') Add
+                        label Read Restrict Flags:
+                        .border.rounded.p-2.mb-2.bg-light#eg_read_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#eg_read_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#eg_read_rest_add(type='button') Add
+                      .col-5
+                        #eg_post_perm_inputs
+                        #eg_post_rest_inputs
+                        br
+                        label Post Perm Flags (default for areas):
+                        .border.rounded.p-2.mb-2.bg-light#eg_post_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#eg_post_perm_select.form-control
+                          button.btn.btn-sm.btn-success#eg_post_perm_add(type='button') Add
+                        label Post Restrict Flags:
+                        .border.rounded.p-2.mb-2.bg-light#eg_post_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#eg_post_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#eg_post_rest_add(type='button') Add
                     .row
                       .col-1
                       .col-10
@@ -623,6 +755,144 @@ block content
 
         var currentAreaShortcode = '';
 
+        const allPerms  = !{JSON.stringify(availablePermissions)};
+        const allRestrs = !{JSON.stringify(availableRestrictions)};
+
+        function parseFlags(jsonstr) {
+          try {
+            var result = JSON.parse(jsonstr);
+            return Array.isArray(result) ? result : [];
+          } catch(e) { return []; }
+        }
+
+        function fmtFlags(jsonstr) {
+          var arr = parseFlags(jsonstr);
+          return arr.length > 0 ? arr.join(', ') : '—';
+        }
+
+        // Renders badges + hidden inputs for a flag editor group.
+        // prefix: element ID prefix (e.g. 'ea_read_perm', 'na_post_rest')
+        // inputName: form field name (e.g. 'read_perm_flags')
+        // activeFlags: current array of flag strings
+        // allFlags: full available list (perms or restrs)
+        // badgeClass: 'bg-success' for perms, 'bg-danger' for restrs
+        function renderAreaFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
+          var badgeEl  = document.getElementById(prefix + '_badges');
+          var inputEl  = document.getElementById(prefix + '_inputs');
+          var selectEl = document.getElementById(prefix + '_select');
+          var addBtn   = document.getElementById(prefix + '_add');
+
+          // Badges
+          badgeEl.innerHTML = '';
+          activeFlags.forEach(function(flag) {
+            var span = document.createElement('span');
+            span.className = 'badge ' + badgeClass + ' me-1 mb-1';
+            span.style.cursor = 'pointer';
+            span.title = 'Click to remove';
+            span.textContent = flag + ' ×';
+            span.addEventListener('click', function() {
+              var updated = activeFlags.filter(function(f) { return f !== flag; });
+              renderAreaFlags(prefix, inputName, updated, allFlags, badgeClass);
+            });
+            badgeEl.appendChild(span);
+          });
+
+          // Hidden inputs
+          inputEl.innerHTML = '';
+          activeFlags.forEach(function(flag) {
+            var inp = document.createElement('input');
+            inp.type  = 'hidden';
+            inp.name  = inputName;
+            inp.value = flag;
+            inputEl.appendChild(inp);
+          });
+
+          // Select — only show flags not already active
+          selectEl.innerHTML = '';
+          var available = allFlags.filter(function(f) { return !activeFlags.includes(f); });
+          if (available.length === 0) {
+            var opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '— none available —';
+            opt.disabled = true;
+            selectEl.appendChild(opt);
+            selectEl.disabled = true;
+            addBtn.disabled = true;
+          } else {
+            selectEl.disabled = false;
+            addBtn.disabled = false;
+            available.forEach(function(flag) {
+              var opt = document.createElement('option');
+              opt.value = flag;
+              opt.textContent = flag;
+              selectEl.appendChild(opt);
+            });
+          }
+        }
+
+        // Wire add buttons for a flag group
+        function wireAddBtn(prefix, inputName, allFlags, badgeClass) {
+          document.getElementById(prefix + '_add').addEventListener('click', function() {
+            var sel = document.getElementById(prefix + '_select');
+            if (!sel.value) return;
+            var current = Array.from(document.querySelectorAll('#' + prefix + '_inputs input')).map(function(i) { return i.value; });
+            if (!current.includes(sel.value)) {
+              current.push(sel.value);
+              renderAreaFlags(prefix, inputName, current, allFlags, badgeClass);
+            }
+          });
+        }
+
+        // Wire all edit-area flag add buttons
+        // Wire edit-area flag add buttons (only exist when msgGroup is set)
+        if (document.getElementById('ea_read_perm_add')) {
+          wireAddBtn('ea_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('ea_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+          wireAddBtn('ea_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('ea_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+        }
+
+        // Wire new-area flag add buttons
+        if (document.getElementById('na_read_perm_add')) {
+          wireAddBtn('na_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('na_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+          wireAddBtn('na_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('na_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+        }
+
+        // Wire edit-group flag add buttons
+        wireAddBtn('eg_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+        wireAddBtn('eg_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+        wireAddBtn('eg_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+        wireAddBtn('eg_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+
+        // Initialize edit-group flags from current group data
+        var groupReadPermFlags = !{JSON.stringify(msgGroup ? (msgGroup.read_perm_flags || []) : [])};
+        var groupReadRestFlags = !{JSON.stringify(msgGroup ? (msgGroup.read_rest_flags || []) : [])};
+        var groupPostPermFlags = !{JSON.stringify(msgGroup ? (msgGroup.post_perm_flags || []) : [])};
+        var groupPostRestFlags = !{JSON.stringify(msgGroup ? (msgGroup.post_rest_flags || []) : [])};
+
+        // Wire edit-group flag add buttons (only exist when msgGroup is set)
+        if (document.getElementById('eg_read_perm_add')) {
+          wireAddBtn('eg_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('eg_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+          wireAddBtn('eg_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('eg_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+
+          renderAreaFlags('eg_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(groupReadPermFlags)), allPerms, 'bg-success');
+          renderAreaFlags('eg_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(groupReadRestFlags)), allRestrs, 'bg-danger');
+          renderAreaFlags('eg_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(groupPostPermFlags)), allPerms, 'bg-success');
+          renderAreaFlags('eg_post_rest', 'post_rest_flags', parseFlags(JSON.stringify(groupPostRestFlags)), allRestrs, 'bg-danger');
+        }
+
+        // Initialize new area flags from group defaults (only exist when msgGroup is set)
+        if (document.getElementById('na_read_perm_add')) {
+          renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(groupReadPermFlags)), allPerms, 'bg-success');
+          renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(groupReadRestFlags)), allRestrs, 'bg-danger');
+          renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(groupPostPermFlags)), allPerms, 'bg-success');
+          renderAreaFlags('na_post_rest', 'post_rest_flags', parseFlags(JSON.stringify(groupPostRestFlags)), allRestrs, 'bg-danger');
+        }
+
         // Area table row click — populate and open info modal
         const table = document.getElementById('msgAreas');
         if (table) {
@@ -644,6 +914,10 @@ block content
               document.getElementById('areaInfoMinAge').textContent      = d.bsMinage;
               document.getElementById('areaInfoMaxAge').textContent      = d.bsMaxage;
               document.getElementById('areaInfoMsgCount').textContent    = parseInt(d.bsMsgcount || 0).toLocaleString();
+              document.getElementById('areaInfoReadPermFlags').textContent  = fmtFlags(d.bsReadpermflags);
+              document.getElementById('areaInfoReadRestFlags').textContent  = fmtFlags(d.bsReadrestflags);
+              document.getElementById('areaInfoPostPermFlags').textContent  = fmtFlags(d.bsPostpermflags);
+              document.getElementById('areaInfoPostRestFlags').textContent  = fmtFlags(d.bsPostrestflags);
               document.getElementById('areaInfoDescription').textContent = d.bsDescription;
               document.getElementById('areaInfoLastFrom').textContent    = d.bsLastfrom    || '—';
               document.getElementById('areaInfoLastMessage').textContent = d.bsLastmessage
@@ -677,6 +951,11 @@ block content
           document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
           document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
           document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
+
+          renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
+          renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');
+          renderAreaFlags('ea_post_perm', 'post_perm_flags', parseFlags(d.bsPostpermflags), allPerms, 'bg-success');
+          renderAreaFlags('ea_post_rest', 'post_rest_flags', parseFlags(d.bsPostrestflags), allRestrs, 'bg-danger');
 
           areaInfoModal.hide();
           editAreaModal.show();

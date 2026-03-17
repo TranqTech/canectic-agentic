@@ -6,6 +6,9 @@ Canectic BBS supports three message networking protocols: FTN (FidoNet Technolog
 
 This document covers the current architecture, key files, data flow, and integration points. It is intended both as a general reference and as a starting point for future development sessions.
 
+For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views, subscriptions), see `message_architecture.md`.
+For the terminal-side UI (readers, editors, menus), see `terminal_architecture.md`.
+
 ---
 
 ## Core Files
@@ -19,10 +22,10 @@ This document covers the current architecture, key files, data flow, and integra
 | `ftnUtils.js` | FTN utility functions. Message-ID generation, datetime string formatting, system time parsing with timezone offset handling. |
 | `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
-| `qwkTosser.js` | QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading, HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. |
+| `qwkTosser.js` | QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
 | `qwkPacketBuilder.js` | QWK packet generation module. Builds complete `.qwk` packets (CONTROL.DAT + MESSAGES.DAT + HEADERS.DAT + NETFLAGS.DAT) for hub-mode delivery to nodes. Designed with low-level reusable functions and a high-level `buildQwkForNode()` entry point. |
 | `qwkTransport.js` | Transport abstraction layer. FTP (`basic-ftp`), SFTP (`ssh2-sftp-client`), Directory (local filesystem copy), and Hub (inbound, no transport needed). Factory function `makeTransport(cd)` selects the right class. |
-| `nntpTosser.js` | NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. |
+| `nntpTosser.js` | NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. Uses `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js` for thread management. Imports `formatBodyHtml` from `terminalText.js` for body_html pre-rendering. |
 | `peerConnections.js` | Peer connection CRUD. Manages connection records, connection_data JSONB (transport settings, HWM, credentials), subscription management. `buildConnectionData()` handles form→JSONB for all network types. `getConnectionByUUIDWithNetwork()` joins with network metadata for tosser use. `getActiveConnectionsByNetworkType()` returns all active connections for a given protocol. |
 | `peers.js` | Peer (remote system) CRUD. Parent entity above connections. Handles cascading deletion (peer → connections → subscriptions). Fields: name, sysop_name, contact, notes. |
 | `peerAreaSubscriptions.js` | Manages per-area subscription state for each connection. `syncConnectionToNetwork()` bootstraps rows when connections or areas are created. `setSubscriptions()` bulk-toggles `allowed` or `enabled` flags. `allowAllNetworkAreas()` marks all active network areas as allowed for a connection (called on new connection creation). `syncNetworkAreaToConnections()` syncs a newly added area to all connections on a network with optional allow/enable. `removeSubscriptionsForNetworkArea()` cleans up subscription rows when an area is removed from a network. Lazy-imports peerConnections to avoid circular dependency. |
@@ -31,18 +34,22 @@ This document covers the current architecture, key files, data flow, and integra
 | `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). Schema includes `thread_mode` (standard/subscribe_only/no_threads) and `post_as` (username/realname) columns. |
 | `networkAreas.js` | Maps message areas to networks with areatags. For QWK networks, areatags are conference numbers (numeric strings). For FTN, areatags are echomail tag names (e.g. "DOVE-NET"). |
 | `msgNetworks.js` | Network definitions (name, domain, type, config). |
-| `echomail.js` | FTN echomail network import/export. Inbound: `handleInboundEchoMessage` (FTN-to-DB conversion, thread resolution, body_html pre-rendering, source_network_id tagging). Outbound: `getOutboundForConnection`, `dbToFtn` conversion. Thread management: `threadMessage`, `applyThreadingForArea`, `updateAreaThreads`, `updateThread`, `mergeRecentThreads`. Has its own copy of `formatBodyHtml` for import-time pre-rendering. View-facing and posting methods have been migrated to `messages.js`. |
+| `echomail.js` | FTN echomail network import/export. Inbound: `handleInboundEchoMessage` (FTN-to-DB conversion, thread resolution, body_html pre-rendering via `formatBodyHtml` imported from `terminalText.js`, source_network_id tagging). Outbound: `getOutboundForConnection`, `dbToFtn` conversion. Thread management: `threadMessage`, `applyThreadingForArea`, `updateAreaThreads`, `updateThread`, `mergeRecentThreads`. **Shared thread helpers** for all tossers: `createThreadRow(threadtable, threadidStr, subject, systemTime, fromUser)` → `{threadId, threadidStr}`, `updateThreadStats(threadtable, threadId, systemTime, fromUser)`, `rollbackThread(threadtable, threadidStr)`. View-facing and posting methods have been migrated to `messages.js`. |
 | `messages.js` | Message viewing, posting, and sanitization model. Owns all view-facing and user-posting logic. **Viewing:** `listMsgGroups`, `getAreasInGroup`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated with `afterId`/`beforeId`/`threadId` filtering), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml`, `escapeHtml`. **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `updateThread` (stat refresh after reply). **Security:** `sanitizeMessageFields` — strips `<script>`, `<style>`, dangerous tags, event handlers, and `javascript:` URIs from all text fields. Called at the model layer for both web posts and importable by tossers for inbound network packets. **Deletion:** `deleteMessageByUUID`. |
-| `codepageConversions.js` | Shared CP437↔UTF-8 conversion utilities. Also provides `formatTextForHtml()` for lightweight space-preservation formatting of plain text with ASCII art alignment. Includes HTML entity escaping as defense-in-depth against XSS. Used by all three tossers. |
-| `terminalText.js` | Terminal text formatter. Converts ANSI escape codes, pipe codes (`|XX`), and Synchronet Ctrl-A attribute codes to HTML with CSS classes. Called at import time by all three tossers to pre-render `body_html`. Also used as a fallback at view time for older messages. Supports cursor positioning, color, and a virtual terminal buffer. |
+| `codepageConversions.js` | Shared CP437↔UTF-8 conversion utilities. Also provides `formatTextForHtml()` for lightweight space-preservation formatting of plain text with ASCII art alignment. Includes HTML entity escaping as defense-in-depth against XSS. Used by `terminalText.js` for the plain-text-with-alignment path. |
+| `termMsgFormat.js` | Terminal message body formatting pipeline. CP437↔UTF-8 conversion, pipe/Ctrl-A/ANSI code conversion, semantic line classification (`classifyLine` → NORMAL/QUOTE/TEAR/TAGLINE/ORIGIN/KLUDGE), paragraph reflow (`reflowParagraphs` at 80% threshold reassembles text from wider editors), ANSI art detection (`detectAnsiArt` — checks for cursor positioning CSI sequences, not just color SGR), and ANSI-aware word wrapping (`wordWrapLineAnsi` with `measureVisualWidth`/`findStringIndexAtVisualCol`). Exports `reflowText(text, wrapWidth)` convenience function that normalizes line endings, reflows, and joins with `\r` for VirtualTerminal compatibility. Does NOT import `terminalText.js` (dependency flows one direction only). |
+| `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId)` returns `Map<shortcode, boolean>` resolving: user override → area `newscan_default` → true. `getSubscription(userId, shortcode)`, `setSubscription(userId, shortcode, subscribed)`, `removeSubscription(userId, shortcode)` for individual management. Used by terminal newscan and area selector. |
+| `terminalText.js` | Terminal text formatter and shared HTML body generator. `VirtualTerminal` class converts ANSI escape codes, pipe codes (`|XX`), and Synchronet Ctrl-A attribute codes to HTML with CSS classes. Supports cursor positioning, color, and a virtual terminal buffer. **`noWrap` mode**: when enabled, lines extend without column wrapping — CSS handles responsive layout. **`formatBodyHtml(displayText, forceWidth)`**: consolidated HTML formatter used by all three tossers and the maintenance regeneration tool. Pipeline: paragraph reflow (`reflowText`) → ANSI art detection (`detectAnsiArt`) → routing: art uses fixed-width VT, colored text uses noWrap VT, plain text uses `formatTextForHtml` or `<br>` replacement. Optional `forceWidth` parameter overrides noWrap to wrap at a specific column width. Imports `detectAnsiArt`/`reflowText` from `termMsgFormat.js` and `formatTextForHtml` from `codepageConversions.js`. |
 
 ### Middleware / Routes
 
 | File | Purpose |
 |------|---------|
-| `tosser.js` | CLI entry point. Runs toss cycles for all active network types. Supports `--in`, `--out`, `--ftn`, `--nntp`, `--qwk` flags. PID-file locking prevents concurrent runs. |
+| `tosser.js` | CLI entry point (located in `src/tools/`). Runs toss cycles for all active network types. Supports `--in`, `--out`, `--ftn`, `--nntp`, `--qwk` flags. PID-file locking prevents concurrent runs. |
+| `maintenance.js` | CLI runner for maintenance tasks (located in `src/tools/`). Currently supports `--regen-html` to regenerate `body_html` for all messages. Flags: `--area SHORTCODE` (repeatable, limit to specific areas), `--dry-run`, `--width N` (force column width), `--batch N` (batch size, default 100). PID-file locking at `/tmp/can_maint.pid`. |
+| `messageBase.js` | Message base maintenance functions (located in `src/maintenance/`). `regenerateAllBodyHtml(options)` iterates active areas and regenerates `body_html` from `utf8`/`body_text` using the current `formatBodyHtml` pipeline. `regenerateAreaBodyHtml(shortcode, options)` processes a single area. Uses keyset pagination (by id) for scalability. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress` callback, `quiet`. |
 | `admin.js` | Admin routes for connection management, network area CRUD, HWM resets. Message group/area management with thread_mode and post_as selectors. `recalculateAreaCounts` route. All DB access through model methods. |
-| `index.js` | User-facing message routes. Group/area/thread browsing with unread counts. Thread listing with keyset pagination. Thread reader and flat-view reader with bidirectional lazy scroll and position-aware progress bars. Message posting (`POST newthread`, `POST reply`) with `post_as` name resolution and model-layer sanitization. Mark-area-read. JSON lazy-load endpoints for both directions. Resolves `thread_mode` to render threaded or flat view. |
+| `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile` into all views. Helper functions: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `checkAreaReadAccess`, `checkAreaPostAccess`. Group/area/thread browsing with unread counts. Thread listing with keyset pagination. Thread reader and flat-view reader with bidirectional lazy scroll and position-aware progress bars. All area/thread routes pass `sufficientAccess` and `canPost` booleans — templates use guard chains (`!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found) instead of separate early-return renders per condition. Message posting (`POST newthread`, `POST reply`) with `post_as` name resolution and model-layer sanitization. Mark-area-read. JSON lazy-load endpoints for both directions. Resolves `thread_mode` to render threaded or flat view. |
 | `ftnTosser.js` | FTN tosser middleware. `TossInbound()` reads type-2 FTN packets from inbound directory, parses messages via `ReadPkt`, routes echomail to `echomail.handleInboundEchoMessage()` and netmail to `netmail.newInboundNetmail()`. `TossOutbound()` gathers pending echomail and netmail, routes via `ftnRouter.resolveRoute()`, builds type-2 packets, and writes to outbound. Handles archive extraction, packet validation, and move-after-toss. |
 
 ### Views
@@ -56,8 +63,9 @@ This document covers the current architecture, key files, data flow, and integra
 | `messages/index.pug` | User-facing message group listing with aggregate unread counts per group. |
 | `messages/groups/view.pug` | User-facing area listing within a group. Per-area unread counts, last post info. |
 | `messages/areas/view.pug` | Threaded area view. Thread listing table with keyset-paginated lazy scroll. Unread badges per thread. New Thread modal with monospace textarea. Mark Read button. Flat View toggle (when thread_mode allows). |
-| `messages/areas/flat.pug` | Flat (threadless) area view. All messages displayed chronologically with bidirectional lazy scroll. Position-aware progress bar showing viewing window within total message count. Post and Reply modals with quote system. Mark All Read in sidebar. |
-| `messages/areas/thread.pug` | Thread reader. Bidirectional lazy scroll starting from first unread message. Position-aware progress bar. Reply button on each message header (per-message reply_to for FTN threading). Reply to Thread button in sidebar (targets thread root). Reply modal with collapsible quote panel — click a line to insert it as `"  > "` prefixed text at the cursor. |
+| `messages/areas/flat.pug` | Flat (threadless) area view. Guard chain: `!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found. Column layout: `col-xl-6.offset-xl-3.col-lg-10.col-12` — centered on xl, wide on lg, full on mobile. Sidebar column hidden below xl (`d-none.d-xl-block`), replaced with offcanvas panel (hamburger ☰ in card header, `data-bs-backdrop='false' data-bs-scroll='true'`, Win95-style close button). Desktop nav buttons (Post, Threads, group-back) hidden below xl. Stacked message headers (from/to/subject over date, reply button right-aligned). All messages displayed chronologically with bidirectional lazy scroll. Position-aware progress bar. `data-force80` (from `msgArea.ansi_area`) and `data-can-post` on container. Post/Reply buttons, modals, quote system, and JS `buildMsgHtml` all gated behind `canPost`. Mark All Read in sidebar/offcanvas. |
+| `messages/areas/thread.pug` | Thread reader. Same guard chain, column layout, offcanvas, and `canPost` gating as flat.pug. `← Threads` button hidden on mobile (available in offcanvas). Stacked message headers. Bidirectional lazy scroll starting from first unread message. Position-aware progress bar. Reply button on each message header gated behind `canPost`. Reply to Thread button in sidebar/offcanvas (targets thread root) gated behind `canPost`. Reply modal with collapsible quote panel — click a line to insert it as `"  > "` prefixed text at cursor. `data-force80` and `data-can-post` on container. |
+| `partials/messages/_msgAutoSize.pug` | Auto-sizes `.messagebody` font to fit target column count. Creates hidden probe with monospace characters (`font-family:"Consolas",monospace` inline, not inherit). Reads `data-force80` from container: `ansi_area=true` → always 80 cols. Otherwise: desktop (≥992px) → 80 cols, mobile → 40 cols. Min 7px, max 32px. Uses `setProperty('font-size', px, 'important')` to override `.text-12` or other classes. Exposed as `window.fitMessageBodies` for infinite scroll. Included by both flat.pug and thread.pug. |
 | `console_parsers.js` | Client-side pipe code color parser for message bodies. Largely superseded by server-side `body_html` pre-rendering; retained as fallback for edge cases. |
 
 ### External / Synchronet Integration
@@ -188,37 +196,12 @@ Our identity on each network.
 - `domain` — inherited from network
 
 ### message_areas
-Each row represents a message area (forum/conference) belonging to a message group.
 
-- `id`, `uuid` — identifiers
-- `name`, `description` — display info
-- `shortcode` — unique internal identifier, used to derive backing table names (`mb_<shortcode>_msgs`, `mb_<shortcode>_threads`)
-- `group_shortcode`, `group_id`, `group_uuid` — FK to parent group
-- `read_security`, `post_security` — minimum security level to read/post
-- `min_age`, `max_age` — age restrictions for participants
-- `active` — boolean
-- `msg_count`, `last_message`, `last_from`, `last_subject`, `last_id` — cached stats
-- `thread_mode` — VARCHAR(16), DEFAULT 'standard'. Controls threading behavior:
-  - `standard` — normal threaded view with thread listing
-  - `no_threads` — flat message list only, no thread grouping
-  - `subscribe_only` — (future) only show subscribed threads in newscan
-- `post_as` — VARCHAR(16), DEFAULT 'username'. Controls how the poster's name appears:
-  - `username` — posts display the user's login name
-  - `realname` — posts display the user's full name (falling back to username)
+See `message_architecture.md` for full schema. Key networking-relevant columns: `shortcode` (derives backing table names), `read_security`/`post_security`, `thread_mode`, `post_as`, `newscan_default`, `ansi_area`.
 
 ### Message tables (per area)
-Each message area has `mb_<shortcode>_msgs` and `mb_<shortcode>_threads` tables.
 
-Key columns on message records:
-- `msg_id` — canonical message ID (from @MSGID kludge or HEADERS.DAT Message-ID)
-- `qwk_msg_id` — QWK-specific dupe ID: `{connectionUUID}:{confNum}:{msgNum}`
-- `nntp_msg_id` — NNTP Message-ID (separate column, allows cross-posting)
-- `source_network_id` — which network this message originated from (for echo suppression)
-- `origin_line` — extracted origin/tagline (stored separately, may be stripped from body)
-- `body_text` — message body (CP437 if from QWK/FTN, UTF-8 if from NNTP or local)
-- `utf8` — UTF-8 version of body (null if body_text is already UTF-8)
-- `body_html` — pre-rendered HTML for display, generated at import time. Three-tier detection: ANSI/pipe/Ctrl-A → `formatTerminalText()`, triple-space alignment → `formatTextForHtml()`, plain text → `\r` to `<br>`. Null for older messages (view layer falls back to on-the-fly rendering). Non-fatal: import succeeds even if HTML generation fails.
-- `thread_id`, `threadid`, `reply_to` — threading
+See `message_architecture.md` for full schema. Key networking-relevant columns: `msg_id` (dupe checking), `qwk_msg_id`, `nntp_msg_id`, `source_network_id` (echo suppression), `body_text`, `utf8`, `body_html` (pre-rendered at import time via `formatBodyHtml()` — see message_architecture for pipeline details), `thread_id`, `threadid`, `reply_to`.
 
 ---
 
@@ -641,9 +624,33 @@ node tosser.js --in --ftn --qwk
 node tosser.js --help
 ```
 
+## Maintenance CLI Usage
+
+```bash
+# Regenerate body_html for all active areas
+node src/tools/maintenance.js --regen-html
+
+# Dry run — preview without writing
+node src/tools/maintenance.js --regen-html --dry-run
+
+# Specific area(s)
+node src/tools/maintenance.js --regen-html --area GENERAL --area ALTBBSADS
+
+# Force 80-column HTML output
+node src/tools/maintenance.js --regen-html --width 80
+
+# Custom batch size (default 100)
+node src/tools/maintenance.js --regen-html --batch 50
+
+# Help
+node src/tools/maintenance.js --help
+```
+
 ---
 
 ## Key Design Decisions
+
+_Networking-specific decisions. For message platform decisions (read tracking, body_html pipeline, sanitization, web views, subscriptions), see `message_architecture.md`._
 
 1. **Conference numbers as areatags**: QWK network_areas use the conference number (as a string) as the areatag. This is enforced at the admin layer with numeric validation.
 
@@ -661,286 +668,46 @@ node tosser.js --help
 
 8. **CP437 handling**: QWK packets are CP437. Shared `codepageConversions.js` handles CP437↔UTF-8. Control characters 0x00-0x1F are preserved (for ANSI escape codes, pipe codes, etc.).
 
-9. **body_html pre-rendering**: All three tossers generate `body_html` at import time using a shared `formatBodyHtml()` pattern. Detection is three-tier: ANSI/pipe/Ctrl-A codes → `terminalText.formatTerminalText()` (full terminal emulation), triple-space alignment → `codepageConversions.formatTextForHtml()` (space preservation with HTML escaping), plain text → `escapeHtml()` then newline → `<br>`. Generation is non-fatal (try/catch returns null). The view layer uses pre-rendered HTML when available, falls back to on-the-fly rendering for older messages. The `isAnsi` flag is set on retrieval for view-layer styling decisions (monospace, dark background).
+9. **body_html pre-rendering**: All tossers import `formatBodyHtml()` from `terminalText.js`. Thread helpers shared from `echomail.js`. See `message_architecture.md` for the full pipeline details.
 
-10. **Subscription auto-allow from network**: New connections auto-allow all areas currently on the network (not copied from sibling connections, which could be incomplete). This ensures the allowed set is always the full network regardless of what other peers have configured. New areas added to a network sync subscription rows to all existing connections, with admin checkboxes controlling whether they're auto-allowed (default yes) and/or auto-enabled (default no). Removing an area from a network cleans up all associated subscription rows.
+10. **Subscription auto-allow from network**: New connections auto-allow all areas currently on the network (not copied from sibling connections, which could be incomplete). New areas added to a network sync subscription rows to all existing connections, with admin checkboxes controlling allow/enable defaults. Removing an area from a network cleans up all associated subscription rows.
 
-11. **No direct DB access from routes**: All database reads and writes go through model methods. Admin routes orchestrate by calling model functions on `peerConnections`, `peerAreaSubscriptions`, `networkAreas`, etc. This keeps business logic portable and testable.
-
-12. **Two-tier read tracking pointers over per-message tracking**: Area pointer is the floor, thread pointers add granularity. Normal reading generates at most 2 DB operations per page view (one upsert, one update) instead of N writes for N messages. The `user_msg_reads` exception table exists for future mark-unread but stays empty during normal usage.
-
-13. **Bidirectional scroll from first unread**: Thread reader and flat view load starting from the first unread message going forward, not from the newest going backward. Users scroll up for older (already-read) content and down for newer. This ensures the first unread is always in the DOM for scroll positioning.
-
-14. **Keyset pagination for thread listings**: `getThreadsPage()` uses `(last_message DESC, id DESC)` cursor instead of OFFSET to avoid skipping/duplicating threads when new messages arrive between pages.
-
-15. **Model-layer input sanitization**: `sanitizeMessageFields()` strips dangerous HTML constructs (script, iframe, event handlers, javascript: URIs) while preserving safe markup and ANSI sequences. Called in the model so it covers web posts, and importable by network tossers. Route-level `sanitize-html` is not used — the model handles it.
-
-16. **Area counts by recalculation**: `recalculateAreaCounts()` runs a correlated UPDATE from actual `message_areas` data on every area add/remove. No increment/decrement drift. Cheap operation for an infrequent action.
-
-17. **resolveUserId for session compatibility**: Redis stores all session values as strings. `resolveUserId(sessionUser)` handles string→number conversion with fallback DB lookup for sessions created before the `id` field was added. All routes use this instead of `currentuser.id` directly.
+11. **No direct DB access from routes**: All database reads and writes go through model methods. Admin routes orchestrate by calling model functions. This keeps business logic portable and testable.
 
 ---
 
 ## Future Development Areas
+
+_Networking-specific items. For message platform items (web newscan, rich editor, thread preferences, etc.), see `message_architecture.md`._
 
 - **User QWK downloads**: Use low-level `buildControlDat()`, `buildMessagesDat()`, `buildHeadersDatText()`, and `assembleQwkPacket()` with user-specific conference lists and scan pointers from `userMsgPointers`.
 - **HTTP QWK endpoint**: REST API for packet download/upload (similar to Synchronet's `qwk.ssjs`).
 - **HEADERS.DAT on inbound FTN**: The parser infrastructure exists — could be extended to generate HEADERS.DAT-equivalent metadata from FTN kludge lines.
 - **HWM split for hub mode**: Return HWM data from `buildQwkForNode()` without advancing, let the caller confirm delivery before advancing.
 - **Voting/polls**: VOTING.DAT support in QWK packets (Synchronet generates empty VOTING.DAT).
-- **Thread preferences**: Subscribe/ignore per-thread (schema designed, see below). `thread_mode` column implemented; `user_thread_prefs` table and model pending.
-- **Newscan route/view**: `GET /messages/newscan` using `getNewscanSummary()`, jump-to-unread shortcuts, mark-area-read shortcuts.
-- **Rich text editor**: TinyMCE or similar for HTML message composition. Separate route/handling with whitelist-based sanitization (`sanitize-html` with allowed formatting tags). HTML stored directly in `body_html`; plain `body_text` generated by stripping tags for network compatibility. ANSI conversion on outbound FTN/QWK path would map formatting tags to pipe/ANSI codes.
-- **ANSI art paste support**: Users paste raw ANSI into the textarea. Escape sequences (`\x1b[...`) stored in `body_text` and detected by `formatBodyHtml`'s ANSI branch. No special handling needed — already works with current architecture.
-- **Tosser sanitization integration**: Wire `sanitizeMessageFields()` calls into echomail.js, nntpTosser.js, and qwkTosser.js inbound paths (see Input Sanitization section).
-- **Message body word-wrapping on post**: Ensure user-composed text respects 80 columns before saving to DB (important for FTN/QWK tossing to remote systems).
+- **Tosser sanitization integration**: Wire `sanitizeMessageFields()` calls into echomail.js, nntpTosser.js, and qwkTosser.js inbound paths (see `message_architecture.md` Input Sanitization section).
 
 ---
 
-## Message Read Tracking (Implemented)
+## Message Read Tracking
 
-### Overview
+See `message_architecture.md` for the full two-tier pointer system, schemas, read-state resolution, pointer advancement, unread queries, view loading strategy, and progress bar implementation.
 
-Two-tier pointer system using area-level and thread-level scan pointers. The area pointer acts as a floor: any message with `id <= area_pointer` is considered read regardless of thread pointers. Thread pointers add per-thread granularity above the floor.
-
-This design avoids per-message tracking rows (which would create massive tables) while correctly handling the interleaved nature of threaded messages (where thread A might have messages 10, 15, 22 and thread B has 12, 18, 55 — reading thread A shouldn't mark thread B's messages as read).
-
-### Schema
-
-#### user_msg_pointers
-
-One row per user per area. Pre-populated when areas are created (all users get a row with pointer=0) and when users are created (new user gets rows for all areas with pointer set to current max message ID so history doesn't appear as "new").
-
-```sql
-CREATE TABLE user_msg_pointers (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER,
-    area_shortcode VARCHAR(64),
-    scan_pointer INTEGER DEFAULT 0,
-    last_read_at TIMESTAMP,
-    UNIQUE(user_id, area_shortcode)
-);
-CREATE INDEX idx_ump_user ON user_msg_pointers(user_id);
-CREATE INDEX idx_ump_area ON user_msg_pointers(area_shortcode);
-```
-
-#### user_thread_pointers
-
-One row per user per thread visited. Only created when a user actually views a thread. Stores the highest message ID seen within that specific thread.
-
-```sql
-CREATE TABLE user_thread_pointers (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER,
-    area_shortcode VARCHAR(64),
-    thread_id INTEGER,
-    scan_pointer INTEGER DEFAULT 0,
-    last_read_at TIMESTAMP,
-    UNIQUE(user_id, area_shortcode, thread_id)
-);
-CREATE INDEX idx_utp_user ON user_thread_pointers(user_id);
-CREATE INDEX idx_utp_user_area ON user_thread_pointers(user_id, area_shortcode);
-CREATE INDEX idx_utp_user_area_thread ON user_thread_pointers(user_id, area_shortcode, thread_id);
-```
-
-#### user_msg_reads
-
-Retained for future mark-unread functionality. Not used in normal read tracking. Currently empty.
-
-```sql
-CREATE TABLE user_msg_reads (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER,
-    area_shortcode VARCHAR(64),
-    msg_id INTEGER,
-    is_read BOOLEAN,
-    read_at TIMESTAMP,
-    UNIQUE(user_id, area_shortcode, msg_id)
-);
-```
-
-### Read-State Resolution
-
-Effective read threshold for a thread = `MAX(area_pointer, COALESCE(thread_pointer, 0))`.
-
-A message is **unread** if `msg.id > effective_threshold` for its thread.
-
-| Scenario | Result |
-|---|---|
-| `msg.id <= area_pointer` | READ (area pointer is the floor) |
-| `msg.id > area_pointer`, `msg.id <= thread_pointer` | READ (thread pointer covers it) |
-| `msg.id > area_pointer`, no thread pointer row exists | UNREAD |
-| `msg.id > area_pointer`, `msg.id > thread_pointer` | UNREAD |
-
-### Pointer Advancement
-
-**Viewing a thread**: `advanceThreadPointer(userId, area, threadId, maxMsgId)` — one UPSERT for the thread pointer + one UPDATE for the area pointer, both with `GREATEST()` so they only move forward. Two DB operations total.
-
-**Viewing flat mode**: `advancePointer(userId, area, maxMsgId)` — one UPDATE with `GREATEST()`. One DB operation.
-
-**Mark area as read**: `markAreaRead(userId, area)` — jumps area pointer to `MAX(id)` in the area's message table. Thread pointers don't need updating because the area pointer is the floor.
-
-**Scrolling down for newer messages (lazy-load)**: Advances the appropriate pointer (thread or area) to the highest ID in the new batch.
-
-**Scrolling up for older messages (lazy-load)**: No pointer update — older messages are below the watermark.
-
-### Unread Queries
-
-**Per-thread unread count** (`getThreadUnreadCount`): Single query comparing `msg.id > GREATEST(area_pointer, thread_pointer)` within the thread.
-
-**Batch thread unread counts** (`getThreadUnreadCounts`): Single query with `LEFT JOIN user_thread_pointers` and `GROUP BY thread_id`. Used for thread listings — one query instead of N.
-
-**Area total unread** (`getUnreadCount`): Same LEFT JOIN pattern, area-wide.
-
-**Quick check** (`hasNewMessages`): Fast path checks `MAX(id) > area_pointer`, slower path checks against per-thread pointers only if needed.
-
-**First unread in thread/area** (`getFirstUnreadInThread`, `getFirstUnreadInArea`): Returns the lowest message ID above the effective threshold. Used to position the initial view.
-
-### View Loading Strategy
-
-Both thread reader and flat view find the first unread message first, then load a batch of 30 messages starting from that point going forward. If nothing is unread, they load the newest 30. The first unread message is always in the DOM so scroll-to-unread is a simple querySelector.
-
-Bidirectional lazy scroll: scrolling up loads older messages (prepended), scrolling down loads newer messages (appended). Both views track `oldestId`, `newestId`, `hasOlder`, `hasNewer`.
-
-### Position-Aware Progress Bar
-
-The progress bar shows a positioned window within the total message count. Server passes `messagesBefore` (from `countMessagesBefore()`) along with `hasOlder`/`hasNewer` flags. Client tracks `msgBefore` and `loaded`, renders the bar with `margin-left` (position) and `width` (window size) as percentages. Loading older decreases `msgBefore` (bar grows left), loading newer increases `loaded` (bar grows right).
-
-### QWK Packet Integration
-
-User QWK downloads use the area scan pointer as the starting point for message gathering — same role as `msg_idx` on `peer_area_subscriptions` for node connections. After a successful QWK download:
-- Advance the area scan pointer to the highest message ID included in the packet
-- Thread pointers not needed (bulk download is sequential)
-
-REP upload (user replies) uses the standard `replyToThread`/`startNewThread` posting path.
+**QWK Packet Integration**: User QWK downloads use the area scan pointer as the starting point for message gathering — same role as `msg_idx` on `peer_area_subscriptions` for node connections. After a successful QWK download, advance the area scan pointer to the highest message ID included in the packet. REP upload uses the standard `replyToThread`/`startNewThread` posting path.
 
 ---
 
-## Input Sanitization (Implemented)
+## Input Sanitization, Message Posting, Web Views, Subscriptions
 
-### Overview
-
-Targeted sanitization at the model layer, covering both web posts and network packet imports. Designed to prevent XSS without stripping legitimate content that may be needed for future rich editing or ANSI art.
-
-### sanitizeMessageFields (messages.js)
-
-Called at the top of `startNewThread()` and `replyToThread()`. Exported for use by tossers on inbound packets.
-
-**What gets stripped:**
-- `<script>...</script>` and `<style>...</style>` (tags and content)
-- Dangerous void/self-closing tags: `<iframe>`, `<object>`, `<embed>`, `<link>`, `<meta>`, `<base>`, `<form>`, `<input>`, `<button>`, `<select>`, `<textarea>`
-- Event handler attributes (`onclick`, `onerror`, `onload`, etc.) on any surviving tags
-- `javascript:`, `vbscript:`, `data:` URI schemes in `href`/`src`/`action` attributes
-
-**What is preserved:**
-- Plain text including literal `<` and `>` characters
-- Safe HTML tags (`<b>`, `<i>`, `<u>`, `<br>`, `<p>`, `<div>`, `<span>`, `<font>`, `<table>`, etc.)
-- ANSI escape sequences, pipe codes, Ctrl-A codes (byte sequences, not HTML)
-- HTML entities (handled at render time)
-
-### Defense-in-Depth Layers
-
-| Layer | What | Covers |
-|---|---|---|
-| Model (`messages.js`) | `sanitizeMessageFields` strips dangerous constructs | All sources (web + FTN/NNTP/QWK) |
-| Render (`formatBodyHtml`) | `escapeHtml()` on plain text path | Prevents XSS at display time |
-| Render (`formatTextForHtml`) | HTML entity escaping before space formatting | Defense-in-depth for codepage path |
-| View (`.pug`) | `= msg.body_text` (Pug auto-escape) for `body_text` fallback | Last resort if `body_html` is null |
-
-### SQL Injection
-
-Not a concern — all three tossers and both save functions use parameterized queries via `postgres.insertObject()`. Table names derive from admin-controlled shortcodes (not user input).
-
-### Tosser Integration (Pending)
-
-Add `sanitizeMessageFields(dbObj)` call in each tosser after constructing the DB object but before `postgres.insertObject()`:
-
-- **echomail.js** — after `var dbObj = await ftnToDb(message);` (line ~195)
-- **nntpTosser.js** — after the `dbObj = { ... };` block (line ~541)
-- **qwkTosser.js** — after the `dbObj = { ... };` block (line ~285)
-
----
-
-## Message Posting (Implemented)
-
-### Routes
-
-- `POST /messages/area/:shortcode/newthread` — creates thread and first message. Redirects to thread (threaded view) or back to flat view.
-- `POST /messages/area/:shortcode/thread/:uuid/reply` — posts reply to existing thread. Sets `reply_to` to the specific message being replied to (from the reply button's `data-bs-msgid`), falling back to the thread root (`dbthread.threadid`). This is critical for FTN `@REPLY` kludge generation during outbound tossing.
-
-Both routes resolve `from_user` via `resolvePostName(sessionUser, msgArea)` which checks the area's `post_as` setting (username or realname). Input is sanitized at the model layer.
-
-### Quote System
-
-The reply modal includes a collapsible quote panel. When replying to a specific message:
-1. The original message's plain text is extracted from the DOM (`getPlainText()` clones the element, converts `<br>`/block elements to `\n`, reads `textContent`)
-2. Text is word-wrapped at 80 columns (with smart truncation for lines only a few chars over)
-3. Lines are displayed with numbered rows in a scrollable panel
-4. Clicking a line immediately inserts `"  > {line text}"` at the cursor position in the textarea (truncated to 80 chars after prefix)
-5. Inserted lines dim to 40% opacity as visual feedback
-6. Users can interleave quotes with their own text by positioning the cursor between inserts
-
-### Flat View Reply Routing
-
-In flat view, messages span multiple threads. Each message carries `thread_uuid` (resolved via `getThreadUUIDMap()` batch lookup). The reply modal's form action is set dynamically per-click to target the correct thread.
+See `message_architecture.md` for:
+- Input sanitization (`sanitizeMessageFields`, defense-in-depth layers, tosser integration points)
+- Message posting (routes, `post_as` resolution, quote system, flat view reply routing)
+- Web view architecture (responsive layout, offcanvas sidebar, auto-sizing, access control, message headers)
+- User area subscriptions (schema, resolution order, usage)
 
 ---
 
 ## Thread Preferences (Design — Not Yet Implemented)
 
-### Overview
-
-Separate from area newscan subscriptions. Allows users to subscribe to or ignore individual threads, independent of whether they're subscribed to the area's newscan. Some areas may also be flagged to function in "subscribe-to-threads" mode rather than "read everything" mode.
-
-The `thread_mode` column on `message_areas` is implemented (standard/subscribe_only/no_threads). The `user_thread_prefs` table and model logic are pending.
-
-### Schema
-
-#### user_thread_prefs
-
-Only non-default rows need to exist. If no row exists for a user+thread, the thread follows the area's default behavior.
-
-```sql
-CREATE TABLE user_thread_prefs (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    area_shortcode VARCHAR(64) NOT NULL,
-    thread_id INTEGER NOT NULL,
-    pref VARCHAR(16) NOT NULL DEFAULT 'normal',
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    UNIQUE(user_id, area_shortcode, thread_id)
-);
-CREATE INDEX idx_utp_user ON user_thread_prefs(user_id);
-CREATE INDEX idx_utp_user_area ON user_thread_prefs(user_id, area_shortcode);
-CREATE INDEX idx_utp_subscribed ON user_thread_prefs(user_id) WHERE pref = 'subscribe';
-```
-
-#### pref values
-
-| Value | Meaning |
-|---|---|
-| `normal` | Follow area default. If user has area in newscan, thread is included. If not, thread is excluded. (Row can be deleted — absence = normal.) |
-| `subscribe` | Always show new messages in this thread, even if the area is not in the user's newscan. |
-| `ignore` | Never show new messages in this thread, even if the area is in the user's newscan. |
-| `mute` | Like ignore but also suppress notifications (future). |
-
-### Auto-subscribe Triggers (Future)
-
-Threads could be auto-subscribed when:
-- User posts a new message (starts a thread)
-- User replies to a thread
-- User is mentioned/tagged in a thread (requires mention system)
-- User receives a private reply in a thread
-
-### Integration with QWK Packets
-
-For user QWK downloads in `subscribe_only` areas:
-- Only include messages from subscribed threads
-- The conference is still listed in CONTROL.DAT (user can post new threads)
-- Thread prefs determine which messages go into the packet
-
-For node QWK packets (`buildQwkForNode`):
-- Thread prefs don't apply — nodes get all messages in subscribed conferences
-- Thread filtering is a user-level concern, not a network-level one
+See `message_architecture.md` for the full design: `user_thread_prefs` schema, pref values (normal/subscribe/ignore/mute), auto-subscribe triggers, QWK packet integration.
 

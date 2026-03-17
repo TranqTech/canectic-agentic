@@ -6,7 +6,8 @@ The FTN mailer system handles real-time node-to-node communication for exchangin
 
 The mailer operates independently of the tosser. The tosser prepares `.pkt` files in an outbound directory and processes `.pkt` files from an inbound directory. The mailer's job is to move files between the local outbound/inbound directories and the remote system via a negotiated transfer protocol over a network transport.
 
-For the message and message networking stack, see `NETWORKING_ARCHITECTURE.md`.
+For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views), see `message_architecture.md`.
+For the message networking stack (tossers, protocols, packet formats), see `NETWORKING_ARCHITECTURE.md`.
 For the terminal-side BBS architecture, see `terminal_architecture.md`.
 
 ---
@@ -640,7 +641,7 @@ Build the minimum viable mailer that can exchange files with a remote binkd syst
 - **Transfer validation**: Verify file sizes match the offered size. Verify CRC when the protocol supports it (binkp NR mode). Never execute received files — they go to the inbound directory for the tosser to process.
 - **Path traversal prevention**: Strip directory components from offered filenames. Write only to the designated temp/inbound directories.
 - **Rate limiting**: Maximum concurrent sessions per remote address. Connection attempt throttling for failed authentications.
-- **Sanitize session data**: Apply `sanitizeMessageFields()` if any session-negotiated strings (system name, operator name) are stored or displayed. EMSI_DAT contains user-controlled strings.
+- **Sanitize session data**: Apply `sanitizeMessageFields()` (see `message_architecture.md`) if any session-negotiated strings (system name, operator name) are stored or displayed. EMSI_DAT contains user-controlled strings.
 
 ---
 

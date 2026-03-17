@@ -17,6 +17,22 @@ async function getPeerConnections() {
 
 dotenv.config();
 
+// Normalize flag input from forms — may arrive as a string, an array, or undefined.
+// Always returns a JSON array (or null if empty).
+function normalizeFlags(input) {
+	if (!input) return JSON.stringify([]);
+	if (typeof input === 'string') {
+		// Single value from form (only one hidden input) comes as a string
+		try {
+			var parsed = JSON.parse(input);
+			if (Array.isArray(parsed)) return JSON.stringify(parsed);
+		} catch (_) {}
+		return JSON.stringify([input]);
+	}
+	if (Array.isArray(input)) return JSON.stringify(input);
+	return JSON.stringify([]);
+}
+
 async function updateAreaStats() {
 	var arealist = await postgres.query("SELECT shortcode FROM message_areas WHERE active");
 	if (arealist && arealist.length > 0) {
@@ -122,7 +138,11 @@ async function newArea(formObj) {
 			: 'standard',
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase()
-			: 'username'
+			: 'username',
+		read_perm_flags: normalizeFlags(formObj.read_perm_flags),
+		read_rest_flags: normalizeFlags(formObj.read_rest_flags),
+		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
+		post_rest_flags: normalizeFlags(formObj.post_rest_flags)
 	};
 
 	var dbres = await postgres.insertObject(pgObj, "message_areas");
@@ -356,6 +376,12 @@ async function updateArea(shortcode, formObj) {
 			updateObj.post_as = postAs;
 		}
 	}
+
+	// Flag columns — always update if present in form (even if empty array)
+	if (formObj.read_perm_flags !== undefined) updateObj.read_perm_flags = normalizeFlags(formObj.read_perm_flags);
+	if (formObj.read_rest_flags !== undefined) updateObj.read_rest_flags = normalizeFlags(formObj.read_rest_flags);
+	if (formObj.post_perm_flags !== undefined) updateObj.post_perm_flags = normalizeFlags(formObj.post_perm_flags);
+	if (formObj.post_rest_flags !== undefined) updateObj.post_rest_flags = normalizeFlags(formObj.post_rest_flags);
 
 	if (Object.keys(updateObj).length === 0) {
 		returnObj.errormessages.push("No updatable fields provided");

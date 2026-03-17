@@ -23,8 +23,8 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
-import * as terminalText from '../utils/terminalText.js';
-import { formatTextForHtml } from '../utils/codepageConversions.js';
+import { formatBodyHtml } from '../utils/terminalText.js';
+import { createThreadRow, updateThreadStats, rollbackThread } from './echomail.js';
 import { makeTransport } from './qwkTransport.js';
 import {
 	parseControlDat,
@@ -40,37 +40,6 @@ dotenv.config();
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// Generate body_html from display text. Detects ANSI/pipe/Ctrl-A codes
-// and routes to the appropriate formatter.
-// Non-fatal — returns null on failure so message import continues without HTML.
-async function formatBodyHtml(displayText) {
-	if (!displayText) return null;
-
-	try {
-		if (displayText.includes("\x1b[") ||
-			/\|\d{2}/.test(displayText) ||
-			displayText.includes("\x01")) {
-			return await terminalText.formatTerminalText(displayText, {
-				terminalWidth: 80,
-				replaceAllSpaces: true,
-				handlePipeCodes: true,
-				handleAnsiCodes: true,
-				handleCtrlACodes: true,
-				resetOnNewline: true
-			});
-		}
-
-		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces)
-		if (displayText.includes("   ")) {
-			return formatTextForHtml(displayText);
-		}
-
-		return displayText.replace(/\r/g, '<br>');
-	} catch (_) {
-		return null;
-	}
-}
 
 // Parse a QWK date "MM-DD-YY" + time "HH:MM" into a Date object.
 // Two-digit year: 00-79 → 2000-2079, 80-99 → 1980-1999.
@@ -225,31 +194,21 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		}
 	}
 
+	var isNewThread = false;
 	if (!threadId) {
 		// Create new thread — use msgId as the threadid
-		var tuuid     = uuidv4();
-		var threadObj = {
-			uuid:              tuuid,
-			threadid:          msgId,
-			subject:           subject,
-			started_at:        systemTime,
-			started_by:        fromUser,
-			message_count:     1,
-			last_message:      systemTime,
-			last_message_from: fromUser
-		};
-		var tres = await postgres.insertObject(threadObj, threadtable);
-		if (!tres.status || !tres.insertId) {
+		var tResult = await createThreadRow(threadtable, msgId, subject, systemTime, fromUser);
+		if (!tResult) {
 			alogger.writeClog(3,
-				'importQwkMessage: could not create thread for ' + dupeId +
-				': ' + tres.errormessages.join(', '), 'tosser',
+				'importQwkMessage: could not create thread for ' + dupeId, 'tosser',
 				'redbright'
 			, false, false);
 			returnObj.errormessages.push('Failed to create thread');
 			return returnObj;
 		}
-		threadId    = tres.insertId;
-		threadidStr = msgId;
+		threadId    = tResult.threadId;
+		threadidStr = tResult.threadidStr;
+		isNewThread = true;
 	}
 
 	// Pre-format body as HTML for display (non-fatal)
@@ -287,11 +246,8 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 	var mres = await postgres.insertObject(dbObj, msgtable);
 	if (!mres.status) {
 		// Roll back thread if we just created it
-		if (threadidStr === msgId) {
-			await postgres.write(
-				'DELETE FROM ' + threadtable + ' WHERE threadid = $1',
-				[msgId]
-			);
+		if (isNewThread) {
+			await rollbackThread(threadtable, msgId);
 		}
 		alogger.writeClog(3,
 			'importQwkMessage: failed to insert message ' + dupeId +
@@ -303,15 +259,8 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 	}
 
 	// Update thread stats if this was a reply into an existing thread
-	if (threadidStr !== msgId) {
-		await postgres.write(
-			'UPDATE ' + threadtable +
-			' SET message_count = message_count + 1,' +
-			' last_message = GREATEST(last_message, $1),' +
-			' last_message_from = $2' +
-			' WHERE id = $3',
-			[systemTime, fromUser, threadId]
-		);
+	if (!isNewThread) {
+		await updateThreadStats(threadtable, threadId, systemTime, fromUser);
 	}
 
 	returnObj.status   = true;
@@ -378,6 +327,58 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 				'cyan'
 			, false, false);
 			hasExisting = true;
+		}
+	}
+
+	// Phase 1.5: Check for an existing downloaded .qwk/.rep in inDir that was
+	// never extracted (e.g. extraction or processing failed on a prior run).
+	// In QWK networking the hub typically deletes the packet after the client
+	// downloads it, so we must process the local copy before trying to pull again.
+	if (!hasExisting && !isHubMode) {
+		var inFiles = fs.readdirSync(inDir);
+		var existingQwk = inFiles.find(f => f.toLowerCase().endsWith('.qwk'));
+		if (existingQwk) {
+			var existingQwkPath = path.join(inDir, existingQwk);
+			alogger.writeClog(5,
+				'pullFromQwkPeer: found existing QWK packet in inbound: ' + existingQwk +
+				' — extracting before pulling new', 'tosser',
+				'cyan'
+			, false, false);
+
+			try {
+				unzipQwkPacket(existingQwkPath, extractDir);
+
+				var freshFiles = fs.readdirSync(extractDir);
+				alogger.writeClog(5,
+					'pullFromQwkPeer: extracted ' + freshFiles.length + ' file(s) from existing packet: ' +
+					freshFiles.join(', '), 'tosser',
+					'cyan'
+				, false, false);
+
+				// Check that extraction actually produced message data
+				var hasMsgData = freshFiles.find(f =>
+					f.toUpperCase() === 'MESSAGES.DAT' || f.toUpperCase().endsWith('.MSG')
+				);
+				if (hasMsgData) {
+					hasExisting = true;
+				} else {
+					alogger.writeClog(5,
+						'pullFromQwkPeer: existing packet had no message data — removing and pulling fresh', 'tosser',
+						'cyan'
+					, false, false);
+					fs.rmSync(extractDir, { recursive: true, force: true });
+					fs.unlinkSync(existingQwkPath);
+				}
+			} catch (err) {
+				alogger.writeClog(3,
+					'pullFromQwkPeer: failed to extract existing QWK ' + existingQwk +
+					': ' + err.message + ' — removing corrupt file and pulling fresh', 'tosser',
+					'redbright'
+				, false, false);
+				// Remove the corrupt/unextractable file so we don't loop on it
+				try { fs.unlinkSync(existingQwkPath); } catch (_) {}
+				try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch (_) {}
+			}
 		}
 	}
 
@@ -699,10 +700,15 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 		, false, false);
 
 		// Processing complete — remove the extracted directory so it isn't
-		// reprocessed next cycle. The .QWK file stays for reference.
+		// reprocessed next cycle. Also remove the source .qwk packet since
+		// Phase 1.5 would otherwise re-extract it on every run.
 		fs.rmSync(extractDir, { recursive: true, force: true });
+		var processedQwk = path.join(inDir, remoteQwkId + '.qwk');
+		if (fs.existsSync(processedQwk)) {
+			fs.unlinkSync(processedQwk);
+		}
 		alogger.writeClog(5,
-			'pullFromQwkPeer: cleaned up extracted directory', 'tosser',
+			'pullFromQwkPeer: cleaned up extracted directory and source packet', 'tosser',
 			'cyan'
 		, false, false);
 

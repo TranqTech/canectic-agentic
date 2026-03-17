@@ -15,6 +15,7 @@ import {webserver} from "../src/servers/webserver.js"
 import { pgpool } from "../src/middleware/db/postgres.js";
 import * as redis from "../src/middleware/db/redis.js";
 import * as userMsgPointers from '../src/models/userMsgPointers.js';
+import * as userAreaSubs from '../src/models/userAreaSubs.js';
 
 
 //variable setup
@@ -73,6 +74,11 @@ process.on('SIGTERM', () => {
 	socatManager.shutdown();
 	process.exit(0);
 });
+
+async function prerunMaint(){
+	await userMsgPointers.ensureConstraintsAndIndexes();
+	await userAreaSubs.ensureConstraintsAndIndexes();
+}
 
 async function startSocatManager(){
 	socatManager = new SocatManager();
@@ -155,7 +161,7 @@ async function exitWatch(){
 
 
 async function main(){
-	await userMsgPointers.ensureConstraintsAndIndexes();
+	await prerunMaint()
 	await startMailerManager()
 	await startNodeManager()
 	await startSocatManager()

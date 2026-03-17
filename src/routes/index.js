@@ -39,6 +39,7 @@ router.use(async function(req, res, next) {
 	res.locals.currentPath = req.path;
 	res.locals.activelink  = '';
 	res.locals.DateTime    = DateTime;
+	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
 	if (req.cookies.sessionid) {
 		await sessionStore.sessionRenew(req.cookies.sessionid);
 	}
@@ -78,6 +79,56 @@ function resolvePostName(sessionUser, msgArea) {
 	return sessionUser.username || 'Unknown';
 }
 
+// Helper: parse JSONB flags from DB — may be a JSON string, array, or null.
+function parseFlags(val) {
+	if (!val) return [];
+	if (Array.isArray(val)) return val;
+	if (typeof val === 'string') {
+		try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
+		catch (_) { return []; }
+	}
+	return [];
+}
+
+// Helper: check if user has sufficient access to read an area.
+// Checks security level, required permission flags, and restriction flags.
+function checkAreaReadAccess(sessionUser, msgArea) {
+	if (!msgArea) return false;
+	var userSecurity = parseInt(sessionUser.security) || 0;
+	if (msgArea.read_security && userSecurity < msgArea.read_security) return false;
+
+	var userPerms  = parseFlags(sessionUser.permissionflags);
+	var userRestrs = parseFlags(sessionUser.restrictionflags);
+	var reqFlags   = parseFlags(msgArea.read_perm_flags);
+	var restFlags  = parseFlags(msgArea.read_rest_flags);
+
+	// Must have ALL required permission flags
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	// Must have NONE of the restriction flags
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+
+	return true;
+}
+
+// Helper: check if user has sufficient access to post in an area.
+function checkAreaPostAccess(sessionUser, msgArea) {
+	if (!msgArea) return false;
+	var userSecurity = parseInt(sessionUser.security) || 0;
+	if (msgArea.post_security && userSecurity < msgArea.post_security) return false;
+
+	var userPerms  = parseFlags(sessionUser.permissionflags);
+	var userRestrs = parseFlags(sessionUser.restrictionflags);
+	var reqFlags   = parseFlags(msgArea.post_perm_flags);
+	var restFlags  = parseFlags(msgArea.post_rest_flags);
+
+	// Must have ALL required permission flags
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	// Must have NONE of the restriction flags
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+
+	return true;
+}
+
 /* GET home page. */
 router.get('/', function(req, res, next) {
   res.render('public/index', { title: 'Express' });
@@ -103,17 +154,25 @@ router.get('/messages', async (req, res) => {
 	var userId = await resolveUserId(currentuser);
 	var grouplist = await messages.listMsgGroups(userSecurity);
 
-	// Attach unread counts per group (sum of unread across all areas in group)
+	// Filter groups by read flags (DB already filtered by read_security level)
+	grouplist = grouplist.filter(function(g) { return checkAreaReadAccess(currentuser, g); });
+
+	// Attach unread counts per group (sum of unread across accessible areas)
 	if (userId) {
 		for (var group of grouplist) {
 			var areas = await messages.getAreasInGroup(group.shortcode, userSecurity);
+			// Filter areas by read flags
+			areas = areas.filter(function(a) { return checkAreaReadAccess(currentuser, a); });
 			var groupUnread = 0;
 			for (var area of areas) {
 				var unread = await userMsgPointers.getUnreadCount(userId, area.shortcode);
 				groupUnread += unread;
 			}
 			group.unread_count = groupUnread;
+			group._areaCount = areas.length;
 		}
+		// Remove groups with no accessible areas
+		grouplist = grouplist.filter(function(g) { return g._areaCount > 0; });
 	}
 
 	res.render('messages/index', {
@@ -151,7 +210,21 @@ router.get('/messages/group/:shortcode', async (req, res) => {
 		});
 	}
 
+	// Check group-level read access (flags)
+	if (!checkAreaReadAccess(currentuser, msgGroup)) {
+		return res.render('messages/groups/view', {
+			title: 'Access Denied',
+			activelink: 'messages',
+			currentuser: currentuser,
+			msgGroup: null,
+			arealist: []
+		});
+	}
+
 	var arealist = await messages.getAreasInGroup(shortcode, userSecurity);
+
+	// Filter areas by read flags
+	arealist = arealist.filter(function(a) { return checkAreaReadAccess(currentuser, a); });
 
 	// Attach unread counts per area
 	var userId = await resolveUserId(currentuser);
@@ -173,39 +246,39 @@ router.get('/messages/group/:shortcode', async (req, res) => {
 // Area view — threads listing or flat messages depending on thread_mode / user toggle
 router.get('/messages/area/:shortcode', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
-	if (!currentuser) {
-		return res.render('messages/areas/view', {
-			title: 'Message Area',
-			activelink: 'messages',
-			currentuser: null,
-			msgArea: null,
-			threadlist: [],
-			totalThreads: 0
-		});
-	}
-
 	var shortcode = req.params.shortcode.toLowerCase().trim();
-	var msgArea   = await msgAreas.getAreaByShortcode(shortcode);
+	var msgArea   = currentuser ? await msgAreas.getAreaByShortcode(shortcode) : null;
+	var sufficientAccess = currentuser && msgArea && checkAreaReadAccess(currentuser, msgArea);
 
-	if (!msgArea) {
+	// Bail early if no user, no area, or no access — template guards handle display
+	if (!currentuser || !msgArea || !sufficientAccess) {
+		var threadMode = (msgArea && msgArea.thread_mode) || 'standard';
+		var viewMode   = req.query.view || null;
+		if ((threadMode === 'no_threads' || viewMode === 'flat') && msgArea) {
+			return res.render('messages/areas/flat', {
+				title: msgArea ? msgArea.name : 'Message Area',
+				activelink: 'messages',
+				currentuser: currentuser,
+				sufficientAccess: !!sufficientAccess,
+				canPost: false,
+				msgArea: msgArea,
+				messages: [],
+				totalMessages: 0,
+				firstUnreadId: 0,
+				threadMode: threadMode,
+				hasOlder: false,
+				hasNewer: false,
+				messagesBefore: 0,
+				postFromName: ''
+			});
+		}
 		return res.render('messages/areas/view', {
-			title: 'Area Not Found',
+			title: msgArea ? msgArea.name : 'Message Area',
 			activelink: 'messages',
 			currentuser: currentuser,
-			msgArea: null,
-			threadlist: [],
-			totalThreads: 0
-		});
-	}
-
-	// Security check
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.read_security && userSecurity < msgArea.read_security) {
-		return res.render('messages/areas/view', {
-			title: 'Access Denied',
-			activelink: 'messages',
-			currentuser: currentuser,
-			msgArea: null,
+			sufficientAccess: !!sufficientAccess,
+			canPost: false,
+			msgArea: msgArea,
 			threadlist: [],
 			totalThreads: 0
 		});
@@ -213,6 +286,7 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 
 	var threadMode = msgArea.thread_mode || 'standard';
 	var viewMode   = req.query.view || null;
+	var canPost    = checkAreaPostAccess(currentuser, msgArea);
 
 	// Flat view: forced by thread_mode=no_threads, or user toggle ?view=flat
 	if (threadMode === 'no_threads' || viewMode === 'flat') {
@@ -281,6 +355,8 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 			title: msgArea.name,
 			activelink: 'messages',
 			currentuser: currentuser,
+			sufficientAccess: true,
+			canPost: canPost,
 			msgArea: msgArea,
 			messages: msglist,
 			totalMessages: totalMessages,
@@ -312,6 +388,8 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 		title: msgArea.name,
 		activelink: 'messages',
 		currentuser: currentuser,
+		sufficientAccess: true,
+		canPost: canPost,
 		msgArea: msgArea,
 		threadlist: threadlist,
 		totalThreads: totalThreads,
@@ -337,8 +415,7 @@ router.get('/messages/area/:shortcode/threads/load', async (req, res) => {
 		return res.status(404).json({ error: 'Area not found' });
 	}
 
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.read_security && userSecurity < msgArea.read_security) {
+	if (!checkAreaReadAccess(currentuser, msgArea)) {
 		return res.status(403).json({ error: 'Access denied' });
 	}
 
@@ -398,8 +475,7 @@ router.get('/messages/area/:shortcode/messages/load', async (req, res) => {
 		return res.status(404).json({ error: 'Area not found' });
 	}
 
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.read_security && userSecurity < msgArea.read_security) {
+	if (!checkAreaReadAccess(currentuser, msgArea)) {
 		return res.status(403).json({ error: 'Access denied' });
 	}
 
@@ -503,47 +579,32 @@ router.post('/messages/area/:shortcode/markread', urlencodedParser, async (req, 
 // Thread reader — initial page load (newest messages)
 router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
-	if (!currentuser) {
-		return res.render('messages/areas/thread', {
-			title: 'Thread',
-			activelink: 'messages',
-			currentuser: null,
-			msgArea: null,
-			thread: null,
-			messages: [],
-			totalMessages: 0
-		});
-	}
-
 	var shortcode = req.params.shortcode.toLowerCase().trim();
 	var uuid      = req.params.uuid.toLowerCase().trim();
-	var msgArea   = await msgAreas.getAreaByShortcode(shortcode);
+	var msgArea   = currentuser ? await msgAreas.getAreaByShortcode(shortcode) : null;
+	var sufficientAccess = currentuser && msgArea && checkAreaReadAccess(currentuser, msgArea);
 
-	if (!msgArea) {
+	// Bail early if no user, no area, or no access — template guards handle display
+	if (!currentuser || !msgArea || !sufficientAccess) {
 		return res.render('messages/areas/thread', {
-			title: 'Not Found',
+			title: msgArea ? msgArea.name : 'Thread',
 			activelink: 'messages',
 			currentuser: currentuser,
-			msgArea: null,
+			sufficientAccess: !!sufficientAccess,
+			canPost: false,
+			msgArea: msgArea,
 			thread: null,
 			messages: [],
-			totalMessages: 0
+			totalMessages: 0,
+			firstUnreadId: 0,
+			hasOlder: false,
+			hasNewer: false,
+			messagesBefore: 0,
+			postFromName: ''
 		});
 	}
 
-	// Security check
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.read_security && userSecurity < msgArea.read_security) {
-		return res.render('messages/areas/thread', {
-			title: 'Access Denied',
-			activelink: 'messages',
-			currentuser: currentuser,
-			msgArea: null,
-			thread: null,
-			messages: [],
-			totalMessages: 0
-		});
-	}
+	var canPost = checkAreaPostAccess(currentuser, msgArea);
 
 	var thread = await messages.getThreadByUUID(uuid, shortcode);
 	if (!thread) {
@@ -551,10 +612,17 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 			title: 'Thread Not Found',
 			activelink: 'messages',
 			currentuser: currentuser,
+			sufficientAccess: true,
+			canPost: canPost,
 			msgArea: msgArea,
 			thread: null,
 			messages: [],
-			totalMessages: 0
+			totalMessages: 0,
+			firstUnreadId: 0,
+			hasOlder: false,
+			hasNewer: false,
+			messagesBefore: 0,
+			postFromName: ''
 		});
 	}
 
@@ -571,7 +639,6 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 	// Load starting from first unread, or newest if all read
 	var allMessages;
 	if (firstUnreadId > 0) {
-		// Load from first unread forward (afterId is exclusive, so subtract 1)
 		allMessages = await messages.getMessages(shortcode, {
 			threadId: thread.id,
 			afterId: firstUnreadId - 1,
@@ -579,7 +646,6 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 			limit: batchSize
 		});
 	} else {
-		// All read — load newest
 		allMessages = await messages.getMessages(shortcode, {
 			threadId: thread.id,
 			order: 'DESC',
@@ -620,6 +686,8 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 		title: thread.subject,
 		activelink: 'messages',
 		currentuser: currentuser,
+		sufficientAccess: true,
+		canPost: canPost,
 		msgArea: msgArea,
 		thread: thread,
 		messages: allMessages,
@@ -652,8 +720,7 @@ router.get('/messages/area/:shortcode/thread/:uuid/load', async (req, res) => {
 		return res.status(404).json({ error: 'Area not found' });
 	}
 
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.read_security && userSecurity < msgArea.read_security) {
+	if (!checkAreaReadAccess(currentuser, msgArea)) {
 		return res.status(403).json({ error: 'Access denied' });
 	}
 
@@ -745,9 +812,8 @@ router.post('/messages/area/:shortcode/newthread', urlencodedParser, async (req,
 		return res.redirect('/messages');
 	}
 
-	// Post security check
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.post_security && userSecurity < msgArea.post_security) {
+	// Post access check (security level + flags)
+	if (!checkAreaPostAccess(currentuser, msgArea)) {
 		return res.redirect('/messages/area/' + shortcode);
 	}
 
@@ -782,9 +848,8 @@ router.post('/messages/area/:shortcode/thread/:uuid/reply', urlencodedParser, as
 		return res.redirect('/messages');
 	}
 
-	// Post security check
-	var userSecurity = parseInt(currentuser.security) || 0;
-	if (msgArea.post_security && userSecurity < msgArea.post_security) {
+	// Post access check (security level + flags)
+	if (!checkAreaPostAccess(currentuser, msgArea)) {
 		return res.redirect('/messages/area/' + shortcode);
 	}
 

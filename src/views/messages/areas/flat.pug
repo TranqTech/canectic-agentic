@@ -8,137 +8,152 @@ block content
       - loginMode = 'guard'
       - loginRedirect = currentPath
       include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else if !msgArea
+      .row.mt-2
+        .col-xl-6.offset-xl-3.col-lg-10.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              h2= title
+            .card-body
+              h3 Data Not Found!
     else
       .row.mt-2
-        .col-lg-1
-        .col-lg-7.col-12
-          if !msgArea
-            .card
-              .card-header.bg-darkblue.text-white
-                h2= title
-              .card-body
-                h3 Data Not Found!
-          else
-            .card
-              .card-header.bg-darkblue.text-white
-                .row.align-items-center
-                  .col-6
-                    h5.mb-0
-                      i.bi.bi-list-task
-                      |  
-                      = msgArea.name
-                    .small.fg-cyan All messages — flat view
-                  .col-6
-                    .text-end
-                      button.btn.btn-sm.btn-success.me-2(data-bs-toggle='modal' data-bs-target='#newThreadModal')
+        .col-xl-6.offset-xl-3.col-lg-10.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row.align-items-center
+                .col-6
+                  h5.mb-0
+                    i.bi.bi-list-task
+                    |  
+                    = msgArea.name
+                  .small.fg-cyan All messages — flat view
+                .col-6
+                  .d-flex.justify-content-end.align-items-center
+                    //- Desktop buttons — hidden below xl
+                    if canPost
+                      button.btn.btn-sm.btn-success.me-2.d-none.d-xl-inline-flex(data-bs-toggle='modal' data-bs-target='#newThreadModal')
                         i.bi.bi-plus-lg
                         |  Post
-                      if threadMode && threadMode !== 'no_threads'
-                        a.btn.btn-sm.btn-outline-info.me-2(href=`/messages/area/${msgArea.shortcode}` title='View as threads')
-                          i.bi.bi-chat-left-text
-                          |  Threads
-                      a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
-                        i.bi.bi-arrow-left
-                        |  
-                        = msgArea.group_shortcode
+                    if threadMode && threadMode !== 'no_threads'
+                      a.btn.btn-sm.btn-outline-info.me-2.d-none.d-xl-inline-flex(href=`/messages/area/${msgArea.shortcode}` title='View as threads')
+                        i.bi.bi-chat-left-text
+                        |  Threads
+                    a.btn.btn-sm.btn-outline-light.me-2.d-none.d-xl-inline-flex(href=`/messages/group/${msgArea.group_shortcode}`)
+                      i.bi.bi-arrow-left
+                      |  
+                      = msgArea.group_shortcode
+                    //- Hamburger — visible below xl
+                    button.btn.btn-outline-light.d-xl-none(
+                      type='button'
+                      data-bs-toggle='offcanvas'
+                      data-bs-target='#sidebarOffcanvas'
+                      aria-label='Menu'
+                    )
+                      i.bi.bi-list
 
-              //- Position-aware progress bar
-              - var leftPct = totalMessages > 0 ? Math.round((messagesBefore / totalMessages) * 100) : 0
-              - var widthPct = totalMessages > 0 ? Math.max(Math.round((messages.length / totalMessages) * 100), 1) : 0
-              .card-body.py-1.bg-dark.border-bottom.border-secondary
-                .d-flex.align-items-center.justify-content-between
-                  .small.text-muted
-                    span#msgProgress
-                      = messages.length
-                      |  of 
-                      = totalMessages
-                      |  loaded
-                  .flex-grow-1.mx-3
-                    .progress(style='height: 6px; background: rgba(255,255,255,0.1);')
-                      .progress-bar.bg-info#msgProgressBar(
-                        role='progressbar'
-                        style=`margin-left: ${leftPct}%; width: ${widthPct}%;`
-                      )
-                  .small.text-muted
-                    span#msgRange
-                      = messagesBefore + 1
-                      | –
-                      = messagesBefore + messages.length
-                      |  of 
-                      = totalMessages
+            //- Position-aware progress bar
+            - var leftPct = totalMessages > 0 ? Math.round((messagesBefore / totalMessages) * 100) : 0
+            - var widthPct = totalMessages > 0 ? Math.max(Math.round((messages.length / totalMessages) * 100), 1) : 0
+            .card-body.py-1.bg-dark.border-bottom.border-secondary
+              .d-flex.align-items-center.justify-content-between
+                .small.text-muted
+                  span#msgProgress
+                    = messages.length
+                    |  of 
+                    = totalMessages
+                    |  loaded
+                .flex-grow-1.mx-3
+                  .progress(style='height: 6px; background: rgba(255,255,255,0.1);')
+                    .progress-bar.bg-info#msgProgressBar(
+                      role='progressbar'
+                      style=`margin-left: ${leftPct}%; width: ${widthPct}%;`
+                    )
+                .small.text-muted
+                  span#msgRange
+                    = messagesBefore + 1
+                    | –
+                    = messagesBefore + messages.length
+                    |  of 
+                    = totalMessages
 
-              //- Message container
-              #messageContainer.card-body.bg-black(
-                style='overflow-y: auto; max-height: calc(100vh - 190px);'
-                data-shortcode=msgArea.shortcode
-                data-total=totalMessages
-                data-loaded=messages.length
-                data-oldest-id=messages.length > 0 ? messages[0].id : 0
-                data-newest-id=messages.length > 0 ? messages[messages.length - 1].id : 0
-                data-has-older=hasOlder ? 'true' : 'false'
-                data-has-newer=hasNewer ? 'true' : 'false'
-                data-first-unread=firstUnreadId || 0
-                data-messages-before=messagesBefore
-              )
-                //- Top sentinel (older messages)
-                #topSentinel.text-center.py-2
-                  if hasOlder
-                    .spinner-border.spinner-border-sm.text-muted#topSpinner(role='status' style='display:none')
-                    .small.text-muted#topHint ↑ scroll for older messages
-                  else if messages.length > 0
-                    .small.text-muted — beginning of area —
+            //- Message container
+            #messageContainer.card-body.bg-black(
+              style='overflow-y: auto; max-height: calc(100vh - 190px);'
+              data-shortcode=msgArea.shortcode
+              data-force80=msgArea.ansi_area ? 'true' : 'false'
+              data-can-post=canPost ? 'true' : 'false'
+              data-total=totalMessages
+              data-loaded=messages.length
+              data-oldest-id=messages.length > 0 ? messages[0].id : 0
+              data-newest-id=messages.length > 0 ? messages[messages.length - 1].id : 0
+              data-has-older=hasOlder ? 'true' : 'false'
+              data-has-newer=hasNewer ? 'true' : 'false'
+              data-first-unread=firstUnreadId || 0
+              data-messages-before=messagesBefore
+            )
+              //- Top sentinel (older messages)
+              #topSentinel.text-center.py-2
+                if hasOlder
+                  .spinner-border.spinner-border-sm.text-muted#topSpinner(role='status' style='display:none')
+                  .small.text-muted#topHint ↑ scroll for older messages
+                else if messages.length > 0
+                  .small.text-muted — beginning of area —
 
-                //- Messages
-                if messages && messages.length > 0
-                  for message of messages
-                    .msg-card(data-msgid=message.id data-thread-uuid=message.thread_uuid || '')
-                      .msg-separator.border-top.border-info(style='border-width: 2px !important; opacity: 0.4;')
-                      .d-flex.justify-content-between.align-items-center.py-1.px-2.bg-darkblue
-                        .text-nowrap.text-truncate.me-2
+              //- Messages
+              if messages && messages.length > 0
+                for message of messages
+                  .msg-card(data-msgid=message.id data-thread-uuid=message.thread_uuid || '')
+                    .msg-separator.border-top.border-info(style='border-width: 2px !important; opacity: 0.4;')
+                    .d-flex.justify-content-between.align-items-start.py-1.px-2.bg-darkblue
+                      div
+                        .text-truncate
                           span.fg-yellow.fw-bold= message.from_user
                           |  → 
                           span.fg-green= message.to_user
                           |   
                           span.fg-cyan.small= message.subject
-                        .text-nowrap
-                          .small.fg-yellow.d-inline.me-2
-                            - var mdate = Date.parse(message.system_time)
-                            - var md = DateTime.fromMillis(mdate)
-                            = md.toFormat('MMM dd, yyyy HH:mm')
-                          button.btn.btn-xs.btn-sm.btn-primary.replybtn(
-                            data-bs-msgposter=message.from_user
-                            data-bs-msgid=message.msg_id
-                            data-bs-subject=message.subject
-                            data-bs-threaduuid=message.thread_uuid || ''
-                          ) Reply
-                      .px-2.py-2
-                        .messagebody.monospace.text-12.fg-brightgrey
-                          if message.isAnsi
-                            .ansi
-                              if message.body_html
-                                != message.body_html
-                              else
-                                != message.body_text
-                          else
+                        .small.fg-yellow
+                          - var mdate = Date.parse(message.system_time)
+                          - var md = DateTime.fromMillis(mdate)
+                          = md.toFormat('MMM dd, yyyy HH:mm')
+                      if canPost
+                        button.btn.btn-xs.btn-sm.btn-primary.replybtn.ms-2.flex-shrink-0(
+                          data-bs-msgposter=message.from_user
+                          data-bs-msgid=message.msg_id
+                          data-bs-subject=message.subject
+                          data-bs-threaduuid=message.thread_uuid || ''
+                        ) Reply
+                    .px-2.py-2
+                      .messagebody.monospace.fg-brightgrey
+                        if message.isAnsi
+                          .ansi
                             if message.body_html
                               != message.body_html
                             else
                               != message.body_text
-                else
-                  .text-center.py-4
-                    .text-muted No messages
+                        else
+                          if message.body_html
+                            != message.body_html
+                          else
+                            != message.body_text
+              else
+                .text-center.py-4
+                  .text-muted No messages
 
-                //- Bottom sentinel (newer messages)
-                #bottomSentinel.text-center.py-2
-                  if hasNewer
-                    .spinner-border.spinner-border-sm.text-muted#bottomSpinner(role='status' style='display:none')
-                    .small.text-muted#bottomHint ↓ scroll for newer messages
-                  else if messages.length > 0
-                    .small.text-muted — end of area —
+              //- Bottom sentinel (newer messages)
+              #bottomSentinel.text-center.py-2
+                if hasNewer
+                  .spinner-border.spinner-border-sm.text-muted#bottomSpinner(role='status' style='display:none')
+                  .small.text-muted#bottomHint ↓ scroll for newer messages
+                else if messages.length > 0
+                  .small.text-muted — end of area —
 
-        //- Sidebar
-        .col-lg-3.col-12
-          .card.mt-lg-0.mt-3
+        //- Sidebar — visible only on xl screens as a column
+        .col-xl-2.d-none.d-xl-block
+          .card
             .card-header.bg-darkblue.text-white
               center
                 h5.mb-0 Navigate
@@ -151,11 +166,12 @@ block content
                   i.bi.bi-arrow-down
                   |  Newest
               hr.border-secondary
-              .d-grid.gap-2
-                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newThreadModal')
-                  i.bi.bi-plus-lg
-                  |  Post
-              hr.border-secondary
+              if canPost
+                .d-grid.gap-2
+                  button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newThreadModal')
+                    i.bi.bi-plus-lg
+                    |  Post
+                hr.border-secondary
               .d-grid.gap-2
                 form(action=`/messages/area/${msgArea.shortcode}/markread` method='POST')
                   input(type='hidden' name='view' value='flat')
@@ -175,7 +191,53 @@ block content
                   i.bi.bi-chat-dots
                   |  Groups
 
-      if msgArea
+      //- Offcanvas sidebar — slides in from right on smaller screens
+      #sidebarOffcanvas.offcanvas.offcanvas-end.bg-dark.text-white(
+        tabindex='-1'
+        data-bs-backdrop='false'
+        data-bs-scroll='true'
+      )
+        .offcanvas-header.bg-darkblue.d-flex.align-items-center
+          button.me-2(
+            data-bs-dismiss='offcanvas'
+            style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+          ) ×
+          h5.offcanvas-title.text-white.mb-0 Navigate
+        .offcanvas-body
+          .d-grid.gap-2
+            button.btn.btn-sm.btn-info.sidebar-scroll-top
+              i.bi.bi-arrow-up
+              |  Oldest
+            button.btn.btn-sm.btn-success.sidebar-scroll-bottom
+              i.bi.bi-arrow-down
+              |  Newest
+          hr.border-secondary
+          if canPost
+            .d-grid.gap-2
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newThreadModal')
+                i.bi.bi-plus-lg
+                |  Post
+            hr.border-secondary
+          .d-grid.gap-2
+            form(action=`/messages/area/${msgArea.shortcode}/markread` method='POST')
+              input(type='hidden' name='view' value='flat')
+              button.btn.btn-sm.btn-warning.w-100(type='submit')
+                i.bi.bi-check2-all
+                |  Mark All Read
+          hr.border-secondary
+          .d-grid.gap-2
+            if threadMode && threadMode !== 'no_threads'
+              a.btn.btn-sm.btn-outline-info(href=`/messages/area/${msgArea.shortcode}`)
+                i.bi.bi-chat-left-text
+                |  Threads
+            a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
+              i.bi.bi-folder2-open
+              |  Area
+            a.btn.btn-sm.btn-outline-light(href='/messages')
+              i.bi.bi-chat-dots
+              |  Groups
+
+      if msgArea && canPost
         //- Reply Modal (action set dynamically per thread)
         #replyModal.modal.fade(tabindex='-1' aria-hidden='true')
           .modal-dialog.modal-dialog-centered(style='max-width: 760px;')
@@ -288,6 +350,7 @@ block content
       var hasOlder      = container.dataset.hasOlder === 'true';
       var hasNewer      = container.dataset.hasNewer === 'true';
       var firstUnreadId = parseInt(container.dataset.firstUnread) || 0;
+      var canPostJs     = container.dataset.canPost === 'true';
       var loading       = false;
       var batchSize     = 30;
 
@@ -346,25 +409,27 @@ block content
 
         return '<div class="msg-card" data-msgid="' + msg.id + '" data-thread-uuid="' + (msg.thread_uuid || '') + '">'
           + '<div class="msg-separator border-top border-info" style="border-width: 2px !important; opacity: 0.4;"></div>'
-          + '<div class="d-flex justify-content-between align-items-center py-1 px-2 bg-darkblue">'
-          +   '<div class="text-nowrap text-truncate me-2">'
-          +     '<span class="fg-yellow fw-bold">' + escapeHtml(msg.from_user || '') + '</span>'
-          +     ' &rarr; '
-          +     '<span class="fg-green">' + escapeHtml(msg.to_user || '') + '</span>'
-          +     ' &nbsp;<span class="fg-cyan small">' + escapeHtml(msg.subject || '') + '</span>'
+          + '<div class="d-flex justify-content-between align-items-start py-1 px-2 bg-darkblue">'
+          +   '<div>'
+          +     '<div class="text-truncate">'
+          +       '<span class="fg-yellow fw-bold">' + escapeHtml(msg.from_user || '') + '</span>'
+          +       ' &rarr; '
+          +       '<span class="fg-green">' + escapeHtml(msg.to_user || '') + '</span>'
+          +       ' &nbsp;<span class="fg-cyan small">' + escapeHtml(msg.subject || '') + '</span>'
+          +     '</div>'
+          +     '<div class="small fg-yellow">' + dateStr + '</div>'
           +   '</div>'
-          +   '<div class="text-nowrap">'
-          +     '<span class="small fg-yellow me-2">' + dateStr + '</span>'
-          +     '<button class="btn btn-xs btn-sm btn-primary replybtn"'
-          +       ' data-bs-msgposter="' + escapeHtml(msg.from_user || '') + '"'
-          +       ' data-bs-msgid="' + escapeHtml(msg.msg_id || '') + '"'
-          +       ' data-bs-subject="' + escapeHtml(msg.subject || '') + '"'
-          +       ' data-bs-threaduuid="' + (msg.thread_uuid || '') + '"'
-          +     '>Reply</button>'
-          +   '</div>'
+          +   (canPostJs
+              ? '<button class="btn btn-xs btn-sm btn-primary replybtn ms-2 flex-shrink-0"'
+              +   ' data-bs-msgposter="' + escapeHtml(msg.from_user || '') + '"'
+              +   ' data-bs-msgid="' + escapeHtml(msg.msg_id || '') + '"'
+              +   ' data-bs-subject="' + escapeHtml(msg.subject || '') + '"'
+              +   ' data-bs-threaduuid="' + (msg.thread_uuid || '') + '"'
+              + '>Reply</button>'
+              : '')
           + '</div>'
           + '<div class="px-2 py-2">'
-          +   '<div class="messagebody monospace text-12 fg-brightgrey">'
+          +   '<div class="messagebody monospace fg-brightgrey">'
           +     bodyContent
           +   '</div>'
           + '</div>'
@@ -414,6 +479,7 @@ block content
             loaded += data.messages.length;
             container.dataset.loaded = loaded;
             if (typeof parsePipeColorCodes === 'function') parsePipeColorCodes();
+            if (typeof fitMessageBodies === 'function') fitMessageBodies();
           }
 
           if (direction === 'older') {
@@ -456,20 +522,44 @@ block content
         }
       });
 
-      document.getElementById('scrollToTopBtn').addEventListener('click', function() {
-        container.scrollTop = 0;
-      });
-      document.getElementById('scrollToBottomBtn').addEventListener('click', function() {
-        container.scrollTop = container.scrollHeight;
-      });
+      // If content doesn't fill the viewport and older messages exist,
+      // auto-load until it overflows (scroll events can't fire without overflow)
+      (function autoFill() {
+        if (hasOlder && !loading && container.scrollHeight <= container.clientHeight) {
+          var prevLoaded = loaded;
+          loadDirection('older').then(function() {
+            if (loaded > prevLoaded && hasOlder && container.scrollHeight <= container.clientHeight) {
+              autoFill();
+            }
+          });
+        }
+      })();
 
-      // --- Quote system ---
+      // Scroll buttons — sidebar column (by ID) and offcanvas (by class)
+      function bindScrollBtn(el, action) {
+        if (!el) return;
+        el.addEventListener('click', function() {
+          if (action === 'top') container.scrollTop = 0;
+          else container.scrollTop = container.scrollHeight;
+          // Dismiss offcanvas if open
+          var oc = bootstrap.Offcanvas.getInstance(document.getElementById('sidebarOffcanvas'));
+          if (oc) oc.hide();
+        });
+      }
+      bindScrollBtn(document.getElementById('scrollToTopBtn'), 'top');
+      bindScrollBtn(document.getElementById('scrollToBottomBtn'), 'bottom');
+      document.querySelectorAll('.sidebar-scroll-top').forEach(function(el) { bindScrollBtn(el, 'top'); });
+      document.querySelectorAll('.sidebar-scroll-bottom').forEach(function(el) { bindScrollBtn(el, 'bottom'); });
+
+      // --- Quote system (only if user can post) ---
       var quoteToggleBtn  = document.getElementById('quoteToggleBtn');
       var quotePanel      = document.getElementById('quotePanel');
       var quoteLinesEl    = document.getElementById('quoteLines');
       var replyTextarea   = document.getElementById('r_body');
       var currentQuoteText = '';
       var currentQuoteLines = [];
+
+      if (quoteToggleBtn) {
 
       function wrapTextLines(text, maxLen) {
         if (!text) return [];
@@ -552,53 +642,59 @@ block content
           quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
         }
       });
+      } // end if (quoteToggleBtn)
 
-      // --- Reply button handler ---
-      var replyModal = new bootstrap.Modal(document.getElementById('replyModal'));
-      var replyForm  = document.getElementById('replyForm');
-      container.addEventListener('click', function(e) {
-        var btn = e.target.closest('.replybtn');
-        if (!btn) return;
-        e.preventDefault();
-        var threaduuid = btn.dataset.bsThreaduuid || '';
-        if (threaduuid) {
-          replyForm.action = '/messages/area/' + shortcode + '/thread/' + threaduuid + '/reply';
-        }
-        document.getElementById('r_to').value      = btn.dataset.bsMsgposter || 'All';
-        document.getElementById('r_reply_to').value = btn.dataset.bsMsgid || '';
-        var subj = btn.dataset.bsSubject || '';
-        if (subj && !subj.toUpperCase().startsWith('RE:')) subj = 'Re: ' + subj;
-        document.getElementById('r_subject').value  = subj;
-        document.getElementById('r_body').value     = '';
+      // --- Reply button handler (only if user can post) ---
+      var replyModalEl = document.getElementById('replyModal');
+      if (replyModalEl) {
+        var replyModal = new bootstrap.Modal(replyModalEl);
+        var replyForm  = document.getElementById('replyForm');
+        container.addEventListener('click', function(e) {
+          var btn = e.target.closest('.replybtn');
+          if (!btn) return;
+          e.preventDefault();
+          var threaduuid = btn.dataset.bsThreaduuid || '';
+          if (threaduuid) {
+            replyForm.action = '/messages/area/' + shortcode + '/thread/' + threaduuid + '/reply';
+          }
+          document.getElementById('r_to').value      = btn.dataset.bsMsgposter || 'All';
+          document.getElementById('r_reply_to').value = btn.dataset.bsMsgid || '';
+          var subj = btn.dataset.bsSubject || '';
+          if (subj && !subj.toUpperCase().startsWith('RE:')) subj = 'Re: ' + subj;
+          document.getElementById('r_subject').value  = subj;
+          document.getElementById('r_body').value     = '';
 
-        // Extract plain text from message body, preserving line breaks
-        function getPlainText(el) {
-          var clone = el.cloneNode(true);
-          clone.querySelectorAll('br').forEach(function(br) {
-            br.replaceWith('\n');
-          });
-          clone.querySelectorAll('div, p').forEach(function(block) {
-            block.insertAdjacentText('beforebegin', '\n');
-          });
-          return clone.textContent || '';
-        }
+          // Extract plain text from message body, preserving line breaks
+          function getPlainText(el) {
+            var clone = el.cloneNode(true);
+            clone.querySelectorAll('br').forEach(function(br) {
+              br.replaceWith('\n');
+            });
+            clone.querySelectorAll('div, p').forEach(function(block) {
+              block.insertAdjacentText('beforebegin', '\n');
+            });
+            return clone.textContent || '';
+          }
 
-        // Find original message text for quoting
-        var msgCard = btn.closest('.msg-card');
-        var bodyEl  = msgCard ? msgCard.querySelector('.messagebody') : null;
-        if (bodyEl) {
-          currentQuoteText = getPlainText(bodyEl);
-          quoteToggleBtn.style.display = '';
-        } else {
-          currentQuoteText = '';
-          quoteToggleBtn.style.display = 'none';
-        }
-        quotePanel.style.display = 'none';
-        quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
-        quoteLinesEl.innerHTML = '';
+          // Find original message text for quoting
+          var msgCard = btn.closest('.msg-card');
+          var bodyEl  = msgCard ? msgCard.querySelector('.messagebody') : null;
+          if (bodyEl) {
+            currentQuoteText = getPlainText(bodyEl);
+            quoteToggleBtn.style.display = '';
+          } else {
+            currentQuoteText = '';
+            quoteToggleBtn.style.display = 'none';
+          }
+          quotePanel.style.display = 'none';
+          quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
+          quoteLinesEl.innerHTML = '';
 
-        replyModal.show();
-      });
+          replyModal.show();
+        });
+      }
 
       if (typeof parsePipeColorCodes === 'function') parsePipeColorCodes();
     });
+
+  include ../../partials/messages/_msgAutoSize

@@ -57,6 +57,31 @@ async function getFmtMod() {
 	return _fmtMod;
 }
 
+// --- Flag helpers ---
+
+function parseFlags(val) {
+	if (!val) return [];
+	if (Array.isArray(val)) return val;
+	if (typeof val === "string") {
+		try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
+		catch (_) { return []; }
+	}
+	return [];
+}
+
+function checkPostAccess(userRecord, areaConfig) {
+	if (!userRecord || !areaConfig) return false;
+	var userSecurity = parseInt(userRecord.security) || 0;
+	if (areaConfig.post_security && userSecurity < areaConfig.post_security) return false;
+	var userPerms  = parseFlags(userRecord.permissionflags);
+	var userRestrs = parseFlags(userRecord.restrictionflags);
+	var reqFlags   = parseFlags(areaConfig.post_perm_flags);
+	var restFlags  = parseFlags(areaConfig.post_rest_flags);
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+	return true;
+}
+
 // --- Constants ---
 
 const STATE = {
@@ -130,6 +155,9 @@ class msgReader extends BaseSubModule {
 		if (call.user_record) {
 			this._userId = call.user_record.id || call.user_record.user_id || null;
 		}
+
+		// Post permission — resolved after area config loads
+		this._canPost = false;
 
 		// State machine
 		this._state = STATE.LOADING;
@@ -394,6 +422,7 @@ class msgReader extends BaseSubModule {
 		if (!this._areaConfig) return false;
 		this._threadMode = this._areaConfig.thread_mode || "standard";
 		this._areaName = this._areaConfig.name || this._areaShortcode;
+		this._canPost = this.call.user_record ? checkPostAccess(this.call.user_record, this._areaConfig) : false;
 		return true;
 	}
 
@@ -1277,8 +1306,10 @@ class msgReader extends BaseSubModule {
 		this.call.cmds.senddata("  ");
 		this._navArrow("\u2192", 0x3E);  // → or >
 		this.call.cmds.senddata("  ");
-		this._navKey("R", "Reply");
-		this.call.cmds.senddata("  ");
+		if (this._canPost) {
+			this._navKey("R", "Reply");
+			this.call.cmds.senddata("  ");
+		}
 		this._navKey("L", "Last");
 
 		if (this._viewMode === "threaded") {
@@ -1637,8 +1668,10 @@ class msgReader extends BaseSubModule {
 				this._jumpToLast();
 				return;
 			case "r":
-				// Launch reply editor
-				this._launchReply();
+				// Launch reply editor (only if user has post access)
+				if (this._canPost) {
+					this._launchReply();
+				}
 				return;
 			case "t":
 				if (this._threadMode === "standard") {
@@ -2077,6 +2110,7 @@ class msgReader extends BaseSubModule {
 		this._bodyLines = [];
 		this._threadUnreads = {};
 		this._areaConfig = null;
+		this._canPost = false;
 		super.clearHandler();
 	}
 }

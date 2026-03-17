@@ -9,6 +9,20 @@ import * as msgAreas from "./msgAreas.js";
 
 dotenv.config();
 
+// Normalize flag input from forms — may arrive as a string, an array, or undefined.
+function normalizeFlags(input) {
+	if (!input) return JSON.stringify([]);
+	if (typeof input === 'string') {
+		try {
+			var parsed = JSON.parse(input);
+			if (Array.isArray(parsed)) return JSON.stringify(parsed);
+		} catch (_) {}
+		return JSON.stringify([input]);
+	}
+	if (Array.isArray(input)) return JSON.stringify(input);
+	return JSON.stringify([]);
+}
+
 async function newGroup(formObj) {
 	var returnObj = {
 		status: false,
@@ -44,13 +58,18 @@ async function newGroup(formObj) {
 		name: formObj.name,
 		description: formObj.description,
 		shortcode: shorty,
-		security: parseInt(formObj.security),
+		read_security: parseInt(formObj.readsecurity) || 0,
+		post_security: parseInt(formObj.postsecurity) || 0,
 		created_at: currtime,
 		updated_at: null,
 		area_count: 0,
 		created_by_uuid: formObj.createdByUUID,
 		created_by_name: formObj.createdByName,
-		active: true
+		active: true,
+		read_perm_flags: normalizeFlags(formObj.read_perm_flags),
+		read_rest_flags: normalizeFlags(formObj.read_rest_flags),
+		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
+		post_rest_flags: normalizeFlags(formObj.post_rest_flags)
 	};
 
 	var dbres = await postgres.insertObject(pgObj, "message_groups");
@@ -137,8 +156,13 @@ async function updateGroup(shortcode, formObj) {
 	var updateObj = {};
 	if (formObj.name        !== undefined) updateObj.name        = formObj.name.trim();
 	if (formObj.description !== undefined) updateObj.description = formObj.description.trim();
-	if (formObj.security    !== undefined) updateObj.security    = parseInt(formObj.security) || 0;
+	if (formObj.readsecurity  !== undefined) updateObj.read_security = parseInt(formObj.readsecurity);
+	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
 	if (formObj.active      !== undefined) updateObj.active      = (formObj.active === "true" || formObj.active === true);
+	if (formObj.read_perm_flags !== undefined) updateObj.read_perm_flags = normalizeFlags(formObj.read_perm_flags);
+	if (formObj.read_rest_flags !== undefined) updateObj.read_rest_flags = normalizeFlags(formObj.read_rest_flags);
+	if (formObj.post_perm_flags !== undefined) updateObj.post_perm_flags = normalizeFlags(formObj.post_perm_flags);
+	if (formObj.post_rest_flags !== undefined) updateObj.post_rest_flags = normalizeFlags(formObj.post_rest_flags);
 
 	if (Object.keys(updateObj).length === 0) {
 		returnObj.errormessages.push("No updatable fields provided");

@@ -64,6 +64,10 @@ block content
                           data-bs-msgcount=area.msg_count || 0
                           data-bs-lastfrom=area.last_from || ''
                           data-bs-lastmessage=area.last_message || ''
+                          data-bs-readpermflags=JSON.stringify(area.read_perm_flags || [])
+                          data-bs-readrestflags=JSON.stringify(area.read_rest_flags || [])
+                          data-bs-postpermflags=JSON.stringify(area.post_perm_flags || [])
+                          data-bs-postrestflags=JSON.stringify(area.post_rest_flags || [])
                         )
                           td= area.group_shortcode
                           td= area.name
@@ -158,6 +162,26 @@ block content
                       span#areaInfoMsgCount
                 hr.border-secondary
                 .row
+                  .col-6
+                    p
+                      strong Read Perm Flags:
+                      |  
+                      span#areaInfoReadPermFlags
+                    p
+                      strong Post Perm Flags:
+                      |  
+                      span#areaInfoPostPermFlags
+                  .col-6
+                    p
+                      strong Read Restrict Flags:
+                      |  
+                      span#areaInfoReadRestFlags
+                    p
+                      strong Post Restrict Flags:
+                      |  
+                      span#areaInfoPostRestFlags
+                hr.border-secondary
+                .row
                   .col-12
                     p#areaInfoDescription
                   .col-6
@@ -220,6 +244,34 @@ block content
                       select(id='ea_post_as' name='post_as' class='form-control' tabindex='9')
                         option(value='username') Username
                         option(value='realname') Real Name
+                  .row
+                    .col-1
+                    .col-5
+                      #ea_read_perm_inputs
+                      #ea_read_rest_inputs
+                      label Read Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_read_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#ea_read_perm_select.form-control
+                        button.btn.btn-sm.btn-success#ea_read_perm_add(type='button') Add
+                      label Read Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_read_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#ea_read_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#ea_read_rest_add(type='button') Add
+                    .col-5
+                      #ea_post_perm_inputs
+                      #ea_post_rest_inputs
+                      label Post Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_post_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#ea_post_perm_select.form-control
+                        button.btn.btn-sm.btn-success#ea_post_perm_add(type='button') Add
+                      label Post Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_post_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#ea_post_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#ea_post_rest_add(type='button') Add
                   .row
                     .col-1
                     .col-10
@@ -333,6 +385,34 @@ block content
                         option(value='realname') Real Name
                   .row
                     .col-1
+                    .col-5
+                      #na_read_perm_inputs
+                      #na_read_rest_inputs
+                      label Read Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_read_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#na_read_perm_select.form-control
+                        button.btn.btn-sm.btn-success#na_read_perm_add(type='button') Add
+                      label Read Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_read_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#na_read_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#na_read_rest_add(type='button') Add
+                    .col-5
+                      #na_post_perm_inputs
+                      #na_post_rest_inputs
+                      label Post Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_post_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#na_post_perm_select.form-control
+                        button.btn.btn-sm.btn-success#na_post_perm_add(type='button') Add
+                      label Post Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_post_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#na_post_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#na_post_rest_add(type='button') Add
+                  .row
+                    .col-1
                     .col-10
                       br
                       .text-end
@@ -373,6 +453,99 @@ block content
       var deleteAreaModal = new bootstrap.Modal(document.getElementById('deleteAreaModal'));
       var currentAreaShortcode = '';
 
+      var allPerms  = !{JSON.stringify(availablePermissions)};
+      var allRestrs = !{JSON.stringify(availableRestrictions)};
+
+      function parseFlags(jsonstr) {
+        try {
+          var result = JSON.parse(jsonstr);
+          return Array.isArray(result) ? result : [];
+        } catch(e) { return []; }
+      }
+
+      function fmtFlags(jsonstr) {
+        var arr = parseFlags(jsonstr);
+        return arr.length > 0 ? arr.join(', ') : '—';
+      }
+
+      function renderAreaFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
+        var badgeEl  = document.getElementById(prefix + '_badges');
+        var inputEl  = document.getElementById(prefix + '_inputs');
+        var selectEl = document.getElementById(prefix + '_select');
+        var addBtn   = document.getElementById(prefix + '_add');
+
+        badgeEl.innerHTML = '';
+        activeFlags.forEach(function(flag) {
+          var span = document.createElement('span');
+          span.className = 'badge ' + badgeClass + ' me-1 mb-1';
+          span.style.cursor = 'pointer';
+          span.title = 'Click to remove';
+          span.textContent = flag + ' ×';
+          span.addEventListener('click', function() {
+            var updated = activeFlags.filter(function(f) { return f !== flag; });
+            renderAreaFlags(prefix, inputName, updated, allFlags, badgeClass);
+          });
+          badgeEl.appendChild(span);
+        });
+
+        inputEl.innerHTML = '';
+        activeFlags.forEach(function(flag) {
+          var inp = document.createElement('input');
+          inp.type  = 'hidden';
+          inp.name  = inputName;
+          inp.value = flag;
+          inputEl.appendChild(inp);
+        });
+
+        selectEl.innerHTML = '';
+        var available = allFlags.filter(function(f) { return !activeFlags.includes(f); });
+        if (available.length === 0) {
+          var opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '— none available —';
+          opt.disabled = true;
+          selectEl.appendChild(opt);
+          selectEl.disabled = true;
+          addBtn.disabled = true;
+        } else {
+          selectEl.disabled = false;
+          addBtn.disabled = false;
+          available.forEach(function(flag) {
+            var opt = document.createElement('option');
+            opt.value = flag;
+            opt.textContent = flag;
+            selectEl.appendChild(opt);
+          });
+        }
+      }
+
+      function wireAddBtn(prefix, inputName, allFlags, badgeClass) {
+        document.getElementById(prefix + '_add').addEventListener('click', function() {
+          var sel = document.getElementById(prefix + '_select');
+          if (!sel.value) return;
+          var current = Array.from(document.querySelectorAll('#' + prefix + '_inputs input')).map(function(i) { return i.value; });
+          if (!current.includes(sel.value)) {
+            current.push(sel.value);
+            renderAreaFlags(prefix, inputName, current, allFlags, badgeClass);
+          }
+        });
+      }
+
+      wireAddBtn('ea_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('ea_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+      wireAddBtn('ea_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('ea_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+      wireAddBtn('na_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('na_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+      wireAddBtn('na_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('na_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+
+      // Initialize new area flags as empty
+      renderAreaFlags('na_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+      renderAreaFlags('na_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+      renderAreaFlags('na_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+      renderAreaFlags('na_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+
       // Row click — event delegation on tbody (survives DataTables redraws)
       var tableBody = document.querySelector('#areaTable tbody');
       if (tableBody) {
@@ -396,6 +569,10 @@ block content
           document.getElementById('areaInfoMinAge').textContent      = d.bsMinage;
           document.getElementById('areaInfoMaxAge').textContent      = d.bsMaxage;
           document.getElementById('areaInfoMsgCount').textContent    = parseInt(d.bsMsgcount || 0).toLocaleString();
+          document.getElementById('areaInfoReadPermFlags').textContent  = fmtFlags(d.bsReadpermflags);
+          document.getElementById('areaInfoReadRestFlags').textContent  = fmtFlags(d.bsReadrestflags);
+          document.getElementById('areaInfoPostPermFlags').textContent  = fmtFlags(d.bsPostpermflags);
+          document.getElementById('areaInfoPostRestFlags').textContent  = fmtFlags(d.bsPostrestflags);
           document.getElementById('areaInfoDescription').textContent = d.bsDescription;
           document.getElementById('areaInfoLastFrom').textContent    = d.bsLastfrom || '—';
           document.getElementById('areaInfoLastMessage').textContent = d.bsLastmessage
@@ -428,6 +605,12 @@ block content
         document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
         document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
         document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
+
+        renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
+        renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');
+        renderAreaFlags('ea_post_perm', 'post_perm_flags', parseFlags(d.bsPostpermflags), allPerms, 'bg-success');
+        renderAreaFlags('ea_post_rest', 'post_rest_flags', parseFlags(d.bsPostrestflags), allRestrs, 'bg-danger');
+
         areaInfoModal.hide();
         editAreaModal.show();
       });
@@ -457,13 +640,38 @@ block content
         });
       }
 
-      // New area — set form action from group select
+      // New area — set form action from group select and fetch group defaults
       var newAreaForm = document.getElementById('newAreaForm');
       var groupSelect = document.getElementById('na_group');
       if (groupSelect && newAreaForm) {
-        groupSelect.addEventListener('change', function() {
+        groupSelect.addEventListener('change', async function() {
           var sc = this.value;
           newAreaForm.action = sc ? '/admin/msgGroup/' + sc + '/newArea' : '';
+
+          if (!sc) {
+            // Reset to empty defaults
+            document.getElementById('na_readsecurity').value = 50;
+            document.getElementById('na_postsecurity').value = 50;
+            renderAreaFlags('na_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+            renderAreaFlags('na_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+            renderAreaFlags('na_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+            renderAreaFlags('na_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+            return;
+          }
+
+          try {
+            var resp = await fetch('/admin/msgGroup/' + sc + '/defaults');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            document.getElementById('na_readsecurity').value = data.read_security || 50;
+            document.getElementById('na_postsecurity').value = data.post_security || 50;
+            renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');
+            renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(data.read_rest_flags)), allRestrs, 'bg-danger');
+            renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(data.post_perm_flags)), allPerms, 'bg-success');
+            renderAreaFlags('na_post_rest', 'post_rest_flags', parseFlags(JSON.stringify(data.post_rest_flags)), allRestrs, 'bg-danger');
+          } catch(e) {
+            console.error('Failed to fetch group defaults:', e);
+          }
         });
       }
 

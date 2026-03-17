@@ -1,3 +1,7 @@
+// Internal imports for formatBodyHtml
+import { formatTextForHtml } from './codepageConversions.js';
+import { detectAnsiArt, reflowText } from './termMsgFormat.js';
+
 /**
  * Terminal Text Formatter for Node.js - Fidonet Packet Support
  * Converts terminal text with escape codes to HTML with proper cursor positioning
@@ -16,13 +20,14 @@ function formatTerminalText(text, options = {}) {
         handleAnsiCodes: true,  // Process ANSI escape codes
         handleCtrlACodes: true, // Process Synchronet Ctrl-A attribute codes
         resetOnNewline: true,   // Reset pipe codes on newlines (\r)
-        terminalWidth: 80       // Terminal width in characters (height is infinite)
+        terminalWidth: 80,      // Terminal width in characters (height is infinite)
+        noWrap: false           // If true, lines extend without wrapping (CSS handles layout)
     };
     
     const opts = { ...defaults, ...options };
     
     // Create virtual terminal buffer with infinite height
-    const terminal = new VirtualTerminal(opts.terminalWidth);
+    const terminal = new VirtualTerminal(opts.terminalWidth, opts.noWrap);
     
     // Color code mappings
     const ansiMappings = {
@@ -224,8 +229,9 @@ function formatTerminalText(text, options = {}) {
  * Virtual Terminal Buffer Class - Infinite Height Version for Fidonet
  */
 class VirtualTerminal {
-    constructor(width = 80) {
+    constructor(width = 80, noWrap = false) {
         this.width = width;
+        this.noWrap = noWrap;
         this.buffer = [];
         this.cursorX = 0;
         this.cursorY = 0;
@@ -270,20 +276,21 @@ class VirtualTerminal {
     clearLine(mode = 0) {
         this.ensureLine(this.cursorY);
         const y = this.cursorY;
+        var lineLen = this.buffer[y] ? this.buffer[y].length : this.width;
         
         switch (mode) {
             case 0: // Clear from cursor to end
-                for (let x = this.cursorX; x < this.width; x++) {
+                for (let x = this.cursorX; x < lineLen; x++) {
                     this.buffer[y][x] = { char: ' ', fg: '', bg: '' };
                 }
                 break;
             case 1: // Clear from start to cursor
-                for (let x = 0; x <= this.cursorX && x < this.width; x++) {
+                for (let x = 0; x <= this.cursorX && x < lineLen; x++) {
                     this.buffer[y][x] = { char: ' ', fg: '', bg: '' };
                 }
                 break;
             case 2: // Clear entire line
-                for (let x = 0; x < this.width; x++) {
+                for (let x = 0; x < lineLen; x++) {
                     this.buffer[y][x] = { char: ' ', fg: '', bg: '' };
                 }
                 break;
@@ -291,13 +298,21 @@ class VirtualTerminal {
     }
     
     setCursor(x, y) {
-        this.cursorX = Math.max(0, Math.min(x - 1, this.width - 1));
+        if (this.noWrap) {
+            this.cursorX = Math.max(0, x - 1);
+        } else {
+            this.cursorX = Math.max(0, Math.min(x - 1, this.width - 1));
+        }
         this.cursorY = Math.max(0, y - 1);
         this.ensureLine(this.cursorY);
     }
     
     moveCursor(dx, dy) {
-        this.cursorX = Math.max(0, Math.min(this.cursorX + dx, this.width - 1));
+        if (this.noWrap) {
+            this.cursorX = Math.max(0, this.cursorX + dx);
+        } else {
+            this.cursorX = Math.max(0, Math.min(this.cursorX + dx, this.width - 1));
+        }
         this.cursorY = Math.max(0, this.cursorY + dy);
         this.ensureLine(this.cursorY);
     }
@@ -340,7 +355,11 @@ class VirtualTerminal {
             } else if (char === '\t') {
                 // Tab to next 8-character boundary
                 const nextTab = Math.ceil((this.cursorX + 1) / 8) * 8;
-                this.cursorX = Math.min(nextTab, this.width - 1);
+                if (this.noWrap) {
+                    this.cursorX = nextTab;
+                } else {
+                    this.cursorX = Math.min(nextTab, this.width - 1);
+                }
             } else if (char === '\n') {
                 // Ignore \n since we use \r for newlines in Fidonet
                 continue;
@@ -348,7 +367,19 @@ class VirtualTerminal {
                 // Regular character
                 this.ensureLine(this.cursorY);
                 
-                if (this.cursorX < this.width) {
+                if (this.noWrap) {
+                    // No-wrap mode: extend line buffer as needed
+                    var line = this.buffer[this.cursorY];
+                    while (line.length <= this.cursorX) {
+                        line.push({ char: ' ', fg: '', bg: '' });
+                    }
+                    line[this.cursorX] = {
+                        char: char,
+                        fg: this.currentFg,
+                        bg: this.currentBg
+                    };
+                    this.cursorX++;
+                } else if (this.cursorX < this.width) {
                     this.buffer[this.cursorY][this.cursorX] = {
                         char: char,
                         fg: this.currentFg,
@@ -379,8 +410,11 @@ class VirtualTerminal {
             let lineHasContent = false;
             let lineHTML = '';
             
+            // Line width: in noWrap mode, lines can be longer than this.width
+            var lineWidth = this.buffer[y] ? this.buffer[y].length : this.width;
+            
             // Check if line has any non-space content
-            for (let x = 0; x < this.width; x++) {
+            for (let x = 0; x < lineWidth; x++) {
                 if (this.buffer[y] && this.buffer[y][x] && this.buffer[y][x].char !== ' ') {
                     lineHasContent = true;
                     break;
@@ -392,11 +426,59 @@ class VirtualTerminal {
                 break;
             }
             
-            for (let x = 0; x < this.width; x++) {
+            // In noWrap mode, we need to be smart about spaces:
+            //   - Leading spaces → &nbsp; (preserve indentation)
+            //   - Runs of 2+ consecutive spaces → &nbsp; (preserve alignment)
+            //   - Single spaces between words → regular space (allow browser word-wrap)
+            // In fixed-width mode (ANSI art), all spaces → &nbsp; (exact column layout).
+            //
+            // Strategy: buffer space cells, flush them when we hit a non-space.
+            // Then decide &nbsp; vs regular space based on context.
+            var pendingSpaces = []; // buffered space cells (with their span classes)
+            var seenNonSpace = false; // have we seen any non-space on this line?
+            
+            for (let x = 0; x < lineWidth; x++) {
                 const cell = (this.buffer[y] && this.buffer[y][x]) || { char: ' ', fg: '', bg: '' };
                 const classes = [cell.fg, cell.bg].filter(Boolean).join(' ');
                 
-                // Handle span opening/closing
+                if (cell.char === ' ') {
+                    // Buffer the space — we'll decide how to emit it later
+                    pendingSpaces.push(classes);
+                    continue;
+                }
+                
+                // Non-space character — flush any pending spaces first
+                if (pendingSpaces.length > 0) {
+                    // Decide: &nbsp; or regular space?
+                    // In noWrap mode: single spaces between words stay as regular spaces
+                    //   so the browser can word-wrap. Leading spaces and runs of 2+
+                    //   use &nbsp; to preserve formatting.
+                    // In fixed-width mode (no noWrap): all spaces → &nbsp; for exact layout.
+                    var useNbsp;
+                    if (this.noWrap) {
+                        useNbsp = !seenNonSpace || pendingSpaces.length > 1;
+                    } else {
+                        useNbsp = !!opts.replaceAllSpaces;
+                    }
+                    var spChar = useNbsp ? '&nbsp;' : ' ';
+                    for (var s = 0; s < pendingSpaces.length; s++) {
+                        var spClasses = pendingSpaces[s];
+                        if (spClasses !== currentSpanClasses) {
+                            if (inSpan) { lineHTML += '</span>'; inSpan = false; }
+                            if (spClasses) {
+                                lineHTML += '<span class="' + spClasses + '">';
+                                inSpan = true;
+                            }
+                            currentSpanClasses = spClasses;
+                        }
+                        lineHTML += spChar;
+                    }
+                    pendingSpaces = [];
+                }
+                
+                seenNonSpace = true;
+                
+                // Handle span opening/closing for this character
                 if (classes !== currentSpanClasses) {
                     if (inSpan) {
                         lineHTML += '</span>';
@@ -409,13 +491,10 @@ class VirtualTerminal {
                     currentSpanClasses = classes;
                 }
                 
-                // Add character (convert spaces to &nbsp; if requested)
-                let char = cell.char;
-                if (opts.replaceAllSpaces && char === ' ') {
-                    char = '&nbsp;';
-                }
-                lineHTML += char;
+                lineHTML += cell.char;
             }
+            
+            // Don't flush trailing pending spaces — they get trimmed anyway
             
             // Close any open span at end of line
             if (inSpan) {
@@ -492,7 +571,62 @@ const plainText = stripTerminalCodes(fidonetText);
 console.log(plainText);
 */
 
+// ---------------------------------------------------------------------------
+// formatBodyHtml — shared HTML formatter for all tossers (FTN, NNTP, QWK).
+//
+// Converts raw message body text to HTML with color spans.
+// Pipeline:
+//   1. Paragraph reflow — reassembles text from wider editors
+//   2. ANSI art detection — cursor positioning means fixed-width layout
+//   3. Color code routing:
+//      - ANSI art → fixed-width virtual terminal (terminalWidth, wrap enabled)
+//      - Color codes only → virtual terminal with noWrap (CSS handles layout)
+//      - Plain text with alignment → formatTextForHtml (preserves spacing)
+//      - Plain text → simple <br> replacement
+//
+// Optional forceWidth parameter: if set, wraps all output at that column width
+// instead of letting CSS handle it. Useful for fixed-width preview contexts.
+//
+// Non-fatal — returns null on failure so message import continues without HTML.
+// ---------------------------------------------------------------------------
+
+async function formatBodyHtml(displayText, forceWidth) {
+	if (!displayText) return null;
+
+	try {
+		var wrapAt = forceWidth || 80;
+		// Reflow paragraphs to reassemble text from wider editors
+		var reflowed = reflowText(displayText, wrapAt);
+
+		if (reflowed.includes("\x1b[") ||
+			/\|\d{2}/.test(reflowed) ||
+			reflowed.includes("\x01")) {
+			// Check if this is ANSI art (cursor positioning) vs just color codes
+			var isArt = detectAnsiArt(reflowed);
+			return await formatTerminalText(reflowed, {
+				terminalWidth: wrapAt,
+				noWrap: !isArt && !forceWidth,
+				replaceAllSpaces: true,
+				handlePipeCodes: true,
+				handleAnsiCodes: true,
+				handleCtrlACodes: true,
+				resetOnNewline: true
+			});
+		}
+
+		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces)
+		if (reflowed.includes("   ")) {
+			return formatTextForHtml(reflowed);
+		}
+
+		return reflowed.replace(/\r/g, '<br>');
+	} catch (_) {
+		return null;
+	}
+}
+
 export{
     formatTerminalText,
+    formatBodyHtml,
     stripTerminalCodes
 }

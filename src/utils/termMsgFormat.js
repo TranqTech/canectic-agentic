@@ -1,13 +1,20 @@
-// termMsgFormat.js — Terminal message body formatting utility.
+// termMsgFormat.js — Message body formatting utility.
 //
 // Handles:
 //   - CP437 → UTF-8 conversion for UTF-8 terminals receiving CP437 text
+//   - UTF-8 → CP437 conversion for CP437 terminals receiving UTF-8 text
 //   - Pipe code (|XX) → ANSI escape sequence conversion
 //   - Synchronet Ctrl-A attribute codes → ANSI escape sequence conversion
-//   - Semantic line coloring (normal, quote, tear, origin)
+//   - Semantic line coloring (normal, quote, tear, origin, tagline)
+//   - Paragraph reflow for text from wider editors
+//   - ANSI-aware word wrapping
+//   - ANSI art detection
 //   - ANSI passthrough (existing escape codes are preserved, never stripped)
+//   - HTML body formatting for web display (shared by all tossers)
 //
-// Used by msgReader.js for message body display.
+// Used by:
+//   - msgReader.js (terminal message display)
+//   - echomail.js, qwkTosser.js, nntpTosser.js (HTML body generation at import time)
 
 // CP437 extended character table (0x80-0xFF → Unicode)
 const CP437_EXT = [
@@ -322,8 +329,6 @@ function processMessageBody(msg, options) {
 	// Detect what kind of color codes are present BEFORE conversion
 	var hasPipe = hasPipeCodes(rawText);
 	var hasCtrlA = hasCtrlACodes(rawText);
-	var hasAnsi = hasAnsiCodes(rawText);
-	var hasEmbeddedCodes = hasPipe || hasCtrlA || hasAnsi;
 	var isAnsiArt = detectAnsiArt(rawText);
 
 	// Convert pipe codes and Ctrl-A codes to ANSI escape sequences
@@ -339,6 +344,28 @@ function processMessageBody(msg, options) {
 
 	// Split into lines
 	var sourceLines = rawText.split("\n");
+
+	// Paragraph reflow pass — join consecutive normal body lines that appear
+	// to be soft-wrapped by a wider editor (>65 visible chars) into full
+	// paragraphs so our wrapper can re-wrap them cleanly at our width.
+	//
+	// Without this, text written at 90 cols and hard-wrapped would produce
+	// orphan words ("and", "on") when re-wrapped at 78 cols.
+	//
+	// Rules:
+	//   JOIN current line with next line if ALL are true:
+	//     - Current line is normal text (not quote, structural, blank)
+	//     - Next line is normal text and non-blank
+	//     - Current line's visual width >= REFLOW_THRESHOLD
+	//     - Next line doesn't start with whitespace (preserves indentation)
+	//   NEVER JOIN across:
+	//     - Blank lines (paragraph separators)
+	//     - Quote lines, structural lines (tear, tagline, origin, kludge)
+	//     - Short lines (intentionally formatted — list items, etc.)
+	//     - Lines where the next starts with space/tab (preformatted)
+	if (wrapWidth > 0 && !isAnsiArt) {
+		sourceLines = reflowParagraphs(sourceLines, wrapWidth);
+	}
 
 	// Build output lines
 	var result = [];
@@ -374,12 +401,15 @@ function processMessageBody(msg, options) {
 			colorType = LINE_TAGLINE;
 		}
 
-		// Word wrap plain lines — don't wrap if text has any embedded codes
-		// (ANSI positioning, pipe conversions, etc. would break on wrap)
-		// Don't wrap separator or origin lines either (structural)
-		if (wrapWidth > 0 && !hasEmbeddedCodes &&
+		// Word wrap. Skip wrapping for:
+		//   - ANSI art (cursor positioning — whole message flag)
+		//   - Structural lines (tear, tagline, origin)
+		// For lines with ANSI escape sequences (from pipe/ctrl-a conversion),
+		// use the ANSI-aware wrapper that tracks visual width.
+		if (wrapWidth > 0 && !isAnsiArt &&
 			lineType !== LINE_TEAR && lineType !== LINE_TAGLINE && lineType !== LINE_ORIGIN) {
-			var wrapped = wordWrapLine(line, wrapWidth);
+			var lineHasAnsi = line.includes("\x1b[");
+			var wrapped = lineHasAnsi ? wordWrapLineAnsi(line, wrapWidth) : wordWrapLine(line, wrapWidth);
 			for (var w = 0; w < wrapped.length; w++) {
 				result.push({
 					text: wrapped[w],
@@ -402,6 +432,92 @@ function processMessageBody(msg, options) {
 				colorPrefix: prefix
 			});
 		}
+	}
+
+	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Paragraph reflow — join soft-wrapped lines from wider editors
+// ---------------------------------------------------------------------------
+
+// Minimum visual width for a line to be considered "soft-wrapped by a wider
+// editor." Lines shorter than this are assumed intentionally short (list items,
+// signatures, short paragraphs) and won't be joined to the next line.
+// Set relative to wrapWidth: if we're wrapping at 78, a line at 65+ was likely
+// wrapped at 80+ and should be reflowed. This avoids reflowing genuinely short
+// lines while catching the common 80/90/100-col editor outputs.
+var REFLOW_MIN_RATIO = 0.80; // line must be at least 80% of wrapWidth
+
+function reflowParagraphs(lines, wrapWidth) {
+	var threshold = Math.floor(wrapWidth * REFLOW_MIN_RATIO);
+	if (threshold < 40) threshold = 40;
+
+	var result = [];
+	var i = 0;
+
+	while (i < lines.length) {
+		var line = lines[i];
+		var lineType = classifyLine(line);
+
+		// Non-normal lines pass through unchanged
+		if (lineType !== LINE_NORMAL || line.trim().length === 0) {
+			result.push(line);
+			i++;
+			continue;
+		}
+
+		// Normal non-blank line — check if we should join with subsequent lines
+		var visWidth = measureVisualWidth(line);
+
+		// If this line is short, it's intentionally formatted — don't join
+		if (visWidth < threshold) {
+			result.push(line);
+			i++;
+			continue;
+		}
+
+		// Line is long enough to be a candidate for reflow.
+		// Accumulate lines into a paragraph until we hit a break condition.
+		var para = line;
+		i++;
+
+		while (i < lines.length) {
+			var nextLine = lines[i];
+			var nextType = classifyLine(nextLine);
+			var nextTrimmed = nextLine.trim();
+
+			// Stop joining at:
+			//   - Blank lines (paragraph boundary)
+			//   - Non-normal lines (quotes, structural, kludge)
+			//   - Lines starting with whitespace (preformatted/indented)
+			if (nextTrimmed.length === 0 ||
+				nextType !== LINE_NORMAL ||
+				nextLine.charAt(0) === " " ||
+				nextLine.charAt(0) === "\t") {
+				break;
+			}
+
+			// Join — add a space between the lines
+			// (the previous line's trailing space, if any, is already there)
+			if (para.charAt(para.length - 1) === " ") {
+				para += nextTrimmed;
+			} else {
+				para += " " + nextTrimmed;
+			}
+			i++;
+
+			// Check if the newly joined paragraph's last source line was short
+			// (meaning the original author ended the paragraph here).
+			// We measure the visual width of the line we just consumed.
+			var consumedWidth = measureVisualWidth(nextLine);
+			if (consumedWidth < threshold) {
+				// This was likely the last line of the paragraph — stop joining
+				break;
+			}
+		}
+
+		result.push(para);
 	}
 
 	return result;
@@ -448,9 +564,111 @@ function wordWrapLine(line, maxWidth) {
 	return result;
 }
 
+// ANSI-aware word wrap. ANSI escape sequences (ESC [ ... final_byte) contribute
+// zero visual width but take up string space. This function tracks visual column
+// position separately from string position to wrap at the correct visual boundary.
+//
+// Walk the string measuring visual width. When it exceeds maxWidth, find the
+// nearest space boundary (by string position near the visual break point) and
+// split. ANSI sequences stay attached to the text around them.
+//
+// Safe assumption: our ANSI sequences are all SGR (digits, semicolons, 'm').
+// Space (0x20) never appears inside them, so any space found is a valid break.
+function wordWrapLineAnsi(line, maxWidth) {
+	if (!line) return [""];
+
+	// Quick check — if visual width fits, no wrap needed
+	if (measureVisualWidth(line) <= maxWidth) return [line];
+
+	var result = [];
+	var remaining = line;
+
+	while (remaining.length > 0) {
+		var rvis = measureVisualWidth(remaining);
+		if (rvis <= maxWidth) {
+			result.push(remaining);
+			break;
+		}
+
+		// Find the string index where visual column reaches maxWidth
+		var breakStringIdx = findStringIndexAtVisualCol(remaining, maxWidth);
+
+		// Search backward for a space to break on
+		var spaceIdx = -1;
+		for (var s = breakStringIdx; s >= 0; s--) {
+			if (remaining.charAt(s) === " ") {
+				spaceIdx = s;
+				break;
+			}
+		}
+
+		if (spaceIdx <= 0) {
+			// No good break point — hard break at visual width boundary
+			spaceIdx = breakStringIdx;
+		}
+
+		result.push(remaining.substring(0, spaceIdx));
+		remaining = remaining.substring(spaceIdx);
+		if (remaining.charAt(0) === " ") remaining = remaining.substring(1);
+	}
+
+	if (result.length === 0) result.push("");
+	return result;
+}
+
+// Measure the visual (column) width of a string, skipping ANSI CSI sequences.
+// CSI = ESC [ <params> <final_byte> where final byte is 0x40-0x7E (@-~).
+function measureVisualWidth(str) {
+	var width = 0;
+	var inEsc = false;
+	for (var i = 0; i < str.length; i++) {
+		var ch = str.charCodeAt(i);
+		if (inEsc) {
+			if (ch >= 0x40 && ch <= 0x7E) inEsc = false;
+		} else if (ch === 0x1B && i + 1 < str.length && str.charCodeAt(i + 1) === 0x5B) {
+			inEsc = true;
+			i++; // skip the [
+		} else {
+			width++;
+		}
+	}
+	return width;
+}
+
+// Find the string index where the visual column reaches targetCol.
+// Returns the string position just past the character at that visual column.
+function findStringIndexAtVisualCol(str, targetCol) {
+	var vis = 0;
+	var inEsc = false;
+	for (var i = 0; i < str.length; i++) {
+		var ch = str.charCodeAt(i);
+		if (inEsc) {
+			if (ch >= 0x40 && ch <= 0x7E) inEsc = false;
+		} else if (ch === 0x1B && i + 1 < str.length && str.charCodeAt(i + 1) === 0x5B) {
+			inEsc = true;
+			i++; // skip the [
+		} else {
+			vis++;
+			if (vis >= targetCol) return i + 1;
+		}
+	}
+	return str.length;
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
+
+// Convenience: reflow a raw text string and return the reflowed string.
+// Used by tossers to pre-process message text before HTML formatting.
+// Joins with \r because VirtualTerminal uses \r for line breaks (FTN convention).
+function reflowText(text, wrapWidth) {
+	if (!text) return text;
+	var normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	var lines = normalized.split("\n");
+	var reflowed = reflowParagraphs(lines, wrapWidth || 80);
+	return reflowed.join("\r");
+}
 
 export {
 	processMessageBody,
@@ -463,6 +681,8 @@ export {
 	hasPipeCodes,
 	hasCtrlACodes,
 	detectAnsiArt,
+	reflowText,
+	reflowParagraphs,
 	classifyLine,
 	LINE_NORMAL,
 	LINE_QUOTE,

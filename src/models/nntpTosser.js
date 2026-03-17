@@ -17,8 +17,9 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as networkAreas from './networkAreas.js';
-import * as terminalText from '../utils/terminalText.js';
-import { cp437ToUtf8, formatTextForHtml } from '../utils/codepageConversions.js';
+import { formatBodyHtml } from '../utils/terminalText.js';
+import { cp437ToUtf8 } from '../utils/codepageConversions.js';
+import { createThreadRow, updateThreadStats, rollbackThread } from './echomail.js';
 
 dotenv.config();
 
@@ -383,36 +384,6 @@ async function findThreadByReferences(references, msgtable, threadtable) {
 	return null;
 }
 
-// Generate body_html from display text. Detects ANSI/pipe/Ctrl-A codes
-// and routes to the appropriate formatter.
-// Non-fatal — returns null on failure so message import continues without HTML.
-async function formatBodyHtml(displayText) {
-	if (!displayText) return null;
-
-	try {
-		if (displayText.includes("\x1b[") ||
-			/\|\d{2}/.test(displayText) ||
-			displayText.includes("\x01")) {
-			return await terminalText.formatTerminalText(displayText, {
-				terminalWidth: 80,
-				replaceAllSpaces: true,
-				handlePipeCodes: true,
-				handleAnsiCodes: true,
-				handleCtrlACodes: true,
-				resetOnNewline: true
-			});
-		}
-
-		if (displayText.includes("   ")) {
-			return formatTextForHtml(displayText);
-		}
-
-		return displayText.replace(/\r/g, '<br>');
-	} catch (_) {
-		return null;
-	}
-}
-
 // Imports a single NNTP article into the message tables for the given area.
 // Returns { status, imported, duplicate, errormessages[] }
 async function importNntpArticle(articleData, area, peerConnectionId, networkId) {
@@ -487,32 +458,22 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 		}
 	}
 
+	var isNewThread = false;
 	if (!threadId) {
 		// No existing thread found — start a new one. The root Message-ID
 		// of this thread is the article's own Message-ID.
-		var tuuid     = uuidv4();
-		var threadObj = {
-			uuid:              tuuid,
-			threadid:          messageId,
-			subject:           subject,
-			started_at:        systemTime,
-			started_by:        fromUser,
-			message_count:     1,
-			last_message:      systemTime,
-			last_message_from: fromUser
-		};
-		var tres = await postgres.insertObject(threadObj, threadtable);
-		if (!tres.status || !tres.insertId) {
+		var tResult = await createThreadRow(threadtable, messageId, subject, systemTime, fromUser);
+		if (!tResult) {
 			alogger.writeAlog(3,
-				'importNntpArticle: could not create thread for ' + messageId +
-				': ' + tres.errormessages.join(', '),
+				'importNntpArticle: could not create thread for ' + messageId,
 				'redbright'
 			);
 			returnObj.errormessages.push('Failed to create thread');
 			return returnObj;
 		}
-		threadId    = tres.insertId;
-		threadidStr = messageId;
+		threadId    = tResult.threadId;
+		threadidStr = tResult.threadidStr;
+		isNewThread = true;
 	}
 
 	// Pre-format body as HTML for display (non-fatal)
@@ -542,12 +503,8 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 
 	var mres = await postgres.insertObject(dbObj, msgtable);
 	if (!mres.status) {
-		// If message insert failed and we just created the thread, clean it up
-		if (threadidStr === messageId) {
-			await postgres.write(
-				'DELETE FROM ' + threadtable + ' WHERE threadid = $1',
-				[messageId]
-			);
+		if (isNewThread) {
+			await rollbackThread(threadtable, messageId);
 		}
 		alogger.writeAlog(3,
 			'importNntpArticle: failed to insert message ' + messageId +
@@ -559,15 +516,8 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 	}
 
 	// Update thread stats if this was a reply into an existing thread
-	if (threadidStr !== messageId) {
-		await postgres.write(
-			'UPDATE ' + threadtable +
-			' SET message_count = message_count + 1,' +
-			' last_message = GREATEST(last_message, $1),' +
-			' last_message_from = $2' +
-			' WHERE id = $3',
-			[systemTime, fromUser, threadId]
-		);
+	if (!isNewThread) {
+		await updateThreadStats(threadtable, threadId, systemTime, fromUser);
 	}
 
 	returnObj.status   = true;

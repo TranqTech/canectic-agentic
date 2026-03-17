@@ -112,7 +112,9 @@ router.get('/msgGroups', async (req, res, next) => {
 		title: 'Message Groups',
 		activelink: 'msgGroups',
 		currentuser: currentuser,
-		grouplist: grouplist
+		grouplist: grouplist,
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions
 	});
 });
 
@@ -207,7 +209,9 @@ router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) =>
 			title: 'Message Groups',
 			activelink: 'msgGroups',
 			currentuser: currentuser,
-			errors: result.errormessages
+			errors: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions
 		});
 	}
 });
@@ -237,7 +241,9 @@ router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asyn
 			title: 'Message Groups',
 			activelink: 'msgGroups',
 			currentuser: currentuser,
-			errors: result.errormessages
+			errors: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions
 		});
 	}
 });
@@ -279,6 +285,8 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 			arealist: arealist,
 			networklist: networklist,
 			errormessages: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions,
 			DateTime: DateTime
 		});
 	}
@@ -316,9 +324,28 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 			arealist: arealist,
 			networklist: networklist,
 			errormessages: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions,
 			DateTime: DateTime
 		});
 	}
+});
+
+// JSON endpoint — returns group security and flag defaults for new area modal auto-populate
+router.get('/msgGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var group = await msgGroups.getGroupByShortcode(shortcode);
+	if (!group) {
+		return res.status(404).json({ error: 'Group not found' });
+	}
+	res.json({
+		read_security: group.read_security || 0,
+		post_security: group.post_security || 0,
+		read_perm_flags: group.read_perm_flags || [],
+		read_rest_flags: group.read_rest_flags || [],
+		post_perm_flags: group.post_perm_flags || [],
+		post_rest_flags: group.post_rest_flags || []
+	});
 });
 
 router.get('/msgGroup/:shortcode', async (req, res, next) => {
@@ -348,6 +375,8 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 		msgGroup: msgGroup,
 		arealist: arealist,
 		networklist: networklist,
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions,
 		DateTime: DateTime
 	});
 });
@@ -379,6 +408,8 @@ router.get('/msgAreas', async (req, res, next) => {
 		grouplist: grouplist,
 		allAreas: allAreas || [],
 		networklist: networklist,
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions,
 		DateTime: DateTime
 	});
 });

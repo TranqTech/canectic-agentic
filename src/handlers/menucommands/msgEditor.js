@@ -3,6 +3,31 @@ import { saveMessage } from "../../models/messages.js";
 import { getAreaByShortcode } from "../../models/msgAreas.js";
 import * as alogger from "../../utils/alogger.js";
 
+// --- Flag helpers ---
+
+function parseFlags(val) {
+	if (!val) return [];
+	if (Array.isArray(val)) return val;
+	if (typeof val === "string") {
+		try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
+		catch (_) { return []; }
+	}
+	return [];
+}
+
+function checkPostAccess(userRecord, areaConfig) {
+	if (!userRecord || !areaConfig) return false;
+	var userSecurity = parseInt(userRecord.security) || 0;
+	if (areaConfig.post_security && userSecurity < areaConfig.post_security) return false;
+	var userPerms  = parseFlags(userRecord.permissionflags);
+	var userRestrs = parseFlags(userRecord.restrictionflags);
+	var reqFlags   = parseFlags(areaConfig.post_perm_flags);
+	var restFlags  = parseFlags(areaConfig.post_rest_flags);
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+	return true;
+}
+
 // --- Constants ---
 
 const STATE = {
@@ -1267,6 +1292,21 @@ class msgEditor extends BaseSubModule {
 		this._resolveFromName()
 			.then(() => {
 				if (!this.active) return;
+
+				// Check post access after area config is loaded
+				if (this._areaConfig && !checkPostAccess(this.call.user_record, this._areaConfig)) {
+					if (this.dumb) {
+						this.call.cmds.senddata("\r\n  You do not have permission to post in this area.\r\n");
+					} else {
+						this.call.cmds.clearscreen();
+						this.call.cmds.movecursor(1, 3);
+						this.call.cmds.setfgcolor(12); // bright red
+						this.call.cmds.senddata("  You do not have permission to post in this area.");
+						this.call.cmds.resetcolors();
+					}
+					setTimeout(() => { if (this.active) this.signalReturn(); }, 2000);
+					return;
+				}
 
 				this._prefillFields();
 				this._prepareQuoteLines();

@@ -2,7 +2,8 @@
 
 Reference document for the terminal-side BBS architecture. Covers the call lifecycle, handler system, input/output pipeline, door execution, and menu framework. Intended as a living reference for ongoing, future, and parallel development sessions.
 
-For the message and message networking stack, see `network_architecture.md`.
+For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views), see `message_architecture.md`.
+For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
 
 ---
 
@@ -276,35 +277,13 @@ _Section for tracking development plans, priorities, and stage completion._
 
 ### Data Layer Summary
 
-The message models are shared between the web and terminal sides. See `network_architecture.md` for the full data flow and schema. Key points for terminal development:
+The message models are shared between the web and terminal sides. See `message_architecture.md` for the full schema, model API, read tracking, body_html pipeline, subscriptions, and posting. Key points specific to terminal development:
 
-**Models used by terminal message commands:**
-
-| Model | Key Functions | Notes |
-|-------|---------------|-------|
-| `messages.js` | `listMsgGroups(security)`, `getAreasInGroup(shortcode, security)`, `getMessages(shortcode, options)`, `getMessage(id, shortcode)`, `getThreadsForArea(shortcode)`, `getRecentThreadsForArea(shortcode)`, `getThreadsPage(shortcode, options)`, `getMessagesForThread(shortcode, threadId)`, `getMessageCount(shortcode)`, `countMessagesBefore(shortcode, beforeId, threadId)`, `saveMessage(formObj, shortcode, threaduuid)`, `startNewThread(formObj, shortcode)`, `replyToThread(formObj, shortcode, threaduuid)` | Central view and posting model |
-| `userMsgPointers.js` | `advancePointer(userId, area, maxMsgId)`, `advanceThreadPointer(userId, area, threadId, maxMsgId)`, `markAreaRead(userId, area)`, `getUnreadCount(userId, area)`, `hasNewMessages(userId, area)`, `getNewscanSummary(userId)`, `getFirstUnreadInThread(userId, area, threadId)`, `getFirstUnreadInArea(userId, area)`, `getThreadUnreadCounts(userId, area, threadIds)` | Two-tier read tracking |
-| `msgGroups.js` | `getGroupByShortcode(shortcode)`, `getActiveGroups()` | Group CRUD model |
-| `msgAreas.js` | `getAreaByShortcode(shortcode)` | Area CRUD model |
-| `useraccounts.js` | `updateUserMsgGroup(username, group)`, `updateUserMsgArea(username, area)` | Persists user's current group/area selection |
-
-**Database schema (key tables for terminal):**
-
-Per-area message tables: `mb_<shortcode>_msgs` — messages with `id` (BIGSERIAL), `uuid`, `msg_id`, `thread_id` (FK to threads.id), `threadid` (FTN message-ID string), `reply_to`, `from_user`, `to_user`, `subject`, `body_text`, `utf8`, `body_html`, `system_time`, `origin_line`.
-
-Per-area thread tables: `mb_<shortcode>_threads` — threads with `id` (BIGSERIAL), `uuid`, `threadid` (FTN message-ID of root), `subject`, `started_at`, `started_by`, `message_count`, `last_message`, `last_message_from`.
-
-`user_msg_pointers` — area-level scan pointer (floor): `user_id`, `area_shortcode`, `scan_pointer` (msg id), `last_read_at`.
-
-`user_thread_pointers` — per-thread pointer (granularity above floor): `user_id`, `area_shortcode`, `thread_id`, `scan_pointer`, `last_read_at`.
-
-**Read-state resolution:** A message is unread if `msg.id > MAX(area_pointer, COALESCE(thread_pointer, 0))`.
+**Models used by terminal message commands:** `messages.js` (viewing + posting), `userMsgPointers.js` (read tracking), `msgGroups.js`, `msgAreas.js`, `useraccounts.js` (persists current group/area), `userAreaSubs.js` (newscan subscription overrides).
 
 **Message body for terminal display:** Use `msg.utf8 || msg.body_text`. The `body_html` field is for web rendering only. Terminal messages may contain ANSI escape codes, pipe codes (`|XX`), or Ctrl-A codes that should be passed through directly to ANSI-capable terminals. For dumb terminals, strip escape sequences and display plain text.
 
-**Area thread_mode:** Controls presentation: `standard` (threaded view with thread listing), `no_threads` (flat message list only), `subscribe_only` (future — only subscribed threads in newscan).
-
-**Area post_as:** Controls poster name: `username` (login name) or `realname` (full name, falling back to username).
+**Key area columns:** `thread_mode` (standard/no_threads/subscribe_only), `post_as` (username/realname), `newscan_default` (boolean), `ansi_area` (boolean). See `message_architecture.md` for full column documentation.
 
 ### Call Object Properties (Message State)
 
@@ -325,7 +304,7 @@ These properties on `IncomingCall` track the user's current message context:
 
 Replaces the old separate `msggroups.js` and `msgareas.js` with a single unified lightbar selector. Loads all accessible groups and areas (filtered by `call.security`), displays areas nested under group headers, and lets the user navigate with a lightbar. Selecting an area updates both `call.msg_group` and `call.msg_area` and persists to the user record.
 
-Features: encoding-aware glyphs (CP437 vs UTF-8), search mode (S key, live filtering), dumb terminal fallback (numbered list), blue highlight bar with distinct colors for current selection vs cursor position.
+Features: encoding-aware glyphs (CP437 vs UTF-8), search mode (S key, live filtering), dumb terminal fallback (numbered list), blue highlight bar with distinct colors for current selection vs cursor position. **Subscription toggle**: T key toggles newscan subscription for the highlighted area via `userAreaSubs.setSubscription()` / `removeSubscription()`. Unsubscribed areas are displayed dimmed. Subscription map loaded on entry via `userAreaSubs.getSubscriptionMap()`.
 
 Fixes from old code: stores shortcodes not names, passes security for filtering, uses correct `.name` column from DB rows.
 
@@ -518,19 +497,21 @@ Handled by `termMsgFormat.js` utility module, called from `msgReader._prepareBod
 6. Normalize line endings: `\r\n` → `\n`, lone `\r` → `\n`
 7. Split on `\n` into lines
 8. **Classify each line**: normal, quote, tear, origin, or kludge (kludge lines are hidden)
-9. **Word-wrap** plain text lines to `(bodyWidth - 2)` columns. Lines with embedded color codes are NOT wrapped (ANSI positioning would break)
-10. **Apply semantic color prefixes**: Each line gets an ANSI SGR prefix based on its type:
+9. **Paragraph reflow** (`reflowParagraphs`): reassembles text from wider editors — if a normal text line meets the next normal text line and exceeds 80% of wrapWidth, they're joined and re-wrapped. Quote lines, separators, and short lines are left alone.
+10. **Word-wrap** plain text lines to `(bodyWidth - 2)` columns. Lines with embedded color codes use **ANSI-aware wrapping** (`wordWrapLineAnsi` with `measureVisualWidth`/`findStringIndexAtVisualCol`) — escape sequences don't count toward column width, and wrap points only occur between visible characters.
+11. **ANSI art detection** (`detectAnsiArt`): checks for cursor positioning CSI sequences (CUP, CUU, CUD, CUF, CUB), NOT just color-only SGR. Art lines are not reflowed or wrapped.
+12. **Apply semantic color prefixes**: Each line gets an ANSI SGR prefix based on its type:
     - Normal text: bright yellow (default, theme key `msg_body_clr`)
     - Quote lines (`>`, `XX>`, `->`, `-=>`, `=>`, etc.): bright cyan (theme key `msg_quote_clr`)
     - Tear lines (`---`): bright white (theme key `msg_tear_clr`)
     - Tagline separators (`--`, `===`): bright green (theme key `msg_tagline_clr`)
     - Origin lines (anything after a tear or tagline separator): bright blue (theme key `msg_origin_clr`)
-11. **Two-level footer tracking**: Tagline separator (`--`, `===`) and tear line (`---`) each trigger a different color cascade:
+13. **Two-level footer tracking**: Tagline separator (`--`, `===`) and tear line (`---`) each trigger a different color cascade:
     - After a tagline separator: subsequent lines get tagline color (bright green) — this covers the actual tagline text
     - After a tear line: subsequent lines get origin color (bright blue) — tear overrides tagline, covering origin, SEEN-BY, PATH, etc.
     - A message with both (tagline before tear) gets green tagline text between the separators, then blue origin text after the tear
-12. For messages WITH embedded color codes: semantic colors are still applied at the start of each line. Embedded codes naturally override as the terminal processes left to right. Exception: ANSI art (cursor positioning detected) gets no prefixes.
-13. Store as `bodyLines[]` array of `{ text, type, colorPrefix }` objects
+14. For messages WITH embedded color codes: semantic colors are still applied at the start of each line. Embedded codes naturally override as the terminal processes left to right. Exception: ANSI art (cursor positioning detected) gets no prefixes.
+15. Store as `bodyLines[]` array of `{ text, type, colorPrefix }` objects
 
 **Line classification rules:**
 - Quote: line starts with `>`, `>>`, or 1-3 letter initials followed by `>` or `>>` then space (e.g. `De> `, `JD>> `). Also any mix of `-` and `=` arrow indicators followed by `>` and space (e.g. `-> `, `-=> `, `=> `, `==> `).
@@ -685,10 +666,11 @@ For scroll indicators, use ASCII fallbacks (`^` / `v`) in CP437 mode since 0x1E/
 
 ### Phase 2d — Newscan (`handlers/menucommands/newscan.js`)
 
-Extends `BaseSubModule`. Scans across areas for unread messages. Supports "all groups" and "current group only" modes.
+Extends `BaseSubModule`. Scans across areas for unread messages. Supports "all groups" and "current group only" modes. **Filters by subscription**: loads `userAreaSubs.getSubscriptionMap()` on entry and skips areas where the user has explicitly unsubscribed (or where `newscan_default` is false with no user override).
 
 **Flow:**
-1. Load all accessible areas with unread counts via `getUnreadCount()` per area
+1. Load subscription map via `userAreaSubs.getSubscriptionMap(userId)`
+2. Load all accessible areas, filter by subscription, get unread counts via `getUnreadCount()` per subscribed area
 2. Display summary screen with lightbar — area names, unread counts, totals
 3. User presses Enter to start sequential scan, or G to jump to selected area
 4. For each area with unreads: set call's area context → instantiate `msgReader` → run it
@@ -980,13 +962,19 @@ onChar(ch)
 
 ### Shared Utilities
 
-Several pieces of logic will be shared across the message modules:
+Several pieces of logic are shared across the message modules:
 
-**Terminal text display** — Word-wrapping body text to terminal width, handling ANSI passthrough vs. stripping for dumb terminals. May warrant a small `termTextUtils.js` helper.
+**Terminal text formatting** (`termMsgFormat.js`) — CP437↔UTF-8 conversion, pipe/Ctrl-A→ANSI, paragraph reflow (`reflowText`/`reflowParagraphs`), ANSI art detection (`detectAnsiArt`), ANSI-aware word wrapping (`wordWrapLineAnsi`), semantic line classification and coloring. `reflowText()` joins with `\r` (not `\n`) because VirtualTerminal breaks on `\r` (FTN convention). Does NOT import `terminalText.js` — dependency flows one direction only.
+
+**HTML body formatting** (`terminalText.js`) — `formatBodyHtml(displayText, forceWidth)` is the consolidated single source for all tossers and the maintenance tool. Pipeline: reflow → ANSI art detection → VirtualTerminal routing. `VirtualTerminal` noWrap mode: single spaces between words are regular ` ` (browser word-wrap), leading/multi-spaces use `&nbsp;`.
+
+**Thread helpers** (`echomail.js`) — `createThreadRow`, `updateThreadStats`, `rollbackThread` shared by QWK and NNTP tossers.
 
 **Message header formatting** — Consistent header block rendering (From/To/Subject/Date/Area) used by both readers and the lister detail view.
 
 **Pointer management** — Wrapper that handles advancing area and thread pointers after viewing, used by both reader modes and newscan.
+
+**Subscription management** (`userAreaSubs.js`) — Resolution cascade: user override → area `newscan_default` → true. Used by newscan (filters scan list) and area selector (T key toggle, dimmed display).
 
 ### MenuHandler Integration
 
@@ -1017,6 +1005,8 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 - Node-spy (sysop) live terminal mirroring (infrastructure exists via `OutputRingBuffer`)
 - Thread preferences (subscribe/ignore/mute) — schema designed, not yet implemented
 - User QWK download/upload from terminal menu
+- Web newscan route/view using `getNewscanSummary()` with `userAreaSubs` filtering
+- Flat-mode reply thread UUID resolution (currently null for some messages)
 
 ---
 
@@ -1031,6 +1021,17 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 | `msggroups.js` (old) | Stores group `.name` in `call.msg_group` instead of `.shortcode` | Fixed — replaced by `msgAreaSelector.js` |
 | `msgareas.js` (old) | Same name-vs-shortcode issue for `call.msg_area` | Fixed — replaced by `msgAreaSelector.js` |
 | `terminalcommands.js` | Missing PgUp/PgDn/Insert escape sequence mappings in `ansiInputParser` | Fixed — added `[5~`, `[6~`, `[2~`, `[1~`, `[4~` |
+| `termMsgFormat.js` | `reflowText` joined with `\n` but VirtualTerminal only breaks on `\r` — entire message condensed to one line | Fixed — joins with `\r` |
+| `termMsgFormat.js` | Stale duplicate `formatBodyHtml` function and circular import to `terminalText.js` | Fixed — removed, consolidated in `terminalText.js` |
+| `terminalText.js` | VirtualTerminal `toHTML()` replaced all spaces with `&nbsp;` — browser had no word-break points, text overflowed or broke mid-word | Fixed — noWrap mode: single spaces between words stay as regular ` `, leading/multi-spaces use `&nbsp;` |
+| `_msgAutoSize.pug` | Probe used `font-family:inherit` — measured wrong font, auto-sizing produced incorrect results | Fixed — inline `font-family:"Consolas",monospace` |
+| `_msgAutoSize.pug` | `MAX_FONT_PX=16` too small for wide screens | Fixed — raised to 32 |
+| `_msgAutoSize.pug` | `.text-12` class overrode calculated font-size | Fixed — removed `.text-12` from `.messagebody` in both views |
+| `flat.pug` / `thread.pug` | Progress bar and `#messageContainer` indented inside `.card-header` instead of as siblings of `.card` | Fixed — outdented to `.card` children |
+| `flat.pug` / `thread.pug` | Offcanvas backdrop dimmed screen and blocked input | Fixed — `data-bs-backdrop='false'` |
+| `qwkTosser.js` | Downloaded `.qwk` could be lost if extraction failed — hub already deleted it | Fixed — Phase 1.5 checks for existing `.qwk` in inDir before downloading |
+| `flat.pug` | Flat-mode reply `thread_uuid` is null for some messages | Pending — needs `getThreadByDbId()` lookup |
+| `telnetCommands` | IAC escaping in `_send()` | Pending |
 
 ---
 
@@ -1052,10 +1053,15 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 | `msgReader.js` | handlers/menucommands | Fullscreen message reader — thread list, message view, flat mode (Phase 2) |
 | `msgEditor.js` | handlers/menucommands | Message editor — fullscreen + dumb fallback, new thread + reply (Phase 3) |
 | `newscan.js` | handlers/menucommands | Cross-area newscan, wraps msgReader (Phase 2d) |
-| `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring |
+| `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring, paragraph reflow (`reflowText`/`reflowParagraphs`), ANSI art detection (`detectAnsiArt`), ANSI-aware word wrapping (`wordWrapLineAnsi`) |
+| `userAreaSubs.js` | models | Per-user newscan subscription overrides — resolution cascade, T key toggle in area selector |
+| **Maintenance** | | |
+| `messageBase.js` | maintenance | `regenerateAllBodyHtml`, `regenerateAreaBodyHtml` — batch body_html regeneration using current pipeline |
+| `maintenance.js` | tools | CLI runner — `--regen-html`, `--area`, `--dry-run`, `--width`, `--batch` |
 | **Shared models** | | |
 | `messages.js` | models | Message viewing, posting, sanitization |
 | `msgGroups.js` | models | Message group CRUD |
 | `msgAreas.js` | models | Message area CRUD, table management |
 | `userMsgPointers.js` | models | Two-tier read tracking (area pointers + thread pointers) |
-| `echomail.js` | models | FTN echomail import/export, threading |
+| `echomail.js` | models | FTN echomail import/export, threading. Shared thread helpers: `createThreadRow`, `updateThreadStats`, `rollbackThread` |
+| `terminalText.js` | utils | VirtualTerminal, `formatTerminalText`, `formatBodyHtml` (consolidated single source for all tossers) |

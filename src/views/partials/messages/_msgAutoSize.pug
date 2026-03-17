@@ -1,0 +1,93 @@
+//- _msgAutoSize.pug — Auto-size monospace message bodies to fit ~80 columns.
+//- Include this partial in any message view that uses .messagebody.monospace.
+//-
+//- Usage in a view:
+//-   include ../../partials/messages/_msgAutoSize.pug
+//-
+//- How it works:
+//-   1. Creates a hidden probe element with 80 monospace characters
+//-   2. Measures its width at a reference font size
+//-   3. Computes the font size that makes 80 chars fill the container
+//-   4. Clamps between min/max and applies to all .messagebody elements
+//-   5. Re-runs on window resize (debounced)
+//-
+//- IMPORTANT: .messagebody elements should NOT use .text-12 or any other
+//- font-size class — this script owns the font-size entirely.
+
+script.
+  (function() {
+    var TARGET_COLS_DESKTOP = 80;
+    var TARGET_COLS_MOBILE = 40;
+    var MOBILE_BREAKPOINT = 992; // below Bootstrap lg
+    var MIN_FONT_PX = 7;
+    var MAX_FONT_PX = 32;
+    var REFERENCE_PX = 16;
+    var resizeTimer = null;
+
+    function fitMessageBodies() {
+      var container = document.getElementById('messageContainer');
+      if (!container) return;
+
+      // Get container's inner width (subtract padding)
+      var style = window.getComputedStyle(container);
+      var padLeft = parseFloat(style.paddingLeft) || 0;
+      var padRight = parseFloat(style.paddingRight) || 0;
+      var availableWidth = container.clientWidth - padLeft - padRight;
+      if (availableWidth < 100) return;
+
+      // Account for .px-2 padding on the message body wrapper (8px each side)
+      availableWidth -= 16;
+
+      // Choose target columns: ansi_area forces 80, otherwise responsive
+      var force80 = container.dataset.force80 === 'true';
+      var targetCols;
+      if (force80) {
+        targetCols = TARGET_COLS_DESKTOP;
+      } else {
+        targetCols = window.innerWidth < MOBILE_BREAKPOINT ? TARGET_COLS_MOBILE : TARGET_COLS_DESKTOP;
+      }
+
+      // Create a hidden probe: 80 monospace characters at reference size.
+      // font-family is set inline to match .monospace class exactly —
+      // DO NOT use inherit, it would measure the container's proportional font.
+      var probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;' +
+        'font-family:"Consolas",monospace;font-size:' + REFERENCE_PX + 'px;';
+      probe.textContent = '0'.repeat(targetCols);
+      container.appendChild(probe);
+
+      var probeWidth = probe.getBoundingClientRect().width;
+      container.removeChild(probe);
+
+      if (probeWidth <= 0) return;
+
+      // Scale: what font-size makes 80 chars = availableWidth?
+      var targetPx = REFERENCE_PX * (availableWidth / probeWidth);
+      targetPx = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, targetPx));
+
+      // Round to 1 decimal place for clean rendering
+      targetPx = Math.round(targetPx * 10) / 10;
+
+      // Apply to all message bodies using !important to override any em-based classes
+      var bodies = document.querySelectorAll('.messagebody');
+      for (var i = 0; i < bodies.length; i++) {
+        bodies[i].style.setProperty('font-size', targetPx + 'px', 'important');
+      }
+    }
+
+    // Run on DOM ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fitMessageBodies);
+    } else {
+      fitMessageBodies();
+    }
+
+    // Re-run on resize (debounced)
+    window.addEventListener('resize', function() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fitMessageBodies, 150);
+    });
+
+    // Expose globally so infinite scroll loader can call it
+    window.fitMessageBodies = fitMessageBodies;
+  })();

@@ -473,7 +473,7 @@ async function listMsgGroups(userSecurity) {
 		: 255;
 
 	var dblist = await postgres.query(
-		"SELECT * FROM message_groups WHERE active AND security <= $1 ORDER BY name ASC",
+		"SELECT * FROM message_groups WHERE active AND (read_security IS NULL OR read_security <= $1) ORDER BY name ASC",
 		[sec]
 	);
 	return dblist || [];

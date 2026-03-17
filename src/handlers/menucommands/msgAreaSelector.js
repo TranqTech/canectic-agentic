@@ -20,6 +20,42 @@ async function getSubsMod() {
 const ROW_GROUP = "group";
 const ROW_AREA = "area";
 
+// Parse JSONB flags from DB — may be JSON string, array, or null
+function parseFlags(val) {
+	if (!val) return [];
+	if (Array.isArray(val)) return val;
+	if (typeof val === "string") {
+		try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
+		catch (_) { return []; }
+	}
+	return [];
+}
+
+// Check if user has read access to an area (flag check only — security level
+// is already filtered by the DB query in listMsgGroups / getAreasInGroup)
+function checkReadFlags(userRecord, area) {
+	var userPerms  = parseFlags(userRecord.permissionflags);
+	var userRestrs = parseFlags(userRecord.restrictionflags);
+	var reqFlags   = parseFlags(area.read_perm_flags);
+	var restFlags  = parseFlags(area.read_rest_flags);
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+	return true;
+}
+
+// Check if user has post access to an area (security level + flags)
+function checkPostAccess(userRecord, area) {
+	var userSecurity = parseInt(userRecord.security) || 0;
+	if (area.post_security && userSecurity < area.post_security) return false;
+	var userPerms  = parseFlags(userRecord.permissionflags);
+	var userRestrs = parseFlags(userRecord.restrictionflags);
+	var reqFlags   = parseFlags(area.post_perm_flags);
+	var restFlags  = parseFlags(area.post_rest_flags);
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+	return true;
+}
+
 // Default colors
 const df_title_clr = 14;
 const df_group_clr = 11;
@@ -127,12 +163,23 @@ class msgAreaSelector extends BaseSubModule {
 			return false;
 		}
 
+		// Filter groups by read flags (security level already filtered by DB query)
+		var userRec = this.call.user_record || {};
+		if (userRec.permissionflags || userRec.restrictionflags) {
+			groups = groups.filter(function(g) { return checkReadFlags(userRec, g); });
+		}
+
 		this.allRows = [];
 		this.areaCount = 0;
 
 		for (var g = 0; g < groups.length; g++) {
 			var group = groups[g];
 			var areas = await getAreasInGroup(group.shortcode, this.call.security);
+
+			// Filter areas by read flags
+			if (userRec.permissionflags || userRec.restrictionflags) {
+				areas = (areas || []).filter(function(a) { return checkReadFlags(userRec, a); });
+			}
 
 			// Only show groups that have at least one accessible area
 			if (!areas || areas.length === 0) continue;
