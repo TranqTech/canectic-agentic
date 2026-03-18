@@ -1,0 +1,83 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else if !sufficientAccess
+      include ../partials/status/unauthorized.pug
+    else
+      .row.mt-2
+        .col-xl-8.offset-xl-2.col-lg-10.offset-lg-1.col-12
+          include ../partials/flash
+          .card
+            .card-header.bg-darkblue.text-white
+              .row.align-items-center
+                .col-6
+                  h5.mb-0
+                    i.bi.bi-exclamation-triangle
+                    |  Undeliverable Messages
+                .col-6
+                  .d-flex.justify-content-end
+                    a.btn.btn-sm.btn-outline-light(href='/pm/inbox')
+                      i.bi.bi-arrow-left
+                      |  Inbox
+
+            .card-body.py-1.bg-dark.border-bottom.border-secondary
+              .d-flex.gap-2
+                a.btn.btn-sm(href='/pm/undeliverable?filter=unreviewed' class=(filter === 'unreviewed' ? 'btn-warning' : 'btn-outline-warning')) Unreviewed
+                a.btn.btn-sm(href='/pm/undeliverable?filter=reviewed' class=(filter === 'reviewed' ? 'btn-info' : 'btn-outline-info')) Reviewed
+                a.btn.btn-sm(href='/pm/undeliverable?filter=all' class=(filter === 'all' ? 'btn-secondary' : 'btn-outline-secondary')) All
+
+            .card-body.p-0.bg-black
+              if messages && messages.length > 0
+                table.table.table-hover.mb-0(style='table-layout: fixed;')
+                  thead.bg-dark
+                    tr
+                      th(scope='col' style='width: 18%') From
+                      th(scope='col' style='width: 18%') To
+                      th(scope='col' style='width: 22%') Subject
+                      th(scope='col' style='width: 12%') Reason
+                      th(scope='col' style='width: 15%') Date
+                      th(scope='col' style='width: 15%') Status
+                  tbody
+                    for msg of messages
+                      tr.clickable-row(data-href=`/pm/undeliverable/${msg.uuid}` style='cursor: pointer;')
+                        td.text-truncate
+                          span.fg-yellow= msg.from_user
+                          if msg.from_address && msg.from_address !== msg.from_user
+                            br
+                            span.fg-cyan.small= msg.from_address
+                        td.text-truncate
+                          span.fg-green= msg.to_user
+                          if msg.to_address && msg.to_address !== msg.to_user
+                            br
+                            span.fg-cyan.small= msg.to_address
+                        td.text-truncate= msg.subject || '(no subject)'
+                        td
+                          span.badge.bg-warning= msg.reason
+                        td.small
+                          if msg.system_time
+                            - var mdate = Date.parse(msg.system_time)
+                            - var md = DateTime.fromMillis(mdate)
+                            span.fg-yellow= md.toFormat('MMM dd HH:mm')
+                        td
+                          if msg.reviewed
+                            span.badge.bg-success= msg.action_taken || 'reviewed'
+                          else
+                            span.badge.bg-danger Pending
+              else
+                .text-center.py-4
+                  .text-muted No undeliverable messages
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.clickable-row').forEach(function(row) {
+        row.addEventListener('click', function() {
+          var href = this.getAttribute('data-href');
+          if (href) window.location.href = href;
+        });
+      });
+    });

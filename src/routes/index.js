@@ -11,6 +11,7 @@ import mobile from 'is-mobile';
 
 //internals
 import * as sessionStore from "../middleware/db/sessionstore.js";
+import * as privateMessages from '../models/privateMessages.js';
 import * as messages from '../models/messages.js';
 import * as msgGroups from '../models/msgGroups.js';
 import * as msgAreas from '../models/msgAreas.js';
@@ -40,8 +41,16 @@ router.use(async function(req, res, next) {
 	res.locals.activelink  = '';
 	res.locals.DateTime    = DateTime;
 	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
+	res.locals.pmUnreadCount = 0;
 	if (req.cookies.sessionid) {
 		await sessionStore.sessionRenew(req.cookies.sessionid);
+		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
+		if (pmSession) {
+			var pmUid = parseInt(pmSession.id);
+			if (pmUid && pmUid > 0) {
+				res.locals.pmUnreadCount = await privateMessages.getUnreadCount(pmUid);
+			}
+		}
 	}
 	next();
 });

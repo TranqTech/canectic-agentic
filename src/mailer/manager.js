@@ -23,9 +23,9 @@ const BINKP_PORT            = parseInt(process.env.MAILER_BINKP_PORT) || 24554;
 const MAX_SESSIONS          = parseInt(process.env.MAILER_MAX_SESSIONS) || 10;
 const CONNECT_TIMEOUT       = (parseInt(process.env.MAILER_CONNECT_TIMEOUT) || 30) * 1000;
 const POLL_INTERVAL         = (parseInt(process.env.MAILER_POLL_INTERVAL) || 900) * 1000;
-const INBOUND_DIR           = process.env.MAILER_INBOUND_DIR  || './ftn/in';
-const OUTBOUND_DIR          = process.env.MAILER_OUTBOUND_DIR || process.env.ftnoutbound || '/var/bbs/ftn/outbound';
-const TEMP_DIR              = process.env.MAILER_TEMP_DIR     || './ftn/tmp';
+const INBOUND_DIR           = process.env.MAILER_INBOUND_DIR  || process.env.ftninbound  || 'ftn/in';
+const OUTBOUND_DIR          = process.env.MAILER_OUTBOUND_DIR || process.env.ftnoutbound || 'ftn/out';
+const TEMP_DIR              = process.env.MAILER_TEMP_DIR     || 'ftn/tmp';
 
 class MailerManager extends EventEmitter {
 	constructor(options) {
@@ -157,11 +157,14 @@ class MailerManager extends EventEmitter {
 			return;
 		}
 
-		// Check if there's actually outbound mail
-		if (!this._hasOutboundMail(cd.address)) {
-			alogger.writeClog(5, 'Mailer: no outbound mail for ' + cd.address + ' — skipping poll', 'mailer', 'cyan');
-			return;
-		}
+		// Always connect — polling is for both sending and receiving.
+		// Log whether we have outbound mail for visibility.
+		var hasmail = this._hasOutboundMail(cd.address);
+		alogger.writeClog(5,
+			'Mailer: polling ' + (cd.address || connectionUUID) +
+			(hasmail ? ' (outbound mail pending)' : ' (receive only)'),
+			'mailer', 'cyan'
+		);
 
 		this._connectToPeer(conn);
 	}
@@ -263,15 +266,15 @@ class MailerManager extends EventEmitter {
 
 	_hasSessionForAddress(address) {
 		if (!address) return false;
-		var addrLower = address.toLowerCase();
+		var bareAddr = address.split('@')[0].toLowerCase();
 		for (var session of this._sessions) {
-			if (session.peerAddresses.some(a => a.toLowerCase() === addrLower)) {
+			if (session.peerAddresses.some(a => a.split('@')[0].toLowerCase() === bareAddr)) {
 				return true;
 			}
 			// Also check the target connection for outbound sessions
 			if (session.peerConnection) {
 				var cd = session.peerConnection.connection_data || {};
-				if (cd.address && cd.address.toLowerCase() === addrLower) {
+				if (cd.address && cd.address.split('@')[0].toLowerCase() === bareAddr) {
 					return true;
 				}
 			}
@@ -283,6 +286,18 @@ class MailerManager extends EventEmitter {
 	// Outbound mail detection
 	// -----------------------------------------------------------------------
 
+	// Resolve the BSO outbound directory for a given zone.
+	// Default zone (1): ftn/out/
+	// Alternate zones:  ftn/out.002/, ftn/out.003/, etc.
+	_getOutboundDirForZone(zone) {
+		var z = parseInt(zone) || 1;
+		if (z === 1) {
+			return OUTBOUND_DIR;
+		}
+		var zoneHex = z.toString(16).padStart(3, '0');
+		return OUTBOUND_DIR + '.' + zoneHex;
+	}
+
 	_hasOutboundMail(peerAddress) {
 		if (!peerAddress) return false;
 
@@ -290,14 +305,17 @@ class MailerManager extends EventEmitter {
 			var parts = this._parseAddress(peerAddress);
 			if (!parts) return false;
 
+			var outDir  = this._getOutboundDirForZone(parts.zone);
 			var netHex  = parts.net.toString(16).padStart(4, '0');
 			var nodeHex = parts.node.toString(16).padStart(4, '0');
 			var desthex = netHex + nodeHex;
 
+			if (!fs.existsSync(outDir)) return false;
+
 			// Check for flow files or direct packet files
 			var extensions = ['.flo', '.clo', '.dlo', '.hlo', '.ilo', '.out', '.cut', '.hut'];
 			for (var ext of extensions) {
-				var filePath = path.join(OUTBOUND_DIR, desthex + ext);
+				var filePath = path.join(outDir, desthex + ext);
 				if (fs.existsSync(filePath)) {
 					return true;
 				}

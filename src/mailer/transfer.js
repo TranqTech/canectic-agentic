@@ -19,8 +19,8 @@ class TransferEngine extends EventEmitter {
 	constructor(protocol, options) {
 		super();
 		this._protocol   = protocol;
-		this._inboundDir = options.inboundDir  || './ftn/in';
-		this._tempDir    = options.tempDir      || './ftn/tmp';
+		this._inboundDir = options.inboundDir  || 'ftn/in';
+		this._tempDir    = options.tempDir      || 'ftn/tmp';
 		this._sessionId  = options.sessionId    || 'unknown';
 
 		// Send state
@@ -53,14 +53,21 @@ class TransferEngine extends EventEmitter {
 
 	// Queue a file for sending. Called by session controller after building
 	// the outbound file list.
-	queueFile(filepath) {
+	// options.floFile   — path to the flow file this entry came from (if any)
+	// options.floPrefix — flow file line prefix: '^' = delete, '#' = truncate, '' = leave
+	// options.deleteAfterSend — true for direct BSO packet files (.out/.cut/.hut)
+	queueFile(filepath, options) {
+		var opts = options || {};
 		try {
 			var stat = fs.statSync(filepath);
 			this._sendQueue.push({
-				filepath: filepath,
-				name:     path.basename(filepath),
-				size:     stat.size,
-				mtime:    stat.mtimeMs
+				filepath:        filepath,
+				name:            path.basename(filepath),
+				size:            stat.size,
+				mtime:           stat.mtimeMs,
+				floFile:         opts.floFile || null,
+				floPrefix:       opts.floPrefix || '',
+				deleteAfterSend: opts.deleteAfterSend || false
 			});
 		} catch (err) {
 			alogger.writeClog(3, 'TransferEngine: cannot stat ' + filepath + ': ' + err.message, 'mailer', 'redbright');
@@ -76,7 +83,8 @@ class TransferEngine extends EventEmitter {
 	// has finished scanning the outbound directory).
 	markAllQueued() {
 		this._allFilesOffered = true;
-		if (this._sendQueue.length === 0 && !this._sendActive) {
+		alogger.writeClog(5, 'TransferEngine: markAllQueued (queue=' + this._sendQueue.length + ', active=' + (this._sendActive ? 'yes' : 'no') + ')', 'mailer', 'cyan');
+		if (this._sendQueue.length === 0 && !this._sendActive && !this._allFilesSent) {
 			this._allFilesSent = true;
 			this.emit('allSent');
 		}
@@ -102,7 +110,7 @@ class TransferEngine extends EventEmitter {
 		if (this._sendActive) return; // Already sending one
 
 		if (this._sendQueue.length === 0) {
-			if (this._allFilesOffered) {
+			if (this._allFilesOffered && !this._allFilesSent) {
 				this._allFilesSent = true;
 				this.emit('allSent');
 			}
@@ -119,12 +127,15 @@ class TransferEngine extends EventEmitter {
 		}
 
 		this._sendActive = {
-			filepath: item.filepath,
-			name:     item.name,
-			size:     item.size,
-			mtime:    item.mtime,
-			offset:   0,
-			fd:       null
+			filepath:        item.filepath,
+			name:            item.name,
+			size:            item.size,
+			mtime:           item.mtime,
+			offset:          0,
+			fd:              null,
+			floFile:         item.floFile || null,
+			floPrefix:       item.floPrefix || '',
+			deleteAfterSend: item.deleteAfterSend || false
 		};
 
 		this._protocol.offerFile(item.name, item.size, item.mtime, 0);
@@ -178,10 +189,31 @@ class TransferEngine extends EventEmitter {
 	_onFileReceived(info) {
 		// Remote acknowledged our file with M_GOT
 		if (this._sendActive && this._sendActive.name === info.name) {
-			var filepath = this._sendActive.filepath;
+			var item = this._sendActive;
 			this._sendActive = null;
 
-			this.emit('sendComplete', { name: info.name, filepath: filepath });
+			// Handle file cleanup based on source
+			if (item.deleteAfterSend) {
+				// Direct BSO packet file (.out/.cut/.hut) — delete
+				this._deleteFile(item.filepath);
+			} else if (item.floFile && item.floPrefix === '^') {
+				// Flow file entry with ^ prefix — delete after send
+				this._deleteFile(item.filepath);
+				this._markFloLineSent(item.floFile, item.filepath);
+			} else if (item.floFile && item.floPrefix === '#') {
+				// Flow file entry with # prefix — truncate after send
+				this._truncateFile(item.filepath);
+				this._markFloLineSent(item.floFile, item.filepath);
+			} else if (item.floFile) {
+				// Flow file entry with no prefix — leave file, mark line sent
+				this._markFloLineSent(item.floFile, item.filepath);
+			}
+
+			this.emit('sendComplete', {
+				name:     info.name,
+				filepath: item.filepath,
+				floFile:  item.floFile
+			});
 
 			// Advance to next file
 			this._offerNextFile();
@@ -206,32 +238,37 @@ class TransferEngine extends EventEmitter {
 
 	_onFileOffered(info) {
 		// Remote is offering us a file
+		alogger.writeClog(5, 'TransferEngine: file offered — ' + info.name + ' (' + info.size + ' bytes, offset ' + info.offset + ')', 'mailer', 'cyan');
 		var tempPath = path.join(this._tempDir, this._sessionId + '_' + info.name);
 
 		// Check for resume (partial file from a previous session)
-		var offset = 0;
+		var resumeOffset = 0;
 		if (fs.existsSync(tempPath)) {
 			try {
 				var stat = fs.statSync(tempPath);
-				offset = stat.size;
+				resumeOffset = stat.size;
 			} catch (_) {}
 		}
 
-		if (offset > 0 && offset < info.size) {
-			// Resume — request from offset
-			this._protocol.sendGET(info.name, info.size, info.time, offset);
+		// NR (Non-Reliable) mode: offset -1 means the sender requires an
+		// M_GET response before it will start sending data. We must always
+		// respond with M_GET indicating our desired start offset.
+		// Also respond with M_GET for normal resume (partial file exists).
+		if (info.offset === -1 || (resumeOffset > 0 && resumeOffset < info.size)) {
+			alogger.writeClog(5, 'TransferEngine: sending M_GET for ' + info.name + ' at offset ' + resumeOffset, 'mailer', 'cyan');
+			this._protocol.sendGET(info.name, info.size, info.time, resumeOffset);
 		}
 
 		this._rxInfo = {
 			name:     info.name,
 			size:     info.size,
 			time:     info.time,
-			offset:   offset,
+			offset:   resumeOffset,
 			tempPath: tempPath
 		};
 
 		// Open write stream (append for resume)
-		this._rxStream = fs.createWriteStream(tempPath, { flags: offset > 0 ? 'a' : 'w' });
+		this._rxStream = fs.createWriteStream(tempPath, { flags: resumeOffset > 0 ? 'a' : 'w' });
 	}
 
 	_onFileData(data) {
@@ -334,6 +371,85 @@ class TransferEngine extends EventEmitter {
 			try { fs.closeSync(this._sendActive.fd); } catch (_) {}
 		}
 		this._sendActive = null;
+	}
+
+	// -----------------------------------------------------------------------
+	// Post-send cleanup
+	// -----------------------------------------------------------------------
+
+	_deleteFile(filepath) {
+		try {
+			if (fs.existsSync(filepath)) {
+				fs.unlinkSync(filepath);
+				alogger.writeClog(5, 'TransferEngine: deleted sent file ' + filepath, 'mailer', 'green');
+			}
+		} catch (err) {
+			alogger.writeClog(3, 'TransferEngine: cannot delete ' + filepath + ': ' + err.message, 'mailer', 'redbright');
+		}
+	}
+
+	_truncateFile(filepath) {
+		try {
+			if (fs.existsSync(filepath)) {
+				fs.truncateSync(filepath, 0);
+				alogger.writeClog(5, 'TransferEngine: truncated sent file ' + filepath, 'mailer', 'green');
+			}
+		} catch (err) {
+			alogger.writeClog(3, 'TransferEngine: cannot truncate ' + filepath + ': ' + err.message, 'mailer', 'redbright');
+		}
+	}
+
+	// Mark a flow file line as sent by replacing its prefix with ~
+	// If all lines in the flow file are marked sent, delete the flow file.
+	_markFloLineSent(floFile, filepath) {
+		try {
+			if (!fs.existsSync(floFile)) return;
+
+			var content = fs.readFileSync(floFile, 'utf8');
+			var lines   = content.split('\n');
+			var updated = false;
+			var allSent = true;
+
+			for (var i = 0; i < lines.length; i++) {
+				var line = lines[i].trim();
+				if (!line) continue;
+
+				// Extract the filepath from this line (strip prefix if present)
+				var linePrefix = '';
+				var lineFile   = line;
+				if (line[0] === '^' || line[0] === '#' || line[0] === '~') {
+					linePrefix = line[0];
+					lineFile   = line.substring(1).trim();
+				}
+				lineFile = lineFile.replace(/\r/g, '');
+
+				// Match by filepath
+				if (lineFile === filepath && linePrefix !== '~') {
+					lines[i] = '~' + lineFile;
+					updated = true;
+				}
+
+				// Check if this line is still pending
+				var checkPrefix = lines[i].trim()[0];
+				if (checkPrefix !== '~' && lines[i].trim().length > 0) {
+					allSent = false;
+				}
+			}
+
+			if (updated) {
+				if (allSent) {
+					// All lines processed — delete the flow file
+					fs.unlinkSync(floFile);
+					alogger.writeClog(5, 'TransferEngine: all files sent, deleted flow file ' + floFile, 'mailer', 'green');
+				} else {
+					// Write updated flow file with ~ markers
+					fs.writeFileSync(floFile, lines.join('\n'));
+					alogger.writeClog(5, 'TransferEngine: marked sent in ' + path.basename(floFile) + ': ' + path.basename(filepath), 'mailer', 'green');
+				}
+			}
+		} catch (err) {
+			alogger.writeClog(3, 'TransferEngine: cannot update flow file ' + floFile + ': ' + err.message, 'mailer', 'redbright');
+		}
 	}
 }
 

@@ -40,6 +40,8 @@ const fulldomain     = "https://" + sitedomain;
 const basedir        = process.cwd();
 const defaultUser    = process.env.DefaultUser || "John Doe";
 const adminsecurity  = parseInt(process.env.adminsecurity) || 200;
+const availablePermissions  = ["Sysop", "Mod", "Adult", "Admin", "Email", "Netmail"];
+const availableRestrictions = ["Underage", "Banned", "Email", "Netmail","Private Messages"];
 
 // Inject shared locals for all admin views
 router.use(async function(req, res, next) {
@@ -1117,9 +1119,6 @@ router.post('/deletemsg/:shortcode/:uuid', urlencodedParser, requireAdmin, async
 // -------------------------------------------------------
 // Users
 // -------------------------------------------------------
-
-const availablePermissions  = ["Sysop", "Mod", "Adult", "Admin"];
-const availableRestrictions = ["Underage", "Banned"];
 
 router.get('/users', async (req, res, next) => {
 	var currentuser      = await getCurrentUser(req);

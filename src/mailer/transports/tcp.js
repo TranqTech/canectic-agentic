@@ -19,6 +19,9 @@ class TcpTransport extends BaseTransport {
 
 	static fromSocket(socket) {
 		var transport = new TcpTransport();
+		// Pause the socket immediately so no data events fire
+		// until the protocol layer is wired and calls resume().
+		socket.pause();
 		transport._attachSocket(socket);
 		transport._connected = true;
 		return transport;
@@ -50,6 +53,16 @@ class TcpTransport extends BaseTransport {
 		});
 
 		return transport;
+	}
+
+	// --- Flow control ---
+
+	pause() {
+		if (this._socket) this._socket.pause();
+	}
+
+	resume() {
+		if (this._socket) this._socket.resume();
 	}
 
 	// --- Internal: wire socket events ---

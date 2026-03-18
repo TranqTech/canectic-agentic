@@ -279,19 +279,21 @@ console.log('\n\x1b[1mTest 9: EOB handling\x1b[0m');
 console.log('\n\x1b[1mTest 10: CRAM-MD5 verification\x1b[0m');
 {
 	var password = 'secretpass';
-	var challenge = 'abcdef1234567890';
+	var challenge = 'abcdef1234567890abcdef1234567890';
 
-	// Compute expected digest
+	// Compute expected digest — decode hex challenge to bytes, same as binkp does
 	var crypto = await import('crypto');
+	var challengeBytes = Buffer.from(challenge, 'hex');
 	var hmac = crypto.createHmac('md5', password);
-	hmac.update(challenge);
+	hmac.update(challengeBytes);
 	var expectedDigest = hmac.digest('hex');
 
 	var response = 'CRAM-MD5-' + expectedDigest;
+	var wrongChallenge = '00112233445566778899aabbccddeeff';
 
 	assert(verifyCramMD5(password, challenge, response), 'Valid CRAM-MD5 accepted');
 	assert(!verifyCramMD5('wrongpass', challenge, response), 'Wrong password rejected');
-	assert(!verifyCramMD5(password, 'wrongchallenge', response), 'Wrong challenge rejected');
+	assert(!verifyCramMD5(password, wrongChallenge, response), 'Wrong challenge rejected');
 	assert(!verifyCramMD5(password, challenge, 'plaintext'), 'Non-CRAM response rejected');
 }
 

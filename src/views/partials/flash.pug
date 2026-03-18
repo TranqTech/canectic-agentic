@@ -1,0 +1,19 @@
+//- Flash message partial — include in any view that needs user feedback
+//- Expects res.locals.flash to be an array of { type, text } objects
+//- type: 'danger', 'warning', 'success', 'info'
+if flash && flash.length > 0
+  each msg in flash
+    .alert.alert-dismissible.fade.show.mb-2(
+      class=`alert-${msg.type || 'info'}`
+      role='alert'
+    )
+      if msg.type === 'danger'
+        i.bi.bi-exclamation-triangle-fill.me-2
+      else if msg.type === 'warning'
+        i.bi.bi-exclamation-circle-fill.me-2
+      else if msg.type === 'success'
+        i.bi.bi-check-circle-fill.me-2
+      else
+        i.bi.bi-info-circle-fill.me-2
+      = msg.text
+      button.btn-close(type='button' data-bs-dismiss='alert' aria-label='Close')

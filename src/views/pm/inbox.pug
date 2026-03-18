@@ -1,0 +1,187 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else
+      .row.mt-2
+        .col-xl-8.offset-xl-2.col-lg-10.offset-lg-1.col-12
+          include ../partials/flash
+          .card
+            .card-header.bg-darkblue.text-white
+              .row.align-items-center
+                .col-6
+                  h5.mb-0
+                    i.bi.bi-envelope
+                    |  Inbox
+                    if unreadCount && unreadCount > 0
+                      span.badge.bg-info.ms-2= unreadCount
+                .col-6
+                  .d-flex.justify-content-end.flex-wrap.gap-1
+                    if allowedTransports && allowedTransports.includes('LOCAL')
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#composeLocalModal')
+                        i.bi.bi-pencil-square
+                        |  Local Message
+                    if allowedTransports && (allowedTransports.includes('FTN') || allowedTransports.includes('QWK') || allowedTransports.includes('EMAIL'))
+                      button.btn.btn-sm.btn-info(data-bs-toggle='modal' data-bs-target='#composeNetworkModal')
+                        i.bi.bi-globe
+                        |  Network Message
+                    form.d-inline(action='/pm/inbox/markallread' method='POST')
+                      button.btn.btn-sm.btn-outline-warning(type='submit' title='Mark all as read')
+                        i.bi.bi-check2-all
+            .card-body.py-1.bg-dark.border-bottom.border-secondary
+              .d-flex.gap-2
+                a.btn.btn-sm(href='/pm/inbox' class=(!unreadOnly ? 'btn-info' : 'btn-outline-info')) All
+                a.btn.btn-sm(href='/pm/inbox?unread=true' class=(unreadOnly ? 'btn-info' : 'btn-outline-info')) Unread
+                .ms-auto
+                  a.btn.btn-sm.btn-outline-secondary(href='/pm/sent')
+                    i.bi.bi-send
+                    |  Sent
+                  a.btn.btn-sm.btn-outline-secondary.ms-1(href='/pm/trash')
+                    i.bi.bi-trash
+                    |  Trash
+
+            .card-body.p-0.bg-black
+              if messages && messages.length > 0
+                table.table.table-hover.mb-0(style='table-layout: fixed;')
+                  thead.bg-dark
+                    tr
+                      th(scope='col' style='width: 5%')
+                      th(scope='col' style='width: 20%') From
+                      th(scope='col' style='width: 35%') Subject
+                      th(scope='col' style='width: 12%') Transport
+                      th(scope='col' style='width: 18%') Date
+                      th(scope='col' style='width: 10%')
+                  tbody
+                    for msg of messages
+                      tr.clickable-row(
+                        data-href=`/pm/inbox/${msg.uuid}`
+                        style='cursor: pointer;'
+                        class=(msg.read ? '' : 'fw-bold')
+                      )
+                        td.text-center
+                          if !msg.read
+                            i.bi.bi-circle-fill.text-info(style='font-size: 8px;')
+                        td.text-truncate
+                          span.fg-yellow= msg.from_user
+                          if msg.from_address && msg.from_address !== msg.from_user
+                            br
+                            span.fg-cyan.small= msg.from_address
+                        td.text-truncate
+                          span= msg.subject || '(no subject)'
+                        td
+                          span.badge(class=(msg.transport_type === 'LOCAL' ? 'bg-secondary' : 'bg-info'))= msg.transport_type
+                        td.small
+                          if msg.system_time
+                            - var mdate = Date.parse(msg.system_time)
+                            - var md = DateTime.fromMillis(mdate)
+                            span.fg-yellow= md.toFormat('MMM dd, yyyy HH:mm')
+                        td.text-end
+                          form.d-inline(action=`/pm/inbox/${msg.uuid}/delete` method='POST')
+                            button.btn.btn-xs.btn-outline-danger(type='submit' title='Delete' onclick='event.stopPropagation()')
+                              i.bi.bi-trash
+              else
+                .text-center.py-4
+                  .text-muted
+                    i.bi.bi-mailbox2
+                    |  No messages
+
+    //- Compose Local Modal
+    if currentuser && allowedTransports && allowedTransports.includes('LOCAL')
+      #composeLocalModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered(style='max-width: 680px;')
+          .modal-content
+            .modal-header.bg-darkblue.text-white.d-flex.align-items-center
+              button.me-2(
+                data-bs-dismiss='modal'
+                style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+              ) ×
+              h4.modal-title.mb-0
+                i.bi.bi-pencil-square
+                |  Local Message
+            .modal-body.bg-dark
+              form(action='/pm/compose/local' method='POST')
+                .px-3
+                  label.text-white(for='local_to') To:
+                  input#local_to.form-control.bg-black.fg-green(
+                    type='text' name='to_user' tabindex='1' required
+                    placeholder='Username'
+                  )
+                  br
+                  label.text-white(for='local_subject') Subject:
+                  input#local_subject.form-control.bg-black.fg-yellow(
+                    type='text' name='subject' tabindex='2' required
+                  )
+                  br
+                  label.text-white(for='local_body') Message:
+                  textarea#local_body.form-control.bg-black.fg-brightgrey.monospace(
+                    name='body_text' rows='12' tabindex='3' required
+                    style='width: 100%; font-size: 12px;'
+                  )
+                  br
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='4')
+
+    //- Compose Network Modal
+    if currentuser && allowedTransports && (allowedTransports.includes('FTN') || allowedTransports.includes('QWK') || allowedTransports.includes('EMAIL'))
+      #composeNetworkModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered(style='max-width: 680px;')
+          .modal-content
+            .modal-header.bg-darkblue.text-white.d-flex.align-items-center
+              button.me-2(
+                data-bs-dismiss='modal'
+                style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+              ) ×
+              h4.modal-title.mb-0
+                i.bi.bi-globe
+                |  Network Message
+            .modal-body.bg-dark
+              form(action='/pm/compose/network' method='POST')
+                .px-3
+                  label.text-white(for='net_transport') Transport:
+                  select#net_transport.form-control.bg-black.fg-cyan(name='transport_type' tabindex='1')
+                    if allowedTransports.includes('FTN')
+                      option(value='FTN') FTN Netmail
+                    if allowedTransports.includes('QWK')
+                      option(value='QWK') QWK
+                    if allowedTransports.includes('EMAIL')
+                      option(value='EMAIL') Email
+                  br
+                  label.text-white(for='net_to_user') To (name):
+                  input#net_to_user.form-control.bg-black.fg-green(
+                    type='text' name='to_user' tabindex='2' required
+                    placeholder='Recipient display name'
+                  )
+                  br
+                  label.text-white(for='net_to_address') Destination Address:
+                  input#net_to_address.form-control.bg-black.fg-cyan(
+                    type='text' name='to_address' tabindex='3' required
+                    placeholder='e.g. 1:123/456'
+                  )
+                  br
+                  label.text-white(for='net_subject') Subject:
+                  input#net_subject.form-control.bg-black.fg-yellow(
+                    type='text' name='subject' tabindex='4' required
+                  )
+                  br
+                  label.text-white(for='net_body') Message:
+                  textarea#net_body.form-control.bg-black.fg-brightgrey.monospace(
+                    name='body_text' rows='12' tabindex='5' required
+                    style='width: 100%; font-size: 12px;'
+                  )
+                  br
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='6')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.clickable-row').forEach(function(row) {
+        row.addEventListener('click', function() {
+          var href = this.getAttribute('data-href');
+          if (href) window.location.href = href;
+        });
+      });
+    });

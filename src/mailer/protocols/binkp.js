@@ -21,6 +21,7 @@
 
 import { EventEmitter } from 'node:events';
 import * as crypto from 'crypto';
+import * as alogger from '../../utils/alogger.js';
 
 // --- binkp command IDs ---
 const M_NUL  = 0;   // Informational / capabilities
@@ -66,6 +67,11 @@ class BinkpProtocol extends EventEmitter {
 		// Current inbound file
 		this._rxFile     = null;   // { name, size, time, offset, received }
 
+		// Pending acknowledgments — incremented on fileComplete, decremented
+		// on sendGOT. Session cannot end while GOTs are outstanding (the
+		// transfer engine flushes writes async before sending GOT).
+		this._pendingGOTs = 0;
+
 		// CRAM-MD5
 		this._cramChallenge = null;
 
@@ -92,6 +98,8 @@ class BinkpProtocol extends EventEmitter {
 		this._role  = role;
 		this._state = 'handshake';
 
+		alogger.writeClog(5, 'binkp: starting session as ' + role + ', addresses: ' + this._localAddresses.join(' '), 'mailer', 'cyan');
+
 		// Send M_NUL capabilities
 		this._sendCmd(M_NUL, 'SYS ' + (this._options.systemName || 'Canectic BBS'));
 		this._sendCmd(M_NUL, 'ZYZ ' + (this._options.sysopName  || 'Sysop'));
@@ -110,6 +118,7 @@ class BinkpProtocol extends EventEmitter {
 		}
 
 		// Send M_ADR with our addresses
+		alogger.writeClog(5, 'binkp tx: M_ADR ' + this._localAddresses.join(' '), 'mailer', 'cyan');
 		this._sendCmd(M_ADR, this._localAddresses.join(' '));
 	}
 
@@ -138,6 +147,8 @@ class BinkpProtocol extends EventEmitter {
 
 	// Signal that we've finished sending all files.
 	sendEOB() {
+		if (this._localEOB) return; // Already sent
+		alogger.writeClog(5, 'binkp tx: M_EOB (local EOB)', 'mailer', 'cyan');
 		this._localEOB = true;
 		this._sendCmd(M_EOB, '');
 		this._checkSessionEnd();
@@ -146,7 +157,10 @@ class BinkpProtocol extends EventEmitter {
 	// Acknowledge receipt of a file.
 	sendGOT(name, size, time) {
 		var ts = Math.floor(time / 1000);
+		alogger.writeClog(5, 'binkp tx: M_GOT ' + name + ' ' + size + ' ' + ts, 'mailer', 'cyan');
 		this._sendCmd(M_GOT, name + ' ' + size + ' ' + ts);
+		if (this._pendingGOTs > 0) this._pendingGOTs--;
+		this._checkSessionEnd();
 	}
 
 	// Skip a file offered by the remote.
@@ -227,6 +241,11 @@ class BinkpProtocol extends EventEmitter {
 		var cmdData = payload.length > 1 ? payload.subarray(1).toString('utf8') : '';
 		var cmdName = CMD_NAMES[cmdId] || ('CMD_' + cmdId);
 
+		// Debug: log all received command frames (skip M_NUL after handshake to reduce noise)
+		if (cmdId !== M_NUL || this._state === 'init' || this._state === 'handshake') {
+			alogger.writeClog(5, 'binkp rx [' + this._state + ']: ' + cmdName + ' ' + cmdData, 'mailer', 'gray');
+		}
+
 		switch (cmdId) {
 			case M_NUL:
 				this._handleNUL(cmdData);
@@ -278,7 +297,10 @@ class BinkpProtocol extends EventEmitter {
 			if (this._rxFile.received >= this._rxFile.size) {
 				var completed = this._rxFile;
 				this._rxFile = null;
+				this._pendingGOTs++;
 				this.emit('fileComplete', { name: completed.name, size: completed.size });
+				// File done — check if session can end (both EOBs + no more files + no pending GOTs)
+				this._checkSessionEnd();
 			}
 		}
 		// Data without an active file receive — discard (shouldn't happen in normal flow)
@@ -320,9 +342,11 @@ class BinkpProtocol extends EventEmitter {
 
 	_handleADR(data) {
 		this._peerAddresses = data.trim().split(/\s+/).filter(Boolean);
+		alogger.writeClog(5, 'binkp: remote addresses: ' + this._peerAddresses.join(', '), 'mailer', 'cyan');
 
 		// If we're the caller, we now have their addresses. Send our password.
 		if (this._role === 'caller') {
+			alogger.writeClog(5, 'binkp: sending password (cramChallenge=' + (this._cramChallenge ? 'yes' : 'no') + ', hasPassword=' + (this._sessionPassword ? 'yes' : 'no') + ')', 'mailer', 'cyan');
 			this._sendPassword();
 		}
 		// If we're the answerer, we wait for M_PWD before validating.
@@ -375,12 +399,31 @@ class BinkpProtocol extends EventEmitter {
 			offset: parts.length > 3 ? parseInt(parts[3]) : 0
 		};
 
+		// In binkp, a new M_FILE for a DIFFERENT filename means the previous
+		// file's data has been fully transmitted. Finalize it.
+		if (this._rxFile && this._rxFile.name !== fileInfo.name) {
+			var completed = this._rxFile;
+			this._rxFile = null;
+			this._pendingGOTs++;
+			this.emit('fileComplete', { name: completed.name, size: completed.size });
+		}
+
+		// NR re-offer: same filename with offset >= 0 after we sent M_GET.
+		// Update the offset (data will follow) but don't re-emit fileOffered
+		// if we already have this file set up.
+		if (this._rxFile && this._rxFile.name === fileInfo.name) {
+			this._rxFile.offset   = Math.max(0, fileInfo.offset);
+			this._rxFile.received = Math.max(0, fileInfo.offset);
+			return;
+		}
+
+		// New file offer
 		this._rxFile = {
 			name:     fileInfo.name,
 			size:     fileInfo.size,
 			time:     fileInfo.time,
 			offset:   fileInfo.offset,
-			received: fileInfo.offset  // Resume offset counts as already received
+			received: Math.max(0, fileInfo.offset)
 		};
 
 		this.emit('fileOffered', fileInfo);
@@ -411,13 +454,25 @@ class BinkpProtocol extends EventEmitter {
 	}
 
 	_handleEOB() {
+		// If we have an active receive, EOB means its data is complete
+		if (this._rxFile) {
+			alogger.writeClog(5, 'binkp: EOB with active receive — finalizing ' + this._rxFile.name, 'mailer', 'cyan');
+			var completed = this._rxFile;
+			this._rxFile = null;
+			this._pendingGOTs++;
+			this.emit('fileComplete', { name: completed.name, size: completed.size });
+		}
+		alogger.writeClog(5, 'binkp: remote sent EOB (localEOB=' + this._localEOB + ', pendingGOTs=' + this._pendingGOTs + ')', 'mailer', 'cyan');
 		this._remoteEOB = true;
 		this.emit('remoteEOB');
 		this._checkSessionEnd();
 	}
 
 	_checkSessionEnd() {
-		if (this._localEOB && this._remoteEOB) {
+		// Session ends only when both sides sent EOB AND no file receive
+		// is in progress AND no GOTs are pending (async write flush).
+		if (this._localEOB && this._remoteEOB && !this._rxFile && this._pendingGOTs === 0) {
+			alogger.writeClog(5, 'binkp: both sides EOB, no pending receives/GOTs — session complete', 'mailer', 'greenbright');
 			this._state = 'done';
 			this.emit('sessionEnd');
 		}
@@ -429,14 +484,22 @@ class BinkpProtocol extends EventEmitter {
 
 	_sendPassword() {
 		if (this._cramChallenge && this._sessionPassword) {
-			// CRAM-MD5: HMAC-MD5(password, challenge)
+			// CRAM-MD5: HMAC-MD5(password_as_key, challenge_as_bytes)
+			// The challenge is transmitted as hex — decode to raw bytes for the HMAC
+			alogger.writeClog(5, 'binkp tx: M_PWD CRAM-MD5 (challenge: ' + this._cramChallenge.substring(0, 8) + '...)', 'mailer', 'cyan');
+			var challengeBytes = Buffer.from(this._cramChallenge, 'hex');
 			var hmac = crypto.createHmac('md5', this._sessionPassword);
-			hmac.update(this._cramChallenge);
+			hmac.update(challengeBytes);
 			var digest = hmac.digest('hex');
 			this._sendCmd(M_PWD, 'CRAM-MD5-' + digest);
-		} else {
+		} else if (this._sessionPassword) {
 			// Plaintext password
-			this._sendCmd(M_PWD, this._sessionPassword || '-');
+			alogger.writeClog(5, 'binkp tx: M_PWD plaintext (length: ' + this._sessionPassword.length + ')', 'mailer', 'cyan');
+			this._sendCmd(M_PWD, this._sessionPassword);
+		} else {
+			// No password
+			alogger.writeClog(5, 'binkp tx: M_PWD - (no password)', 'mailer', 'cyan');
+			this._sendCmd(M_PWD, '-');
 		}
 	}
 
@@ -473,8 +536,9 @@ class BinkpProtocol extends EventEmitter {
 function verifyCramMD5(password, challenge, response) {
 	if (!response.startsWith('CRAM-MD5-')) return false;
 	var digest = response.substring(9);
+	var challengeBytes = Buffer.from(challenge, 'hex');
 	var hmac   = crypto.createHmac('md5', password);
-	hmac.update(challenge);
+	hmac.update(challengeBytes);
 	return hmac.digest('hex') === digest;
 }
 

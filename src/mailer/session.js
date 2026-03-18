@@ -49,9 +49,9 @@ class SessionController extends EventEmitter {
 		this._sessionTimer = null;
 
 		// Directories
-		this._inboundDir  = this.options.inboundDir  || process.env.MAILER_INBOUND_DIR  || './ftn/in';
-		this._outboundDir = this.options.outboundDir  || process.env.MAILER_OUTBOUND_DIR || process.env.ftnoutbound || '/var/bbs/ftn/outbound';
-		this._tempDir     = this.options.tempDir      || process.env.MAILER_TEMP_DIR     || './ftn/tmp';
+		this._inboundDir  = this.options.inboundDir  || process.env.MAILER_INBOUND_DIR  || process.env.ftninbound  || 'ftn/in';
+		this._outboundDir = this.options.outboundDir  || process.env.MAILER_OUTBOUND_DIR || process.env.ftnoutbound || 'ftn/out';
+		this._tempDir     = this.options.tempDir      || process.env.MAILER_TEMP_DIR     || 'ftn/tmp';
 	}
 
 	// -----------------------------------------------------------------------
@@ -66,6 +66,13 @@ class SessionController extends EventEmitter {
 			alogger.writeClog(3, 'Session ' + this.uuid + ': timeout after ' + SESSION_TIMEOUT + 's', 'mailer', 'redbright');
 			this._endSession('timeout');
 		}, SESSION_TIMEOUT * 1000);
+
+		// ---------------------------------------------------------------
+		// Phase 1: All async work happens here — before the protocol is
+		// created. This prevents a race where the remote sends M_ADR and
+		// M_PWD while we're yielded on an await and no data listener
+		// exists yet.
+		// ---------------------------------------------------------------
 
 		// Resolve our local FTN addresses
 		var localAddresses = await this._getLocalAddresses();
@@ -100,6 +107,13 @@ class SessionController extends EventEmitter {
 			protocolOpts.sessionPassword = cd.session_password || '';
 		}
 
+		// ---------------------------------------------------------------
+		// Phase 2: Protocol creation + event wiring + handshake start.
+		// All synchronous from here — no awaits, no event loop yields.
+		// The transport data listener is wired in the BinkpProtocol
+		// constructor, so frames arriving after this point are captured.
+		// ---------------------------------------------------------------
+
 		// Create protocol
 		this.protocol = new BinkpProtocol(this.transport, protocolOpts);
 
@@ -110,8 +124,14 @@ class SessionController extends EventEmitter {
 		this.protocol.on('sessionEnd', () => this._onSessionEnd());
 		this.protocol.on('error', (err) => this._onError(err));
 
-		// Start the handshake
+		// Start the handshake (sends our M_NUL + M_ADR)
 		this.protocol.startSession(this.role);
+
+		// Resume the transport — for inbound connections, the socket was
+		// paused in TcpTransport.fromSocket() to prevent data loss during
+		// async setup. Now that the protocol is wired and listening for
+		// data events, we can let the buffered frames flow through.
+		this.transport.resume();
 
 		alogger.writeClog(5,
 			'Session ' + this.uuid + ': started as ' + this.role +
@@ -229,6 +249,19 @@ class SessionController extends EventEmitter {
 	// File list — find outbound files for this peer
 	// -----------------------------------------------------------------------
 
+	// Resolve the BSO outbound directory for a given zone.
+	// Default zone (1): ftn/out/
+	// Alternate zones:  ftn/out.002/, ftn/out.003/, etc.
+	_getOutboundDirForZone(zone) {
+		var z = parseInt(zone) || 1;
+		if (z === 1) {
+			return this._outboundDir;
+		}
+		// BSO convention: base dir name + '.' + 3-digit hex zone
+		var zoneHex = z.toString(16).padStart(3, '0');
+		return this._outboundDir + '.' + zoneHex;
+	}
+
 	async _buildOutboundList() {
 		if (!this.peerConnection) return;
 
@@ -240,25 +273,29 @@ class SessionController extends EventEmitter {
 		var addrParts = this._parseAddress(peerAddr);
 		if (!addrParts) return;
 
+		var outDir  = this._getOutboundDirForZone(addrParts.zone);
 		var netHex  = addrParts.net.toString(16).padStart(4, '0');
 		var nodeHex = addrParts.node.toString(16).padStart(4, '0');
 		var desthex = netHex + nodeHex;
 
+		if (!fs.existsSync(outDir)) return;
+
 		// Look for flow files (.flo, .clo, .dlo, .hlo, .ilo)
 		var floExtensions = ['.flo', '.clo', '.dlo', '.hlo', '.ilo'];
 		for (var ext of floExtensions) {
-			var floPath = path.join(this._outboundDir, desthex + ext);
+			var floPath = path.join(outDir, desthex + ext);
 			if (fs.existsSync(floPath)) {
 				this._processFlowFile(floPath);
 			}
 		}
 
-		// Also look for direct .pkt/.out/.cut/.hut files in the outbound dir
+		// Also look for direct BSO-style packet files (.out, .cut, .hut)
+		// These are deleted after successful send.
 		var pktExtensions = ['.out', '.cut', '.hut'];
 		for (var pktExt of pktExtensions) {
-			var pktPath = path.join(this._outboundDir, desthex + pktExt);
+			var pktPath = path.join(outDir, desthex + pktExt);
 			if (fs.existsSync(pktPath)) {
-				this.transfer.queueFile(pktPath);
+				this.transfer.queueFile(pktPath, { deleteAfterSend: true });
 			}
 		}
 	}
@@ -288,7 +325,10 @@ class SessionController extends EventEmitter {
 				filepath = filepath.replace(/\r/g, '');
 
 				if (filepath && fs.existsSync(filepath)) {
-					this.transfer.queueFile(filepath);
+					this.transfer.queueFile(filepath, {
+						floFile:   floPath,
+						floPrefix: prefix
+					});
 				}
 			}
 		} catch (err) {
@@ -353,15 +393,36 @@ class SessionController extends EventEmitter {
 	// -----------------------------------------------------------------------
 
 	async _matchPeer(addresses) {
-		// Get all active FTN connections
+		// Get all active FTN connections (joined with message_networks — has .domain)
 		var connections = await peerConnections.getActiveConnectionsByNetworkType('FTN');
 		if (!connections || connections.length === 0) return null;
 
-		// For each presented address, find a matching connection
+		// Remote binkd presents addresses like "1:134/101@fidonet".
+		// We store address "1:134/101" and domain "fidonet" separately.
+		// First pass: match both address AND domain for strongest match.
+		// Second pass: match address only (for remotes that don't send @domain).
 		for (var addr of addresses) {
+			var parts    = addr.split('@');
+			var bareAddr = parts[0].toLowerCase();
+			var domain   = parts.length > 1 ? parts[1].toLowerCase() : null;
+
+			if (domain) {
+				for (var conn of connections) {
+					var cd = conn.connection_data || {};
+					if (cd.address && cd.address.toLowerCase() === bareAddr &&
+						conn.domain && conn.domain.toLowerCase() === domain) {
+						return conn;
+					}
+				}
+			}
+		}
+
+		// Second pass — address-only match (no domain or domain didn't match)
+		for (var addr of addresses) {
+			var bareAddr = addr.split('@')[0].toLowerCase();
 			for (var conn of connections) {
 				var cd = conn.connection_data || {};
-				if (cd.address && cd.address.toLowerCase() === addr.toLowerCase()) {
+				if (cd.address && cd.address.toLowerCase() === bareAddr) {
 					return conn;
 				}
 			}
@@ -380,14 +441,14 @@ class SessionController extends EventEmitter {
 			// If the session has a specific connection, use its network's addresses
 			if (this.peerConnection) {
 				var netAddrs = await systemAddresses.getAddressesByNetwork(this.peerConnection.network_id);
-				addresses = netAddrs.map(a => a.address);
+				addresses = netAddrs.map(a => a.domain ? a.address + '@' + a.domain : a.address);
 			}
 			// Fallback: get all active FTN addresses
 			if (addresses.length === 0) {
 				var allAddrs = await systemAddresses.getActiveAddresses();
 				addresses = allAddrs
 					.filter(a => a.address_zone && a.address_net && a.address_node) // FTN only
-					.map(a => a.address);
+					.map(a => a.domain ? a.address + '@' + a.domain : a.address);
 			}
 			return addresses;
 		} catch (err) {

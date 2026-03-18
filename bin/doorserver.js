@@ -64,6 +64,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 process.on('SIGINT', () => {
+	if (mailerManager) mailerManager.stop();
 	socatManager.shutdown();
 	pgpool.end();
 	redis.shutdown();
@@ -71,6 +72,7 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
+	if (mailerManager) mailerManager.stop();
 	socatManager.shutdown();
 	process.exit(0);
 });
@@ -101,8 +103,12 @@ async function startWebServer(){
 }
 
 async function startMailerManager(){
-	mailerManager = new MailerManager
-	await mailerManager.start()
+	if (process.env.MAILER_ENABLED !== 'true') {
+		alogger.writeAlog(2, "Mailer: disabled (set MAILER_ENABLED=true to enable)", "yellow")
+		return
+	}
+	mailerManager = new MailerManager()
+	mailerManager.start()
 }
 
 async function startCallPools(){
@@ -162,7 +168,6 @@ async function exitWatch(){
 
 async function main(){
 	await prerunMaint()
-	await startMailerManager()
 	await startNodeManager()
 	await startSocatManager()
 	await startCallPools()
@@ -170,6 +175,7 @@ async function main(){
 	if (runwssrv){
 		await startWebsockets()
 	}
+	await startMailerManager()
 }
 
 await main()

@@ -627,6 +627,37 @@ function buildSessionData(userobj) {
 	};
 }
 
+// --- Realname lookups (for PM recipient resolution) ---
+
+// Single match by fullname (case-insensitive). Returns first match or null.
+async function getUserByRealname(realname) {
+	var row = await postgres.queryOne(
+		'SELECT * FROM users WHERE UPPER(fullname) = UPPER($1)',
+		[realname.trim()]
+	);
+	return row;
+}
+
+// All matches by fullname (case-insensitive). For ambiguity detection.
+async function getUsersByRealname(realname) {
+	var rows = await postgres.query(
+		'SELECT * FROM users WHERE UPPER(fullname) = UPPER($1)',
+		[realname.trim()]
+	);
+	return rows || [];
+}
+
+// --- Permission flag lookup (for sysop notifications, etc.) ---
+
+// All users whose permissionflags JSONB array contains the given flag.
+async function getUsersByPermissionFlag(flag) {
+	var rows = await postgres.query(
+		'SELECT * FROM users WHERE permissionflags @> $1',
+		[JSON.stringify([flag])]
+	);
+	return rows || [];
+}
+
 export {
 	checkUserPass,
 	getUserRecord,
@@ -653,5 +684,8 @@ export {
 	saveUser,
 	updateUser,
 	resetUserPassword,
-	getUserByUUID
+	getUserByUUID,
+	getUserByRealname,
+	getUsersByRealname,
+	getUsersByPermissionFlag
 };

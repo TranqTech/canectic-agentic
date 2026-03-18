@@ -355,6 +355,85 @@ async function removeAddress(uuid) {
 	return returnObj;
 }
 
+// Check if an address string exists as an active system address
+// on a network of the given type (e.g. 'FTN', 'QWK', 'NNTP').
+// Returns the system_addresses row if found, null otherwise.
+// Used by ftnNetmailAdapter to determine if a destination is local.
+async function getActiveAddressByNetworkType(addressString, networkType) {
+	var row = await postgres.queryOne(
+		"SELECT sa.* FROM system_addresses sa " +
+		"JOIN message_networks mn ON sa.network_id = mn.id " +
+		"WHERE sa.address = $1 AND UPPER(mn.network_type) = UPPER($2) AND sa.active = true",
+		[addressString, networkType]
+	);
+	return row || null;
+}
+
+// Get the default system address for a network type (e.g. 'FTN', 'QWK').
+// Joins with message_networks to find networks of the given type, then
+// returns the first default address found. Returns null if none.
+// Note: for FTN, prefer resolveSourceForDestinationZone() which matches
+// the correct network based on destination zone.
+async function getDefaultAddressByNetworkType(networkType) {
+	var row = await postgres.queryOne(
+		"SELECT sa.* FROM system_addresses sa " +
+		"JOIN message_networks mn ON sa.network_id = mn.id " +
+		"WHERE UPPER(mn.network_type) = UPPER($1) AND sa.is_default = true AND sa.active = true " +
+		"ORDER BY sa.id ASC LIMIT 1",
+		[networkType]
+	);
+	return row || null;
+}
+
+// Resolve the correct local system address to use as the source for an
+// outbound FTN message based on the destination zone number.
+//
+// Cascade:
+//   1. Get all FTN-type networks
+//   2. For each, check if destinationZone is in that network's zone list
+//   3. Return the default system address for the matching network
+//   4. If no zone match on any network, return { address: null, reason: '...' }
+//
+// Returns { address: <system_addresses row>, networkId: <int> } on success
+// or { address: null, reason: <string> } on failure.
+async function resolveSourceForDestinationZone(destinationZone) {
+	if (!destinationZone) {
+		return { address: null, reason: 'no_destination_zone' };
+	}
+
+	var zone = parseInt(destinationZone);
+	if (isNaN(zone)) {
+		return { address: null, reason: 'invalid_destination_zone' };
+	}
+
+	// Get all FTN-type networks
+	var ftnNetworks = await msgNetworks.getNetworksByType('FTN');
+	if (!ftnNetworks || ftnNetworks.length === 0) {
+		return { address: null, reason: 'no_ftn_networks_configured' };
+	}
+
+	// Check each network's zone list for a match
+	for (var network of ftnNetworks) {
+		if (!network.active) continue;
+
+		var zoneList = await msgZones.getCachedZonesByNetwork(network.id);
+		if (!zoneList || zoneList.length === 0) continue;
+
+		var zoneMatch = zoneList.some(function(z) { return z.zone_number === zone; });
+		if (zoneMatch) {
+			// Found the network that owns this zone — get its default address
+			var defaultAddr = await getDefaultAddress(network.id);
+			if (defaultAddr) {
+				return { address: defaultAddr, networkId: network.id };
+			}
+			// Network owns the zone but has no default address
+			return { address: null, reason: 'no_default_address_for_network_' + network.domain };
+		}
+	}
+
+	return { address: null, reason: 'zone_' + zone + '_not_found_on_any_ftn_network' };
+}
+
 export {
 	newAddress,
 	updateAddress,
@@ -368,5 +447,8 @@ export {
 	getAddressesForZone,
 	getAddressesForDomain,
 	getAddressById,
-	getAddressByUUID
+	getAddressByUUID,
+	getActiveAddressByNetworkType,
+	getDefaultAddressByNetworkType,
+	resolveSourceForDestinationZone
 };

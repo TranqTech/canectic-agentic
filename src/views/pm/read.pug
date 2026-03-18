@@ -1,0 +1,147 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else if !message
+      .row.mt-2
+        .col-xl-6.offset-xl-3.col-lg-10.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              h5.mb-0= title
+            .card-body
+              h3 Message Not Found
+    else
+      .row.mt-2
+        .col-xl-6.offset-xl-3.col-lg-10.offset-lg-1.col-12
+          include ../partials/flash
+          .card
+            .card-header.bg-darkblue.text-white
+              .row.align-items-center
+                .col-8
+                  h5.mb-0
+                    i.bi.bi-envelope-open
+                    |  
+                    = message.subject || '(no subject)'
+                .col-4
+                  .d-flex.justify-content-end.gap-1
+                    a.btn.btn-sm.btn-outline-light(href='/pm/inbox')
+                      i.bi.bi-arrow-left
+                      |  Inbox
+                    - var canReply = false
+                    if message.transport_type === 'LOCAL'
+                      - canReply = allowedTransports && allowedTransports.includes('LOCAL')
+                    else if message.transport_type === 'EMAIL'
+                      - canReply = allowedTransports && allowedTransports.includes('EMAIL')
+                    else
+                      - canReply = allowedTransports && allowedTransports.includes(message.transport_type)
+                    if canReply
+                      button.btn.btn-sm.btn-primary(data-bs-toggle='modal' data-bs-target='#replyModal')
+                        i.bi.bi-reply
+                        |  Reply
+
+            //- Message header
+            .card-body.py-2.bg-dark.border-bottom.border-secondary
+              .row
+                .col-sm-6
+                  .small
+                    span.text-muted From: 
+                    span.fg-yellow.fw-bold= message.from_user
+                    if message.from_address && message.from_address !== message.from_user
+                      span.fg-cyan.ms-1 (#{message.from_address})
+                  .small
+                    span.text-muted To: 
+                    span.fg-green= message.to_user
+                    if message.to_address && message.to_address !== message.to_user
+                      span.fg-cyan.ms-1 (#{message.to_address})
+                .col-sm-6.text-sm-end
+                  .small
+                    span.text-muted Date: 
+                    if message.system_time
+                      - var mdate = Date.parse(message.system_time)
+                      - var md = DateTime.fromMillis(mdate)
+                      span.fg-yellow= md.toFormat('MMM dd, yyyy HH:mm')
+                  .small
+                    span.text-muted Transport: 
+                    span.badge(class=(message.transport_type === 'LOCAL' ? 'bg-secondary' : 'bg-info'))= message.transport_type
+
+            //- Message body
+            .card-body.bg-black
+              .messagebody.monospace.fg-brightgrey
+                if message.body_html && message.body_html.trim()
+                  != message.body_html
+                else if message.body_text && message.body_text.trim()
+                  pre(style='white-space: pre-wrap; margin: 0; font-family: inherit; font-size: inherit; color: inherit;')= message.body_text
+                else
+                  .text-muted (empty message)
+
+            //- Actions footer
+            .card-footer.bg-dark
+              .d-flex.justify-content-between
+                div
+                  if message.read
+                    form.d-inline(action=`/pm/inbox/${message.uuid}/read` method='POST')
+                      input(type='hidden' name='action' value='unread')
+                      button.btn.btn-sm.btn-outline-info(type='submit')
+                        i.bi.bi-envelope
+                        |  Mark Unread
+                  else
+                    form.d-inline(action=`/pm/inbox/${message.uuid}/read` method='POST')
+                      input(type='hidden' name='action' value='read')
+                      button.btn.btn-sm.btn-outline-info(type='submit')
+                        i.bi.bi-envelope-open
+                        |  Mark Read
+                div
+                  form.d-inline(action=`/pm/inbox/${message.uuid}/delete` method='POST')
+                    button.btn.btn-sm.btn-outline-danger(type='submit')
+                      i.bi.bi-trash
+                      |  Delete
+
+    //- Reply Modal
+    if currentuser && message && canReply
+      #replyModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered(style='max-width: 680px;')
+          .modal-content
+            .modal-header.bg-darkblue.text-white.d-flex.align-items-center
+              button.me-2(
+                data-bs-dismiss='modal'
+                style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+              ) ×
+              h4.modal-title.mb-0
+                i.bi.bi-reply
+                |  Reply
+            .modal-body.bg-dark
+              form(action=`/pm/reply/${message.uuid}` method='POST')
+                .px-3
+                  label.text-white(for='r_to') To:
+                  input#r_to.form-control.bg-black.fg-green(
+                    type='text' name='to_user' tabindex='1' readonly
+                    value=message.from_user
+                  )
+                  if message.transport_type !== 'LOCAL'
+                    br
+                    label.text-white(for='r_address') Address:
+                    input#r_address.form-control.bg-black.fg-cyan(
+                      type='text' readonly
+                      value=message.from_address
+                    )
+                  br
+                  - var replySubject = message.subject || ''
+                  - if (replySubject && !replySubject.toUpperCase().startsWith('RE:')) replySubject = 'Re: ' + replySubject
+                  label.text-white(for='r_subject') Subject:
+                  input#r_subject.form-control.bg-black.fg-yellow(
+                    type='text' name='subject' tabindex='2'
+                    value=replySubject
+                  )
+                  br
+                  label.text-white(for='r_body') Message:
+                  textarea#r_body.form-control.bg-black.fg-brightgrey.monospace(
+                    name='body_text' rows='12' tabindex='3' required
+                    style='width: 100%; font-size: 12px;'
+                  )
+                  br
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='4')

@@ -10,7 +10,9 @@ const pexec = util.promisify(exec);
 
 //internals
 import {Message, Packet} from '../models/ftnClasses.js'
-import * as netmail from '../models/netmail.js'
+import * as ftnNetmailAdapter from '../models/ftnNetmailAdapter.js'
+import * as privateMessages from '../models/privateMessages.js'
+import * as systemAddresses from '../models/systemAddresses.js'
 import * as echomail from '../models/echomail.js'
 import * as ftnUtils from "../utils/ftnUtils.js"
 import * as peerConnections from '../models/peerConnections.js'
@@ -20,9 +22,9 @@ import * as codepageConversions from "../utils/codepageConversions.js"
 //setup and variables
 const TosserName = "Canectic Tosser v0.1"
 const SystemTZUTC = "-0600"
-const defaultInbound = process.env.ftninbound || "/var/bbs/ftn/inbound"
-const defaultOutbound = process.env.ftnoutbound || "/var/bbs/ftn/outbound"
-const moveDir = process.env.ftntossed || "/var/bbs/ftn/tossed"
+const defaultInbound = process.env.ftninbound || "ftn/in"
+const defaultOutbound = process.env.ftnoutbound || "ftn/out"
+const moveDir = process.env.ftntossed || "ftn/tossed"
 const defaultZone = 1
 const removeProcessed = false
 const moveProcessed = true
@@ -33,6 +35,30 @@ const testpwd = process.env.PacketPwd || ""
 //this is here more to keep things debuggable.
 //However, we may want to address this as a size limitation for radio based transfers of files in the future. (LoRa, etc.)
 const maxMsg = 256
+
+// --- 8.3-safe unique packet filename generator ---
+// 4 hex chars from lower 16 bits of epoch seconds (time-ordered, ~18hr cycle)
+// + 4 hex chars from a monotonic counter (wraps at 0xFFFF, 65536 per cycle)
+// Filesystem collision check as final safety net.
+var _pktSeq = 0;
+function generatePktFilename(outDir) {
+	var timePart = (Math.floor(Date.now() / 1000) & 0xFFFF).toString(16).padStart(4, '0');
+	var seqPart = (_pktSeq & 0xFFFF).toString(16).padStart(4, '0');
+	_pktSeq++;
+	var name = timePart + seqPart;
+	var filepath = outDir + '/' + name + '.pkt';
+
+	// Collision check — if file exists, add random jitter to seq portion
+	var attempts = 0;
+	while (fs.existsSync(filepath) && attempts < 16) {
+		seqPart = (Math.floor(Math.random() * 0xFFFF)).toString(16).padStart(4, '0');
+		name = timePart + seqPart;
+		filepath = outDir + '/' + name + '.pkt';
+		attempts++;
+	}
+
+	return { name: name, filepath: filepath };
+}
 
 async function getFileType(filePath) {
   try {
@@ -467,7 +493,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 	//pkt.Messages.forEach(message =>{
 	for await (var message of pkt.Messages){			
 		if (message.Type === "Netmail"){
-			var result = await netmail.newInboundNetmail(message)
+			var result = await ftnNetmailAdapter.importFtnNetmail(message)
 			if (result.status === true){
 				if (result.duplicate){
 					returnObj.pktdupecount ++
@@ -543,7 +569,7 @@ async function OldTossInbound(inboundDir){
 		//pkt.Messages.forEach(message =>{
 		for await (var message of pkt.Messages){			
 			if (message.Type === "Netmail"){
-				var result = await netmail.newInboundNetmail(message)
+				var result = await ftnNetmailAdapter.importFtnNetmail(message)
 				if (result.status === true){
 					if (result.duplicate){
 						pktdupecount ++
@@ -840,12 +866,10 @@ function WritePktToNode(messageArray, conn, systemaddress){
 	const finalBuffer = buffer.subarray(0, offset);
 
 	// Filename
-	// const sourceNtHex = parseInt(packet.SourceNet).toString(16).padStart(4, '0');
-	// const sourceNoHex = parseInt(packet.SourceNode).toString(16).padStart(4, '0');
-	const millihex = ftnUtils.getMilliHex()
+	const pktFile = generatePktFilename(defaultOutbound)
 	const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
 	const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
-	const filename = `${defaultOutbound}/${millihex}.pkt`;
+	const filename = pktFile.filepath;
 	// Write file
 	try {
 		fs.writeFileSync(filename, finalBuffer);
@@ -1158,12 +1182,10 @@ function WritePkts(messageArray){
 			const finalBuffer = buffer.subarray(0, offset);
 
 			// Filename
-			// const sourceNtHex = parseInt(packet.SourceNet).toString(16).padStart(4, '0');
-			// const sourceNoHex = parseInt(packet.SourceNode).toString(16).padStart(4, '0');
-			const millihex = ftnUtils.getMilliHex()
+			const pktFile = generatePktFilename(defaultOutbound)
 			const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
 			const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
-			const filename = `${defaultOutbound}/${millihex}.pkt`;
+			const filename = pktFile.filepath;
 			// Write file
 			try {
 				fs.writeFileSync(filename, finalBuffer);
@@ -1223,32 +1245,85 @@ async function UpcertMailerFile(filename, desthex, flavour){
 
 async function TossOutboundNetmail(){
 	console.log("\r\n-------------------\r\nOutbound Netmail\r\n-------------------")
-	var dblist = await netmail.getPendingNetmail()
+	var dblist = await privateMessages.getPendingByTransport('FTN')
+	if (!dblist || dblist.length === 0){
+		console.log("No pending FTN netmail")
+		return
+	}
+
 	var sendArray = []
-	for await (var msg of dblist){
-		console.log("Message from", msg.FromUser, "To", msg.ToUser)
-		//var netMessage = new Message()
-		// //map standard keys
-		// for await (var key of netmailkeys){
-		// 	netMessage[key] = msg[key]
-		// }
-		//setup optional attributes
+	for await (var pmRow of dblist){
+		// Convert pm_outbox row to FTN Message object
+		var msg = ftnNetmailAdapter.privateMessageToFtn(pmRow)
+		console.log("Message from", msg.FromUser, "To", msg.ToUser, "Dest:", msg.Destination)
+
+		// Parse destination zone from the address string
+		var destZone = msg.DestinationZone
+		if ((!destZone || destZone === 0) && msg.Destination) {
+			var zPart = msg.Destination.split(":")[0]
+			destZone = parseInt(zPart) || 0
+		}
+
+		if (!destZone) {
+			console.log("ERROR: No destination zone for message id", pmRow.id, "- marking undeliverable")
+			await privateMessages.markOutboxUndeliverable(pmRow.id, "No destination zone could be determined from address: " + (msg.Destination || '(empty)'))
+			continue
+		}
+
+		// Resolve source address based on which network owns the destination zone
+		var sourceResult = await systemAddresses.resolveSourceForDestinationZone(destZone)
+		if (!sourceResult.address) {
+			console.log("ERROR: Cannot resolve source for zone", destZone, ":", sourceResult.reason, "- marking undeliverable")
+			await privateMessages.markOutboxUndeliverable(pmRow.id, "Cannot route to zone " + destZone + ": " + sourceResult.reason)
+			continue
+		}
+
+		var srcAddr = sourceResult.address
+
+		// Stamp source address
+		msg.SourceZone = srcAddr.address_zone || 1
+		msg.SourceNet  = srcAddr.address_net  || 0
+		msg.SourceNode = srcAddr.address_node || 0
+		msg.Source     = srcAddr.address
+
+		// Ensure destination numeric fields are populated
+		if (!msg.DestinationNet && msg.Destination) {
+			var parsed = msg.Destination.split(":")
+			var netsplit = parsed[1] ? parsed[1].split("/") : []
+			msg.DestinationZone = parseInt(parsed[0]) || 1
+			msg.DestinationNet  = parseInt(netsplit[0]) || 0
+			msg.DestinationNode = parseInt(netsplit[1]) || 0
+		}
+
+		if (!msg.DestinationNet) {
+			console.log("ERROR: Invalid destination address for message id", pmRow.id, "- marking undeliverable")
+			await privateMessages.markOutboxUndeliverable(pmRow.id, "Invalid destination address: " + (msg.Destination || '(empty)'))
+			continue
+		}
+
+		// Setup INTL attribute
 		var intlval = msg.Destination + " " + msg.Source
 		var hasintl = false
 		for await (var oa of msg.OptionalAttributes){
-			if (oi.attribute == "INTL"){
+			if (oa.attribute == "INTL"){
 				hasintl = true
 			}
 		}
 		if (!hasintl){
 			msg.OptionalAttributes.push({attribute: "INTL", value: intlval})
-		}		
+		}
 		sendArray.push(msg)
 	}
+
+	if (sendArray.length === 0){
+		console.log("No routable netmail to send")
+		return
+	}
+
 	var pktresult = await WritePkts(sendArray)
 	if ((pktresult)&&(pktresult.processedmsgs)){
 		console.log("Wrote", pktresult.pktcount, "Packets")
-		await netmail.markMessageSentArray(pktresult.processedmsgs, TosserName)
+		await privateMessages.markSentArray(pktresult.processedmsgs, TosserName)
 	}else{
 		console.log("No outbound msgs processed")
 	}

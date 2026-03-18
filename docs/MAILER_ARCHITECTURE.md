@@ -361,27 +361,28 @@ When a remote system presents FTN addresses during handshake:
 
 **Inbound files** are written to a temp directory during transfer, then moved to the inbound directory on successful completion. Partial transfers are kept for resume on the next session.
 
-**Outbound directory structure:**
+**Outbound directory structure (BSO — Binkley-Style Outbound):**
+
+Zone 1 (default zone) uses the base outbound directory. Alternate zones use a `.NNN` hex suffix on the directory name:
+
 ```
-outbound/
-  <hex-zone>.<hex-net>/
-    <hex-node>.cut     — type-2 packet (crash flavour)
-    <hex-node>.hut     — type-2 packet (hold flavour)
-    <hex-node>.out     — type-2 packet (normal flavour)
-    <hex-node>.clo     — flow file (crash)
-    <hex-node>.hlo     — flow file (hold)
-    <hex-node>.flo     — flow file (normal)
+ftn/out/                    — zone 1 (default)
+  <net-hex><node-hex>.flo   — flow file (normal flavour)
+  <net-hex><node-hex>.clo   — flow file (crash)
+  <net-hex><node-hex>.hlo   — flow file (hold)
+  <net-hex><node-hex>.out   — direct packet (normal)
+  <net-hex><node-hex>.cut   — direct packet (crash)
+  <net-hex><node-hex>.hut   — direct packet (hold)
+ftn/out.002/                — zone 2
+  <net-hex><node-hex>.flo
+  ...
+ftn/out.003/                — zone 3
+  ...
 ```
 
-Or simplified flat structure (configurable):
-```
-outbound/
-  <connection-uuid>/
-    *.pkt              — packets ready for this connection
-    *.flo              — flow files
-```
+Example: peer `2:200/100` → zone dir `ftn/out.002/`, filename stem `00c80064` (net 200 = 0x00c8, node 100 = 0x0064).
 
-The flat-by-connection-UUID structure is simpler and avoids the hex encoding, but the traditional BSO (Binkley-Style Outbound) structure is needed for interoperability with other mailers. Both should be supported, with BSO as the default for FTN connections.
+The tosser currently writes `.pkt` files to the base outbound directory and creates `.flo` flow file references via `UpcertMailerFile()`. Zone subdirectory support in the tosser is pending — the mailer already resolves the correct directory per zone.
 
 ---
 
@@ -421,12 +422,21 @@ class MailerManager {
     stop()                               // Graceful shutdown — finish active sessions, unbind
     setWebSocketPool(wsPool)             // Receive inbound WS connections from existing WsManager
     getActiveSessions()                  // Array of session status objects
+    isRunning()                          // Boolean
+
+    // Outbound polling
+    pollConnection(connectionUUID)       // Production path — checks _running, outbound mail, then connects
+    triggerPoll(connectionUUID)          // Manual path — bypasses _running and outbound mail checks, always connects
+    signalOutbound(connectionUUID)       // Called by tosser — CRASH = immediate poll, NORMAL = next cycle
 
     // Internal
     _onInboundTcp(socket)                // Wrap in TcpTransport, create answerer session
-    _onInboundWebSocket(wsConnection)    // Wrap in WebSocketTransport, create answerer session
-    _pollConnection(connectionId)        // Initiate outbound call
-    _checkOutboundQueue()                // Scan for connections with pending mail
+    _onInboundWebSocket(wsConnection)    // Wrap in WebSocketTransport, create answerer session (Phase 3)
+    _connectToPeer(conn)                 // Shared: resolve host/port/transport, create caller session
+    _createSession(transport, role, opts) // Instantiate SessionController, wire events, add to pool
+    _hasSessionForAddress(address)       // Deduplication check
+    _hasOutboundMail(peerAddress)        // Scan BSO outbound for flow/packet files
+    _startPollScheduling()               // Timer setup for NORMAL connections with hosts
 }
 ```
 
@@ -438,9 +448,9 @@ class MailerManager {
 | `MAILER_BINKP_PORT` | `24554` | TCP listen port for binkp |
 | `MAILER_EMSI_PORT` | `60179` | TCP listen port for EMSI (0 to disable) |
 | `MAILER_WS_PATH` | `/ws/mailer` | WebSocket path registered on WsManager |
-| `MAILER_INBOUND_DIR` | `./ftn/in` | Inbound file directory |
-| `MAILER_OUTBOUND_DIR` | `./ftn/out` | Outbound file directory |
-| `MAILER_TEMP_DIR` | `./ftn/tmp` | Temp directory for in-progress transfers |
+| `MAILER_INBOUND_DIR` | `ftn/in` | Inbound file directory (falls back to `ftninbound` env var) |
+| `MAILER_OUTBOUND_DIR` | `ftn/out` | Outbound file directory (falls back to `ftnoutbound` env var) |
+| `MAILER_TEMP_DIR` | `ftn/tmp` | Temp directory for in-progress transfers |
 | `MAILER_MAX_SESSIONS` | `10` | Maximum concurrent sessions |
 | `MAILER_POLL_INTERVAL` | `900` | Default poll interval in seconds |
 | `MAILER_CONNECT_TIMEOUT` | `30` | Outbound connection timeout in seconds |
@@ -520,7 +530,7 @@ Partial inbound files in the temp directory are kept between sessions. On the ne
 | `ftnTosser` | Prepares `.pkt` files in outbound directory (existing `TossOutbound`). Processes `.pkt` files from inbound directory (existing `TossInbound`). The mailer sits between these two operations. |
 | `ftnClasses` | Packet/Message classes for packet header inspection (reading dest address from outbound packets to match to connections). |
 | `systemAddresses` | Our FTN addresses, presented during handshake. Origin lines for any locally-generated session messages. |
-| `alogger` | Session logging — connect, authenticate, transfer, disconnect events. |
+| `alogger` | Session logging via `writeClog()` with `'mailer'` filename — all mailer output goes to `logs/<env>/mailer.log`, separate from the main system log. |
 
 ### Tosser Integration
 
@@ -545,71 +555,83 @@ The mailer does not toss — it only moves files. After a session completes:
 ## Directory Structure
 
 ```
-mailer/
+src/mailer/
   manager.js          — MailerManager (server listeners, poll scheduling, session pool)
   session.js          — SessionController (per-session state machine, file list, peer matching)
   transfer.js         — TransferEngine (file send/receive, resume, CRC)
   transports/
     base.js           — BaseTransport (interface definition)
     tcp.js            — TCP client/server transport
-    websocket.js      — WebSocket client/server transport
+    websocket.js      — WebSocket client/server transport (Phase 3)
   protocols/
     base.js           — BaseProtocol (interface definition)
     binkp.js          — binkp/1.1 protocol implementation
-    emsi.js           — EMSI/Wazoo protocol implementation
+    emsi.js           — EMSI/Wazoo protocol implementation (Phase 4)
 transfers/
   zmodem.js           — Standalone Zmodem send/receive (used by mailer EMSI + terminal file transfers)
+tests/mailer/
+  README.md           — Test documentation and run instructions
+  test-binkp-frames.js — Unit: binkp frame encoding/decoding, CRAM-MD5 (41 assertions, no dependencies)
+  test-loopback.js    — Integration: paired in-memory transports, handshake + file transfer (5 scenarios)
+  test-tcp-loopback.js — Integration: real TCP sockets, full stack validation
+  binkp-echo.js       — Manual: standalone binkp answerer server (accepts connections, receives files)
+  binkp-send.js       — Manual: standalone binkp caller (connects, authenticates, sends files)
+  trigger-poll.js     — Manual: triggers outbound poll by connection UUID or FTN address (requires DB)
 ```
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: TCP Transport + binkp Core
+### Phase 1: TCP Transport + binkp Core (Implemented)
 
 Build the minimum viable mailer that can exchange files with a remote binkd system.
 
-1. **BaseTransport + TCP transport** — server and client, event-based byte stream
-2. **binkp frame parser** — read/write binkp frames from a byte stream, handle partial frames
-3. **binkp protocol module** — M_NUL/M_ADR/M_PWD/M_OK/M_ERR handshake, M_FILE/M_GOT file negotiation, M_EOB session end
-4. **Session controller** — state machine, peer matching against `peer_connections`, outbound file list building from outbound directory
-5. **Transfer engine** — basic send/receive with temp file handling, no resume yet
-6. **Mailer manager** — single TCP listener, manual poll trigger only (no scheduling yet)
-7. **connection_data extensions** — add mailer fields to admin peer connection UI
+1. **BaseTransport + TCP transport** — `BaseTransport` abstract class with `write`/`close`/`destroy`/`remoteAddress`/`isConnected`. `TcpTransport` with `fromSocket()` (inbound) and `connect()` (outbound) factory methods. `setNoDelay` enabled.
+2. **binkp frame parser** — accumulator-based parser handles partial frames, multi-frame batches, and max-size frames. Big-endian 2-byte header with command flag (bit 15) and 15-bit payload length.
+3. **binkp protocol module** — all 11 command types (M_NUL through M_SKIP). Caller and answerer handshake flows. CRAM-MD5 challenge/response authentication (answerer generates challenge in M_NUL OPT, caller responds with HMAC-MD5 in M_PWD). `confirmAuth()` for answerer-side password validation delegation to session controller. Full-duplex file send/receive negotiation.
+4. **Session controller** — state machine (idle → handshake → authenticated → transfer → done/error). Inbound peer matching against `getActiveConnectionsByNetworkType('FTN')` by presented address. Password validation with CRAM-MD5 and plaintext fallback. Outbound file list building from BSO flow files (`.flo`/`.clo`/`.dlo`/`.hlo`/`.ilo`) and direct packet files (`.out`/`.cut`/`.hut`). Local address resolution via `systemAddresses`.
+5. **Transfer engine** — file queue, 4KB chunk reads, `sendProgress`/`receiveProgress`/`sendComplete`/`receiveComplete`/`allSent` events. Inbound: write to temp dir, verify size on stream `finish` callback, move to inbound dir. Resume support via partial file detection and M_GET offset. `cleanup()` for fd/stream teardown.
+6. **Mailer manager** — TCP listener on `MAILER_BINKP_PORT`. `pollConnection()` (production, checks `_running` + outbound mail) and `triggerPoll()` (manual, bypasses guards). Shared `_connectToPeer()`. Session pool with deduplication by FTN address. Poll scheduling for NORMAL connections. `signalOutbound()` for CRASH immediate delivery. M_BSY frame on max sessions. `pollFailed` event for test tooling.
+7. **connection_data extensions** — admin peer connection UI updated with Direct/Route To selector, Mailer Host, Mailer Port fields in both new and edit connection modals. `buildConnectionData()` already handled the form fields.
+8. **Logging** — all mailer modules use `writeClog` with `'mailer'` filename, writing to `logs/<env>/mailer.log`.
 
-**Milestone**: Can accept an inbound binkp connection from a remote binkd, authenticate, receive packets, and place them in the inbound directory. Can make an outbound binkp call, authenticate, and send pending packets.
+**Milestone reached**: Loopback tests pass (in-memory paired transports, real TCP sockets). Manual tools (`binkp-echo`, `binkp-send`, `trigger-poll`) work for end-to-end testing. CRAM-MD5 authentication, file transfer with content verification, resume support, and poll scheduling are functional.
 
 ### Phase 2: Reliability + Polish
 
-8. **Resume support** — M_GET handling, partial file persistence across sessions
-9. **CRAM-MD5 authentication** — M_NUL challenge, MD5 password response
-10. **Poll scheduling** — timed polls per connection, CRASH immediate delivery, HOLD passive-only
-11. **Outbound queue signaling** — tosser notifies mailer when new outbound mail is ready
-12. **Session logging** — structured session log (connect time, peer, files transferred, errors)
-13. **Admin status route** — `GET /admin/mailer` with active session display
+Items 8–10 from the original plan (resume support, CRAM-MD5, poll scheduling) were implemented in Phase 1. Remaining work:
+
+8. **Real-world binkd testing** — test inbound and outbound sessions against a live binkd node. Fix any protocol compliance issues discovered.
+9. **Outbound queue signaling** — tosser notifies mailer when new outbound mail is ready. Wire `signalOutbound()` call into `ftnTosser.TossOutbound()` completion path.
+10. **Sent file cleanup** — after M_GOT, handle flow file line prefixes: `^` = delete file, `#` = truncate, no prefix = leave. Mark flow file lines as sent (`~` prefix).
+11. **Session logging** — structured session log entries (connect time, peer address, peer system name, files transferred with sizes, errors, duration) written to `mailer.log` via `writeClog`.
+12. **Path traversal prevention** — strip directory components from offered filenames on inbound. Reject filenames containing `..`, `/`, `\`.
+13. **Admin status route** — `GET /admin/mailer` with active session display, recent session history.
+14. **Startup integration** — wire `MailerManager` into `doorserver.js` startup sequence, gated by `MAILER_ENABLED` env var.
 
 ### Phase 3: WebSocket Transport
 
-14. **WebSocket transport** — `WebSocketTransport` class wrapping `ws` connections. Inbound: register a `WsPool` at `/ws/mailer` on the existing `WsManager` (same HTTP server as terminal WebSockets). Outbound: `ws` client to remote `mailer_ws_url`. Binary frame mode.
-15. **Admin UI for transport selection** — per-connection transport type in the peer connection editor
-16. **Connection testing** — admin button to test connectivity to a peer
+15. **WebSocket transport** — `WebSocketTransport` class wrapping `ws` connections. Inbound: register a `WsPool` at `/ws/mailer` on the existing `WsManager` (same HTTP server as terminal WebSockets). Outbound: `ws` client to remote `mailer_ws_url`. Binary frame mode.
+16. **Admin UI for transport selection** — per-connection transport type in the peer connection editor
+17. **Connection testing** — admin button to test connectivity to a peer
 
 ### Phase 4: EMSI/Wazoo Support
 
-17. **EMSI handshake** — EMSI_REQ/EMSI_INQ/EMSI_DAT/EMSI_ACK negotiation
-18. **Wazoo session layer** — batch file exchange orchestration
-19. **Zmodem transfer module** — standalone, event-driven Zmodem implementation (`transfers/zmodem.js`) that operates on any bidirectional byte stream, not coupled to the mailer. Used by the EMSI protocol module for mailer sessions, but equally usable by terminal connection handlers for user file uploads/downloads (Zmodem over telnet/TCP/WebSocket). See Design Decision #9.
-20. **Protocol auto-detection** — on inbound connections, detect whether the remote is speaking binkp or EMSI based on the first bytes received
+18. **EMSI handshake** — EMSI_REQ/EMSI_INQ/EMSI_DAT/EMSI_ACK negotiation
+19. **Wazoo session layer** — batch file exchange orchestration
+20. **Zmodem transfer module** — standalone, event-driven Zmodem implementation (`transfers/zmodem.js`) that operates on any bidirectional byte stream, not coupled to the mailer. Used by the EMSI protocol module for mailer sessions, but equally usable by terminal connection handlers for user file uploads/downloads (Zmodem over telnet/TCP/WebSocket). See Design Decision #9.
+21. **Protocol auto-detection** — on inbound connections, detect whether the remote is speaking binkp or EMSI based on the first bytes received
 
 ### Phase 5: Advanced Features
 
-21. **TLS support** — for both TCP and WebSocket transports
-22. **File attach handling** — `.flo` flow file parsing, file attach netmail
-23. **TIC file processing** — receive TIC bundles, validate CRC, store in file areas
-24. **BSO directory structure** — traditional Binkley-Style Outbound hex-encoded directory tree
-25. **Nodelist integration** — dial flags, system capabilities, phone/IP lookup
-26. **AreaFix/FileFix** — automated area subscription management via netmail commands
-27. **Compression** — binkp CRYPT/compressed data frames (if demand exists)
+22. **TLS support** — for both TCP and WebSocket transports
+23. **File attach handling** — file attach netmail integration (`.flo` flow file parsing is implemented in Phase 1's session controller; this covers the netmail attach workflow)
+24. **TIC file processing** — receive TIC bundles, validate CRC, store in file areas
+25. **BSO zone directory support in tosser** — update `ftnTosser.js` to write packets and flow files to zone-specific outbound directories (`ftn/out.NNN/`) for alternate zones. The mailer already resolves zone directories.
+26. **Nodelist integration** — dial flags, system capabilities, phone/IP lookup
+27. **AreaFix/FileFix** — automated area subscription management via netmail commands
+28. **Compression** — binkp CRYPT/compressed data frames (if demand exists)
 
 ---
 
@@ -629,9 +651,11 @@ Build the minimum viable mailer that can exchange files with a remote binkd syst
 
 7. **WebSocket as first-class transport, shared infrastructure**: Not an afterthought. The transport abstraction is designed from the start to support WebSocket alongside TCP. Inbound WebSocket connections use the existing `WsManager`/`WsPool` path-routing system (shared with the terminal server) — the mailer registers a pool at `/ws/mailer` on the same HTTP server, no separate listener. This follows the established serverless pattern: `httpServer.on('upgrade')` routes by pathname, terminal paths go to terminal pools, mailer path goes to the mailer pool. Outbound WebSocket connections use the `ws` client library directly. This enables novel topologies (relay nodes, browser bridges, serverless mailer endpoints) without protocol changes or additional ports.
 
-8. **Flat + BSO outbound**: Support both a simple per-connection-UUID flat directory and the traditional BSO hex-encoded tree. The flat structure is easier for Canectic's tosser (which already knows connection UUIDs), while BSO is needed if sharing an outbound directory with other FTN software.
+8. **BSO outbound with zone directories**: The outbound uses Binkley-Style Outbound conventions. Zone 1 (default) is the base outbound directory (`ftn/out/`). Alternate zones get a `.NNN` hex suffix (`ftn/out.002/` for zone 2). Filenames are `<net-hex><node-hex>` with extensions indicating flavour (`.flo`/`.clo`/`.hlo` for flow files, `.out`/`.cut`/`.hut` for direct packets). This is the standard BSO layout understood by binkd and other FTN mailers.
 
 9. **Zmodem as a standalone reusable module**: The Zmodem implementation should be a general-purpose event-driven module (`transfers/zmodem.js`) that operates on any bidirectional byte stream — not wired to the mailer's transport layer specifically. The module takes a stream-like object with `write(buffer)` and `on('data')`, and exposes `send(filepath)` / `receive(directory)` with progress events. This means the same Zmodem code is used by the EMSI mailer protocol for FTN sessions **and** by terminal connection handlers for user file uploads and downloads over telnet, TCP, or WebSocket. The terminal side would switch the `IncomingCall` to raw mode (bypassing the ANSI input parser) and pipe socket data directly through the Zmodem module — the same pattern used for door I/O. This avoids maintaining two Zmodem implementations or shelling out to external `sz`/`rz` binaries.
+
+10. **Separate poll and trigger paths**: `pollConnection()` is the production path — checks `_running`, verifies outbound mail exists, respects HOLD status, and silently skips when there's nothing to do. `triggerPoll()` is the manual/admin path — bypasses all guards and always initiates a connection, even with no outbound mail (useful for testing auth, receiving inbound files, or forcing a session). Both share `_connectToPeer()` for the actual transport setup. This avoids admin and test tools needing to mock outbound state or set `_running = true`.
 
 ---
 

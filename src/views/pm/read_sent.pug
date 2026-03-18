@@ -1,0 +1,84 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else if !message
+      .row.mt-2
+        .col-xl-6.offset-xl-3.col-lg-10.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              h5.mb-0= title
+            .card-body
+              h3 Message Not Found
+    else
+      .row.mt-2
+        .col-xl-6.offset-xl-3.col-lg-10.offset-lg-1.col-12
+          include ../partials/flash
+          .card
+            .card-header.bg-darkblue.text-white
+              .row.align-items-center
+                .col-8
+                  h5.mb-0
+                    i.bi.bi-send
+                    |  
+                    = message.subject || '(no subject)'
+                .col-4
+                  .d-flex.justify-content-end
+                    a.btn.btn-sm.btn-outline-light(href='/pm/sent')
+                      i.bi.bi-arrow-left
+                      |  Sent
+
+            .card-body.py-2.bg-dark.border-bottom.border-secondary
+              .row
+                .col-sm-6
+                  .small
+                    span.text-muted To: 
+                    span.fg-green= message.to_user
+                    if message.to_address && message.to_address !== message.to_user
+                      span.fg-cyan.ms-1 (#{message.to_address})
+                  .small
+                    span.text-muted From: 
+                    span.fg-yellow= message.from_user
+                .col-sm-6.text-sm-end
+                  .small
+                    span.text-muted Date: 
+                    if message.system_time
+                      - var mdate = Date.parse(message.system_time)
+                      - var md = DateTime.fromMillis(mdate)
+                      span.fg-yellow= md.toFormat('MMM dd, yyyy HH:mm')
+                  .small
+                    span.text-muted Status: 
+                    if message.sent
+                      span.badge.bg-success Sent
+                      if message.sent_at
+                        - var sdate = Date.parse(message.sent_at)
+                        - var sd = DateTime.fromMillis(sdate)
+                        span.fg-cyan.ms-1= sd.toFormat('MMM dd, yyyy HH:mm')
+                    else if message.send_error
+                      span.badge.bg-danger Error
+                      span.fg-cyan.ms-1= message.send_error
+                    else
+                      span.badge.bg-warning Queued
+                  .small
+                    span.text-muted Transport: 
+                    span.badge(class=(message.transport_type === 'LOCAL' ? 'bg-secondary' : 'bg-info'))= message.transport_type
+
+            .card-body.bg-black
+              .messagebody.monospace.fg-brightgrey
+                if message.body_html && message.body_html.trim()
+                  != message.body_html
+                else if message.body_text && message.body_text.trim()
+                  pre(style='white-space: pre-wrap; margin: 0; font-family: inherit; font-size: inherit; color: inherit;')= message.body_text
+                else
+                  .text-muted (empty message)
+
+            .card-footer.bg-dark
+              .text-end
+                form.d-inline(action=`/pm/sent/${message.uuid}/delete` method='POST')
+                  button.btn.btn-sm.btn-outline-danger(type='submit')
+                    i.bi.bi-trash
+                    |  Delete

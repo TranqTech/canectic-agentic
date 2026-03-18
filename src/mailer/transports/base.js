@@ -26,6 +26,11 @@ class BaseTransport extends EventEmitter {
 		throw new Error('BaseTransport.destroy() must be implemented by subclass');
 	}
 
+	// Flow control — pause incoming data events. Used by the session
+	// controller to prevent data loss during async setup.
+	pause() {}
+	resume() {}
+
 	// String identifying the remote end (IP:port, WS URL, etc.)
 	get remoteAddress() {
 		return 'unknown';
