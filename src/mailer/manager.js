@@ -159,42 +159,70 @@ class MailerManager extends EventEmitter {
 
 		// Check if there's actually outbound mail
 		if (!this._hasOutboundMail(cd.address)) {
+			alogger.writeClog(5, 'Mailer: no outbound mail for ' + cd.address + ' — skipping poll', 'mailer', 'cyan');
 			return;
 		}
 
-		// Determine transport
-		var transport;
+		this._connectToPeer(conn);
+	}
+
+	// Manual poll trigger — bypasses _running and outbound mail checks.
+	// Always initiates a connection. Used by admin routes and test scripts.
+	async triggerPoll(connectionUUID) {
+		var conn = await peerConnections.getConnectionByUUIDWithNetwork(connectionUUID);
+		if (!conn) {
+			alogger.writeClog(3, 'Mailer: triggerPoll — connection not found: ' + connectionUUID, 'mailer', 'redbright');
+			return;
+		}
+
+		var cd = conn.connection_data || {};
+
+		// Check for existing session to this peer
+		if (this._hasSessionForAddress(cd.address)) {
+			alogger.writeClog(5, 'Mailer: skipping triggerPoll for ' + cd.address + ' — session already active', 'mailer', 'cyan');
+			return;
+		}
+
+		var hasmail = this._hasOutboundMail(cd.address);
+		alogger.writeClog(5,
+			'Mailer: triggerPoll for ' + (cd.address || connectionUUID) +
+			(hasmail ? ' (outbound mail pending)' : ' (no outbound mail — session-only)'),
+			'mailer', 'cyan'
+		);
+
+		this._connectToPeer(conn);
+	}
+
+	// Internal — initiate TCP/WS connection to a peer
+	_connectToPeer(conn) {
+		var cd = conn.connection_data || {};
 		var mailerTransport = cd.mailer_transport || 'tcp';
 		var host = cd.mailer_host || cd.remote_host || '';
 		var port = cd.mailer_port || cd.remote_port || BINKP_PORT;
 
 		if (!host) {
-			alogger.writeClog(4, 'Mailer: no host configured for ' + cd.address + ' — skipping poll', 'mailer', 'yellow');
+			alogger.writeClog(4, 'Mailer: no host configured for ' + (cd.address || conn.uuid) + ' — cannot connect', 'mailer', 'yellow');
 			return;
 		}
 
 		if (this._sessions.length >= MAX_SESSIONS) {
-			alogger.writeClog(4, 'Mailer: cannot poll ' + cd.address + ' — max sessions reached', 'mailer', 'yellow');
+			alogger.writeClog(4, 'Mailer: cannot connect to ' + cd.address + ' — max sessions reached', 'mailer', 'yellow');
 			return;
 		}
 
-		alogger.writeClog(5, 'Mailer: polling ' + cd.address + ' at ' + host + ':' + port, 'mailer', 'cyan');
+		alogger.writeClog(5, 'Mailer: connecting to ' + (cd.address || conn.uuid) + ' at ' + host + ':' + port, 'mailer', 'cyan');
 
 		if (mailerTransport === 'tcp') {
-			transport = TcpTransport.connect(host, port, CONNECT_TIMEOUT);
+			var transport = TcpTransport.connect(host, port, CONNECT_TIMEOUT);
 			transport.once('connect', () => {
-				this._createSession(transport, 'caller', { connectionUUID: connectionUUID });
+				this._createSession(transport, 'caller', { connectionUUID: conn.uuid });
 			});
 			transport.once('error', (err) => {
 				alogger.writeClog(3, 'Mailer: outbound connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
+				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
 			});
 		}
 		// WebSocket transport: Phase 3
-	}
-
-	// Manual poll trigger (for admin route)
-	async triggerPoll(connectionUUID) {
-		await this.pollConnection(connectionUUID);
 	}
 
 	// -----------------------------------------------------------------------

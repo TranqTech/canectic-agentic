@@ -4,6 +4,8 @@ Reference document for the terminal-side BBS architecture. Covers the call lifec
 
 For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views), see `message_architecture.md`.
 For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
+For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
+For the web application stack (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
 
 ---
 
@@ -283,7 +285,9 @@ The message models are shared between the web and terminal sides. See `message_a
 
 **Message body for terminal display:** Use `msg.utf8 || msg.body_text`. The `body_html` field is for web rendering only. Terminal messages may contain ANSI escape codes, pipe codes (`|XX`), or Ctrl-A codes that should be passed through directly to ANSI-capable terminals. For dumb terminals, strip escape sequences and display plain text.
 
-**Key area columns:** `thread_mode` (standard/no_threads/subscribe_only), `post_as` (username/realname), `newscan_default` (boolean), `ansi_area` (boolean). See `message_architecture.md` for full column documentation.
+**Key area columns:** `thread_mode` (standard/no_threads/subscribe_only), `post_as` (username/realname), `newscan_default` (boolean), `ansi_area` (boolean), `read_security`/`post_security` (integer), `read_perm_flags`/`read_rest_flags`/`post_perm_flags`/`post_rest_flags` (JSONB arrays). Groups have the same security and flag columns. See `message_architecture.md` for full column documentation and access control logic.
+
+**Access control in terminal modules:** Each terminal message module includes `parseFlags()` and `checkPostAccess()` (or `checkReadFlags()`) helpers that match the web route logic: security level + permission flags (must have ALL) + restriction flags (must have NONE). User flags come from `call.user_record.permissionflags` and `call.user_record.restrictionflags` (JSONB arrays on the users table).
 
 ### Call Object Properties (Message State)
 
@@ -296,13 +300,13 @@ These properties on `IncomingCall` track the user's current message context:
 | `msg_area` | string | `user_record.msg_area` | Current area shortcode (persisted to user record) |
 | `msg_area_title` | string | Set by selector | Display name of current area |
 | `security` | integer | `user_record.security` | Used to filter groups/areas by read_security |
-| `user_record` | object | Set at login | Full user DB row, needed for `user_record.id` in pointer operations |
+| `user_record` | object | Set at login | Full user DB row. Needed for `user_record.id` in pointer operations, `user_record.permissionflags`/`user_record.restrictionflags` for flag-based access control, and `user_record.security` for security level checks. |
 
 ### Phase 1: Unified Area Selector — COMPLETE
 
 **File:** `handlers/menucommands/msgAreaSelector.js`
 
-Replaces the old separate `msggroups.js` and `msgareas.js` with a single unified lightbar selector. Loads all accessible groups and areas (filtered by `call.security`), displays areas nested under group headers, and lets the user navigate with a lightbar. Selecting an area updates both `call.msg_group` and `call.msg_area` and persists to the user record.
+Replaces the old separate `msggroups.js` and `msgareas.js` with a single unified lightbar selector. Loads all accessible groups and areas (filtered by `call.security` at the DB layer, then by permission/restriction flags via `checkReadFlags(userRecord, group/area)` at the application layer). Groups with zero accessible areas after flag filtering are excluded. Displays areas nested under group headers and lets the user navigate with a lightbar. Selecting an area updates both `call.msg_group` and `call.msg_area` and persists to the user record.
 
 Features: encoding-aware glyphs (CP437 vs UTF-8), search mode (S key, live filtering), dumb terminal fallback (numbered list), blue highlight bar with distinct colors for current selection vs cursor position. **Subscription toggle**: T key toggles newscan subscription for the highlighted area via `userAreaSubs.setSubscription()` / `removeSubscription()`. Unsubscribed areas are displayed dimmed. Subscription map loaded on entry via `userAreaSubs.getSubscriptionMap()`.
 
@@ -361,7 +365,7 @@ Single unified `BaseSubModule` with an internal state machine. Handles thread li
 | MESSAGE_VIEW (any) | Right | Next message | Within thread or flat list |
 | MESSAGE_VIEW (any) | Left | Previous message | Within thread or flat list |
 | MESSAGE_VIEW (any) | L | Last message | Jump to newest message in thread/flat list |
-| MESSAGE_VIEW (any) | R | Reply | Launch message editor (Phase 3 — stub for now) |
+| MESSAGE_VIEW (any) | R | Reply | Launch message editor — only shown in nav bar and accepted as input when `_canPost` is true (resolved via `checkPostAccess(userRecord, areaConfig)` after area config loads) |
 | MESSAGE_VIEW (threaded) | ] | Next thread | Jump to first unread in next thread |
 | MESSAGE_VIEW (threaded) | [ | Previous thread | Jump to first message in prev thread |
 
@@ -595,7 +599,7 @@ The thread list and message view share the `threadList` reference, so selecting 
 | ] | Next thread (threaded mode only) |
 | [ | Previous thread (threaded mode only) |
 | T | Toggle threaded/flat (standard areas only) |
-| R | Reply — launch message editor (Phase 3 stub) |
+| R | Reply — launch message editor (only when `_canPost` is true) |
 | ESC/Q | Back to thread list (threaded) or exit (flat in no_threads area) |
 
 #### Module Structure
@@ -699,6 +703,10 @@ case "newscanGroup":
 ### Phase 3: Message Editor (`handlers/menucommands/msgEditor.js`)
 
 Single unified `BaseSubModule` with fullscreen editing for ANSI terminals and line-mode fallback for dumb terminals. Called from the reader's `R` key (reply) or from a menu command (new thread).
+
+#### Post Access Gate
+
+On `run()`, after loading the area config via `_resolveFromName()`, the editor checks `checkPostAccess(call.user_record, areaConfig)`. If the user lacks permission (security level too low, missing required permission flags, or has a blocking restriction flag), the editor displays "You do not have permission to post in this area." (bright red on fullscreen, plain text on dumb) and returns to the caller after 2 seconds without entering the editing state. This is a defense-in-depth check — the reader already hides the R key when `_canPost` is false, but the editor enforces independently in case it's invoked from a menu command or future code path.
 
 #### Invocation Modes
 

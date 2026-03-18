@@ -251,59 +251,64 @@ class TransferEngine extends EventEmitter {
 	_onFileComplete(info) {
 		if (!this._rxStream || !this._rxInfo) return;
 
-		this._rxStream.end();
+		var stream = this._rxStream;
 		var rxInfo = this._rxInfo;
 		this._rxStream = null;
 		this._rxInfo   = null;
 
-		// Verify size
-		try {
-			var stat = fs.statSync(rxInfo.tempPath);
-			if (stat.size !== rxInfo.size) {
-				alogger.writeClog(3,
-					'TransferEngine: size mismatch for ' + rxInfo.name +
-					' (expected ' + rxInfo.size + ', got ' + stat.size + ')',
-					'mailer', 'redbright'
-				);
-				this.emit('transferError', {
-					name: rxInfo.name,
-					error: new Error('Size mismatch')
-				});
-				return;
-			}
-		} catch (err) {
-			alogger.writeClog(3, 'TransferEngine: cannot stat completed file: ' + err.message, 'mailer', 'redbright');
-			return;
-		}
+		var self = this;
 
-		// Move to inbound directory
-		var destPath = path.join(this._inboundDir, rxInfo.name);
-
-		// Avoid overwriting — append timestamp if needed
-		if (fs.existsSync(destPath)) {
-			var ext  = path.extname(rxInfo.name);
-			var base = path.basename(rxInfo.name, ext);
-			destPath = path.join(this._inboundDir, base + '_' + Date.now() + ext);
-		}
-
-		try {
-			fs.renameSync(rxInfo.tempPath, destPath);
-		} catch (err) {
-			// Cross-device rename fallback
+		// Wait for the write stream to flush to disk before verifying
+		stream.end(function() {
+			// Verify size
 			try {
-				fs.copyFileSync(rxInfo.tempPath, destPath);
-				fs.unlinkSync(rxInfo.tempPath);
-			} catch (copyErr) {
-				alogger.writeClog(3, 'TransferEngine: cannot move file to inbound: ' + copyErr.message, 'mailer', 'redbright');
+				var stat = fs.statSync(rxInfo.tempPath);
+				if (stat.size !== rxInfo.size) {
+					alogger.writeClog(3,
+						'TransferEngine: size mismatch for ' + rxInfo.name +
+						' (expected ' + rxInfo.size + ', got ' + stat.size + ')',
+						'mailer', 'redbright'
+					);
+					self.emit('transferError', {
+						name: rxInfo.name,
+						error: new Error('Size mismatch')
+					});
+					return;
+				}
+			} catch (err) {
+				alogger.writeClog(3, 'TransferEngine: cannot stat completed file: ' + err.message, 'mailer', 'redbright');
 				return;
 			}
-		}
 
-		// Tell remote we got the file
-		this._protocol.sendGOT(rxInfo.name, rxInfo.size, rxInfo.time);
+			// Move to inbound directory
+			var destPath = path.join(self._inboundDir, rxInfo.name);
 
-		alogger.writeClog(5, 'TransferEngine: received ' + rxInfo.name + ' (' + rxInfo.size + ' bytes)', 'mailer', 'greenbright');
-		this.emit('receiveComplete', { name: rxInfo.name, size: rxInfo.size, path: destPath });
+			// Avoid overwriting — append timestamp if needed
+			if (fs.existsSync(destPath)) {
+				var ext  = path.extname(rxInfo.name);
+				var base = path.basename(rxInfo.name, ext);
+				destPath = path.join(self._inboundDir, base + '_' + Date.now() + ext);
+			}
+
+			try {
+				fs.renameSync(rxInfo.tempPath, destPath);
+			} catch (err) {
+				// Cross-device rename fallback
+				try {
+					fs.copyFileSync(rxInfo.tempPath, destPath);
+					fs.unlinkSync(rxInfo.tempPath);
+				} catch (copyErr) {
+					alogger.writeClog(3, 'TransferEngine: cannot move file to inbound: ' + copyErr.message, 'mailer', 'redbright');
+					return;
+				}
+			}
+
+			// Tell remote we got the file
+			self._protocol.sendGOT(rxInfo.name, rxInfo.size, rxInfo.time);
+
+			alogger.writeClog(5, 'TransferEngine: received ' + rxInfo.name + ' (' + rxInfo.size + ' bytes)', 'mailer', 'greenbright');
+			self.emit('receiveComplete', { name: rxInfo.name, size: rxInfo.size, path: destPath });
+		});
 	}
 
 	// -----------------------------------------------------------------------

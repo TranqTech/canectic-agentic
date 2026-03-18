@@ -8,6 +8,7 @@ This document covers the current architecture, key files, data flow, and integra
 
 For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views, subscriptions), see `message_architecture.md`.
 For the terminal-side UI (readers, editors, menus), see `terminal_architecture.md`.
+For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
 
 ---
 
@@ -197,7 +198,7 @@ Our identity on each network.
 
 ### message_areas
 
-See `message_architecture.md` for full schema. Key networking-relevant columns: `shortcode` (derives backing table names), `read_security`/`post_security`, `thread_mode`, `post_as`, `newscan_default`, `ansi_area`.
+See `message_architecture.md` for full schema. Key networking-relevant columns: `shortcode` (derives backing table names), `read_security`/`post_security`, `read_perm_flags`/`read_rest_flags`/`post_perm_flags`/`post_rest_flags` (JSONB access control flags), `thread_mode`, `post_as`, `newscan_default`, `ansi_area`.
 
 ### Message tables (per area)
 

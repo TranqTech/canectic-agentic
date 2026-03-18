@@ -6,6 +6,8 @@ The shared message platform sits between the networking layer (FTN/QWK/NNTP toss
 
 For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
 For the terminal-side UI (readers, editors, menus), see `terminal_architecture.md`.
+For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
+For the web application stack (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
 
 ---
 
@@ -15,11 +17,11 @@ For the terminal-side UI (readers, editors, menus), see `terminal_architecture.m
 
 | File | Purpose |
 |------|---------|
-| `messages.js` | Message viewing, posting, and sanitization model. Owns all view-facing and user-posting logic. **Viewing:** `listMsgGroups`, `getAreasInGroup`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated with `afterId`/`beforeId`/`threadId` filtering), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml`, `escapeHtml`. **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `updateThread` (stat refresh after reply). **Security:** `sanitizeMessageFields` — strips `<script>`, `<style>`, dangerous tags, event handlers, and `javascript:` URIs from all text fields. Called at the model layer for both web posts and importable by tossers for inbound network packets. **Deletion:** `deleteMessageByUUID`. |
+| `messages.js` | Message viewing, posting, and sanitization model. Owns all view-facing and user-posting logic. **Viewing:** `listMsgGroups(userSecurity)` — filters by `read_security <= userSecurity` (with `IS NULL` fallback for ungated groups), `getAreasInGroup(shortcode, userSecurity)` — filters by `read_security <= userSecurity`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated with `afterId`/`beforeId`/`threadId` filtering), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml`, `escapeHtml`. **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `updateThread` (stat refresh after reply). **Security:** `sanitizeMessageFields` — strips `<script>`, `<style>`, dangerous tags, event handlers, and `javascript:` URIs from all text fields. Called at the model layer for both web posts and importable by tossers for inbound network packets. **Deletion:** `deleteMessageByUUID`. |
 | `userMsgPointers.js` | Message read tracking model. Two-tier pointer system: area-level scan pointers (`user_msg_pointers`) and per-thread pointers (`user_thread_pointers`). Area pointer is a floor — any message with `id <= area_pointer` is read. Thread pointers add granularity above the floor. Effective read threshold for a thread: `MAX(area_pointer, COALESCE(thread_pointer, 0))`. Provides: `advancePointer`, `advanceThreadPointer`, `markAreaRead`, `getThreadUnreadCounts` (batch), `getUnreadCount`, `hasNewMessages`, `getNewscanSummary`, `getFirstUnreadInThread`, `getFirstUnreadInArea`. Pre-populates pointers on user/area creation. Table bootstrap via `ensureConstraintsAndIndexes()` at startup. |
 | `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId)` returns `Map<shortcode, boolean>` resolving: user override → area `newscan_default` → true. `getSubscription(userId, shortcode)`, `setSubscription(userId, shortcode, subscribed)`, `removeSubscription(userId, shortcode)` for individual management. Used by terminal newscan, area selector, and future web newscan. |
-| `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). Schema includes `thread_mode`, `post_as`, `newscan_default`, and `ansi_area` columns. |
-| `msgGroups.js` | Message group CRUD. `getGroupByShortcode`, `getActiveGroups`. |
+| `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). `normalizeFlags(input)` — coerces form input (string, array, or undefined) to JSON array for JSONB storage. Schema includes `thread_mode`, `post_as`, `newscan_default`, `ansi_area`, and four flag JSONB columns (`read_perm_flags`, `read_rest_flags`, `post_perm_flags`, `post_rest_flags`). |
+| `msgGroups.js` | Message group CRUD. `getGroupByShortcode`, `getActiveGroups`, `getAllGroups`, `getAllGroupsWithAreas`, `newGroup`, `updateGroup`, `removeGroup` (cascading area removal). `normalizeFlags(input)` — same coercion as `msgAreas.js`. Schema includes `read_security`, `post_security`, and four flag JSONB columns (same names as areas). Groups act as default templates — new areas inherit the parent group's security levels and flags. |
 | `echomail.js` | FTN echomail import/export (see networking architecture). Also exports **shared thread helpers** used by all tossers: `createThreadRow(threadtable, threadidStr, subject, systemTime, fromUser)` → `{threadId, threadidStr}`, `updateThreadStats(threadtable, threadId, systemTime, fromUser)`, `rollbackThread(threadtable, threadidStr)`. |
 
 ### Text Formatting Pipeline
@@ -34,17 +36,17 @@ For the terminal-side UI (readers, editors, menus), see `terminal_architecture.m
 
 | File | Purpose |
 |------|---------|
-| `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile`. Helpers: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `checkAreaReadAccess`, `checkAreaPostAccess`. All area/thread routes pass `sufficientAccess` and `canPost` booleans. Guard chain pattern in templates. Group/area/thread browsing with unread counts. Thread and flat-view readers with bidirectional lazy scroll. Posting routes with `post_as` resolution and model-layer sanitization. Mark-area-read. JSON lazy-load endpoints. |
+| `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile`. Helpers: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `parseFlags`, `checkAreaReadAccess`, `checkAreaPostAccess`. Access checks combine security level + permission flags (must have ALL) + restriction flags (must have NONE). Works on both group and area objects (same column names). All area/thread routes pass `sufficientAccess` and `canPost` booleans. Group listing filters groups and areas by `checkAreaReadAccess`, hides groups with zero accessible areas. Area listing gates group access and filters child areas. All JSON lazy-load endpoints use `checkAreaReadAccess`. POST routes use `checkAreaPostAccess`. Guard chain pattern in templates. Bidirectional lazy scroll with auto-fill for short content. Mark-area-read. |
 
 ### Views
 
 | File | Purpose |
 |------|---------|
-| `messages/index.pug` | User-facing message group listing with aggregate unread counts per group. |
-| `messages/groups/view.pug` | User-facing area listing within a group. Per-area unread counts, last post info. |
+| `messages/index.pug` | User-facing message group listing. Groups and their areas filtered by `checkAreaReadAccess` (security + flags). Groups with zero accessible areas hidden. Aggregate unread counts per group computed from accessible areas only. |
+| `messages/groups/view.pug` | User-facing area listing within a group. Group-level read access checked. Areas filtered by `checkAreaReadAccess`. Per-area unread counts, last post info. |
 | `messages/areas/view.pug` | Threaded area view. Thread listing table with keyset-paginated lazy scroll. Unread badges per thread. New Thread modal. Mark Read button. Flat View toggle. |
-| `messages/areas/flat.pug` | Flat area view. Guard chain: `!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found. Column layout: `col-xl-6.offset-xl-3.col-lg-10.col-12`. Sidebar hidden below xl, replaced with offcanvas (hamburger ☰). Desktop nav buttons hidden on mobile. Stacked message headers. `data-force80` and `data-can-post` on container. Post/Reply buttons, modals, quote system, and JS `buildMsgHtml` all gated behind `canPost`. |
-| `messages/areas/thread.pug` | Thread reader. Same guard chain, column layout, offcanvas, and `canPost` gating as flat.pug. `← Threads` button hidden on mobile. Stacked message headers. Bidirectional lazy scroll from first unread. Reply modal with quote panel. |
+| `messages/areas/flat.pug` | Flat area view. Guard chain: `!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found. Column layout: `col-xl-6.offset-xl-3.col-lg-10.col-12`. Sidebar hidden below xl, replaced with offcanvas (hamburger ☰). Desktop nav buttons hidden on mobile. Stacked message headers. `data-force80` and `data-can-post` on container. Post/Reply buttons, modals, quote system, and JS `buildMsgHtml` all gated behind `canPost`. Auto-fill for short content (loads older messages when initial batch doesn't overflow container). |
+| `messages/areas/thread.pug` | Thread reader. Same guard chain, column layout, offcanvas, and `canPost` gating as flat.pug. `← Threads` button hidden on mobile. Stacked message headers. Bidirectional lazy scroll from first unread with auto-fill for short content. Reply modal with quote panel. |
 | `partials/messages/_msgAutoSize.pug` | Auto-sizes `.messagebody` font to fit target column count. Probe uses `font-family:"Consolas",monospace` inline. Reads `data-force80`: `ansi_area=true` → always 80 cols. Desktop (≥992px) → 80 cols. Mobile → 40 cols. Min 7px, max 32px. `setProperty('font-size', px, 'important')`. Exposed as `window.fitMessageBodies`. |
 
 ### Maintenance
@@ -58,6 +60,20 @@ For the terminal-side UI (readers, editors, menus), see `terminal_architecture.m
 
 ## Database Schema
 
+### message_groups
+
+Each row represents a message group containing one or more areas. Groups provide default security and flag settings that new areas inherit.
+
+- `id` (BIGSERIAL), `uuid` — identifiers
+- `name`, `description` — display info
+- `shortcode` — unique internal identifier
+- `read_security`, `post_security` — default security levels for child areas. `listMsgGroups()` filters by `read_security`. **Note:** the legacy `security` column has been removed; `read_security` replaces it for group visibility gating.
+- `read_perm_flags`, `read_rest_flags` — JSONB arrays. Default read permission/restriction flags for child areas.
+- `post_perm_flags`, `post_rest_flags` — JSONB arrays. Default post permission/restriction flags for child areas.
+- `area_count` — cached count of child areas
+- `active` — boolean
+- `created_at`, `updated_at`, `created_by_uuid`, `created_by_name`
+
 ### message_areas
 
 Each row represents a message area (forum/conference) belonging to a message group.
@@ -67,6 +83,8 @@ Each row represents a message area (forum/conference) belonging to a message gro
 - `shortcode` — unique internal identifier, used to derive backing table names (`mb_<shortcode>_msgs`, `mb_<shortcode>_threads`)
 - `group_shortcode`, `group_id`, `group_uuid` — FK to parent group
 - `read_security`, `post_security` — minimum security level to read/post
+- `read_perm_flags`, `read_rest_flags` — JSONB arrays. Required permission flags / blocking restriction flags for read access. User must have ALL permission flags and NONE of the restriction flags.
+- `post_perm_flags`, `post_rest_flags` — JSONB arrays. Same pattern for post access.
 - `min_age`, `max_age` — age restrictions for participants
 - `active` — boolean
 - `msg_count`, `last_message`, `last_from`, `last_subject`, `last_id` — cached stats
@@ -247,6 +265,8 @@ Both thread reader and flat view find the first unread message first, then load 
 
 Bidirectional lazy scroll: scrolling up loads older messages (prepended), scrolling down loads newer messages (appended). Both views track `oldestId`, `newestId`, `hasOlder`, `hasNewer`.
 
+**Auto-fill for short content**: If the initial batch doesn't overflow the scroll container (e.g., a thread with only one new message), the scroll event can never fire. Both views run an `autoFill()` function after initialization that detects `container.scrollHeight <= container.clientHeight` and auto-triggers `loadDirection('older')`. It recurses until the container overflows or there are no more older messages, with a safety check that `loaded` actually increased to prevent infinite loops on error.
+
 ### Position-Aware Progress Bar
 
 The progress bar shows a positioned window within the total message count. Server passes `messagesBefore` (from `countMessagesBefore()`) along with `hasOlder`/`hasNewer` flags. Client tracks `msgBefore` and `loaded`, renders the bar with `margin-left` (position) and `width` (window size) as percentages.
@@ -387,9 +407,29 @@ Included by both view templates. Creates a hidden monospace probe element at 16p
 
 Runs on page load, debounced on resize, and exposed as `window.fitMessageBodies` for the infinite scroll loader to call after inserting new messages.
 
-### Access Control in Templates
+### Access Control
 
-Routes pass `sufficientAccess` (read permission) and `canPost` (write permission) booleans. Templates use guard chains instead of duplicating error-state renders:
+Access control uses a three-layer check at both group and area levels. Both `checkAreaReadAccess` and `checkAreaPostAccess` in the routes (and equivalent `checkReadFlags`/`checkPostAccess` in terminal modules) evaluate all three layers:
+
+1. **Security level** — `user.security >= area.read_security` (or `post_security`). Filtered at the DB layer by `listMsgGroups` and `getAreasInGroup`.
+2. **Required permission flags** — user must have ALL flags listed in `read_perm_flags` (or `post_perm_flags`). JSONB array on both groups and areas. User flags stored in `users.permissionflags` JSONB.
+3. **Restriction flags** — user must have NONE of the flags listed in `read_rest_flags` (or `post_rest_flags`). JSONB array on both groups and areas. User flags stored in `users.restrictionflags` JSONB.
+
+Empty flag arrays impose no constraint. All three layers must pass for access to be granted.
+
+#### Web enforcement
+
+**Group listing** (`GET /messages`): groups filtered by `checkAreaReadAccess` after DB query. Areas within each group filtered by `checkAreaReadAccess` for unread counting. Groups with zero accessible areas removed from listing.
+
+**Area listing** (`GET /messages/group/:shortcode`): group-level `checkAreaReadAccess` gate. Areas filtered by `checkAreaReadAccess`.
+
+**Area/thread views**: `sufficientAccess` from `checkAreaReadAccess`, `canPost` from `checkAreaPostAccess`, both passed to templates for guard chains and UI gating.
+
+**JSON lazy-load endpoints**: all three (`threads.json`, `messages.json`, thread `messages.json`) use `checkAreaReadAccess`.
+
+**POST routes**: `newthread` and `reply` use `checkAreaPostAccess`.
+
+#### Template guard chains
 
 ```pug
 if !currentuser → login partial
@@ -399,6 +439,20 @@ else → content (with canPost gating on post/reply UI)
 ```
 
 `canPost` gates: Post button (header + sidebar + offcanvas), Reply buttons (per-message Pug + JS `buildMsgHtml`), reply/post modals (DOM presence), quote system JS, and reply handler JS. When false, modals are absent from the DOM and JS initializers use null checks (`if (replyModalEl) { ... }`) to avoid errors.
+
+#### Terminal enforcement
+
+**Area selector** (`msgAreaSelector.js`): `checkReadFlags(userRecord, group)` filters groups, `checkReadFlags(userRecord, area)` filters areas. Groups with zero accessible areas excluded.
+
+**Reader** (`msgReader.js`): `_canPost` resolved via `checkPostAccess(userRecord, areaConfig)` after area config loads. When false, Reply key hidden from nav bar and R key input ignored.
+
+**Editor** (`msgEditor.js`): `checkPostAccess(userRecord, areaConfig)` checked in `run()` after area config loads. Denied users see "You do not have permission to post in this area." and return to the caller after 2 seconds.
+
+#### Admin management
+
+Groups and areas share the same four flag columns. Flag values are JSONB arrays of string tags. The admin UI uses a badge + select + add-button pattern (same as user flag management). Available flags are defined in `admin.js` as `availablePermissions` ("Sysop", "Mod", "Adult", "Admin") and `availableRestrictions` ("Underage", "Banned").
+
+Groups act as templates: when creating a new area, the new-area modal pre-populates read/post security and all four flag sets from the parent group. The `msgAreas/index` view fetches defaults via `GET /admin/msgGroup/:shortcode/defaults` (JSON endpoint) when the group selector changes. Individual areas can override any setting.
 
 ### Message Headers
 
@@ -507,6 +561,14 @@ node src/tools/maintenance.js --regen-html --batch 50
 14. **Area counts by recalculation**: `recalculateAreaCounts()` runs a correlated UPDATE from actual data on every area add/remove. No increment/decrement drift.
 
 15. **resolveUserId for session compatibility**: Redis stores session values as strings. `resolveUserId()` handles string→number conversion with fallback DB lookup.
+
+16. **Three-layer access control (security + perm flags + restrict flags)**: Both read and post access check security level (numeric), required permission flags (JSONB array, must have ALL), and restriction flags (JSONB array, must have NONE). Same pattern on groups and areas, same column names, same `checkAreaReadAccess`/`checkAreaPostAccess` helpers work on both. DB handles security level filtering; application layer handles flag checks.
+
+17. **Groups as area templates**: Groups carry `read_security`, `post_security`, and four flag columns. New area modals pre-populate from the parent group. `msgGroups_view.pug` uses server-rendered defaults; `msgAreas_index.pug` fetches via `GET /admin/msgGroup/:shortcode/defaults` AJAX when the group selector changes. Individual areas can override any inherited value.
+
+18. **Group `security` column removed**: The legacy single `security` column on `message_groups` was replaced by `read_security` and `post_security`. `listMsgGroups()` now filters by `read_security IS NULL OR read_security <= $1` for backward compatibility during migration.
+
+19. **Auto-fill for short lazy-load content**: When initial batch doesn't overflow the scroll container, scroll events can't fire. Both views run a recursive `autoFill()` that triggers `loadDirection('older')` until the container overflows, there's nothing left, or the loaded count stops increasing (error guard).
 
 ---
 

@@ -9,6 +9,7 @@ The mailer operates independently of the tosser. The tosser prepares `.pkt` file
 For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views), see `message_architecture.md`.
 For the message networking stack (tossers, protocols, packet formats), see `NETWORKING_ARCHITECTURE.md`.
 For the terminal-side BBS architecture, see `terminal_architecture.md`.
+For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
 
 ---
 
