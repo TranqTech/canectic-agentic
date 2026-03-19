@@ -24,6 +24,7 @@ import { DoorLaunchHandler } from "../handlers/doorlaunchhandler.js";
 import { SubModuleAdapter } from "../handlers/submoduleadapter.js";
 import { LastCallers } from "../handlers/lastcallers.js";
 import { WhosOnline } from "../handlers/whosonline.js";
+import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
@@ -49,6 +50,7 @@ const handlerRegistry = {
 	"door_launch":  (call) => new DoorLaunchHandler(call, false),
 	"last_callers": (call) => new SubModuleAdapter(call, LastCallers, "LastCallers"),
 	"whos_online":  (call) => new SubModuleAdapter(call, WhosOnline, "WhosOnline"),
+	"check_email":  (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
 	//"announcements": (call) => new AnnouncementHandler(call),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
@@ -64,6 +66,7 @@ const callFlows = {
 		"negotiate",
 		"logon",
 		"last_callers",
+		"check_email",
 		//"announcements",
 		"menu",
 		"goodbye",

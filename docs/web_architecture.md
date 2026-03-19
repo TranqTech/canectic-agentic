@@ -349,7 +349,7 @@ The Express app and WebSocket infrastructure share a single `http.Server` instan
 All models (`messages.js`, `msgAreas.js`, `msgGroups.js`, `useraccounts.js`, `userMsgPointers.js`, `userAreaSubs.js`, etc.) are ES module singletons shared between:
 
 - Web routes (`src/routes/*.js`) — user-facing and admin
-- Terminal handlers (`src/handlers/menucommands/*.js`) — area selector, reader, editor, newscan
+- Terminal handlers (`src/handlers/menucommands/*.js`) — area selector, reader, editor, newscan, PM reader/editor/check
 - Tossers (`src/models/*Tosser.js`) — FTN, QWK, NNTP import/export
 - Maintenance tools (`src/tools/*.js`, `src/maintenance/*.js`)
 

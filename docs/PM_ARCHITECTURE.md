@@ -58,6 +58,16 @@ For the web application stack (Express, sessions, admin panel), see `web_archite
 | `useraccounts.js` | Added `getUserByRealname()`, `getUsersByRealname()`, `getUsersByPermissionFlag()`. Fixed `buildSessionData()` to derive `isSysop` from `permissionflags` array. Fixed `_addFlags`/`_removeFlags` to keep `isSysop` in sync on all active sessions. |
 | `systemAddresses.js` | Added `getActiveAddressByNetworkType()`, `getDefaultAddressByNetworkType()`, `resolveSourceForDestinationZone()`. |
 
+### Terminal UI
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `pmReader.js` | `src/handlers/menucommands/` | Terminal mail reader. Lightbar list with inbox/sent/trash folders, message view with scrolling body viewport, reply/delete/restore/mark-all-read. Spawns `pmEditor` for compose and reply. |
+| `pmEditor.js` | `src/handlers/menucommands/` | Terminal mail editor. Full-screen editor with cycleable From name (username/fullname), To field with local user resolution, Via/Addr field with transport cycling, Subject, body editor with word wrap, and quote system. Handles LOCAL and network (FTN/QWK) transports. |
+| `pmCheck.js` | `src/handlers/menucommands/` | Unread mail check. Queries unread count, prompts to launch reader. Works as both a menu command (`checkEmail`) and a call flow stage (`check_email` via `SubModuleAdapter`). |
+| `menuhandler.js` | `src/handlers/` | Added `email` command (launches `pmReader`) and `checkEmail` command (launches `pmCheck`). |
+| `callmanager.js` | `src/servers/` | Added `check_email` to handler registry via `SubModuleAdapter`. Can be placed in any call flow (e.g. after login). |
+
 ---
 
 ## Database Schema
@@ -446,6 +456,134 @@ Same Mail link with unread badge on the right side. Brand links to `/`. Dashboar
 
 ---
 
+## Terminal UI Architecture
+
+Three `BaseSubModule` modules provide full terminal-side PM access: a reader, an editor, and a mail-check prompt. All follow the same patterns as the echomail `msgReader`/`msgEditor`: state machine, viewport geometry, CP437/UTF-8 glyph helpers, dumb terminal fallback, and sub-module spawning via `emitter.on("ModuleReturn")`.
+
+### PM Reader (`pmReader.js`)
+
+#### State Machine
+
+```
+LOADING → MESSAGE_LIST ↔ MESSAGE_VIEW
+```
+
+#### Message List
+
+- **Three folders**: Inbox (I), Sent (S), Trash (T) — switchable via hotkeys without reload
+- **Chronological order**: Messages sorted oldest-first (model returns DESC, reversed on load)
+- **Cursor positioning**: On load, lightbar starts at first unread message; if all read, starts at last (newest) message
+- **Lightbar columns**: Adapt per folder:
+  - Inbox: `[unread] From | Subject | Date | Type`
+  - Sent: `[unread] To | Subject | Date | Status` (Sent/Queue/Draft)
+  - Trash: `Type(In/Sent) | From/To | Subject | Deleted`
+- **Date column** (9 chars): Today → `15:45    ` (24h time), Yesterday → `Yesterday`, Older → `Mar 18'25`
+- **Unread indicators**: Bullet glyph (`•`/CP437 `0xF9`) + bright green color, unread count in title bar
+- **Actions**: Enter (read), C (compose), D (delete), U (restore, trash), M (mark all read, inbox), Q (quit)
+
+#### Message View
+
+- **4-row header**: From, To, Subject, Via on left; Date, Time, Folder, Msg# on right
+- **Network addresses**: From/To fields append `" @ address"` for non-LOCAL messages (e.g. `"John Smith @ 1:134/101"`)
+- **From/To highlight**: Username match → bright yellow, others → bright green
+- **Body viewport**: Rows 6 to H-2, centered/capped at 100 cols. Uses `termMsgFormat.processMessageBody` when available, with fallback word-wrap
+- **Scroll indicators**: Separator lines on rows 5 and H-1 with down-arrow glyph when more content exists
+- **Navigation**: ↑↓ scroll, ←→ prev/next message, Space (page down then advance), L (jump to last), R (reply, inbox), D (delete), U (restore, trash), Q (back to list)
+- **Read state sync**: Opening a message marks it read in the DB (`getMessage` auto-marks); the read flag is synced back to the in-memory list entry so returning to the list shows the updated state
+
+#### Compose/Reply
+
+- Compose (C): Spawns `pmEditor` with `mode: "new"` and `allowedTransports` from `getAllowedTransports()`
+- Reply (R): Spawns `pmEditor` with `mode: "reply"`, original message passed as `replyToMsg`, transport locked to original's `transport_type`. Checks `checkTransportAccess()` before launch.
+
+### PM Editor (`pmEditor.js`)
+
+#### State Machine
+
+```
+FIELD_FROM → FIELD_TO → FIELD_ADDRESS → FIELD_SUBJECT → BODY → CONFIRM_SAVE
+                                                          ↓         ↑
+                                                       QUOTING   (Y → _doSave)
+                                                                 (else → BODY)
+```
+
+#### Screen Layout (5-row header)
+
+```
+Row 1:  From : Underminer          ←→ change
+Row 2:    To : [editable]
+Row 3:   Via : LOCAL                ←→ change    (or)  Addr : [editable]       (FTN)
+Row 4: Subject : [editable]
+Row 5: ─────────────────────── separator ───────────────────────
+Row 6+: body editing viewport (max 79 cols, auto-wrap)
+Row H-1: status bar (line/col/mode or error message)
+Row H:  nav bar (Ctrl-S Send  Ctrl-A Abort  Ctrl-Q Quote  Ctrl-Z Save+Send)
+```
+
+#### From Name Cycling
+
+Left/right arrows on the From field cycle between username and fullname (if different). No text editing — cycle only. Chosen name is used as `from_user` in the message.
+
+#### Transport Cycling (Compose Mode)
+
+On the Via/Addr row, left/right arrows cycle through the user's allowed transports (passed as `allowedTransports` from the reader). Switching to LOCAL clears the address field. Switching to a network transport enables the address field for editing. Transport is locked for replies.
+
+#### To Name Normalization
+
+On save, the To field value is title-cased: first letter of each word uppercased, rest lowercased. `"JOHN SMITH"` → `"John Smith"`. The original typed text is preserved as `to_user` for display; `to_address` gets the resolved username for routing.
+
+#### Save Flow — LOCAL vs Network
+
+- **LOCAL**: `resolveRecipient()` matches by username, realname, or sysop alias. Sets `transport_data.recipient_user_id` for delivery. If resolution fails, shows error on status bar and repositions cursor to the To field.
+- **Network (FTN/QWK)**: Skips `resolveRecipient`. Uses To field as recipient name, Addr field as destination address. For FTN, parses address into zone:net/node components. Validates FTN address format.
+- **Error visibility**: `_showError()` writes to the status bar and is NOT followed by `_drawStatusBar()`, so the error message persists until the next keypress triggers a natural redraw.
+- **Async save guard**: `_saving` flag blocks all input while `resolveRecipient` and `queueMessage` are awaiting, preventing keystroke interference.
+
+#### Quote System (Reply Mode)
+
+Matches `msgEditor` pattern:
+- `Ctrl+Q` enters quote mode — quote lines from original message displayed in the body viewport
+- Lightbar navigation with `*` marker for selected lines
+- Enter toggles selection + auto-advances, A selects all, N clears all
+- `Ctrl+Q` or ESC inserts all selected lines (prefixed with `"> "`) at cursor position and returns to body editing
+- Blank line appended after quote block
+
+#### Ctrl Key Handling
+
+Ctrl combos arrive as both `"^Z"`/`"^A"` tokens via `onKey()` and raw bytes (`\x1a`/`\x01`/`\x11`) via `onChar()`. Both paths are handled. Works in all field states and body state.
+
+#### Dumb Terminal Fallback
+
+Sequential prompts: From (shown), To (editable), Subject (editable), body lines. `/s` to send, `/a` to abort.
+
+### PM Check (`pmCheck.js`)
+
+Simple unread-mail prompt, usable as both a menu command and a call flow stage:
+
+- Queries `getUnreadCount()` for the logged-in user
+- **No unread**: `"No new private messages. [Press any key]"` → any key → `signalReturn()`
+- **Has unread**: `"You have N new private message(s). Read now? (Y/N)"` → Y spawns `pmReader`, else → `signalReturn()`
+- Works through `SubModuleAdapter` in callmanager as stage `"check_email"`, or via menu command `"checkEmail"`
+
+### MenuHandler Integration
+
+| Command | Action |
+|---------|--------|
+| `email` | `_runSubModule(new pmReader(this.call))` |
+| `checkEmail` | `_runSubModule(new pmCheck(this.call))` |
+
+### CallManager Integration
+
+```javascript
+// Handler registry
+"check_email": (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
+
+// Example call flow
+"Standard": ["negotiate", "logon", "last_callers", "check_email", "menu", "goodbye"]
+```
+
+---
+
 ## FTN-Specific Details
 
 ### Zone-Aware Source Resolution
@@ -563,6 +701,12 @@ Executed sequentially under the same PID lock (`/tmp/can_maint.pid`).
 
 10. **Co-sysop notification**: `notifySysops()` queries `getUsersByPermissionFlag('Sysop')` and delivers to ALL matching users, not just the first. All sysops see undeliverable messages and system alerts.
 
+11. **Terminal editor branches LOCAL vs network at save time**: Rather than separate compose flows, a single editor handles all transports. For LOCAL, `resolveRecipient` validates the user exists before queuing. For network transports, resolution is skipped entirely — the name and address are taken as-is, since the recipient may not be a local user.
+
+12. **Title-case normalization on To field**: The recipient name is title-cased at save time to produce consistent display regardless of how the user typed it. The original typed value is preserved as `to_user` (display) while `to_address` holds the resolved username (routing), so `"john smith"` displays as `"John Smith"` but routes correctly to the `jsmith` account.
+
+13. **Shared module for call flow and menu**: `pmCheck` is a `BaseSubModule` that works both as a menu command (via `_runSubModule`) and as a call flow stage (via `SubModuleAdapter`). Same code path, no duplication.
+
 ---
 
 ## Environment Variables
@@ -583,3 +727,5 @@ Executed sequentially under the same PID lock (`/tmp/can_maint.pid`).
 - **`netmail.js` retirement**: Old FTN-specific module can be dropped once all paths confirmed working through the unified PM system
 - **Old `netmail_in` / `netmail_out` tables**: Can be dropped or renamed to `_legacy` after migration verified
 - **Areafix/filefix routing**: Stub in `importFtnNetmail` — conference 0 messages addressed to automated processors (areafix, filefix) should be routed to handler modules instead of user inboxes
+- **Terminal reader pagination**: Currently loads a single batch of 50 messages per folder. Lazy-loading of older/newer batches (like `msgReader`) for mailboxes exceeding the batch size
+- **Terminal address book**: Quick-select from recent recipients or known network addresses rather than typing addresses manually

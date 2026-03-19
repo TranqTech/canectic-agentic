@@ -51,7 +51,7 @@ Shared singleton managing node number allocation and a registry of active sessio
 Declared as ordered arrays of stage names in `callFlows`. The reserved name `"goodbye"` triggers hangup.
 
 ```
-Standard:   negotiate → logon → last_callers → menu → goodbye
+Standard:   negotiate → logon → last_callers → check_email → menu → goodbye
 Doorserver: door_auth → door_launch → goodbye
 Test:       negotiate → goodbye
 ```
@@ -73,6 +73,7 @@ Maps stage names to factory functions:
 | `door_launch` | `DoorLaunchHandler` | Routes to door target or door menu |
 | `last_callers` | `SubModuleAdapter(LastCallers)` | Recent caller display |
 | `whos_online` | `SubModuleAdapter(WhosOnline)` | Active node display |
+| `check_email` | `SubModuleAdapter(pmCheck)` | Unread PM prompt, optionally launches reader |
 
 ---
 
@@ -998,6 +999,8 @@ The menu command dispatch in `menuhandler.js` already has slots for these comman
 | `newscan` | `newscan` (Phase 2d) | All-groups mode; new slot in menu command dispatch |
 | `newscanGroup` | `newscan` (Phase 2d) | Current-group mode; new slot in menu command dispatch |
 | `markAreaRead` | Inline in menu dispatch | Calls `markAreaRead()` directly, no sub-module needed |
+| `email` | `pmReader` | Full terminal mail reader with inbox/sent/trash folders |
+| `checkEmail` | `pmCheck` | Unread count prompt, optionally launches pmReader |
 
 The `readMessages` wrapper should detect `call.term_type` and route to line reader (dumb terminals) or fullscreen reader (ANSI terminals). Same pattern for the editor.
 
@@ -1015,6 +1018,57 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 - User QWK download/upload from terminal menu
 - Web newscan route/view using `getNewscanSummary()` with `userAreaSubs` filtering
 - Flat-mode reply thread UUID resolution (currently null for some messages)
+- Terminal PM reader pagination for mailboxes exceeding batch size
+- Terminal PM address book for quick recipient selection
+
+---
+
+## Private Messaging — Terminal Side
+
+Full terminal-side PM access is provided by three `BaseSubModule` modules. They follow the same architecture as the echomail modules (state machine, geometry, CP437/UTF-8 glyphs, dumb fallback, sub-module spawning). Detailed architecture is in `PM_ARCHITECTURE.md` under "Terminal UI Architecture" — this section summarizes the key patterns.
+
+### PM Reader (`handlers/menucommands/pmReader.js`)
+
+**State machine**: `LOADING → MESSAGE_LIST ↔ MESSAGE_VIEW`
+
+Provides a lightbar message list with three switchable folders (Inbox/Sent/Trash), and a message view with 4-row header, scrolling body viewport, and full navigation (prev/next, jump to last, space-page-advance). Network messages display `"name @ address"` in the From/To header fields.
+
+Key differences from `msgReader`:
+- **No threads**: Flat chronological list (newest at bottom), not threaded
+- **Folder switching**: I/S/T hotkeys switch between inbox, sent, and trash without leaving the list
+- **Read state sync**: Opening a message marks it read in DB; the read flag is synced back to the in-memory list entry so the list reflects the change immediately on return
+- **Cursor positioning**: Starts on first unread message, or last message if all read
+- **Smart date column** (9 chars): Today → `15:45    `, Yesterday → `Yesterday`, Older → `Mar 18'25`
+- **Compose/Reply**: Spawns `pmEditor` with transport and address context
+
+### PM Editor (`handlers/menucommands/pmEditor.js`)
+
+**State machine**: `FIELD_FROM → FIELD_TO → FIELD_ADDRESS → FIELD_SUBJECT → BODY ↔ QUOTING → CONFIRM_SAVE/CONFIRM_ABORT`
+
+5-row header with cycleable From name (username/fullname via ←→), editable To, Via/Addr with transport cycling (LOCAL/FTN/QWK via ←→), editable Subject. Body editor with auto-wrap at 79 columns. Quote system matches `msgEditor` (Enter toggles, Ctrl+Q/ESC inserts selected).
+
+Key differences from `msgEditor`:
+- **From name cycling**: Left/right on row 1 cycles between username and fullname
+- **Transport cycling**: Left/right on Via/Addr row cycles through allowed transports
+- **Dual save path**: LOCAL resolves recipient via `resolveRecipient()` and sets `recipient_user_id`. Network (FTN/QWK) skips resolution, uses address as-is, parses FTN zone:net/node
+- **To name normalization**: Title-cases on save (`john smith` → `John Smith`), preserves for display
+- **Error persistence**: `_showError()` is not followed by `_drawStatusBar()` so errors remain visible
+- **Async save guard**: `_saving` flag blocks input during the async `resolveRecipient`/`queueMessage` pipeline
+- **Transport is locked on reply**: Reply inherits the original message's transport type and pre-fills the network address
+
+### PM Check (`handlers/menucommands/pmCheck.js`)
+
+Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "N new messages — read now?". Y launches `pmReader`, any other key exits. Works as both a menu command (`checkEmail`) and a call flow stage (`check_email` via `SubModuleAdapter`).
+
+### Call Flow Registration
+
+```javascript
+// callmanager.js handler registry
+"check_email": (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
+
+// Example call flow
+"Standard": ["negotiate", "logon", "last_callers", "check_email", "menu", "goodbye"]
+```
 
 ---
 
@@ -1061,6 +1115,9 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 | `msgReader.js` | handlers/menucommands | Fullscreen message reader — thread list, message view, flat mode (Phase 2) |
 | `msgEditor.js` | handlers/menucommands | Message editor — fullscreen + dumb fallback, new thread + reply (Phase 3) |
 | `newscan.js` | handlers/menucommands | Cross-area newscan, wraps msgReader (Phase 2d) |
+| `pmReader.js` | handlers/menucommands | Terminal private mail reader — inbox/sent/trash folders, message view, compose/reply launch |
+| `pmEditor.js` | handlers/menucommands | Terminal PM editor — From/To/Addr/Subject fields, transport cycling, LOCAL+network save, quote system |
+| `pmCheck.js` | handlers/menucommands | Unread mail check prompt — also works as call flow stage via SubModuleAdapter |
 | `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring, paragraph reflow (`reflowText`/`reflowParagraphs`), ANSI art detection (`detectAnsiArt`), ANSI-aware word wrapping (`wordWrapLineAnsi`) |
 | `userAreaSubs.js` | models | Per-user newscan subscription overrides — resolution cascade, T key toggle in area selector |
 | **Maintenance** | | |

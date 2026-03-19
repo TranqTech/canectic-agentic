@@ -31,5 +31,10 @@
 	"uname_clr": 11,
 	"uname_label_clr": 10,
 	"ver_clr": 4,
-	"warn_clr": 2
+	"warn_clr": 2,
+	"msg_body_clr": 11,
+	"msg_quote_clr": 14,
+	"msg_tear_clr": 15,
+	"msg_origin_clr": 12,
+	"msg_tagline_clr": 10
 }

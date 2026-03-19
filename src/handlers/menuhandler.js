@@ -11,6 +11,7 @@ import { msgEditor } from "./menucommands/msgEditor.js";
 import { newscan } from "./menucommands/newscan.js";
 import { testDownloader } from "./menucommands/testdownload.js";
 import { pmReader } from "./menucommands/pmReader.js";
+import { pmCheck } from "./menucommands/pmCheck.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -617,6 +618,9 @@ class MenuHandler extends BaseHandler {
 				return;
 			case "email":
 				this._runSubModule(new pmReader(this.call));
+				return;
+			case "checkEmail":
+				this._runSubModule(new pmCheck(this.call));
 				return;
 
 
