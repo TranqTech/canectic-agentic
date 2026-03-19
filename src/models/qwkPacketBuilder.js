@@ -22,6 +22,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
+import * as privateMessages from './privateMessages.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
 import {
 	QWK_RECORD_SIZE,
@@ -140,7 +141,7 @@ function buildMessagesDat(messageItems, qwkId) {
 		}
 
 		var bodyBuf = buildQwkBody(bodyForPack);
-		var hdrBuf  = buildQwkHeader(item.msg, item.conferenceNum, bodyBuf.length);
+		var hdrBuf  = buildQwkHeader(item.msg, item.conferenceNum, bodyBuf.length, item.isPrivate || false);
 
 		itemOffsets.push(currentOffset);
 
@@ -480,6 +481,41 @@ async function buildQwkForNode(peerConnectionUUID) {
 		}
 	}
 
+	// --- Gather pending QWK private messages (conference 0) ---
+	var pendingPMs = await privateMessages.getPendingByTransport('QWK');
+	var pmWorkItems = [];
+
+	if (pendingPMs && pendingPMs.length > 0) {
+		// Add conference 0 to the conference list if not already there
+		var hasConf0 = conferences.some(function(c) { return c.number === 0; });
+		if (!hasConf0) {
+			conferences.unshift({ number: 0, name: 'Personal' });
+		}
+
+		for (var pm of pendingPMs) {
+			messageItems.push({
+				msg: {
+					id: pm.id,
+					from_user: pm.from_user || '',
+					to_user: pm.to_user || '',
+					subject: pm.subject || '',
+					body_text: pm.utf8 || pm.body_text || '',
+					utf8: null, // null so buildMessagesDat runs utf8ToCp437 conversion
+					system_time: pm.system_time || new Date(),
+					reply_ref: 0
+				},
+				conferenceNum: 0,
+				isPrivate: true
+			});
+			pmWorkItems.push({ pmOutboxId: pm.id });
+		}
+
+		alogger.writeClog(5,
+			'buildQwkForNode: ' + pendingPMs.length + ' QWK PM(s) added as conference 0', 'tosser',
+			'cyan'
+		, false, false);
+	}
+
 	if (messageItems.length === 0) {
 		alogger.writeClog(5,
 			'buildQwkForNode: no new messages for ' + remoteQwkId, 'tosser',
@@ -530,6 +566,11 @@ async function buildQwkForNode(peerConnectionUUID) {
 
 	// Advance HWM for all processed items (posted + skipped)
 	await advanceHwmForItems(workTracker, enabledSubs);
+
+	// Mark QWK PMs as sent
+	for (var pmItem of pmWorkItems) {
+		await privateMessages.markSent(pmItem.pmOutboxId);
+	}
 
 	returnObj.status = true;
 	returnObj.qwkPath = qwkPath;

@@ -1,11 +1,21 @@
 - var activenav = activelink || ""
 nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
   .container-fluid
-    a.navbar-brand(href='/admin')= boardname || 'BBS Admin'
+    a.navbar-brand(href='/')= boardname || 'BBS Admin'
     button.navbar-toggler(type='button' data-bs-toggle='collapse' data-bs-target='#adminNavbar' aria-controls='adminNavbar' aria-expanded='false' aria-label='Toggle navigation')
       span.navbar-toggler-icon
     #adminNavbar.collapse.navbar-collapse
       ul.navbar-nav.me-auto
+
+        //- Dashboard
+        li.nav-item
+          a.nav-link(
+            href='/admin'
+            class=activenav === 'dashboard' ? 'active' : ''
+          )
+            | Dashboard
+            if activenav === 'dashboard'
+              span.visually-hidden  (current)
 
         //- Messages
         li.nav-item.dropdown
@@ -69,9 +79,15 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'users'
               span.visually-hidden  (current)
 
-      //- Right side — user dropdown or login
+      //- Right side — mail link + user dropdown or login
       ul.navbar-nav.ms-auto
         if currentuser
+          li.nav-item
+            a.nav-link(href='/pm/inbox')
+              i.bi.bi-envelope
+              |  Mail
+              if pmUnreadCount && pmUnreadCount > 0
+                span.badge.bg-info.ms-1= pmUnreadCount
           li.nav-item.dropdown
             a.nav-link.dropdown-toggle(
               data-bs-toggle='dropdown'
@@ -81,8 +97,6 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
               aria-expanded='false'
             )= currentuser.username
             .dropdown-menu.dropdown-menu-end
-              a.dropdown-item(href='/admin') Dashboard
-              .dropdown-divider
               a.dropdown-item(href='/users/logout') Logout
         else
           li.nav-item

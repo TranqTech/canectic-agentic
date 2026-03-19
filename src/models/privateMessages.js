@@ -303,9 +303,14 @@ async function getTrash(userId, options) {
   var limit = opts.limit || 50;
   var offset = opts.offset || 0;
 
-  var sql = "SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
-    "read, transport_type, system_time, deleted_at " +
-    "FROM pm_inbox WHERE user_id = $1 AND deleted = true " +
+  // UNION inbox and outbox deleted messages with a source column
+  var sql = "(SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
+    "transport_type, system_time, deleted_at, 'inbox' AS source " +
+    "FROM pm_inbox WHERE user_id = $1 AND deleted = true) " +
+    "UNION ALL " +
+    "(SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
+    "transport_type, system_time, deleted_at, 'sent' AS source " +
+    "FROM pm_outbox WHERE user_id = $1 AND deleted = true) " +
     "ORDER BY deleted_at DESC LIMIT $2 OFFSET $3";
 
   return await postgres.query(sql, [userId, limit, offset]);

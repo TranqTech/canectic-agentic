@@ -17,37 +17,6 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'messages'
               span.visually-hidden  (current)
 
-        //- Private Messages
-        li.nav-item.dropdown
-          a.nav-link.dropdown-toggle(
-            data-bs-toggle='dropdown'
-            href='#'
-            role='button'
-            aria-haspopup='true'
-            aria-expanded='false'
-            class=activenav === 'pm' ? 'active' : ''
-          )
-            i.bi.bi-envelope
-            |  Mail
-            if pmUnreadCount && pmUnreadCount > 0
-              span.badge.bg-info.ms-1= pmUnreadCount
-          .dropdown-menu
-            a.dropdown-item(href='/pm/inbox')
-              i.bi.bi-inbox
-              |  Inbox
-              if pmUnreadCount && pmUnreadCount > 0
-                span.badge.bg-info.ms-2= pmUnreadCount
-            a.dropdown-item(href='/pm/sent')
-              i.bi.bi-send
-              |  Sent
-            a.dropdown-item(href='/pm/trash')
-              i.bi.bi-trash
-              |  Trash
-            .dropdown-divider
-            a.dropdown-item(href='/pm/inbox')
-              i.bi.bi-pencil-square
-              |  Compose
-
         //- Files
         li.nav-item
           a.nav-link(
@@ -68,9 +37,23 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'doors'
               span.visually-hidden  (current)
 
-      //- Right side — user dropdown or login
+      //- Right side — mail link + user dropdown or login
       ul.navbar-nav.ms-auto
         if currentuser
+          if currentuser.isSysop
+            li.nav-item
+              a.nav-link(href='/admin')
+                i.bi.bi-gear
+                |  Dashboard
+          li.nav-item
+            a.nav-link(
+              href='/pm/inbox'
+              class=activenav === 'pm' ? 'active' : ''
+            )
+              i.bi.bi-envelope
+              |  Mail
+              if pmUnreadCount && pmUnreadCount > 0
+                span.badge.bg-info.ms-1= pmUnreadCount
           li.nav-item.dropdown
             a.nav-link.dropdown-toggle(
               data-bs-toggle='dropdown'

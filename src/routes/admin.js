@@ -9,6 +9,7 @@ import sanitizeHtml from 'sanitize-html';
 import mobile from 'is-mobile';
 
 //internals
+import * as privateMessages from '../models/privateMessages.js';
 import * as msgNetworks from '../models/msgNetworks.js';
 import * as msgZones from '../models/msgZones.js';
 import * as msgGroups from '../models/msgGroups.js';
@@ -51,6 +52,13 @@ router.use(async function(req, res, next) {
 	res.locals.activelink   = '';
 	if (req.cookies.sessionid) {
 		await sessionStore.sessionRenew(req.cookies.sessionid);
+		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
+		if (pmSession) {
+			var pmUid = parseInt(pmSession.id);
+			if (pmUid && pmUid > 0) {
+				res.locals.pmUnreadCount = await privateMessages.getUnreadCount(pmUid);
+			}
+		}
 	}
 	next();
 });
@@ -89,7 +97,7 @@ router.get('/', async (req, res, next) => {
 	res.render('admin/dashboard', {
 		sufficientAccess: sufficientAccess,
 		title: 'Admin Dash',
-		activelink: '',
+		activelink: 'dashboard',
 		currentuser: currentuser
 	});
 });

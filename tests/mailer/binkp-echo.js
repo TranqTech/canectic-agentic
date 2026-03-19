@@ -18,7 +18,7 @@
 //   address:  1:999/999
 //   password: (accept any)
 //
-// Files are received to ./tmp/mailer/echo-inbound/
+// Files are received to ./binkp-echo-inbound/
 // Press Ctrl+C to stop.
 
 import * as net from 'net';
@@ -31,8 +31,8 @@ import { TransferEngine } from '../../src/mailer/transfer.js';
 var PORT       = parseInt(process.argv[2]) || 24554;
 var ADDRESS    = process.argv[3] || '1:999/999';
 var ACCEPT_PW  = process.argv[4] || null; // null = accept any
-var INBOUND    = './tmp/mailer/echo-inbound';
-var TEMP       = './tmp/mailer/echo-tmp';
+var INBOUND    = './binkp-echo-inbound';
+var TEMP       = './binkp-echo-tmp';
 
 // Ensure directories
 if (!fs.existsSync(INBOUND)) fs.mkdirSync(INBOUND, { recursive: true });
@@ -140,6 +140,7 @@ var server = net.createServer((socket) => {
 	});
 
 	proto.startSession('answerer');
+	transport.resume(); // Socket was paused by fromSocket — resume after protocol wired
 });
 
 server.on('error', (err) => {

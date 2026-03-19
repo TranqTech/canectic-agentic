@@ -26,6 +26,7 @@ import * as systemAddresses from './systemAddresses.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
 import { createThreadRow, updateThreadStats, rollbackThread } from './echomail.js';
 import { makeTransport } from './qwkTransport.js';
+import * as privateMessages from './privateMessages.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
@@ -266,6 +267,100 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 	returnObj.status   = true;
 	returnObj.imported = true;
 	return returnObj;
+}
+
+// ---------------------------------------------------------------------------
+// Import a QWK conference 0 message as a private message
+// ---------------------------------------------------------------------------
+
+async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) {
+	var retObj = {
+		delivered: false,
+		duplicate: false,
+		errormessages: []
+	};
+
+	var toUser = (qwkMsg.to || '').trim();
+	var fromUser = (qwkMsg.from || '').trim();
+
+	if (!toUser) {
+		retObj.errormessages.push('QWK PM has no recipient');
+		return retObj;
+	}
+
+	// Resolve recipient to a local user
+	var resolution = await privateMessages.resolveRecipient(toUser);
+	if (!resolution.resolved) {
+		// Unresolvable — send to undeliverable queue and notify sysops
+		var undeliverableMsg = {
+			from_user: fromUser,
+			to_user: toUser,
+			from_address: remoteQwkId,
+			to_address: '',
+			subject: qwkMsg.subject || '',
+			body_text: qwkMsg.utf8 || qwkMsg.bodyText || '',
+			transport_type: 'QWK',
+			transport_data: JSON.stringify({
+				source: remoteQwkId,
+				peer_connection_uuid: peerConnectionUUID,
+				conference: 0,
+				msg_number: qwkMsg.msgNumber || 0
+			}),
+			reason: 'Recipient "' + toUser + '" not found (QWK PM from ' + remoteQwkId + ')'
+		};
+		await privateMessages.insertUndeliverable(undeliverableMsg);
+		await privateMessages.notifySysops(
+			'Undeliverable QWK PM from ' + remoteQwkId,
+			'A private message from ' + fromUser + ' to ' + toUser + ' could not be delivered.\nSubject: ' + (qwkMsg.subject || '(none)') + '\nReason: Recipient not found.'
+		);
+		retObj.errormessages.push('Recipient "' + toUser + '" not found');
+		return retObj;
+	}
+
+	// Build the message object for delivery
+	var bodyText = qwkMsg.utf8 || qwkMsg.bodyText || '';
+	var msgId = '';
+	if (qwkMsg.kludges && qwkMsg.kludges.MSGID) {
+		msgId = qwkMsg.kludges.MSGID;
+	} else {
+		msgId = remoteQwkId + ':0:' + (qwkMsg.msgNumber || Date.now());
+	}
+
+	var messageObj = {
+		user_id: resolution.userId,
+		msg_id: msgId,
+		from_user: fromUser,
+		to_user: resolution.username,
+		from_address: remoteQwkId,
+		to_address: resolution.username,
+		subject: qwkMsg.subject || '',
+		body_text: bodyText,
+		utf8: bodyText,
+		raw_text: qwkMsg.rawUtf8 || qwkMsg.rawBody || '',
+		transport_type: 'QWK',
+		transport_data: {
+			source: remoteQwkId,
+			peer_connection_uuid: peerConnectionUUID,
+			conference: 0,
+			msg_number: qwkMsg.msgNumber || 0,
+			msg_id: msgId,
+			reply_to: (qwkMsg.kludges && qwkMsg.kludges.REPLY) || ''
+		},
+		system_time: parseQwkDateTime(qwkMsg.date, qwkMsg.time) || new Date()
+	};
+
+	var deliveryResult = await privateMessages.deliverMessage(messageObj);
+	if (deliveryResult.duplicate) {
+		retObj.duplicate = true;
+		return retObj;
+	}
+	if (!deliveryResult.status) {
+		retObj.errormessages = deliveryResult.errormessages;
+		return retObj;
+	}
+
+	retObj.delivered = true;
+	return retObj;
 }
 
 // ---------------------------------------------------------------------------
@@ -627,8 +722,33 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 
 		// Import messages
 		for (var msg of messages) {
-			// Skip conference 0 (personal/netmail)
-			if (msg.conferenceNum === 0) continue;
+			// Conference 0 = personal/private messages → deliver as PM
+			if (msg.conferenceNum === 0) {
+				if (!msg.isLive) continue;
+				try {
+					var pmResult = await importQwkPrivateMessage(msg, remoteQwkId, peerConnectionUUID);
+					if (pmResult.delivered) {
+						returnObj.totalImported++;
+						alogger.writeClog(5,
+							'pullFromQwkPeer: delivered PM from ' + msg.from + ' to ' + msg.to, 'tosser',
+							'cyan'
+						, false, false);
+					} else if (pmResult.duplicate) {
+						returnObj.totalDuplicate++;
+					} else if (pmResult.errormessages && pmResult.errormessages.length > 0) {
+						alogger.writeClog(3,
+							'pullFromQwkPeer: PM import error: ' + pmResult.errormessages.join(', '), 'tosser',
+							'redbright'
+						, false, false);
+					}
+				} catch (pmErr) {
+					alogger.writeClog(3,
+						'pullFromQwkPeer: PM import exception: ' + pmErr.message, 'tosser',
+						'redbright'
+					, false, false);
+				}
+				continue;
+			}
 
 			// Skip deleted messages
 			if (!msg.isLive) continue;
@@ -875,11 +995,9 @@ async function pushToQwkPeer(peerConnectionUUID) {
 
 	if (!enabledSubs || enabledSubs.length === 0) {
 		alogger.writeClog(5,
-			'pushToQwkPeer: no enabled subscriptions for ' + peerConnectionUUID, 'tosser',
+			'pushToQwkPeer: no enabled echomail subscriptions for ' + peerConnectionUUID, 'tosser',
 			'cyan'
 		, false, false);
-		returnObj.status = true;
-		return returnObj;
 	}
 
 	// Build ordered work list per subscription.
@@ -887,6 +1005,7 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	// we can advance past them correctly without blocking on failed posts.
 	var workItems = [];
 
+	if (enabledSubs && enabledSubs.length > 0) {
 	for (var sub of enabledSubs) {
 		var curIdx   = sub.msg_idx || 0;
 		var shorty   = sub.shortcode.toLowerCase().trim();
@@ -958,6 +1077,38 @@ async function pushToQwkPeer(peerConnectionUUID) {
 					// Case 3: foreign with tear/origin in body — leave as-is
 				}
 			}
+		}
+	}
+	} // end if enabledSubs
+
+	// --- Gather pending QWK private messages (conference 0) ---
+	var pendingPMs = await privateMessages.getPendingByTransport('QWK');
+	var pmSentIds = []; // track PM outbox IDs for marking sent after delivery
+
+	if (pendingPMs && pendingPMs.length > 0) {
+		alogger.writeClog(5,
+			'pushToQwkPeer: ' + pendingPMs.length + ' pending QWK PM(s) for conference 0', 'tosser',
+			'cyan'
+		, false, false);
+
+		for (var pm of pendingPMs) {
+			workItems.push({
+				pas_id: null, area_id: null, msgtable: null,
+				msgId: pm.id, skip: false, isPM: true,
+				pmOutboxId: pm.id,
+				conferenceNum: 0,
+				isPrivate: true,
+				msg: {
+					id: pm.id,
+					from_user: pm.from_user || '',
+					to_user: pm.to_user || '',
+					subject: pm.subject || '',
+					body_text: pm.utf8 || pm.body_text || '',
+					utf8: null, // null so buildRepPacket runs utf8ToCp437 conversion
+					system_time: pm.system_time || new Date(),
+					reply_ref: 0
+				}
+			});
 		}
 	}
 
@@ -1070,6 +1221,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 			if (item.skip) {
 				item.success = true;
 				returnObj.totalSkipped++;
+			} else if (item.isPM) {
+				// Private message — mark sent in pm_outbox
+				item.success = true;
+				returnObj.totalPosted++;
+				await privateMessages.markSent(item.pmOutboxId);
 			} else {
 				item.success = true;
 				returnObj.totalPosted++;
@@ -1113,6 +1269,7 @@ async function pushToQwkPeer(peerConnectionUUID) {
 async function advanceQwkIdxForSkips(workItems) {
 	var byPas = {};
 	for (var item of workItems) {
+		if (item.pas_id === null || item.pas_id === undefined) continue;
 		if (!byPas[item.pas_id] || item.msgId > byPas[item.pas_id]) {
 			byPas[item.pas_id] = item.msgId;
 		}
@@ -1130,6 +1287,7 @@ async function advanceQwkIdxForSkips(workItems) {
 async function advanceQwkIdxAfterPost(workItems, enabledSubs) {
 	var byPas = {};
 	for (var item of workItems) {
+		if (item.pas_id === null || item.pas_id === undefined) continue; // skip PM items
 		if (!byPas[item.pas_id]) byPas[item.pas_id] = [];
 		byPas[item.pas_id].push(item);
 	}

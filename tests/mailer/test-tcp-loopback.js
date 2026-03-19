@@ -13,6 +13,7 @@
 import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { TcpTransport } from '../../src/mailer/transports/tcp.js';
 import { BinkpProtocol, verifyCramMD5 } from '../../src/mailer/protocols/binkp.js';
 import { TransferEngine } from '../../src/mailer/transfer.js';
@@ -41,13 +42,13 @@ async function main() {
 	var PASSWORD  = 'tcptest';
 
 	// Temp directories
-	var tmpBase = './tmp/mailer/tcp-' + Date.now();
+	var tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'binkp-tcp-'));
 	var outDir  = path.join(tmpBase, 'outbound');
 	var inDir   = path.join(tmpBase, 'inbound');
 	var tmpDir  = path.join(tmpBase, 'tmp');
-	fs.mkdirSync(outDir, { recursive: true });
-	fs.mkdirSync(inDir, { recursive: true });
-	fs.mkdirSync(tmpDir, { recursive: true });
+	fs.mkdirSync(outDir);
+	fs.mkdirSync(inDir);
+	fs.mkdirSync(tmpDir);
 
 	// Create test file
 	var testContent = 'TCP loopback test data — ' + Date.now() + '\r\n';
@@ -69,6 +70,7 @@ async function main() {
 
 		var transport = TcpTransport.fromSocket(socket);
 		var proto = new BinkpProtocol(transport, {
+			quiet: true,
 			localAddresses: ['1:200/200'],
 			systemName: 'TCP Answerer'
 		});
@@ -114,6 +116,7 @@ async function main() {
 		});
 
 		proto.startSession('answerer');
+		transport.resume(); // Socket was paused by fromSocket — resume after protocol wired
 	});
 
 	server.listen(TEST_PORT, '127.0.0.1', () => {
@@ -132,6 +135,7 @@ async function main() {
 		console.log('  [client] Connected');
 
 		var proto = new BinkpProtocol(callerTransport, {
+			quiet: true,
 			localAddresses: ['1:100/100'],
 			sessionPassword: PASSWORD,
 			systemName: 'TCP Caller'
@@ -184,8 +188,8 @@ async function main() {
 		waited += 50;
 	}
 
-	// Give a beat for file operations to flush
-	await sleep(100);
+	// Give a beat for file operations to flush (pendingGOTs + stream.end callback)
+	await sleep(500);
 
 	// --- Assertions ---
 

@@ -16,7 +16,7 @@ Unit test for the binkp protocol module. No network, no database, no project dep
 node tests/mailer/test-binkp-frames.js
 ```
 
-Tests frame encoding/decoding, partial frame reassembly, multi-frame batching, M_NUL/M_ADR/M_FILE/M_EOB/M_ERR parsing, file data reception with fileComplete, and CRAM-MD5 verification. ~40 assertions.
+Tests frame encoding/decoding, partial frame reassembly, multi-frame batching, M_NUL/M_ADR/M_FILE/M_EOB/M_ERR parsing, file data reception with fileComplete, CRAM-MD5 verification, NR mode (offset -1) handling, implicit file completion on new M_FILE, double EOB protection, and sendSKIP clearing receive state. ~55 assertions.
 
 ### test-loopback.js
 
@@ -26,7 +26,7 @@ Integration test using paired in-memory transports (no network). Requires the pr
 node tests/mailer/test-loopback.js
 ```
 
-Five scenarios: CRAM-MD5 handshake, duplicate CRAM-MD5 test, bad password rejection, full file transfer with content verification, and empty session with no files. Creates temp directories, writes a test `.pkt`, verifies it arrives intact.
+Five scenarios: CRAM-MD5 handshake, duplicate CRAM-MD5 test, bad password rejection, full file transfer with content verification, and empty session with no files. Plus: double EOB protection, NR mode (offset -1) file receive, and path traversal filename rejection. Creates temp directories, writes test `.pkt` files, verifies arrival and content.
 
 ### test-tcp-loopback.js
 

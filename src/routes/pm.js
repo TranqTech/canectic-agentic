@@ -92,11 +92,22 @@ function checkAdminAccess(user) {
 	return perms.includes('Sysop');
 }
 
+// Helper: validate that a submitted from_user value is one of the user's
+// allowed identities (username or fullname). Prevents form tampering.
+// Returns the validated name or null if invalid.
+function validateFromUser(sessionUser, submittedName) {
+	if (!submittedName || !sessionUser) return null;
+	var trimmed = submittedName.trim();
+	if (trimmed === sessionUser.username) return trimmed;
+	if (sessionUser.fullname && trimmed === sessionUser.fullname.trim()) return trimmed;
+	return null;
+}
+
 // -------------------------------------------------------
 // Inbox
 // -------------------------------------------------------
 
-// GET /pm or /pm/inbox — inbox listing
+// GET /pm or /pm/inbox — combined mail view with inbox/sent/trash tabs
 router.get(['/', '/inbox'], async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) {
@@ -104,6 +115,8 @@ router.get(['/', '/inbox'], async (req, res) => {
 			title: 'Private Messages',
 			currentuser: null,
 			messages: [],
+			sentMessages: [],
+			trashMessages: [],
 			unreadCount: 0,
 			allowedTransports: []
 		});
@@ -111,23 +124,22 @@ router.get(['/', '/inbox'], async (req, res) => {
 
 	hydrateSessionFlags(currentuser);
 	var userId = await resolveUserId(currentuser);
-	var page = parseInt(req.query.page) || 1;
 	var limit = 50;
-	var offset = (page - 1) * limit;
-	var unreadOnly = req.query.unread === 'true';
 
-	var inboxMessages = await privateMessages.getInbox(userId, { limit: limit, offset: offset, unreadOnly: unreadOnly });
+	var inboxMessages = await privateMessages.getInbox(userId, { limit: limit });
+	var sentMessages = await privateMessages.getSentMessages(userId, { limit: limit });
+	var trashMessages = await privateMessages.getTrash(userId, { limit: limit });
 	var unreadCount = await privateMessages.getUnreadCount(userId);
 	var allowedTransports = privateMessages.getAllowedTransports(currentuser);
 
 	res.render('pm/inbox', {
-		title: 'Inbox',
+		title: 'Mail',
 		currentuser: currentuser,
 		messages: inboxMessages,
+		sentMessages: sentMessages,
+		trashMessages: trashMessages,
 		unreadCount: unreadCount,
-		allowedTransports: allowedTransports,
-		page: page,
-		unreadOnly: unreadOnly
+		allowedTransports: allowedTransports
 	});
 });
 
@@ -264,11 +276,16 @@ router.post('/compose/local', urlencodedParser, async (req, res) => {
 	}
 
 	// Validate required fields
+	var fromUser = validateFromUser(currentuser, req.body.from_user);
 	var toUsername = (req.body.to_user || '').trim();
 	var subject = (req.body.subject || '').trim();
 	var bodyText = (req.body.body_text || '').trim();
 	var errors = [];
 
+	if (!fromUser) {
+		fromUser = currentuser.username; // fallback to username if tampered
+		errors.push('Invalid sender identity');
+	}
 	if (!toUsername) errors.push('Recipient is required');
 	if (!subject) errors.push('Subject is required');
 	if (!bodyText) errors.push('Message body cannot be empty');
@@ -291,7 +308,7 @@ router.post('/compose/local', urlencodedParser, async (req, res) => {
 
 	var messageObj = {
 		user_id: userId,
-		from_user: currentuser.username,
+		from_user: fromUser,
 		to_user: resolution.username,
 		from_address: currentuser.username,
 		to_address: resolution.username,
@@ -313,7 +330,7 @@ router.post('/compose/local', urlencodedParser, async (req, res) => {
 	}
 
 	await flash.setOne(req, 'success', 'Message sent to ' + resolution.username);
-	res.redirect('/pm/sent');
+	res.redirect('/pm/inbox');
 });
 
 // POST /pm/compose/network — send a network message (FTN, QWK, etc.)
@@ -334,12 +351,17 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 	}
 
 	// Validate required fields
+	var fromUser = validateFromUser(currentuser, req.body.from_user);
 	var toUser = (req.body.to_user || '').trim();
 	var toAddress = (req.body.to_address || '').trim();
 	var subject = (req.body.subject || '').trim();
 	var bodyText = (req.body.body_text || '').trim();
 	var errors = [];
 
+	if (!fromUser) {
+		fromUser = currentuser.username;
+		errors.push('Invalid sender identity');
+	}
 	if (!transportType) errors.push('Transport type is required');
 	if (!toUser) errors.push('Recipient name is required');
 	if (!toAddress) errors.push('Destination address is required');
@@ -361,7 +383,7 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 
 	var messageObj = {
 		user_id: userId,
-		from_user: currentuser.username,
+		from_user: fromUser,
 		to_user: toUser,
 		from_address: (req.body.from_address || '').trim(),
 		to_address: toAddress,
@@ -401,7 +423,7 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 	}
 
 	await flash.setOne(req, 'success', transportType + ' message queued for ' + toUser + ' at ' + toAddress);
-	res.redirect('/pm/sent');
+	res.redirect('/pm/inbox');
 });
 
 // POST /pm/reply/:uuid — reply to an inbox message
@@ -499,7 +521,75 @@ router.post('/reply/:uuid', urlencodedParser, async (req, res) => {
 	}
 
 	await flash.setOne(req, 'success', 'Reply sent to ' + original.from_user);
-	res.redirect('/pm/sent');
+	res.redirect('/pm/inbox');
+});
+
+// -------------------------------------------------------
+// AJAX JSON Endpoints
+// -------------------------------------------------------
+
+// GET /pm/inbox/:uuid/json — load a single inbox message as JSON (for modal reader)
+router.get('/inbox/:uuid/json', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.status(401).json({ error: 'Not authenticated' });
+
+	hydrateSessionFlags(currentuser);
+	var userId = await resolveUserId(currentuser);
+	var message = await privateMessages.getMessage(userId, req.params.uuid);
+
+	if (!message) {
+		return res.status(404).json({ error: 'Message not found' });
+	}
+
+	// Determine reply permission
+	var canReply = false;
+	var transportType = message.transport_type || 'LOCAL';
+	var accessCheck = privateMessages.checkTransportAccess(currentuser, transportType);
+	canReply = accessCheck.allowed;
+
+	res.json({
+		uuid: message.uuid,
+		from_user: message.from_user,
+		to_user: message.to_user,
+		from_address: message.from_address || '',
+		to_address: message.to_address || '',
+		subject: message.subject || '',
+		body_html: message.body_html || '',
+		body_text: message.body_text || '',
+		transport_type: message.transport_type,
+		system_time: message.system_time,
+		read: message.read,
+		canReply: canReply
+	});
+});
+
+// GET /pm/sent/:uuid/json — load a single sent message as JSON (for modal reader)
+router.get('/sent/:uuid/json', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.status(401).json({ error: 'Not authenticated' });
+
+	var userId = await resolveUserId(currentuser);
+	var message = await privateMessages.getSentMessage(userId, req.params.uuid);
+
+	if (!message) {
+		return res.status(404).json({ error: 'Message not found' });
+	}
+
+	res.json({
+		uuid: message.uuid,
+		from_user: message.from_user,
+		to_user: message.to_user,
+		from_address: message.from_address || '',
+		to_address: message.to_address || '',
+		subject: message.subject || '',
+		body_html: message.body_html || '',
+		body_text: message.body_text || '',
+		transport_type: message.transport_type,
+		system_time: message.system_time,
+		sent: message.sent,
+		sent_at: message.sent_at,
+		send_error: message.send_error
+	});
 });
 
 // -------------------------------------------------------
@@ -553,18 +643,20 @@ router.post('/sent/:uuid/delete', async (req, res) => {
 	var userId = await resolveUserId(currentuser);
 	await privateMessages.deleteSentMessage(userId, req.params.uuid);
 
-	res.redirect('/pm/sent');
+	res.redirect('/pm/inbox');
 });
 
-// POST /pm/trash/:uuid/restore — restore from trash
+// POST /pm/trash/:uuid/restore — restore from trash (tries both inbox and outbox)
 router.post('/trash/:uuid/restore', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 
 	var userId = await resolveUserId(currentuser);
+	// Try both tables — one will be a no-op
 	await privateMessages.restoreMessage(userId, req.params.uuid);
+	await privateMessages.restoreSentMessage(userId, req.params.uuid);
 
-	res.redirect('/pm/trash');
+	res.redirect('/pm/inbox');
 });
 
 // -------------------------------------------------------

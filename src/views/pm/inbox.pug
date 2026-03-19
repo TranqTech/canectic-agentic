@@ -1,96 +1,295 @@
 extends ../layouts/user
 
 block content
-  .container-fluid.main-wrapper
-    if !currentuser
-      - loginMode = 'guard'
-      - loginRedirect = currentPath
-      include ../partials/users/login.pug
-    else
-      .row.mt-2
-        .col-xl-8.offset-xl-2.col-lg-10.offset-lg-1.col-12
-          include ../partials/flash
-          .card
-            .card-header.bg-darkblue.text-white
-              .row.align-items-center
-                .col-6
-                  h5.mb-0
-                    i.bi.bi-envelope
-                    |  Inbox
-                    if unreadCount && unreadCount > 0
-                      span.badge.bg-info.ms-2= unreadCount
-                .col-6
-                  .d-flex.justify-content-end.flex-wrap.gap-1
-                    if allowedTransports && allowedTransports.includes('LOCAL')
-                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#composeLocalModal')
-                        i.bi.bi-pencil-square
-                        |  Local Message
-                    if allowedTransports && (allowedTransports.includes('FTN') || allowedTransports.includes('QWK') || allowedTransports.includes('EMAIL'))
-                      button.btn.btn-sm.btn-info(data-bs-toggle='modal' data-bs-target='#composeNetworkModal')
-                        i.bi.bi-globe
-                        |  Network Message
-                    form.d-inline(action='/pm/inbox/markallread' method='POST')
-                      button.btn.btn-sm.btn-outline-warning(type='submit' title='Mark all as read')
-                        i.bi.bi-check2-all
-            .card-body.py-1.bg-dark.border-bottom.border-secondary
-              .d-flex.gap-2
-                a.btn.btn-sm(href='/pm/inbox' class=(!unreadOnly ? 'btn-info' : 'btn-outline-info')) All
-                a.btn.btn-sm(href='/pm/inbox?unread=true' class=(unreadOnly ? 'btn-info' : 'btn-outline-info')) Unread
-                .ms-auto
-                  a.btn.btn-sm.btn-outline-secondary(href='/pm/sent')
-                    i.bi.bi-send
-                    |  Sent
-                  a.btn.btn-sm.btn-outline-secondary.ms-1(href='/pm/trash')
-                    i.bi.bi-trash
-                    |  Trash
+  style.
+    html, body { overflow: hidden; height: 100vh; margin: 0; }
+    .pm-outer { display: flex; flex-direction: column; height: calc(100vh - 56px); }
+    .pm-flash-area { flex-shrink: 0; }
+    .pm-layout { display: flex; flex-grow: 1; min-height: 0; }
+    .pm-sidebar {
+      width: 180px; flex-shrink: 0; overflow-y: auto;
+      border-right: 1px solid rgba(255,255,255,0.1);
+    }
+    .pm-main { flex-grow: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .pm-list { flex: 0 0 40%; overflow: hidden; border-bottom: 2px solid rgba(255,255,255,0.15); display: flex; flex-direction: column; }
+    .pm-list > div { flex-grow: 1; display: flex; flex-direction: column; min-height: 0; }
+    .pm-list > div.pm-hidden { display: none !important; }
+    .pm-reader { flex: 1 1 60%; overflow: hidden; display: flex; flex-direction: column; min-height: 0; position: relative; }
+    .pm-reader-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    .pm-reader-content { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
+    .pm-reader-header { flex-shrink: 0; }
+    .pm-reader-body { flex-grow: 1; overflow-y: auto; min-height: 0; }
+    .pm-reader-body .messagebody::after { content: ''; display: block; height: 4rem; }
+    .pm-hidden { display: none !important; }
+    .pm-msg-row { cursor: pointer; transition: background 0.1s; }
+    .pm-msg-row:hover { background: rgba(255,255,255,0.06) !important; }
+    .pm-msg-row.active { background: rgba(13,110,253,0.2) !important; border-left: 3px solid #0d6efd; }
+    .pm-msg-row.unread td { font-weight: bold; }
+    .pm-folder-btn { text-align: left; border: none; border-radius: 0; }
+    .pm-folder-btn.active { background: rgba(13,110,253,0.25) !important; border-left: 3px solid #0d6efd; }
+    /* DataTables overrides for dark theme */
+    .pm-list .dataTables_wrapper { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
+    .pm-list .dataTables_scroll { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
+    .pm-list .dataTables_filter { flex-shrink: 0; padding: 6px 10px; background: #1a1a2e; }
+    .pm-list .dataTables_filter input { background: #000; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 2px 8px; font-size: 13px; }
+    .pm-list .dataTables_scrollHead { flex-shrink: 0; }
+    .pm-list .dataTables_scrollBody { flex-grow: 1; overflow-y: auto !important; max-height: none !important; }
+    .pm-list table.dataTable { margin: 0 !important; }
+    .pm-list table.dataTable thead th { background: #1a1a2e; border-bottom: 1px solid #333; font-size: 12px; padding: 4px 8px; }
+    .pm-list table.dataTable tbody td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; vertical-align: middle; }
+    .pm-list table.dataTable tbody tr { background: transparent; }
+    .pm-list table.dataTable tbody tr:hover { background: rgba(255,255,255,0.06); }
+    .pm-list .dataTables_info, .pm-list .dataTables_paginate { display: none; }
+    .pm-list .dataTables_empty { color: #666; text-align: center; padding: 20px; }
+    @media (max-width: 991px) {
+      .pm-layout { flex-direction: column; }
+      .pm-sidebar {
+        width: 100%; flex-shrink: 0; border-right: none;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        overflow-y: visible;
+      }
+      .pm-sidebar .d-grid { display: flex !important; flex-wrap: wrap; gap: 0 !important; }
+      .pm-sidebar .pm-folder-btn { flex: 1; text-align: center; border-radius: 0; }
+      .pm-sidebar .pm-sidebar-actions { display: none; }
+      .pm-list { flex: 0 0 35%; }
+    }
 
-            .card-body.p-0.bg-black
-              if messages && messages.length > 0
-                table.table.table-hover.mb-0(style='table-layout: fixed;')
-                  thead.bg-dark
+  .container-fluid.p-0
+    if !currentuser
+      .container.mt-3
+        - loginMode = 'guard'
+        - loginRedirect = currentPath
+        include ../partials/users/login.pug
+    else
+      .pm-outer
+        .pm-flash-area.px-3.pt-2
+          include ../partials/flash
+
+        .pm-layout
+          //- Folder sidebar
+          .pm-sidebar.bg-dark
+            .d-grid.gap-0
+              button.btn.btn-dark.pm-folder-btn.py-2.active(
+                data-folder='inbox' type='button'
+              )
+                i.bi.bi-inbox.me-2
+                | Inbox
+                if unreadCount && unreadCount > 0
+                  span.badge.bg-info.float-end= unreadCount
+              button.btn.btn-dark.pm-folder-btn.py-2(
+                data-folder='sent' type='button'
+              )
+                i.bi.bi-send.me-2
+                | Sent
+              button.btn.btn-dark.pm-folder-btn.py-2(
+                data-folder='trash' type='button'
+              )
+                i.bi.bi-trash.me-2
+                | Trash
+
+            .pm-sidebar-actions.p-2
+              hr.border-secondary.my-2
+              .d-grid.gap-1
+                if allowedTransports && allowedTransports.includes('LOCAL')
+                  button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#composeLocalModal')
+                    i.bi.bi-pencil-square
+                    |  Local Message
+                if allowedTransports && (allowedTransports.includes('FTN') || allowedTransports.includes('QWK') || allowedTransports.includes('EMAIL'))
+                  button.btn.btn-sm.btn-info(data-bs-toggle='modal' data-bs-target='#composeNetworkModal')
+                    i.bi.bi-globe
+                    |  Network Message
+              hr.border-secondary.my-2
+              .d-grid.gap-1
+                form(action='/pm/inbox/markallread' method='POST')
+                  button.btn.btn-sm.btn-outline-warning.w-100(type='submit')
+                    i.bi.bi-check2-all
+                    |  Mark All Read
+
+          //- Main area
+          .pm-main.bg-black
+            //- Message list
+            .pm-list
+              //- Inbox table
+              #folder-inbox
+                table#inboxTable.table.table-dark.table-sm.mb-0(style='width:100%;')
+                  thead
                     tr
-                      th(scope='col' style='width: 5%')
-                      th(scope='col' style='width: 20%') From
-                      th(scope='col' style='width: 35%') Subject
-                      th(scope='col' style='width: 12%') Transport
-                      th(scope='col' style='width: 18%') Date
-                      th(scope='col' style='width: 10%')
+                      th(style='width:24px;')
+                      th From
+                      th Subject
+                      th(style='width:100px;') Date
                   tbody
-                    for msg of messages
-                      tr.clickable-row(
-                        data-href=`/pm/inbox/${msg.uuid}`
-                        style='cursor: pointer;'
-                        class=(msg.read ? '' : 'fw-bold')
-                      )
-                        td.text-center
-                          if !msg.read
-                            i.bi.bi-circle-fill.text-info(style='font-size: 8px;')
-                        td.text-truncate
-                          span.fg-yellow= msg.from_user
-                          if msg.from_address && msg.from_address !== msg.from_user
-                            br
-                            span.fg-cyan.small= msg.from_address
-                        td.text-truncate
-                          span= msg.subject || '(no subject)'
-                        td
-                          span.badge(class=(msg.transport_type === 'LOCAL' ? 'bg-secondary' : 'bg-info'))= msg.transport_type
-                        td.small
-                          if msg.system_time
-                            - var mdate = Date.parse(msg.system_time)
-                            - var md = DateTime.fromMillis(mdate)
-                            span.fg-yellow= md.toFormat('MMM dd, yyyy HH:mm')
-                        td.text-end
-                          form.d-inline(action=`/pm/inbox/${msg.uuid}/delete` method='POST')
-                            button.btn.btn-xs.btn-outline-danger(type='submit' title='Delete' onclick='event.stopPropagation()')
-                              i.bi.bi-trash
-              else
-                .text-center.py-4
-                  .text-muted
-                    i.bi.bi-mailbox2
-                    |  No messages
+                    if messages && messages.length > 0
+                      for msg in messages
+                        tr.pm-msg-row(
+                          data-uuid=msg.uuid
+                          data-type='inbox'
+                          class=(msg.read ? '' : 'unread')
+                        )
+                          td.text-center
+                            if !msg.read
+                              i.bi.bi-circle-fill.text-info(style='font-size: 7px;')
+                          td.text-truncate(style='max-width:0;')
+                            span.fg-yellow= msg.from_user
+                            if msg.from_address && msg.from_address !== msg.from_user
+                              span.fg-cyan.small.ms-1 (#{msg.from_address})
+                          td.text-truncate(style='max-width:0;')= msg.subject || '(no subject)'
+                          td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;')
+                            if msg.system_time
+                              - var mdate = Date.parse(msg.system_time)
+                              - var md = DateTime.fromMillis(mdate)
+                              = md.toFormat('MMM dd HH:mm')
+
+              //- Sent table (hidden)
+              #folder-sent.pm-hidden
+                table#sentTable.table.table-dark.table-sm.mb-0(style='width:100%;')
+                  thead
+                    tr
+                      th(style='width:24px;')
+                      th To
+                      th Subject
+                      th(style='width:100px;') Date
+                  tbody
+                    if sentMessages && sentMessages.length > 0
+                      for msg in sentMessages
+                        tr.pm-msg-row(
+                          data-uuid=msg.uuid
+                          data-type='sent'
+                        )
+                          td.text-center
+                            if msg.sent
+                              i.bi.bi-check-lg.text-success(style='font-size: 11px;')
+                            else if msg.send_error
+                              i.bi.bi-exclamation-circle.text-danger(style='font-size: 11px;')
+                            else
+                              i.bi.bi-clock.text-warning(style='font-size: 11px;')
+                          td.text-truncate(style='max-width:0;')
+                            span.fg-green= msg.to_user
+                            if msg.to_address && msg.to_address !== msg.to_user
+                              span.fg-cyan.small.ms-1 (#{msg.to_address})
+                          td.text-truncate(style='max-width:0;')= msg.subject || '(no subject)'
+                          td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;')
+                            if msg.system_time
+                              - var mdate = Date.parse(msg.system_time)
+                              - var md = DateTime.fromMillis(mdate)
+                              = md.toFormat('MMM dd HH:mm')
+
+              //- Trash table (hidden)
+              #folder-trash.pm-hidden
+                table#trashTable.table.table-dark.table-sm.mb-0(style='width:100%;')
+                  thead
+                    tr
+                      th(style='width:50px;') Type
+                      th From/To
+                      th Subject
+                      th(style='width:100px;') Deleted
+                  tbody
+                    if trashMessages && trashMessages.length > 0
+                      for msg in trashMessages
+                        tr.pm-msg-row(
+                          data-uuid=msg.uuid
+                          data-type=msg.source
+                          data-folder='trash'
+                        )
+                          td
+                            if msg.source === 'sent'
+                              span.badge.bg-secondary(style='font-size:10px;') Sent
+                            else
+                              span.badge.bg-info(style='font-size:10px;') Inbox
+                          td.text-truncate(style='max-width:0;')
+                            if msg.source === 'sent'
+                              span.text-muted To: 
+                              span.fg-green= msg.to_user
+                            else
+                              span.text-muted From: 
+                              span.fg-yellow= msg.from_user
+                          td.text-truncate(style='max-width:0;')= msg.subject || '(no subject)'
+                          td.small.text-muted(style='white-space:nowrap;')
+                            if msg.deleted_at
+                              - var ddate = Date.parse(msg.deleted_at)
+                              - var dd = DateTime.fromMillis(ddate)
+                              = dd.toFormat('MMM dd')
+
+            //- Reader pane
+            .pm-reader
+              #readerEmpty.pm-reader-empty.text-muted
+                div.text-center
+                  i.bi.bi-envelope-open(style='font-size: 2rem; opacity: 0.3;')
+                  .small.mt-2 Select a message to read
+
+              #readerContent.pm-reader-content.pm-hidden
+                .pm-reader-header.px-3.py-2.bg-dark.border-bottom.border-secondary
+                  .d-flex.justify-content-between.align-items-start
+                    div.min-width-0
+                      .fw-bold.fg-cyan.text-truncate#readerSubject
+                      .small
+                        span.text-muted From: 
+                        span#readerFrom.fg-yellow
+                        span.text-muted.ms-3 To: 
+                        span#readerTo.fg-green
+                    .flex-shrink-0.ms-3.text-end
+                      .d-flex.gap-1.justify-content-end
+                        button.btn.btn-sm.btn-primary#readerReplyBtn(type='button' style='display:none;')
+                          i.bi.bi-reply
+                          |  Reply
+                        button.btn.btn-sm.btn-outline-success#readerRestoreBtn(type='button' style='display:none;')
+                          i.bi.bi-arrow-counterclockwise
+                          |  Restore
+                        button.btn.btn-sm.btn-outline-danger#readerDeleteBtn(type='button' style='display:none;')
+                          i.bi.bi-trash
+                      .small.mt-1
+                        span#readerDate.fg-yellow
+                        span.ms-2#readerTransport
+
+                .pm-reader-body.px-3.py-2
+                  .messagebody.monospace.fg-brightgrey#readerBodyContent
+
+    //- Reply Modal with Quote System
+    if currentuser
+      #replyModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered(style='max-width: 760px;')
+          .modal-content
+            .modal-header.bg-darkblue.text-white.d-flex.align-items-center
+              button.me-2(
+                data-bs-dismiss='modal'
+                style='width: 24px; height: 24px; background: #c0c0c0; border: 2px outset #fff; color: #000; font-weight: bold; font-size: 14px; line-height: 1; padding: 0; cursor: pointer; font-family: monospace;'
+              ) ×
+              h4.modal-title.mb-0
+                i.bi.bi-reply
+                |  Reply
+            .modal-body.bg-dark
+              form#replyForm(action='/pm/reply/' method='POST')
+                .px-3
+                  label.text-white(for='r_to') To:
+                  input#r_to.form-control.bg-black.fg-green(
+                    type='text' name='to_user' tabindex='1' readonly
+                  )
+                  br
+                  label.text-white(for='r_subject') Subject:
+                  input#r_subject.form-control.bg-black.fg-yellow(
+                    type='text' name='subject' tabindex='2' required
+                  )
+                  hr.border-secondary
+                  #quotePanel.bg-black.rounded.border.border-secondary.p-2(style='display:none;')
+                    div(style='max-height: 250px; overflow-y: auto;')
+                      .fg-cyan.small.px-2.py-1 Click a line to quote it
+                      #quoteLines.monospace(style='font-size: 12px; padding: 4px;')
+                  .text-end
+                    button.btn.btn-sm.btn-outline-info#quoteToggleBtn(type='button')
+                      i.bi.bi-quote
+                      |  Quote Original
+                  label.text-white(for='r_body') Message:
+                  textarea#r_body.form-control.bg-black.fg-brightgrey.monospace(
+                    name='body_text' rows='12' tabindex='3' required
+                    style='width: 100%; font-size: 12px;'
+                  )
+                  br
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Send Reply' tabindex='4')
 
     //- Compose Local Modal
     if currentuser && allowedTransports && allowedTransports.includes('LOCAL')
+      - var hasRealname = currentuser.fullname && currentuser.fullname.trim() && currentuser.fullname.trim() !== currentuser.username
       #composeLocalModal.modal.fade(tabindex='-1' aria-hidden='true')
         .modal-dialog.modal-dialog-centered(style='max-width: 680px;')
           .modal-content
@@ -105,28 +304,35 @@ block content
             .modal-body.bg-dark
               form(action='/pm/compose/local' method='POST')
                 .px-3
+                  label.text-white(for='local_from') From:
+                  select#local_from.form-control.bg-black.fg-cyan(name='from_user' tabindex='1')
+                    option(value=currentuser.username selected)= currentuser.username
+                    if hasRealname
+                      option(value=currentuser.fullname)= currentuser.fullname + ' (real name)'
+                  br
                   label.text-white(for='local_to') To:
                   input#local_to.form-control.bg-black.fg-green(
-                    type='text' name='to_user' tabindex='1' required
+                    type='text' name='to_user' tabindex='2' required
                     placeholder='Username'
                   )
                   br
                   label.text-white(for='local_subject') Subject:
                   input#local_subject.form-control.bg-black.fg-yellow(
-                    type='text' name='subject' tabindex='2' required
+                    type='text' name='subject' tabindex='3' required
                   )
                   br
                   label.text-white(for='local_body') Message:
                   textarea#local_body.form-control.bg-black.fg-brightgrey.monospace(
-                    name='body_text' rows='12' tabindex='3' required
+                    name='body_text' rows='12' tabindex='4' required
                     style='width: 100%; font-size: 12px;'
                   )
                   br
                   .text-end
-                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='4')
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='5')
 
     //- Compose Network Modal
     if currentuser && allowedTransports && (allowedTransports.includes('FTN') || allowedTransports.includes('QWK') || allowedTransports.includes('EMAIL'))
+      - var hasRealname = currentuser.fullname && currentuser.fullname.trim() && currentuser.fullname.trim() !== currentuser.username
       #composeNetworkModal.modal.fade(tabindex='-1' aria-hidden='true')
         .modal-dialog.modal-dialog-centered(style='max-width: 680px;')
           .modal-content
@@ -141,8 +347,14 @@ block content
             .modal-body.bg-dark
               form(action='/pm/compose/network' method='POST')
                 .px-3
+                  label.text-white(for='net_from') From:
+                  select#net_from.form-control.bg-black.fg-cyan(name='from_user' tabindex='1')
+                    option(value=currentuser.username selected)= currentuser.username
+                    if hasRealname
+                      option(value=currentuser.fullname)= currentuser.fullname + ' (real name)'
+                  br
                   label.text-white(for='net_transport') Transport:
-                  select#net_transport.form-control.bg-black.fg-cyan(name='transport_type' tabindex='1')
+                  select#net_transport.form-control.bg-black.fg-cyan(name='transport_type' tabindex='2')
                     if allowedTransports.includes('FTN')
                       option(value='FTN') FTN Netmail
                     if allowedTransports.includes('QWK')
@@ -152,36 +364,352 @@ block content
                   br
                   label.text-white(for='net_to_user') To (name):
                   input#net_to_user.form-control.bg-black.fg-green(
-                    type='text' name='to_user' tabindex='2' required
+                    type='text' name='to_user' tabindex='3' required
                     placeholder='Recipient display name'
                   )
                   br
                   label.text-white(for='net_to_address') Destination Address:
                   input#net_to_address.form-control.bg-black.fg-cyan(
-                    type='text' name='to_address' tabindex='3' required
+                    type='text' name='to_address' tabindex='4' required
                     placeholder='e.g. 1:123/456'
                   )
                   br
                   label.text-white(for='net_subject') Subject:
                   input#net_subject.form-control.bg-black.fg-yellow(
-                    type='text' name='subject' tabindex='4' required
+                    type='text' name='subject' tabindex='5' required
                   )
                   br
                   label.text-white(for='net_body') Message:
                   textarea#net_body.form-control.bg-black.fg-brightgrey.monospace(
-                    name='body_text' rows='12' tabindex='5' required
+                    name='body_text' rows='12' tabindex='6' required
                     style='width: 100%; font-size: 12px;'
                   )
                   br
                   .text-end
-                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='6')
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='7')
 
   script.
     document.addEventListener('DOMContentLoaded', function() {
-      document.querySelectorAll('.clickable-row').forEach(function(row) {
-        row.addEventListener('click', function() {
-          var href = this.getAttribute('data-href');
-          if (href) window.location.href = href;
+      // --- DataTables init ---
+      var dtConfig = {
+        paging: false,
+        info: false,
+        autoWidth: false,
+        scrollY: '1px',
+        scrollCollapse: false,
+        dom: 'ft',
+        language: { search: '', searchPlaceholder: 'Search messages...' },
+        order: [[3, 'desc']]
+      };
+
+      var inboxDT = $('#inboxTable').DataTable(Object.assign({}, dtConfig, {
+        columnDefs: [
+          { orderable: false, targets: 0, width: '24px' }
+        ]
+      }));
+
+      var sentDT = $('#sentTable').DataTable(Object.assign({}, dtConfig, {
+        columnDefs: [
+          { orderable: false, targets: 0, width: '24px' }
+        ]
+      }));
+
+      var trashDT = $('#trashTable').DataTable(Object.assign({}, dtConfig, {
+        order: [[3, 'desc']],
+        columnDefs: [
+          { orderable: false, targets: 0, width: '50px' }
+        ]
+      }));
+
+      var dtMap = { inbox: inboxDT, sent: sentDT, trash: trashDT };
+
+      // --- Folder switching ---
+      var folderBtns = document.querySelectorAll('.pm-folder-btn');
+      var folders = {
+        inbox: document.getElementById('folder-inbox'),
+        sent: document.getElementById('folder-sent'),
+        trash: document.getElementById('folder-trash')
+      };
+      var activeFolder = 'inbox';
+
+      folderBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var folder = this.dataset.folder;
+          if (folder === activeFolder) return;
+          folderBtns.forEach(function(b) { b.classList.remove('active'); });
+          this.classList.add('active');
+          for (var key in folders) {
+            if (folders[key]) {
+              if (key === folder) {
+                folders[key].classList.remove('pm-hidden');
+              } else {
+                folders[key].classList.add('pm-hidden');
+              }
+            }
+          }
+          activeFolder = folder;
+          // Adjust DataTable columns for newly visible table
+          if (dtMap[folder]) {
+            dtMap[folder].columns.adjust().draw();
+          }
+          clearReader();
+          document.querySelectorAll('.pm-msg-row.active').forEach(function(r) {
+            r.classList.remove('active');
+          });
         });
+      });
+
+      // --- Reader pane ---
+      var readerEmpty       = document.getElementById('readerEmpty');
+      var readerContent     = document.getElementById('readerContent');
+      var readerSubject     = document.getElementById('readerSubject');
+      var readerFrom        = document.getElementById('readerFrom');
+      var readerTo          = document.getElementById('readerTo');
+      var readerDate        = document.getElementById('readerDate');
+      var readerTransport   = document.getElementById('readerTransport');
+      var readerBodyContent = document.getElementById('readerBodyContent');
+      var readerReplyBtn    = document.getElementById('readerReplyBtn');
+      var readerDeleteBtn   = document.getElementById('readerDeleteBtn');
+      var readerRestoreBtn  = document.getElementById('readerRestoreBtn');
+
+      var replyModalEl   = document.getElementById('replyModal');
+      var replyModal     = replyModalEl ? new bootstrap.Modal(replyModalEl) : null;
+      var replyForm      = document.getElementById('replyForm');
+      var quoteToggleBtn = document.getElementById('quoteToggleBtn');
+      var quotePanel     = document.getElementById('quotePanel');
+      var quoteLinesEl   = document.getElementById('quoteLines');
+      var replyTextarea  = document.getElementById('r_body');
+
+      var currentMessageUuid = '';
+      var currentMessageType = '';
+      var currentIsTrash     = false;
+      var currentQuoteText   = '';
+      var currentQuoteLines  = [];
+
+      function clearReader() {
+        readerEmpty.classList.remove('pm-hidden');
+        readerContent.classList.add('pm-hidden');
+        readerReplyBtn.style.display = 'none';
+        readerDeleteBtn.style.display = 'none';
+        readerRestoreBtn.style.display = 'none';
+        currentMessageUuid = '';
+        currentMessageType = '';
+        currentIsTrash = false;
+      }
+
+      function formatDate(isoStr) {
+        if (!isoStr) return '';
+        try {
+          var d = new Date(isoStr);
+          if (isNaN(d.getTime())) return isoStr;
+          var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          return months[d.getMonth()] + ' ' + String(d.getDate()).padStart(2,'0') + ', '
+            + d.getFullYear() + ' ' + String(d.getHours()).padStart(2,'0')
+            + ':' + String(d.getMinutes()).padStart(2,'0');
+        } catch(e) { return isoStr; }
+      }
+
+      function escapeHtml(text) {
+        var d = document.createElement('div');
+        d.appendChild(document.createTextNode(text));
+        return d.innerHTML;
+      }
+
+      // --- Click handler for message rows (delegated for DataTables redraws) ---
+      document.addEventListener('click', function(e) {
+        var row = e.target.closest('.pm-msg-row');
+        if (!row) return;
+        if (e.target.closest('button, form, a')) return;
+
+        document.querySelectorAll('.pm-msg-row.active').forEach(function(r) { r.classList.remove('active'); });
+        row.classList.add('active');
+
+        currentMessageUuid = row.dataset.uuid;
+        currentMessageType = row.dataset.type || 'inbox';
+        currentIsTrash = row.dataset.folder === 'trash';
+
+        readerEmpty.classList.add('pm-hidden');
+        readerContent.classList.remove('pm-hidden');
+        readerSubject.textContent = 'Loading...';
+        readerFrom.textContent = '';
+        readerTo.textContent = '';
+        readerDate.textContent = '';
+        readerTransport.innerHTML = '';
+        readerBodyContent.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-muted"></div></div>';
+        readerReplyBtn.style.display = 'none';
+        readerDeleteBtn.style.display = 'none';
+        readerRestoreBtn.style.display = 'none';
+
+        fetch('/pm/' + currentMessageType + '/' + currentMessageUuid + '/json')
+          .then(function(resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.json();
+          })
+          .then(function(msg) {
+            readerSubject.textContent = msg.subject || '(no subject)';
+            readerFrom.innerHTML = escapeHtml(msg.from_user || '');
+            if (msg.from_address && msg.from_address !== msg.from_user) {
+              readerFrom.innerHTML += ' <span class="fg-cyan">(' + escapeHtml(msg.from_address) + ')</span>';
+            }
+            readerTo.innerHTML = escapeHtml(msg.to_user || '');
+            if (msg.to_address && msg.to_address !== msg.to_user) {
+              readerTo.innerHTML += ' <span class="fg-cyan">(' + escapeHtml(msg.to_address) + ')</span>';
+            }
+            readerDate.textContent = formatDate(msg.system_time);
+            var tClass = msg.transport_type === 'LOCAL' ? 'bg-secondary' : 'bg-info';
+            readerTransport.innerHTML = '<span class="badge ' + tClass + '">' + escapeHtml(msg.transport_type || '') + '</span>';
+
+            if (msg.body_html && msg.body_html.trim()) {
+              readerBodyContent.innerHTML = msg.body_html;
+            } else if (msg.body_text && msg.body_text.trim()) {
+              var pre = document.createElement('pre');
+              pre.style.cssText = 'white-space: pre-wrap; margin: 0; font-family: inherit; font-size: inherit; color: inherit;';
+              pre.textContent = msg.body_text;
+              readerBodyContent.innerHTML = '';
+              readerBodyContent.appendChild(pre);
+            } else {
+              readerBodyContent.innerHTML = '<div class="text-muted">(empty message)</div>';
+            }
+
+            if (currentIsTrash) {
+              readerRestoreBtn.style.display = '';
+            } else {
+              readerDeleteBtn.style.display = '';
+              if (currentMessageType === 'inbox' && msg.canReply) {
+                readerReplyBtn.style.display = '';
+              }
+            }
+
+            if (currentMessageType === 'inbox' && !currentIsTrash) {
+              row.classList.remove('unread');
+              var dot = row.querySelector('.bi-circle-fill');
+              if (dot) dot.style.display = 'none';
+            }
+          })
+          .catch(function(err) {
+            readerBodyContent.innerHTML = '<div class="text-muted">Failed to load message</div>';
+          });
+      });
+
+      // --- Delete ---
+      readerDeleteBtn.addEventListener('click', function() {
+        if (!currentMessageUuid) return;
+        var path = currentMessageType === 'sent' ? '/pm/sent/' : '/pm/inbox/';
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = path + currentMessageUuid + '/delete';
+        document.body.appendChild(form);
+        form.submit();
+      });
+
+      // --- Restore from trash ---
+      readerRestoreBtn.addEventListener('click', function() {
+        if (!currentMessageUuid) return;
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/pm/trash/' + currentMessageUuid + '/restore';
+        document.body.appendChild(form);
+        form.submit();
+      });
+
+      // --- Reply ---
+      readerReplyBtn.addEventListener('click', function() {
+        if (!currentMessageUuid) return;
+        replyForm.action = '/pm/reply/' + currentMessageUuid;
+        document.getElementById('r_to').value = (readerFrom.textContent || '').split('(')[0].trim();
+        var subj = readerSubject.textContent || '';
+        if (subj && !subj.toUpperCase().startsWith('RE:')) subj = 'Re: ' + subj;
+        document.getElementById('r_subject').value = subj;
+        document.getElementById('r_body').value = '';
+        currentQuoteText = getPlainText(readerBodyContent);
+        quotePanel.style.display = 'none';
+        quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
+        quoteLinesEl.innerHTML = '';
+        replyModal.show();
+      });
+
+      // --- Plain text extraction ---
+      function getPlainText(el) {
+        var clone = el.cloneNode(true);
+        clone.querySelectorAll('br').forEach(function(br) { br.replaceWith('\n'); });
+        clone.querySelectorAll('div, p').forEach(function(block) {
+          block.insertAdjacentText('beforebegin', '\n');
+        });
+        return clone.textContent || '';
+      }
+
+      // --- Quote system ---
+      function wrapTextLines(text, maxLen) {
+        if (!text) return [];
+        var clean = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+        clean = clean.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        var rawLines = clean.split(/\r\n|\r|\n/);
+        var result = [];
+        for (var i = 0; i < rawLines.length; i++) {
+          var line = rawLines[i];
+          while (line.length > maxLen) {
+            if (line.length <= maxLen + 5) { result.push(line.substring(0, maxLen)); line = ''; }
+            else {
+              var breakAt = line.lastIndexOf(' ', maxLen);
+              if (breakAt <= 0) breakAt = maxLen;
+              result.push(line.substring(0, breakAt));
+              line = line.substring(breakAt).replace(/^ /, '');
+            }
+          }
+          if (line.length > 0 || rawLines[i].length === 0) result.push(line);
+        }
+        return result;
+      }
+
+      function insertQuotedLines(indices) {
+        var quoted = [];
+        for (var i = 0; i < indices.length; i++) {
+          var idx = indices[i];
+          if (idx >= 0 && idx < currentQuoteLines.length) {
+            var qline = '  > ' + currentQuoteLines[idx];
+            if (qline.length > 80) qline = qline.substring(0, 80);
+            quoted.push(qline);
+          }
+        }
+        if (quoted.length === 0) return;
+        var insertText = quoted.join('\n') + '\n';
+        var pos = replyTextarea.selectionStart || 0;
+        var before = replyTextarea.value.substring(0, pos);
+        var after  = replyTextarea.value.substring(pos);
+        replyTextarea.value = before + insertText + after;
+        var newPos = pos + insertText.length;
+        replyTextarea.selectionStart = newPos;
+        replyTextarea.selectionEnd   = newPos;
+      }
+
+      function populateQuotePanel(text) {
+        quoteLinesEl.innerHTML = '';
+        currentQuoteLines = wrapTextLines(text, 80);
+        if (currentQuoteLines.length === 0) return;
+        for (var i = 0; i < currentQuoteLines.length; i++) {
+          var div = document.createElement('div');
+          div.className = 'quote-line fg-brightgrey';
+          div.dataset.line = i;
+          div.style.cssText = 'display: block; cursor: pointer; padding: 1px 4px; white-space: pre; user-select: none;';
+          var num = String(i + 1).padStart(3, ' ');
+          div.innerHTML = '<span class="fg-yellow" style="opacity:0.5">' + num + '</span> ' + escapeHtml(currentQuoteLines[i]);
+          div.addEventListener('click', function() {
+            this.classList.add('inserted');
+            this.style.opacity = '0.4';
+            insertQuotedLines([parseInt(this.dataset.line)]);
+          });
+          quoteLinesEl.appendChild(div);
+        }
+      }
+
+      quoteToggleBtn.addEventListener('click', function() {
+        if (quotePanel.style.display === 'none') {
+          populateQuotePanel(currentQuoteText);
+          quotePanel.style.display = 'block';
+          quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Finished Quoting';
+        } else {
+          quotePanel.style.display = 'none';
+          quoteToggleBtn.innerHTML = '<i class="bi bi-quote"></i> Quote Original';
+        }
       });
     });

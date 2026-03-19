@@ -24,13 +24,19 @@ class PairedTransport extends EventEmitter {
 		this._name = name;
 		this._connected = true;
 		this._peer = null;
+		this._paused = false;
+		this._pauseBuffer = [];
 	}
 	setPeer(peer) { this._peer = peer; }
 	write(buffer) {
 		if (this._peer && this._peer._connected) {
 			// Async delivery to simulate real network
 			setImmediate(() => {
-				this._peer.emit('data', Buffer.from(buffer));
+				if (this._peer._paused) {
+					this._peer._pauseBuffer.push(Buffer.from(buffer));
+				} else {
+					this._peer.emit('data', Buffer.from(buffer));
+				}
 			});
 		}
 	}
@@ -41,6 +47,14 @@ class PairedTransport extends EventEmitter {
 	destroy() {
 		this._connected = false;
 		setImmediate(() => this.emit('close'));
+	}
+	pause() { this._paused = true; }
+	resume() {
+		this._paused = false;
+		// Flush buffered data
+		while (this._pauseBuffer.length > 0) {
+			this.emit('data', this._pauseBuffer.shift());
+		}
 	}
 	get remoteAddress() { return 'loopback:' + this._name; }
 	get isConnected() { return this._connected; }
@@ -84,12 +98,14 @@ async function testBasicHandshake() {
 	var sessionPassword = 'testpass';
 
 	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
 		localAddresses: ['1:100/100'],
 		sessionPassword: sessionPassword,
 		systemName: 'Caller BBS'
 	});
 
 	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
 		localAddresses: ['1:200/200'],
 		systemName: 'Answerer BBS'
 	});
@@ -146,12 +162,14 @@ async function testCramMD5Handshake() {
 	var sessionPassword = 'cramtest';
 
 	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
 		localAddresses: ['1:100/100'],
 		sessionPassword: sessionPassword,
 		systemName: 'CRAM Caller'
 	});
 
 	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
 		localAddresses: ['1:200/200'],
 		systemName: 'CRAM Answerer'
 	});
@@ -196,12 +214,14 @@ async function testBadPassword() {
 	var pair = createPair();
 
 	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
 		localAddresses: ['1:100/100'],
 		sessionPassword: 'wrongpass',
 		systemName: 'Bad Caller'
 	});
 
 	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
 		localAddresses: ['1:200/200'],
 		systemName: 'Strict Answerer'
 	});
@@ -262,6 +282,7 @@ async function testFileTransfer() {
 
 	// Caller protocol + transfer
 	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
 		localAddresses: ['1:100/100'],
 		sessionPassword: sessionPassword,
 		systemName: 'File Sender'
@@ -269,6 +290,7 @@ async function testFileTransfer() {
 
 	// Answerer protocol + transfer
 	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
 		localAddresses: ['1:200/200'],
 		systemName: 'File Receiver'
 	});
@@ -329,8 +351,8 @@ async function testFileTransfer() {
 	answererProto.startSession('answerer');
 	callerProto.startSession('caller');
 
-	// Wait for transfer to complete
-	await sleep(500);
+	// Wait for transfer to complete (async stream flush + pendingGOTs)
+	await sleep(1000);
 
 	assert(callerSent, 'Caller: sendComplete event fired');
 	assert(answererReceived !== null, 'Answerer: receiveComplete event fired');
@@ -364,12 +386,14 @@ async function testEmptySession() {
 	var pair = createPair();
 
 	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
 		localAddresses: ['1:100/100'],
 		sessionPassword: 'empty',
 		systemName: 'Empty Caller'
 	});
 
 	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
 		localAddresses: ['1:200/200'],
 		systemName: 'Empty Answerer'
 	});
@@ -404,6 +428,251 @@ async function testEmptySession() {
 }
 
 // -----------------------------------------------------------------------
+// Test 6: Double EOB protection
+// -----------------------------------------------------------------------
+
+async function testDoubleEOB() {
+	console.log('\n\x1b[1mTest 6: Double EOB protection\x1b[0m');
+
+	var pair = createPair();
+
+	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
+		localAddresses: ['1:100/100'],
+		sessionPassword: 'eob',
+		systemName: 'EOB Caller'
+	});
+
+	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
+		localAddresses: ['1:200/200'],
+		systemName: 'EOB Answerer'
+	});
+
+	callerProto.on('error', () => {});
+	answererProto.on('error', () => {});
+
+	answererProto.on('passwordReceived', (info) => {
+		answererProto.confirmAuth();
+	});
+
+	var sessionEndCount = 0;
+
+	callerProto.on('authenticated', () => {
+		// Send EOB twice — should only emit one
+		callerProto.sendEOB();
+		callerProto.sendEOB();
+	});
+
+	answererProto.on('authenticated', () => {
+		answererProto.sendEOB();
+	});
+
+	callerProto.on('sessionEnd', () => { sessionEndCount++; });
+
+	answererProto.startSession('answerer');
+	callerProto.startSession('caller');
+
+	await sleep(200);
+
+	assert(sessionEndCount === 1, 'sessionEnd emitted exactly once (got ' + sessionEndCount + ')');
+	assert(callerProto.state === 'done', 'Caller state is done');
+}
+
+// -----------------------------------------------------------------------
+// Test 7: NR mode (offset -1) handling
+// -----------------------------------------------------------------------
+
+async function testNRMode() {
+	console.log('\n\x1b[1mTest 7: NR mode (offset -1) file receive\x1b[0m');
+
+	var pair = createPair();
+	var sessionPassword = 'nrtest';
+
+	// Temp dirs
+	var tmpBase = './tmp/mailer/loopback-nr-' + Date.now();
+	var inDir   = path.join(tmpBase, 'inbound');
+	var tmpDir  = path.join(tmpBase, 'tmp');
+	fs.mkdirSync(inDir, { recursive: true });
+	fs.mkdirSync(tmpDir, { recursive: true });
+
+	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
+		localAddresses: ['1:100/100'],
+		sessionPassword: sessionPassword,
+		systemName: 'NR Caller'
+	});
+
+	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
+		localAddresses: ['1:200/200'],
+		systemName: 'NR Answerer'
+	});
+
+	callerProto.on('error', () => {});
+	answererProto.on('error', () => {});
+
+	var receivedFile = null;
+	var getReceived = false;
+
+	answererProto.on('passwordReceived', (info) => {
+		var ok = false;
+		if (info.isCramMD5 && info.challenge) {
+			ok = verifyCramMD5(sessionPassword, info.challenge, info.password);
+		} else {
+			ok = (info.password === sessionPassword);
+		}
+		if (ok) {
+			answererProto.confirmAuth();
+		} else {
+			answererProto.sendERR('Bad password');
+		}
+	});
+
+	// Answerer receives files
+	answererProto.on('authenticated', () => {
+		var transfer = new TransferEngine(answererProto, {
+			inboundDir: inDir, tempDir: tmpDir, sessionId: 'nr-answerer'
+		});
+
+		transfer.on('receiveComplete', (info) => {
+			receivedFile = info;
+		});
+
+		// Answerer has no files to send
+		answererProto.sendEOB();
+	});
+
+	// Caller will manually send a file in NR mode (offset -1)
+	callerProto.on('authenticated', () => {
+		// Listen for M_GET from answerer
+		callerProto.on('fileRequested', (info) => {
+			getReceived = true;
+		});
+
+		// Offer file with offset -1 (NR mode)
+		callerProto.offerFile('nrtest.pkt', 20, Date.now(), -1);
+	});
+
+	// Listen for M_GET on the caller side — when answerer sends M_GET,
+	// we send the data. We hook _handleGET.
+	var origGET = callerProto._handleGET.bind(callerProto);
+	callerProto._handleGET = function(data) {
+		origGET(data);
+		getReceived = true;
+		// Now send the actual data + re-offer with real offset
+		callerProto.offerFile('nrtest.pkt', 20, Date.now(), 0);
+		callerProto.sendFileData(Buffer.alloc(20, 0x41));
+		callerProto.sendEOB();
+	};
+
+	answererProto.startSession('answerer');
+	callerProto.startSession('caller');
+
+	await sleep(1000);
+
+	assert(getReceived, 'Answerer sent M_GET in response to NR offer');
+	assert(receivedFile !== null, 'File received by answerer');
+	if (receivedFile) {
+		assert(receivedFile.name === 'nrtest.pkt', 'Received filename correct');
+		assert(receivedFile.size === 20, 'Received size correct');
+	}
+
+	fs.rmSync(tmpBase, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
+// Test 8: Path traversal rejection
+// -----------------------------------------------------------------------
+
+async function testPathTraversal() {
+	console.log('\n\x1b[1mTest 8: Path traversal filename sanitization\x1b[0m');
+
+	var tmpBase = './tmp/mailer/loopback-traversal-' + Date.now();
+	var inDir   = path.join(tmpBase, 'inbound');
+	var tmpDir  = path.join(tmpBase, 'tmp');
+	fs.mkdirSync(inDir, { recursive: true });
+	fs.mkdirSync(tmpDir, { recursive: true });
+
+	var pair = createPair();
+	var sessionPassword = 'traverse';
+
+	var callerProto = new BinkpProtocol(pair.caller, {
+		quiet: true,
+		localAddresses: ['1:100/100'],
+		sessionPassword: sessionPassword,
+		systemName: 'Traversal Caller'
+	});
+
+	var answererProto = new BinkpProtocol(pair.answerer, {
+		quiet: true,
+		localAddresses: ['1:200/200'],
+		systemName: 'Traversal Answerer'
+	});
+
+	callerProto.on('error', () => {});
+	answererProto.on('error', () => {});
+
+	var skippedFiles = [];
+	var offeredFiles = [];
+
+	answererProto.on('passwordReceived', (info) => {
+		var ok = false;
+		if (info.isCramMD5 && info.challenge) {
+			ok = verifyCramMD5(sessionPassword, info.challenge, info.password);
+		} else {
+			ok = (info.password === sessionPassword);
+		}
+		if (ok) answererProto.confirmAuth();
+	});
+
+	answererProto.on('authenticated', () => {
+		var transfer = new TransferEngine(answererProto, {
+			inboundDir: inDir, tempDir: tmpDir, sessionId: 'trav-test'
+		});
+
+		// Track which filenames the transfer engine actually sees
+		answererProto.on('fileOffered', (info) => {
+			offeredFiles.push(info.name);
+		});
+
+		answererProto.sendEOB();
+	});
+
+	// Track M_SKIP responses from answerer
+	callerProto.on('fileSkipped', (info) => {
+		skippedFiles.push(info.name);
+	});
+
+	callerProto.on('authenticated', () => {
+		// Offer files with dangerous names:
+		// ../../../etc/passwd → basename strips to "passwd" (safe, accepted)
+		// /tmp/evil.sh        → basename strips to "evil.sh" (safe, accepted)
+		// ..                  → rejected (bare ".." is dangerous)
+		// \x00\x01\x02        → rejected (empty after control char strip)
+		callerProto.offerFile('../../../etc/passwd', 10, Date.now(), 0);
+		callerProto.offerFile('/tmp/evil.sh', 10, Date.now(), 0);
+		callerProto.offerFile('..', 10, Date.now(), 0);
+		callerProto.offerFile('\x00\x01\x02', 10, Date.now(), 0);
+		callerProto.sendEOB();
+	});
+
+	answererProto.startSession('answerer');
+	callerProto.startSession('caller');
+
+	await sleep(500);
+
+	// Path components stripped — "passwd" and "evil.sh" are safe bare names
+	assert(offeredFiles.includes('passwd'), 'Directory-stripped "passwd" accepted');
+	assert(offeredFiles.includes('evil.sh'), 'Directory-stripped "evil.sh" accepted');
+
+	// Bare ".." and control-only names rejected
+	assert(skippedFiles.length === 2, 'Two dangerous filenames were skipped (got ' + skippedFiles.length + ')');
+
+	fs.rmSync(tmpBase, { recursive: true, force: true });
+}
+
+// -----------------------------------------------------------------------
 // Run all tests
 // -----------------------------------------------------------------------
 
@@ -415,6 +684,9 @@ async function main() {
 	await testBadPassword();
 	await testFileTransfer();
 	await testEmptySession();
+	await testDoubleEOB();
+	await testNRMode();
+	await testPathTraversal();
 
 	console.log('\n\x1b[1m' + '─'.repeat(40) + '\x1b[0m');
 	console.log('\x1b[1mResults: ' + passed + ' passed, ' + failed + ' failed\x1b[0m');

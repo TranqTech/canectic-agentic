@@ -233,10 +233,41 @@ class TransferEngine extends EventEmitter {
 	}
 
 	// -----------------------------------------------------------------------
+	// Filename sanitization — prevent path traversal attacks
+	// -----------------------------------------------------------------------
+
+	_sanitizeFilename(name) {
+		if (!name) return null;
+
+		// Strip any directory components — only the base filename matters
+		name = path.basename(name);
+
+		// Reject names containing traversal patterns even after basename
+		if (name === '.' || name === '..' || name.includes('..')) return null;
+
+		// Strip null bytes and control characters
+		name = name.replace(/[\x00-\x1f]/g, '');
+
+		// Reject empty after sanitization
+		if (!name || name.length === 0) return null;
+
+		return name;
+	}
+
+	// -----------------------------------------------------------------------
 	// Inbound — receive files
 	// -----------------------------------------------------------------------
 
 	_onFileOffered(info) {
+		// Sanitize the offered filename — reject anything suspicious
+		var safeName = this._sanitizeFilename(info.name);
+		if (!safeName) {
+			alogger.writeClog(3, 'TransferEngine: rejected unsafe filename: ' + JSON.stringify(info.name), 'mailer', 'redbright');
+			this._protocol.sendSKIP(info.name, info.size, info.time);
+			return;
+		}
+		info.name = safeName;
+
 		// Remote is offering us a file
 		alogger.writeClog(5, 'TransferEngine: file offered — ' + info.name + ' (' + info.size + ' bytes, offset ' + info.offset + ')', 'mailer', 'cyan');
 		var tempPath = path.join(this._tempDir, this._sessionId + '_' + info.name);

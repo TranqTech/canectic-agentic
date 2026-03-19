@@ -448,15 +448,15 @@ function padNumberLeft(num, len) {
 //   - Blocks = left-aligned
 //   - Reply ref = left-aligned
 //   - Byte 127 = 0x2A (*) tagline indicator
-function buildQwkHeader(msg, conferenceNum, bodyLength) {
+function buildQwkHeader(msg, conferenceNum, bodyLength, isPrivate) {
 	var buf = Buffer.alloc(QWK_RECORD_SIZE, QWK_PAD_BYTE);
 
 	// Total blocks = header (1) + ceil(bodyLength / 128)
 	var bodyBlocks  = Math.ceil(bodyLength / QWK_RECORD_SIZE);
 	var totalBlocks = QWK_HEADER_BLOCKS + bodyBlocks;
 
-	// Status — space (0x20) for public message
-	buf[0] = 0x20;
+	// Status — 0x2A (*) for private/personal, 0x20 (space) for public
+	buf[0] = isPrivate ? 0x2A : 0x20;
 
 	// Message number (7 chars) — conference number, left-aligned
 	buf.write(padNumberLeft(conferenceNum, 7), 1, 7, 'ascii');
@@ -573,7 +573,7 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 		}
 
 		var bodyBuf = buildQwkBody(bodyForPack);
-		var hdrBuf  = buildQwkHeader(item.msg, item.conferenceNum, bodyBuf.length);
+		var hdrBuf  = buildQwkHeader(item.msg, item.conferenceNum, bodyBuf.length, item.isPrivate || false);
 
 		// Record the offset of this message header for HEADERS.DAT
 		var hdrOffset = msgOffset;

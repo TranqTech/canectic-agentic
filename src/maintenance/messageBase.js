@@ -209,10 +209,158 @@ async function regenerateAreaBodyHtml(shortcode, options) {
 }
 
 // ---------------------------------------------------------------------------
+// regeneratePmBodyHtml — regenerate body_html for pm_inbox and pm_outbox
+// ---------------------------------------------------------------------------
+// Same pipeline as message areas but operates on the two PM tables.
+// Options are the same as regenerateAllBodyHtml (batchSize, dryRun, forceWidth, quiet, onProgress).
+
+async function regeneratePmBodyHtml(options) {
+	var opts = options || {};
+	var quiet = opts.quiet || false;
+
+	var result = {
+		totalProcessed: 0,
+		totalUpdated:   0,
+		totalSkipped:   0,
+		totalErrors:    0,
+		tableResults:   []
+	};
+
+	var tables = ['pm_inbox', 'pm_outbox'];
+
+	if (!quiet) {
+		console.log('regeneratePmBodyHtml: processing pm_inbox + pm_outbox' +
+			(opts.dryRun ? ' [DRY RUN]' : ''));
+	}
+
+	for (var t = 0; t < tables.length; t++) {
+		var tableResult = await regeneratePmTableBodyHtml(tables[t], opts);
+		result.tableResults.push(tableResult);
+		result.totalProcessed += tableResult.processed;
+		result.totalUpdated   += tableResult.updated;
+		result.totalSkipped   += tableResult.skipped;
+		result.totalErrors    += tableResult.errors;
+	}
+
+	if (!quiet) {
+		console.log('regeneratePmBodyHtml: complete — ' +
+			result.totalProcessed + ' processed, ' +
+			result.totalUpdated + ' updated, ' +
+			result.totalSkipped + ' unchanged, ' +
+			result.totalErrors + ' errors');
+	}
+
+	return result;
+}
+
+async function regeneratePmTableBodyHtml(tableName, options) {
+	var opts = options || {};
+	var batchSize  = opts.batchSize  || 100;
+	var dryRun     = opts.dryRun     || false;
+	var forceWidth = opts.forceWidth || undefined;
+	var quiet      = opts.quiet      || false;
+	var onProgress = opts.onProgress || null;
+
+	var tableResult = {
+		table:     tableName,
+		processed: 0,
+		updated:   0,
+		skipped:   0,
+		errors:    0
+	};
+
+	var countRow = await postgres.queryOne(
+		'SELECT COUNT(*) AS cnt FROM ' + tableName,
+		[]
+	);
+	var total = countRow ? parseInt(countRow.cnt) : 0;
+
+	if (total === 0) {
+		if (!quiet) console.log('  ' + tableName + ': 0 messages — skipping');
+		return tableResult;
+	}
+
+	if (!quiet) console.log('  ' + tableName + ': ' + total + ' message(s)');
+
+	var lastId = 0;
+
+	while (true) {
+		var rows = await postgres.query(
+			'SELECT id, body_text, utf8 FROM ' + tableName +
+			' WHERE id > $1 ORDER BY id ASC LIMIT $2',
+			[lastId, batchSize]
+		);
+
+		if (!rows || rows.length === 0) break;
+
+		for (var i = 0; i < rows.length; i++) {
+			var row = rows[i];
+			lastId = row.id;
+			tableResult.processed++;
+
+			var displayText = row.utf8 || row.body_text || '';
+			if (!displayText) {
+				tableResult.skipped++;
+				continue;
+			}
+
+			try {
+				var newHtml = await formatBodyHtml(displayText, forceWidth);
+
+				if (!dryRun && newHtml !== null) {
+					await postgres.write(
+						'UPDATE ' + tableName + ' SET body_html = $1 WHERE id = $2',
+						[newHtml, row.id]
+					);
+					tableResult.updated++;
+				} else if (newHtml !== null) {
+					tableResult.updated++;
+				} else {
+					tableResult.skipped++;
+				}
+			} catch (err) {
+				tableResult.errors++;
+				if (!quiet) {
+					console.log('    error on ' + tableName + ' id=' + row.id + ': ' + (err.message || err));
+				}
+			}
+		}
+
+		if (onProgress) {
+			try {
+				onProgress({
+					table:     tableName,
+					processed: tableResult.processed,
+					updated:   tableResult.updated,
+					skipped:   tableResult.skipped,
+					total:     total,
+					done:      tableResult.processed >= total
+				});
+			} catch (_) {}
+		}
+
+		if (!quiet && tableResult.processed % (batchSize * 5) === 0) {
+			console.log('    ' + tableName + ': ' + tableResult.processed + '/' + total +
+				' (' + tableResult.updated + ' updated)');
+		}
+	}
+
+	if (!quiet) {
+		console.log('    ' + tableName + ': done — ' +
+			tableResult.updated + ' updated, ' +
+			tableResult.skipped + ' skipped, ' +
+			tableResult.errors + ' errors');
+	}
+
+	return tableResult;
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
 export {
 	regenerateAllBodyHtml,
-	regenerateAreaBodyHtml
+	regenerateAreaBodyHtml,
+	regeneratePmBodyHtml
 };

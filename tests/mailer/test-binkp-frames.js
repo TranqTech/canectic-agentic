@@ -74,6 +74,7 @@ console.log('\n\x1b[1mTest 1: Command frame encoding\x1b[0m');
 {
 	var transport = new MockTransport();
 	var proto = new BinkpProtocol(transport, {
+		quiet: true,
 		localAddresses: ['1:123/456'],
 		sessionPassword: 'testpass'
 	});
@@ -97,7 +98,7 @@ console.log('\n\x1b[1mTest 1: Command frame encoding\x1b[0m');
 console.log('\n\x1b[1mTest 2: Data frame encoding\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var testData = Buffer.from('Hello file data');
 	proto._sendDataFrame(testData);
@@ -116,7 +117,7 @@ console.log('\n\x1b[1mTest 2: Data frame encoding\x1b[0m');
 console.log('\n\x1b[1mTest 3: Command frame parsing\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var receivedAddresses = null;
 	proto.on('authenticated', (info) => { /* won't fire here */ });
@@ -146,7 +147,7 @@ console.log('\n\x1b[1mTest 3: Command frame parsing\x1b[0m');
 console.log('\n\x1b[1mTest 4: Partial frame handling\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var gotSys = false;
 	var origNUL = proto._handleNUL.bind(proto);
@@ -174,7 +175,7 @@ console.log('\n\x1b[1mTest 4: Partial frame handling\x1b[0m');
 console.log('\n\x1b[1mTest 5: Multiple frames in one chunk\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var frame1 = buildCmdFrame(M_NUL, 'SYS Multi BBS');
 	var frame2 = buildCmdFrame(M_NUL, 'ZYZ Sysop Name');
@@ -192,7 +193,7 @@ console.log('\n\x1b[1mTest 5: Multiple frames in one chunk\x1b[0m');
 console.log('\n\x1b[1mTest 6: M_ADR parsing\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 	proto._role = 'answerer'; // Don't try to send password on ADR
 
 	transport.inject(buildCmdFrame(M_ADR, '1:123/456 2:200/100'));
@@ -208,7 +209,7 @@ console.log('\n\x1b[1mTest 6: M_ADR parsing\x1b[0m');
 console.log('\n\x1b[1mTest 7: M_FILE parsing\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var offeredFile = null;
 	proto.on('fileOffered', (info) => { offeredFile = info; });
@@ -227,7 +228,7 @@ console.log('\n\x1b[1mTest 7: M_FILE parsing\x1b[0m');
 console.log('\n\x1b[1mTest 8: File data reception\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var dataChunks = [];
 	var completed = null;
@@ -254,7 +255,7 @@ console.log('\n\x1b[1mTest 8: File data reception\x1b[0m');
 console.log('\n\x1b[1mTest 9: EOB handling\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var remoteEOB = false;
 	var sessionEnded = false;
@@ -298,13 +299,13 @@ console.log('\n\x1b[1mTest 10: CRAM-MD5 verification\x1b[0m');
 }
 
 // -----------------------------------------------------------------------
-// Test 11: M_ERR handling
+// Test 11: Error frame handling
 // -----------------------------------------------------------------------
 
 console.log('\n\x1b[1mTest 11: Error frame handling\x1b[0m');
 {
 	var transport = new MockTransport();
-	var proto = new BinkpProtocol(transport, { localAddresses: ['1:1/1'] });
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
 
 	var errorMsg = null;
 	proto.on('error', (err) => { errorMsg = err.message; });
@@ -313,6 +314,103 @@ console.log('\n\x1b[1mTest 11: Error frame handling\x1b[0m');
 	assert(errorMsg !== null, 'Error event emitted');
 	assert(errorMsg.includes('Bad password'), 'Error message contains remote reason');
 	assert(proto.state === 'error', 'Protocol state is error');
+}
+
+// -----------------------------------------------------------------------
+// Test 12: NR mode — M_FILE with offset -1
+// -----------------------------------------------------------------------
+
+console.log('\n\x1b[1mTest 12: NR mode file offer (offset -1)\x1b[0m');
+{
+	var transport = new MockTransport();
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
+
+	var offeredFile = null;
+	proto.on('fileOffered', (info) => { offeredFile = info; });
+
+	transport.inject(buildCmdFrame(M_FILE, 'test.pkt 1024 1700000000 -1'));
+	assert(offeredFile !== null, 'fileOffered event emitted for NR offer');
+	assert(offeredFile.offset === -1, 'Offset is -1 (NR mode)');
+
+	// NR re-offer with offset 0 — should NOT emit fileOffered again
+	var offerCount = 0;
+	proto.on('fileOffered', () => { offerCount++; });
+	transport.inject(buildCmdFrame(M_FILE, 'test.pkt 1024 1700000000 0'));
+	assert(offerCount === 0, 'NR re-offer does not emit fileOffered again');
+	assert(proto._rxFile.offset === 0, 'Offset updated to 0 after re-offer');
+}
+
+// -----------------------------------------------------------------------
+// Test 13: Implicit file completion on new M_FILE
+// -----------------------------------------------------------------------
+
+console.log('\n\x1b[1mTest 13: Implicit file completion on new M_FILE\x1b[0m');
+{
+	var transport = new MockTransport();
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
+
+	var completedFiles = [];
+	var offeredFiles = [];
+	proto.on('fileComplete', (info) => { completedFiles.push(info.name); });
+	proto.on('fileOffered', (info) => { offeredFiles.push(info.name); });
+
+	// Offer first file
+	transport.inject(buildCmdFrame(M_FILE, 'first.pkt 100 1700000000 0'));
+	assert(offeredFiles.length === 1, 'First file offered');
+	assert(completedFiles.length === 0, 'No completion yet');
+
+	// Offer second file — should implicitly complete the first
+	transport.inject(buildCmdFrame(M_FILE, 'second.pkt 200 1700000000 0'));
+	assert(offeredFiles.length === 2, 'Second file offered');
+	assert(completedFiles.length === 1, 'First file implicitly completed');
+	assert(completedFiles[0] === 'first.pkt', 'Completed file is first.pkt');
+}
+
+// -----------------------------------------------------------------------
+// Test 14: Double EOB protection
+// -----------------------------------------------------------------------
+
+console.log('\n\x1b[1mTest 14: Double EOB protection\x1b[0m');
+{
+	var transport = new MockTransport();
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
+	proto.on('error', () => {});
+
+	proto.sendEOB();
+	var bytesAfterFirst = transport.getWritten().length;
+
+	proto.sendEOB();
+	var bytesAfterSecond = transport.getWritten().length;
+
+	assert(bytesAfterFirst > 0, 'First EOB produced bytes');
+	assert(bytesAfterSecond === bytesAfterFirst, 'Second EOB produced no additional bytes');
+	assert(proto._localEOB === true, 'localEOB is set');
+}
+
+// -----------------------------------------------------------------------
+// Test 15: sendSKIP clears _rxFile
+// -----------------------------------------------------------------------
+
+console.log('\n\x1b[1mTest 15: sendSKIP clears receive state\x1b[0m');
+{
+	var transport = new MockTransport();
+	var proto = new BinkpProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
+
+	// Set up a file receive
+	transport.inject(buildCmdFrame(M_FILE, 'bad.pkt 100 1700000000 0'));
+	assert(proto._rxFile !== null, 'rxFile set after M_FILE');
+	assert(proto._rxFile.name === 'bad.pkt', 'rxFile name correct');
+
+	// Skip it
+	proto.sendSKIP('bad.pkt', 100, 1700000000000);
+	assert(proto._rxFile === null, 'rxFile cleared after sendSKIP');
+
+	// Next M_FILE should NOT trigger implicit fileComplete (no pendingGOTs bump)
+	var completed = [];
+	proto.on('fileComplete', (info) => { completed.push(info.name); });
+	transport.inject(buildCmdFrame(M_FILE, 'good.pkt 50 1700000000 0'));
+	assert(completed.length === 0, 'No implicit fileComplete for skipped file');
+	assert(proto._pendingGOTs === 0, 'No pending GOTs from skipped file');
 }
 
 // -----------------------------------------------------------------------

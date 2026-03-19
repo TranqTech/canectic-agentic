@@ -357,6 +357,10 @@ async function _addFlags(username, column, flagsToAdd) {
 	}
 	var sessionField = {};
 	sessionField[column] = JSON.stringify(merged);
+	// Keep isSysop in sync when permissionflags change
+	if (column === 'permissionflags') {
+		sessionField.isSysop = String(merged.includes('Sysop'));
+	}
 	await sessionUpdateUser(username, sessionField);
 	return true;
 }
@@ -381,6 +385,10 @@ async function _removeFlags(username, column, flagsToRemove) {
 	}
 	var sessionField = {};
 	sessionField[column] = JSON.stringify(filtered);
+	// Keep isSysop in sync when permissionflags change
+	if (column === 'permissionflags') {
+		sessionField.isSysop = String(filtered.includes('Sysop'));
+	}
 	await sessionUpdateUser(username, sessionField);
 	return true;
 }
@@ -611,6 +619,7 @@ async function resetUserPassword(uuid, newpassword) {
 // sessionGet will parse permissionflags, restrictionflags, isSysop,
 // and security back out.
 function buildSessionData(userobj) {
+	var perms = Array.isArray(userobj.permissionflags) ? userobj.permissionflags : [];
 	return {
 		id:               userobj.id               || 0,
 		uuid:             userobj.uuid             || '',
@@ -619,8 +628,8 @@ function buildSessionData(userobj) {
 		lastname:         userobj.lastname         || '',
 		fullname:         userobj.fullname         || '',
 		security:         String(userobj.security  || 0),
-		isSysop:          String(userobj.isSysop   || false),
-		permissionflags:  JSON.stringify(Array.isArray(userobj.permissionflags)  ? userobj.permissionflags  : []),
+		isSysop:          String(perms.includes('Sysop')),
+		permissionflags:  JSON.stringify(perms),
 		restrictionflags: JSON.stringify(Array.isArray(userobj.restrictionflags) ? userobj.restrictionflags : []),
 		mailaddress:      userobj.mailaddress      || '',
 		mailtype:         userobj.mailtype         || '',
