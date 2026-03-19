@@ -8,6 +8,7 @@ For the shared message platform (schemas, read tracking, access control, posting
 For the terminal-side architecture, see `terminal_architecture.md`.
 For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
 For the FTN mailer system, see `MAILER_ARCHITECTURE.md`.
+For the private messaging system (unified PM model, transport adapters, webmail UI), see `PM_ARCHITECTURE.md`.
 
 ---
 
@@ -47,6 +48,7 @@ Standard Express 4 setup with Pug view engine.
 | `/` | `indexRouter` (`src/routes/index.js`) | Public landing page + message browsing/posting |
 | `/admin` | `adminRouter` (`src/routes/admin.js`) | Admin panel — all admin routes are prepended with `/admin` |
 | `/users` | `usersRouter` (`src/routes/users.js`) | Authentication (login/logout/register) |
+| `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply, AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
 
 ### Error Handling
 
@@ -118,19 +120,21 @@ Both login and register accept `Accept: application/json` requests. Error respon
 
 ### Shared Middleware Pattern
 
-Each router (`index.js`, `admin.js`, `users.js`) uses a consistent pattern:
+Each router (`index.js`, `admin.js`, `users.js`, `pm.js`) uses a consistent pattern:
 
 1. **Cookie parser** — `router.use(cookieParser())`
 2. **Shared locals injection** — A `router.use()` middleware that sets template variables available to all views in that router: `boardname`, `faviconlink`, `currentPath`, `activelink`, and (for index.js) `DateTime` and `ismobile`
 3. **Session renewal** — The shared locals middleware also calls `sessionStore.sessionRenew()` on every request if a session cookie exists, keeping active sessions alive
+4. **Unread PM count** — `index.js`, `admin.js`, and `pm.js` all fetch `pmUnreadCount` via `privateMessages.getUnreadCount(userId)` in their shared middleware, making it available to nav templates for the mail badge
+5. **Flash messages** — `pm.js` loads flash messages via `flash.get(req)` into `res.locals.flash` for one-shot user feedback after redirects
 
 ### getCurrentUser Pattern
 
-All three routers define a `getCurrentUser(req)` helper that reads the session cookie and returns the parsed session object from Redis (or null). This is called at the top of every route handler that needs user context.
+All four routers define a `getCurrentUser(req)` helper that reads the session cookie and returns the parsed session object from Redis (or null). This is called at the top of every route handler that needs user context.
 
 ### resolveUserId Pattern
 
-In `index.js`, `resolveUserId(sessionUser)` handles the string-to-integer conversion for `sessionUser.id` (Redis stores everything as strings). Falls back to a DB lookup by UUID or username for sessions created before the `id` field was added. All routes that need a numeric user ID (pointer operations, unread counts) use this.
+In `index.js` and `pm.js`, `resolveUserId(sessionUser)` handles the string-to-integer conversion for `sessionUser.id` (Redis stores everything as strings). Falls back to a DB lookup by UUID or username for sessions created before the `id` field was added. All routes that need a numeric user ID (pointer operations, unread counts) use this.
 
 ---
 
@@ -210,11 +214,11 @@ Both layouts share identical asset loading: Bootstrap 5 (Darkly theme), Bootstra
 
 ### Navigation
 
-**Admin nav** (`admin-nav.pug`): Dropdown menus for Messages (Groups, Areas, Networks), Doors, Files. Direct link for Users. Right side: user dropdown with Dashboard + Logout, or Login link. Active state driven by `activelink` local variable.
+**Admin nav** (`admin-nav.pug`): Brand links to `/`. Dashboard as a top-level nav item (`activelink === 'dashboard'`). Dropdown menus for Messages (Groups, Areas, Networks), Doors, Files. Direct link for Users. Right side: Mail link (envelope icon + "Mail" + unread badge from `pmUnreadCount`) + user dropdown with Logout, or Login link. Active state driven by `activelink` local variable.
 
-**User nav** (`user-nav.pug`): Direct links for Messages, Files, Doors. Right side: user dropdown with Profile + Logout, or Login link. Active state driven by `activelink` local variable.
+**User nav** (`user-nav.pug`): Brand links to `/`. Direct links for Messages, Files, Doors. Right side: Dashboard link (gear icon, only shown when `currentuser.isSysop` is true) + Mail link (envelope icon + "Mail" + unread badge) + user dropdown with Profile + Logout, or Login link. Active state driven by `activelink` local variable.
 
-Both navs display `boardname` (from `process.env.boardname`) as the brand link.
+Both navs display `boardname` (from `process.env.boardname`) as the brand text. The Mail unread badge uses `pmUnreadCount` fetched in each router's shared middleware.
 
 ### Template Conventions
 
@@ -224,6 +228,8 @@ Both navs display `boardname` (from `process.env.boardname`) as the brand link.
 - **`ismobile`** — Set by shared middleware via `is-mobile` package. Used for responsive layout decisions (offcanvas vs sidebar).
 - **`DateTime`** — Luxon DateTime class injected as a template local by `index.js` middleware. Used for date formatting in views.
 - **`boardname` / `faviconlink`** — From environment variables, injected by shared middleware.
+- **`pmUnreadCount`** — Unread PM count for the current user, fetched by shared middleware in `index.js`, `admin.js`, and `pm.js`. Used by nav includes for the mail badge.
+- **`currentuser.isSysop`** — Boolean derived from `permissionflags` at session creation (`buildSessionData`). Used by `user-nav.pug` to conditionally show the admin Dashboard link.
 
 ### Mobile Detection
 
@@ -293,7 +299,12 @@ All queries are parameterized — no SQL injection risk from user input. Table n
 
 ### Redis (`src/middleware/db/redis.js`)
 
-Redis client wrapper. Used exclusively for session storage. Key functions: `getClient()`, `hSet(key, data)`, `hGetAll(key)`, `del(key)`, `exists(key)`, `expire(key, seconds)`, `keys(pattern)`. The client is created lazily on first use.
+Redis client wrapper. Core key/value operations: `get`, `set`, `del`, `exists`, `expire`, `keys`. Hash operations: `hSet`, `hGet`, `hGetAll`. JSON cache helpers: `cacheSet`, `cacheGet`, `cacheInvalidate`, `cacheInvalidateAll`, `cacheThrough`. The client is created lazily on first use.
+
+Used by:
+- **Session storage** (`sessionstore.js`) — session hashes with TTL, username reverse index
+- **Flash messages** (`flash.js`) — one-shot user feedback stored as JSON arrays under `flash:{sessionId}` with 30-second TTL. Used by PM routes for compose/reply/delete feedback. Generic — usable by any route. See `PM_ARCHITECTURE.md`.
+- **Zone caching** (`msgZones.js`) — FTN zone lists cached per network for tosser source resolution
 
 ---
 
@@ -357,6 +368,8 @@ Key configuration via `.env`:
 | `faviconlink` | Favicon path | `/images/favicon.ico` |
 | `adminsecurity` | Minimum security level for admin access | 200 |
 | `session_ttl` | Redis session TTL in seconds | 3600 |
+| `cache_ttl` | Redis cache TTL in seconds | 3600 |
+| `pm_trash_retention_days` | Days before hard-deleting trashed PMs | 30 |
 | `DefaultUser` | Default poster name (legacy) | "John Doe" |
 | `NODE_ENV` | Express environment (controls error detail) | "development" |
 

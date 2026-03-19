@@ -10,6 +10,7 @@ import { msgReader } from "./menucommands/msgReader.js";
 import { msgEditor } from "./menucommands/msgEditor.js";
 import { newscan } from "./menucommands/newscan.js";
 import { testDownloader } from "./menucommands/testdownload.js";
+import { pmReader } from "./menucommands/pmReader.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -614,6 +615,10 @@ class MenuHandler extends BaseHandler {
 			case "testDownload":
 				this._runSubModule(new testDownloader(this.call));
 				return;
+			case "email":
+				this._runSubModule(new pmReader(this.call));
+				return;
+
 
 			default:
 				alogger.writeAlog(4, this.loggingId + "\n  Unknown command: " + cmd, "yellow");

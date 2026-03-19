@@ -1,0 +1,585 @@
+# Canectic BBS — Private Messaging Architecture Reference
+
+## Overview
+
+The private messaging system provides unified user-to-user messaging across multiple transports (LOCAL, FTN, QWK, EMAIL, MESHTASTIC). A single pair of tables (`pm_inbox` / `pm_outbox`) replaces the previous FTN-specific `netmail_in` / `netmail_out` tables. Transport-specific metadata lives in a JSONB `transport_data` column, keeping the schema generic while preserving full protocol fidelity.
+
+For the shared message platform (echomail areas, read tracking, body_html pipeline), see `message_architecture.md`.
+For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`.
+For the web application stack (Express, sessions, admin panel), see `web_architecture.md`.
+
+---
+
+## Core Files
+
+### Models
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `privateMessages.js` | `src/models/` | Unified PM model. Transport access control, recipient resolution, inbox/outbox/trash CRUD, delivery pipeline, dupe checking, undeliverable queue, sysop notifications, soft delete with trash purge. |
+| `ftnNetmailAdapter.js` | `src/models/` | FTN↔PM bridge. Converts between FTN Message objects and PM objects. Handles inbound routing (local delivery, relay, automated processors). |
+| `flash.js` | `src/middleware/db/` | Session-scoped flash messages via Redis. Used by PM routes for user feedback on compose/reply/delete/restore actions. Generic — usable by any route. |
+
+### Routes
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `pm.js` | `src/routes/` | Express router mounted at `/pm`. Webmail UI routes, AJAX JSON endpoints, compose/reply/delete/restore actions, admin undeliverable queue. Flash message middleware. |
+
+### Views
+
+| File | Purpose |
+|------|---------|
+| `views/pm/inbox.pug` | Main webmail interface. Split-pane layout: folder sidebar, DataTables message list with search/sort, inline reader pane with reply/delete/restore. Compose modals (Local + Network). Reply modal with line-quoting system. |
+| `views/pm/undeliverable.pug` | Admin undeliverable message queue with filter tabs. |
+| `views/pm/undeliverable_detail.pug` | Admin review detail — deliver to user / discard / return to sender. |
+| `views/partials/flash.pug` | Reusable Bootstrap alert partial for flash messages. |
+
+### Tosser Integration
+
+| File | Changes |
+|------|---------|
+| `ftnTosser.js` | `TossInboundFile` and `OldTossInbound` route netmail through `ftnNetmailAdapter.importFtnNetmail()` instead of `netmail.newInboundNetmail()`. `TossOutboundNetmail` uses `privateMessages.getPendingByTransport('FTN')` with per-message zone-aware source resolution via `systemAddresses.resolveSourceForDestinationZone()`. |
+| `qwkTosser.js` | `pullFromQwkPeer` delivers conference 0 messages as PMs via `importQwkPrivateMessage()`. `pushToQwkPeer` gathers pending QWK PMs and packs them as conference 0 with private status byte (`0x2A`). |
+| `qwkPacketBuilder.js` | `buildQwkForNode` gathers pending QWK PMs for conference 0 in hub-mode packets. `buildMessagesDat` passes `isPrivate` through to `buildQwkHeader`. |
+| `qwkClasses.js` | `buildQwkHeader` accepts `isPrivate` parameter — sets status byte to `0x2A` (private) or `0x20` (public). `buildRepPacket` passes `isPrivate` through. |
+
+### Maintenance
+
+| File | Changes |
+|------|---------|
+| `maintenance.js` | `--purge-pm-trash` flag invokes `purgeDeleted(days)`. `--regen-pm-html` flag invokes `regeneratePmBodyHtml()`. |
+| `messageBase.js` | `regeneratePmBodyHtml()` and `regeneratePmTableBodyHtml()` regenerate `body_html` for `pm_inbox` and `pm_outbox` using the same `formatBodyHtml` pipeline as message areas. |
+
+### Updated Models
+
+| File | Changes |
+|------|---------|
+| `useraccounts.js` | Added `getUserByRealname()`, `getUsersByRealname()`, `getUsersByPermissionFlag()`. Fixed `buildSessionData()` to derive `isSysop` from `permissionflags` array. Fixed `_addFlags`/`_removeFlags` to keep `isSysop` in sync on all active sessions. |
+| `systemAddresses.js` | Added `getActiveAddressByNetworkType()`, `getDefaultAddressByNetworkType()`, `resolveSourceForDestinationZone()`. |
+
+---
+
+## Database Schema
+
+### pm_inbox
+
+Inbound messages delivered to a local user. One row per recipient per message.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | BIGSERIAL | Primary key |
+| `uuid` | UUID | Public identifier |
+| `user_id` | INTEGER | FK to users — the recipient |
+| `msg_id` | TEXT | Canonical message ID (MSGID, QWK Message-ID, or generated UUID) |
+| `from_user` | TEXT | Sender display name |
+| `to_user` | TEXT | Recipient display name |
+| `from_address` | TEXT | Sender address (FTN address, QWK-ID, username for LOCAL) |
+| `to_address` | TEXT | Recipient address |
+| `subject` | TEXT | |
+| `body_text` | TEXT | Plain text body |
+| `utf8` | TEXT | UTF-8 version of body (null if body_text is already UTF-8) |
+| `body_html` | TEXT | Pre-rendered HTML for web display |
+| `raw_text` | TEXT | Raw message text including kludge lines |
+| `read` | BOOLEAN | DEFAULT false |
+| `read_at` | TIMESTAMP | Set on first access |
+| `deleted` | BOOLEAN | DEFAULT false — soft delete |
+| `deleted_at` | TIMESTAMP | Set on soft delete |
+| `transport_type` | VARCHAR(16) | 'LOCAL', 'FTN', 'QWK', 'EMAIL', 'MESHTASTIC' |
+| `transport_data` | JSONB | Transport-specific metadata (see below) |
+| `system_time` | TIMESTAMP | Message creation time |
+| `created_at` | TIMESTAMP | Row creation time |
+
+### pm_outbox
+
+Outbound messages queued for delivery or already sent. One row per sent message.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | BIGSERIAL | Primary key |
+| `uuid` | UUID | Public identifier |
+| `user_id` | INTEGER | FK to users — the sender |
+| `msg_id` | TEXT | Canonical message ID |
+| `from_user` | TEXT | Sender display name |
+| `to_user` | TEXT | Recipient display name |
+| `from_address` | TEXT | Sender address |
+| `to_address` | TEXT | Recipient address |
+| `subject` | TEXT | |
+| `body_text` | TEXT | |
+| `utf8` | TEXT | |
+| `body_html` | TEXT | Pre-rendered HTML |
+| `raw_text` | TEXT | |
+| `queued` | BOOLEAN | DEFAULT true — waiting for tosser |
+| `sent` | BOOLEAN | DEFAULT false |
+| `sent_at` | TIMESTAMP | |
+| `send_error` | TEXT | Last error message |
+| `undeliverable` | BOOLEAN | DEFAULT false — permanently failed |
+| `undeliverable_reason` | TEXT | Human-readable failure reason |
+| `deleted` | BOOLEAN | DEFAULT false — soft delete |
+| `deleted_at` | TIMESTAMP | |
+| `transport_type` | VARCHAR(16) | |
+| `transport_data` | JSONB | |
+| `system_time` | TIMESTAMP | |
+| `created_at` | TIMESTAMP | |
+
+### pm_undeliverable
+
+Sysop review queue for messages that could not be delivered automatically.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | BIGSERIAL | Primary key |
+| `uuid` | UUID | Public identifier |
+| `from_user` | TEXT | |
+| `to_user` | TEXT | |
+| `from_address` | TEXT | |
+| `to_address` | TEXT | |
+| `subject` | TEXT | |
+| `body_text` | TEXT | |
+| `transport_type` | VARCHAR(16) | |
+| `transport_data` | JSONB | |
+| `reason` | TEXT | Why delivery failed |
+| `reviewed` | BOOLEAN | DEFAULT false |
+| `reviewed_at` | TIMESTAMP | |
+| `reviewed_by` | INTEGER | FK to users — sysop who reviewed |
+| `action_taken` | TEXT | 'delivered', 'deleted', 'returned' |
+| `delivered_to` | INTEGER | FK to users — if manually delivered |
+| `created_at` | TIMESTAMP | |
+
+---
+
+## transport_data JSONB Structures
+
+### LOCAL
+
+```json
+{
+  "sender_user_id": 42,
+  "recipient_user_id": 17,
+  "outbox_uuid": "abc-123-..."
+}
+```
+
+### FTN
+
+```json
+{
+  "source": "1:134/123",
+  "destination": "1:134/101",
+  "source_zone": 1,
+  "source_net": 134,
+  "source_node": 123,
+  "destination_zone": 1,
+  "destination_net": 134,
+  "destination_node": 101,
+  "datetime_string": "18 Mar 26  15:44:33",
+  "msg_id": "1:134/123 69bb2045",
+  "reply_to": "",
+  "tz_utc": "-0600",
+  "tosser_id": "Canectic Tosser v0.1",
+  "origin_line": "",
+  "seen_by": "",
+  "path": "",
+  "optional_attributes": [{ "attribute": "INTL", "value": "1:134/101 1:134/123" }]
+}
+```
+
+### QWK
+
+```json
+{
+  "source": "VERT",
+  "peer_connection_uuid": "9f894ef9-...",
+  "conference": 0,
+  "msg_number": 42,
+  "msg_id": "VERT:0:42",
+  "reply_to": ""
+}
+```
+
+---
+
+## Transport Access Control
+
+Access to each transport is governed by a combination of permission flags and restriction flags. Defined in `TRANSPORT_ACCESS_RULES` in `privateMessages.js`:
+
+| Transport | Permission Required | Restriction Flag | Default |
+|-----------|-------------------|-----------------|---------|
+| LOCAL | (none) | "Private Messages" | Allow all users |
+| FTN | "Netmail" | "Netmail" | Require permission |
+| QWK | "Netmail" | "Netmail" | Require permission |
+| MESHTASTIC | "Netmail" | "Netmail" | Require permission |
+| EMAIL | "Email" | "Email" | Require permission |
+
+Rules:
+- Sysop bypasses permission requirements (but not restrictions)
+- Restriction flags always win — even Sysop is blocked if restricted
+- `checkTransportAccess(userSession, transportType)` → `{ allowed, reason }`
+- `getAllowedTransports(userSession)` → array of permitted transport type strings
+
+Admin flags configured in `admin.js`:
+- `availablePermissions`: `["Sysop", "Mod", "Adult", "Admin", "Email", "Netmail"]`
+- `availableRestrictions`: `["Underage", "Banned", "Email", "Netmail", "Private Messages"]`
+
+---
+
+## Data Flow
+
+### LOCAL Messages (user-to-user on same system)
+
+```
+Web compose form → POST /pm/compose/local
+  → validateFromUser() — verifies sender identity isn't tampered
+  → resolveRecipient() — username match → realname match → sysop alias
+  → queueMessage(messageObj, userSession)
+    → checkTransportAccess (if session provided)
+    → sanitizeMessageFields()
+    → formatBodyHtml() with simpleTextToHtml fallback
+    → INSERT pm_outbox (sent=true, queued=false, sent_at=NOW)
+    → deliverMessage() — dual-write to pm_inbox
+      → dupe check (msg_id + transport_type + user_id + subject + body_length)
+      → INSERT pm_inbox (read=false)
+  → flash success message → redirect
+```
+
+### FTN Inbound
+
+```
+Remote system sends .pkt → ftnTosser.TossInboundFile()
+  → ReadPkt() parses packet → message.Type === "Netmail"
+  → ftnNetmailAdapter.importFtnNetmail(ftnMessage)
+    → isLocalAddress() — checks systemAddresses for our FTN addresses
+    → LOCAL: resolveRecipient() → deliverMessage() to pm_inbox
+    → RELAY (if allow_netmail_relay=true): ftnRouter.resolveRoute() → queueOutbound()
+    → RELAY (if relay disabled): write to ftn/bad/ → notifySysops()
+    → UNRESOLVABLE: insertUndeliverable() → notifySysops()
+```
+
+### FTN Outbound
+
+```
+tosser.js --out --ftn → TossOutboundNetmail()
+  → privateMessages.getPendingByTransport('FTN')
+  → ftnNetmailAdapter.privateMessageToFtn(pmRow)
+    → sets Attribute = 0x0001 (Private flag)
+    → generates FTN datetime string from system_time
+  → per-message: systemAddresses.resolveSourceForDestinationZone(destZone)
+    → zone match failure → markOutboxUndeliverable() → bounce notification
+  → WritePkts() → .pkt files in outbound directory
+  → markSentArray() on success
+```
+
+### QWK Inbound
+
+```
+pullFromQwkPeer() → parseMessagesDAT() → applyHeadersDat()
+  → for each message:
+    → conferenceNum === 0 → importQwkPrivateMessage()
+      → resolveRecipient(to)
+      → resolved: deliverMessage() to pm_inbox (transport_type='QWK')
+      → unresolved: insertUndeliverable() + notifySysops()
+    → conferenceNum > 0 → importQwkMessage() (existing echomail path)
+```
+
+### QWK Outbound (Client Mode — pushToQwkPeer)
+
+```
+pushToQwkPeer() → gather echomail work items per subscription
+  → privateMessages.getPendingByTransport('QWK')
+  → add PM work items as conference 0, isPrivate=true, utf8=null
+  → buildRepPacket() → buildQwkHeader with status 0x2A
+    → utf8ToCp437 conversion → buildQwkBody with 0xE3 line terminators
+  → upload .REP → markSent() for each PM on success
+```
+
+### QWK Outbound (Hub Mode — buildQwkForNode)
+
+```
+buildQwkForNode() → gather echomail from subscriptions
+  → privateMessages.getPendingByTransport('QWK')
+  → add PM items as conference 0, isPrivate=true
+  → conferences.unshift({ number: 0, name: 'Personal' })
+  → buildMessagesDat() → buildQwkHeader with isPrivate
+  → assembleQwkPacket() → .qwk file
+  → markSent() for each PM
+```
+
+---
+
+## Recipient Resolution
+
+`resolveRecipient(toUser)` cascade:
+
+1. **Username match** — `userAccounts.getUserRecord(toUser)`. Exact username lookup (case-insensitive).
+2. **Realname match** — `userAccounts.getUsersByRealname(toUser)`. If exactly one match, resolved. If multiple matches, returns `{ resolved: false, reason: 'ambiguous_match' }`.
+3. **Sysop alias** — if `toUser` is "Sysop" (case-insensitive), resolves to the first user with the "Sysop" permission flag via `getUsersByPermissionFlag('Sysop')`.
+
+Returns `{ resolved, userId, username, reason }`.
+
+---
+
+## Dupe Checking
+
+`deliverMessage()` checks for duplicates before inserting into `pm_inbox`:
+
+```sql
+SELECT id FROM pm_inbox
+WHERE msg_id = $1 AND transport_type = $2 AND user_id = $3
+  AND subject = $4 AND LENGTH(COALESCE(body_text, '')) = $5
+```
+
+Subject and body length are included because some FTN implementations (notably SBBSecho areafix) reuse the same MSGID across multiple distinct response messages (split replies, related responses). The five-field check prevents false dupe rejection while still catching true duplicates.
+
+---
+
+## body_html Pipeline
+
+Both `deliverMessage()` and `queueMessage()` generate `body_html` from the display text:
+
+1. Try `formatBodyHtml(displayText)` — the full pipeline (paragraph reflow → ANSI art detection → VirtualTerminal or plain text conversion)
+2. Validate the result is a non-empty string
+3. If `formatBodyHtml` returns empty or throws → fall back to `simpleTextToHtml(displayText)` which escapes HTML entities and converts line breaks to `<br>`
+
+View-layer fallback chain: `body_html` (unescaped) → `body_text` in a `<pre>` (auto-escaped by Pug) → "(empty message)".
+
+---
+
+## Outbox Undeliverable Handling
+
+When a message cannot be delivered (destination zone not found, address unparseable, recipient resolution failure):
+
+1. `markOutboxUndeliverable(id, reason)` — sets `undeliverable=true`, clears `queued`, stores reason
+2. `notifySenderUndeliverable(outboxRow, reason)` — delivers a bounce notification to the sender's inbox as a LOCAL/SYSTEM transport message
+3. For FTN: `getPendingByTransport('FTN')` excludes `undeliverable=true` and `deleted=true` rows, so the tosser stops retrying
+
+For QWK inbound: unresolvable recipients go to `pm_undeliverable` for sysop review rather than bouncing (since the sender is on a remote system).
+
+---
+
+## Soft Delete and Trash
+
+Messages support soft delete with a retention period:
+
+- `deleteMessage(userId, uuid)` / `deleteSentMessage(userId, uuid)` — sets `deleted=true`, `deleted_at=NOW()`
+- `restoreMessage(userId, uuid)` / `restoreSentMessage(userId, uuid)` — clears `deleted` and `deleted_at`
+- `getTrash(userId)` — UNIONs both tables with a `source` column ('inbox'/'sent')
+- `purgeDeleted(retentionDays)` — hard-deletes from both tables where `deleted_at < NOW() - N days`
+
+Default retention: `pm_trash_retention_days` env var or 30 days. CLI: `node src/tools/maintenance.js --purge-pm-trash [--days N]`.
+
+---
+
+## Sysop Notifications
+
+`notifySysops(subject, bodyText)` delivers a LOCAL/SYSTEM message to ALL users with the "Sysop" permission flag (co-sysop support). Uses `userAccounts.getUsersByPermissionFlag('Sysop')`. Called for:
+
+- Undeliverable inbound FTN netmail
+- Undeliverable inbound QWK PMs
+- Relay denials (when `allow_netmail_relay=false`)
+
+---
+
+## Web UI Architecture
+
+### Layout
+
+Webmail-style split-pane layout filling `calc(100vh - 56px)`:
+
+```
+┌──────────┬──────────────────────────────────────────┐
+│ Inbox  4 │ [DataTables search box]                   │
+│ Sent     │ ● John Smith    Re: Config    Mar 18 15:30│
+│ Trash    │   Bob Jones     Hello there   Mar 17 09:00│  ← 40%, scrolls
+│──────────│─────────────────────────────────────────── │
+│ ✉ Local  │ Re: Network Config           [Reply] [Del]│
+│ 🌐Network│ From: John Smith  To: Underminer          │
+│──────────│ Date: Mar 18, 2026 15:30      QWK         │  ← 60%, scrolls
+│ ☑ Mark   │                                           │
+│   All    │ Message body here...                      │
+│   Read   │                                           │
+└──────────┴──────────────────────────────────────────┘
+```
+
+- **Sidebar** (180px fixed): folder buttons (Inbox/Sent/Trash), compose buttons, mark all read. Collapses to horizontal strip on mobile.
+- **Message list** (40%): DataTables with `paging: false`, `scrollY`, search box, column sorting. Three tables (inbox/sent/trash) toggled by folder buttons.
+- **Reader pane** (60%): inline message display with header (subject, from, to, date, transport badge) and action buttons (Reply, Delete, or Restore for trash). Empty state overlay when no message selected.
+
+### AJAX Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/pm/inbox/:uuid/json` | Load inbox message as JSON, marks read |
+| GET | `/pm/sent/:uuid/json` | Load sent message as JSON |
+
+Both return `{ uuid, from_user, to_user, from_address, to_address, subject, body_html, body_text, transport_type, system_time, canReply }`.
+
+### Compose Modals
+
+Both modals include a "From" select box with the user's username (default) and real name as options. Server-side `validateFromUser(sessionUser, submittedName)` checks the submitted value matches either field — tampered values are rejected with a flash error.
+
+### Reply Modal with Quote System
+
+Same line-quoting mechanism as the message area views:
+1. `getPlainText(el)` extracts text from the reader body HTML
+2. `wrapTextLines(text, 80)` word-wraps at 80 columns
+3. `populateQuotePanel()` renders numbered clickable lines
+4. Clicking a line inserts `"  > {text}"` at the cursor position in the textarea
+5. Toggle button flips between "Quote Original" and "Finished Quoting"
+
+### Flash Messages
+
+`flash.js` stores messages in Redis under `flash:{sessionId}` with 30-second TTL. One-shot — cleared after first read. PM router middleware loads them into `res.locals.flash` on every request. The `flash.pug` partial renders Bootstrap dismissible alerts with type-specific icons (danger/warning/success/info).
+
+---
+
+## Navigation
+
+### User Nav (`user-nav.pug`)
+
+Mail link on the right side: envelope icon + "Mail" text + unread badge. Links to `/pm/inbox`. Admin Dashboard link (gear icon) shown only when `currentuser.isSysop` is true.
+
+### Admin Nav (`admin-nav.pug`)
+
+Same Mail link with unread badge on the right side. Brand links to `/`. Dashboard is a top-level nav item.
+
+`pmUnreadCount` is fetched via `privateMessages.getUnreadCount(userId)` in the shared middleware of `pm.js`, `index.js`, and `admin.js` routes.
+
+---
+
+## FTN-Specific Details
+
+### Zone-Aware Source Resolution
+
+FTN outbound uses `systemAddresses.resolveSourceForDestinationZone(destinationZone)` per-message:
+
+1. Gets all FTN networks via `msgNetworks.getNetworksByType('FTN')`
+2. For each network, checks zone list via `msgZones.getCachedZonesByNetwork()` (Redis-cached)
+3. Returns `{ address, networkId }` on match or `{ address: null, reason }` on failure
+
+Failure reasons become bounce messages to the sender.
+
+### FTN Message Conversion
+
+`privateMessageToFtn(pmRow)`:
+- Sets `msg.Attribute = 0x0001` (Private flag — required for FTN netmail)
+- Generates FTN datetime string (`"DD Mon YY  HH:MM:SS"`) from `system_time` or falls back to `transport_data.datetime_string` for relayed messages
+- Restores all FTN kludge fields from `transport_data` JSONB
+
+`ftnToPrivateMessage(ftnMessage)`:
+- Packs all FTN metadata (zones, nets, nodes, kludges, seen-by, path, origin) into `transport_data` JSONB
+- Sets `transport_type = 'FTN'`
+
+### Packet Filename Generation
+
+`generatePktFilename(outDir)`: 8-character hex filename (8.3 safe for legacy mailers):
+- 4 hex chars from lower 16 bits of epoch seconds (time-ordered, ~18hr cycle)
+- 4 hex chars from monotonic counter (65,536 per cycle before wrap)
+- Filesystem collision check with random jitter fallback (up to 16 attempts)
+
+---
+
+## QWK-Specific Details
+
+### Conference 0
+
+QWK uses conference 0 for personal/private messages. The status byte in the QWK message header distinguishes:
+- `0x20` (space) — public message
+- `0x2A` (`*`) — private/personal message
+
+### Inbound
+
+`importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID)`:
+- Resolves `to` field against local users
+- Delivers to `pm_inbox` with `transport_type: 'QWK'`
+- MSGID from kludges or generated as `{remoteQwkId}:0:{msgNumber}`
+- Unresolvable recipients go to `pm_undeliverable` with sysop notification
+
+### Outbound
+
+PM work items set `utf8: null` so that `buildRepPacket` / `buildMessagesDat` run `utf8ToCp437()` conversion on the body text. The `body_text` field receives the UTF-8 content (`pm.utf8 || pm.body_text`). This ensures proper CP437 encoding with `0xE3` line terminators.
+
+---
+
+## Maintenance
+
+### Trash Purge
+
+```bash
+# Default retention (env pm_trash_retention_days or 30 days)
+node src/tools/maintenance.js --purge-pm-trash
+
+# Override retention period
+node src/tools/maintenance.js --purge-pm-trash --days 7
+```
+
+Hard-deletes from both `pm_inbox` and `pm_outbox` where `deleted = true AND deleted_at < NOW() - N days`.
+
+### body_html Regeneration
+
+```bash
+# Regenerate for both PM tables
+node src/tools/maintenance.js --regen-pm-html
+
+# Dry run
+node src/tools/maintenance.js --regen-pm-html --dry-run
+
+# Force column width
+node src/tools/maintenance.js --regen-pm-html --width 80
+```
+
+Uses keyset pagination (batch by `id > lastId`). Same `formatBodyHtml` pipeline as message area regeneration. PM tables don't have `updated_at` so only `body_html` is touched.
+
+### Combined Tasks
+
+All maintenance tasks can be combined in a single run:
+
+```bash
+node src/tools/maintenance.js --regen-html --regen-pm-html --purge-pm-trash
+```
+
+Executed sequentially under the same PID lock (`/tmp/can_maint.pid`).
+
+---
+
+## Key Design Decisions
+
+1. **Unified schema over per-transport tables**: `pm_inbox` / `pm_outbox` handle all transports. Protocol-specific data lives in `transport_data` JSONB. Adding a new transport requires no schema changes — just a new adapter and transport_data structure.
+
+2. **Dual-write for LOCAL**: `queueMessage` with `transport_type='LOCAL'` inserts into both `pm_outbox` (marked sent immediately) and `pm_inbox` (via `deliverMessage`). This gives the sender a sent copy and the recipient an inbox copy in a single operation.
+
+3. **Restriction flags always win**: Even Sysop is blocked by restriction flags. This ensures administrative restrictions (e.g., "Banned" user can't send mail) are absolute. Sysop only bypasses permission requirements (e.g., doesn't need "Netmail" flag to send FTN).
+
+4. **Content-aware dupe checking**: msg_id + transport_type + user_id + subject + body_text length. Handles FTN implementations that reuse MSGIDs across split replies (SBBSecho areafix).
+
+5. **`simpleTextToHtml` fallback**: If `formatBodyHtml` returns empty or throws, a simple HTML-escape + line-break conversion ensures `body_html` is always populated for web-composed messages. The view layer has its own fallback chain as defense-in-depth.
+
+6. **QWK `utf8: null` convention**: PM work items set `utf8: null` to trigger CP437 conversion in the packet builders. The echomail convention (`utf8` truthy = `body_text` is already CP437) doesn't apply to web-composed PMs which are always UTF-8.
+
+7. **Flash messages via Redis**: Avoids adding session middleware dependencies. Short TTL (30 seconds) means abandoned flashes auto-expire. Append-on-set supports multiple redirects stacking messages.
+
+8. **Webmail split-pane over modal reader**: Messages are read inline without page navigation or modal overlays. DataTables provides search/sort without server round-trips. Reply is the only modal (needs the full compose form with quote system).
+
+9. **From select with server validation**: Users can choose between username and real name as sender identity. `validateFromUser` on the server prevents form tampering — rejects values that don't match either field.
+
+10. **Co-sysop notification**: `notifySysops()` queries `getUsersByPermissionFlag('Sysop')` and delivers to ALL matching users, not just the first. All sysops see undeliverable messages and system alerts.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `pm_trash_retention_days` | 30 | Days to keep soft-deleted messages before hard purge |
+| `allow_netmail_relay` | false | Whether to relay FTN netmail through this system |
+| `boardname` | 'Canectic BBS' | Used in bounce notifications and FTN origin lines |
+
+---
+
+## Future Development
+
+- **Conversation grouping**: `transport_data` preserves `msg_id` / `reply_to` for future `conversation_id` threading
+- **Email transport adapter**: Similar to FTN/QWK adapters but for SMTP/IMAP
+- **Meshtastic transport adapter**: LoRa mesh radio message delivery
+- **`netmail.js` retirement**: Old FTN-specific module can be dropped once all paths confirmed working through the unified PM system
+- **Old `netmail_in` / `netmail_out` tables**: Can be dropped or renamed to `_legacy` after migration verified
+- **Areafix/filefix routing**: Stub in `importFtnNetmail` — conference 0 messages addressed to automated processors (areafix, filefix) should be routed to handler modules instead of user inboxes

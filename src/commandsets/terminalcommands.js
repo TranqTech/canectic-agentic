@@ -501,6 +501,7 @@ class ansiInputParser {
 				case "[2~": keyname = "KEY_Insert"; break;
 				case "[H":  keyname = "KEY_Home"; break;
 				case "[F":  keyname = "KEY_End"; break;
+				case "[K":  keyname = "KEY_End"; break;   // SCO/VT100 variant - This is for cleareol, so syncterm really shouldn't be using it for end.
 				case "[1~": keyname = "KEY_Home"; break;   // Alternative Home
 				case "[4~": keyname = "KEY_End"; break;    // Alternative End
 				default:
