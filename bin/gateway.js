@@ -25,6 +25,7 @@ import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
 
 dotenv.config();
+alogger.setProcessName('gateway');
 
 //variable setup
 const systemver = systeminfo.softwareVersion()
@@ -77,6 +78,7 @@ process.on('SIGINT', async () => {
 	if (embeddedWorkers) await embeddedWorkers.shutdown();
 	if (mailerManager) mailerManager.stop();
 	if (eventSubscriber) eventSubscriber.shutdown();
+	alogger.shutdownLogBus();
 	await closeQueues();
 	socatManager.shutdown();
 	pgpool.end();
@@ -88,6 +90,7 @@ process.on('SIGTERM', async () => {
 	if (embeddedWorkers) await embeddedWorkers.shutdown();
 	if (mailerManager) mailerManager.stop();
 	if (eventSubscriber) eventSubscriber.shutdown();
+	alogger.shutdownLogBus();
 	await closeQueues();
 	socatManager.shutdown();
 	process.exit(0);
@@ -224,6 +227,7 @@ async function exitWatch(){
 // --- Main ---
 
 async function main(){
+	await alogger.initLogBus()
 	await prerunMaint()
 	await startNodeManager()
 	await startSocatManager()

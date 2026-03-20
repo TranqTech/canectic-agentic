@@ -10,7 +10,11 @@ A BBS for the modern world and beyond.
 - Websockets and other modern connection methods
 - Modern Web Forum views and features
 - A mix of legacy, modern, and experimental message networking technologies
+- Support for DOS, native, and Synchronet JS Door games.
 
 ## Package requirements not in NPM (apt)
 - build-essential
 - python3
+
+## Recommended installs
+- PM2 (Process and worker start/restart management)

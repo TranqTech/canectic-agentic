@@ -10,6 +10,7 @@ import {router as indexRouter} from '../routes/index.js';
 import {router as adminRouter} from '../routes/admin.js';
 import {router as usersRouter} from '../routes/users.js';
 import { router as pmRouter } from '../routes/pm.js';
+import { router as adminLogRouter, registerLogWebSocket } from "../routes/adminLogs.js";
 
 const node_env = process.env.NODE_ENV || "development"
 var webserver = express();
@@ -28,6 +29,7 @@ webserver.use(express.static( path.join(path.dirname("./"), 'public'), { dotfile
 
 webserver.use('/', indexRouter);
 webserver.use('/admin', adminRouter);
+webserver.use('/adminlogs', adminLogRouter);
 webserver.use('/users', usersRouter);
 webserver.use('/pm', pmRouter);
 

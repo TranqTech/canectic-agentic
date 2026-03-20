@@ -48,6 +48,7 @@ import * as userMsgPointers from "../src/models/userMsgPointers.js";
 import * as userAreaSubs from "../src/models/userAreaSubs.js";
 
 dotenv.config();
+alogger.setProcessName('worker');
 
 const systemvermsg = systeminfo.versionMsg();
 const tossConcurrency = parseInt(process.env.WORKER_CONCURRENCY) || 3;
@@ -74,6 +75,7 @@ async function shutdown() {
 	if (maintWorker) await maintWorker.close();
 	await closeQueues();
 	if (eventPublisher) eventPublisher.shutdown();
+	alogger.shutdownLogBus();
 	pgpool.end();
 	redis.shutdown();
 	process.exit(0);
@@ -278,6 +280,7 @@ function createMaintenanceProcessor() {
 // ---------------------------------------------------------------------------
 
 async function main() {
+	await alogger.initLogBus();
 	alogger.writeAlog(1, systemvermsg + "\n  Worker Process Startup", "yellowbright", true);
 
 	var queueConfig = getQueueConfig();

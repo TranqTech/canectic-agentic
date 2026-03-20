@@ -38,6 +38,7 @@ import { createEventPublisher, EVENTS } from "../src/queues/events.js";
 import { Worker } from 'bullmq';
 
 dotenv.config();
+alogger.setProcessName('mailer');
 
 const systemvermsg = systeminfo.versionMsg();
 var mailerManager;
@@ -62,6 +63,7 @@ async function shutdown() {
 	if (mailerWorker) await mailerWorker.close();
 	await closeQueues();
 	if (eventPublisher) eventPublisher.shutdown();
+	alogger.shutdownLogBus();
 	pgpool.end();
 	redis.shutdown();
 	process.exit(0);
@@ -75,6 +77,7 @@ process.on('SIGTERM', shutdown);
 // ---------------------------------------------------------------------------
 
 async function main() {
+	await alogger.initLogBus();
 	alogger.writeAlog(1, systemvermsg + "\n  Mailer Process Startup", "yellowbright", true);
 
 	// Check enable flag
