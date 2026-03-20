@@ -180,12 +180,15 @@ Translates door output for modern terminals:
 
 Extends `BaseHandler`. The main interactive hub after login.
 
-**Configuration** (loaded from DB via `getMenu()`):
-- `menu_entries`: Array of entry objects with `hotkey`, `display`, `command_name`, `command_arg`, access control fields (`min_security`, `required_flags`, `prohibited_flags`), and display colors (`fg_clr`, `bg_clr`).
-- `display_file` / `display_file_type`: Optional art file shown as menu background.
+**Configuration** (loaded from PostgreSQL via `getMenu()` in `src/models/menus.js`):
+- `menu_type`: Input behavior — `Hotkey` (single-keypress dispatch, current handler behavior) or `Lightbar` (arrow-key navigable highlight bar, future). Stored in DB, persisted through admin UI, but the handler does not yet branch on it.
+- `menu_entries`: Array of entry objects with `hotkey`, `display`, `command_name`, `command_arg`, access control fields (`min_security`, `required_flags`, `prohibited_flags`), and display colors (`fg_clr`, `bg_clr`). Entry colors default to 7 (White) / 0 (Black) — they cannot be null because `setfgcolor(null)` renders as black (invisible on dark backgrounds).
+- `display_file` / `display_file_type`: Optional art file shown as menu background. `display_file` is a bare filename (no path or extension) — the art system resolves via `drawscreen()` → `_findArtFile()`, walking the terminal's format priority chain. `display_file_type` maps to a subdirectory: `"Screen"` → `screens/`, `"Header"` → `headers/`, `""` → `misc/`.
 - `display_entries`: Whether to render entry list over the display file.
 - Layout controls: `entries_x_offset`, `entries_y_offset`, `max_columns`, `col_gap`.
-- Theme color overrides.
+- Theme color overrides: `title_clr`, `input_clr`, `prompt_clr`, `error_clr`, `hotkey_clr`. These are nullable — `getMenu()` strips null values (via `delete`) so they arrive as `undefined` in `_applyConfig()`, and the handler's `config.X !== undefined` check falls through to theme defaults.
+
+Menu and entry data is managed via the admin web UI (`/admin/menus`). The schemas are defined in `menus.conf` and `menu_entries.conf` for the DB migration system.
 
 **Access control**: `_isEntryAccessible()` checks caller's security level, permission flags (must have ALL required), and restriction flags (must have NONE of prohibited).
 
@@ -211,6 +214,10 @@ Extends `BaseHandler`. The main interactive hub after login.
 | `userList` | Sub-module |
 | `lastCallers` | Sub-module |
 | `whosOnline` | Sub-module |
+| `email` | Sub-module (PM reader) |
+| `checkEmail` | Sub-module (PM check) |
+| `newScan` | Sub-module (all areas) |
+| `newScanGroup` | Sub-module (current group) |
 | `testDownload` | Sub-module |
 
 **Sub-module management**: `_runSubModule()` pauses the menu, wires `ModuleReturn` and `HangupSignal`, starts the module. Menu handler owns inactivity timeouts even while a sub-module is active. On return, `_doModuleReturn()` cleans up and redraws.
@@ -218,6 +225,49 @@ Extends `BaseHandler`. The main interactive hub after login.
 ---
 
 ## Door System
+
+### Door Configuration (`src/models/doors.js`)
+
+Door game configurations are stored in PostgreSQL (schema: `doors.conf`) and managed via the admin web UI (`/admin/doors`). `getDoorConfig(slug)` returns a normalized config object with camelCase keys matching what `DoorRunner` and `SyncJSDoorRunner` expect. The old hardcoded `testingarray` has been replaced.
+
+### Variable Substitution (`src/utils/configvars.js`)
+
+Admin-configured strings in door config (command, door directory, dropfile directory, door arguments) support `%X` token substitution. Tokens are replaced at runtime by `substitute(template, call, doorConfig)` with live session data. The engine is a single-pass O(n) parser (no regex, no repeated string replacement).
+
+| Token | Description |
+|-------|-------------|
+| `%N`, `%#` | Node number |
+| `%*` | Node number (zero-padded to 3 digits) |
+| `%I` | Session UUID |
+| `%U`, `%A` | Username (alias) |
+| `%R` | Real name (fullname) |
+| `%1`–`%4` | User record ID (with zero-padding) |
+| `%$` | User security level |
+| `%L` | User location |
+| `%W` | Terminal width (columns) |
+| `%H` | Terminal height (rows) |
+| `%E` | Terminal encoding |
+| `%Y` | Terminal type |
+| `%B` | Baud rate |
+| `%T` | Time left (seconds) |
+| `%C` | Connection type |
+| `%P` | Port number |
+| `%D` | Door directory (from config) |
+| `%F` | Dropfile directory (from config) |
+| `%S` | Door script filename (from config) |
+| `%X` | Door command (from config) |
+| `%G` | Door slug |
+| `%!` | Door base directory (env: `doordir`) |
+| `%Z` | Text/art directory (env: `textdir`) |
+| `%K` | Config directory (`cwd/config`) |
+| `%J` | Data directory (`cwd/data`) |
+| `%M` | DOSemu drive C (env: `dosemu_drive_c`, default `~/.dosemu/drive_c`) |
+| `%O` | Board name (env: `boardname`) |
+| `%Q` | System name (env: `system_name`) |
+| `%V` | Web port (env: `webport`) |
+| `%%` | Literal percent sign |
+
+Adding a new variable is a single entry in `VARIABLE_DEFS` — the engine, admin reference panel, and substitution all pick it up automatically.
 
 ### DoorLaunchHandler (`doorlaunchhandler.js`)
 
@@ -269,10 +319,14 @@ _Section for tracking development plans, priorities, and stage completion._
 | Area | Item | Status | Notes |
 |------|------|--------|-------|
 | Telnet | IAC escaping in `telnetCommands._send()` | TODO | Currently uses raw `socket.write()` |
+| Menus | Lightbar menu type | TODO | `menu_type` column in schema, admin UI persists it, handler does not yet branch |
 | Messages | Phase 1: Unified area selector with lightbar | **Done** | `msgAreaSelector.js` — replaces old msggroups + msgareas |
 | Messages | Phase 2: Fullscreen message reader | **Done** | `msgReader.js` — thread list + message view + flat mode |
 | Messages | Phase 2d: Newscan | **Done** | `newscan.js` — summary screen + sequential reader launch |
 | Messages | Phase 3: Message editor | **Done** | `msgEditor.js` — fullscreen + dumb, new thread + reply. Wired into reader R key. |
+| Admin | Menu admin (web) | **Done** | PostgreSQL-backed menus + menu_entries. Full CRUD via `/admin/menus`. Color picker selects with ANSI color map. |
+| Admin | Door admin (web) | **Done** | PostgreSQL-backed doors. Full CRUD via `/admin/doors`. Two-column layout, tooltip labels, variable reference. |
+| Admin | Config variable substitution | **Done** | `configvars.js` — %X token engine for door commands, directories, arguments. 36 variables. |
 
 ---
 
@@ -1127,6 +1181,13 @@ Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "
 | `messages.js` | models | Message viewing, posting, sanitization |
 | `msgGroups.js` | models | Message group CRUD |
 | `msgAreas.js` | models | Message area CRUD, table management |
+| `menus.js` | models | PostgreSQL-backed menu and menu entry CRUD, color map, command list, display file types |
+| `doors.js` | models | PostgreSQL-backed door game config CRUD, slug→camelCase normalization, launch/dropfile type validation |
 | `userMsgPointers.js` | models | Two-tier read tracking (area pointers + thread pointers) |
 | `echomail.js` | models | FTN echomail import/export, threading. Shared thread helpers: `createThreadRow`, `updateThreadStats`, `rollbackThread` |
 | `terminalText.js` | utils | VirtualTerminal, `formatTerminalText`, `formatBodyHtml` (consolidated single source for all tossers) |
+| `configvars.js` | utils | Runtime %X variable substitution for door commands, directories, and arguments. Single-pass O(n) engine, 36 tokens. |
+| **Schemas** | | |
+| `menus.conf` | schemas | Menu table — name, title, menu_type, display file, layout, colors |
+| `menu_entries.conf` | schemas | Menu entry table — hotkey, display, command, colors (default 7/0), access control flags |
+| `doors.conf` | schemas | Door game table — slug, launch type, command, directories, dropfile, capacity, real name flags |

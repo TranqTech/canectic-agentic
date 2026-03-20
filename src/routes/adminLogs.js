@@ -1,6 +1,7 @@
 // src/routes/adminLogs.js — Admin log viewer API and WebSocket bridge.
 //
 // Provides (mounted at /adminlogs):
+//   GET /adminlogs                  — log viewer page (pug view)
 //   GET /adminlogs/history/:process — JSON history from Redis sorted sets
 //   GET /adminlogs/history          — JSON history for all processes
 //   WebSocket at /ws/adminlogs      — real-time log stream via alog:stream pub/sub
@@ -10,40 +11,83 @@
 // level is done client-side for instant responsiveness.
 
 import express from 'express';
+import cookieParser from 'cookie-parser';
+import { WebSocketServer } from 'ws';
 import * as redis from '../middleware/db/redis.js';
 import * as alogger from '../utils/alogger.js';
 import * as sessionStore from '../middleware/db/sessionstore.js';
+import * as privateMessages from '../models/privateMessages.js';
 
 const router = express.Router();
+router.use(cookieParser());
 
 const VALID_PROCESSES = ['gateway', 'worker', 'mailer'];
+const adminsecurity   = parseInt(process.env.adminsecurity) || 200;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Shared middleware — inject common locals (same pattern as admin.js)
+// ---------------------------------------------------------------------------
+
+router.use(async function(req, res, next) {
+	res.locals.boardname    = process.env.boardname || 'BBS Admin';
+	res.locals.faviconlink  = process.env.faviconlink || '/images/favicon.ico';
+	res.locals.currentPath  = '/adminlogs' + req.path;
+	res.locals.activelink   = 'logs';
+	if (req.cookies.sessionid) {
+		await sessionStore.sessionRenew(req.cookies.sessionid);
+		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
+		if (pmSession) {
+			var pmUid = parseInt(pmSession.id);
+			if (pmUid && pmUid > 0) {
+				res.locals.pmUnreadCount = await privateMessages.getUnreadCount(pmUid);
+			}
+		}
+	}
+	next();
+});
+
+// ---------------------------------------------------------------------------
+// Helpers (same as admin.js)
 // ---------------------------------------------------------------------------
 
 async function getCurrentUser(req) {
-	if (!req.cookies || !req.cookies.sessionId) return null;
-	return await sessionStore.sessionGet(req.cookies.sessionId);
+	return await sessionStore.sessionGet(req.cookies.sessionid) || null;
 }
 
-function requireAdmin(req, res, next) {
-	getCurrentUser(req).then(user => {
-		var adminSecurity = parseInt(process.env.adminsecurity) || 200;
-		if (!user || (parseInt(user.security) || 0) < adminSecurity) {
-			return res.status(403).json({ error: 'Unauthorized' });
-		}
-		next();
-	}).catch(() => res.status(403).json({ error: 'Unauthorized' }));
+function checkAdminAccess(user) {
+	if (!user) return false;
+	var security = parseInt(user.security) || 0;
+	if (security < adminsecurity) return false;
+	var perms = Array.isArray(user.permissionflags) ? user.permissionflags : [];
+	return perms.includes('Sysop');
+}
+
+async function requireAdmin(req, res, next) {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	if (sufficientAccess) return next();
+	alogger.writeAlog(3, "Unauthorized admin log access attempt: " + req.path + " by " + (currentuser ? currentuser.username : 'unauthenticated'), "redbright");
+	return res.status(403).json({ error: 'Unauthorized' });
 }
 
 // ---------------------------------------------------------------------------
-// GET /adminlogs/history/:process
-//
-// Returns JSON array of log entries from the Redis sorted set.
-// Query params:
-//   since  — epoch ms timestamp, return entries after this (default: 8h ago)
-//   limit  — max entries to return (default: 500)
+// GET / (mounted as /adminlogs) — log viewer page
+// ---------------------------------------------------------------------------
+
+router.get('/', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	res.render('admin/logs/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'System Logs',
+		activelink: 'logs',
+		currentuser: currentuser,
+		sessionId: req.cookies ? req.cookies.sessionid || '' : ''
+	});
+});
+
+// ---------------------------------------------------------------------------
+// GET /history/:process — JSON history for a single process
 // ---------------------------------------------------------------------------
 
 router.get('/history/:process', requireAdmin, async (req, res) => {
@@ -60,7 +104,6 @@ router.get('/history/:process', requireAdmin, async (req, res) => {
 		var rc = await redis.getClient();
 		var key = alogger.HISTORY_PREFIX + proc;
 
-		// ZRANGEBYSCORE with score range, limited
 		var entries = await rc.zRangeByScore(key, since, '+inf', {
 			LIMIT: { offset: 0, count: limit }
 		});
@@ -69,9 +112,7 @@ router.get('/history/:process', requireAdmin, async (req, res) => {
 		for (var entry of entries) {
 			try {
 				parsed.push(JSON.parse(entry));
-			} catch (_) {
-				// skip malformed entries
-			}
+			} catch (_) {}
 		}
 
 		res.json({
@@ -86,9 +127,7 @@ router.get('/history/:process', requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /adminlogs/history
-//
-// Returns history for ALL processes in one call (for initial page load).
+// GET /history — JSON history for ALL processes (initial page load)
 // ---------------------------------------------------------------------------
 
 router.get('/history', requireAdmin, async (req, res) => {
@@ -124,24 +163,78 @@ router.get('/history', requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// WebSocket bridge setup
+// WebSocket bridge
 //
 // Call registerLogWebSocket(wsManager) from gateway startup to register
-// the /ws/adminlogs pool.  Admin clients connect here for real-time
-// log streaming.
+// the /ws/adminlogs path.
 //
-// Auth: the client must send a { type: 'auth', sessionId: '...' } message
-// within 5 seconds of connecting.  The session is validated against
-// sessionStore.  Unauthenticated connections are closed.
+// IMPORTANT: This does NOT use WsPool/WsConnection — those are designed
+// for terminal connections and will close sockets that don't have a
+// CallPool.  Instead we create a raw WebSocketServer and register a
+// lightweight adapter on the WsManager's pathMap, which only needs a
+// handleUpgrade(request, socket, head) method.
+//
+// Auth: the client sends { type: 'auth', sessionId: '...' } within 5
+// seconds of connecting.  The session is validated against sessionStore
+// using the same checkAdminAccess() check as HTTP routes.
 // ---------------------------------------------------------------------------
 
 var _logSubscriber = null;
-var _logWsPool = null;
+var _logWss = null;          // raw WebSocketServer (noServer mode)
+var _logClients = new Set(); // authenticated WebSocket clients
 
 async function registerLogWebSocket(wsManager) {
-	// Create a WsPool at /ws/adminlogs — no CallPool link
-	_logWsPool = wsManager.createNewPool('/ws/adminlogs', 'Admin Log Stream');
-	// Don't setCallPool — we handle connections directly
+	// Create a raw WebSocketServer — no WsPool, no WsConnection
+	_logWss = new WebSocketServer({ noServer: true });
+
+	// Register on WsManager's pathMap as a lightweight adapter.
+	// The WsManager upgrade handler calls pool.handleUpgrade() —
+	// our adapter does the same thing but skips WsConnection creation.
+	wsManager.pathMap.set('/ws/adminlogs', {
+		handleUpgrade(request, socket, head) {
+			_logWss.handleUpgrade(request, socket, head, (ws) => {
+				_logWss.emit('connection', ws, request);
+			});
+		}
+	});
+
+	// Handle new connections — require auth before streaming
+	_logWss.on('connection', (ws) => {
+		ws._logAuthed = false;
+
+		var authTimer = setTimeout(() => {
+			if (!ws._logAuthed) {
+				ws.close(4001, 'Authentication timeout');
+			}
+		}, 5000);
+
+		ws.on('message', async (data) => {
+			try {
+				var msg = JSON.parse(data.toString());
+
+				if (msg.type === 'auth' && msg.sessionId) {
+					var session = await sessionStore.sessionGet(msg.sessionId);
+					if (checkAdminAccess(session)) {
+						ws._logAuthed = true;
+						clearTimeout(authTimer);
+						_logClients.add(ws);
+						ws.send(JSON.stringify({ type: 'auth', status: 'ok' }));
+					} else {
+						ws.close(4003, 'Insufficient permissions');
+					}
+				}
+			} catch (_) {}
+		});
+
+		ws.on('close', () => {
+			clearTimeout(authTimer);
+			_logClients.delete(ws);
+		});
+
+		ws.on('error', () => {
+			_logClients.delete(ws);
+		});
+	});
 
 	// Subscribe to the alog:stream Redis channel
 	try {
@@ -152,14 +245,11 @@ async function registerLogWebSocket(wsManager) {
 		await _logSubscriber.connect();
 
 		await _logSubscriber.subscribe(alogger.LOG_CHANNEL, (payload) => {
-			// Broadcast raw JSON payload to all connected admin WS clients
-			if (_logWsPool && _logWsPool.connections) {
-				for (var conn of _logWsPool.connections) {
-					if (conn._logAuthed) {
-						try {
-							conn.ws.send(payload);
-						} catch (_) {}
-					}
+			for (var ws of _logClients) {
+				try {
+					ws.send(payload);
+				} catch (_) {
+					_logClients.delete(ws);
 				}
 			}
 		});
@@ -167,43 +257,6 @@ async function registerLogWebSocket(wsManager) {
 		alogger.writeAlog(2, "  Admin log WebSocket bridge started at /ws/adminlogs", "cyan");
 	} catch (err) {
 		alogger.writeAlog(2, "  Admin log WebSocket bridge failed: " + err.message, "redbright");
-	}
-
-	// Handle new connections — require auth before streaming
-	if (_logWsPool && _logWsPool.wss) {
-		_logWsPool.wss.on('connection', (ws) => {
-			ws._logAuthed = false;
-
-			// Auth timeout — close if not authenticated within 5s
-			var authTimer = setTimeout(() => {
-				if (!ws._logAuthed) {
-					ws.close(4001, 'Authentication timeout');
-				}
-			}, 5000);
-
-			ws.on('message', async (data) => {
-				try {
-					var msg = JSON.parse(data.toString());
-
-					if (msg.type === 'auth' && msg.sessionId) {
-						var session = await sessionStore.sessionGet(msg.sessionId);
-						var adminSecurity = parseInt(process.env.adminsecurity) || 200;
-
-						if (session && (parseInt(session.security) || 0) >= adminSecurity) {
-							ws._logAuthed = true;
-							clearTimeout(authTimer);
-							ws.send(JSON.stringify({ type: 'auth', status: 'ok' }));
-						} else {
-							ws.close(4003, 'Insufficient permissions');
-						}
-					}
-				} catch (_) {}
-			});
-
-			ws.on('close', () => {
-				clearTimeout(authTimer);
-			});
-		});
 	}
 }
 
@@ -215,6 +268,11 @@ function shutdownLogWebSocket() {
 		} catch (_) {}
 		_logSubscriber = null;
 	}
+	// Close all connected clients
+	for (var ws of _logClients) {
+		try { ws.close(1001, 'Server shutting down'); } catch (_) {}
+	}
+	_logClients.clear();
 }
 
 export { router, registerLogWebSocket, shutdownLogWebSocket };

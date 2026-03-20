@@ -28,8 +28,9 @@ import * as redis from "../src/middleware/db/redis.js";
 import { createQueueConnection, getQueueConfig } from "../src/queues/connection.js";
 import { closeQueues } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
-import { createEventPublisher, EVENTS } from "../src/queues/events.js";
+import { createEventPublisher, createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { Worker } from 'bullmq';
+import appConfig from "../src/config/appConfig.js";
 
 // Tosser imports — relocated to middleware/tossers/
 import * as ftnTosser from "../src/middleware/tossers/ftnTosser.js";
@@ -281,6 +282,7 @@ function createMaintenanceProcessor() {
 
 async function main() {
 	await alogger.initLogBus();
+	await appConfig.load();
 	alogger.writeAlog(1, systemvermsg + "\n  Worker Process Startup", "yellowbright", true);
 
 	var queueConfig = getQueueConfig();
@@ -321,6 +323,14 @@ async function main() {
 
 	maintWorker.on('error', (err) => {
 		alogger.writeAlog(2, `[Worker] Maintenance worker error: ${err.message}`, "redbright");
+	});
+
+	// Config reload subscriber
+	var eventSubscriber = createEventSubscriber((event) => {
+		if (event.type === EVENTS.CONFIG_CHANGED) {
+			alogger.writeAlog(3, "[Worker] Config changed, reloading", "cyan");
+			appConfig.reload();
+		}
 	});
 
 	alogger.writeAlog(1, `[Worker] Ready — toss(concurrency=${tossConcurrency}) + maintenance`, "greenbright", true);

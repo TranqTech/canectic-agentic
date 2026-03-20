@@ -34,8 +34,9 @@ import { nodeManager } from "../src/managers/nodemanager.js";
 import { createQueueConnection, getQueueConfig } from "../src/queues/connection.js";
 import { closeQueues } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
-import { createEventPublisher, EVENTS } from "../src/queues/events.js";
+import { createEventPublisher, createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { Worker } from 'bullmq';
+import appConfig from "../src/config/appConfig.js";
 
 dotenv.config();
 alogger.setProcessName('mailer');
@@ -78,6 +79,7 @@ process.on('SIGTERM', shutdown);
 
 async function main() {
 	await alogger.initLogBus();
+	await appConfig.load();
 	alogger.writeAlog(1, systemvermsg + "\n  Mailer Process Startup", "yellowbright", true);
 
 	// Check enable flag
@@ -151,6 +153,14 @@ async function main() {
 
 	mailerWorker.on('error', (err) => {
 		alogger.writeAlog(2, `[Mailer] Worker error: ${err.message}`, "redbright");
+	});
+
+	// Config reload subscriber
+	var eventSubscriber = createEventSubscriber((event) => {
+		if (event.type === EVENTS.CONFIG_CHANGED) {
+			alogger.writeAlog(3, "[Mailer] Config changed, reloading", "cyan");
+			appConfig.reload();
+		}
 	});
 
 	alogger.writeAlog(1, "[Mailer] Ready — consuming mailer queue", "greenbright", true);

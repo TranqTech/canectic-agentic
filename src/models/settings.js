@@ -1,1 +1,1 @@
-//pull all settings from db and cache to redis?
+// Replaced by src/models/configStore.js — see docs/CONFIG_SYSTEM_DESIGN.md

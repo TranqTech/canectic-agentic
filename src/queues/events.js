@@ -34,6 +34,9 @@ export const EVENTS = {
 	MAILER_SESSION_START: 'mailer:session:start',
 	MAILER_SESSION_END: 'mailer:session:end',
 	MAILER_TRANSFER_PROGRESS: 'mailer:transfer:progress',
+
+	// Any process → All: config changed in DB, reload appConfig
+	CONFIG_CHANGED: 'config:changed',
 };
 
 // ---------------------------------------------------------------------------

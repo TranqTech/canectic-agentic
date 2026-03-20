@@ -79,6 +79,17 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'users'
               span.visually-hidden  (current)
 
+        //- System Logs
+        li.nav-item
+          a.nav-link(
+            href='/adminlogs'
+            class=activenav === 'logs' ? 'active' : ''
+          )
+            i.bi.bi-terminal.me-1
+            | Logs
+            if activenav === 'logs'
+              span.visually-hidden  (current)
+
       //- Right side — mail link + user dropdown or login
       ul.navbar-nav.ms-auto
         if currentuser

@@ -23,6 +23,8 @@ import { closeQueues } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
 import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
+import { registerLogWebSocket } from "../src/routes/adminLogs.js";
+import appConfig from "../src/config/appConfig.js";
 
 dotenv.config();
 alogger.setProcessName('gateway');
@@ -180,6 +182,11 @@ async function startEventSubscriber(){
 				alogger.writeAlog(3, `[Event] Mailer: ${event.type}`, "cyan");
 				// TODO: update admin dashboard if open
 				break;
+
+			case EVENTS.CONFIG_CHANGED:
+				alogger.writeAlog(3, "[Event] Config changed, reloading", "cyan");
+				appConfig.reload();
+				break;
 		}
 	});
 	alogger.writeAlog(2, "  Event subscriber started", "cyan");
@@ -228,6 +235,7 @@ async function exitWatch(){
 
 async function main(){
 	await alogger.initLogBus()
+	await appConfig.load()
 	await prerunMaint()
 	await startNodeManager()
 	await startSocatManager()
@@ -235,6 +243,7 @@ async function main(){
 	await startWebServer()
 	if (runwssrv){
 		await startWebsockets()
+		await registerLogWebSocket(wsManager);
 	}
 
 	// Mode-dependent startup

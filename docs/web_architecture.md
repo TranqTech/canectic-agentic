@@ -165,6 +165,8 @@ Two-layer admin check:
 | Netmail | `GET/POST /admin/netmail/*` | Netmail browser and viewer |
 | Tosser | `POST /admin/tosser/*` | Enqueues toss jobs on the BullMQ queue (replaces direct tosser calls) |
 | Users | `GET /admin/users`, `POST /admin/users/:uuid/*` | User list, edit, password reset |
+| Menus | `GET /admin/menus`, `GET /admin/menus/:id`, `POST /admin/menus/*` | Menu CRUD — list, view with entries, create/update/delete. Entry CRUD and reorder within a menu. |
+| Doors | `GET /admin/doors`, `POST /admin/doors/*` | Door game CRUD — list, create/update/delete. Variable reference panel with %X tokens. |
 | Group Defaults | `GET /admin/msgGroup/:shortcode/defaults` | JSON endpoint — returns group security/flag defaults for new area modal auto-populate |
 
 ### Modal-Driven Editing Pattern
@@ -178,6 +180,22 @@ Admin views use a consistent pattern for CRUD:
 5. **JS wiring** — `DOMContentLoaded` handler initializes Bootstrap modals, wires click events, and handles inter-modal transitions (info -> edit, info -> delete)
 
 For tables using DataTables (e.g., users, all-areas index), event delegation on `tbody` survives DataTables redraws.
+
+### Menu Admin Views (`views/admin/menus/`)
+
+Two views: `index.pug` (menu list with create modal) and `view.pug` (menu detail with entries table, edit/delete modals, entry add/edit modals). Follows the standard modal-driven editing pattern.
+
+Menu-level color fields use `<select>` dropdowns with inline `style="color:<hex>"` on each option, rendered against a `.bg-dark` background. A `syncSelectColor()` JS function copies the selected option's color onto the `<select>` element itself on change and on page load (browsers don't natively show option inline styles on the closed select). A "Theme Default" option submits an empty value, which the model stores as `null`; `getMenu()` strips null color keys via `delete` so they arrive as `undefined` in `_applyConfig()` and the handler falls through to theme defaults.
+
+Entry-level `fg_clr`/`bg_clr` always have a value (default 7/0) — they're passed directly to `setfgcolor()` which renders `null` as black (ANSI color 0, invisible on dark backgrounds).
+
+The `ANSI_COLORS` array in `menus.js` maps each of the 16 ANSI color values to a label, hex color, and CSS class from `styles.css`. This array is used by all color select dropdowns and by the entry table's colored name/swatch display.
+
+### Door Admin Views (`views/admin/doors/`)
+
+Single view: `index.pug` with table, info/edit/delete modals. Add and edit modals use a two-column layout (1100px wide): left column has identity and executable fields, right column has dropfile and options. All field descriptions are Bootstrap tooltips on `<label>` elements (small info icon) rather than `.form-text` blocks.
+
+A collapsible "Variable Reference" panel below the door table shows all `%X` substitution tokens organized by category (node/session, user, terminal, connection, door config, system directories, system info). Sourced from `configvars.getVariableList()`, which means adding a new variable to the engine automatically updates the admin reference.
 
 ### Flag Editor Pattern
 
@@ -313,6 +331,14 @@ Connection pool (`pgpool`) using `pg` library. Shared across all models. Key fun
 
 All queries are parameterized — no SQL injection risk from user input. Table names derive from admin-controlled shortcodes.
 
+#### Admin-Managed Tables
+
+| Table | Schema File | Purpose |
+|---|---|---|
+| `menus` | `menus.conf` | Menu definitions — name, title, menu_type, display file, layout, colors |
+| `menu_entries` | `menu_entries.conf` | Menu items — hotkey, display text, command, colors, access control (flags, security) |
+| `doors` | `doors.conf` | Door game configs — slug, launch type, command, directories, dropfile, capacity, real name flags |
+
 ### Redis (`src/middleware/db/redis.js`)
 
 Redis client wrapper. Core key/value operations: `get`, `set`, `del`, `exists`, `expire`, `keys`. Hash operations: `hSet`, `hGet`, `hGetAll`. JSON cache helpers: `cacheSet`, `cacheGet`, `cacheInvalidate`, `cacheInvalidateAll`, `cacheThrough`. The client is created lazily on first use.
@@ -364,7 +390,7 @@ In **separate mode**, the mailer process binds its own HTTP listener on `MAILER_
 
 ### Model Layer Sharing
 
-All models (`messages.js`, `msgAreas.js`, `msgGroups.js`, `useraccounts.js`, `userMsgPointers.js`, `userAreaSubs.js`, etc.) are ES module singletons shared between:
+All models (`messages.js`, `msgAreas.js`, `msgGroups.js`, `menus.js`, `doors.js`, `useraccounts.js`, `userMsgPointers.js`, `userAreaSubs.js`, etc.) are ES module singletons shared between:
 
 - Web routes (`src/routes/*.js`) — user-facing and admin
 - Terminal handlers (`src/handlers/menucommands/*.js`) — area selector, reader, editor, newscan, PM reader/editor/check
@@ -372,6 +398,16 @@ All models (`messages.js`, `msgAreas.js`, `msgGroups.js`, `useraccounts.js`, `us
 - Maintenance tools (`src/tools/*.js`, `src/maintenance/*.js`)
 
 No model knows whether it's being called from a web route or a terminal handler. Access control is performed by the caller (route helper or terminal module), not the model.
+
+#### Menu and Door Models
+
+`menus.js` — PostgreSQL-backed menu and menu entry management. `getMenu(name)` returns the menu row with a `menu_entries` array attached (JSONB flags parsed, null color values stripped so the handler falls through to theme defaults). Full CRUD for menus and entries, plus `reorderEntries()` for drag-and-drop reordering. Exports `getAvailableCommands()` (command list for admin dropdowns), `getAnsiColors()` (16-color map with labels, hex values, and CSS classes for color pickers), and `getValidMenuTypes()` / `getValidDisplayFileTypes()` for admin form selects.
+
+`doors.js` — PostgreSQL-backed door game configuration. `getDoorConfig(slug)` returns a normalized config object with camelCase keys matching what `DoorRunner` and `SyncJSDoorRunner` expect (e.g. `door_script` → `doorScript`, `pause_on_exit` → `pauseOnExit`). Full CRUD with slug uniqueness validation and launch type enforcement. Exports `getValidLaunchTypes()` and `getValidDropfileTypes()` for admin form selects.
+
+#### Variable Substitution
+
+`configvars.js` (`src/utils/`) — Runtime variable substitution for admin-configured strings. Any string field in door configuration (command, door directory, dropfile directory, door arguments) can contain `%X` tokens that are replaced at execution time with session, user, terminal, and system values. The `substitute(template, call, doorConfig)` function performs single-pass O(n) replacement. `substituteArray()` handles arrays (e.g. door arguments). `getVariableList()` exports the full token/description list for the admin variable reference panel. See `terminal_architecture.md` for the complete variable table.
 
 ### Environment Variables
 
@@ -395,6 +431,8 @@ Key configuration via `.env`:
 | `MAILER_WS_PORT` | WebSocket listener port for mailer (separate mode) | 24555 |
 | `REDIS_BULLMQ_DB` | Redis database number for BullMQ job data | 2 |
 | `WORKER_CONCURRENCY` | Toss queue concurrency in worker process | 3 |
+| `doordir` | Base directory for external door game executables | — |
+| `dosemu_drive_c` | DOSemu virtual drive C path | `~/.dosemu/drive_c` |
 
 ---
 
@@ -408,3 +446,10 @@ Key configuration via `.env`:
 - **WebSocket authentication** — Currently WebSocket connections are anonymous until the terminal login flow. Future: authenticate via session cookie on upgrade.
 - **Rate limiting** — No rate limiting on login attempts or API endpoints currently.
 - **CSRF protection** — Not currently implemented. POST routes rely on session cookies + same-origin policy.
+- **Lightbar menu type** — `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
+
+### Recently Completed
+
+- **Menu admin** — Full web CRUD for menus and menu entries. PostgreSQL-backed (`menus` + `menu_entries` tables), replaces hardcoded `defaultmenuarray`. Color picker selects with live preview using ANSI color map. Entry reordering, flag-based access control editing.
+- **Door admin** — Full web CRUD for door game configurations. PostgreSQL-backed (`doors` table), replaces hardcoded `testingarray`. Two-column modal layout, tooltip field descriptions, variable reference panel.
+- **Config variable substitution** — `configvars.js` engine for `%X` token replacement in door commands, directories, and arguments. 36 variables across 6 categories. Admin reference panel on the doors page.
