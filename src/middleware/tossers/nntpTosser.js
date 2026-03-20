@@ -13,13 +13,13 @@ import * as tls from 'tls';
 import { v4 as uuidv4 } from 'uuid';
 import * as dotenv from 'dotenv';
 
-import * as postgres from '../middleware/db/postgres.js';
-import * as alogger from '../utils/alogger.js';
-import * as peerConnections from './peerConnections.js';
-import * as networkAreas from './networkAreas.js';
-import { formatBodyHtml } from '../utils/terminalText.js';
-import { cp437ToUtf8 } from '../utils/codepageConversions.js';
-import { createThreadRow, updateThreadStats, rollbackThread } from './echomail.js';
+import * as postgres from '../db/postgres.js';
+import * as alogger from '../../utils/alogger.js';
+import * as peerConnections from '../../models/peerConnections.js';
+import * as networkAreas from '../../models/networkAreas.js';
+import { formatBodyHtml } from '../../utils/terminalText.js';
+import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
+import { createThreadRow, updateThreadStats, rollbackThread } from '../../models/echomail.js';
 
 dotenv.config();
 

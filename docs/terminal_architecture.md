@@ -5,7 +5,7 @@ Reference document for the terminal-side BBS architecture. Covers the call lifec
 For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views), see `message_architecture.md`.
 For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
 For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
-For the web application stack (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
+For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -1091,7 +1091,7 @@ Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "
 | `_msgAutoSize.pug` | `.text-12` class overrode calculated font-size | Fixed — removed `.text-12` from `.messagebody` in both views |
 | `flat.pug` / `thread.pug` | Progress bar and `#messageContainer` indented inside `.card-header` instead of as siblings of `.card` | Fixed — outdented to `.card` children |
 | `flat.pug` / `thread.pug` | Offcanvas backdrop dimmed screen and blocked input | Fixed — `data-bs-backdrop='false'` |
-| `qwkTosser.js` | Downloaded `.qwk` could be lost if extraction failed — hub already deleted it | Fixed — Phase 1.5 checks for existing `.qwk` in inDir before downloading |
+| `qwkTosser.js` _(in `src/middleware/tossers/`)_ | Downloaded `.qwk` could be lost if extraction failed — hub already deleted it | Fixed — Phase 1.5 checks for existing `.qwk` in inDir before downloading |
 | `flat.pug` | Flat-mode reply `thread_uuid` is null for some messages | Pending — needs `getThreadByDbId()` lookup |
 | `telnetCommands` | IAC escaping in `_send()` | Pending |
 

@@ -9,14 +9,14 @@ import * as  util  from 'util';
 const pexec = util.promisify(exec);
 
 //internals
-import {Message, Packet} from '../models/ftnClasses.js'
-import * as ftnNetmailAdapter from '../models/ftnNetmailAdapter.js'
-import * as privateMessages from '../models/privateMessages.js'
-import * as systemAddresses from '../models/systemAddresses.js'
-import * as echomail from '../models/echomail.js'
-import * as ftnUtils from "../utils/ftnUtils.js"
-import * as peerConnections from '../models/peerConnections.js'
-import * as codepageConversions from "../utils/codepageConversions.js"
+import {Message, Packet} from '../../models/ftnClasses.js'
+import * as ftnNetmailAdapter from '../../models/ftnNetmailAdapter.js'
+import * as privateMessages from '../../models/privateMessages.js'
+import * as systemAddresses from '../../models/systemAddresses.js'
+import * as echomail from '../../models/echomail.js'
+import * as ftnUtils from "../../utils/ftnUtils.js"
+import * as peerConnections from '../../models/peerConnections.js'
+import * as codepageConversions from "../../utils/codepageConversions.js"
 
 
 //setup and variables

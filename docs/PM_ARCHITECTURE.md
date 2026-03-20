@@ -7,6 +7,7 @@ The private messaging system provides unified user-to-user messaging across mult
 For the shared message platform (echomail areas, read tracking, body_html pipeline), see `message_architecture.md`.
 For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`.
 For the web application stack (Express, sessions, admin panel), see `web_architecture.md`.
+For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -16,7 +17,7 @@ For the web application stack (Express, sessions, admin panel), see `web_archite
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `privateMessages.js` | `src/models/` | Unified PM model. Transport access control, recipient resolution, inbox/outbox/trash CRUD, delivery pipeline, dupe checking, undeliverable queue, sysop notifications, soft delete with trash purge. |
+| `privateMessages.js` | `src/models/` | Unified PM model. Transport access control, recipient resolution, inbox/outbox/trash CRUD, delivery pipeline, dupe checking, undeliverable queue, sysop notifications, soft delete with trash purge. On non-LOCAL `queueMessage()` and `queueOutbound()`, triggers outbound toss via BullMQ job queue (FTN → `enqueueFtnOutbound`, QWK → `enqueueQwkPushAll`). Dynamic import of queue module — gracefully skips if queue infrastructure is unavailable. |
 | `ftnNetmailAdapter.js` | `src/models/` | FTN↔PM bridge. Converts between FTN Message objects and PM objects. Handles inbound routing (local delivery, relay, automated processors). |
 | `flash.js` | `src/middleware/db/` | Session-scoped flash messages via Redis. Used by PM routes for user feedback on compose/reply/delete/restore actions. Generic — usable by any route. |
 
@@ -39,8 +40,8 @@ For the web application stack (Express, sessions, admin panel), see `web_archite
 
 | File | Changes |
 |------|---------|
-| `ftnTosser.js` | `TossInboundFile` and `OldTossInbound` route netmail through `ftnNetmailAdapter.importFtnNetmail()` instead of `netmail.newInboundNetmail()`. `TossOutboundNetmail` uses `privateMessages.getPendingByTransport('FTN')` with per-message zone-aware source resolution via `systemAddresses.resolveSourceForDestinationZone()`. |
-| `qwkTosser.js` | `pullFromQwkPeer` delivers conference 0 messages as PMs via `importQwkPrivateMessage()`. `pushToQwkPeer` gathers pending QWK PMs and packs them as conference 0 with private status byte (`0x2A`). |
+| `ftnTosser.js` _(in `src/middleware/tossers/`)_ | `TossInboundFile` and `OldTossInbound` route netmail through `ftnNetmailAdapter.importFtnNetmail()` instead of `netmail.newInboundNetmail()`. `TossOutboundNetmail` uses `privateMessages.getPendingByTransport('FTN')` with per-message zone-aware source resolution via `systemAddresses.resolveSourceForDestinationZone()`. |
+| `qwkTosser.js` _(in `src/middleware/tossers/`)_ | `pullFromQwkPeer` delivers conference 0 messages as PMs via `importQwkPrivateMessage()`. `pushToQwkPeer` gathers pending QWK PMs and packs them as conference 0 with private status byte (`0x2A`). |
 | `qwkPacketBuilder.js` | `buildQwkForNode` gathers pending QWK PMs for conference 0 in hub-mode packets. `buildMessagesDat` passes `isPrivate` through to `buildQwkHeader`. |
 | `qwkClasses.js` | `buildQwkHeader` accepts `isPrivate` parameter — sets status byte to `0x2A` (private) or `0x20` (public). `buildRepPacket` passes `isPrivate` through. |
 
@@ -48,7 +49,7 @@ For the web application stack (Express, sessions, admin panel), see `web_archite
 
 | File | Changes |
 |------|---------|
-| `maintenance.js` | `--purge-pm-trash` flag invokes `purgeDeleted(days)`. `--regen-pm-html` flag invokes `regeneratePmBodyHtml()`. |
+| `maintenance.js` | `--purge-pm-trash` enqueues purge job on BullMQ maintenance queue. `--regen-pm-html` enqueues PM body_html regeneration job. Worker process handles execution. |
 | `messageBase.js` | `regeneratePmBodyHtml()` and `regeneratePmTableBodyHtml()` regenerate `body_html` for `pm_inbox` and `pm_outbox` using the same `formatBodyHtml` pipeline as message areas. |
 
 ### Updated Models
@@ -252,6 +253,23 @@ Web compose form → POST /pm/compose/local
   → flash success message → redirect
 ```
 
+### Network Messages (FTN, QWK — user compose from web or terminal)
+
+```
+Web compose form → POST /pm/compose/network   (or terminal pmEditor save)
+  → queueMessage(messageObj, userSession)
+    → checkTransportAccess (if session provided)
+    → sanitizeMessageFields()
+    → formatBodyHtml() with simpleTextToHtml fallback
+    → INSERT pm_outbox (sent=false, queued=true)
+    → _triggerOutboundToss(transport_type)
+        FTN → enqueues ftn:outbound on toss queue
+        QWK → enqueues qwk:push-all on toss queue
+  → flash success message → redirect
+```
+
+The outbound toss trigger fires from the model layer, so both web routes and terminal `pmEditor` get immediate dispatch without duplicating logic. The trigger uses dynamic import of `jobs.js` and silently skips if queue infrastructure is unavailable.
+
 ### FTN Inbound
 
 ```
@@ -268,7 +286,9 @@ Remote system sends .pkt → ftnTosser.TossInboundFile()
 ### FTN Outbound
 
 ```
-tosser.js --out --ftn → TossOutboundNetmail()
+Triggered by: scheduled toss cycle, CLI (node src/tools/tosser.js --out --ftn),
+              or queueMessage() model trigger after network PM compose
+  → worker picks up ftn:outbound job → TossOutboundNetmail()
   → privateMessages.getPendingByTransport('FTN')
   → ftnNetmailAdapter.privateMessageToFtn(pmRow)
     → sets Attribute = 0x0001 (Private flag)
@@ -675,7 +695,11 @@ All maintenance tasks can be combined in a single run:
 node src/tools/maintenance.js --regen-html --regen-pm-html --purge-pm-trash
 ```
 
-Executed sequentially under the same PID lock (`/tmp/can_maint.pid`).
+Enqueues each task as a separate job on the BullMQ maintenance queue. The worker processes them sequentially (maintenance queue concurrency is 1).
+
+### Queue-Based Scheduling
+
+PM trash purge runs automatically via a BullMQ repeatable job (daily at 3:00 AM). body_html regeneration and trash purge can also be triggered from the admin panel via the `maintenance` queue. The CLI tools remain available for manual runs and cron compatibility. See `PROCESS_ARCHITECTURE.md` for queue job definitions and scheduling.
 
 ---
 
@@ -706,6 +730,8 @@ Executed sequentially under the same PID lock (`/tmp/can_maint.pid`).
 12. **Title-case normalization on To field**: The recipient name is title-cased at save time to produce consistent display regardless of how the user typed it. The original typed value is preserved as `to_user` (display) while `to_address` holds the resolved username (routing), so `"john smith"` displays as `"John Smith"` but routes correctly to the `jsmith` account.
 
 13. **Shared module for call flow and menu**: `pmCheck` is a `BaseSubModule` that works both as a menu command (via `_runSubModule`) and as a call flow stage (via `SubModuleAdapter`). Same code path, no duplication.
+
+14. **Model-layer outbound toss trigger**: `queueMessage()` and `queueOutbound()` enqueue the appropriate outbound toss job (FTN → `enqueueFtnOutbound`, QWK → `enqueueQwkPushAll`) after a successful outbox insert for non-LOCAL transports. This ensures both web routes and terminal `pmEditor` trigger delivery without duplicating logic in each caller. Uses dynamic `await import('../queues/jobs.js')` with try/catch so the model remains testable without Redis — the trigger silently skips if queue infrastructure is unavailable.
 
 ---
 

@@ -17,6 +17,8 @@ import * as msgAreas from '../models/msgAreas.js';
 import * as netmail from '../models/netmail.js';
 import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
+import * as doors from '../models/doors.js';
+import * as menus from '../models/menus.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as peerAreaSubscriptions from '../models/peerAreaSubscriptions.js';
 import * as networkAreas from '../models/networkAreas.js';
@@ -24,8 +26,8 @@ import * as systemAddresses from "../models/systemAddresses.js";
 import * as userAccounts from "../models/useraccounts.js";
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
-import * as nntpTosser from "../models/nntpTosser.js";
-import * as qwkTosser from "../models/qwkTosser.js";
+import * as jobs from "../queues/jobs.js";
+import {getVariableList} from "../utils/configvars.js"
 
 //setup
 router.use(cookieParser());
@@ -228,7 +230,7 @@ router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) =>
 
 // Recalculate area counts for all groups
 router.post('/msgGroups/recalculateAreaCounts', urlencodedParser, requireAdmin, async (req, res) => {
-	await msgAreas.recalculateAreaCounts();
+	await jobs.enqueueRecalcAreaCounts();
 	res.redirect('/admin/msgGroups');
 });
 
@@ -851,7 +853,7 @@ router.post('/connection/:uuid/resetnntpidx', urlencodedParser, requireAdmin, as
 		alogger.writeAlog(3, "resetnntpidx: connection not found for uuid " + uuid, "redbright");
 		return res.redirect('/admin/peers');
 	}
-	var result = await nntpTosser.resetNntpOutboundIdx(uuid, areaId);
+	var result = await peerAreaSubscriptions.resetOutboundIdx(uuid, areaId);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "resetnntpidx failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
@@ -869,7 +871,7 @@ router.post('/connection/:uuid/resetqwkidx', urlencodedParser, requireAdmin, asy
 		alogger.writeAlog(3, "resetqwkidx: connection not found for uuid " + uuid, "redbright");
 		return res.redirect('/admin/peers');
 	}
-	var result = await qwkTosser.resetQwkOutboundIdx(uuid, areaId);
+	var result = await peerAreaSubscriptions.resetOutboundIdx(uuid, areaId);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "resetqwkidx failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
@@ -1184,6 +1186,224 @@ router.post('/users/:uuid/resetpassword', urlencodedParser, requireAdmin, async 
 		alogger.writeAlog(3, "resetUserPassword failed for " + uuid + ": " + resultObj.errormessages.join(", "), "redbright");
 	}
 	res.redirect('/admin/users');
+});
+
+// -------------------------------------------------------
+// Menu & Door Admin Routes
+// -------------------------------------------------------
+// Add these imports at the top of admin.js alongside existing imports:
+//
+//   import * as menus from '../models/menus.js';
+//   import * as doors from '../models/doors.js';
+//   import { getVariableList } from '../utils/configvars.js';
+//
+// Then paste these route blocks into admin.js before the final `export { router }`.
+
+
+// -------------------------------------------------------
+// Menus
+// -------------------------------------------------------
+
+router.get('/menus', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var menulist         = await menus.getAllMenus();
+	var availCommands    = menus.getAvailableCommands();
+	var menuTypes        = menus.getValidMenuTypes();
+	var ansiColors       = menus.getAnsiColors();
+	res.render('admin/menus/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Menus',
+		activelink: 'menus',
+		currentuser: currentuser,
+		menulist: menulist,
+		availCommands: availCommands,
+		menuTypes: menuTypes,
+		ansiColors: ansiColors
+	});
+});
+
+router.get('/menus/:id', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var menuId           = parseInt(req.params.id);
+	var menu             = await menus.getMenuById(menuId);
+	if (!menu) {
+		res.redirect('/admin/menus');
+		return;
+	}
+	var entries        = await menus.getEntriesForMenu(menuId);
+	var availCommands  = menus.getAvailableCommands();
+	var menuTypes      = menus.getValidMenuTypes();
+	var ansiColors     = menus.getAnsiColors();
+	var allMenus       = await menus.getAllMenus();
+	var allDoors       = await doors.getAllDoors();
+	res.render('admin/menus/view', {
+		sufficientAccess: sufficientAccess,
+		title: menu.name,
+		activelink: 'menus',
+		currentuser: currentuser,
+		menu: menu,
+		entries: entries,
+		availCommands: availCommands,
+		menuTypes: menuTypes,
+		ansiColors: ansiColors,
+		allMenus: allMenus,
+		allDoors: allDoors,
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions
+	});
+});
+
+router.post('/menus/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await menus.createMenu(req.body);
+	if (result.status && result.menuId) {
+		res.redirect('/admin/menus/' + result.menuId);
+	} else {
+		// Re-render with errors
+		var currentuser      = await getCurrentUser(req);
+		var sufficientAccess = checkAdminAccess(currentuser);
+		var menulist         = await menus.getAllMenus();
+		var availCommands    = menus.getAvailableCommands();
+		var menuTypes        = menus.getValidMenuTypes();
+		var ansiColors       = menus.getAnsiColors();
+		res.render('admin/menus/index', {
+			sufficientAccess: sufficientAccess,
+			title: 'Menus',
+			activelink: 'menus',
+			currentuser: currentuser,
+			menulist: menulist,
+			availCommands: availCommands,
+			menuTypes: menuTypes,
+			ansiColors: ansiColors,
+			errormessages: result.errormessages
+		});
+	}
+});
+
+router.post('/menus/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var menuId = parseInt(req.params.id);
+	var result = await menus.updateMenu(menuId, req.body);
+	if (result.status) {
+		res.redirect('/admin/menus/' + menuId);
+	} else {
+		alogger.writeAlog(3, "updateMenu failed for id " + menuId + ": " + result.errormessages.join(", "), "redbright");
+		res.redirect('/admin/menus/' + menuId);
+	}
+});
+
+router.post('/menus/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var menuId = parseInt(req.params.id);
+	await menus.deleteMenu(menuId);
+	res.redirect('/admin/menus');
+});
+
+// --- Menu Entry routes ---
+
+router.post('/menus/:id/entries/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var menuId = parseInt(req.params.id);
+	var result = await menus.createEntry(menuId, req.body);
+	if (!result.status) {
+		alogger.writeAlog(3, "createEntry failed: " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect('/admin/menus/' + menuId);
+});
+
+router.post('/menus/:id/entries/:entryId/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var menuId  = parseInt(req.params.id);
+	var entryId = parseInt(req.params.entryId);
+	var result  = await menus.updateEntry(entryId, req.body);
+	if (!result.status) {
+		alogger.writeAlog(3, "updateEntry failed for id " + entryId + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect('/admin/menus/' + menuId);
+});
+
+router.post('/menus/:id/entries/:entryId/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var menuId  = parseInt(req.params.id);
+	var entryId = parseInt(req.params.entryId);
+	await menus.deleteEntry(entryId);
+	res.redirect('/admin/menus/' + menuId);
+});
+
+router.post('/menus/:id/entries/reorder', urlencodedParser, requireAdmin, async (req, res) => {
+	var menuId = parseInt(req.params.id);
+	var orderedIds = [];
+	try {
+		orderedIds = JSON.parse(req.body.order || '[]');
+	} catch (_) {}
+	if (orderedIds.length > 0) {
+		await menus.reorderEntries(menuId, orderedIds);
+	}
+	if (req.headers.accept && req.headers.accept.includes('application/json')) {
+		res.json({ status: true });
+	} else {
+		res.redirect('/admin/menus/' + menuId);
+	}
+});
+
+
+// -------------------------------------------------------
+// Doors
+// -------------------------------------------------------
+
+router.get('/doors', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var doorlist         = await doors.getAllDoors();
+	var launchTypes      = doors.getValidLaunchTypes();
+	var dropfileTypes    = doors.getValidDropfileTypes();
+	var configVars       = getVariableList();
+	res.render('admin/doors/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Door Games',
+		activelink: 'doors',
+		currentuser: currentuser,
+		doorlist: doorlist,
+		launchTypes: launchTypes,
+		dropfileTypes: dropfileTypes,
+		configVars: configVars
+	});
+});
+
+router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await doors.createDoor(req.body);
+	if (result.status) {
+		res.redirect('/admin/doors');
+	} else {
+		var currentuser      = await getCurrentUser(req);
+		var sufficientAccess = checkAdminAccess(currentuser);
+		var doorlist         = await doors.getAllDoors();
+		var launchTypes      = doors.getValidLaunchTypes();
+		var dropfileTypes    = doors.getValidDropfileTypes();
+		var configVars       = getVariableList();
+		res.render('admin/doors/index', {
+			sufficientAccess: sufficientAccess,
+			title: 'Door Games',
+			activelink: 'doors',
+			currentuser: currentuser,
+			doorlist: doorlist,
+			launchTypes: launchTypes,
+			dropfileTypes: dropfileTypes,
+			configVars: configVars,
+			errormessages: result.errormessages
+		});
+	}
+});
+
+router.post('/doors/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var doorId = parseInt(req.params.id);
+	var result = await doors.updateDoor(doorId, req.body);
+	if (!result.status) {
+		alogger.writeAlog(3, "updateDoor failed for id " + doorId + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect('/admin/doors');
+});
+
+router.post('/doors/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var doorId = parseInt(req.params.id);
+	await doors.deleteDoor(doorId);
+	res.redirect('/admin/doors');
 });
 
 export { router };

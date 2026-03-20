@@ -1,0 +1,508 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info.me-2(href='/admin')
+                        | Exit
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newDoorModal')
+                        | Add Door
+              .card-body
+                if errormessages && errormessages.length > 0
+                  ul.text-danger
+                    for error of errormessages
+                      li.text-danger= error
+                  br
+
+                if doorlist && doorlist.length > 0
+                  table#doorTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Name
+                        th(scope='col') Slug
+                        th(scope='col') Launch Type
+                        th(scope='col') Command / Script
+                        th(scope='col') Max Nodes
+                        th(scope='col') Status
+                        th(scope='col' style='width:140px') Actions
+                    tbody
+                      for door of doorlist
+                        tr(
+                          data-id=door.id
+                          data-slug=door.slug
+                          data-name=door.name
+                          data-cmd=door.cmd || ''
+                          data-door_script=door.door_script || ''
+                          data-door_dir=door.door_dir || ''
+                          data-door_args=JSON.stringify(door.door_args || [])
+                          data-launch_type=door.launch_type
+                          data-dropfile_type=door.dropfile_type || ''
+                          data-dropfile_dir=door.dropfile_dir || ''
+                          data-db_subdir=door.db_subdir || ''
+                          data-usereal_local=(door.usereal_local ? 'true' : 'false')
+                          data-usereal_doorsession=(door.usereal_doorsession ? 'true' : 'false')
+                          data-pause_on_exit=(door.pause_on_exit ? 'true' : 'false')
+                          data-max_nodes=door.max_nodes
+                          data-active=(door.active ? 'true' : 'false')
+                          data-sort_order=door.sort_order
+                          data-description=door.description || ''
+                        )
+                          td= door.name
+                          td
+                            code= door.slug
+                          td
+                            span.badge.bg-primary= door.launch_type
+                          td
+                            if door.cmd
+                              small= door.cmd
+                            else if door.door_script
+                              small.text-info= door.door_script
+                            else
+                              | —
+                          td.text-center
+                            if door.max_nodes === 0
+                              span.text-muted ∞
+                            else
+                              = door.max_nodes
+                          td
+                            if door.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-danger Inactive
+                          td
+                            button.btn.btn-xs.btn-outline-warning.me-1.edit-door-btn(type='button' title='Edit')
+                              i.bi.bi-pencil
+                            button.btn.btn-xs.btn-outline-danger.delete-door-btn(type='button' title='Delete')
+                              i.bi.bi-trash
+                else
+                  center
+                    .h4 No Door Games Configured
+                    p.text-muted Add your first door game to get started.
+
+            //- Variable Reference (collapsible)
+            .card.mt-3
+              .card-header.bg-darkblue.text-white(style='cursor:pointer' data-bs-toggle='collapse' data-bs-target='#varRefPanel')
+                .row
+                  .col-10
+                    h5.mb-0
+                      i.bi.bi-code-square.me-2
+                      | Variable Reference
+                  .col-2.text-end
+                    small.text-muted (click to expand)
+              #varRefPanel.collapse
+                .card-body
+                  p.text-muted.mb-2 Use these tokens in Command, Door Directory, Dropfile Directory, and Door Arguments fields. They are replaced at runtime with live session data.
+                  .row
+                    .col-6
+                      h6 Node / Session
+                      table.table.table-sm.table-hover.mb-3
+                        tbody
+                          for v in configVars
+                            if v.token === '%N' || v.token === '%#' || v.token === '%*' || v.token === '%I'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+                      h6 User
+                      table.table.table-sm.table-hover.mb-3
+                        tbody
+                          for v in configVars
+                            if v.token === '%U' || v.token === '%A' || v.token === '%R' || v.token === '%1' || v.token === '%2' || v.token === '%3' || v.token === '%4' || v.token === '%$' || v.token === '%L'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+                      h6 Terminal
+                      table.table.table-sm.table-hover.mb-3
+                        tbody
+                          for v in configVars
+                            if v.token === '%W' || v.token === '%H' || v.token === '%E' || v.token === '%Y'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+                    .col-6
+                      h6 Connection
+                      table.table.table-sm.table-hover.mb-3
+                        tbody
+                          for v in configVars
+                            if v.token === '%B' || v.token === '%T' || v.token === '%C' || v.token === '%P'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+                      h6 Door Config
+                      table.table.table-sm.table-hover.mb-3
+                        tbody
+                          for v in configVars
+                            if v.token === '%D' || v.token === '%F' || v.token === '%S' || v.token === '%X' || v.token === '%G'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+                      h6 System Directories
+                      table.table.table-sm.table-hover.mb-3
+                        tbody
+                          for v in configVars
+                            if v.token === '%!' || v.token === '%Z' || v.token === '%K' || v.token === '%J' || v.token === '%M'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+                      h6 System Info / Misc
+                      table.table.table-sm.table-hover
+                        tbody
+                          for v in configVars
+                            if v.token === '%O' || v.token === '%Q' || v.token === '%V' || v.token === '%%'
+                              tr
+                                td.text-nowrap: code= v.token
+                                td.small= v.description
+
+    //- Door Info Modal
+    #doorInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3#doorInfoTitle.modal-title Door Info
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            table.table.table-sm
+              tr
+                th Slug
+                td#diSlug
+              tr
+                th Launch Type
+                td#diLaunchType
+              tr
+                th Command
+                td#diCmd
+              tr
+                th Script
+                td#diScript
+              tr
+                th Directory
+                td#diDir
+              tr
+                th Dropfile
+                td#diDropfile
+              tr
+                th Max Nodes
+                td#diMaxNodes
+              tr
+                th Description
+                td#diDescription
+
+    //- New Door Modal
+    #newDoorModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered.modal-xl
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Add Door Game
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form(action='/admin/doors/new' method='POST')
+              .row
+                .col-1
+                .col-5
+                  label.form-label(for='nd_name') Name:
+                  input#nd_name.form-control(type='text' name='name' required placeholder='e.g. Legend of the Red Dragon')
+                .col-5
+                  label.form-label(for='nd_slug') Slug (unique ID):
+                  input#nd_slug.form-control(type='text' name='slug' required placeholder='e.g. lord' pattern='[a-z0-9_-]+')
+                  .form-text Lowercase letters, numbers, hyphens, underscores only
+              br
+              .row
+                .col-1
+                .col-5
+                  label.form-label Launch Type:
+                  select.form-control(name='launch_type')
+                    for lt in launchTypes
+                      option(value=lt)= lt
+                .col-5
+                  label.form-label Description:
+                  input.form-control(type='text' name='description' placeholder='Optional description')
+              br
+              h5 Executable
+              .row
+                .col-1
+                .col-5
+                  label.form-label Command (native/dosemu):
+                  input.form-control(type='text' name='cmd' placeholder='e.g. "c:\\bat\\lord.bat"')
+                  .form-text Used by NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty. Supports %X variables — see reference below.
+                .col-5
+                  label.form-label JS Door Script (SyncJSDoor):
+                  input.form-control(type='text' name='door_script' placeholder='e.g. lord.js')
+                  .form-text Used only by SyncJSDoor launch type
+              .row
+                .col-1
+                .col-5
+                  label.form-label Door Directory:
+                  input.form-control(type='text' name='door_dir' placeholder='/path/to/door')
+                .col-5
+                  label.form-label Door Arguments (space-separated):
+                  input.form-control(type='text' name='door_args' placeholder='e.g. -m RESET')
+              br
+              h5 Dropfile
+              .row
+                .col-1
+                .col-5
+                  label.form-label Dropfile Type:
+                  select.form-control(name='dropfile_type')
+                    option(value='') None
+                    for dt in dropfileTypes
+                      if dt
+                        option(value=dt)= dt
+                .col-5
+                  label.form-label Dropfile Directory:
+                  input.form-control(type='text' name='dropfile_dir' placeholder='/path/to/dropfile/dir')
+              br
+              h5 Options
+              .row
+                .col-1
+                .col-2
+                  label.form-label Max Nodes:
+                  input.form-control(type='number' name='max_nodes' value='0' min='0')
+                  .form-text 0 = unlimited
+                .col-2
+                  label.form-label DB Subdir:
+                  input.form-control(type='text' name='db_subdir' placeholder='e.g. DB')
+                .col-2
+                  label.form-label Sort Order:
+                  input.form-control(type='number' name='sort_order' value='0')
+                .col-2
+                  label.form-label Active:
+                  select.form-control(name='active')
+                    option(value='true') Yes
+                    option(value='false') No
+              br
+              .row
+                .col-1
+                .col-3
+                  label.form-label Pause on Exit:
+                  select.form-control(name='pause_on_exit')
+                    option(value='true') Yes
+                    option(value='false') No
+                .col-3
+                  label.form-label Use Real Names (Local):
+                  select.form-control(name='usereal_local')
+                    option(value='false') No
+                    option(value='true') Yes
+                .col-3
+                  label.form-label Use Real Names (Doorsession):
+                  select.form-control(name='usereal_doorsession')
+                    option(value='false') No
+                    option(value='true') Yes
+              br
+              .row
+                .col-1
+                .col-10
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Create Door')
+
+    //- Edit Door Modal
+    #editDoorModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered.modal-xl
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Edit Door Game
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form#editDoorForm(method='POST')
+              .row
+                .col-1
+                .col-5
+                  label.form-label Name:
+                  input#ed_name.form-control(type='text' name='name' required)
+                .col-5
+                  label.form-label Slug:
+                  input#ed_slug.form-control(type='text' name='slug' required pattern='[a-z0-9_-]+')
+              br
+              .row
+                .col-1
+                .col-5
+                  label.form-label Launch Type:
+                  select#ed_launch_type.form-control(name='launch_type')
+                    for lt in launchTypes
+                      option(value=lt)= lt
+                .col-5
+                  label.form-label Description:
+                  input#ed_description.form-control(type='text' name='description')
+              br
+              h5 Executable
+              .row
+                .col-1
+                .col-5
+                  label.form-label Command:
+                  input#ed_cmd.form-control(type='text' name='cmd')
+                .col-5
+                  label.form-label JS Door Script:
+                  input#ed_door_script.form-control(type='text' name='door_script')
+              .row
+                .col-1
+                .col-5
+                  label.form-label Door Directory:
+                  input#ed_door_dir.form-control(type='text' name='door_dir')
+                .col-5
+                  label.form-label Door Arguments:
+                  input#ed_door_args.form-control(type='text' name='door_args')
+              br
+              h5 Dropfile
+              .row
+                .col-1
+                .col-5
+                  label.form-label Dropfile Type:
+                  select#ed_dropfile_type.form-control(name='dropfile_type')
+                    option(value='') None
+                    for dt in dropfileTypes
+                      if dt
+                        option(value=dt)= dt
+                .col-5
+                  label.form-label Dropfile Directory:
+                  input#ed_dropfile_dir.form-control(type='text' name='dropfile_dir')
+              br
+              h5 Options
+              .row
+                .col-1
+                .col-2
+                  label.form-label Max Nodes:
+                  input#ed_max_nodes.form-control(type='number' name='max_nodes' min='0')
+                .col-2
+                  label.form-label DB Subdir:
+                  input#ed_db_subdir.form-control(type='text' name='db_subdir')
+                .col-2
+                  label.form-label Sort Order:
+                  input#ed_sort_order.form-control(type='number' name='sort_order')
+                .col-2
+                  label.form-label Active:
+                  select#ed_active.form-control(name='active')
+                    option(value='true') Yes
+                    option(value='false') No
+              br
+              .row
+                .col-1
+                .col-3
+                  label.form-label Pause on Exit:
+                  select#ed_pause.form-control(name='pause_on_exit')
+                    option(value='true') Yes
+                    option(value='false') No
+                .col-3
+                  label.form-label Use Real Names (Local):
+                  select#ed_usereal_local.form-control(name='usereal_local')
+                    option(value='false') No
+                    option(value='true') Yes
+                .col-3
+                  label.form-label Use Real Names (Doorsession):
+                  select#ed_usereal_doorsession.form-control(name='usereal_doorsession')
+                    option(value='false') No
+                    option(value='true') Yes
+              br
+              .row
+                .col-1
+                .col-10
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Save Changes')
+
+    //- Delete Door Modal
+    #deleteDoorModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-danger.text-white
+            h3.modal-title Delete Door
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            p
+              | Are you sure you want to delete 
+              strong#deleteDoorName
+              | ?
+            form#deleteDoorForm(method='POST')
+              .text-end
+                button.btn.btn-secondary.me-2(data-bs-dismiss='modal') Cancel
+                input.btn.btn-danger(type='submit' value='Delete Door')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var editDoorModal   = new bootstrap.Modal(document.getElementById('editDoorModal'));
+      var deleteDoorModal = new bootstrap.Modal(document.getElementById('deleteDoorModal'));
+
+      // Edit button
+      document.querySelectorAll('.edit-door-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var row = this.closest('tr');
+          var d   = row.dataset;
+
+          document.getElementById('editDoorForm').action      = '/admin/doors/' + d.id + '/update';
+          document.getElementById('ed_name').value             = d.name;
+          document.getElementById('ed_slug').value             = d.slug;
+          document.getElementById('ed_launch_type').value      = d.launch_type;
+          document.getElementById('ed_description').value      = d.description;
+          document.getElementById('ed_cmd').value              = d.cmd;
+          document.getElementById('ed_door_script').value      = d.door_script;
+          document.getElementById('ed_door_dir').value         = d.door_dir;
+          document.getElementById('ed_dropfile_type').value    = d.dropfile_type;
+          document.getElementById('ed_dropfile_dir').value     = d.dropfile_dir;
+          document.getElementById('ed_db_subdir').value        = d.db_subdir;
+          document.getElementById('ed_max_nodes').value        = d.max_nodes;
+          document.getElementById('ed_sort_order').value       = d.sort_order;
+          document.getElementById('ed_active').value           = d.active;
+          document.getElementById('ed_pause').value            = d.pause_on_exit;
+          document.getElementById('ed_usereal_local').value    = d.usereal_local;
+          document.getElementById('ed_usereal_doorsession').value = d.usereal_doorsession;
+
+          // Door args: DB stores JSON, display as space-separated
+          var args = [];
+          try { args = JSON.parse(d.door_args || '[]'); } catch(_) {}
+          document.getElementById('ed_door_args').value = Array.isArray(args) ? args.join(' ') : '';
+
+          editDoorModal.show();
+        });
+      });
+
+      // Delete button
+      document.querySelectorAll('.delete-door-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var row = this.closest('tr');
+          var d   = row.dataset;
+
+          document.getElementById('deleteDoorName').textContent = d.name;
+          document.getElementById('deleteDoorForm').action      = '/admin/doors/' + d.id + '/delete';
+          deleteDoorModal.show();
+        });
+      });
+
+      // Row click → info modal
+      document.querySelectorAll('#doorTable tbody tr').forEach(function(row) {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function() {
+          var d = this.dataset;
+          document.getElementById('doorInfoTitle').textContent = d.name;
+          document.getElementById('diSlug').textContent        = d.slug;
+          document.getElementById('diLaunchType').textContent  = d.launch_type;
+          document.getElementById('diCmd').textContent          = d.cmd || '—';
+          document.getElementById('diScript').textContent       = d.door_script || '—';
+          document.getElementById('diDir').textContent          = d.door_dir || '—';
+          document.getElementById('diDropfile').textContent     = d.dropfile_type ? d.dropfile_type + ' → ' + d.dropfile_dir : '—';
+          document.getElementById('diMaxNodes').textContent     = d.max_nodes === '0' ? 'Unlimited' : d.max_nodes;
+          document.getElementById('diDescription').textContent  = d.description || '—';
+
+          var infoModal = new bootstrap.Modal(document.getElementById('doorInfoModal'));
+          infoModal.show();
+        });
+      });
+    });

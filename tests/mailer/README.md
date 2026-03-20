@@ -74,16 +74,30 @@ node tests/mailer/binkp-send.js localhost 24554 1:100/100 ""
 
 ### trigger-poll.js
 
-Triggers an outbound mailer poll for a specific peer connection. Accepts either a connection UUID or an FTN address. Requires the full project environment (database, `.env`). Loads the connection record, displays its config, initiates the outbound call, and reports the result.
+Triggers an outbound mailer poll for a specific peer connection. Accepts either a connection UUID or an FTN address. Requires the full project environment (database, Redis, `.env`).
+
+Two modes:
+
+**Queue mode (default):** Enqueues a `trigger-poll` job on the BullMQ mailer queue. The mailer process (`bin/mailer.js`) picks it up and runs the session. Reports success or failure when the job completes. This tests the production job flow end-to-end. Requires the mailer process to be running.
 
 ```
 node tests/mailer/trigger-poll.js <connection-uuid or ftn-address>
 ```
 
+**Direct mode (`--direct`):** Starts a local MailerManager in this process, initiates the outbound call, and prints session events inline (session start, files sent/received, duration, errors). No queue or mailer process involved. Useful for debugging binkp protocol issues where you want everything in one terminal.
+
+```
+node tests/mailer/trigger-poll.js --direct <connection-uuid or ftn-address>
+```
+
 Examples:
 ```
+# Queue mode — production path
 node tests/mailer/trigger-poll.js 9f894ef9-5333-42c2-826b-caaf84cb457e
 node tests/mailer/trigger-poll.js 1:123/456
+
+# Direct mode — debug path
+node tests/mailer/trigger-poll.js --direct 1:123/456
 ```
 
 When given an FTN address, searches all active FTN connections for a matching `connection_data.address`. If no match is found, lists all active FTN connections with their addresses and UUIDs. The connection must have `remote_host` configured in its `connection_data`.
@@ -96,6 +110,7 @@ When given an FTN address, searches all active FTN connections for a matching `c
 2. `test-loopback.js` — verify handshake + file transfer in memory
 3. `test-tcp-loopback.js` — verify over real TCP
 4. Start `binkp-echo.js` in one terminal, run `binkp-send.js` against it — verify the two tools work together
-5. Start `binkp-echo.js`, configure a peer connection with `remote_host: localhost`, run `trigger-poll.js` with the connection UUID — verify full mailer manager outbound
-6. Start the mailer manager, run `binkp-send.js` against it — verify full inbound with DB peer matching
-7. Test against a real remote binkd
+5. Start `binkp-echo.js`, configure a peer connection with `remote_host: localhost`, run `trigger-poll.js --direct` with the connection UUID — verify full mailer manager outbound (no queue)
+6. Start the mailer process (`bin/mailer.js`), run `trigger-poll.js` (queue mode) with the connection UUID — verify the production job flow
+7. Start the mailer process, run `binkp-send.js` against it — verify full inbound with DB peer matching
+8. Test against a real remote binkd

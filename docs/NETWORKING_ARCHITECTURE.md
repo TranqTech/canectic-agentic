@@ -9,6 +9,7 @@ This document covers the current architecture, key files, data flow, and integra
 For the shared message platform (schemas, read tracking, body_html pipeline, posting, web views, subscriptions), see `message_architecture.md`.
 For the terminal-side UI (readers, editors, menus), see `terminal_architecture.md`.
 For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
+For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -23,13 +24,13 @@ For the web application (Express, sessions, admin panel, WebSockets), see `web_a
 | `ftnUtils.js` | FTN utility functions. Message-ID generation, datetime string formatting, system time parsing with timezone offset handling. |
 | `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
-| `qwkTosser.js` | QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
+| `qwkTosser.js` | _(Located in `src/middleware/tossers/`)_ QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
 | `qwkPacketBuilder.js` | QWK packet generation module. Builds complete `.qwk` packets (CONTROL.DAT + MESSAGES.DAT + HEADERS.DAT + NETFLAGS.DAT) for hub-mode delivery to nodes. Designed with low-level reusable functions and a high-level `buildQwkForNode()` entry point. |
 | `qwkTransport.js` | Transport abstraction layer. FTP (`basic-ftp`), SFTP (`ssh2-sftp-client`), Directory (local filesystem copy), and Hub (inbound, no transport needed). Factory function `makeTransport(cd)` selects the right class. |
-| `nntpTosser.js` | NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. Uses `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js` for thread management. Imports `formatBodyHtml` from `terminalText.js` for body_html pre-rendering. |
+| `nntpTosser.js` | _(Located in `src/middleware/tossers/`)_ NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. Uses `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js` for thread management. Imports `formatBodyHtml` from `terminalText.js` for body_html pre-rendering. |
 | `peerConnections.js` | Peer connection CRUD. Manages connection records, connection_data JSONB (transport settings, HWM, credentials), subscription management. `buildConnectionData()` handles form→JSONB for all network types. `getConnectionByUUIDWithNetwork()` joins with network metadata for tosser use. `getActiveConnectionsByNetworkType()` returns all active connections for a given protocol. |
 | `peers.js` | Peer (remote system) CRUD. Parent entity above connections. Handles cascading deletion (peer → connections → subscriptions). Fields: name, sysop_name, contact, notes. |
-| `peerAreaSubscriptions.js` | Manages per-area subscription state for each connection. `syncConnectionToNetwork()` bootstraps rows when connections or areas are created. `setSubscriptions()` bulk-toggles `allowed` or `enabled` flags. `allowAllNetworkAreas()` marks all active network areas as allowed for a connection (called on new connection creation). `syncNetworkAreaToConnections()` syncs a newly added area to all connections on a network with optional allow/enable. `removeSubscriptionsForNetworkArea()` cleans up subscription rows when an area is removed from a network. Lazy-imports peerConnections to avoid circular dependency. |
+| `peerAreaSubscriptions.js` | Manages per-area subscription state for each connection. `syncConnectionToNetwork()` bootstraps rows when connections or areas are created. `setSubscriptions()` bulk-toggles `allowed` or `enabled` flags. `allowAllNetworkAreas()` marks all active network areas as allowed for a connection (called on new connection creation). `syncNetworkAreaToConnections()` syncs a newly added area to all connections on a network with optional allow/enable. `removeSubscriptionsForNetworkArea()` cleans up subscription rows when an area is removed from a network. `resetOutboundIdx(peerConnectionUUID, areaId)` zeroes `msg_idx` for a connection (all areas or one area) so the next toss cycle rescans from the beginning — used by admin HWM reset routes, replacing the protocol-specific reset functions previously in the tossers. Lazy-imports peerConnections to avoid circular dependency. |
 | `systemAddresses.js` | System address management. Each network has one or more addresses identifying the local system (FTN address, QWK-ID, NNTP host). Includes origin_line field for tear/origin on outgoing messages. |
 | `userMsgPointers.js` | Message read tracking model. Two-tier pointer system: area-level scan pointers (`user_msg_pointers`) and per-thread pointers (`user_thread_pointers`). Area pointer is a floor — any message with `id <= area_pointer` is read. Thread pointers add granularity above the floor. Effective read threshold for a thread: `MAX(area_pointer, COALESCE(thread_pointer, 0))`. Provides: `advancePointer`, `advanceThreadPointer`, `markAreaRead`, `getThreadUnreadCounts` (batch), `getUnreadCount`, `hasNewMessages`, `getNewscanSummary`, `getFirstUnreadInThread`, `getFirstUnreadInArea`. Pre-populates pointers on user/area creation. Table bootstrap via `ensureConstraintsAndIndexes()` at startup. |
 | `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). Schema includes `thread_mode` (standard/subscribe_only/no_threads) and `post_as` (username/realname) columns. |
@@ -46,12 +47,12 @@ For the web application (Express, sessions, admin panel, WebSockets), see `web_a
 
 | File | Purpose |
 |------|---------|
-| `tosser.js` | CLI entry point (located in `src/tools/`). Runs toss cycles for all active network types. Supports `--in`, `--out`, `--ftn`, `--nntp`, `--qwk` flags. PID-file locking prevents concurrent runs. |
-| `maintenance.js` | CLI runner for maintenance tasks (located in `src/tools/`). Currently supports `--regen-html` to regenerate `body_html` for all messages. Flags: `--area SHORTCODE` (repeatable, limit to specific areas), `--dry-run`, `--width N` (force column width), `--batch N` (batch size, default 100). PID-file locking at `/tmp/can_maint.pid`. |
+| `tosser.js` | CLI entry point (located in `src/tools/`). Enqueues toss jobs on the BullMQ `toss` queue and waits for completion. Supports `--in`, `--out`, `--ftn`, `--nntp`, `--qwk` flags. Concurrency is managed by BullMQ jobId deduplication (replaces PID-file locking). Requires the worker process (`bin/worker.js`) or embedded mode to be running. |
+| `maintenance.js` | CLI entry point (located in `src/tools/`). Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. Supports `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`. Flags: `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency is managed by BullMQ jobId deduplication (replaces PID-file locking). Requires the worker process (`bin/worker.js`) or embedded mode to be running. |
 | `messageBase.js` | Message base maintenance functions (located in `src/maintenance/`). `regenerateAllBodyHtml(options)` iterates active areas and regenerates `body_html` from `utf8`/`body_text` using the current `formatBodyHtml` pipeline. `regenerateAreaBodyHtml(shortcode, options)` processes a single area. Uses keyset pagination (by id) for scalability. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress` callback, `quiet`. |
-| `admin.js` | Admin routes for connection management, network area CRUD, HWM resets. Message group/area management with thread_mode and post_as selectors. `recalculateAreaCounts` route. All DB access through model methods. |
+| `admin.js` | Admin routes for connection management, network area CRUD, HWM resets (via `peerAreaSubscriptions.resetOutboundIdx`). Message group/area management with thread_mode and post_as selectors. `recalculateAreaCounts` enqueues via BullMQ maintenance queue. All DB access through model methods; heavy operations go through job queues. |
 | `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile` into all views. Helper functions: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `checkAreaReadAccess`, `checkAreaPostAccess`. Group/area/thread browsing with unread counts. Thread listing with keyset pagination. Thread reader and flat-view reader with bidirectional lazy scroll and position-aware progress bars. All area/thread routes pass `sufficientAccess` and `canPost` booleans — templates use guard chains (`!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found) instead of separate early-return renders per condition. Message posting (`POST newthread`, `POST reply`) with `post_as` name resolution and model-layer sanitization. Mark-area-read. JSON lazy-load endpoints for both directions. Resolves `thread_mode` to render threaded or flat view. |
-| `ftnTosser.js` | FTN tosser middleware. `TossInbound()` reads type-2 FTN packets from inbound directory, parses messages via `ReadPkt`, routes echomail to `echomail.handleInboundEchoMessage()` and netmail to `netmail.newInboundNetmail()`. `TossOutbound()` gathers pending echomail and netmail, routes via `ftnRouter.resolveRoute()`, builds type-2 packets, and writes to outbound. Handles archive extraction, packet validation, and move-after-toss. |
+| `ftnTosser.js` | _(Located in `src/middleware/tossers/`)_ FTN tosser. `TossInbound()` reads type-2 FTN packets from inbound directory, parses messages via `ReadPkt`, routes echomail to `echomail.handleInboundEchoMessage()` and netmail to `netmail.newInboundNetmail()`. `TossOutbound()` gathers pending echomail and netmail, routes via `ftnRouter.resolveRoute()`, builds type-2 packets, and writes to outbound. Handles archive extraction, packet validation, and move-after-toss. |
 
 ### Views
 
@@ -604,25 +605,27 @@ System dependency: `zip` command (Info-ZIP) for creating outbound packets. `adm-
 
 ## Tosser CLI Usage
 
+The tosser CLI enqueues jobs on the BullMQ `toss` queue. The worker process (`bin/worker.js`) or embedded mode must be running to consume them. PID-file locking is no longer used — BullMQ's jobId deduplication handles concurrency.
+
 ```bash
 # Default — all directions, all types
-node tosser.js
+node src/tools/tosser.js
 
 # Inbound only
-node tosser.js --in
+node src/tools/tosser.js --in
 
 # Outbound only
-node tosser.js --out
+node src/tools/tosser.js --out
 
 # Specific network type
-node tosser.js --qwk
-node tosser.js --in --qwk
+node src/tools/tosser.js --qwk
+node src/tools/tosser.js --in --qwk
 
 # Multiple types
-node tosser.js --in --ftn --qwk
+node src/tools/tosser.js --in --ftn --qwk
 
 # Help
-node tosser.js --help
+node src/tools/tosser.js --help
 ```
 
 ## Maintenance CLI Usage
@@ -646,6 +649,8 @@ node src/tools/maintenance.js --regen-html --batch 50
 # Help
 node src/tools/maintenance.js --help
 ```
+
+Maintenance tasks can also be triggered via the BullMQ `maintenance` queue (from admin routes or the scheduler). PM trash purge runs automatically as a daily repeatable job. The CLI tool remains available for manual runs and cron compatibility. See `PROCESS_ARCHITECTURE.md` for queue job definitions and scheduling.
 
 ---
 

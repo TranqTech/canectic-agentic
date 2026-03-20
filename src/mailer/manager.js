@@ -251,6 +251,19 @@ class MailerManager extends EventEmitter {
 				'mailer', 'cyan'
 			);
 			this.emit('sessionEnd', info);
+
+			// Notify listeners that files arrived and need tossing.
+			// connectionUUID comes from caller options (outbound) or
+			// peer matching during handshake (inbound).
+			if (info.filesReceived > 0) {
+				var connectionUUID = session.options.connectionUUID
+					|| (session.peerConnection ? session.peerConnection.uuid : null);
+				this.emit('filesReceived', {
+					connectionUUID: connectionUUID,
+					fileCount:      info.filesReceived,
+					sessionUUID:    info.uuid,
+				});
+			}
 		});
 
 		session.start();

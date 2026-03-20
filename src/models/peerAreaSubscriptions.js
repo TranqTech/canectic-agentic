@@ -355,6 +355,39 @@ async function removeSubscriptionsForNetworkArea(networkId, areaId) {
 	}
 }
 
+// Reset outbound msg_idx for a peer connection so the next toss cycle
+// rescans from the beginning.  Protocol-agnostic — works for FTN, QWK, NNTP.
+// Optionally targets a single area; defaults to all areas on the connection.
+async function resetOutboundIdx(peerConnectionUUID, areaId) {
+	var peerConnections = await getPeerConnections();
+	var dbconn = await peerConnections.getConnectionByUUID(peerConnectionUUID);
+	if (!dbconn) return { status: false, errormessages: ['Connection not found'] };
+
+	var sql    = 'UPDATE peer_area_subscriptions SET msg_idx = 0 WHERE peer_connection_id = $1';
+	var params = [dbconn.id];
+
+	if (areaId) {
+		sql    += ' AND area_id = $2';
+		params.push(parseInt(areaId));
+	}
+
+	var err = await postgres.write(sql, params);
+	if (err) {
+		alogger.writeAlog(3,
+			'resetOutboundIdx: failed for ' + peerConnectionUUID + ': ' + err.message,
+			'redbright'
+		);
+		return { status: false, errormessages: [err.message] };
+	}
+
+	alogger.writeAlog(5,
+		'resetOutboundIdx: reset msg_idx for connection ' + peerConnectionUUID +
+		(areaId ? ' area ' + areaId : ' all areas'),
+		'greenbright'
+	);
+	return { status: true, errormessages: [] };
+}
+
 export {
 	getSubscriptionsByConnection,
 	getEnabledByConnection,
@@ -363,5 +396,6 @@ export {
 	syncConnectionToNetwork,
 	allowAllNetworkAreas,
 	syncNetworkAreaToConnections,
-	removeSubscriptionsForNetworkArea
+	removeSubscriptionsForNetworkArea,
+	resetOutboundIdx
 };

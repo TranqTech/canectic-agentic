@@ -19,14 +19,14 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import * as dotenv from 'dotenv';
 
-import * as postgres from '../middleware/db/postgres.js';
-import * as alogger from '../utils/alogger.js';
-import * as peerConnections from './peerConnections.js';
-import * as systemAddresses from './systemAddresses.js';
-import { formatBodyHtml } from '../utils/terminalText.js';
-import { createThreadRow, updateThreadStats, rollbackThread } from './echomail.js';
-import { makeTransport } from './qwkTransport.js';
-import * as privateMessages from './privateMessages.js';
+import * as postgres from '../db/postgres.js';
+import * as alogger from '../../utils/alogger.js';
+import * as peerConnections from '../../models/peerConnections.js';
+import * as systemAddresses from '../../models/systemAddresses.js';
+import { formatBodyHtml } from '../../utils/terminalText.js';
+import { createThreadRow, updateThreadStats, rollbackThread } from '../../models/echomail.js';
+import { makeTransport } from '../../models/qwkTransport.js';
+import * as privateMessages from '../../models/privateMessages.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
@@ -34,7 +34,7 @@ import {
 	applyHeadersDat,
 	buildRepPacket,
 	unzipQwkPacket
-} from './qwkClasses.js';
+} from '../../models/qwkClasses.js';
 
 dotenv.config();
 

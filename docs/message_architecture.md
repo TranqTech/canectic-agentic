@@ -7,7 +7,7 @@ The shared message platform sits between the networking layer (FTN/QWK/NNTP toss
 For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
 For the terminal-side UI (readers, editors, menus), see `terminal_architecture.md`.
 For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
-For the web application stack (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
+For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -54,7 +54,7 @@ For the web application stack (Express, sessions, admin panel, WebSockets), see 
 | File | Location | Purpose |
 |------|----------|---------|
 | `messageBase.js` | `src/maintenance/` | `regenerateAllBodyHtml(options)` and `regenerateAreaBodyHtml(shortcode, options)`. Iterates active areas, regenerates `body_html` from `utf8`/`body_text` using current `formatBodyHtml` pipeline. Keyset pagination by id. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress`, `quiet`. |
-| `maintenance.js` | `src/tools/` | CLI runner. `--regen-html`, `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`. PID-file locking at `/tmp/can_maint.pid`. |
+| `maintenance.js` | `src/tools/` | CLI runner. Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`, `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency managed by BullMQ jobId deduplication (replaces PID-file locking). See `PROCESS_ARCHITECTURE.md`. |
 
 ---
 
@@ -349,8 +349,8 @@ Not a concern — all tossers and save functions use parameterized queries via `
 Add `sanitizeMessageFields(dbObj)` call in each tosser after constructing the DB object but before `postgres.insertObject()`:
 
 - **echomail.js** — after `var dbObj = await ftnToDb(message);`
-- **nntpTosser.js** — after the `dbObj = { ... };` block
-- **qwkTosser.js** — after the `dbObj = { ... };` block
+- **nntpTosser.js** _(in `src/middleware/tossers/`)_ — after the `dbObj = { ... };` block
+- **qwkTosser.js** _(in `src/middleware/tossers/`)_ — after the `dbObj = { ... };` block
 
 ---
 

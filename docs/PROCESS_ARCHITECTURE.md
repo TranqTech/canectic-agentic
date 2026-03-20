@@ -162,11 +162,11 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 
 ### Concurrency and deduplication
 
-- **Per-connection locking on toss jobs**: Two `qwk:pull` jobs for the same connectionUUID must not run concurrently (would double-download from the same FTP host). Use BullMQ's `jobId` set to `qwk:pull:${connectionUUID}` — duplicate job IDs are rejected while one is active. Same pattern for `nntp:pull`, `qwk:push`, `nntp:push`.
+- **Per-connection locking on toss jobs**: Two `qwk:pull` jobs for the same connectionUUID must not run concurrently (would double-download from the same FTP host). Use BullMQ's `jobId` set to `qwk-pull--${connectionUUID}` — duplicate job IDs are rejected while one is active. Same pattern for `nntp:pull`, `qwk:push`, `nntp:push`.
 - **FTN inbound is safe to overlap**: Multiple `ftn:inbound` jobs can run if they process different files. The existing move-after-toss pattern prevents double-processing.
-- **FTN outbound needs per-connection isolation**: HWM advancement must not race. Use `ftn:outbound:${connectionUUID}` as jobId.
+- **FTN outbound needs per-connection isolation**: HWM advancement must not race. Use `ftn-outbound--${connectionUUID}` as jobId.
 - **Maintenance jobs are single-instance**: Use jobId deduplication. Only one `regen-html` at a time.
-- **Mailer poll deduplication**: `signal-outbound:${connectionUUID}` and `poll-scheduled:${connectionUUID}` as jobIds prevent queuing multiple polls for the same peer while one is already active/waiting.
+- **Mailer poll deduplication**: `signal-outbound--${connectionUUID}` and `poll-scheduled--${connectionUUID}` as jobIds prevent queuing multiple polls for the same peer while one is already active/waiting.
 
 ---
 
@@ -262,44 +262,44 @@ export async function enqueueFtnInbound(opts = {}) {
         sourceDir: opts.sourceDir || null,
     }, {
         jobId: opts.connectionUUID
-            ? `ftn:inbound:${opts.connectionUUID}`
-            : `ftn:inbound:${Date.now()}`,
+            ? `ftn-inbound--${opts.connectionUUID}`
+            : `ftn-inbound--${Date.now()}`,
     });
 }
 
 export async function enqueueFtnOutbound(connectionUUID) {
     return tossQueue.add('ftn:outbound', { connectionUUID }, {
-        jobId: `ftn:outbound:${connectionUUID}`,
+        jobId: `ftn-outbound--${connectionUUID}`,
     });
 }
 
 export async function enqueueQwkPull(connectionUUID) {
     return tossQueue.add('qwk:pull', { connectionUUID }, {
-        jobId: `qwk:pull:${connectionUUID}`,
+        jobId: `qwk-pull--${connectionUUID}`,
     });
 }
 
 export async function enqueueQwkPush(connectionUUID) {
     return tossQueue.add('qwk:push', { connectionUUID }, {
-        jobId: `qwk:push:${connectionUUID}`,
+        jobId: `qwk-push--${connectionUUID}`,
     });
 }
 
 export async function enqueueQwkHubInbound(connectionUUID) {
     return tossQueue.add('qwk:hub:inbound', { connectionUUID }, {
-        jobId: `qwk:hub:inbound:${connectionUUID}`,
+        jobId: `qwk-hub-inbound--${connectionUUID}`,
     });
 }
 
 export async function enqueueNntpPull(connectionUUID) {
     return tossQueue.add('nntp:pull', { connectionUUID }, {
-        jobId: `nntp:pull:${connectionUUID}`,
+        jobId: `nntp-pull--${connectionUUID}`,
     });
 }
 
 export async function enqueueNntpPush(connectionUUID) {
     return tossQueue.add('nntp:push', { connectionUUID }, {
-        jobId: `nntp:push:${connectionUUID}`,
+        jobId: `nntp-push--${connectionUUID}`,
     });
 }
 
@@ -307,13 +307,13 @@ export async function enqueueNntpPush(connectionUUID) {
 
 export async function enqueueMailerSignalOutbound(connectionUUID) {
     return mailerQueue.add('signal-outbound', { connectionUUID }, {
-        jobId: `signal-outbound:${connectionUUID}`,
+        jobId: `signal-outbound--${connectionUUID}`,
     });
 }
 
 export async function enqueueMailerTriggerPoll(connectionUUID) {
     return mailerQueue.add('trigger-poll', { connectionUUID }, {
-        jobId: `trigger-poll:${connectionUUID}`,
+        jobId: `trigger-poll--${connectionUUID}`,
     });
 }
 
@@ -638,10 +638,10 @@ import { Worker } from 'bullmq';
 import * as jobs from "../src/queues/jobs.js"
 import { createEventPublisher, EVENTS } from "../src/queues/events.js"
 
-// Tosser imports
-import * as ftnTosser from "../src/middleware/ftnTosser.js"
-import * as qwkTosser from "../src/models/qwkTosser.js"
-import * as nntpTosser from "../src/models/nntpTosser.js"
+// Tosser imports — relocated to middleware/tossers/
+import * as ftnTosser from "../src/middleware/tossers/ftnTosser.js"
+import * as qwkTosser from "../src/middleware/tossers/qwkTosser.js"
+import * as nntpTosser from "../src/middleware/tossers/nntpTosser.js"
 
 // Maintenance imports
 import * as messageBase from "../src/maintenance/messageBase.js"
@@ -1075,7 +1075,7 @@ BullMQ uses the existing Redis instance. No new infrastructure required.
 
 4. **Separate Redis DB for BullMQ**: Keeps job keys isolated from session data and flash messages. Allows independent `FLUSHDB` of job data during development without losing user sessions.
 
-5. **jobId-based deduplication over custom locking**: BullMQ rejects duplicate jobIds while one is active. This is simpler and more reliable than maintaining lock keys in Redis manually. The convention of `${jobName}:${connectionUUID}` as jobId naturally prevents concurrent toss operations against the same peer.
+5. **jobId-based deduplication over custom locking**: BullMQ rejects duplicate jobIds while one is active. This is simpler and more reliable than maintaining lock keys in Redis manually. The convention of `${jobName}--${connectionUUID}` as jobId naturally prevents concurrent toss operations against the same peer. Note: BullMQ disallows colons in custom job IDs, so `--` is used as the delimiter.
 
 6. **Gateway as schedule registrar**: Schedules are registered by the gateway at startup because the gateway always runs and has access to the admin UI for schedule updates. The worker and mailer are pure consumers — they don't need to know about schedules, just process jobs when they arrive.
 
@@ -1135,5 +1135,5 @@ Items to update when renaming:
 - Process manager configuration (pm2 ecosystem file, systemd unit, etc.)
 - Any shell scripts or cron entries that reference `doorserver.js`
 - The `wspaths` array inside the file — the `/ws/doorserver` path is unchanged; it's a functional endpoint for doorserver (door game) clients, not named after the entry point file. `/ws/bbs` is the general-purpose gateway WebSocket path.
-- Documentation references in other architecture docs (`MAILER_ARCHITECTURE.md` mentions `doorserver.js` in the startup integration example and Phase 2 item 14)
+- Documentation references in other architecture docs (now updated — `MAILER_ARCHITECTURE.md` references use `bin/gateway.js` and `bin/mailer.js`)
 - The `systemstartupmsg` / `systemshutdownmsg` strings if they reference the old name

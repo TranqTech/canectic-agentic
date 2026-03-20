@@ -1,0 +1,199 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-2
+          .col-8
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info.me-2(href='/admin')
+                        | Exit
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newMenuModal')
+                        | Add Menu
+              .card-body
+                if errormessages && errormessages.length > 0
+                  ul.text-danger
+                    for error of errormessages
+                      li.text-danger= error
+                  br
+
+                if menulist && menulist.length > 0
+                  table#menuTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Name
+                        th(scope='col') Title
+                        th(scope='col') Type
+                        th(scope='col') Entries
+                        th(scope='col') Display File
+                        th(scope='col') Show Entries
+                    tbody
+                      for menu of menulist
+                        tr(data-bs-id=menu.id style='cursor:pointer')
+                          td= menu.name
+                          td= menu.title
+                          td
+                            span.badge.bg-secondary= menu.menu_type || 'Hotkey'
+                          td.text-center= menu.entry_count
+                          td
+                            if menu.display_file
+                              span.badge.bg-info.text-dark= menu.display_file
+                              if menu.display_file_type
+                                |  
+                                small.text-muted= menu.display_file_type
+                            else
+                              span.text-muted —
+                          td
+                            if menu.display_entries
+                              span.badge.bg-success Yes
+                            else
+                              span.badge.bg-secondary No
+                else
+                  center
+                    .h4 No Menus Found!
+                    p.text-muted Create your first menu to get started.
+
+    //- New Menu Modal
+    #newMenuModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Add New Menu
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form(action='/admin/menus/new' method='POST')
+              .row
+                .col-1
+                .col-10
+                  label.form-label(for='nm_name') Menu Name (unique identifier):
+                  input#nm_name.form-control(type='text' name='name' required placeholder='e.g. Main, Messages, Doors')
+                  br
+                  label.form-label(for='nm_title') Display Title:
+                  input#nm_title.form-control(type='text' name='title' placeholder='Title shown to users')
+              br
+              .row
+                .col-1
+                .col-5
+                  label.form-label Menu Type:
+                  select.form-control(name='menu_type')
+                    for mt in menuTypes
+                      option(value=mt selected=(mt === 'Hotkey'))= mt
+                  .form-text Hotkey = single keypress, Lightbar = arrow-key navigation (future)
+              br
+              .row
+                .col-1
+                .col-5
+                  label.form-label Display File Name:
+                  input.form-control(type='text' name='display_file' placeholder='e.g. mainmenu')
+                  .form-text Art filename only — no path or extension. The terminal art system resolves the full path and format automatically.
+                .col-5
+                  label.form-label Display File Type:
+                  select.form-control(name='display_file_type')
+                    option(value='') — None —
+                    option(value='Screen') Screen (full-screen art)
+                    option(value='Header') Header (header art)
+                  .form-text Determines which art subdirectory to search (screens/ or headers/).
+              br
+              .row
+                .col-1
+                .col-3
+                  label.form-label Display Entries:
+                  select.form-control(name='display_entries')
+                    option(value='true') Yes
+                    option(value='false') No
+                  .form-text Draw entry list over the display file
+                .col-2
+                  label.form-label X Offset:
+                  input.form-control(type='number' name='entries_x_offset' value='0' min='0')
+                .col-2
+                  label.form-label Y Offset:
+                  input.form-control(type='number' name='entries_y_offset' value='0' min='0')
+                .col-2
+                  label.form-label Max Columns:
+                  input.form-control(type='number' name='max_columns' value='3' min='1' max='10')
+              br
+              h5 Menu Colors
+              .form-text.mb-2 Leave as "Theme Default" to inherit from the active terminal theme.
+              .row
+                .col-1
+                .col-5
+                  label.form-label Title Color:
+                  select.form-control.bg-dark.color-select(name='title_clr')
+                    option(value='') — Theme Default —
+                    for clr in ansiColors
+                      option(value=clr.value style='color:' + clr.hex)= clr.label
+                .col-5
+                  label.form-label Prompt Color:
+                  select.form-control.bg-dark.color-select(name='prompt_clr')
+                    option(value='') — Theme Default —
+                    for clr in ansiColors
+                      option(value=clr.value style='color:' + clr.hex)= clr.label
+              .row
+                .col-1
+                .col-5
+                  label.form-label Input Color:
+                  select.form-control.bg-dark.color-select(name='input_clr')
+                    option(value='') — Theme Default —
+                    for clr in ansiColors
+                      option(value=clr.value style='color:' + clr.hex)= clr.label
+                .col-5
+                  label.form-label Hotkey Color:
+                  select.form-control.bg-dark.color-select(name='hotkey_clr')
+                    option(value='') — Theme Default —
+                    for clr in ansiColors
+                      option(value=clr.value style='color:' + clr.hex)= clr.label
+              .row
+                .col-1
+                .col-5
+                  label.form-label Error Color:
+                  select.form-control.bg-dark.color-select(name='error_clr')
+                    option(value='') — Theme Default —
+                    for clr in ansiColors
+                      option(value=clr.value style='color:' + clr.hex)= clr.label
+              br
+              .row
+                .col-1
+                .col-10
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Create Menu')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var table = document.getElementById('menuTable');
+      if (table) {
+        table.querySelectorAll('tbody tr').forEach(function(row) {
+          row.addEventListener('click', function() {
+            var id = this.getAttribute('data-bs-id');
+            if (id) window.location.href = '/admin/menus/' + id;
+          });
+        });
+      }
+
+      // Sync color-select text color with selected option
+      function syncSelectColor(sel) {
+        var opt = sel.options[sel.selectedIndex];
+        sel.style.color = opt && opt.style.color ? opt.style.color : '';
+      }
+      document.querySelectorAll('.color-select').forEach(function(sel) {
+        syncSelectColor(sel);
+        sel.addEventListener('change', function() { syncSelectColor(this); });
+      });
+    });

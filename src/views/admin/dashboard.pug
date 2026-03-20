@@ -22,30 +22,19 @@ block content
                 h2= title
               .card-body.bg-dark
                 .row
-                  .col-1
-                  .col-10
-                    .text-end
-                      .span.fg-brightblue
-                        |Test
-                        | 
-                      .span.fg-green
-                        |Something
-                      .span.fg-yellow
-                        |New
+                  .col-12
+                    br
                 .row
-                  .col-1
-                  .col-5                  
+                  .col-4
                     .d-grid.gap-2
                       center
                         h3
                           |Messages
-                      a.button.btn.btn-lg.btn-primary(href='/admin/netmail')
-                        |Netmail
                       a.button.btn.btn-lg.btn-primary(href='/admin/msgGroups')
                         |Message Groups
                       a.button.btn.btn-lg.btn-primary(href='/admin/msgAreas')
                         |Message Areas
-                  .col-5
+                  .col-4
                     .d-grid.gap-2
                       center
                         .h3
@@ -54,14 +43,31 @@ block content
                         |File Groups
                       a.button.btn.btn-lg.btn-primary(href='/admin/fileAreas')
                         |File Areas
+                  .col-4
+                    .d-grid.gap-2
+                      center
+                        .h3
+                          |Networking
+                      a.button.btn.btn-lg.btn-primary(href='/admin/networks')
+                        |Message Networks
+                      a.button.btn.btn-lg.btn-primary(href='/admin/peers')
+                        |Linked Nodes
                 .row
                   .col-12
                     br
                     hr
                     br
                 .row
-                  .col-1
-                  .col-5
+                  .col-4
+                    .d-grid.gap-2
+                      center
+                        .h3
+                          |Admin Tools
+                      a.button.btn.btn-lg.btn-primary(href='/admin/users')
+                        |Users
+                      a.button.btn.btn-lg.btn-primary(href='/admin/netmail')
+                        |Netmail
+                  .col-4
                     .d-grid.gap-2
                       center
                         .h3
@@ -70,16 +76,12 @@ block content
                         |Door Games
                       a.button.btn.btn-lg.btn-primary(href='/admin/events')
                         |Timed Events
-                  .col-5
+                  .col-4
                     .d-grid.gap-2
                       center
                         .h3
                           |System
+                      a.button.btn.btn-lg.btn-primary(href='/admin/menus')
+                        |Menus    
                       a.button.btn.btn-lg.btn-primary(href='/admin/settings')
                         |Settings
-                      a.button.btn.btn-lg.btn-primary(href='/admin/networks')
-                        |Message Networks
-                      a.button.btn.btn-lg.btn-primary(href='/admin/peers')
-                        |Linked Nodes
-                      a.button.btn.btn-lg.btn-primary(href='/admin/users')
-                        |Users

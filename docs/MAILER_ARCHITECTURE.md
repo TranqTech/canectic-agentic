@@ -10,6 +10,7 @@ For the shared message platform (schemas, read tracking, body_html pipeline, pos
 For the message networking stack (tossers, protocols, packet formats), see `NETWORKING_ARCHITECTURE.md`.
 For the terminal-side BBS architecture, see `terminal_architecture.md`.
 For the web application (Express, sessions, admin panel, WebSockets), see `web_architecture.md`.
+For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -97,10 +98,14 @@ Binary frames — all data is transmitted as `Buffer` payloads in binary WebSock
 
 **Integration with existing infrastructure:**
 ```javascript
-// In doorserver.js or main startup, after startWebsockets():
+// Embedded mode (PROCESS_MODE=embedded) — in bin/gateway.js after startWebsockets():
 var mailerWsPool = wsManager.createNewPool('/ws/mailer', 'Mailer Websocket Pool');
 // mailerWsPool does NOT setCallPool() — instead:
 mailerManager.setWebSocketPool(mailerWsPool);
+
+// Separate mode (PROCESS_MODE=separate) — the mailer process (bin/mailer.js)
+// binds its own HTTP listener on MAILER_WS_PORT for WebSocket transport.
+// See PROCESS_ARCHITECTURE.md for the full process model.
 ```
 
 The `MailerManager` listens for connections on the pool and creates answerer sessions, rather than the pool forwarding to the call manager. This keeps the mailer's session lifecycle separate from the terminal's call lifecycle while sharing the HTTP server and upgrade routing.
@@ -534,20 +539,17 @@ Partial inbound files in the temp directory are kept between sessions. On the ne
 
 ### Tosser Integration
 
-The mailer does not toss — it only moves files. After a session completes:
+The mailer does not toss — it only moves files. Inter-process signaling uses BullMQ queues (see `PROCESS_ARCHITECTURE.md`).
 
-1. **Inbound**: Files are in `MAILER_INBOUND_DIR`. Either:
-   - Signal the tosser to run an inbound toss cycle
-   - Set a flag file that the tosser's cron/scheduled run picks up
-   - Call `TossInbound()` directly if running in the same process
+1. **Inbound**: When a session finishes receiving files, the mailer emits `filesReceived` and enqueues a `ftn:inbound` job on the toss queue. The worker process picks it up and runs `TossInbound()`.
 
-2. **Outbound**: The tosser's `TossOutbound()` writes packets to `MAILER_OUTBOUND_DIR`. The mailer polls this directory (or is signaled) when building the file list for an outbound session.
+2. **Outbound**: The worker's `ftn:outbound` job writes packets to the outbound directory, then enqueues a `signal-outbound` job on the mailer queue. The mailer picks it up and triggers a poll for CRASH connections.
 
 ### Admin Routes (future)
 
 - `GET /admin/mailer` — mailer status, active sessions, recent session log
 - `GET /admin/mailer/sessions` — list of active sessions with transfer progress
-- `POST /admin/mailer/poll/:connectionId` — manually trigger outbound call
+- `POST /admin/mailer/poll/:connectionId` — enqueue a `trigger-poll` job on the mailer queue
 - `POST /admin/mailer/stop` / `POST /admin/mailer/start` — control mailer without restart
 
 ---
@@ -603,16 +605,16 @@ Build the minimum viable mailer that can exchange files with a remote binkd syst
 Items 8–10 from the original plan (resume support, CRAM-MD5, poll scheduling) were implemented in Phase 1. Remaining work:
 
 8. **Real-world binkd testing** — test inbound and outbound sessions against a live binkd node. Fix any protocol compliance issues discovered.
-9. **Outbound queue signaling** — tosser notifies mailer when new outbound mail is ready. Wire `signalOutbound()` call into `ftnTosser.TossOutbound()` completion path.
+9. ~~**Outbound queue signaling**~~ — **DONE.** The worker enqueues `signal-outbound` on the mailer queue after completing an `ftn:outbound` toss job. See `PROCESS_ARCHITECTURE.md`.
 10. **Sent file cleanup** — after M_GOT, handle flow file line prefixes: `^` = delete file, `#` = truncate, no prefix = leave. Mark flow file lines as sent (`~` prefix).
 11. **Session logging** — structured session log entries (connect time, peer address, peer system name, files transferred with sizes, errors, duration) written to `mailer.log` via `writeClog`.
 12. **Path traversal prevention** — strip directory components from offered filenames on inbound. Reject filenames containing `..`, `/`, `\`.
 13. **Admin status route** — `GET /admin/mailer` with active session display, recent session history.
-14. **Startup integration** — wire `MailerManager` into `doorserver.js` startup sequence, gated by `MAILER_ENABLED` env var.
+14. ~~**Startup integration**~~ — **DONE.** In embedded mode, `bin/gateway.js` starts the mailer in-process. In separate mode, `bin/mailer.js` is the standalone entry point. Both are gated by `MAILER_ENABLED` env var. See `PROCESS_ARCHITECTURE.md`.
 
 ### Phase 3: WebSocket Transport
 
-15. **WebSocket transport** — `WebSocketTransport` class wrapping `ws` connections. Inbound: register a `WsPool` at `/ws/mailer` on the existing `WsManager` (same HTTP server as terminal WebSockets). Outbound: `ws` client to remote `mailer_ws_url`. Binary frame mode.
+15. **WebSocket transport** — `WebSocketTransport` class wrapping `ws` connections. **Inbound (embedded mode):** register a `WsPool` at `/ws/mailer` on the gateway's `WsManager` (same HTTP server as terminal WebSockets). **Inbound (separate mode):** the mailer process binds its own HTTP listener on `MAILER_WS_PORT` for WebSocket mailer connections — no shared infrastructure with the gateway. **Outbound:** `ws` client to remote `mailer_ws_url`. Binary frame mode.
 16. **Admin UI for transport selection** — per-connection transport type in the peer connection editor
 17. **Connection testing** — admin button to test connectivity to a peer
 

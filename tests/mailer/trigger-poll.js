@@ -2,32 +2,49 @@
 // tests/mailer/trigger-poll.js
 //
 // Manually trigger an outbound mailer poll for a specific peer connection.
-// Starts the mailer manager, polls the connection, then exits.
 //
-// Requires the full project environment (database, .env).
+// Default mode: enqueues a trigger-poll job on the mailer queue.  The mailer
+// process (bin/mailer.js or embedded) picks it up and runs the session.
+// Session details appear in the mailer's logs.
+//
+// Direct mode (--direct): starts a local MailerManager, polls the connection,
+// and prints session events inline.  Useful for debugging binkp sessions
+// without the queue layer.  Does not require the mailer process to be running.
+//
+// Requires the full project environment (database, Redis, .env).
 //
 // Usage:
 //   node tests/mailer/trigger-poll.js <connection-uuid or ftn-address>
+//   node tests/mailer/trigger-poll.js --direct <connection-uuid or ftn-address>
 //
 // Examples:
 //   node tests/mailer/trigger-poll.js 9f894ef9-5333-42c2-826b-caaf84cb457e
 //   node tests/mailer/trigger-poll.js 1:123/456
+//   node tests/mailer/trigger-poll.js --direct 1:123/456
 
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-import { MailerManager } from '../../src/mailer/manager.js';
 import * as peerConnections from '../../src/models/peerConnections.js';
 import * as alogger from '../../src/utils/alogger.js';
 
-var target = process.argv[2];
+// Parse args — extract --direct flag and the target
+var args = process.argv.slice(2);
+var directMode = args.includes('--direct');
+var target = args.filter(a => a !== '--direct')[0];
 
 if (!target) {
-	console.log('Usage: node tests/mailer/trigger-poll.js <connection-uuid or ftn-address>');
+	console.log('Usage: node tests/mailer/trigger-poll.js [--direct] <connection-uuid or ftn-address>');
 	console.log('');
 	console.log('  Accepts either a connection UUID or an FTN address (e.g. 1:123/456).');
 	console.log('  Triggers an outbound binkp call to the matching peer connection.');
-	console.log('  The connection must have remote_host configured in connection_data.');
+	console.log('');
+	console.log('Options:');
+	console.log('  --direct   Start a local MailerManager and run the session in this process.');
+	console.log('             Shows session events inline. Does not require mailer process.');
+	console.log('');
+	console.log('  (default)  Enqueue a trigger-poll job on the mailer queue.');
+	console.log('             Requires the mailer process (bin/mailer.js) to be running.');
 	process.exit(1);
 }
 
@@ -75,13 +92,10 @@ async function resolveConnection(target) {
 	}
 }
 
-async function main() {
-	var conn = await resolveConnection(target);
-	var connectionUUID = conn.uuid;
+function printConnectionInfo(conn) {
 	var cd = conn.connection_data || {};
-
 	console.log('\x1b[1m\x1b[36m=== Mailer Poll Trigger ===\x1b[0m\n');
-	console.log('  Connection: ' + connectionUUID);
+	console.log('  Connection: ' + conn.uuid);
 	console.log('  Peer:       ' + (conn.peer_name || 'unknown'));
 	console.log('  Network:    ' + (conn.network_name || conn.network_id));
 	console.log('  Address:    ' + (cd.address || '—'));
@@ -89,7 +103,77 @@ async function main() {
 	console.log('  Port:       ' + (cd.remote_port || cd.mailer_port || 24554));
 	console.log('  Status:     ' + (cd.status || 'NORMAL'));
 	console.log('  Active:     ' + (conn.active ? 'yes' : 'no'));
+	console.log('  Mode:       ' + (directMode ? 'DIRECT (local MailerManager)' : 'QUEUE (mailer process)'));
 	console.log('');
+}
+
+// ---------------------------------------------------------------------------
+// Queue mode — enqueue a job and wait for the result
+// ---------------------------------------------------------------------------
+
+async function runQueueMode(connectionUUID) {
+	var { enqueueMailerTriggerPoll } = await import('../../src/queues/jobs.js');
+	var { closeQueues } = await import('../../src/queues/queues.js');
+	var { QueueEvents } = await import('bullmq');
+	var { createQueueConnection } = await import('../../src/queues/connection.js');
+
+	console.log('Enqueueing trigger-poll job...\n');
+
+	var job = await enqueueMailerTriggerPoll(connectionUUID);
+
+	if (!job || !job.id) {
+		console.log('\x1b[31mFailed to enqueue job. Is Redis running?\x1b[0m');
+		await closeQueues();
+		process.exit(1);
+	}
+
+	console.log('  Job ID:  ' + job.id);
+	console.log('  Queue:   mailer');
+	console.log('');
+	console.log('Waiting for mailer process to pick up the job...');
+
+	// Watch for completion/failure
+	var connection = createQueueConnection();
+	var queueEvents = new QueueEvents('mailer', { connection });
+
+	var timeout = setTimeout(() => {
+		console.log('\n\x1b[31mTimeout — job not completed within 60 seconds.\x1b[0m');
+		console.log('Is the mailer process running?  (node bin/mailer.js)');
+		cleanup();
+		process.exit(1);
+	}, 60000);
+
+	function cleanup() {
+		clearTimeout(timeout);
+		queueEvents.close();
+		connection.disconnect();
+		closeQueues();
+	}
+
+	queueEvents.on('completed', ({ jobId }) => {
+		if (jobId === job.id) {
+			console.log('\n\x1b[32m✓ Poll completed.\x1b[0m');
+			console.log('  Check mailer logs for session details.');
+			cleanup();
+			setTimeout(() => process.exit(0), 200);
+		}
+	});
+
+	queueEvents.on('failed', ({ jobId, failedReason }) => {
+		if (jobId === job.id) {
+			console.log('\n\x1b[31m✗ Poll failed: ' + failedReason + '\x1b[0m');
+			cleanup();
+			setTimeout(() => process.exit(1), 200);
+		}
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Direct mode — instantiate MailerManager locally (original behavior)
+// ---------------------------------------------------------------------------
+
+async function runDirectMode(connectionUUID, conn) {
+	var cd = conn.connection_data || {};
 
 	if (!cd.remote_host && !cd.mailer_host) {
 		console.log('\x1b[31mNo mailer host configured for this connection.\x1b[0m');
@@ -100,6 +184,8 @@ async function main() {
 	if (!conn.active) {
 		console.log('\x1b[33mWarning: connection is inactive. Polling anyway.\x1b[0m\n');
 	}
+
+	var { MailerManager } = await import('../../src/mailer/manager.js');
 
 	// Create a mailer manager but don't start the full listener/poll system
 	var manager = new MailerManager();
@@ -126,7 +212,7 @@ async function main() {
 		setTimeout(() => process.exit(1), 500);
 	});
 
-	console.log('Initiating outbound call...\n');
+	console.log('Initiating outbound call (direct mode)...\n');
 	await manager.triggerPoll(connectionUUID);
 
 	// Timeout safety — if nothing happens within 60s, bail
@@ -134,6 +220,21 @@ async function main() {
 		console.log('\n\x1b[31mTimeout — no session completed within 60 seconds.\x1b[0m');
 		process.exit(1);
 	}, 60000);
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+	var conn = await resolveConnection(target);
+	printConnectionInfo(conn);
+
+	if (directMode) {
+		await runDirectMode(conn.uuid, conn);
+	} else {
+		await runQueueMode(conn.uuid);
+	}
 }
 
 main().catch(err => {

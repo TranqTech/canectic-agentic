@@ -1,19 +1,387 @@
-import { defaultmenuarray } from '../../config/default/menus/default.js'
+// src/models/menus.js
+// PostgreSQL-backed menu and menu entry management.
+// Replaces the hardcoded defaultmenuarray with database queries.
 
-async function getMenu(name){
-	//
-	const defaultmenu = defaultmenuarray.find(menu => menu.name === name)
-	console.log("Menu Found")
-	return defaultmenu
-}
+import * as postgres from '../middleware/db/postgres.js';
 
-async function menuExists(name){
-	const defaultmenu = defaultmenuarray.find(menu => menu.name === name)
-	if (defaultmenu){
-		return true
-	}else{
-		return false
+// Valid display file types — maps to subdirectory in the art file hierarchy.
+// drawscreen() in terminalcommands.js resolves:
+//   "Screen" → textdir/<format>/screens/<filename>.<ext>  (full-screen art)
+//   "Header" → textdir/<format>/headers/<filename>.<ext>  (header art)
+//   ""       → textdir/<format>/misc/<filename>.<ext>     (default/misc)
+// The filename has no path or extension — the art system resolves those
+// by walking the terminal's format priority chain (rip→sixel→utf8→ansi→ascii).
+const VALID_DISPLAY_FILE_TYPES = ['', 'Screen', 'Header'];
+
+// Valid menu types — determines input behavior.
+// "Hotkey" = single-keypress dispatch (current handler behavior)
+// "Lightbar" = arrow-key navigable highlight bar (future)
+const VALID_MENU_TYPES = ['Hotkey', 'Lightbar'];
+
+// ANSI color map — value, label, hex color, and fg-* CSS class from styles.css.
+// Used by admin views for color select dropdowns with live preview.
+// Hex values match the fg-* classes in public/css/styles.css.
+const ANSI_COLORS = [
+	{ value: 0,  label: 'Black',          hex: '#000000', css: 'fg-black' },
+	{ value: 1,  label: 'Red',            hex: '#800000', css: 'fg-red' },
+	{ value: 2,  label: 'Green',          hex: '#00af00', css: 'fg-green' },
+	{ value: 3,  label: 'Yellow',         hex: '#ffaf00', css: 'fg-yellow' },
+	{ value: 4,  label: 'Blue',           hex: '#005fd7', css: 'fg-blue' },
+	{ value: 5,  label: 'Magenta',        hex: '#800080', css: 'fg-magenta' },
+	{ value: 6,  label: 'Cyan',           hex: '#00d7ff', css: 'fg-cyan' },
+	{ value: 7,  label: 'White',          hex: '#808080', css: 'fg-grey' },
+	{ value: 8,  label: 'Bright Black',   hex: '#808080', css: 'fg-brightblack' },
+	{ value: 9,  label: 'Bright Red',     hex: '#ff0000', css: 'fg-brightred' },
+	{ value: 10, label: 'Bright Green',   hex: '#00ff00', css: 'fg-brightgreen' },
+	{ value: 11, label: 'Bright Yellow',  hex: '#ffff00', css: 'fg-brightyellow' },
+	{ value: 12, label: 'Bright Blue',    hex: '#0087ff', css: 'fg-brightblue' },
+	{ value: 13, label: 'Bright Magenta', hex: '#ff00ff', css: 'fg-brightmagenta' },
+	{ value: 14, label: 'Bright Cyan',    hex: '#00ffff', css: 'fg-brightcyan' },
+	{ value: 15, label: 'Bright White',   hex: '#ffffff', css: 'fg-brightwhite' },
+];
+
+// --- Menu CRUD ---
+
+async function getMenu(name) {
+	var menu = await postgres.queryOne(
+		'SELECT * FROM menus WHERE name = $1',
+		[name]
+	);
+	if (!menu) return null;
+
+	var entries = await postgres.query(
+		'SELECT * FROM menu_entries WHERE menu_id = $1 ORDER BY sort_order ASC, id ASC',
+		[menu.id]
+	);
+
+	// Parse JSONB flag columns on each entry
+	for (var i = 0; i < entries.length; i++) {
+		if (typeof entries[i].required_flags === 'string') {
+			try { entries[i].required_flags = JSON.parse(entries[i].required_flags); } catch (_) { entries[i].required_flags = []; }
+		}
+		if (typeof entries[i].prohibited_flags === 'string') {
+			try { entries[i].prohibited_flags = JSON.parse(entries[i].prohibited_flags); } catch (_) { entries[i].prohibited_flags = []; }
+		}
+		entries[i].required_flags = entries[i].required_flags || [];
+		entries[i].prohibited_flags = entries[i].prohibited_flags || [];
 	}
+
+	menu.menu_entries = entries;
+
+	// Strip null color values so they arrive as undefined in _applyConfig().
+	// The handler checks `config.title_clr !== undefined` — if it sees null
+	// it overwrites the theme default, and setfgcolor(null) renders as black.
+	var colorKeys = ['title_clr', 'input_clr', 'prompt_clr', 'error_clr', 'hotkey_clr'];
+	for (var k = 0; k < colorKeys.length; k++) {
+		if (menu[colorKeys[k]] === null) {
+			delete menu[colorKeys[k]];
+		}
+	}
+
+	return menu;
 }
 
-export{getMenu, menuExists}
+async function menuExists(name) {
+	var row = await postgres.queryOne(
+		'SELECT id FROM menus WHERE name = $1',
+		[name]
+	);
+	return !!row;
+}
+
+async function getAllMenus() {
+	var menus = await postgres.query(
+		`SELECT m.*, COUNT(e.id)::int AS entry_count
+		 FROM menus m
+		 LEFT JOIN menu_entries e ON e.menu_id = m.id
+		 GROUP BY m.id
+		 ORDER BY m.name ASC`
+	);
+	return menus || [];
+}
+
+async function getMenuById(id) {
+	return await postgres.queryOne('SELECT * FROM menus WHERE id = $1', [id]);
+}
+
+async function createMenu(data) {
+	var result = { status: false, errormessages: [], menuId: null };
+
+	var name = (data.name || '').trim();
+	if (!name) {
+		result.errormessages.push('Menu name is required');
+		return result;
+	}
+
+	// Check uniqueness
+	var existing = await postgres.queryOne('SELECT id FROM menus WHERE name = $1', [name]);
+	if (existing) {
+		result.errormessages.push('A menu with that name already exists');
+		return result;
+	}
+
+	var obj = {
+		name: name,
+		title: (data.title || name).trim(),
+		menu_type: VALID_MENU_TYPES.includes(data.menu_type) ? data.menu_type : 'Hotkey',
+		display_entries: data.display_entries === 'true' || data.display_entries === true || data.display_entries === 'True',
+		display_file: (data.display_file || '').trim(),
+		display_file_type: (data.display_file_type || '').trim(),
+		entries_x_offset: parseInt(data.entries_x_offset) || 0,
+		entries_y_offset: parseInt(data.entries_y_offset) || 0,
+		max_columns: parseInt(data.max_columns) || 3,
+		col_gap: parseInt(data.col_gap) || 2,
+		title_clr: data.title_clr !== undefined && data.title_clr !== '' ? parseInt(data.title_clr) : null,
+		input_clr: data.input_clr !== undefined && data.input_clr !== '' ? parseInt(data.input_clr) : null,
+		prompt_clr: data.prompt_clr !== undefined && data.prompt_clr !== '' ? parseInt(data.prompt_clr) : null,
+		error_clr: data.error_clr !== undefined && data.error_clr !== '' ? parseInt(data.error_clr) : null,
+		hotkey_clr: data.hotkey_clr !== undefined && data.hotkey_clr !== '' ? parseInt(data.hotkey_clr) : null,
+		created_at: new Date(),
+		updated_at: new Date()
+	};
+
+	var insertResult = await postgres.insertObject(obj, 'menus');
+	if (insertResult.status) {
+		result.status = true;
+		result.menuId = insertResult.insertId;
+	} else {
+		result.errormessages.push('Database insert failed');
+	}
+	return result;
+}
+
+async function updateMenu(id, data) {
+	var result = { status: false, errormessages: [] };
+
+	var obj = {
+		title: (data.title || '').trim(),
+		menu_type: VALID_MENU_TYPES.includes(data.menu_type) ? data.menu_type : 'Hotkey',
+		display_entries: data.display_entries === 'true' || data.display_entries === true || data.display_entries === 'True',
+		display_file: (data.display_file || '').trim(),
+		display_file_type: (data.display_file_type || '').trim(),
+		entries_x_offset: parseInt(data.entries_x_offset) || 0,
+		entries_y_offset: parseInt(data.entries_y_offset) || 0,
+		max_columns: parseInt(data.max_columns) || 3,
+		col_gap: parseInt(data.col_gap) || 2,
+		title_clr: data.title_clr !== undefined && data.title_clr !== '' ? parseInt(data.title_clr) : null,
+		input_clr: data.input_clr !== undefined && data.input_clr !== '' ? parseInt(data.input_clr) : null,
+		prompt_clr: data.prompt_clr !== undefined && data.prompt_clr !== '' ? parseInt(data.prompt_clr) : null,
+		error_clr: data.error_clr !== undefined && data.error_clr !== '' ? parseInt(data.error_clr) : null,
+		hotkey_clr: data.hotkey_clr !== undefined && data.hotkey_clr !== '' ? parseInt(data.hotkey_clr) : null,
+		updated_at: new Date()
+	};
+
+	// Allow name change only if new name is unique
+	if (data.name) {
+		var trimmed = data.name.trim();
+		var existing = await postgres.queryOne('SELECT id FROM menus WHERE name = $1 AND id != $2', [trimmed, id]);
+		if (existing) {
+			result.errormessages.push('A menu with that name already exists');
+			return result;
+		}
+		obj.name = trimmed;
+	}
+
+	await postgres.updateById(id, obj, 'menus');
+	result.status = true;
+	return result;
+}
+
+async function deleteMenu(id) {
+	var result = { status: false, errormessages: [] };
+	// Delete entries first (cascade)
+	await postgres.write('DELETE FROM menu_entries WHERE menu_id = $1', [id]);
+	await postgres.write('DELETE FROM menus WHERE id = $1', [id]);
+	result.status = true;
+	return result;
+}
+
+// --- Menu Entry CRUD ---
+
+async function getEntriesForMenu(menuId) {
+	var entries = await postgres.query(
+		'SELECT * FROM menu_entries WHERE menu_id = $1 ORDER BY sort_order ASC, id ASC',
+		[menuId]
+	);
+	for (var i = 0; i < entries.length; i++) {
+		if (typeof entries[i].required_flags === 'string') {
+			try { entries[i].required_flags = JSON.parse(entries[i].required_flags); } catch (_) { entries[i].required_flags = []; }
+		}
+		if (typeof entries[i].prohibited_flags === 'string') {
+			try { entries[i].prohibited_flags = JSON.parse(entries[i].prohibited_flags); } catch (_) { entries[i].prohibited_flags = []; }
+		}
+		entries[i].required_flags = entries[i].required_flags || [];
+		entries[i].prohibited_flags = entries[i].prohibited_flags || [];
+	}
+	return entries || [];
+}
+
+async function getEntryById(id) {
+	return await postgres.queryOne('SELECT * FROM menu_entries WHERE id = $1', [id]);
+}
+
+async function createEntry(menuId, data) {
+	var result = { status: false, errormessages: [], entryId: null };
+
+	if (!menuId) {
+		result.errormessages.push('Menu ID is required');
+		return result;
+	}
+
+	// Get next sort order
+	var maxRow = await postgres.queryOne(
+		'SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM menu_entries WHERE menu_id = $1',
+		[menuId]
+	);
+	var nextSort = (maxRow ? maxRow.max_sort : 0) + 10;
+
+	// Handle multi-value form fields (Express sends array for multiple select)
+	var requiredFlags = data.required_flags || [];
+	if (typeof requiredFlags === 'string') {
+		try { requiredFlags = JSON.parse(requiredFlags); } catch (_) { requiredFlags = [requiredFlags]; }
+	}
+	if (!Array.isArray(requiredFlags)) requiredFlags = [requiredFlags];
+	requiredFlags = requiredFlags.filter(Boolean);
+
+	var prohibitedFlags = data.prohibited_flags || [];
+	if (typeof prohibitedFlags === 'string') {
+		try { prohibitedFlags = JSON.parse(prohibitedFlags); } catch (_) { prohibitedFlags = [prohibitedFlags]; }
+	}
+	if (!Array.isArray(prohibitedFlags)) prohibitedFlags = [prohibitedFlags];
+	prohibitedFlags = prohibitedFlags.filter(Boolean);
+
+	var obj = {
+		menu_id: menuId,
+		sort_order: parseInt(data.sort_order) || nextSort,
+		hotkey: (data.hotkey || '').trim().substring(0, 4),
+		display: (data.display || '').trim(),
+		command_name: (data.command_name || '').trim(),
+		command_arg: (data.command_arg || '').trim(),
+		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : 7,
+		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : 0,
+		min_security: data.min_security !== undefined && data.min_security !== '' ? parseInt(data.min_security) : null,
+		required_flags: JSON.stringify(requiredFlags),
+		prohibited_flags: JSON.stringify(prohibitedFlags),
+		created_at: new Date(),
+		updated_at: new Date()
+	};
+
+	var insertResult = await postgres.insertObject(obj, 'menu_entries');
+	if (insertResult.status) {
+		result.status = true;
+		result.entryId = insertResult.insertId;
+	} else {
+		result.errormessages.push('Database insert failed');
+	}
+	return result;
+}
+
+async function updateEntry(entryId, data) {
+	var result = { status: false, errormessages: [] };
+
+	var requiredFlags = data.required_flags || [];
+	if (typeof requiredFlags === 'string') {
+		try { requiredFlags = JSON.parse(requiredFlags); } catch (_) { requiredFlags = [requiredFlags]; }
+	}
+	if (!Array.isArray(requiredFlags)) requiredFlags = [requiredFlags];
+	requiredFlags = requiredFlags.filter(Boolean);
+
+	var prohibitedFlags = data.prohibited_flags || [];
+	if (typeof prohibitedFlags === 'string') {
+		try { prohibitedFlags = JSON.parse(prohibitedFlags); } catch (_) { prohibitedFlags = [prohibitedFlags]; }
+	}
+	if (!Array.isArray(prohibitedFlags)) prohibitedFlags = [prohibitedFlags];
+	prohibitedFlags = prohibitedFlags.filter(Boolean);
+
+	var obj = {
+		sort_order: parseInt(data.sort_order) || 0,
+		hotkey: (data.hotkey || '').trim().substring(0, 4),
+		display: (data.display || '').trim(),
+		command_name: (data.command_name || '').trim(),
+		command_arg: (data.command_arg || '').trim(),
+		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : 7,
+		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : 0,
+		min_security: data.min_security !== undefined && data.min_security !== '' ? parseInt(data.min_security) : null,
+		required_flags: JSON.stringify(requiredFlags),
+		prohibited_flags: JSON.stringify(prohibitedFlags),
+		updated_at: new Date()
+	};
+
+	await postgres.updateById(entryId, obj, 'menu_entries');
+	result.status = true;
+	return result;
+}
+
+async function deleteEntry(entryId) {
+	await postgres.write('DELETE FROM menu_entries WHERE id = $1', [entryId]);
+	return { status: true };
+}
+
+async function reorderEntries(menuId, orderedIds) {
+	for (var i = 0; i < orderedIds.length; i++) {
+		await postgres.write(
+			'UPDATE menu_entries SET sort_order = $1, updated_at = NOW() WHERE id = $2 AND menu_id = $3',
+			[(i + 1) * 10, orderedIds[i], menuId]
+		);
+	}
+	return { status: true };
+}
+
+// --- Available commands for dropdowns ---
+// Keep in sync with menuhandler.js _doMenuCommand switch
+
+function getAvailableCommands() {
+	return [
+		{ name: 'loadMenu',        label: 'Load Menu',         needsArg: true,  argLabel: 'Menu Name' },
+		{ name: 'previousMenu',    label: 'Previous Menu',     needsArg: false },
+		{ name: 'logOff',          label: 'Log Off',           needsArg: false },
+		{ name: 'exitStage',       label: 'Exit Stage',        needsArg: false },
+		{ name: 'redrawMenu',      label: 'Redraw Menu',       needsArg: false },
+		{ name: 'runXtrn',         label: 'Run Door Game',     needsArg: true,  argLabel: 'Door Slug' },
+		{ name: 'msgAreaChange',   label: 'Change Msg Area',   needsArg: false },
+		{ name: 'msgGroupChange',  label: 'Change Msg Group',  needsArg: false },
+		{ name: 'listMessages',    label: 'List Messages',     needsArg: false },
+		{ name: 'readMessages',    label: 'Read Messages',     needsArg: false },
+		{ name: 'postMessage',     label: 'Post Message',      needsArg: false },
+		{ name: 'newScan',         label: 'New Scan (All)',     needsArg: false },
+		{ name: 'newScanGroup',    label: 'New Scan (Group)',   needsArg: false },
+		{ name: 'userList',        label: 'User List',         needsArg: false },
+		{ name: 'lastCallers',     label: 'Last Callers',      needsArg: false },
+		{ name: 'whosOnline',      label: "Who's Online",      needsArg: false },
+		{ name: 'email',           label: 'Private Messages',  needsArg: false },
+		{ name: 'checkEmail',      label: 'Check Email',       needsArg: false },
+		{ name: 'testDownload',    label: 'Test Download',     needsArg: false },
+	];
+}
+
+function getValidDisplayFileTypes() {
+	return VALID_DISPLAY_FILE_TYPES;
+}
+
+function getValidMenuTypes() {
+	return VALID_MENU_TYPES;
+}
+
+function getAnsiColors() {
+	return ANSI_COLORS;
+}
+
+export {
+	getMenu,
+	menuExists,
+	getAllMenus,
+	getMenuById,
+	createMenu,
+	updateMenu,
+	deleteMenu,
+	getEntriesForMenu,
+	getEntryById,
+	createEntry,
+	updateEntry,
+	deleteEntry,
+	reorderEntries,
+	getAvailableCommands,
+	getValidDisplayFileTypes,
+	getValidMenuTypes,
+	getAnsiColors
+};

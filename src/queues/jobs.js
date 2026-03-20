@@ -1,0 +1,254 @@
+/**
+ * Job enqueue helpers.
+ *
+ * Thin wrappers around queue.add() that enforce jobId conventions for
+ * deduplication.  These are what the gateway routes, admin panel, CLI tools,
+ * and other processes call to schedule work.
+ *
+ * jobId conventions:
+ *   - Per-connection jobs use `${jobName}--${connectionUUID}` — BullMQ rejects
+ *     duplicate jobIds while one is active, preventing concurrent operations
+ *     against the same peer.
+ *   - Singleton jobs (maintenance) use a fixed jobId — only one at a time.
+ *   - One-shot jobs (e.g. manual FTN inbound with no specific connection) use
+ *     a timestamp suffix to allow multiple enqueues.
+ *
+ * Note: BullMQ does not allow colons in custom job IDs.  We use `--` as the
+ * delimiter between job name and connection UUID.
+ */
+
+import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
+
+// =========================================================================
+// Toss jobs
+// =========================================================================
+
+/**
+ * FTN inbound toss.  Process .pkt files from inbound directory.
+ * Called by: mailer (after file receive), admin (manual toss), CLI.
+ */
+export async function enqueueFtnInbound(opts = {}) {
+	return tossQueue.add('ftn:inbound', {
+		connectionUUID: opts.connectionUUID || null,
+		sourceDir: opts.sourceDir || null,
+	}, {
+		jobId: opts.connectionUUID
+			? `ftn-inbound--${opts.connectionUUID}`
+			: `ftn-inbound--${Date.now()}`,
+	});
+}
+
+/**
+ * FTN outbound toss.  Gather and pack outbound echomail/netmail.
+ * Called by: gateway (after user post), admin, CLI, scheduler.
+ */
+export async function enqueueFtnOutbound(connectionUUID) {
+	return tossQueue.add('ftn:outbound', { connectionUUID }, {
+		jobId: connectionUUID
+			? `ftn-outbound--${connectionUUID}`
+			: `ftn-outbound--${Date.now()}`,
+	});
+}
+
+/**
+ * QWK client pull.  Connect to remote hub, download .qwk, import.
+ * Called by: scheduler (repeatable), admin, CLI.
+ */
+export async function enqueueQwkPull(connectionUUID) {
+	return tossQueue.add('qwk:pull', { connectionUUID }, {
+		jobId: `qwk-pull--${connectionUUID}`,
+	});
+}
+
+/**
+ * QWK pull for ALL active connections.
+ * Convenience for CLI — calls the existing pullAllQWK() which iterates
+ * connections internally.  Scheduler and admin should prefer per-connection
+ * enqueueQwkPull() for finer control.
+ */
+export async function enqueueQwkPullAll() {
+	return tossQueue.add('qwk:pull-all', {}, {
+		jobId: `qwk-pull-all--${Date.now()}`,
+	});
+}
+
+/**
+ * QWK client push.  Build .rep and upload to remote hub.
+ * Called by: scheduler (repeatable), admin, CLI.
+ */
+export async function enqueueQwkPush(connectionUUID) {
+	return tossQueue.add('qwk:push', { connectionUUID }, {
+		jobId: `qwk-push--${connectionUUID}`,
+	});
+}
+
+/**
+ * QWK push for ALL active connections.
+ * Convenience for CLI — same rationale as enqueueQwkPullAll().
+ */
+export async function enqueueQwkPushAll() {
+	return tossQueue.add('qwk:push-all', {}, {
+		jobId: `qwk-push-all--${Date.now()}`,
+	});
+}
+
+/**
+ * QWK hub inbound.  Process .rep files dropped by a hub node.
+ * Called by: gateway (node drops .rep), filesystem watcher, admin.
+ */
+export async function enqueueQwkHubInbound(connectionUUID) {
+	return tossQueue.add('qwk:hub:inbound', { connectionUUID }, {
+		jobId: `qwk-hub-inbound--${connectionUUID}`,
+	});
+}
+
+/**
+ * NNTP pull.  Connect to NNTP server, pull articles above HWM.
+ * Called by: scheduler (repeatable), admin, CLI.
+ */
+export async function enqueueNntpPull(connectionUUID) {
+	return tossQueue.add('nntp:pull', { connectionUUID }, {
+		jobId: `nntp-pull--${connectionUUID}`,
+	});
+}
+
+/**
+ * NNTP pull for ALL active connections.
+ * Convenience for CLI — calls pullAllNNTP() internally.
+ */
+export async function enqueueNntpPullAll() {
+	return tossQueue.add('nntp:pull-all', {}, {
+		jobId: `nntp-pull-all--${Date.now()}`,
+	});
+}
+
+/**
+ * NNTP push.  Post local messages to NNTP server.
+ * Called by: scheduler (repeatable), admin, CLI.
+ */
+export async function enqueueNntpPush(connectionUUID) {
+	return tossQueue.add('nntp:push', { connectionUUID }, {
+		jobId: `nntp-push--${connectionUUID}`,
+	});
+}
+
+/**
+ * NNTP push for ALL active connections.
+ * Convenience for CLI — calls pushAllNNTP() internally.
+ */
+export async function enqueueNntpPushAll() {
+	return tossQueue.add('nntp:push-all', {}, {
+		jobId: `nntp-push-all--${Date.now()}`,
+	});
+}
+
+/**
+ * Full toss cycle.  Enqueues inbound+outbound for the specified protocols.
+ * Used by the CLI tosser and admin panel "run toss" button.
+ *
+ * Returns an array of the enqueued job objects.
+ */
+export async function enqueueTossCycle(opts = {}) {
+	const { doInbound, doOutbound, doFtn, doNntp, doQwk, connections } = opts;
+	const jobs = [];
+
+	if (doFtn) {
+		if (doInbound) jobs.push(await enqueueFtnInbound());
+		if (doOutbound) jobs.push(await enqueueFtnOutbound());
+	}
+
+	if (doQwk && connections?.qwk) {
+		for (const conn of connections.qwk) {
+			if (doInbound) jobs.push(await enqueueQwkPull(conn.uuid));
+			if (doOutbound) jobs.push(await enqueueQwkPush(conn.uuid));
+		}
+	}
+
+	if (doNntp && connections?.nntp) {
+		for (const conn of connections.nntp) {
+			if (doInbound) jobs.push(await enqueueNntpPull(conn.uuid));
+			if (doOutbound) jobs.push(await enqueueNntpPush(conn.uuid));
+		}
+	}
+
+	return jobs;
+}
+
+// =========================================================================
+// Mailer jobs
+// =========================================================================
+
+/**
+ * Signal the mailer that outbound mail is ready for a peer.
+ * For CRASH connections, triggers immediate poll.
+ * Called by: worker (after FTN outbound toss).
+ */
+export async function enqueueMailerSignalOutbound(connectionUUID) {
+	return mailerQueue.add('signal-outbound', { connectionUUID }, {
+		jobId: `signal-outbound--${connectionUUID}`,
+	});
+}
+
+/**
+ * Force a mailer poll for a specific connection (manual/admin).
+ * Bypasses guards — connects even with no outbound mail.
+ * Called by: admin panel, CLI.
+ */
+export async function enqueueMailerTriggerPoll(connectionUUID) {
+	return mailerQueue.add('trigger-poll', { connectionUUID }, {
+		jobId: `trigger-poll--${connectionUUID}`,
+	});
+}
+
+// =========================================================================
+// Maintenance jobs
+// =========================================================================
+
+/**
+ * Regenerate body_html for message area messages.
+ * Called by: admin panel, CLI, scheduler.
+ */
+export async function enqueueRegenHtml(opts = {}) {
+	return maintenanceQueue.add('regen-html', {
+		areas: opts.areas || null,
+		batchSize: opts.batchSize || 100,
+		forceWidth: opts.forceWidth || null,
+	}, {
+		jobId: 'regen-html',
+	});
+}
+
+/**
+ * Regenerate body_html for PM inbox/outbox.
+ * Called by: admin panel, CLI, scheduler.
+ */
+export async function enqueueRegenPmHtml(opts = {}) {
+	return maintenanceQueue.add('regen-pm-html', {
+		batchSize: opts.batchSize || 100,
+		forceWidth: opts.forceWidth || null,
+	}, {
+		jobId: 'regen-pm-html',
+	});
+}
+
+/**
+ * Hard-delete soft-deleted PMs older than N days.
+ * Called by: scheduler (daily), admin, CLI.
+ */
+export async function enqueuePurgePmTrash(days) {
+	return maintenanceQueue.add('purge-pm-trash', {
+		days: days || parseInt(process.env.pm_trash_retention_days) || 30,
+	}, {
+		jobId: 'purge-pm-trash',
+	});
+}
+
+/**
+ * Recalculate message counts for all areas.
+ * Called by: admin panel.
+ */
+export async function enqueueRecalcAreaCounts() {
+	return maintenanceQueue.add('recalc-area-counts', {}, {
+		jobId: 'recalc-area-counts',
+	});
+}

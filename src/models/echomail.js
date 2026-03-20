@@ -7,7 +7,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as msgAreas from './msgAreas.js';
 import * as ftn from "./ftnClasses.js";
 import * as ftnUtils from "../utils/ftnUtils.js";
-import * as ftnTosser from "../middleware/ftnTosser.js";
+import * as ftnTosser from "../middleware/tossers/ftnTosser.js";
 import * as systemAddresses from "./systemAddresses.js";
 import * as peerConnections from "./peerConnections.js";
 import * as peerAreaSubscriptions from "./peerAreaSubscriptions.js";
@@ -205,6 +205,23 @@ async function pushThreadIdToUpdateQueue(id, shortcode) {
 	if (!threadUpdateArray.includes(psuedoid)) {
 		threadUpdateArray.push(psuedoid);
 	}
+}
+
+// Return the current contents of threadUpdateArray (parsed) and clear it.
+// This is the safe way for long-lived processes (worker, embedded mode) to
+// consume the queue — no window between read and clear where items could
+// be lost.  Short-lived CLI processes can still read threadUpdateArray
+// directly since they exit after one run.
+function drainThreadUpdateArray() {
+	var items = [];
+	for (var entry of threadUpdateArray) {
+		items.push({
+			id: entry.split("[")[0],
+			shortcode: entry.split("[")[1]
+		});
+	}
+	threadUpdateArray.length = 0;
+	return items;
 }
 
 async function getExistingThreadBySubject(message, threadtable, subject, strippedre) {
@@ -1200,6 +1217,7 @@ export {
 	updateThreadArray,
 	updateDailyThreads,
 	threadUpdateArray,
+	drainThreadUpdateArray,
 	mergeRecentThreads,
 	getOutboundForConnection,
 	startNewThread,

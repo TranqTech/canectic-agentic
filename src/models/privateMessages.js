@@ -14,6 +14,44 @@ dotenv.config();
 
 const trashRetentionDays = parseInt(process.env.pm_trash_retention_days) || 30;
 
+// --- Outbound toss trigger ---
+// After a non-LOCAL message is queued in pm_outbox, signal the worker to
+// run the appropriate outbound toss cycle.  Uses dynamic import so the
+// model has no hard dependency on BullMQ/Redis — works in tests and
+// one-shot scripts without queue infrastructure.
+
+var _jobs = null;
+async function _getJobs() {
+  if (_jobs) return _jobs;
+  try {
+    _jobs = await import('../queues/jobs.js');
+    return _jobs;
+  } catch (err) {
+    // Queue infrastructure not available (tests, standalone scripts) — skip
+    return null;
+  }
+}
+
+async function _triggerOutboundToss(transportType) {
+  var jobs = await _getJobs();
+  if (!jobs) return;
+
+  try {
+    switch (transportType) {
+      case 'FTN':
+        await jobs.enqueueFtnOutbound();
+        break;
+      case 'QWK':
+        await jobs.enqueueQwkPushAll();
+        break;
+      // NNTP PMs are not currently supported
+      // EMAIL, MESHTASTIC — future transports
+    }
+  } catch (err) {
+    alogger.writeAlog(4, 'PM outbound trigger failed for ' + transportType + ': ' + err.message, 'yellow');
+  }
+}
+
 // --- Simple text-to-HTML fallback ---
 // Used when formatBodyHtml fails or returns empty.
 // Escapes HTML entities and converts line breaks to <br>.
@@ -509,6 +547,13 @@ async function queueMessage(messageObj, userSession) {
 
   retObj.outboxId = outboxResult.insertId;
 
+  // For non-LOCAL transports, signal the worker to toss outbound.
+  // This triggers the next toss cycle immediately rather than waiting
+  // for the scheduled poll.  Works from both web routes and terminal.
+  if (!isLocal) {
+    await _triggerOutboundToss(messageObj.transport_type);
+  }
+
   // For LOCAL: deliver directly to recipient inbox
   if (isLocal) {
     var recipientId = messageObj.transport_data && messageObj.transport_data.recipient_user_id;
@@ -565,6 +610,12 @@ async function queueOutbound(messageObj) {
   };
 
   var result = await postgres.insertObject(insertObj, 'pm_outbox');
+
+  // Signal outbound toss for the transport
+  if (result.status && messageObj.transport_type) {
+    await _triggerOutboundToss(messageObj.transport_type);
+  }
+
   return result;
 }
 

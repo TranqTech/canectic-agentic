@@ -9,22 +9,25 @@ For the terminal-side architecture, see `terminal_architecture.md`.
 For the networking/tosser stack, see `NETWORKING_ARCHITECTURE.md`.
 For the FTN mailer system, see `MAILER_ARCHITECTURE.md`.
 For the private messaging system (unified PM model, transport adapters, webmail UI), see `PM_ARCHITECTURE.md`.
+For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
 ---
 
 ## Startup Sequence
 
-Entry point: `doorserver.js` (project root). Orchestrates the full system startup:
+Entry point: `bin/gateway.js` (renamed from `doorserver.js`). Orchestrates the gateway process startup:
 
 1. **Pre-run maintenance** — `userMsgPointers.ensureConstraintsAndIndexes()`, `userAreaSubs.ensureConstraintsAndIndexes()`. Creates tables/indexes/constraints if missing.
-2. **Mailer manager** — `MailerManager.start()`. FTN binkp/EMSI mailer (see mailer architecture).
-3. **Node manager** — Tracks active terminal nodes (allocated slots for connected users).
-4. **Socat manager** — Manages socat bridge processes for legacy connections.
-5. **Call pools** — `CallManager` creates named pools (`PrimaryBBS`, `Doorserver`) with flow order configuration. Call pools handle the terminal-side call lifecycle.
-6. **HTTP server** — `http.createServer(webserver)` wraps the Express app. Listens on `process.env.webport` (default 8080). **Single HTTP server** shared by Express routes and all WebSocket pools.
-7. **WebSocket pools** — `WsManager` created with the HTTP server. Named pools created and linked to call pools by configuration. WebSocket upgrade requests are path-routed to the matching pool.
+2. **Node manager** — Tracks active terminal nodes (allocated slots for connected users).
+3. **Socat manager** — Manages socat bridge processes for legacy connections.
+4. **Call pools** — `CallManager` creates named pools (`PrimaryBBS`, `Doorserver`) with flow order configuration. Call pools handle the terminal-side call lifecycle.
+5. **HTTP server** — `http.createServer(webserver)` wraps the Express app. Listens on `process.env.webport` (default 8080). **Single HTTP server** shared by Express routes and all WebSocket pools.
+6. **WebSocket pools** — `WsManager` created with the HTTP server. Named pools created and linked to call pools by configuration. WebSocket upgrade requests are path-routed to the matching pool.
+7. **Process mode startup** — If `PROCESS_MODE=embedded`, starts the mailer (`MailerManager`) and BullMQ workers in-process. If `PROCESS_MODE=separate` (default), the mailer and worker run as independent processes (`bin/mailer.js`, `bin/worker.js`). See `PROCESS_ARCHITECTURE.md`.
+8. **Event subscriber** — Listens for cross-process notifications (new messages imported, PMs delivered) for real-time UI updates.
+9. **Job schedules** — Registers BullMQ repeatable jobs for poll cycles, toss schedules, and maintenance tasks.
 
-Shutdown handlers on `SIGINT`/`SIGTERM` clean up socat processes, close the Postgres pool, and shut down Redis.
+Shutdown handlers on `SIGINT`/`SIGTERM` drain embedded workers (if any), close BullMQ connections, clean up socat processes, close the Postgres pool, and shut down Redis.
 
 Global `uncaughtException` and `unhandledRejection` handlers log to alogger but don't crash the process.
 
@@ -160,7 +163,7 @@ Two-layer admin check:
 | Networks | Network management routes | FTN/QWK/NNTP network configuration |
 | Peers | Peer connection management | Remote system configuration |
 | Netmail | `GET/POST /admin/netmail/*` | Netmail browser and viewer |
-| Tosser | `POST /admin/tosser/*` | Manual toss triggers (QWK, NNTP) |
+| Tosser | `POST /admin/tosser/*` | Enqueues toss jobs on the BullMQ queue (replaces direct tosser calls) |
 | Users | `GET /admin/users`, `POST /admin/users/:uuid/*` | User list, edit, password reset |
 | Group Defaults | `GET /admin/msgGroup/:shortcode/defaults` | JSON endpoint — returns group security/flag defaults for new area modal auto-populate |
 
@@ -242,13 +245,19 @@ The `is-mobile` package checks `User-Agent` server-side. The result is passed to
 ### Architecture
 
 ```
-                     HTTP Server
-              (shared with Express)
+                     HTTP Server (gateway)
+                  (shared with Express)
 
   upgrade event --+-- /ws/bbs -------> WsPool -> CallPool (PrimaryBBS)
                   |-- /ws/doorserver -> WsPool -> CallPool (Doorserver)
-                  |-- /            --> WsPool -> CallPool (PrimaryBBS)
-                  +-- /ws/mailer ----> WsPool -> MailerManager
+                  +-- /            --> WsPool -> CallPool (PrimaryBBS)
+
+  Embedded mode only:
+                  +-- /ws/mailer ----> WsPool -> MailerManager (in-process)
+
+  Separate mode:
+      Mailer process (bin/mailer.js) binds its own HTTP listener
+      on MAILER_WS_PORT for /ws/mailer WebSocket connections.
 ```
 
 ### WsManager
@@ -269,14 +278,21 @@ Wraps a single WebSocket connection. Provides `sendtext()`, `sendString()`, `sen
 
 ### Path Configuration
 
-Configured in `doorserver.js` as an array of `{ name, path, callpool }` objects:
+Configured in `bin/gateway.js` as an array of `{ name, path, callpool }` objects:
 
 | Path | Pool Name | Call Pool | Purpose |
 |---|---|---|---|
 | `/ws/bbs` | BBS | PrimaryBBS | Main BBS terminal connections |
 | `/ws/doorserver` | Doorserver | Doorserver | Door game server connections |
 | `/` | Catchall | PrimaryBBS | Default path for clients that don't specify |
+
+In **embedded mode**, an additional pool is registered for the mailer:
+
+| Path | Pool Name | Call Pool | Purpose |
+|---|---|---|---|
 | `/ws/mailer` | Mailer | (none) | FTN mailer connections (handled by MailerManager, not CallPool) |
+
+In **separate mode**, `/ws/mailer` is served by the mailer process on its own port (`MAILER_WS_PORT`). See `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -338,11 +354,13 @@ Served from `public/` directory at the project root.
 
 ### HTTP Server Sharing
 
-The Express app and WebSocket infrastructure share a single `http.Server` instance created in `doorserver.js`. Express handles normal HTTP requests; the `upgrade` event is intercepted by `WsManager` for WebSocket connections. This means:
+The Express app and WebSocket infrastructure share a single `http.Server` instance created in `bin/gateway.js`. Express handles normal HTTP requests; the `upgrade` event is intercepted by `WsManager` for WebSocket connections. This means:
 
 - Single port for both web and terminal access
 - No CORS issues between HTTP and WS on the same origin
-- SSL/TLS can be terminated once at the proxy layer (nginx, Cloudflare, etc.)
+- SSL/TLS can be terminated once at the proxy layer (HAProxy, nginx, etc.)
+
+In **separate mode**, the mailer process binds its own HTTP listener on `MAILER_WS_PORT` — the gateway's HTTP server handles only terminal and web traffic. In **embedded mode**, the mailer's WsPool is added to the gateway's HTTP server. See `PROCESS_ARCHITECTURE.md` for the full process model and reverse proxy configuration.
 
 ### Model Layer Sharing
 
@@ -350,7 +368,7 @@ All models (`messages.js`, `msgAreas.js`, `msgGroups.js`, `useraccounts.js`, `us
 
 - Web routes (`src/routes/*.js`) — user-facing and admin
 - Terminal handlers (`src/handlers/menucommands/*.js`) — area selector, reader, editor, newscan, PM reader/editor/check
-- Tossers (`src/models/*Tosser.js`) — FTN, QWK, NNTP import/export
+- Tossers (`src/middleware/tossers/*.js`) — FTN, QWK, NNTP import/export (run in the worker process or embedded mode, not the gateway)
 - Maintenance tools (`src/tools/*.js`, `src/maintenance/*.js`)
 
 No model knows whether it's being called from a web route or a terminal handler. Access control is performed by the caller (route helper or terminal module), not the model.
@@ -372,6 +390,11 @@ Key configuration via `.env`:
 | `pm_trash_retention_days` | Days before hard-deleting trashed PMs | 30 |
 | `DefaultUser` | Default poster name (legacy) | "John Doe" |
 | `NODE_ENV` | Express environment (controls error detail) | "development" |
+| `PROCESS_MODE` | `separate` (gateway only) or `embedded` (all-in-one) | `separate` |
+| `MAILER_ENABLED` | Enable FTN mailer (`true`/`false`) | `false` |
+| `MAILER_WS_PORT` | WebSocket listener port for mailer (separate mode) | 24555 |
+| `REDIS_BULLMQ_DB` | Redis database number for BullMQ job data | 2 |
+| `WORKER_CONCURRENCY` | Toss queue concurrency in worker process | 3 |
 
 ---
 
@@ -381,7 +404,7 @@ Key configuration via `.env`:
 - **User profile page** — `/users/profile` linked in user nav but not yet implemented.
 - **Navigation polish** — Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
 - **Rich text editor integration** — TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
-- **Admin real-time dashboard** — Live session counts, active mailer connections, tosser status. WebSocket push from server.
+- **Admin real-time dashboard** — Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
 - **WebSocket authentication** — Currently WebSocket connections are anonymous until the terminal login flow. Future: authenticate via session cookie on upgrade.
 - **Rate limiting** — No rate limiting on login attempts or API endpoints currently.
 - **CSRF protection** — Not currently implemented. POST routes rely on session cookies + same-origin policy.

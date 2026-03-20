@@ -10,6 +10,7 @@ import { BaseHandler } from "./basehandler.js";
 import { DoorOutputParser } from "../helpers/outputParser.js"
 import * as alogger from "../utils/alogger.js";
 import * as dropfile_handler from "./dropfile_handler.js";
+import { substitute, substituteArray } from '../utils/configvars.js';
 
 dotenv.config();
 const doordir = process.env.doordir || "";
@@ -35,9 +36,12 @@ class DoorRunner extends BaseHandler {
 		// Door configuration
 		this.doorConfig = doorConfig || {};
 		this.launchType = doorConfig.launchType || LAUNCH_TYPES.NATIVE_SHELL;
-		this.doorCmd = doorConfig.cmd || "";
+		this.doorCmd = substitute(doorConfig.cmd || "", call, doorConfig);
 		this.dropfileType = doorConfig.dropfileType || null;
-		this.dropfileDir = doorConfig.dropfileDir || null;
+		this.dropfileDir = doorConfig.dropfileDir
+			? substitute(doorConfig.dropfileDir, call, doorConfig)
+			: null;
+		this.doorArgs = substituteArray(doorConfig.doorArgs, call, doorConfig);
 		this.pauseOnExit = doorConfig.pauseOnExit !== undefined ? doorConfig.pauseOnExit : true;
 		this.returnStage = doorConfig.returnStage || null;
 

@@ -1,0 +1,524 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-8
+            if !menu
+              .card
+                .card-header.bg-darkblue.text-white
+                  h2 Menu Not Found
+                .card-body
+                  a.btn.btn-info(href='/admin/menus') Back to Menus
+            else
+              //- Menu Properties Card
+              .card.mb-3
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2
+                        | Menu: 
+                        = menu.name
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-sm.btn-info(href='/admin/menus')
+                          | Back
+                .card-body
+                  .row
+                    .col-4
+                      h5
+                        | Title: 
+                        span.text-info= menu.title
+                      h6
+                        | Type: 
+                        span.badge.bg-secondary= menu.menu_type || 'Hotkey'
+                      h6
+                        | Display Entries: 
+                        if menu.display_entries
+                          span.badge.bg-success Yes
+                        else
+                          span.badge.bg-secondary No
+                      h6
+                        | Layout: #{menu.max_columns || 3} cols, gap #{menu.col_gap || 2}
+                    .col-4
+                      if menu.display_file
+                        h6
+                          | Display File: 
+                          span.text-muted= menu.display_file
+                        h6
+                          | File Type: 
+                          span.text-muted= menu.display_file_type || '(misc)'
+                      else
+                        h6.text-muted No display file
+                    .col-4
+                      h6
+                        | Offsets: X=#{menu.entries_x_offset} Y=#{menu.entries_y_offset}
+                      h6 Colors:
+                      .small
+                        if menu.title_clr !== null && menu.title_clr !== undefined
+                          - var tc = (ansiColors || []).find(c => c.value === menu.title_clr)
+                          | Title: 
+                          if tc
+                            span(style='color:' + tc.hex)= tc.label
+                          |  
+                        if menu.prompt_clr !== null && menu.prompt_clr !== undefined
+                          - var pc = (ansiColors || []).find(c => c.value === menu.prompt_clr)
+                          | Prompt: 
+                          if pc
+                            span(style='color:' + pc.hex)= pc.label
+                          |  
+                        if menu.input_clr !== null && menu.input_clr !== undefined
+                          - var ic = (ansiColors || []).find(c => c.value === menu.input_clr)
+                          | Input: 
+                          if ic
+                            span(style='color:' + ic.hex)= ic.label
+                          |  
+                        if menu.hotkey_clr !== null && menu.hotkey_clr !== undefined
+                          - var hc = (ansiColors || []).find(c => c.value === menu.hotkey_clr)
+                          | Hotkey: 
+                          if hc
+                            span(style='color:' + hc.hex)= hc.label
+                          |  
+                        if menu.error_clr !== null && menu.error_clr !== undefined
+                          - var ec = (ansiColors || []).find(c => c.value === menu.error_clr)
+                          | Error: 
+                          if ec
+                            span(style='color:' + ec.hex)= ec.label
+                        if menu.title_clr === null && menu.prompt_clr === null && menu.input_clr === null && menu.hotkey_clr === null && menu.error_clr === null
+                          span.text-muted (using theme defaults)
+
+              //- Entries Card
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h4 Menu Entries
+                    .col-4
+                      .text-end
+                        button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newEntryModal')
+                          | Add Entry
+                .card-body
+                  if entries && entries.length > 0
+                    table#entryTable.table.table-hover.table-sm
+                      thead
+                        tr
+                          th(scope='col' style='width:50px') #
+                          th(scope='col' style='width:60px') Hotkey
+                          th(scope='col') Display Text
+                          th(scope='col') Command
+                          th(scope='col') Argument
+                          th(scope='col' style='width:80px') Security
+                          th(scope='col' style='width:60px') FG
+                          th(scope='col' style='width:60px') BG
+                          th(scope='col' style='width:120px') Actions
+                      tbody#sortableEntries
+                        for entry in entries
+                          tr.entry-row(
+                            data-id=entry.id
+                            data-sort=entry.sort_order
+                            data-hotkey=entry.hotkey
+                            data-display=entry.display
+                            data-command_name=entry.command_name
+                            data-command_arg=entry.command_arg
+                            data-fg_clr=(entry.fg_clr !== null && entry.fg_clr !== undefined ? entry.fg_clr : '7')
+                            data-bg_clr=(entry.bg_clr !== null && entry.bg_clr !== undefined ? entry.bg_clr : '0')
+                            data-min_security=(entry.min_security !== null && entry.min_security !== undefined ? entry.min_security : '')
+                            data-required_flags=JSON.stringify(entry.required_flags || [])
+                            data-prohibited_flags=JSON.stringify(entry.prohibited_flags || [])
+                          )
+                            td.text-muted= entry.sort_order
+                            td
+                              if entry.hotkey
+                                span.badge.bg-warning.text-dark= entry.hotkey
+                            td
+                              if entry.display
+                                = entry.display
+                              else
+                                span.text-muted.fst-italic (hidden)
+                            td
+                              span.badge.bg-primary= entry.command_name
+                            td
+                              if entry.command_arg
+                                small.text-muted= entry.command_arg
+                              else
+                                | —
+                            td.text-center
+                              if entry.min_security !== null && entry.min_security !== undefined
+                                = entry.min_security
+                              else
+                                | —
+                            td.text-center
+                              - var fgMatch = (ansiColors || []).find(c => c.value === entry.fg_clr)
+                              if fgMatch
+                                span(style='color:' + fgMatch.hex + '; font-weight:bold')= fgMatch.label
+                              else
+                                | —
+                            td.text-center
+                              - var bgMatch = (ansiColors || []).find(c => c.value === entry.bg_clr)
+                              if bgMatch
+                                span.px-2.rounded(style='background:' + bgMatch.hex + '; color:' + (entry.bg_clr > 6 ? '#000' : '#fff'))= bgMatch.label
+                              else
+                                | —
+                            td
+                              button.btn.btn-xs.btn-outline-warning.me-1.edit-entry-btn(type='button' title='Edit')
+                                i.bi.bi-pencil
+                              form.d-inline(action='/admin/menus/' + menu.id + '/entries/' + entry.id + '/delete' method='POST')
+                                button.btn.btn-xs.btn-outline-danger(type='submit' title='Delete' onclick="return confirm('Delete this entry?')")
+                                  i.bi.bi-trash
+                  else
+                    center
+                      .h5.text-muted No entries yet
+                      p Add entries to build this menu
+
+          //- Sidebar
+          .col-2
+            .row
+              .col-12
+                .card.bg-light
+                  .card-header.bg-darkblue.text-white
+                    .h6 Quick Actions
+                  .card-body.bg-dark
+                    .d-grid.gap-1
+                      a.btn.btn-danger(href='/admin/menus')
+                        | Exit
+                      if menu
+                        br
+                        h6.text-white.mb-1 Menu:
+                        button.btn.btn-warning.w-100(data-bs-toggle='modal' data-bs-target='#editMenuModal')
+                          | Edit Menu
+                        button.btn.btn-danger.w-100.mt-1(data-bs-toggle='modal' data-bs-target='#deleteMenuModal')
+                          | Delete Menu
+                        br
+                        h6.text-white.mb-1 Entries:
+                        button.btn.btn-success.w-100(data-bs-toggle='modal' data-bs-target='#newEntryModal')
+                          | Add Entry
+
+    if menu
+      //- Edit Menu Modal
+      #editMenuModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title Edit Menu
+              button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+            .modal-body
+              form(action='/admin/menus/' + menu.id + '/update' method='POST')
+                .row
+                  .col-1
+                  .col-10
+                    label.form-label Menu Name:
+                    input.form-control(type='text' name='name' value=menu.name required)
+                    br
+                    label.form-label Display Title:
+                    input.form-control(type='text' name='title' value=menu.title)
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Menu Type:
+                    select.form-control(name='menu_type')
+                      for mt in menuTypes
+                        option(value=mt selected=(menu.menu_type === mt))= mt
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Display File Name:
+                    input.form-control(type='text' name='display_file' value=menu.display_file || '' placeholder='e.g. mainmenu')
+                    .form-text Art filename only — no path or extension.
+                  .col-5
+                    label.form-label Display File Type:
+                    select.form-control(name='display_file_type')
+                      option(value='' selected=(!menu.display_file_type || menu.display_file_type === '')) — None —
+                      option(value='Screen' selected=(menu.display_file_type === 'Screen')) Screen (full-screen art)
+                      option(value='Header' selected=(menu.display_file_type === 'Header')) Header (header art)
+                br
+                .row
+                  .col-1
+                  .col-2
+                    label.form-label Display Entries:
+                    select.form-control(name='display_entries')
+                      option(value='true' selected=menu.display_entries) Yes
+                      option(value='false' selected=!menu.display_entries) No
+                  .col-2
+                    label.form-label X Offset:
+                    input.form-control(type='number' name='entries_x_offset' value=menu.entries_x_offset min='0')
+                  .col-2
+                    label.form-label Y Offset:
+                    input.form-control(type='number' name='entries_y_offset' value=menu.entries_y_offset min='0')
+                  .col-2
+                    label.form-label Max Cols:
+                    input.form-control(type='number' name='max_columns' value=(menu.max_columns || 3) min='1' max='10')
+                  .col-2
+                    label.form-label Col Gap:
+                    input.form-control(type='number' name='col_gap' value=(menu.col_gap || 2) min='0')
+                br
+                h5 Menu Colors
+                .form-text.mb-2 Leave as "Theme Default" to inherit from the active terminal theme.
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Title Color:
+                    select.form-control.bg-dark.color-select(name='title_clr')
+                      option(value='' selected=(menu.title_clr === null || menu.title_clr === undefined)) — Theme Default —
+                      for clr in ansiColors
+                        option(value=clr.value selected=(menu.title_clr === clr.value) style='color:' + clr.hex)= clr.label
+                  .col-5
+                    label.form-label Prompt Color:
+                    select.form-control.bg-dark.color-select(name='prompt_clr')
+                      option(value='' selected=(menu.prompt_clr === null || menu.prompt_clr === undefined)) — Theme Default —
+                      for clr in ansiColors
+                        option(value=clr.value selected=(menu.prompt_clr === clr.value) style='color:' + clr.hex)= clr.label
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Input Color:
+                    select.form-control.bg-dark.color-select(name='input_clr')
+                      option(value='' selected=(menu.input_clr === null || menu.input_clr === undefined)) — Theme Default —
+                      for clr in ansiColors
+                        option(value=clr.value selected=(menu.input_clr === clr.value) style='color:' + clr.hex)= clr.label
+                  .col-5
+                    label.form-label Hotkey Color:
+                    select.form-control.bg-dark.color-select(name='hotkey_clr')
+                      option(value='' selected=(menu.hotkey_clr === null || menu.hotkey_clr === undefined)) — Theme Default —
+                      for clr in ansiColors
+                        option(value=clr.value selected=(menu.hotkey_clr === clr.value) style='color:' + clr.hex)= clr.label
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Error Color:
+                    select.form-control.bg-dark.color-select(name='error_clr')
+                      option(value='' selected=(menu.error_clr === null || menu.error_clr === undefined)) — Theme Default —
+                      for clr in ansiColors
+                        option(value=clr.value selected=(menu.error_clr === clr.value) style='color:' + clr.hex)= clr.label
+                br
+                .row
+                  .col-1
+                  .col-10
+                    .text-end
+                      input.btn.btn-lg.btn-success(type='submit' value='Save Changes')
+
+      //- Delete Menu Modal
+      #deleteMenuModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered
+          .modal-content
+            .modal-header.bg-danger.text-white
+              h3.modal-title Delete Menu
+              button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+            .modal-body
+              p
+                | Are you sure you want to delete menu 
+                strong= menu.name
+                | ? This will also delete all menu entries.
+              form(action='/admin/menus/' + menu.id + '/delete' method='POST')
+                .text-end
+                  button.btn.btn-secondary.me-2(data-bs-dismiss='modal') Cancel
+                  input.btn.btn-danger(type='submit' value='Delete Menu')
+
+      //- New Entry Modal
+      #newEntryModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title Add Menu Entry
+              button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+            .modal-body
+              form(action='/admin/menus/' + menu.id + '/entries/new' method='POST')
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Hotkey (1–4 chars):
+                    input.form-control(type='text' name='hotkey' maxlength='4' placeholder='e.g. M, Q, 1, ?')
+                  .col-5
+                    label.form-label Display Text:
+                    input.form-control(type='text' name='display' placeholder='e.g. M) Messages — leave blank for hidden hotkey')
+                br
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Command:
+                    select#ne_command.form-control(name='command_name')
+                      for cmd in availCommands
+                        option(value=cmd.name)= cmd.label
+                  .col-5
+                    label.form-label Argument:
+                    input#ne_command_arg.form-control(type='text' name='command_arg' placeholder='Menu name, door slug, etc.')
+                    .form-text Required for Load Menu (menu name) and Run Door (door slug).
+                br
+                .row
+                  .col-1
+                  .col-3
+                    label.form-label Sort Order:
+                    input.form-control(type='number' name='sort_order' value='0')
+                  .col-3
+                    label.form-label Min Security:
+                    input.form-control(type='number' name='min_security' min='0' max='255' placeholder='— any —')
+                  .col-2
+                    label.form-label FG Color:
+                    select.form-control.bg-dark.color-select(name='fg_clr')
+                      for clr in ansiColors
+                        option(value=clr.value selected=(clr.value === 7) style='color:' + clr.hex)= clr.label
+                  .col-2
+                    label.form-label BG Color:
+                    select.form-control.bg-dark.color-select(name='bg_clr')
+                      for clr in ansiColors
+                        option(value=clr.value selected=(clr.value === 0) style='color:' + clr.hex)= clr.label
+                br
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Required Flags:
+                    select.form-control(name='required_flags' multiple size='4')
+                      for perm in availablePermissions
+                        option(value=perm)= perm
+                    .form-text User must have ALL selected flags
+                  .col-5
+                    label.form-label Prohibited Flags:
+                    select.form-control(name='prohibited_flags' multiple size='4')
+                      for restr in availableRestrictions
+                        option(value=restr)= restr
+                    .form-text User must have NONE of these
+                br
+                .row
+                  .col-1
+                  .col-10
+                    .text-end
+                      input.btn.btn-lg.btn-success(type='submit' value='Add Entry')
+
+      //- Edit Entry Modal
+      #editEntryModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered.modal-lg
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title Edit Entry
+              button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+            .modal-body
+              form#editEntryForm(method='POST')
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Hotkey:
+                    input#ee_hotkey.form-control(type='text' name='hotkey' maxlength='4')
+                  .col-5
+                    label.form-label Display Text:
+                    input#ee_display.form-control(type='text' name='display')
+                br
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Command:
+                    select#ee_command.form-control(name='command_name')
+                      for cmd in availCommands
+                        option(value=cmd.name)= cmd.label
+                  .col-5
+                    label.form-label Argument:
+                    input#ee_command_arg.form-control(type='text' name='command_arg')
+                br
+                .row
+                  .col-1
+                  .col-3
+                    label.form-label Sort Order:
+                    input#ee_sort.form-control(type='number' name='sort_order' value='0')
+                  .col-3
+                    label.form-label Min Security:
+                    input#ee_security.form-control(type='number' name='min_security' min='0' max='255' placeholder='—')
+                  .col-2
+                    label.form-label FG Color:
+                    select#ee_fg.form-control.bg-dark.color-select(name='fg_clr')
+                      for clr in ansiColors
+                        option(value=clr.value style='color:' + clr.hex)= clr.label
+                  .col-2
+                    label.form-label BG Color:
+                    select#ee_bg.form-control.bg-dark.color-select(name='bg_clr')
+                      for clr in ansiColors
+                        option(value=clr.value style='color:' + clr.hex)= clr.label
+                br
+                .row
+                  .col-1
+                  .col-5
+                    label.form-label Required Flags:
+                    select#ee_required.form-control(name='required_flags' multiple size='4')
+                      for perm in availablePermissions
+                        option(value=perm)= perm
+                  .col-5
+                    label.form-label Prohibited Flags:
+                    select#ee_prohibited.form-control(name='prohibited_flags' multiple size='4')
+                      for restr in availableRestrictions
+                        option(value=restr)= restr
+                br
+                .row
+                  .col-1
+                  .col-10
+                    .text-end
+                      input.btn.btn-lg.btn-success(type='submit' value='Save Changes')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var menuId = !{menu ? menu.id : 'null'};
+
+      // --- Color select sync ---
+      // Browsers don't show option inline styles in the closed select.
+      // Copy the selected option's color onto the select element itself.
+      function syncSelectColor(sel) {
+        var opt = sel.options[sel.selectedIndex];
+        sel.style.color = opt && opt.style.color ? opt.style.color : '';
+      }
+      document.querySelectorAll('.color-select').forEach(function(sel) {
+        syncSelectColor(sel);
+        sel.addEventListener('change', function() { syncSelectColor(this); });
+      });
+
+      // Edit entry buttons
+      document.querySelectorAll('.edit-entry-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var row = this.closest('tr');
+          var d   = row.dataset;
+
+          document.getElementById('editEntryForm').action = '/admin/menus/' + menuId + '/entries/' + d.id + '/update';
+          document.getElementById('ee_hotkey').value      = d.hotkey || '';
+          document.getElementById('ee_display').value     = d.display || '';
+          document.getElementById('ee_command').value     = d.command_name || '';
+          document.getElementById('ee_command_arg').value = d.command_arg || '';
+          document.getElementById('ee_sort').value        = d.sort || '0';
+          document.getElementById('ee_security').value    = d.min_security || '';
+
+          var fgSel = document.getElementById('ee_fg');
+          var bgSel = document.getElementById('ee_bg');
+          fgSel.value = d.fg_clr || '7';
+          bgSel.value = d.bg_clr || '0';
+          syncSelectColor(fgSel);
+          syncSelectColor(bgSel);
+
+          // Set required flags
+          var reqFlags = [];
+          try { reqFlags = JSON.parse(d.required_flags || '[]'); } catch(_) {}
+          var reqSelect = document.getElementById('ee_required');
+          for (var i = 0; i < reqSelect.options.length; i++) {
+            reqSelect.options[i].selected = reqFlags.includes(reqSelect.options[i].value);
+          }
+
+          // Set prohibited flags
+          var prohFlags = [];
+          try { prohFlags = JSON.parse(d.prohibited_flags || '[]'); } catch(_) {}
+          var prohSelect = document.getElementById('ee_prohibited');
+          for (var i = 0; i < prohSelect.options.length; i++) {
+            prohSelect.options[i].selected = prohFlags.includes(prohSelect.options[i].value);
+          }
+
+          var modal = new bootstrap.Modal(document.getElementById('editEntryModal'));
+          modal.show();
+        });
+      });
+    });
