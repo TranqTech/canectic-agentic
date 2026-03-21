@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import * as alogger from "../utils/alogger.js";
 import { BaseHandler } from "./basehandler.js";
 import { charSet } from "../commandsets/charsets.js";
+import appConfig from "../config/appConfig.js";
 
 // Known terminal identification strings (ASCII-decoded)
 const KNOWN_TERMINALS = {
@@ -56,8 +57,8 @@ class TerminalNegotiator extends BaseHandler {
 		this.inactivityTO = 0;
 		this.negotiationTO = 15000;
 		this._utf8TestChar = Buffer.from("\xc3\xa9");
-		this.startupDelay = Number(process.env.termNegotiateDelay) || 500;
-		this.startupMessage = process.env.termNegotiateMsg || "Detecting Terminal...\r\n";
+		this.startupDelay = appConfig.getNumber('termNegotiateDelay', 500);
+		this.startupMessage = appConfig.get('termNegotiateMsg', "Detecting Terminal...\r\n");
 
 		// Request state
 		this._currentRequest = 0;

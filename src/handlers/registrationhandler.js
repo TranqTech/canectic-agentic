@@ -3,6 +3,7 @@ import * as alogger from "../utils/alogger.js";
 import { DateTime } from "luxon";
 import { checkUsernameAvailable, createNewUser, getUserRecord } from "../models/useraccounts.js";
 import { checkRegMailAddress } from "../utils/evalmailaddresses.js";
+import appConfig from "../config/appConfig.js";
 
 // Input validation
 const validunamechars = new RegExp("[A-Za-z0-9 ]");
@@ -13,9 +14,7 @@ const validnetmailchars = new RegExp("[A-Za-z0-9:/\\.@]");
 const validpwchars = new RegExp("[A-Za-z0-9]");
 const validdatechars = new RegExp("[0-9]");
 
-// Config
-const pwmin = Number(process.env.pwmin) || 12;
-const minage = Number(process.env.minage) || 13;
+// Config (read at point of use via appConfig)
 
 // Colors
 const border_clr = 4;
@@ -51,7 +50,7 @@ class RegistrationHandler extends BaseHandler {
 		this.dumb = (call.term_type === "Dumb");
 
 		// Use shorter inactivity timeout for input fields
-		this.inactivityTO = Number(process.env.inputTO) || 20000;
+		this.inactivityTO = appConfig.getNumber('inputTO', 20000);
 
 		// User data
 		this.firstname = "";
@@ -322,7 +321,7 @@ class RegistrationHandler extends BaseHandler {
 				break;
 			case "Password":
 				if (!this.dumb) {
-					var minlmsg = "Min length: " + pwmin;
+					var minlmsg = "Min length: " + appConfig.getNumber('pwmin', 12);
 					this.call.cmds.movecursor(this.input_x, this.input_y - 2);
 					this.call.cmds.setfgcolor(pwl_clr);
 					this.call.cmds.senddata(minlmsg);
@@ -866,7 +865,7 @@ class RegistrationHandler extends BaseHandler {
 				return;
 
 			case "Password":
-				if (this.inputbuffer.length > pwmin) {
+				if (this.inputbuffer.length > appConfig.getNumber('pwmin', 12)) {
 					this._showSuccess("Password OK!");
 					this.password = this.inputbuffer;
 					this.inputbuffer = "";
@@ -977,7 +976,7 @@ class RegistrationHandler extends BaseHandler {
 				var currentyear = DateTime.now().toFormat("yyyy");
 				var roughuserage = currentyear - datearr[0];
 
-				if (roughuserage < minage) {
+				if (roughuserage < appConfig.getNumber('minage', 13)) {
 					this.inputbuffer = "";
 					this._showError("That birthdate would make you too young for access.");
 					this._sendPrompt();

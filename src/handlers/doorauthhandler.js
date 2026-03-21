@@ -2,14 +2,13 @@ import { BaseHandler } from "./basehandler.js";
 import * as alogger from "../utils/alogger.js";
 
 import { getClientBBS } from "../models/doorserver.js";
-
-const doorAuthTO = Number(process.env.doorAuthTO) || 15000;
+import appConfig from "../config/appConfig.js";
 const maxAuthBuffer = 4096; // Max bytes we'll accept before giving up
 
 class DoorAuthHandler extends BaseHandler {
 	constructor(call) {
 		super(call, "DoorAuth");
-		this.inactivityTO = doorAuthTO;
+		this.inactivityTO = appConfig.getNumber('doorAuthTO', 15000);
 		this.warnMsg = ""; // No warn for machine clients
 		this.authBuffer = "";
 		this.authenticated = false;

@@ -30,6 +30,7 @@ import * as path from 'path';
 import { BaseHandler } from "./basehandler.js";
 import { MainSide, MSG_OUTPUT, MSG_READY, MSG_EXIT, MSG_ERROR, MSG_DB_REQUEST } from "../comm/syncjsdoor_comm.js";
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
 class SyncJSDoorRunner extends BaseHandler {
 	constructor(call, doorConfig) {
@@ -53,8 +54,8 @@ class SyncJSDoorRunner extends BaseHandler {
 		this._previousRawtarget = null;
 
 		// Timeouts
-		this.launchTO = Number(process.env.syncjsdoorTO) || 30000;
-		this.inactivityTO = Number(process.env.doorInactivityTO) || 300000;
+		this.launchTO = appConfig.getNumber('syncjsdoorTO', 30000);
+		this.inactivityTO = appConfig.getNumber('doorInactivityTO', 300000);
 
 		this.loggingId = "SyncJSDoor (Node " + this.call.nodenum + ") [" + this.doorScript + "]";
 	}

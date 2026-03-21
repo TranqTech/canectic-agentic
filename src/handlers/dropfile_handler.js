@@ -9,12 +9,12 @@ import * as path from "path";
 import * as dotenv from "dotenv";
 
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
-dotenv.config();
-
-const bbsname = process.env.bbsname || "BBS";
-const sysopname = process.env.sysopname || "Sysop";
-const sysopalias = process.env.sysopalias || sysopname;
+// Config accessors — read at call time for hot-reload support
+function cfgBbsName()    { return appConfig.get('bbsname', 'BBS'); }
+function cfgSysopName()  { return appConfig.get('sysopname', 'Sysop'); }
+function cfgSysopAlias() { return appConfig.get('sysopalias') || cfgSysopName(); }
 
 // ============================================================================
 // Safe accessors — pull from call and user_record with defaults for
@@ -203,7 +203,7 @@ function buildDoorSys(call, rs, useRealNames) {
 		/* 32 */ birthdate,
 		/* 33 */ rundir + "/nodes/" + c.nodenum,
 		/* 34 */ rundir + "/data",
-		/* 35 */ sysopalias,
+		/* 35 */ cfgSysopAlias(),
 		/* 36 */ u.username,
 		/* 37 */ "00:00",
 		/* 38 */ "Y",
@@ -218,7 +218,7 @@ function buildDoorSys(call, rs, useRealNames) {
 		/* 47 */ u.dailydownloadcount,
 		/* 48 */ u.totaluploadk,
 		/* 49 */ u.totaldownloadk,
-		/* 50 */ u.user_comment || bbsname,
+		/* 50 */ u.user_comment || cfgBbsName(),
 		/* 51 */ u.lifetimedoortotal,
 		/* 52 */ "0"
 	];
@@ -236,7 +236,7 @@ function buildDoor32(call, rs, useRealNames) {
 		/* 01 */ rs.comtype ?? 2,
 		/* 02 */ c.sockethandle,
 		/* 03 */ c.baudRate,
-		/* 04 */ bbsname,
+		/* 04 */ cfgBbsName(),
 		/* 05 */ u.usernumber,
 		/* 06 */ displayName,
 		/* 07 */ u.username,
@@ -269,7 +269,7 @@ function buildDorInfo(call, rs, useRealNames) {
 	// 11: Security level
 	// 12: Minutes remaining
 
-	var sysopParts = sysopname.split(" ");
+	var sysopParts = cfgSysopName().split(" ");
 	var sysopFirst = sysopParts[0] || "Sysop";
 	var sysopLast  = sysopParts.slice(1).join(" ") || "";
 
@@ -288,7 +288,7 @@ function buildDorInfo(call, rs, useRealNames) {
 	var comPort = "COM" + (rs.comport || 0);
 
 	var lines = [
-		/* 01 */ bbsname,
+		/* 01 */ cfgBbsName(),
 		/* 02 */ sysopFirst,
 		/* 03 */ sysopLast,
 		/* 04 */ comPort,
@@ -331,7 +331,7 @@ function buildDoorfileSR(call, rs, useRealNames) {
 		/* 01 */ displayName,
 		/* 02 */ rs.comport || 0,
 		/* 03 */ c.baudRate,
-		/* 04 */ bbsname,
+		/* 04 */ cfgBbsName(),
 		/* 05 */ u.usernumber,
 		/* 06 */ minsLeft,
 		/* 07 */ ansi,

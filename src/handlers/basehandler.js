@@ -1,10 +1,6 @@
 import { EventEmitter } from 'node:events';
 import * as alogger from "../utils/alogger.js";
-
-const defaultInactivityTO = Number(process.env.inactivityTO) || 60000;
-const defaultWarnBuff = Number(process.env.warnbuff) || 10000;
-const defaultWarnMsg = process.env.warnmsg || "Are you there?";
-const defaultInactiveMsg = process.env.inactivemsg || "You have been inactive too long";
+import appConfig from "../config/appConfig.js";
 
 class BaseHandler {
     constructor(call, handlerType) {
@@ -16,10 +12,10 @@ class BaseHandler {
         this.loggingId = this.type + " Handler (Node " + this.call.nodenum + ")";
 
         // Timeout config — subclasses can override in constructor
-        this.inactivityTO = defaultInactivityTO;
-        this.warnBuff = defaultWarnBuff;
-        this.warnMsg = defaultWarnMsg;
-        this.inactiveMsg = defaultInactiveMsg;
+        this.inactivityTO = appConfig.getNumber('inactivityTO', 60000);
+        this.warnBuff = appConfig.getNumber('warnbuff', 10000);
+        this.warnMsg = appConfig.get('warnmsg', "Are you there?");
+        this.inactiveMsg = appConfig.get('inactivemsg', "You have been inactive too long");
 
         // Tracked timeouts
         this._timeouts = new Set();

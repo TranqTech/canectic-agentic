@@ -24,6 +24,7 @@ import * as nodePath from 'node:path';
 import { Script } from 'node:vm';
 import { Attribute } from './dorkit_shim.js';
 import { RecordFile, RecordFileRecord, GetRecordLength, getRecordLength, setDatabaseDir, importBinaryRecordFile, removeRecordFileData } from './recordfile_sqlite.js';
+import appConfig from "../config/appConfig.js";
 
 
 /**
@@ -212,14 +213,14 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, doorArgs) {
 	globalThis.system = {
 		os_version: 'Node.js ' + process.version,
 		platform: process.platform,
-		qwk_id: (process.env.bbsname || 'BBS').toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 8) || 'BBS',
+		qwk_id: (appConfig.get('bbsname', 'BBS')).toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 8) || 'BBS',
 		ctrl_dir: doorDir + '/',
 		text_dir: doorDir + '/',
 		node_dir: doorDir + '/',
 		nodes: 1,
 		node_num: 1,
-		name: process.env.bbsname || 'BBS Door Server',
-		operator: process.env.sysopname || 'Sysop',
+		name: appConfig.get('bbsname', 'BBS Door Server'),
+		operator: appConfig.get('sysopname', 'Sysop'),
 		inetaddr: 'localhost',
 		datestr: function(time) {
 			var d = time ? new Date(time * 1000) : new Date();

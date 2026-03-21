@@ -15,8 +15,7 @@
 // The call and doorConfig arguments are optional — unknown or unavailable
 // variables resolve to empty string rather than crashing.
 
-import * as dotenv from 'dotenv';
-dotenv.config();
+import appConfig from "../config/appConfig.js";
 
 // --- Variable definitions ---
 // Each entry: { token, description, resolve(call, doorConfig) }
@@ -60,16 +59,16 @@ const VARIABLE_DEFS = [
 	{ token: '%G',  description: 'Door slug',                                        resolve: (c, d) => d?.slug ?? '' },
 
 	// --- System directories (from env) ---
-	{ token: '%!',  description: 'Door base directory (env: doordir)',         resolve: () => process.env.doordir || '' },
-	{ token: '%Z',  description: 'Text/art directory (env: textdir)',          resolve: () => process.env.textdir || '' },
+	{ token: '%!',  description: 'Door base directory',                       resolve: () => appConfig.get('doordir', '') },
+	{ token: '%Z',  description: 'Text/art directory',                        resolve: () => appConfig.get('textdir', '') },
 	{ token: '%K',  description: 'Config directory (cwd/config)',             resolve: () => process.cwd() + '/config' },
 	{ token: '%J',  description: 'Data directory (cwd/data)',                 resolve: () => process.cwd() + '/data' },
-	{ token: '%M',  description: 'DOSemu drive C (env: dosemu_drive_c)',     resolve: () => process.env.dosemu_drive_c || (process.env.HOME || '~') + '/.dosemu/drive_c' },
+	{ token: '%M',  description: 'DOSemu drive C',                           resolve: () => appConfig.get('dosemu_drive_c') || (process.env.HOME || '~') + '/.dosemu/drive_c' },
 
 	// --- System info ---
-	{ token: '%O',  description: 'Board name (env: boardname)',               resolve: () => process.env.boardname || '' },
-	{ token: '%Q',  description: 'System name (env: system_name)',            resolve: () => process.env.system_name || '' },
-	{ token: '%V',  description: 'Web port (env: webport)',                   resolve: () => process.env.webport || '' },
+	{ token: '%O',  description: 'Board name',                               resolve: () => appConfig.get('boardname', '') },
+	{ token: '%Q',  description: 'System name',                              resolve: () => appConfig.get('system_name', '') },
+	{ token: '%V',  description: 'Web port',                                 resolve: () => appConfig.get('webport', '') },
 
 	// --- Escape ---
 	{ token: '%%',  description: 'Literal percent sign',                      resolve: () => '%' },

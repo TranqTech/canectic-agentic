@@ -29,12 +29,12 @@ import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 //models
 import {getDoorConfig} from "../models/doors.js"
 import {logCall, logCallDuration} from "../models/callers.js"
+import appConfig from "../config/appConfig.js"
 
 //setup
 dotenv.config()
 const system_ver_msg = systeminfo.versionMsg()
 const connect_msg = system_ver_msg
-const theme = process.env.theme || "canectic"
 const configdir = path.join(path.dirname("./"), 'config');
 const configcount = 1
 
@@ -43,7 +43,7 @@ const configcount = 1
 const handlerRegistry = {
 	"negotiate":    (call) => new TerminalNegotiator(call),
 	"logon":        (call) => new LogonHandler(call),
-	"login":        (call) => new LoginHandler(call, process.env.system_name || "Canectic BBS"),
+	"login":        (call) => new LoginHandler(call, appConfig.get('system_name', "Canectic BBS")),
 	"door_auth":    (call) => new DoorAuthHandler(call),
 	"event_login":  (call) => new DoorAuthHandler(call),
 	"menu":         (call) => new MenuHandler(call),
@@ -250,11 +250,7 @@ class IncomingCall{
 	}
 	loadTheme(){
 		console.log("Loading Theme")
-		if (this.config.theme){
-			var themename = theme
-		}else{
-			var themename = "canectic"
-		}
+		var themename = appConfig.get('theme', 'canectic');
 		var tfwpath = configdir + "/themes/" + themename + ".json"
 		readFile(tfwpath, 'utf8', (error, data) => {
 			if(error){

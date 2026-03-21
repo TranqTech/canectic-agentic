@@ -11,9 +11,9 @@ import { DoorOutputParser } from "../helpers/outputParser.js"
 import * as alogger from "../utils/alogger.js";
 import * as dropfile_handler from "./dropfile_handler.js";
 import { substitute, substituteArray } from '../utils/configvars.js';
+import appConfig from "../config/appConfig.js";
 
 dotenv.config();
-const doordir = process.env.doordir || "";
 
 // Launch strategies
 const LAUNCH_TYPES = {
@@ -46,8 +46,8 @@ class DoorRunner extends BaseHandler {
 		this.returnStage = doorConfig.returnStage || null;
 
 		// Timeouts
-		this.launchTO = Number(process.env.xtrnTO) || 30000;
-		this.inactivityTO = Number(process.env.doorInactivityTO) || 300000;
+		this.launchTO = appConfig.getNumber('xtrnTO', 30000);
+		this.inactivityTO = appConfig.getNumber('doorInactivityTO', 300000);
 
 		// Process handles
 		this._child = null;
@@ -240,7 +240,7 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_launchNativeShell() {
-		var runCmd = doordir + "/" + this.doorCmd;
+		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching NativeShell: " + runCmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
@@ -270,7 +270,7 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_launchExecNative() {
-		var runCmd = doordir + "/" + this.doorCmd;
+		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching ExecNative: " + runCmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
@@ -304,7 +304,7 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_launchSpawnNative() {
-		var runCmd = doordir + "/" + this.doorCmd;
+		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching SpawnNative: " + runCmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
