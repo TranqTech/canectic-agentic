@@ -29,6 +29,8 @@ import * as alogger from "../utils/alogger.js";
 import * as jobs from "../queues/jobs.js";
 import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
+import { CONFIG_DEFINITIONS, getDefinition, getCategories } from "../config/configDefaults.js";
+import * as configStore from "../models/configStore.js";
 
 //setup
 router.use(cookieParser());
@@ -1397,6 +1399,95 @@ router.post('/doors/:id/delete', urlencodedParser, requireAdmin, async (req, res
 	var doorId = parseInt(req.params.id);
 	await doors.deleteDoor(doorId);
 	res.redirect('/admin/doors');
+});
+
+// -----------------------------------------------------------------------
+// Config Settings
+// -----------------------------------------------------------------------
+
+router.get('/config', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+
+	// Build per-key data for the template
+	var allValues = appConfig.getAll();
+	var categories = getCategories();
+	var settings = [];
+	for (var def of CONFIG_DEFINITIONS) {
+		settings.push({
+			key: def.key,
+			defaultValue: def.defaultValue,
+			type: def.type,
+			category: def.category,
+			description: def.description,
+			restart: def.restart || false,
+			value: allValues[def.key] !== undefined ? allValues[def.key] : def.defaultValue,
+			source: appConfig.getSource(def.key)
+		});
+	}
+
+	res.render('admin/config/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'System Configuration',
+		activelink: 'config',
+		currentuser: currentuser,
+		categories: categories,
+		settings: settings
+	});
+});
+
+router.post('/config', urlencodedParser, requireAdmin, async (req, res) => {
+	var formData = req.body;
+	var category = formData._category || '';
+	var kvArray = [];
+
+	for (var def of CONFIG_DEFINITIONS) {
+		// Only process settings from the submitted category
+		if (def.category !== category) continue;
+		// Skip env-overridden keys — they can't be changed via UI
+		if (appConfig.getSource(def.key) === 'env') continue;
+
+		var formKey = 'cfg_' + def.key;
+		var newValue;
+
+		if (def.type === 'boolean') {
+			// Checkbox: present in form = true, absent = false
+			newValue = formData[formKey] ? 'true' : 'false';
+		} else {
+			newValue = formData[formKey] !== undefined ? formData[formKey] : def.defaultValue;
+		}
+
+		kvArray.push({ key: def.key, value: newValue });
+	}
+
+	if (kvArray.length > 0) {
+		var ok = await configStore.setValues(kvArray);
+		if (ok) {
+			alogger.writeAlog(3, "[admin/config] Saved " + kvArray.length + " " + category + " settings", "cyan");
+		} else {
+			alogger.writeAlog(2, "[admin/config] Error saving " + category + " settings", "redbright");
+		}
+	}
+
+	res.redirect('/admin/config');
+});
+
+router.post('/config/reset/:key', urlencodedParser, requireAdmin, async (req, res) => {
+	var key = req.params.key;
+	var def = getDefinition(key);
+	if (!def) {
+		alogger.writeAlog(3, "[admin/config] Reset requested for unknown key: " + key, "yellow");
+		return res.redirect('/admin/config');
+	}
+
+	var ok = await configStore.setValue(key, def.defaultValue);
+	if (ok) {
+		alogger.writeAlog(3, "[admin/config] Reset " + key + " to default: " + def.defaultValue, "cyan");
+	} else {
+		alogger.writeAlog(2, "[admin/config] Error resetting " + key, "redbright");
+	}
+
+	res.redirect('/admin/config');
 });
 
 export { router };

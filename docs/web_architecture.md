@@ -168,6 +168,7 @@ Two-layer admin check:
 | Menus | `GET /admin/menus`, `GET /admin/menus/:id`, `POST /admin/menus/*` | Menu CRUD — list, view with entries, create/update/delete. Entry CRUD and reorder within a menu. |
 | Doors | `GET /admin/doors`, `POST /admin/doors/*` | Door game CRUD — list, create/update/delete. Variable reference panel with %X tokens. |
 | Group Defaults | `GET /admin/msgGroup/:shortcode/defaults` | JSON endpoint — returns group security/flag defaults for new area modal auto-populate |
+| Config | `GET /admin/config`, `POST /admin/config`, `POST /admin/config/reset/:key` | System configuration management — view/edit all config settings organized by category, reset individual keys to defaults. Uses accordion layout with per-category save forms. Environment-overridden settings shown as read-only. |
 
 ### Modal-Driven Editing Pattern
 
@@ -196,6 +197,12 @@ The `ANSI_COLORS` array in `menus.js` maps each of the 16 ANSI color values to a
 Single view: `index.pug` with table, info/edit/delete modals. Add and edit modals use a two-column layout (1100px wide): left column has identity and executable fields, right column has dropfile and options. All field descriptions are Bootstrap tooltips on `<label>` elements (small info icon) rather than `.form-text` blocks.
 
 A collapsible "Variable Reference" panel below the door table shows all `%X` substitution tokens organized by category (node/session, user, terminal, connection, door config, system directories, system info). Sourced from `configvars.getVariableList()`, which means adding a new variable to the engine automatically updates the admin reference.
+
+### Config Admin Views (`views/admin/config/`)
+
+Single view: `index.pug` with Bootstrap accordion layout. Each category (system, network, display, security, performance, maintenance, logging, terminal, doors, paths, mailer, worker) gets its own collapsible accordion section containing a form. Settings display type-appropriate inputs: text for strings, number for numbers, switch/checkbox for booleans. Each setting shows a source badge (Default/gray, Database/blue, Environment/yellow) and optionally a "Requires restart" badge. Environment-overridden settings are disabled/read-only. Database-overridden settings show a "Reset" button that POSTs to `/admin/config/reset/:key` to restore the default value. Each category form has its own "Save" button that submits all settings for that category. The POST handler uses `configStore.setValues()` for batch upsert, which automatically publishes `CONFIG_CHANGED` for cross-process invalidation via Redis pub/sub.
+
+Data flow: `CONFIG_DEFINITIONS` from `configDefaults.js` provides metadata (type, category, description, restart flag, default value). `appConfig.getAll()` provides current merged values. `appConfig.getSource(key)` provides the tier each value comes from. The route pre-builds a flat array of setting objects combining all three sources for the template.
 
 ### Flag Editor Pattern
 
@@ -411,28 +418,33 @@ No model knows whether it's being called from a web route or a terminal handler.
 
 ### Environment Variables
 
-Key configuration via `.env`:
+Most operational config is now managed through `appConfig` (backed by the `config_settings` PostgreSQL table) and editable via `/admin/config`. The `.env` file is only required for bootstrap variables that are needed before the database is available, or that sit in circular dependency chains (logging, Redis).
+
+**Bootstrap variables (must stay in `.env`):**
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `webport` | HTTP server port | 8080 |
-| `boardname` | System name (nav brand, origin lines) | — |
-| `sitetld` | Cookie domain | — |
-| `sitedomain` | Full domain for URL generation | — |
-| `faviconlink` | Favicon path | `/images/favicon.ico` |
-| `adminsecurity` | Minimum security level for admin access | 200 |
-| `session_ttl` | Redis session TTL in seconds | 3600 |
-| `cache_ttl` | Redis cache TTL in seconds | 3600 |
-| `pm_trash_retention_days` | Days before hard-deleting trashed PMs | 30 |
-| `DefaultUser` | Default poster name (legacy) | "John Doe" |
-| `NODE_ENV` | Express environment (controls error detail) | "development" |
+| `dbuser`, `dbhost`, `dbname`, `dbpass`, `dbport` | PostgreSQL connection | `canectic` / `localhost` / `canectic_bbs` / — / `5432` |
+| `redis_url` | Redis connection URL | `redis://localhost:6379` |
+| `REDIS_PASSWORD` | Redis password (if required) | — |
+| `REDIS_BULLMQ_DB` | Redis database number for BullMQ job data | 2 |
+| `NODE_ENV` | Express environment (controls error detail) | `development` |
 | `PROCESS_MODE` | `separate` (gateway only) or `embedded` (all-in-one) | `separate` |
 | `MAILER_ENABLED` | Enable FTN mailer (`true`/`false`) | `false` |
-| `MAILER_WS_PORT` | WebSocket listener port for mailer (separate mode) | 24555 |
-| `REDIS_BULLMQ_DB` | Redis database number for BullMQ job data | 2 |
-| `WORKER_CONCURRENCY` | Toss queue concurrency in worker process | 3 |
-| `doordir` | Base directory for external door game executables | — |
-| `dosemu_drive_c` | DOSemu virtual drive C path | `~/.dosemu/drive_c` |
+
+**Infrastructure variables (stay in `.env` due to circular import chains):**
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `loglevel` | Log verbosity (0=critical, 5=trace) | 3 |
+| `logtoconsole` | Force console output in production | — |
+| `logeverything` | Log all levels in development | — |
+| `logfileindev` | Write log files in development mode | — |
+| `defaultlogfile` | Default log filename | `system.log` |
+| `LOG_BUS_RETENTION_HOURS` | Hours to retain log bus history in Redis | 8 |
+| `cache_ttl` | Redis cache TTL in seconds | 3600 |
+
+**All other config** (`boardname`, `adminsecurity`, `session_ttl`, `faviconlink`, `doordir`, mailer settings, terminal timeouts, etc.) is managed via `appConfig` and the admin config UI. Values set in `.env` override database values for any key.
 
 ---
 

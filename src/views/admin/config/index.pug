@@ -1,0 +1,143 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin')
+                        | Exit
+
+              .card-body
+                p.text-muted.mb-3
+                  | Settings are loaded from three tiers: defaults, database overrides, and environment variables. Environment variables take highest precedence and cannot be changed here.
+
+                .accordion#configAccordion
+                  each cat in categories
+                    - var catId = 'cat_' + cat
+                    - var catTitle = cat.charAt(0).toUpperCase() + cat.slice(1)
+                    - var catSettings = settings.filter(function(s) { return s.category === cat; })
+                    .accordion-item
+                      h2.accordion-header(id='heading_' + cat)
+                        button.accordion-button.collapsed(
+                          type='button'
+                          data-bs-toggle='collapse'
+                          data-bs-target='#' + catId
+                          aria-expanded='false'
+                          aria-controls=catId
+                        )
+                          strong= catTitle
+                          span.badge.bg-secondary.ms-2= catSettings.length + ' settings'
+                      .accordion-collapse.collapse(id=catId aria-labelledby='heading_' + cat data-bs-parent='#configAccordion')
+                        .accordion-body
+                          form(action='/admin/config' method='POST')
+                            input(type='hidden' name='_category' value=cat)
+                            each s in catSettings
+                              .row.mb-3.align-items-start
+                                .col-md-3
+                                  label.form-label.fw-bold(for='cfg_' + s.key)
+                                    code= s.key
+                                  br
+                                  //- Source badge
+                                  if s.source === 'env'
+                                    span.badge.bg-warning.text-dark Environment
+                                  else if s.source === 'db'
+                                    span.badge.bg-info Database
+                                  else
+                                    span.badge.bg-secondary Default
+                                  if s.restart
+                                    |
+                                    span.badge.bg-danger Requires restart
+
+                                .col-md-6
+                                  if s.type === 'boolean'
+                                    .form-check.form-switch
+                                      if s.source === 'env'
+                                        input.form-check-input(
+                                          type='checkbox'
+                                          id='cfg_' + s.key
+                                          name='cfg_' + s.key
+                                          value='true'
+                                          checked=(s.value === 'true' || s.value === '1' || s.value === 'yes')
+                                          disabled
+                                        )
+                                      else
+                                        input.form-check-input(
+                                          type='checkbox'
+                                          id='cfg_' + s.key
+                                          name='cfg_' + s.key
+                                          value='true'
+                                          checked=(s.value === 'true' || s.value === '1' || s.value === 'yes')
+                                        )
+                                      label.form-check-label(for='cfg_' + s.key)= s.value === 'true' || s.value === '1' || s.value === 'yes' ? 'Enabled' : 'Disabled'
+                                  else if s.type === 'number'
+                                    if s.source === 'env'
+                                      input.form-control(
+                                        type='number'
+                                        id='cfg_' + s.key
+                                        name='cfg_' + s.key
+                                        value=s.value
+                                        disabled
+                                      )
+                                    else
+                                      input.form-control(
+                                        type='number'
+                                        id='cfg_' + s.key
+                                        name='cfg_' + s.key
+                                        value=s.value
+                                      )
+                                  else
+                                    if s.source === 'env'
+                                      input.form-control(
+                                        type='text'
+                                        id='cfg_' + s.key
+                                        name='cfg_' + s.key
+                                        value=s.value
+                                        disabled
+                                      )
+                                    else
+                                      input.form-control(
+                                        type='text'
+                                        id='cfg_' + s.key
+                                        name='cfg_' + s.key
+                                        value=s.value
+                                      )
+                                  small.form-text.text-muted= s.description
+                                  if s.source === 'env'
+                                    br
+                                    small.text-warning
+                                      i.bi.bi-lock.me-1
+                                      | Overridden by environment variable
+
+                                .col-md-3.text-end
+                                  if s.source === 'db'
+                                    form.d-inline(action='/admin/config/reset/' + s.key method='POST')
+                                      button.btn.btn-sm.btn-outline-secondary(type='submit' title='Reset to default: ' + s.defaultValue)
+                                        i.bi.bi-arrow-counterclockwise.me-1
+                                        | Reset
+                                  else
+                                    small.text-muted= s.source === 'env' ? '' : 'Default: ' + s.defaultValue
+
+                            .text-end.mt-2
+                              button.btn.btn-success(type='submit')
+                                i.bi.bi-check-lg.me-1
+                                | Save #{catTitle} Settings

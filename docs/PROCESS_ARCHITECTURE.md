@@ -105,6 +105,7 @@ Stateless batch processor. Runs toss cycles, maintenance tasks, and future TIC p
 | BullMQ connection | ✓ | ✓ | ✓ |
 | NodeManager (read-only config) | ✓ | ✓ | ✗ |
 | dotenv / env config | ✓ | ✓ | ✓ |
+| appConfig singleton (own instance) | ✓ | ✓ | ✓ |
 
 ### What is NOT shared across processes
 
@@ -365,6 +366,7 @@ export const EVENTS = {
     MAILER_SESSION_END: 'mailer:session:end',
     MAILER_TRANSFER_PROGRESS: 'mailer:transfer:progress',
     TOSS_COMPLETE: 'toss:complete',
+    CONFIG_CHANGED: 'config:changed',
 };
 
 export function createEventPublisher() {

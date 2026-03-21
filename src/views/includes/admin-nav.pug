@@ -79,6 +79,17 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'users'
               span.visually-hidden  (current)
 
+        //- Config
+        li.nav-item
+          a.nav-link(
+            href='/admin/config'
+            class=activenav === 'config' ? 'active' : ''
+          )
+            i.bi.bi-gear.me-1
+            | Config
+            if activenav === 'config'
+              span.visually-hidden  (current)
+
         //- System Logs
         li.nav-item
           a.nav-link(
