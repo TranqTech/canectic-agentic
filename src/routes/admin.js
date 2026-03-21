@@ -31,6 +31,12 @@ import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
 import { CONFIG_DEFINITIONS, getDefinition, getCategories } from "../config/configDefaults.js";
 import * as configStore from "../models/configStore.js";
+import * as fileGroups from '../models/fileGroups.js';
+import * as fileAreas from '../models/fileAreas.js';
+import * as fileEntries from '../models/fileEntries.js';
+import * as postgres from '../middleware/db/postgres.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 //setup
 router.use(cookieParser());
@@ -1119,6 +1125,489 @@ router.post('/deletemsg/:shortcode/:uuid', urlencodedParser, requireAdmin, async
 	} else {
 		res.redirect('/admin');
 	}
+});
+
+// -------------------------------------------------------
+// File Groups
+// -------------------------------------------------------
+
+router.get('/fileGroups', async (req, res, next) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var grouplist = await fileGroups.getAllGroups();
+	res.render('admin/fileGroups', {
+		sufficientAccess: sufficientAccess,
+		title: 'File Groups',
+		activelink: 'fileGroups',
+		currentuser: currentuser,
+		grouplist: grouplist,
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions
+	});
+});
+
+router.post('/fileGroup/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var formObj     = req.body;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await fileGroups.newGroup(formObj);
+	if (result.status === true) {
+		res.redirect(`/admin/fileGroup/${result.shortcode}`);
+	} else {
+		res.render('admin/fileGroups', {
+			sufficientAccess: sufficientAccess,
+			title: 'File Groups',
+			activelink: 'fileGroups',
+			currentuser: currentuser,
+			errors: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions
+		});
+	}
+});
+
+// Recalculate area counts for all file groups
+router.post('/fileGroups/recalculateAreaCounts', urlencodedParser, requireAdmin, async (req, res) => {
+	await fileGroups.recalculateAreaCounts();
+	res.redirect('/admin/fileGroups');
+});
+
+router.post('/fileGroup/:shortcode/newArea', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode   = req.params.shortcode.toUpperCase().trim();
+	var formObj     = req.body;
+	formObj.groupshortcode = shortcode;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await fileAreas.newArea(formObj);
+	if (result.status === true) {
+		res.redirect(`/admin/fileGroup/${shortcode}`);
+	} else {
+		res.render('admin/fileGroups', {
+			sufficientAccess: sufficientAccess,
+			title: 'File Groups',
+			activelink: 'fileGroups',
+			currentuser: currentuser,
+			errors: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions
+		});
+	}
+});
+
+router.post('/fileGroup/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode        = req.params.shortcode.toUpperCase().trim();
+	var formObj          = req.body;
+	if (currentuser) {
+		formObj.updatedByName = currentuser.name;
+		formObj.updatedByUUID = currentuser.uuid;
+	}
+	var result = await fileGroups.updateGroup(shortcode, formObj);
+	if (result.status === true) {
+		res.redirect(`/admin/fileGroup/${shortcode}`);
+	} else {
+		alogger.writeAlog(3, "updateFileGroup failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		var fileGroup = await fileGroups.getGroupByShortcode(shortcode);
+		var arealist  = await fileAreas.getAreasInGroup(shortcode);
+		res.render('admin/fileGroups/view', {
+			sufficientAccess: sufficientAccess,
+			title: fileGroup ? fileGroup.name : shortcode,
+			activelink: 'fileGroups',
+			currentuser: currentuser,
+			fileGroup: fileGroup,
+			arealist: arealist,
+			errormessages: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions,
+			DateTime: DateTime
+		});
+	}
+});
+
+router.post('/fileGroup/:shortcode/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser  = await getCurrentUser(req);
+	var deleteFiles  = (req.body.delete_files === 'true');
+	var shortcode    = req.params.shortcode.toUpperCase().trim();
+	var result       = await fileGroups.removeGroup(shortcode, deleteFiles);
+	if (result.status === true) {
+		res.redirect('/admin/fileGroups');
+	} else {
+		alogger.writeAlog(3, "removeFileGroup failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		var fileGroup = await fileGroups.getGroupByShortcode(shortcode);
+		var arealist  = await fileAreas.getAreasInGroup(shortcode);
+		res.render('admin/fileGroups/view', {
+			sufficientAccess: true,
+			title: fileGroup ? fileGroup.name : shortcode,
+			activelink: 'fileGroups',
+			currentuser: currentuser,
+			fileGroup: fileGroup,
+			arealist: arealist,
+			errormessages: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions,
+			DateTime: DateTime
+		});
+	}
+});
+
+// JSON endpoint — returns group security and flag defaults for new area modal auto-populate
+router.get('/fileGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var group = await fileGroups.getGroupByShortcode(shortcode);
+	if (!group) {
+		return res.status(404).json({ error: 'Group not found' });
+	}
+	res.json({
+		read_security: group.read_security || 0,
+		post_security: group.post_security || 0,
+		read_perm_flags: group.read_perm_flags || [],
+		read_rest_flags: group.read_rest_flags || [],
+		post_perm_flags: group.post_perm_flags || [],
+		post_rest_flags: group.post_rest_flags || []
+	});
+});
+
+router.get('/fileGroup/:shortcode', async (req, res, next) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode   = req.params.shortcode.toUpperCase().trim();
+	var fileGroup   = await fileGroups.getGroupByShortcode(shortcode);
+	var arealist    = await fileAreas.getAreasInGroup(shortcode);
+	var title       = fileGroup ? fileGroup.name : "Unknown File Group";
+	res.render('admin/fileGroups/view', {
+		sufficientAccess: sufficientAccess,
+		title: title,
+		activelink: 'fileGroups',
+		currentuser: currentuser,
+		fileGroup: fileGroup,
+		arealist: arealist,
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions,
+		DateTime: DateTime
+	});
+});
+
+// -------------------------------------------------------
+// File Areas
+// -------------------------------------------------------
+
+router.get('/fileAreas', async (req, res, next) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var grouplist = await fileGroups.getAllGroups();
+	var allAreas  = await fileAreas.getAllAreas();
+
+	res.render('admin/fileAreas/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'File Areas',
+		activelink: 'fileGroups',
+		currentuser: currentuser,
+		grouplist: grouplist,
+		allAreas: allAreas || [],
+		availablePermissions: availablePermissions,
+		availableRestrictions: availableRestrictions,
+		DateTime: DateTime
+	});
+});
+
+router.post('/fileArea/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode        = req.params.shortcode.toUpperCase().trim();
+	var formObj          = req.body;
+	var result           = await fileAreas.updateArea(shortcode, formObj);
+	if (result.status === true) {
+		res.redirect('/admin/fileGroup/' + (formObj.groupshortcode || ''));
+	} else {
+		alogger.writeAlog(3, "updateFileArea failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		var grouplist = await fileGroups.getAllGroups();
+		var allAreas  = await fileAreas.getAllAreas();
+		res.render('admin/fileAreas/index', {
+			sufficientAccess: sufficientAccess,
+			title: 'File Areas',
+			activelink: 'fileGroups',
+			currentuser: currentuser,
+			grouplist: grouplist,
+			allAreas: allAreas || [],
+			errormessages: result.errormessages,
+			availablePermissions: availablePermissions,
+			availableRestrictions: availableRestrictions,
+			DateTime: DateTime
+		});
+	}
+});
+
+router.post('/fileArea/:shortcode/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser    = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode      = req.params.shortcode.toUpperCase().trim();
+	var deleteFiles    = (req.body.delete_files === 'true');
+	var dbarea         = await fileAreas.getAreaByShortcode(shortcode);
+	var groupshortcode = dbarea ? dbarea.group_shortcode : null;
+
+	var result = await fileAreas.removeArea(shortcode, deleteFiles);
+	if (result.status === true) {
+		res.redirect(groupshortcode ? '/admin/fileGroup/' + groupshortcode : '/admin/fileGroups');
+	} else {
+		alogger.writeAlog(3, "removeFileArea failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
+		res.redirect(groupshortcode ? '/admin/fileGroup/' + groupshortcode : '/admin/fileGroups');
+	}
+});
+
+// -------------------------------------------------------
+// File Area Detail / Browser
+// -------------------------------------------------------
+
+router.get('/fileArea/:shortcode', async (req, res, next) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var shortcode        = req.params.shortcode.toUpperCase().trim();
+	var fileArea         = await fileAreas.getAreaByShortcode(shortcode);
+	var group            = fileArea ? await fileGroups.getGroupByShortcode(fileArea.group_shortcode) : null;
+	var resolvedPath     = fileArea ? fileAreas.resolveAreaPath(group, fileArea) : '';
+	var allAreasList     = await fileAreas.getAllAreas();
+
+	// Get ALL entries for this area (including inactive) — admin view
+	var entries = [];
+	if (fileArea) {
+		entries = await postgres.query(
+			"SELECT * FROM file_entries WHERE area_id = $1 ORDER BY upload_date DESC",
+			[fileArea.id]
+		);
+	}
+
+	// Check for scan results in query string (set by redirect from scan route)
+	var scanResults = null;
+	if (req.query.scanFound !== undefined) {
+		scanResults = {
+			found:   parseInt(req.query.scanFound) || 0,
+			added:   parseInt(req.query.scanAdded) || 0,
+			skipped: parseInt(req.query.scanSkipped) || 0,
+			errors:  parseInt(req.query.scanErrors) || 0
+		};
+	}
+
+	res.render('admin/fileAreas/view', {
+		sufficientAccess: sufficientAccess,
+		title: fileArea ? fileArea.name : 'Unknown File Area',
+		activelink: 'fileAreas',
+		currentuser: currentuser,
+		fileArea: fileArea,
+		fileEntries: entries || [],
+		resolvedPath: resolvedPath,
+		allAreas: allAreasList || [],
+		scanResults: scanResults,
+		DateTime: DateTime
+	});
+});
+
+router.post('/fileEntry/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var uuid  = req.params.uuid;
+	var entry = await fileEntries.getEntryByUUID(uuid);
+	if (!entry) {
+		alogger.writeAlog(3, "fileEntry update: entry not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/fileGroups');
+	}
+
+	var updateObj = {
+		short_desc: req.body.short_desc || null,
+		long_desc:  req.body.long_desc || null,
+		active:     (req.body.active === 'true' || req.body.active === true),
+		flagged:    (req.body.flagged === 'true' || req.body.flagged === true)
+	};
+
+	var ok = await fileEntries.updateEntry(entry.id, updateObj);
+	if (!ok) {
+		alogger.writeAlog(3, "fileEntry update failed for uuid " + uuid, "redbright");
+	}
+	res.redirect('/admin/fileArea/' + (entry.area_shortcode || ''));
+});
+
+router.post('/fileEntry/:uuid/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var uuid  = req.params.uuid;
+	var entry = await fileEntries.getEntryByUUID(uuid);
+	if (!entry) {
+		alogger.writeAlog(3, "fileEntry delete: entry not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/fileGroups');
+	}
+
+	var areaShortcode  = entry.area_shortcode;
+	var deleteFromDisk = (req.body.delete_from_disk === 'true');
+
+	// Optionally remove file from disk
+	if (deleteFromDisk && entry.disk_path) {
+		try {
+			var area  = await fileAreas.getAreaByShortcode(areaShortcode);
+			var group = area ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
+			var areaPath = fileAreas.resolveAreaPath(group, area);
+			var filePath = path.join(areaPath, entry.disk_path);
+			if (fs.existsSync(filePath)) {
+				fs.unlinkSync(filePath);
+				alogger.writeAlog(5, "fileEntry delete: removed file from disk: " + filePath, "yellow");
+			}
+		} catch (e) {
+			alogger.writeAlog(3, "fileEntry delete: disk removal failed: " + e.message, "redbright");
+		}
+	}
+
+	var ok = await fileEntries.deleteEntry(uuid);
+	if (!ok) {
+		alogger.writeAlog(3, "fileEntry delete failed for uuid " + uuid, "redbright");
+	}
+
+	// Update area stats
+	if (areaShortcode) {
+		await fileAreas.updateStatsForArea(areaShortcode);
+	}
+
+	res.redirect('/admin/fileArea/' + (areaShortcode || ''));
+});
+
+router.post('/fileEntry/:uuid/move', urlencodedParser, requireAdmin, async (req, res) => {
+	var uuid  = req.params.uuid;
+	var entry = await fileEntries.getEntryByUUID(uuid);
+	if (!entry) {
+		alogger.writeAlog(3, "fileEntry move: entry not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/fileGroups');
+	}
+
+	var sourceAreaShortcode = entry.area_shortcode;
+	var targetShortcode     = (req.body.target_area_shortcode || '').toUpperCase().trim();
+	var moveOnDisk          = (req.body.move_on_disk === 'true');
+
+	var targetArea = await fileAreas.getAreaByShortcode(targetShortcode);
+	if (!targetArea) {
+		alogger.writeAlog(3, "fileEntry move: target area not found: " + targetShortcode, "redbright");
+		return res.redirect('/admin/fileArea/' + (sourceAreaShortcode || ''));
+	}
+
+	// Optionally move file on disk
+	if (moveOnDisk && entry.disk_path) {
+		try {
+			var sourceArea  = await fileAreas.getAreaByShortcode(sourceAreaShortcode);
+			var sourceGroup = sourceArea ? await fileGroups.getGroupByShortcode(sourceArea.group_shortcode) : null;
+			var targetGroup = await fileGroups.getGroupByShortcode(targetArea.group_shortcode);
+			var sourcePath  = path.join(fileAreas.resolveAreaPath(sourceGroup, sourceArea), entry.disk_path);
+			var targetDir   = fileAreas.resolveAreaPath(targetGroup, targetArea);
+			var targetPath  = path.join(targetDir, entry.disk_path);
+
+			if (fs.existsSync(sourcePath)) {
+				// Ensure target directory exists
+				if (!fs.existsSync(targetDir)) {
+					fs.mkdirSync(targetDir, { recursive: true });
+				}
+				fs.renameSync(sourcePath, targetPath);
+				alogger.writeAlog(5, "fileEntry move: moved file on disk from " + sourcePath + " to " + targetPath, "greenbright");
+			}
+		} catch (e) {
+			alogger.writeAlog(3, "fileEntry move: disk move failed: " + e.message, "redbright");
+		}
+	}
+
+	// Update the database entry
+	var ok = await fileEntries.updateEntry(entry.id, {
+		area_id: targetArea.id,
+		area_shortcode: targetShortcode
+	});
+
+	if (!ok) {
+		alogger.writeAlog(3, "fileEntry move: DB update failed for uuid " + uuid, "redbright");
+	}
+
+	// Update stats for both areas
+	if (sourceAreaShortcode) {
+		await fileAreas.updateStatsForArea(sourceAreaShortcode);
+	}
+	await fileAreas.updateStatsForArea(targetShortcode);
+
+	res.redirect('/admin/fileArea/' + targetShortcode);
+});
+
+router.post('/fileArea/:shortcode/scan', urlencodedParser, requireAdmin, async (req, res) => {
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var area      = await fileAreas.getAreaByShortcode(shortcode);
+	if (!area) {
+		alogger.writeAlog(3, "fileArea scan: area not found: " + shortcode, "redbright");
+		return res.redirect('/admin/fileGroups');
+	}
+
+	var group       = await fileGroups.getGroupByShortcode(area.group_shortcode);
+	var areaPath    = fileAreas.resolveAreaPath(group, area);
+	var found       = 0;
+	var added       = 0;
+	var skipped     = 0;
+	var errors      = 0;
+
+	try {
+		if (fs.existsSync(areaPath) && fs.statSync(areaPath).isDirectory()) {
+			var dirEntries = fs.readdirSync(areaPath);
+			for (var i = 0; i < dirEntries.length; i++) {
+				var fname    = dirEntries[i];
+				var fullPath = path.join(areaPath, fname);
+				var stat;
+				try {
+					stat = fs.statSync(fullPath);
+				} catch (e) {
+					errors++;
+					continue;
+				}
+				if (!stat.isFile()) continue;
+
+				found++;
+
+				// Check if already tracked
+				var existing = await postgres.queryOne(
+					"SELECT id FROM file_entries WHERE area_id = $1 AND filename = $2",
+					[area.id, fname]
+				);
+
+				if (existing) {
+					skipped++;
+					continue;
+				}
+
+				// Add new entry
+				var entryResult = await fileEntries.addFileEntry({
+					area_id: area.id,
+					area_shortcode: shortcode,
+					filename: fname,
+					disk_path: fname,
+					file_size: stat.size,
+					file_date: stat.mtime,
+					source_type: 'local',
+					source_data: { import_method: 'directory_scan' }
+				});
+
+				if (entryResult.status) {
+					added++;
+				} else {
+					errors++;
+					alogger.writeAlog(3, "fileArea scan: failed to add entry for " + fname + ": " + entryResult.errormessages.join(", "), "yellow");
+				}
+			}
+		} else {
+			alogger.writeAlog(3, "fileArea scan: directory does not exist: " + areaPath, "yellow");
+		}
+	} catch (e) {
+		alogger.writeAlog(3, "fileArea scan: error scanning " + areaPath + ": " + e.message, "redbright");
+		errors++;
+	}
+
+	// Update area stats
+	await fileAreas.updateStatsForArea(shortcode);
+
+	alogger.writeAlog(5, "fileArea scan complete for " + shortcode + ": found=" + found + " added=" + added + " skipped=" + skipped + " errors=" + errors, "cyan");
+
+	res.redirect('/admin/fileArea/' + shortcode + '?scanFound=' + found + '&scanAdded=' + added + '&scanSkipped=' + skipped + '&scanErrors=' + errors);
 });
 
 // -------------------------------------------------------

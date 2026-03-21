@@ -168,6 +168,12 @@ Two-layer admin check:
 | Menus | `GET /admin/menus`, `GET /admin/menus/:id`, `POST /admin/menus/*` | Menu CRUD — list, view with entries, create/update/delete. Entry CRUD and reorder within a menu. |
 | Doors | `GET /admin/doors`, `POST /admin/doors/*` | Door game CRUD — list, create/update/delete. Variable reference panel with %X tokens. |
 | Group Defaults | `GET /admin/msgGroup/:shortcode/defaults` | JSON endpoint — returns group security/flag defaults for new area modal auto-populate |
+| File Groups | `GET /admin/fileGroups`, `GET/POST /admin/fileGroup/:shortcode/*` | File group CRUD, area counts, base_dir management |
+| File Areas | `GET /admin/fileAreas`, `POST /admin/fileArea/:shortcode/*` | File area CRUD (all areas view + per-group view), sub_dir, newscan_default |
+| File Area Detail | `GET /admin/fileArea/:shortcode` | File browser — area info, paginated file listing (DataTables), file info/edit/move/delete modals, directory scan |
+| File Entry Ops | `POST /admin/fileEntry/:uuid/{update,delete,move}` | File entry update (desc, active, flagged), delete (optional disk removal), move to another area (optional disk move) |
+| Directory Scan | `POST /admin/fileArea/:shortcode/scan` | Scans area directory for untracked files, creates file_entries rows for new files, updates area stats |
+| File Group Defaults | `GET /admin/fileGroup/:shortcode/defaults` | JSON endpoint — returns file group security/flag defaults for new area modal auto-populate |
 | Config | `GET /admin/config`, `POST /admin/config`, `POST /admin/config/reset/:key` | System configuration management — view/edit all config settings organized by category, reset individual keys to defaults. Uses accordion layout with per-category save forms. Environment-overridden settings shown as read-only. |
 
 ### Modal-Driven Editing Pattern
@@ -224,6 +230,56 @@ GET /admin/msgGroup/:shortcode/defaults
 ```
 
 The group select `change` handler fetches this endpoint, populates security fields, and calls `renderAreaFlags()` for all four flag groups. If the selector is cleared, fields reset to defaults (50/50, empty flags).
+
+The same pattern is used for file areas:
+
+```
+GET /admin/fileGroup/:shortcode/defaults
+-> { read_security, post_security, read_perm_flags, read_rest_flags, post_perm_flags, post_rest_flags }
+```
+
+### File Group/Area Admin Views
+
+The file group and area admin views (`src/views/admin/fileGroups/`, `src/views/admin/fileAreas/`) mirror the message group/area admin views exactly in structure:
+
+| View | Template | Purpose |
+|---|---|---|
+| File Groups List | `admin/fileGroups/index.pug` | Group listing with clickable rows, "Add Group" modal with base_dir field |
+| File Group Detail | `admin/fileGroups/view.pug` | Group info + areas table, edit/delete group modals, add/edit/delete area modals |
+| All File Areas | `admin/fileAreas/index.pug` | DataTables listing across all groups, group selector in new area modal, AJAX defaults |
+
+Key differences from message area views:
+- **Labels**: "Download Security" / "Upload Security" instead of "Read Security" / "Post Security" (underlying field names remain `read_security`/`post_security` for consistency)
+- **File-specific fields**: `base_dir` (group), `sub_dir` (area), `newscan_default` (area)
+- **File stats columns**: File Count, Total Size (formatted as B/KB/MB/GB), Last Upload date
+- **Delete options**: "Delete files from disk" instead of "Delete tables and all data"
+- **No network/areatag columns**: File networking (TIC) is a future phase
+
+Models imported: `src/models/fileGroups.js`, `src/models/fileAreas.js`, `src/models/fileEntries.js`.
+
+### File Area Detail / Browser View
+
+The file area detail view (`admin/fileAreas/view.pug`) provides a drill-down into individual file areas:
+
+| View | Template | Purpose |
+|---|---|---|
+| File Area Detail | `admin/fileAreas/view.pug` | Area info card + file listing (DataTables) with info/edit/move/delete modals |
+
+**Top section**: Area info card showing name, shortcode, description, sub_dir, resolved filesystem path, file count, total size, and link back to parent group.
+
+**Main section**: DataTables file listing with columns: Filename, Size (human-readable), Date, Short Description, Downloads, Source, Status (active/flagged badges). Row click opens info modal.
+
+**Modals**:
+- **File Info Modal** — Read-only display of all file metadata (filename, disk_path, sizes, hashes, dates, uploader, source info, descriptions). Buttons: Edit, Move, Delete.
+- **Edit File Modal** — Form to update short_desc, long_desc, active (checkbox), flagged (checkbox). POST to `/admin/fileEntry/:uuid/update`.
+- **Move File Modal** — Select dropdown of all file areas (grouped by file group), checkbox for "Also move file on disk". POST to `/admin/fileEntry/:uuid/move`.
+- **Delete File Modal** — Confirmation with checkbox for "Also delete file from disk" (unchecked by default for safety). POST to `/admin/fileEntry/:uuid/delete`.
+
+**Quick Actions sidebar**: "Back to Group" link, "Scan Directory" button (POST to `/admin/fileArea/:shortcode/scan`).
+
+**Directory scan**: Reads the area's resolved filesystem path, compares against tracked file_entries rows. For each untracked file: creates a new entry with source_type='local', source_data containing `{ "import_method": "directory_scan" }`. After scan, updates area stats and redirects with result counts in query params.
+
+**Browse link from group view**: The file areas table in `fileGroups/view.pug` includes a "Browse" button on each row linking to `/admin/fileArea/:shortcode`.
 
 ---
 

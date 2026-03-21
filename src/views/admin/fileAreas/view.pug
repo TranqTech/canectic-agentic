@@ -1,0 +1,579 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-8
+            if !fileArea
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-sm.btn-info(href='/admin/fileGroups')
+                          | Exit
+                .card-body
+                  br
+                  h3 Data Not Found!
+                  br
+            else
+              //- Area Info Card
+              .card.mb-3
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= fileArea.name
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-sm.btn-info(href=`/admin/fileGroup/${fileArea.group_shortcode}`)
+                          | Back to Group
+                .card-body
+                  h4= fileArea.description
+                  .row
+                    .col-6
+                      h5
+                        | Shortcode:
+                        = fileArea.shortcode
+                      h5
+                        | Sub Directory:
+                        = fileArea.sub_dir || '—'
+                      h5
+                        | Resolved Path:
+                        code= resolvedPath || '—'
+                    .col-6
+                      h5
+                        | Files:
+                        = (fileArea.file_count || 0).toLocaleString()
+                      h5
+                        | Total Size:
+                        - var tbytes = fileArea.total_bytes || 0
+                        if tbytes >= 1073741824
+                          = (tbytes / 1073741824).toFixed(1) + ' GB'
+                        else if tbytes >= 1048576
+                          = (tbytes / 1048576).toFixed(1) + ' MB'
+                        else if tbytes >= 1024
+                          = (tbytes / 1024).toFixed(1) + ' KB'
+                        else
+                          = tbytes + ' B'
+                      h5
+                        | Group:
+                        a(href=`/admin/fileGroup/${fileArea.group_shortcode}`)= fileArea.group_shortcode
+
+              if scanResults
+                .alert(class=scanResults.added > 0 ? 'alert-success' : 'alert-info')
+                  strong Directory Scan Complete:
+                  = `Found ${scanResults.found} files on disk, ${scanResults.added} new entries added, ${scanResults.skipped} already tracked.`
+                  if scanResults.errors > 0
+                    = ` ${scanResults.errors} errors.`
+
+              if errormessages && errormessages.length > 0
+                .alert.alert-danger
+                  strong Error:
+                  each msg in errormessages
+                    = msg
+                    br
+
+              //- File Listing Card
+              .card
+                .card-header.bg-darkblue.text-white
+                  h4 Files
+                .card-body
+                  .row
+                    .col-12
+                      if fileEntries && fileEntries.length > 0
+                        br
+                        table#fileEntriesTable.table.table-hover
+                          thead
+                            tr
+                              th(scope='col') Filename
+                              th(scope='col') Size
+                              th(scope='col') Date
+                              th(scope='col') Short Description
+                              th(scope='col') Downloads
+                              th(scope='col') Source
+                              th(scope='col') Status
+                          tbody
+                            for entry of fileEntries
+                              tr(
+                                data-bs-uuid=entry.uuid
+                                data-bs-id=entry.id
+                                data-bs-filename=entry.filename
+                                data-bs-diskpath=(entry.disk_path || '')
+                                data-bs-filesize=entry.file_size || 0
+                                data-bs-filedate=entry.file_date || ''
+                                data-bs-crc32=(entry.file_hash_crc32 || '')
+                                data-bs-sha256=(entry.file_hash_sha256 || '')
+                                data-bs-shortdesc=(entry.short_desc || '')
+                                data-bs-longdesc=(entry.long_desc || '')
+                                data-bs-uploaddate=entry.upload_date || ''
+                                data-bs-uploaderuuid=(entry.uploader_uuid || '')
+                                data-bs-uploadername=(entry.uploader_name || '')
+                                data-bs-downloadcount=entry.download_count || 0
+                                data-bs-sourcetype=(entry.source_type || '')
+                                data-bs-sourcedata=(entry.source_data ? JSON.stringify(entry.source_data) : '')
+                                data-bs-active=(entry.active ? 'true' : 'false')
+                                data-bs-flagged=(entry.flagged ? 'true' : 'false')
+                              )
+                                td= entry.filename
+                                td.text-end
+                                  - var fsize = entry.file_size || 0
+                                  if fsize >= 1073741824
+                                    = (fsize / 1073741824).toFixed(1) + ' GB'
+                                  else if fsize >= 1048576
+                                    = (fsize / 1048576).toFixed(1) + ' MB'
+                                  else if fsize >= 1024
+                                    = (fsize / 1024).toFixed(1) + ' KB'
+                                  else
+                                    = fsize + ' B'
+                                td
+                                  if entry.file_date
+                                    - var fdate = DateTime.fromJSDate(new Date(entry.file_date))
+                                    = fdate.toFormat('yyyy-MM-dd')
+                                  else
+                                    | —
+                                td= entry.short_desc || '—'
+                                td.text-end= entry.download_count || 0
+                                td= entry.source_type || '—'
+                                td
+                                  if entry.active
+                                    span.badge.bg-success Active
+                                  else
+                                    span.badge.bg-secondary Inactive
+                                  if entry.flagged
+                                    |
+                                    span.badge.bg-warning Flagged
+                      else
+                        center
+                          h4 No Files Found
+
+          .col-2
+            .row
+              .col-12
+                .card.bg-light
+                  .card-header.bg-darkblue.text-white
+                    .h6 Quick Actions
+                  .card-body.bg-dark
+                    .d-grid.gap-1
+                      a.btn.btn-danger(href=`/admin/fileGroup/${fileArea ? fileArea.group_shortcode : ''}`)
+                        | Back to Group
+                      if fileArea
+                        br
+                        h6.text-white.mb-1 Area:
+                        form(action=`/admin/fileArea/${fileArea.shortcode}/scan` method='POST')
+                          button.btn.btn-info.w-100(type='submit')
+                            | Scan Directory
+
+        if fileArea
+
+          //- File Info Modal
+          #fileInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
+            .modal-dialog.modal-dialog-centered.modal-lg
+              .modal-content
+                .modal-header.bg-dark.text-white
+                  h3.modal-title#fileInfoTitle
+                  .row.w-100
+                    .col-12.text-end
+                      button.btn.btn-sm.btn-warning#fileEditBtn Edit
+                      |
+                      button.btn.btn-sm.btn-primary#fileMoveBtn Move
+                      |
+                      button.btn.btn-sm.btn-danger#fileDeleteBtn Delete
+                      |
+                      button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
+                .modal-body.bg-dark.text-white
+                  .row
+                    .col-6
+                      p
+                        strong Filename:
+                        span#fileInfoFilename
+                      p
+                        strong Disk Path:
+                        span#fileInfoDiskPath
+                      p
+                        strong File Size:
+                        span#fileInfoFileSize
+                      p
+                        strong File Date:
+                        span#fileInfoFileDate
+                      p
+                        strong CRC-32:
+                        span#fileInfoCrc32
+                      p
+                        strong SHA-256:
+                        span#fileInfoSha256
+                    .col-6
+                      p
+                        strong Upload Date:
+                        span#fileInfoUploadDate
+                      p
+                        strong Uploader:
+                        span#fileInfoUploader
+                      p
+                        strong Downloads:
+                        span#fileInfoDownloads
+                      p
+                        strong Source Type:
+                        span#fileInfoSourceType
+                      p
+                        strong Status:
+                        span#fileInfoStatus
+                  hr.border-secondary
+                  .row
+                    .col-12
+                      p
+                        strong Short Description:
+                      p#fileInfoShortDesc
+                  .row
+                    .col-12
+                      p
+                        strong Long Description:
+                      pre.bg-secondary.p-2.rounded(style='white-space:pre-wrap; max-height:200px; overflow-y:auto')#fileInfoLongDesc
+                  .row
+                    .col-12
+                      p
+                        strong Source Data:
+                      pre.bg-secondary.p-2.rounded(style='white-space:pre-wrap; max-height:150px; overflow-y:auto')#fileInfoSourceData
+
+          //- Edit File Modal
+          #editFileModal.modal.fade(tabindex='-1' aria-hidden='true')
+            .modal-dialog.modal-dialog-centered.modal-lg
+              .modal-content
+                .modal-header.bg-dark.text-white
+                  h3.modal-title Edit File Entry
+                  button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                .modal-body
+                  form#editFileForm(method='POST' class='form-registration')
+                    .row
+                      .col-1
+                      .col-10
+                        label(for='ef_shortdesc') Short Description:
+                        input(
+                          type='text'
+                          id='ef_shortdesc'
+                          name='short_desc'
+                          class='form-control'
+                          tabindex='1'
+                        )
+                        br
+                        label(for='ef_longdesc') Long Description:
+                        textarea(
+                          id='ef_longdesc'
+                          name='long_desc'
+                          class='form-control'
+                          rows='6'
+                          tabindex='2'
+                        )
+                        br
+                        .row
+                          .col-6
+                            .form-check
+                              input.form-check-input(
+                                type='checkbox'
+                                id='ef_active'
+                                name='active'
+                                value='true'
+                                tabindex='3'
+                              )
+                              label.form-check-label(for='ef_active') Active
+                          .col-6
+                            .form-check
+                              input.form-check-input(
+                                type='checkbox'
+                                id='ef_flagged'
+                                name='flagged'
+                                value='true'
+                                tabindex='4'
+                              )
+                              label.form-check-label(for='ef_flagged') Flagged
+                        br
+                        .text-end
+                          input(
+                            type='submit'
+                            value='Save Changes'
+                            class='btn btn-lg btn-warning btn-block'
+                            tabindex='5'
+                          )
+
+          //- Move File Modal
+          #moveFileModal.modal.fade(tabindex='-1' aria-hidden='true')
+            .modal-dialog.modal-dialog-centered
+              .modal-content
+                .modal-header.bg-dark.text-white
+                  h3.modal-title Move File Entry
+                  button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                .modal-body.bg-dark.text-white
+                  form#moveFileForm(method='POST' class='form-registration')
+                    .row
+                      .col-1
+                      .col-10
+                        p
+                          | Moving file:
+                          strong#moveFileFilename
+                        label(for='mf_targetarea') Destination Area:
+                        select#mf_targetarea(name='target_area_shortcode' class='form-control' tabindex='1')
+                          if allAreas && allAreas.length > 0
+                            each area in allAreas
+                              if area.shortcode !== fileArea.shortcode
+                                option(value=area.shortcode)
+                                  = area.group_name ? (area.group_name + ' / ') : ''
+                                  = area.name + ' (' + area.shortcode + ')'
+                        br
+                        .form-check
+                          input.form-check-input(
+                            type='checkbox'
+                            id='mf_movedisk'
+                            name='move_on_disk'
+                            value='true'
+                            checked
+                            tabindex='2'
+                          )
+                          label.form-check-label(for='mf_movedisk') Also move file on disk
+                        br
+                        .text-end
+                          button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                          |
+                          input(
+                            type='submit'
+                            value='Move File'
+                            class='btn btn-primary'
+                            tabindex='3'
+                          )
+
+          //- Delete File Modal
+          #deleteFileModal.modal.fade(tabindex='-1' aria-hidden='true')
+            .modal-dialog.modal-dialog-centered
+              .modal-content
+                .modal-header.bg-danger.text-white
+                  h3.modal-title Delete File Entry
+                  button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                .modal-body.bg-dark.text-white
+                  .row
+                    .col-1
+                    .col-10
+                      .alert.alert-danger
+                        h5 Warning
+                        p
+                          | This will permanently delete the file entry
+                          strong#deleteFileFilename
+                          | .
+                      p This action cannot be undone.
+                      br
+                      .form-check
+                        input.form-check-input(
+                          type='checkbox'
+                          id='df_deletedisk'
+                          name='delete_from_disk'
+                          value='true'
+                        )
+                        label.form-check-label(for='df_deletedisk') Also delete file from disk
+                      br
+                      .alert.alert-warning#df_diskWarning(style='display:none')
+                        | This will permanently remove the physical file from disk.
+                .modal-footer.bg-dark
+                  form#deleteFileForm(method='POST')
+                    input(type='hidden' name='delete_from_disk' id='df_deletedisk_hidden' value='false')
+                    button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                    |
+                    input(
+                      type='submit'
+                      value='Delete File'
+                      class='btn btn-danger'
+                    )
+
+    script.
+      document.addEventListener('DOMContentLoaded', function() {
+
+        var fileInfoModal   = new bootstrap.Modal(document.getElementById('fileInfoModal'));
+        var editFileModal   = new bootstrap.Modal(document.getElementById('editFileModal'));
+        var moveFileModal   = new bootstrap.Modal(document.getElementById('moveFileModal'));
+        var deleteFileModal = new bootstrap.Modal(document.getElementById('deleteFileModal'));
+
+        var currentUUID = '';
+
+        function formatBytes(bytes) {
+          var b = parseInt(bytes) || 0;
+          if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+          if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+          if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+          return b + ' B';
+        }
+
+        function formatDate(dateStr) {
+          if (!dateStr) return '—';
+          try {
+            return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+          } catch(e) { return dateStr; }
+        }
+
+        function formatSourceData(raw) {
+          if (!raw) return '—';
+          try {
+            var obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            return JSON.stringify(obj, null, 2);
+          } catch(e) { return raw; }
+        }
+
+        // DataTables init
+        var dt = $('#fileEntriesTable').DataTable({
+          pageLength: 25,
+          order: [[2, 'desc']],
+          columnDefs: [
+            { targets: [1, 4], className: 'text-end' }
+          ]
+        });
+
+        // Row click -> info modal
+        var table = document.getElementById('fileEntriesTable');
+        if (table) {
+          table.querySelectorAll('tbody tr').forEach(function(row) {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', function() {
+              var d = this.dataset;
+              currentUUID = d.bsUuid;
+
+              document.getElementById('fileInfoTitle').textContent     = d.bsFilename;
+              document.getElementById('fileInfoFilename').textContent  = d.bsFilename;
+              document.getElementById('fileInfoDiskPath').textContent  = d.bsDiskpath || '—';
+              document.getElementById('fileInfoFileSize').textContent  = formatBytes(d.bsFilesize);
+              document.getElementById('fileInfoFileDate').textContent  = formatDate(d.bsFiledate);
+              document.getElementById('fileInfoCrc32').textContent     = d.bsCrc32 || '—';
+              document.getElementById('fileInfoSha256').textContent    = d.bsSha256 || '—';
+              document.getElementById('fileInfoUploadDate').textContent = formatDate(d.bsUploaddate);
+              document.getElementById('fileInfoUploader').textContent  = d.bsUploadername || '—';
+              document.getElementById('fileInfoDownloads').textContent = d.bsDownloadcount || '0';
+              document.getElementById('fileInfoSourceType').textContent = d.bsSourcetype || '—';
+              document.getElementById('fileInfoShortDesc').textContent = d.bsShortdesc || '—';
+              document.getElementById('fileInfoLongDesc').textContent  = d.bsLongdesc || '—';
+              document.getElementById('fileInfoSourceData').textContent = formatSourceData(d.bsSourcedata);
+
+              var statusHtml = '';
+              if (d.bsActive === 'true') {
+                statusHtml += '<span class="badge bg-success">Active</span>';
+              } else {
+                statusHtml += '<span class="badge bg-secondary">Inactive</span>';
+              }
+              if (d.bsFlagged === 'true') {
+                statusHtml += ' <span class="badge bg-warning">Flagged</span>';
+              }
+              document.getElementById('fileInfoStatus').innerHTML = statusHtml;
+
+              fileInfoModal.show();
+            });
+          });
+
+          // Re-bind after DataTables redraws (pagination, search, sort)
+          dt.on('draw', function() {
+            table.querySelectorAll('tbody tr').forEach(function(row) {
+              row.style.cursor = 'pointer';
+              row.addEventListener('click', function() {
+                var d = this.dataset;
+                currentUUID = d.bsUuid;
+
+                document.getElementById('fileInfoTitle').textContent     = d.bsFilename;
+                document.getElementById('fileInfoFilename').textContent  = d.bsFilename;
+                document.getElementById('fileInfoDiskPath').textContent  = d.bsDiskpath || '—';
+                document.getElementById('fileInfoFileSize').textContent  = formatBytes(d.bsFilesize);
+                document.getElementById('fileInfoFileDate').textContent  = formatDate(d.bsFiledate);
+                document.getElementById('fileInfoCrc32').textContent     = d.bsCrc32 || '—';
+                document.getElementById('fileInfoSha256').textContent    = d.bsSha256 || '—';
+                document.getElementById('fileInfoUploadDate').textContent = formatDate(d.bsUploaddate);
+                document.getElementById('fileInfoUploader').textContent  = d.bsUploadername || '—';
+                document.getElementById('fileInfoDownloads').textContent = d.bsDownloadcount || '0';
+                document.getElementById('fileInfoSourceType').textContent = d.bsSourcetype || '—';
+                document.getElementById('fileInfoShortDesc').textContent = d.bsShortdesc || '—';
+                document.getElementById('fileInfoLongDesc').textContent  = d.bsLongdesc || '—';
+                document.getElementById('fileInfoSourceData').textContent = formatSourceData(d.bsSourcedata);
+
+                var statusHtml = '';
+                if (d.bsActive === 'true') {
+                  statusHtml += '<span class="badge bg-success">Active</span>';
+                } else {
+                  statusHtml += '<span class="badge bg-secondary">Inactive</span>';
+                }
+                if (d.bsFlagged === 'true') {
+                  statusHtml += ' <span class="badge bg-warning">Flagged</span>';
+                }
+                document.getElementById('fileInfoStatus').innerHTML = statusHtml;
+
+                fileInfoModal.show();
+              });
+            });
+          });
+        }
+
+        // Edit button
+        document.getElementById('fileEditBtn').addEventListener('click', function() {
+          if (!currentUUID) return;
+          var row = document.querySelector('tr[data-bs-uuid="' + currentUUID + '"]');
+          if (!row) return;
+          var d = row.dataset;
+
+          document.getElementById('editFileForm').action = '/admin/fileEntry/' + currentUUID + '/update';
+          document.getElementById('ef_shortdesc').value  = d.bsShortdesc || '';
+          document.getElementById('ef_longdesc').value   = d.bsLongdesc || '';
+          document.getElementById('ef_active').checked   = d.bsActive === 'true';
+          document.getElementById('ef_flagged').checked   = d.bsFlagged === 'true';
+
+          fileInfoModal.hide();
+          editFileModal.show();
+        });
+
+        // Move button
+        document.getElementById('fileMoveBtn').addEventListener('click', function() {
+          if (!currentUUID) return;
+          var row = document.querySelector('tr[data-bs-uuid="' + currentUUID + '"]');
+          if (!row) return;
+
+          document.getElementById('moveFileForm').action     = '/admin/fileEntry/' + currentUUID + '/move';
+          document.getElementById('moveFileFilename').textContent = row.dataset.bsFilename;
+
+          fileInfoModal.hide();
+          moveFileModal.show();
+        });
+
+        // Delete button
+        document.getElementById('fileDeleteBtn').addEventListener('click', function() {
+          if (!currentUUID) return;
+          var row = document.querySelector('tr[data-bs-uuid="' + currentUUID + '"]');
+          if (!row) return;
+
+          document.getElementById('deleteFileFilename').textContent = row.dataset.bsFilename;
+          document.getElementById('deleteFileForm').action          = '/admin/fileEntry/' + currentUUID + '/delete';
+          document.getElementById('df_deletedisk_hidden').value     = 'false';
+          document.getElementById('df_diskWarning').style.display   = 'none';
+
+          // Reset checkbox
+          var cb = document.getElementById('df_deletedisk');
+          if (cb) cb.checked = false;
+
+          fileInfoModal.hide();
+          deleteFileModal.show();
+        });
+
+        // Delete disk checkbox -> warning + hidden field sync
+        var dfCheckbox = document.getElementById('df_deletedisk');
+        var dfHidden   = document.getElementById('df_deletedisk_hidden');
+        var dfWarning  = document.getElementById('df_diskWarning');
+        if (dfCheckbox) {
+          dfCheckbox.addEventListener('change', function() {
+            dfHidden.value = this.checked ? 'true' : 'false';
+            dfWarning.style.display = this.checked ? 'block' : 'none';
+          });
+        }
+
+      });

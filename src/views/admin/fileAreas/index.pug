@@ -1,0 +1,643 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row.align-items-center
+                  .col-6
+                    h2= title
+                  .col-6
+                    .text-end
+                      button.btn.btn-success.me-2(data-bs-toggle='modal' data-bs-target='#newAreaModal')
+                        | Add Area
+                      a.button.btn.btn-info.me-2(href='/admin/fileGroups')
+                        | Groups
+                      a.button.btn.btn-danger(href='/admin')
+                        | Exit
+              .card-body
+                if allAreas && allAreas.length > 0
+                  br
+                  table#areaTable.table.table-hover.table-sm(style='width:100%')
+                    thead
+                      tr
+                        th(scope='col') Group
+                        th(scope='col') Name
+                        th(scope='col') Shortcode
+                        th(scope='col') Description
+                        th(scope='col') Sub Dir
+                        th(scope='col') File Count
+                        th(scope='col') Total Size
+                        th(scope='col') Latest
+                        th(scope='col')
+                    tbody
+                      for area of allAreas
+                        tr.area-row(
+                          data-bs-id=area.id
+                          data-bs-shortcode=area.shortcode
+                          data-bs-name=area.name
+                          data-bs-description=area.description
+                          data-bs-groupshortcode=area.group_shortcode
+                          data-bs-subdir=(area.sub_dir || '')
+                          data-bs-readsecurity=area.read_security
+                          data-bs-postsecurity=area.post_security
+                          data-bs-active=(area.active ? 'true' : 'false')
+                          data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
+                          data-bs-filecount=area.file_count || 0
+                          data-bs-totalbytes=area.total_bytes || 0
+                          data-bs-lastupload=area.last_upload || ''
+                          data-bs-lastfilename=area.last_filename || ''
+                          data-bs-lastuploader=area.last_uploader || ''
+                          data-bs-readpermflags=JSON.stringify(area.read_perm_flags || [])
+                          data-bs-readrestflags=JSON.stringify(area.read_rest_flags || [])
+                          data-bs-postpermflags=JSON.stringify(area.post_perm_flags || [])
+                          data-bs-postrestflags=JSON.stringify(area.post_rest_flags || [])
+                        )
+                          td= area.group_shortcode
+                          td= area.name
+                          td= area.shortcode
+                          td= area.description
+                          td= area.sub_dir || '—'
+                          td.text-end
+                            - var fcount = (area.file_count || 0).toLocaleString()
+                            = fcount
+                          td.text-end
+                            - var tbytes = area.total_bytes || 0
+                            if tbytes >= 1073741824
+                              = (tbytes / 1073741824).toFixed(1) + ' GB'
+                            else if tbytes >= 1048576
+                              = (tbytes / 1048576).toFixed(1) + ' MB'
+                            else if tbytes >= 1024
+                              = (tbytes / 1024).toFixed(1) + ' KB'
+                            else
+                              = tbytes + ' B'
+                          td
+                            if area.last_upload
+                              .text-end
+                                - var e1date = Date.parse(area.last_upload)
+                                - var edate = DateTime.fromMillis(e1date)
+                                = edate.toFormat('MMMM dd, yyyy')
+                            else
+                              center
+                                | N/A
+                          td.text-center
+                            a.btn.btn-sm.btn-outline-info(href='/admin/fileArea/' + area.shortcode onclick='event.stopPropagation()')
+                              i.bi.bi-folder2-open
+                              |  Browse
+                else
+                  center
+                    h4 No Areas Found
+
+        //- Area Info Modal
+        #areaInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title#areaInfoTitle
+                .ms-auto.d-flex.gap-2
+                  button.btn.btn-sm.btn-warning#areaEditBtn Edit
+                  button.btn.btn-sm.btn-danger#areaDeleteBtn Delete
+                  button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-6
+                    p
+                      strong Shortcode:
+                      |
+                      span#areaInfoShortcode
+                    p
+                      strong Group:
+                      |
+                      span#areaInfoGroup
+                    p
+                      strong Sub Directory:
+                      |
+                      span#areaInfoSubDir
+                    p
+                      strong Status:
+                      |
+                      span#areaInfoActive
+                    p
+                      strong Newscan Default:
+                      |
+                      span#areaInfoNewscan
+                  .col-6
+                    p
+                      strong Download Security:
+                      |
+                      span#areaInfoReadSec
+                    p
+                      strong Upload Security:
+                      |
+                      span#areaInfoPostSec
+                    p
+                      strong Files:
+                      |
+                      span#areaInfoFileCount
+                    p
+                      strong Total Size:
+                      |
+                      span#areaInfoTotalSize
+                hr.border-secondary
+                .row
+                  .col-6
+                    p
+                      strong Download Perm Flags:
+                      |
+                      span#areaInfoReadPermFlags
+                    p
+                      strong Upload Perm Flags:
+                      |
+                      span#areaInfoPostPermFlags
+                  .col-6
+                    p
+                      strong Download Restrict Flags:
+                      |
+                      span#areaInfoReadRestFlags
+                    p
+                      strong Upload Restrict Flags:
+                      |
+                      span#areaInfoPostRestFlags
+                hr.border-secondary
+                .row
+                  .col-12
+                    p#areaInfoDescription
+                  .col-6
+                    p
+                      small Last Uploader:
+                      |
+                      span#areaInfoLastUploader
+                    p
+                      small Last File:
+                      |
+                      span#areaInfoLastFilename
+                  .col-6.text-end
+                    p
+                      small Last Upload:
+                      |
+                      span#areaInfoLastUpload
+
+        //- Edit Area Modal
+        #editAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title Edit File Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form#editAreaForm(method='POST' class='form-registration')
+                  input#ea_groupshortcode(type='hidden' name='groupshortcode')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='ea_name') Name:
+                      input(type='text' id='ea_name' name='name' class='form-control' tabindex='1' required)
+                      br
+                      label(for='ea_description') Description:
+                      input(type='text' id='ea_description' name='description' class='form-control' tabindex='2' required)
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='ea_subdir') Sub Directory:
+                      input(type='text' id='ea_subdir' name='sub_dir' class='form-control' tabindex='3')
+                      br
+                      label(for='ea_newscan') Newscan Default:
+                      select(id='ea_newscan' name='newscan_default' class='form-control' tabindex='4')
+                        option(value='true') Yes
+                        option(value='false') No
+                    .col-5
+                      label(for='ea_readsecurity') Download Security:
+                      input(type='number' id='ea_readsecurity' name='readsecurity' class='form-control' min=1 max=255 tabindex='5' required)
+                      br
+                      label(for='ea_postsecurity') Upload Security:
+                      input(type='number' id='ea_postsecurity' name='postsecurity' class='form-control' min=1 max=255 tabindex='6' required)
+                      br
+                      label(for='ea_active') Status:
+                      select(id='ea_active' name='active' class='form-control' tabindex='7')
+                        option(value='true') Active
+                        option(value='false') Inactive
+                  .row
+                    .col-1
+                    .col-5
+                      #ea_read_perm_inputs
+                      #ea_read_rest_inputs
+                      label Download Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_read_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#ea_read_perm_select.form-control
+                        button.btn.btn-sm.btn-success#ea_read_perm_add(type='button') Add
+                      label Download Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_read_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#ea_read_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#ea_read_rest_add(type='button') Add
+                    .col-5
+                      #ea_post_perm_inputs
+                      #ea_post_rest_inputs
+                      label Upload Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_post_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#ea_post_perm_select.form-control
+                        button.btn.btn-sm.btn-success#ea_post_perm_add(type='button') Add
+                      label Upload Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#ea_post_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#ea_post_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#ea_post_rest_add(type='button') Add
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(type='submit' value='Save Changes' class='btn btn-lg btn-warning btn-block' tabindex='8')
+
+        //- Delete Area Modal
+        #deleteAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered
+            .modal-content
+              .modal-header.bg-danger.text-white
+                h3.modal-title Delete File Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body.bg-dark.text-white
+                .row
+                  .col-1
+                  .col-10
+                    .alert.alert-danger
+                      h5 Warning
+                      p
+                        | This will permanently delete the file area
+                        strong#deleteAreaName
+                        | .
+                    p This action cannot be undone.
+                    br
+                    label(for='da_delete_files') Files on Disk:
+                    select#da_delete_files.form-control
+                      option(value='false') Leave files on disk
+                      option(value='true') Delete files from disk
+                    br
+                    .alert.alert-warning#da_deleteFilesWarning(style='display:none')
+                      | This will permanently remove all files in this area from disk.
+              .modal-footer.bg-dark
+                form#deleteAreaForm(method='POST')
+                  input(type='hidden' name='delete_files' id='da_delete_files_hidden' value='false')
+                  button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+                  |
+                  input(type='submit' value='Delete Area' class='btn btn-danger')
+
+        //- New Area Modal (with group selector)
+        #newAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered.modal-lg
+            .modal-content
+              .modal-header.bg-dark.text-white
+                h3.modal-title Add File Area
+                button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+              .modal-body
+                form#newAreaForm(method='POST' class='form-registration')
+                  .row
+                    .col-1
+                    .col-10
+                      label(for='na_group') Group:
+                      select#na_group(name='groupshortcode' class='form-select' required)
+                        option(value='') — Select a group —
+                        if grouplist && grouplist.length > 0
+                          for group of grouplist
+                            option(value=group.shortcode)= group.name + ' (' + group.shortcode + ')'
+                      br
+                      label(for='na_name') Name:
+                      input(type='text' id='na_name' name='name' class='form-control' required)
+                      br
+                      label(for='na_description') Description:
+                      input(type='text' id='na_description' name='description' class='form-control' required)
+                      br
+                  .row
+                    .col-1
+                    .col-5
+                      label(for='na_shortcode') Short Code (Internal):
+                      input(type='text' id='na_shortcode' name='shortcode' class='form-control' required)
+                      br
+                      label(for='na_subdir') Sub Directory:
+                      input(type='text' id='na_subdir' name='sub_dir' class='form-control' placeholder='games')
+                      br
+                      label(for='na_newscan') Newscan Default:
+                      select#na_newscan(name='newscan_default').form-select
+                        option(value='true' selected) Yes
+                        option(value='false') No
+                    .col-5
+                      label(for='na_readsecurity') Download Security:
+                      input(type='number' id='na_readsecurity' min=1 max=255 name='readsecurity' class='form-control' value=50 required)
+                      br
+                      label(for='na_postsecurity') Upload Security:
+                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=50 required)
+                      br
+                      label(for='na_active') Status:
+                      select#na_active(name='active').form-select
+                        option(value='true' selected) Active
+                        option(value='false') Inactive
+                  .row
+                    .col-1
+                    .col-5
+                      #na_read_perm_inputs
+                      #na_read_rest_inputs
+                      label Download Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_read_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#na_read_perm_select.form-control
+                        button.btn.btn-sm.btn-success#na_read_perm_add(type='button') Add
+                      label Download Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_read_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#na_read_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#na_read_rest_add(type='button') Add
+                    .col-5
+                      #na_post_perm_inputs
+                      #na_post_rest_inputs
+                      label Upload Permission Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_post_perm_badges(style='min-height:2.2rem')
+                      .input-group.mb-2
+                        select#na_post_perm_select.form-control
+                        button.btn.btn-sm.btn-success#na_post_perm_add(type='button') Add
+                      label Upload Restriction Flags:
+                      .border.rounded.p-2.mb-2.bg-light#na_post_rest_badges(style='min-height:2.2rem')
+                      .input-group
+                        select#na_post_rest_select.form-control
+                        button.btn.btn-sm.btn-danger#na_post_rest_add(type='button') Add
+                  .row
+                    .col-1
+                    .col-10
+                      br
+                      .text-end
+                        input(type='submit' value='Submit' class='btn btn-lg btn-success btn-block')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+
+      // Init DataTable
+      var table = document.getElementById('areaTable');
+      if (table) {
+        $(table).DataTable({
+          pageLength: 50,
+          order: [[0, 'asc'], [1, 'asc']],
+          pagingType: 'full_numbers',
+          columnDefs: [
+            { targets: 5, type: 'num' }
+          ],
+          drawCallback: function() {
+            var $pag = $(this.api().table().container()).find('.dataTables_paginate');
+            if ($pag.length === 0) return;
+
+            var $prev  = $pag.find('.previous').detach();
+            var $next  = $pag.find('.next').detach();
+            var $nums  = $pag.find('span:first').children().detach();
+
+            var $numRow = $('<div class="dt-page-numbers">').append($nums);
+            var $navRow = $('<div class="dt-page-nav">').append($prev, $next);
+            var $wrap   = $('<div class="dt-pagination-wrap">').append($numRow, $navRow);
+
+            $pag.empty().append($wrap);
+          }
+        });
+      }
+
+      var areaInfoModal   = new bootstrap.Modal(document.getElementById('areaInfoModal'));
+      var editAreaModal   = new bootstrap.Modal(document.getElementById('editAreaModal'));
+      var deleteAreaModal = new bootstrap.Modal(document.getElementById('deleteAreaModal'));
+      var currentAreaShortcode = '';
+
+      var allPerms  = !{JSON.stringify(availablePermissions)};
+      var allRestrs = !{JSON.stringify(availableRestrictions)};
+
+      function parseFlags(jsonstr) {
+        try {
+          var result = JSON.parse(jsonstr);
+          return Array.isArray(result) ? result : [];
+        } catch(e) { return []; }
+      }
+
+      function fmtFlags(jsonstr) {
+        var arr = parseFlags(jsonstr);
+        return arr.length > 0 ? arr.join(', ') : '—';
+      }
+
+      function formatBytes(bytes) {
+        var b = parseInt(bytes) || 0;
+        if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+        if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+        if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+        return b + ' B';
+      }
+
+      function renderAreaFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
+        var badgeEl  = document.getElementById(prefix + '_badges');
+        var inputEl  = document.getElementById(prefix + '_inputs');
+        var selectEl = document.getElementById(prefix + '_select');
+        var addBtn   = document.getElementById(prefix + '_add');
+
+        badgeEl.innerHTML = '';
+        activeFlags.forEach(function(flag) {
+          var span = document.createElement('span');
+          span.className = 'badge ' + badgeClass + ' me-1 mb-1';
+          span.style.cursor = 'pointer';
+          span.title = 'Click to remove';
+          span.textContent = flag + ' ×';
+          span.addEventListener('click', function() {
+            var updated = activeFlags.filter(function(f) { return f !== flag; });
+            renderAreaFlags(prefix, inputName, updated, allFlags, badgeClass);
+          });
+          badgeEl.appendChild(span);
+        });
+
+        inputEl.innerHTML = '';
+        activeFlags.forEach(function(flag) {
+          var inp = document.createElement('input');
+          inp.type  = 'hidden';
+          inp.name  = inputName;
+          inp.value = flag;
+          inputEl.appendChild(inp);
+        });
+
+        selectEl.innerHTML = '';
+        var available = allFlags.filter(function(f) { return !activeFlags.includes(f); });
+        if (available.length === 0) {
+          var opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '— none available —';
+          opt.disabled = true;
+          selectEl.appendChild(opt);
+          selectEl.disabled = true;
+          addBtn.disabled = true;
+        } else {
+          selectEl.disabled = false;
+          addBtn.disabled = false;
+          available.forEach(function(flag) {
+            var opt = document.createElement('option');
+            opt.value = flag;
+            opt.textContent = flag;
+            selectEl.appendChild(opt);
+          });
+        }
+      }
+
+      function wireAddBtn(prefix, inputName, allFlags, badgeClass) {
+        document.getElementById(prefix + '_add').addEventListener('click', function() {
+          var sel = document.getElementById(prefix + '_select');
+          if (!sel.value) return;
+          var current = Array.from(document.querySelectorAll('#' + prefix + '_inputs input')).map(function(i) { return i.value; });
+          if (!current.includes(sel.value)) {
+            current.push(sel.value);
+            renderAreaFlags(prefix, inputName, current, allFlags, badgeClass);
+          }
+        });
+      }
+
+      wireAddBtn('ea_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('ea_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+      wireAddBtn('ea_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('ea_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+      wireAddBtn('na_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('na_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+      wireAddBtn('na_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+      wireAddBtn('na_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+
+      // Initialize new area flags as empty
+      renderAreaFlags('na_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+      renderAreaFlags('na_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+      renderAreaFlags('na_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+      renderAreaFlags('na_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+
+      // Row click — event delegation on tbody (survives DataTables redraws)
+      var tableBody = document.querySelector('#areaTable tbody');
+      if (tableBody) {
+        tableBody.style.cursor = 'pointer';
+        tableBody.addEventListener('click', function(e) {
+          var row = e.target.closest('tr.area-row');
+          if (!row) return;
+          var d = row.dataset;
+          currentAreaShortcode = d.bsShortcode;
+
+          document.getElementById('areaInfoTitle').textContent       = d.bsName;
+          document.getElementById('areaInfoShortcode').textContent   = d.bsShortcode;
+          document.getElementById('areaInfoGroup').textContent       = d.bsGroupshortcode || '—';
+          document.getElementById('areaInfoSubDir').textContent      = d.bsSubdir || '—';
+          document.getElementById('areaInfoActive').textContent      = d.bsActive === 'true' ? 'Active' : 'Inactive';
+          document.getElementById('areaInfoNewscan').textContent     = d.bsNewscandefault === 'true' ? 'Yes' : 'No';
+          document.getElementById('areaInfoReadSec').textContent     = d.bsReadsecurity;
+          document.getElementById('areaInfoPostSec').textContent     = d.bsPostsecurity;
+          document.getElementById('areaInfoFileCount').textContent   = parseInt(d.bsFilecount || 0).toLocaleString();
+          document.getElementById('areaInfoTotalSize').textContent   = formatBytes(d.bsTotalbytes);
+          document.getElementById('areaInfoReadPermFlags').textContent  = fmtFlags(d.bsReadpermflags);
+          document.getElementById('areaInfoReadRestFlags').textContent  = fmtFlags(d.bsReadrestflags);
+          document.getElementById('areaInfoPostPermFlags').textContent  = fmtFlags(d.bsPostpermflags);
+          document.getElementById('areaInfoPostRestFlags').textContent  = fmtFlags(d.bsPostrestflags);
+          document.getElementById('areaInfoDescription').textContent = d.bsDescription;
+          document.getElementById('areaInfoLastUploader').textContent = d.bsLastuploader || '—';
+          document.getElementById('areaInfoLastFilename').textContent = d.bsLastfilename || '—';
+          document.getElementById('areaInfoLastUpload').textContent  = d.bsLastupload
+            ? new Date(d.bsLastupload).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+            : '—';
+
+          areaInfoModal.show();
+        });
+      }
+
+      // Edit
+      document.getElementById('areaEditBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        var row = document.querySelector('tr[data-bs-shortcode="' + currentAreaShortcode + '"]');
+        if (!row) return;
+        var d = row.dataset;
+        document.getElementById('editAreaForm').action     = '/admin/fileArea/' + currentAreaShortcode + '/update';
+        document.getElementById('ea_groupshortcode').value = d.bsGroupshortcode || '';
+        document.getElementById('ea_name').value           = d.bsName;
+        document.getElementById('ea_description').value    = d.bsDescription;
+        document.getElementById('ea_subdir').value         = d.bsSubdir || '';
+        document.getElementById('ea_readsecurity').value   = d.bsReadsecurity;
+        document.getElementById('ea_postsecurity').value   = d.bsPostsecurity;
+        document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
+        document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
+
+        renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
+        renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');
+        renderAreaFlags('ea_post_perm', 'post_perm_flags', parseFlags(d.bsPostpermflags), allPerms, 'bg-success');
+        renderAreaFlags('ea_post_rest', 'post_rest_flags', parseFlags(d.bsPostrestflags), allRestrs, 'bg-danger');
+
+        areaInfoModal.hide();
+        editAreaModal.show();
+      });
+
+      // Delete
+      document.getElementById('areaDeleteBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        var row = document.querySelector('tr[data-bs-shortcode="' + currentAreaShortcode + '"]');
+        if (!row) return;
+        document.getElementById('deleteAreaName').textContent           = row.dataset.bsName;
+        document.getElementById('deleteAreaForm').action                = '/admin/fileArea/' + currentAreaShortcode + '/delete';
+        document.getElementById('da_delete_files_hidden').value        = 'false';
+        document.getElementById('da_delete_files').value               = 'false';
+        document.getElementById('da_deleteFilesWarning').style.display = 'none';
+        areaInfoModal.hide();
+        deleteAreaModal.show();
+      });
+
+      // Delete files warning
+      var daSelect  = document.getElementById('da_delete_files');
+      var daHidden  = document.getElementById('da_delete_files_hidden');
+      var daWarning = document.getElementById('da_deleteFilesWarning');
+      if (daSelect) {
+        daSelect.addEventListener('change', function() {
+          daHidden.value = this.value;
+          daWarning.style.display = this.value === 'true' ? 'block' : 'none';
+        });
+      }
+
+      // New area — set form action from group select and fetch group defaults
+      var newAreaForm = document.getElementById('newAreaForm');
+      var groupSelect = document.getElementById('na_group');
+      if (groupSelect && newAreaForm) {
+        groupSelect.addEventListener('change', async function() {
+          var sc = this.value;
+          newAreaForm.action = sc ? '/admin/fileGroup/' + sc + '/newArea' : '';
+
+          if (!sc) {
+            // Reset to empty defaults
+            document.getElementById('na_readsecurity').value = 50;
+            document.getElementById('na_postsecurity').value = 50;
+            renderAreaFlags('na_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+            renderAreaFlags('na_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+            renderAreaFlags('na_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+            renderAreaFlags('na_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+            return;
+          }
+
+          try {
+            var resp = await fetch('/admin/fileGroup/' + sc + '/defaults');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            document.getElementById('na_readsecurity').value = data.read_security || 50;
+            document.getElementById('na_postsecurity').value = data.post_security || 50;
+            renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');
+            renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(data.read_rest_flags)), allRestrs, 'bg-danger');
+            renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(data.post_perm_flags)), allPerms, 'bg-success');
+            renderAreaFlags('na_post_rest', 'post_rest_flags', parseFlags(JSON.stringify(data.post_rest_flags)), allRestrs, 'bg-danger');
+          } catch(e) {
+            console.error('Failed to fetch group defaults:', e);
+          }
+        });
+      }
+
+    });

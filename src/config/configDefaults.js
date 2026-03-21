@@ -118,6 +118,17 @@ var CONFIG_DEFINITIONS = [
 	// Worker
 	// -----------------------------------------------------------------------
 	{ key: 'WORKER_CONCURRENCY',    defaultValue: '3',          type: 'number',  category: 'worker',      description: 'Toss queue concurrency (requires restart)',                   restart: true },
+
+	// -----------------------------------------------------------------------
+	// Files
+	// -----------------------------------------------------------------------
+	{ key: 'file_base_dir',           defaultValue: 'files',          type: 'string',  category: 'files',       description: 'Base directory for file area storage' },
+	{ key: 'file_upload_staging_dir', defaultValue: 'files/staging',  type: 'string',  category: 'files',       description: 'Staging directory for file uploads' },
+	{ key: 'file_max_upload_size',    defaultValue: '10485760',       type: 'number',  category: 'files',       description: 'Maximum upload file size in bytes (default 10MB)' },
+	{ key: 'file_allowed_extensions', defaultValue: '',               type: 'string',  category: 'files',       description: 'Comma-separated allowed file extensions (empty = all)' },
+	{ key: 'tic_staging_dir',         defaultValue: 'ftn/tic_staging', type: 'string', category: 'files',       description: 'TIC processing staging directory' },
+	{ key: 'tic_inbound_dir',         defaultValue: '',               type: 'string',  category: 'files',       description: 'TIC inbound directory (defaults to ftninbound)' },
+	{ key: 'tic_auto_forward',        defaultValue: 'true',           type: 'boolean', category: 'files',       description: 'Auto-forward received TIC files to subscribed peers' },
 ];
 
 // ---------------------------------------------------------------------------
