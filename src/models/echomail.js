@@ -14,15 +14,12 @@ import * as peerAreaSubscriptions from "./peerAreaSubscriptions.js";
 import * as networkAreas from "./networkAreas.js";
 import { formatBodyHtml } from "../utils/terminalText.js";
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
 dotenv.config();
 
-const DefaultAddress  = process.env.DefaultAddress  || "1:1/1";
 const maxOutbound     = 1000;
 const default_tzutc   = "-0600";
-const currentversion  = process.env.currentversion  || "0.1a";
-const product_string  = "Canectic BBS v" + currentversion;
-const boardname       = process.env.boardname        || "Canectic BBS";
 
 var threadUpdateArray = [];
 
@@ -934,6 +931,7 @@ async function startNewThread(formObj, shortcode) {
 	// Resolve system FTN address for this area via network_areas + system_addresses.
 	// Uses the default address for the network if set, otherwise first active address.
 	// origin_line: use address's custom origin_line if set, else "boardname address".
+	var boardname = appConfig.get('boardname', 'Canectic BBS');
 	var address = null;
 	var path    = null;
 	var origin_line = boardname;
@@ -1000,7 +998,7 @@ async function startNewThread(formObj, shortcode) {
 		system_time: currtime,
 		path: path,
 		origin_line: origin_line,
-		product_string: product_string
+		product_string: "Canectic BBS v" + appConfig.get('currentversion', '0.1a')
 	};
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);
@@ -1062,6 +1060,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 	// Resolve system FTN address for this area via network_areas + system_addresses.
 	// Uses the default address for the network if set, otherwise first active address.
 	// origin_line: use address's custom origin_line if set, else "boardname address".
+	var boardname = appConfig.get('boardname', 'Canectic BBS');
 	var address = null;
 	var path    = null;
 	var origin_line = boardname;
@@ -1110,7 +1109,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 		system_time: currtime,
 		path: path,
 		origin_line: origin_line,
-		product_string: product_string
+		product_string: "Canectic BBS v" + appConfig.get('currentversion', '0.1a')
 	};
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);

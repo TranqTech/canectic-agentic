@@ -8,11 +8,7 @@ import * as alogger from '../utils/alogger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { formatBodyHtml } from '../utils/terminalText.js';
 import { sanitizeMessageFields } from './messages.js';
-import * as dotenv from 'dotenv';
-
-dotenv.config();
-
-const trashRetentionDays = parseInt(process.env.pm_trash_retention_days) || 30;
+import appConfig from "../config/appConfig.js";
 
 // --- Outbound toss trigger ---
 // After a non-LOCAL message is queued in pm_outbox, signal the worker to
@@ -444,7 +440,7 @@ async function restoreSentMessage(userId, uuid) {
 
 // Maintenance: hard-delete messages older than retention period from both tables
 async function purgeDeleted(retentionDays) {
-  var days = retentionDays || trashRetentionDays;
+  var days = retentionDays || appConfig.getNumber('pm_trash_retention_days', 30);
   var cutoff = "$1::interval";
 
   var inboxResult = await postgres.query(

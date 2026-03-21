@@ -7,10 +7,9 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as ftn from "./ftnClasses.js";
 import * as ftnUtils from "../utils/ftnUtils.js";
+import appConfig from "../config/appConfig.js";
 
 dotenv.config();
-
-const DefaultAddress = process.env.DefaultAddress || "1:1/1";
 
 async function getInboundMsgByMsgId(msgId) {
 	var idupper = msgId.toUpperCase().trim();
@@ -124,7 +123,7 @@ async function newOutboundNetmail(formObj) {
 		return returnObj;
 	}
 
-	var dSource = formObj.Source || DefaultAddress;
+	var dSource = formObj.Source || appConfig.get('DefaultAddress', '1:1/1');
 
 	var currtime = new Date();
 	var destsplit1  = formObj.Destination.split(":");

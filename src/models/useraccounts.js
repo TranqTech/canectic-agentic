@@ -6,13 +6,13 @@ import { v4 as uuidv4 } from 'uuid';
 //internal modules
 import * as alogger from "../utils/alogger.js";
 import * as postgres from '../middleware/db/postgres.js';
+import appConfig from "../config/appConfig.js";
 import { sessionUpdateUser } from '../middleware/db/sessionstore.js';
 
 //setup
 dotenv.config();
-const defaultsecurity = process.env.defaultsecurity || 50;
 const saltRounds = 10;
-const storeplain = process.env.storeplainindev_yesimsure;
+const storeplain = process.env.storeplainindev_yesimsure;  // bootstrap — stays in .env
 
 // Reserved usernumbers — these are never assigned to real user accounts
 const RESERVED_USERNUMBERS = [512]; // 512 = guest/doorsession placeholder
@@ -121,7 +121,7 @@ async function createNewUser(newrecord) {
 	var devpass = storeplain ? newrecord.password : storedpassword;
 
 	// Security level
-	var recsec = newrecord.security || defaultsecurity;
+	var recsec = newrecord.security || appConfig.getNumber('defaultsecurity', 50);
 
 	// Optional fields
 	var recfirst = newrecord.firstname ? newrecord.firstname.trim() : null;

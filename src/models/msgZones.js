@@ -6,11 +6,11 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
 dotenv.config();
 
 const ZONES_CACHE_NS = "zones";
-const ZONES_CACHE_TTL = parseInt(process.env.zones_cache_ttl) || 3600;
 
 // Invalidates the Redis zone cache for a network so the next lookup
 // repopulates from the DB via cacheThrough.
@@ -28,7 +28,7 @@ async function getCachedZonesByNetwork(networkId) {
 		ZONES_CACHE_NS,
 		networkId.toString(),
 		() => getActiveZonesByNetwork(networkId),
-		ZONES_CACHE_TTL
+		appConfig.getNumber('zones_cache_ttl', 3600)
 	);
 }
 

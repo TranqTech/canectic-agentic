@@ -18,6 +18,7 @@
  */
 
 import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
+import appConfig from '../config/appConfig.js';
 
 // =========================================================================
 // Toss jobs
@@ -237,7 +238,7 @@ export async function enqueueRegenPmHtml(opts = {}) {
  */
 export async function enqueuePurgePmTrash(days) {
 	return maintenanceQueue.add('purge-pm-trash', {
-		days: days || parseInt(process.env.pm_trash_retention_days) || 30,
+		days: days || appConfig.getNumber('pm_trash_retention_days', 30),
 	}, {
 		jobId: 'purge-pm-trash',
 	});

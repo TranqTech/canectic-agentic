@@ -35,6 +35,7 @@ import {
 	buildRepPacket,
 	unzipQwkPacket
 } from '../../models/qwkClasses.js';
+import appConfig from "../../config/appConfig.js";
 
 dotenv.config();
 
@@ -963,7 +964,7 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	// Format: "--- \r || Canectic || <origin text>\r"
 	// If origin_line is set on the system address, use it directly.
 	// If blank: "<BBS_NAME> - <localQwkId>" or just "<localQwkId>"
-	var bbsName = process.env.boardname || 'Canectic BBS';
+	var bbsName = appConfig.get('boardname', 'Canectic BBS');
 	var originText;
 	if (originLine) {
 		originText = originLine;

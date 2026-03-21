@@ -17,13 +17,11 @@ import * as ftnUtils from '../utils/ftnUtils.js';
 import * as codepageConversions from '../utils/codepageConversions.js';
 import * as terminalText from '../utils/terminalText.js';
 import * as alogger from '../utils/alogger.js';
+import appConfig from "../config/appConfig.js";
 
 dotenv.config();
 
 const default_tzutc   = "-0600";
-const currentversion  = process.env.currentversion  || "0.1a";
-const product_string  = "Canectic BBS v" + currentversion;
-const boardname       = process.env.boardname        || "Canectic BBS";
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -503,6 +501,7 @@ async function getAreasInGroup(groupShortcode, userSecurity) {
 // Resolve the FTN system address and origin line for a given area.
 // Used by both startNewThread and replyToThread to stamp outgoing messages.
 async function resolveAreaAddress(areaId) {
+	var boardname = appConfig.get('boardname', 'Canectic BBS');
 	var result = { address: null, path: null, origin_line: boardname };
 
 	var areaNetworks = await networkAreas.getNetworksByArea(areaId);
@@ -605,7 +604,7 @@ async function startNewThread(formObj, shortcode) {
 		system_time: currtime,
 		path: addrInfo.path,
 		origin_line: addrInfo.origin_line,
-		product_string: product_string
+		product_string: "Canectic BBS v" + appConfig.get('currentversion', '0.1a')
 	};
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);
@@ -693,7 +692,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 		system_time: currtime,
 		path: addrInfo.path,
 		origin_line: addrInfo.origin_line,
-		product_string: product_string
+		product_string: "Canectic BBS v" + appConfig.get('currentversion', '0.1a')
 	};
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);

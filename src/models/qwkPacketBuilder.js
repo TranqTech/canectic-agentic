@@ -30,6 +30,7 @@ import {
 	buildQwkHeader,
 	buildQwkBody
 } from './qwkClasses.js';
+import appConfig from "../config/appConfig.js";
 
 dotenv.config();
 
@@ -348,7 +349,7 @@ async function buildQwkForNode(peerConnectionUUID) {
 	}
 
 	// Build tear/origin for locally-originated messages
-	var bbsName = process.env.boardname || 'Canectic BBS';
+	var bbsName = appConfig.get('boardname', 'Canectic BBS');
 	var originText;
 	if (originLine) {
 		originText = originLine;
@@ -530,9 +531,9 @@ async function buildQwkForNode(peerConnectionUUID) {
 	// Build packet components
 	var controlDat = buildControlDat({
 		bbsName:       bbsName,
-		bbsLocation:   process.env.boardlocation || '',
-		bbsPhone:      process.env.boardphone || 'N/A',
-		sysopName:     process.env.sysopname || 'Sysop',
+		bbsLocation:   appConfig.get('boardlocation', ''),
+		bbsPhone:      appConfig.get('boardphone', 'N/A'),
+		sysopName:     appConfig.get('sysopname', 'Sysop'),
 		qwkId:         localQwkId,
 		recipientName: remoteQwkId,
 		conferences:   conferences,

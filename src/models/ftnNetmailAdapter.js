@@ -10,12 +10,7 @@ import * as systemAddresses from './systemAddresses.js';
 import { Message } from './ftnClasses.js';
 import * as alogger from '../utils/alogger.js';
 import * as fs from 'fs';
-import * as dotenv from 'dotenv';
-
-dotenv.config();
-
-const allowRelay = (process.env.allow_netmail_relay || 'false').toLowerCase() === 'true';
-const badDir = process.env.ftnbad || 'ftn/bad';
+import appConfig from "../config/appConfig.js";
 
 // ============================================================
 // Inbound: FTN Message → PM system
@@ -42,7 +37,7 @@ async function importFtnNetmail(ftnMessage) {
 
   if (!isLocal) {
     // Transit/relay mail
-    if (allowRelay) {
+    if (appConfig.getBoolean('allow_netmail_relay', false)) {
       var relayResult = await relayNetmail(ftnMessage, pmObj);
       retObj.status = true;
       retObj.relayed = true;
@@ -287,6 +282,7 @@ async function relayNetmail(ftnMessage, pmObj) {
 
 // Reject relay: write raw to bad dir, notify sysops
 async function rejectRelay(ftnMessage, pmObj) {
+  var badDir = appConfig.get('ftnbad', 'ftn/bad');
   // Ensure bad directory exists
   try {
     if (!fs.existsSync(badDir)) {

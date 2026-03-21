@@ -26,6 +26,7 @@
 import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as alogger from "../utils/alogger.js";
+import appConfig from '../config/appConfig.js';
 
 export async function registerSchedules() {
 	var scheduleCount = 0;
@@ -38,7 +39,7 @@ export async function registerSchedules() {
 			pattern: '0 3 * * *',   // 3:00 AM daily
 		}, {
 			name: 'purge-pm-trash',
-			data: { days: parseInt(process.env.pm_trash_retention_days) || 30 },
+			data: { days: appConfig.getNumber('pm_trash_retention_days', 30) },
 		});
 		scheduleCount++;
 

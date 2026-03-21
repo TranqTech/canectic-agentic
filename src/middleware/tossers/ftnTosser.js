@@ -17,19 +17,16 @@ import * as echomail from '../../models/echomail.js'
 import * as ftnUtils from "../../utils/ftnUtils.js"
 import * as peerConnections from '../../models/peerConnections.js'
 import * as codepageConversions from "../../utils/codepageConversions.js"
+import appConfig from "../../config/appConfig.js"
 
 
 //setup and variables
 const TosserName = "Canectic Tosser v0.1"
 const SystemTZUTC = "-0600"
-const defaultInbound = process.env.ftninbound || "ftn/in"
-const defaultOutbound = process.env.ftnoutbound || "ftn/out"
-const moveDir = process.env.ftntossed || "ftn/tossed"
 const defaultZone = 1
 const removeProcessed = false
 const moveProcessed = true
 const netmailkeys = ["SourceZone", "DestinationZone", "SourceNode", "SourceNet", "DestinationNode", "DestinationNet", "Subject", "FromUser", "ToUser", "DateTime", "BodyText", "Id", "OriginLine"]
-const testpwd = process.env.PacketPwd || ""
 //set max msg count per pkt
 //typically this has been a size constraint, but should be less of an issue with modern systems.
 //this is here more to keep things debuggable.
@@ -77,7 +74,7 @@ async function getFileType(filePath) {
 }
 
 async function FindAndExtractArchives(inboundDir){
-	var inDir = defaultInbound
+	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
 		inDir = inboundDir
 	}
@@ -130,7 +127,7 @@ async function TossInbound(inboundDir){
 	var processcount = 0
 	var pktcount = 0
 
-	var inDir = defaultInbound
+	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
 		inDir = inboundDir
 	}
@@ -161,14 +158,14 @@ async function TossInbound(inboundDir){
 					//then we can call this both here and under the other else
 					//and prep arrays for other files like .tic etc.
 					if (path.extname(file).toUpperCase() === ".PKT"){
-						var fileobj = {filepath: filepath, movepath: moveDir + "/" + file}
+						var fileobj = {filepath: filepath, movepath: appConfig.get('ftntossed', 'ftn/tossed') + "/" + file}
 						pktArray.push(fileobj)
 					}
 			}
 		}else{
 			console.log("Unknown file type", file)
 			if (path.extname(file).toUpperCase() === ".PKT"){
-				var fileobj = {filepath: filepath, movepath: moveDir + "/" + file}
+				var fileobj = {filepath: filepath, movepath: appConfig.get('ftntossed', 'ftn/tossed') + "/" + file}
 				pktArray.push(fileobj)
 			}
 		}
@@ -211,7 +208,7 @@ async function TossInbound(inboundDir){
 			//try tossing all files again to catch newly unzipped.
 			//should check extension and only try if .pkt
 			var filepath = inDir + "/" + file
-			var movepath = moveDir + "/" + file
+			var movepath = appConfig.get('ftntossed', 'ftn/tossed') + "/" + file
 			var returnObj = await TossInboundFile(filepath, movepath)
 			if (returnObj){
 				pktcount ++
@@ -539,7 +536,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 }
 
 async function OldTossInbound(inboundDir){
-	var inDir = defaultInbound
+	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
 		inDir = inboundDir
 	}
@@ -554,7 +551,7 @@ async function OldTossInbound(inboundDir){
 	for await (var file of filelist){
 		pktcount ++
 		var pktfilepath = inDir + "/" + file
-		var movepktpath = moveDir + "/" + file
+		var movepktpath = appConfig.get('ftntossed', 'ftn/tossed') + "/" + file
 		const pkt = ReadPkt(pktfilepath)
 		if (!pkt){
 			break;
@@ -866,7 +863,7 @@ function WritePktToNode(messageArray, conn, systemaddress){
 	const finalBuffer = buffer.subarray(0, offset);
 
 	// Filename
-	const pktFile = generatePktFilename(defaultOutbound)
+	const pktFile = generatePktFilename(appConfig.get('ftnoutbound', 'ftn/out'))
 	const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
 	const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
 	const filename = pktFile.filepath;
@@ -1016,9 +1013,9 @@ function WritePkts(messageArray){
 			packet.ProdCode = 0xFE;
 			packet.Serial = 0x01;
 			packet.Password = '';
-			if (testpwd){
-				//do password lookup
-				packet.Password = testpwd
+			var pktpwd = appConfig.get('PacketPwd', '');
+			if (pktpwd){
+				packet.Password = pktpwd
 			}
 			packet.Messages = destination;
 			packet.MessageCount = destination.length;
@@ -1182,7 +1179,7 @@ function WritePkts(messageArray){
 			const finalBuffer = buffer.subarray(0, offset);
 
 			// Filename
-			const pktFile = generatePktFilename(defaultOutbound)
+			const pktFile = generatePktFilename(appConfig.get('ftnoutbound', 'ftn/out'))
 			const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
 			const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
 			const filename = pktFile.filepath;
@@ -1233,7 +1230,7 @@ async function UpcertMailerFile(filename, desthex, flavour){
 	}
 	var fline = "^" + filename + "\r\n"
 	console.log(fline)
-	var mfile = defaultOutbound + "/" + desthex + extension
+	var mfile = appConfig.get('ftnoutbound', 'ftn/out') + "/" + desthex + extension
 	try{
 		await fs.appendFileSync(mfile, fline)
 	}catch(error){
