@@ -432,7 +432,7 @@ block content
                 .modal-footer.bg-dark
                   form#deleteAreaForm(method='POST')
                     input(type='hidden' name='delete_tables' id='da_delete_tables_hidden' value='false')
-                    button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+                    button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                     |  
                     input(
                       type='submit'
@@ -738,7 +738,7 @@ block content
                 .modal-footer.bg-dark
                   form(action=`/admin/msgGroup/${msgGroup.shortcode}/delete` method='POST')
                     input(type='hidden' name='delete_tables' id='delete_tables_hidden' value='false')
-                    button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+                    button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                     |  
                     input(
                       type='submit'

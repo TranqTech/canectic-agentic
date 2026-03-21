@@ -52,6 +52,7 @@ Standard Express 4 setup with Pug view engine.
 | `/admin` | `adminRouter` (`src/routes/admin.js`) | Admin panel — all admin routes are prepended with `/admin` |
 | `/users` | `usersRouter` (`src/routes/users.js`) | Authentication (login/logout/register) |
 | `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply, AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
+| `/files` | `filesRouter` (`src/routes/files.js`) | File browsing — group/area/file listing, file detail, download, JSON pagination |
 
 ### Error Handling
 
@@ -160,8 +161,10 @@ Two-layer admin check:
 | Styles | `GET /admin/styles` | Terminal style editor |
 | Message Groups | `GET/POST /admin/msgGroups`, `GET/POST /admin/msgGroup/:shortcode/*` | Group CRUD, area counts |
 | Message Areas | `GET /admin/msgAreas`, `GET/POST /admin/msgArea/:shortcode/*` | Area CRUD (all areas view + per-group view) |
-| Networks | Network management routes | FTN/QWK/NNTP network configuration |
-| Peers | Peer connection management | Remote system configuration |
+| Networks | Network management routes | FTN/QWK/NNTP network configuration, message area mappings, file area mappings |
+| Peers | Peer connection management | Remote system configuration, message area subscriptions, file area subscriptions |
+| File Network Areas | `POST /admin/network/:uuid/addfilearea`, `POST /admin/network/filearea/:id/{update,remove}` | Map file areas to networks (areatag), manage TIC file echo mappings. Uses `fileNetworkAreas` model. |
+| File Peer Subscriptions | `POST /admin/connection/:uuid/setfile{allowed,enabled}` | Per-connection allowed/enabled file areas for TIC distribution. Uses `filePeerSubscriptions` model. |
 | Netmail | `GET/POST /admin/netmail/*` | Netmail browser and viewer |
 | Tosser | `POST /admin/tosser/*` | Enqueues toss jobs on the BullMQ queue (replaces direct tosser calls) |
 | Users | `GET /admin/users`, `POST /admin/users/:uuid/*` | User list, edit, password reset |
@@ -253,9 +256,9 @@ Key differences from message area views:
 - **File-specific fields**: `base_dir` (group), `sub_dir` (area), `newscan_default` (area)
 - **File stats columns**: File Count, Total Size (formatted as B/KB/MB/GB), Last Upload date
 - **Delete options**: "Delete files from disk" instead of "Delete tables and all data"
-- **No network/areatag columns**: File networking (TIC) is a future phase
+- **File networking (TIC)**: File areas can be mapped to networks via file echo areatags (managed on the Network detail view). Per-peer file area subscriptions (allowed/enabled) managed on the Peer detail view.
 
-Models imported: `src/models/fileGroups.js`, `src/models/fileAreas.js`, `src/models/fileEntries.js`.
+Models imported: `src/models/fileGroups.js`, `src/models/fileAreas.js`, `src/models/fileEntries.js`, `src/models/fileNetworkAreas.js`, `src/models/filePeerSubscriptions.js`.
 
 ### File Area Detail / Browser View
 
@@ -280,6 +283,50 @@ The file area detail view (`admin/fileAreas/view.pug`) provides a drill-down int
 **Directory scan**: Reads the area's resolved filesystem path, compares against tracked file_entries rows. For each untracked file: creates a new entry with source_type='local', source_data containing `{ "import_method": "directory_scan" }`. After scan, updates area stats and redirects with result counts in query params.
 
 **Browse link from group view**: The file areas table in `fileGroups/view.pug` includes a "Browse" button on each row linking to `/admin/fileArea/:shortcode`.
+
+---
+
+## File Browsing (`src/routes/files.js`)
+
+User-facing file browsing system. Follows the same architecture as `src/routes/index.js` (message browsing): shared middleware, `getCurrentUser`/`resolveUserId` helpers, `parseFlags`/`checkFileAreaReadAccess`/`checkFileAreaUploadAccess` access control helpers, guard chain pattern in templates.
+
+### Routes
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/files` | List file groups (access-filtered, new file counts per group) |
+| GET | `/files/group/:shortcode` | List areas in a file group (access-filtered, new counts, upload indicators) |
+| GET | `/files/area/:shortcode` | Browse files in an area (paginated table, advances scan pointer) |
+| GET | `/files/view/:uuid` | File detail — metadata, descriptions, download button |
+| GET | `/files/download/:uuid` | Download — access-checked, increments download count, sends file via `res.download()` |
+| GET | `/files/area/:shortcode/files.json` | JSON pagination — `?offset=N&limit=N&sort=column&order=asc|desc` |
+
+### Templates
+
+| Template | Layout | Purpose |
+|---|---|---|
+| `files/index.pug` | `../layouts/user` | File group listing — clickable rows, new badge |
+| `files/groups/view.pug` | `../../layouts/user` | Areas in group — file counts, sizes, latest upload, new badge, upload icon |
+| `files/areas/view.pug` | `../../layouts/user` | File listing in area — DataTables, breadcrumb, upload button placeholder |
+| `files/view.pug` | `../layouts/user` | File detail — metadata table, long description, download button |
+
+### Access Control
+
+Uses the same pattern as message areas: `checkFileAreaReadAccess(sessionUser, areaOrGroup)` checks security level + permission flags + restriction flags. `checkFileAreaUploadAccess()` does the same for upload (post) access. Groups with zero accessible areas are hidden from the listing.
+
+### Scan Pointers
+
+When a user views a file listing, the scan pointer is advanced to the highest file ID in the results (via `userFilePointers.advancePointer()`). New file counts are computed from the gap between the pointer and current max file ID per area.
+
+### Download Flow
+
+1. Load entry by UUID
+2. Load parent area + group
+3. Check read access
+4. Resolve filesystem path via `fileAreas.resolveAreaPath(group, area)` + `entry.disk_path`
+5. Verify file exists on disk
+6. Increment download count
+7. Send via `res.download()` with original filename
 
 ---
 
@@ -506,7 +553,7 @@ Most operational config is now managed through `appConfig` (backed by the `confi
 
 ## Future Development
 
-- **File area web routes** — File groups/areas, upload/download, file listings. Currently stub in nav only.
+- **File upload** — Phase 3 of the file area system. Upload button is present but disabled in the file area view.
 - **User profile page** — `/users/profile` linked in user nav but not yet implemented.
 - **Navigation polish** — Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
 - **Rich text editor integration** — TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.

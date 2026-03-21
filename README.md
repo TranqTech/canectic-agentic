@@ -15,6 +15,7 @@ A BBS for the modern world and beyond.
 ## Package requirements not in NPM (apt)
 - build-essential
 - python3
+- lrzsz
 
 ## Recommended installs
 - PM2 (Process and worker start/restart management)

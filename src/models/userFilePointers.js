@@ -21,6 +21,12 @@ async function ensureConstraintsAndIndexes() {
 		"  UNIQUE(user_id, area_shortcode)" +
 		")"
 	);
+	// Unique constraint (idempotent — catches "already exists" error)
+	try {
+		await postgres.write("ALTER TABLE " + TABLE + " ADD CONSTRAINT ufp_user_area_unique UNIQUE (user_id, area_shortcode)");
+	} catch (_) {
+		// constraint already exists — fine
+	}
 	// Indexes (idempotent)
 	await postgres.write("CREATE INDEX IF NOT EXISTS idx_ufp_user ON " + TABLE + "(user_id)");
 	await postgres.write("CREATE INDEX IF NOT EXISTS idx_ufp_area ON " + TABLE + "(area_shortcode)");

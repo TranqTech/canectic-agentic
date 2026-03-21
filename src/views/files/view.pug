@@ -1,0 +1,147 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else if !sufficientAccess
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          .card
+            .card-header.bg-darkblue.text-white
+              h2
+                i.bi.bi-lock
+                |  Access Denied
+            .card-body
+              .text-center.py-4
+                h5.text-muted You do not have sufficient access to view this file.
+                a.btn.btn-outline-light.mt-3(href='/files') Back to Files
+    else if !entry
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          .card
+            .card-header.bg-darkblue.text-white
+              h2
+                i.bi.bi-file-earmark-x
+                |  File Not Found
+            .card-body
+              .text-center.py-4
+                h5.text-muted The requested file could not be found.
+                a.btn.btn-outline-light.mt-3(href='/files') Back to Files
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          //- Breadcrumb
+          nav(aria-label='breadcrumb')
+            ol.breadcrumb
+              li.breadcrumb-item
+                a(href='/files') Files
+              if fileGroup
+                li.breadcrumb-item
+                  a(href=`/files/group/${fileGroup.shortcode}`)= fileGroup.name
+              if fileArea
+                li.breadcrumb-item
+                  a(href=`/files/area/${fileArea.shortcode}`)= fileArea.name
+              li.breadcrumb-item.active(aria-current='page')= entry.filename
+
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-file-earmark
+                    |  #{entry.filename}
+                .col-4
+                  .text-end
+                    if fileArea
+                      a.btn.btn-sm.btn-outline-light.me-2(href=`/files/area/${fileArea.shortcode}`)
+                        i.bi.bi-arrow-left
+                        |  Area
+                    a.btn.btn-sm.btn-success(href=`/files/download/${entry.uuid}`)
+                      i.bi.bi-download
+                      |  Download
+            .card-body
+              .row
+                .col-md-6
+                  table.table.table-sm
+                    tbody
+                      tr
+                        td.text-muted Filename
+                        td
+                          strong= entry.filename
+                      tr
+                        td.text-muted Size
+                        td= formatBytes(entry.file_size || 0)
+                      tr
+                        td.text-muted Upload Date
+                        td
+                          if entry.upload_date
+                            - var udate = Date.parse(entry.upload_date)
+                            - var ud = DateTime.fromMillis(udate)
+                            = ud.toFormat('MMM dd, yyyy HH:mm')
+                          else
+                            span.text-muted —
+                      if entry.file_date
+                        tr
+                          td.text-muted File Date
+                          td
+                            - var fdate = Date.parse(entry.file_date)
+                            - var fd = DateTime.fromMillis(fdate)
+                            = fd.toFormat('MMM dd, yyyy HH:mm')
+                .col-md-6
+                  table.table.table-sm
+                    tbody
+                      tr
+                        td.text-muted Downloads
+                        td= entry.download_count || 0
+                      if entry.uploader_name
+                        tr
+                          td.text-muted Uploader
+                          td= entry.uploader_name
+                      if entry.file_hash_sha256
+                        tr
+                          td.text-muted SHA-256
+                          td
+                            code.small= entry.file_hash_sha256
+                      if entry.file_hash_crc32
+                        tr
+                          td.text-muted CRC-32
+                          td
+                            code= entry.file_hash_crc32
+
+              if entry.short_desc
+                .mt-3
+                  h5 Description
+                  p= entry.short_desc
+
+              if entry.long_desc_html || entry.long_desc
+                .mt-3
+                  h5 Details
+                  if entry.long_desc_html
+                    .file-long-desc
+                      != entry.long_desc_html
+                  else if entry.long_desc
+                    pre.file-long-desc.bg-dark.p-3.rounded
+                      = entry.long_desc
+
+              .mt-4.text-center
+                a.btn.btn-success.btn-lg(href=`/files/download/${entry.uuid}`)
+                  i.bi.bi-download
+                  |  Download #{entry.filename}

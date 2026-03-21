@@ -27,6 +27,9 @@ export const EVENTS = {
 	// Worker → Gateway: PM delivered to a user's inbox
 	PM_DELIVERED: 'pm:delivered',
 
+	// Worker → Gateway: new files imported into file areas
+	FILES_IMPORTED: 'files:imported',
+
 	// Worker → Gateway/Mailer: toss cycle completed
 	TOSS_COMPLETE: 'toss:complete',
 

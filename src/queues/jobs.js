@@ -144,6 +144,35 @@ export async function enqueueNntpPushAll() {
 }
 
 /**
+ * TIC inbound toss.  Process .tic files from inbound directory.
+ * Called by: mailer (after file receive, alongside ftn:inbound), admin, CLI.
+ */
+export async function enqueueTicInbound(opts = {}) {
+	return tossQueue.add('tic:inbound', {
+		connectionUUID: opts.connectionUUID || null,
+		sourceDir: opts.sourceDir || null,
+	}, {
+		jobId: opts.connectionUUID
+			? `tic-inbound--${opts.connectionUUID}`
+			: `tic-inbound--${Date.now()}`,
+	});
+}
+
+/**
+ * TIC outbound toss.  Build and stage outbound .tic files.
+ * Called by: upload handler (networked area), tic:inbound (forwarding), admin, CLI.
+ */
+export async function enqueueTicOutbound(opts = {}) {
+	return tossQueue.add('tic:outbound', {
+		connectionUUID: opts.connectionUUID || null,
+	}, {
+		jobId: opts.connectionUUID
+			? `tic-outbound--${opts.connectionUUID}`
+			: `tic-outbound--${Date.now()}`,
+	});
+}
+
+/**
  * Full toss cycle.  Enqueues inbound+outbound for the specified protocols.
  * Used by the CLI tosser and admin panel "run toss" button.
  *
@@ -154,8 +183,14 @@ export async function enqueueTossCycle(opts = {}) {
 	const jobs = [];
 
 	if (doFtn) {
-		if (doInbound) jobs.push(await enqueueFtnInbound());
-		if (doOutbound) jobs.push(await enqueueFtnOutbound());
+		if (doInbound) {
+			jobs.push(await enqueueFtnInbound());
+			jobs.push(await enqueueTicInbound());
+		}
+		if (doOutbound) {
+			jobs.push(await enqueueFtnOutbound());
+			jobs.push(await enqueueTicOutbound());
+		}
 	}
 
 	if (doQwk && connections?.qwk) {
@@ -197,7 +232,7 @@ export async function enqueueMailerSignalOutbound(connectionUUID) {
  */
 export async function enqueueMailerTriggerPoll(connectionUUID) {
 	return mailerQueue.add('trigger-poll', { connectionUUID }, {
-		jobId: `trigger-poll--${connectionUUID}`,
+		jobId: `trigger-poll--${connectionUUID}--${Date.now()}`,
 	});
 }
 

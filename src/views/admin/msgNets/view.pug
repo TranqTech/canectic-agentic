@@ -431,6 +431,70 @@ block content
                             center
                               h5 No Areas Mapped to This Network
 
+                  // File Echoes row
+                  .row
+                    .col-12
+                      br
+                  .row
+                    .col-12
+                      .card
+                        .card-header
+                          .row
+                            .col-8
+                              h5 File Echoes
+                            .col-4
+                              .text-end
+                                button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addFileAreaModal')
+                                  | Add File Area
+                        .card-body
+                          if fileAreaMappings && fileAreaMappings.length > 0
+                            table#fileAreaTable.table.table-hover
+                              thead
+                                tr
+                                  th(scope='col') Area Tag
+                                  th(scope='col') Area Name
+                                  th(scope='col') Shortcode
+                                  th(scope='col') Status
+                                  th(scope='col')
+                              tbody
+                                for fa of fileAreaMappings
+                                  tr(
+                                    data-bs-faid=fa.id
+                                    data-bs-areatag=fa.areatag
+                                    data-bs-areaname=(fa.area_name || '')
+                                    data-bs-shortcode=(fa.shortcode || '')
+                                    data-bs-active=(fa.active ? 'true' : 'false')
+                                  )
+                                    td= fa.areatag
+                                    td= fa.area_name || '—'
+                                    td
+                                      span.badge.bg-dark= fa.shortcode || '—'
+                                    td
+                                      if fa.active
+                                        span.badge.bg-success Active
+                                      else
+                                        span.badge.bg-secondary Inactive
+                                    td.text-end
+                                      button.btn.btn-xs.btn-sm.btn-warning(
+                                        data-bs-toggle='modal'
+                                        data-bs-target='#editFileAreaModal'
+                                        data-bs-faid=fa.id
+                                        data-bs-areatag=fa.areatag
+                                        data-bs-active=(fa.active ? 'true' : 'false')
+                                      )
+                                        | Edit
+                                      |  
+                                      button.btn.btn-xs.btn-sm.btn-danger(
+                                        data-bs-toggle='modal'
+                                        data-bs-target='#removeFileAreaModal'
+                                        data-bs-faid=fa.id
+                                        data-bs-areatag=fa.areatag
+                                      )
+                                        | Remove
+                          else
+                            center
+                              h5 No File Areas Mapped to This Network
+
               // -------------------------------------------------------
               // Modals
               // -------------------------------------------------------
@@ -822,6 +886,148 @@ block content
                           class='btn btn-danger'
                         )
 
+              // Add File Area Modal
+              #addFileAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title Map File Area to Network
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form(action=`/admin/network/${network.uuid}/addfilearea` method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            .form-check
+                              input#afa_allow_all.form-check-input(
+                                type='checkbox'
+                                name='allow_all_peers'
+                                value='true'
+                                checked
+                              )
+                              label.form-check-label(for='afa_allow_all')
+                                | Allow for all current peer connections on this network
+                            .form-check
+                              input#afa_enable_all.form-check-input(
+                                type='checkbox'
+                                name='enable_all_peers'
+                                value='true'
+                              )
+                              label.form-check-label(for='afa_enable_all')
+                                | Enable for all current peer connections on this network
+                            hr
+                        .row
+                          .col-1
+                          .col-5
+                            label(for='afa_search') File Area:
+                            input#afa_search.form-control(
+                              type='text'
+                              placeholder='Search file areas...'
+                              autocomplete='off'
+                            )
+                            select#afa_area.form-select(name='file_area_id' tabindex='1' size='8' style='margin-top:4px')
+                              if fileArealist && fileArealist.length > 0
+                                each grp in fileArealist
+                                  optgroup(label=grp.groupName)
+                                    each area in grp.areas
+                                      option(value=area.id)= area.name + ' (' + area.shortcode + ')'
+                              else
+                                option(value='' disabled) No file areas available
+                          .col-5
+                            label(for='afa_areatag') Area Tag:
+                            input(
+                              type='text'
+                              id='afa_areatag'
+                              name='areatag'
+                              class='form-control'
+                              tabindex='2'
+                              placeholder='FILEAREA.NAME'
+                              required
+                            )
+                            br
+                            p.text-muted.small
+                              | The tag used to identify this file area on the 
+                              = network.name
+                              |  network (used in TIC descriptors).
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Add File Area'
+                                class='btn btn-lg btn-success btn-block'
+                                tabindex='3'
+                              )
+
+              // Edit File Area Modal (dynamically populated)
+              #editFileAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-md
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Edit File Area — 
+                        span#editFileAreaTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#editFileAreaForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            label(for='efa_areatag') Area Tag:
+                            input(
+                              type='text'
+                              id='efa_areatag'
+                              name='areatag'
+                              class='form-control'
+                              tabindex='1'
+                              required
+                            )
+                            br
+                            label(for='efa_active') Status:
+                            select#efa_active(name='active' tabindex='2').form-select
+                              option(value='true') Active
+                              option(value='false') Inactive
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save Changes'
+                                class='btn btn-lg btn-warning btn-block'
+                                tabindex='3'
+                              )
+
+              // Remove File Area Modal
+              #removeFileAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered
+                  .modal-content
+                    .modal-header.bg-danger.text-white
+                      h3.modal-title Remove File Area from Network
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body.bg-dark.text-white
+                      .row
+                        .col-1
+                        .col-10
+                          .alert.alert-danger
+                            h5 Warning
+                            p
+                              | This will remove file area 
+                              strong#removeFileAreaTag
+                              |  from this network and clear all file subscription rows for this mapping.
+                    .modal-footer.bg-dark
+                      form#removeFileAreaForm(method='POST')
+                        button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                        |  
+                        input(
+                          type='submit'
+                          value='Remove File Area'
+                          class='btn btn-danger'
+                        )
+
               // Edit System Address Modal
               #editAddressModal.modal.fade(tabindex='-1' aria-hidden='true')
                 .modal-dialog.modal-dialog-centered.modal-md
@@ -988,6 +1194,64 @@ block content
           document.getElementById('removeNetAreaForm').action = `/admin/network/area/${d.bsNaid}/remove`;
         });
       });
+
+      // Edit file area button — populate modal
+      document.querySelectorAll('[data-bs-target="#editFileAreaModal"]').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const d = this.dataset;
+          document.getElementById('editFileAreaTitle').textContent = d.bsAreatag || '';
+          document.getElementById('editFileAreaForm').action = `/admin/network/filearea/${d.bsFaid}/update`;
+          document.getElementById('efa_areatag').value = d.bsAreatag || '';
+          document.getElementById('efa_active').value  = d.bsActive === 'true' ? 'true' : 'false';
+        });
+      });
+
+      // Remove file area button — populate modal
+      document.querySelectorAll('[data-bs-target="#removeFileAreaModal"]').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const d = this.dataset;
+          document.getElementById('removeFileAreaTag').textContent = d.bsAreatag || '';
+          document.getElementById('removeFileAreaForm').action = `/admin/network/filearea/${d.bsFaid}/remove`;
+        });
+      });
+
+      // Search filter for the file area select in add-file-area modal
+      var afaSearch = document.getElementById('afa_search');
+      var afaSelect = document.getElementById('afa_area');
+      if (afaSearch && afaSelect) {
+        var origFileGroups = [];
+        afaSelect.querySelectorAll('optgroup').forEach(function(og) {
+          var opts = [];
+          og.querySelectorAll('option').forEach(function(opt) {
+            opts.push({ value: opt.value, text: opt.textContent, el: opt });
+          });
+          origFileGroups.push({ label: og.label, options: opts });
+        });
+
+        afaSearch.addEventListener('input', function() {
+          var q = afaSearch.value.toLowerCase().trim();
+          while (afaSelect.firstChild) afaSelect.removeChild(afaSelect.firstChild);
+
+          origFileGroups.forEach(function(grp) {
+            var matches = grp.options.filter(function(o) {
+              return !q || o.text.toLowerCase().indexOf(q) !== -1;
+            });
+            if (matches.length > 0) {
+              var og = document.createElement('optgroup');
+              og.label = grp.label;
+              matches.forEach(function(o) {
+                var opt = document.createElement('option');
+                opt.value = o.value;
+                opt.textContent = o.text;
+                og.appendChild(opt);
+              });
+              afaSelect.appendChild(og);
+            }
+          });
+        });
+      }
 
       // QWK areatag validation — show warning if areatag is not numeric
       function validateQwkAreatag(inputId, warningId) {

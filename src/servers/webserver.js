@@ -11,6 +11,7 @@ import {router as adminRouter} from '../routes/admin.js';
 import {router as usersRouter} from '../routes/users.js';
 import { router as pmRouter } from '../routes/pm.js';
 import { router as adminLogRouter, registerLogWebSocket } from "../routes/adminLogs.js";
+import { router as filesRouter } from '../routes/files.js';
 
 const node_env = process.env.NODE_ENV || "development"
 var webserver = express();
@@ -32,6 +33,7 @@ webserver.use('/admin', adminRouter);
 webserver.use('/adminlogs', adminLogRouter);
 webserver.use('/users', usersRouter);
 webserver.use('/pm', pmRouter);
+webserver.use('/files', filesRouter);
 
 // catch 404 and forward to error handler
 webserver.use(function(req, res, next) {

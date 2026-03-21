@@ -34,6 +34,9 @@ import * as configStore from "../models/configStore.js";
 import * as fileGroups from '../models/fileGroups.js';
 import * as fileAreas from '../models/fileAreas.js';
 import * as fileEntries from '../models/fileEntries.js';
+import * as fileNetworkAreas from '../models/fileNetworkAreas.js';
+import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
+import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -470,6 +473,7 @@ router.get('/network/:uuid', async (req, res, next) => {
 	var uuid             = req.params.uuid.toLowerCase().trim();
 	var network          = await msgNetworks.getNetworkByUUID(uuid);
 	var zonelist, addresslist, connectionlist, networkareas, arealist;
+	var fileAreaMappings, fileArealist;
 	if (network) {
 		zonelist       = await msgZones.getZonesByNetwork(network.id);
 		addresslist    = await systemAddresses.getAddressesByNetwork(network.id);
@@ -502,6 +506,33 @@ router.get('/network/:uuid', async (req, res, next) => {
 		arealist = Object.values(groupedAreas).sort((a, b) =>
 			a.groupName.localeCompare(b.groupName)
 		);
+
+		// File area mappings for this network
+		fileAreaMappings = await fileNetworkAreas.getMappingsForNetwork(network.id);
+		// Build grouped file area list for the 'Add File Area' modal (unmapped only)
+		var allFileAreas     = await fileAreas.getActiveAreas();
+		var fileMappedIds    = new Set((fileAreaMappings || []).map(fm => parseInt(fm.area_id)));
+		var unmappedFiles    = (allFileAreas || []).filter(fa => !fileMappedIds.has(parseInt(fa.id)));
+		var allFileGroups    = await fileGroups.getAllGroups();
+		var fileGroupMap     = {};
+		for (var fg of (allFileGroups || [])) {
+			fileGroupMap[fg.shortcode] = fg.name || fg.shortcode;
+		}
+		var groupedFileAreas = {};
+		for (var fa of unmappedFiles) {
+			var fgkey = fa.group_shortcode || '_ungrouped';
+			if (!groupedFileAreas[fgkey]) {
+				groupedFileAreas[fgkey] = {
+					groupName: fileGroupMap[fgkey] || fgkey,
+					groupShortcode: fgkey,
+					areas: []
+				};
+			}
+			groupedFileAreas[fgkey].areas.push(fa);
+		}
+		fileArealist = Object.values(groupedFileAreas).sort((a, b) =>
+			a.groupName.localeCompare(b.groupName)
+		);
 	}
 	res.render('admin/msgNets/view', {
 		sufficientAccess: sufficientAccess,
@@ -513,7 +544,9 @@ router.get('/network/:uuid', async (req, res, next) => {
 		addresslist: addresslist || [],
 		connectionlist: connectionlist || [],
 		networkareas: networkareas || [],
-		arealist: arealist || []
+		arealist: arealist || [],
+		fileAreaMappings: fileAreaMappings || [],
+		fileArealist: fileArealist || []
 	});
 });
 
@@ -692,17 +725,19 @@ router.get('/peer/:uuid', async (req, res, next) => {
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var uuid             = req.params.uuid.toLowerCase().trim();
 	var peer             = await peers.getPeerByUUID(uuid);
-	var connections, grouplist, networklist, networkAddressMap;
+	var connections, grouplist, networklist, networkAddressMap, fileGrouplist;
 	if (peer) {
 		connections = await peerConnections.getConnectionsByPeer(peer.id);
 		// Attach subscription rows to each connection for the view
 		if (connections && connections.length > 0) {
 			for (var conn of connections) {
-				conn.subscriptions = await peerAreaSubscriptions.getSubscriptionsByConnection(conn.id);
+				conn.subscriptions     = await peerAreaSubscriptions.getSubscriptionsByConnection(conn.id);
+				conn.fileSubscriptions = await filePeerSubscriptions.getSubscriptionsByConnection(conn.id);
 			}
 		}
-		grouplist   = await msgGroups.getAllGroupsWithAreas();
-		networklist = await msgNetworks.getActiveNetworks();
+		grouplist      = await msgGroups.getAllGroupsWithAreas();
+		fileGrouplist  = await fileGroups.getAllGroupsWithAreas();
+		networklist    = await msgNetworks.getActiveNetworks();
 		// Build networkId → [addresses] map for system address selects in connection modals
 		networkAddressMap = {};
 		if (networklist && networklist.length > 0) {
@@ -719,6 +754,7 @@ router.get('/peer/:uuid', async (req, res, next) => {
 		peer: peer || null,
 		connections: connections || [],
 		grouplist: grouplist || [],
+		fileGrouplist: fileGrouplist || [],
 		networklist: networklist || [],
 		networkAddressMap: networkAddressMap || {}
 	});
@@ -972,6 +1008,133 @@ router.post('/network/area/:id/remove', urlencodedParser, requireAdmin, async (r
 		await peerAreaSubscriptions.removeSubscriptionsForNetworkArea(naRow.network_id, naRow.area_id);
 	}
 	res.redirect(network ? '/admin/network/' + network.uuid : '/admin/networks');
+});
+
+// -------------------------------------------------------
+// File Network Areas
+// -------------------------------------------------------
+
+router.post('/network/:uuid/addfilearea', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var network     = await msgNetworks.getNetworkByUUID(uuid);
+	if (!network) {
+		alogger.writeAlog(3, "addfilearea: network not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var formObj = req.body;
+	if (currentuser) {
+		formObj.createdByName = currentuser.name;
+		formObj.createdByUUID = currentuser.uuid;
+	}
+	var result = await fileNetworkAreas.addMapping(
+		network.id,
+		parseInt(formObj.file_area_id),
+		formObj.areatag,
+		{ createdByUUID: formObj.createdByUUID, createdByName: formObj.createdByName }
+	);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "addfilearea failed for network " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	} else {
+		// Sync all connections on this network — creates subscription rows for the
+		// new file area and optionally sets allowed/enabled based on checkboxes.
+		await filePeerSubscriptions.syncFileAreaToConnections(
+			network.id,
+			parseInt(formObj.file_area_id),
+			{
+				allowAll:  formObj.allow_all_peers === 'true',
+				enableAll: formObj.enable_all_peers === 'true'
+			}
+		);
+	}
+	res.redirect('/admin/network/' + uuid);
+});
+
+router.post('/network/filearea/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var id          = parseInt(req.params.id);
+	var formObj     = req.body;
+	if (currentuser) {
+		formObj.updatedByName = currentuser.name;
+		formObj.updatedByUUID = currentuser.uuid;
+	}
+	var fnaRow = await fileNetworkAreas.getMappingById(id);
+	if (!fnaRow) {
+		alogger.writeAlog(3, "updateFileNetworkArea: file_network_area id " + id + " not found", "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var network = await msgNetworks.getNetworkById(fnaRow.network_id);
+	var updateObj = {};
+	if (formObj.areatag !== undefined) updateObj.areatag = formObj.areatag.toUpperCase().trim();
+	if (formObj.active  !== undefined) updateObj.active  = (formObj.active === 'true' || formObj.active === true);
+	if (formObj.updatedByUUID) updateObj.updated_by_uuid = formObj.updatedByUUID;
+	if (formObj.updatedByName) updateObj.updated_by_name = formObj.updatedByName;
+	var result = await fileNetworkAreas.updateMapping(id, updateObj);
+	if (!result) {
+		alogger.writeAlog(3, "updateFileNetworkArea failed for id " + id, "redbright");
+	}
+	res.redirect(network ? '/admin/network/' + network.uuid : '/admin/networks');
+});
+
+router.post('/network/filearea/:id/remove', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var id          = parseInt(req.params.id);
+	var fnaRow = await fileNetworkAreas.getMappingById(id);
+	if (!fnaRow) {
+		alogger.writeAlog(3, "removeFileNetworkArea: file_network_area id " + id + " not found", "redbright");
+		return res.redirect('/admin/networks');
+	}
+	var network = await msgNetworks.getNetworkById(fnaRow.network_id);
+	var result  = await fileNetworkAreas.removeMapping(fnaRow.network_id, fnaRow.area_id);
+	if (!result) {
+		alogger.writeAlog(3, "removeFileNetworkArea failed for id " + id, "redbright");
+	} else {
+		// Clean up subscription rows that referenced this file area on this network
+		await filePeerSubscriptions.removeSubscriptionsForFileArea(fnaRow.network_id, fnaRow.area_id);
+	}
+	res.redirect(network ? '/admin/network/' + network.uuid : '/admin/networks');
+});
+
+// -------------------------------------------------------
+// File Peer Subscriptions
+// -------------------------------------------------------
+
+router.post('/connection/:uuid/setfileallowed', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var conn        = await peerConnections.getConnectionByUUID(uuid);
+	if (!conn) {
+		alogger.writeAlog(3, "setfileallowed: connection not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/peers');
+	}
+	var rawIds   = req.body.allowedfileareas || [];
+	var areaIds  = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => parseInt(id)).filter(Boolean);
+	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.name } : {};
+	var result   = await filePeerSubscriptions.setSubscriptions(conn.id, areaIds, 'allowed', formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "setfileallowed failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	var peer = await peers.getPeerById(conn.peer_id);
+	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
+});
+
+router.post('/connection/:uuid/setfileenabled', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var uuid        = req.params.uuid.toLowerCase().trim();
+	var conn        = await peerConnections.getConnectionByUUID(uuid);
+	if (!conn) {
+		alogger.writeAlog(3, "setfileenabled: connection not found for uuid " + uuid, "redbright");
+		return res.redirect('/admin/peers');
+	}
+	var rawIds   = req.body.enabledfileareas || [];
+	var areaIds  = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => parseInt(id)).filter(Boolean);
+	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.name } : {};
+	var result   = await filePeerSubscriptions.setSubscriptions(conn.id, areaIds, 'enabled', formObj);
+	if (result.status !== true) {
+		alogger.writeAlog(3, "setfileenabled failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	}
+	var peer = await peers.getPeerById(conn.peer_id);
+	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
 });
 
 // Kept: systemaddresses/new (still valid — system addresses are not peer-specific)
@@ -1575,8 +1738,8 @@ router.post('/fileArea/:shortcode/scan', urlencodedParser, requireAdmin, async (
 					continue;
 				}
 
-				// Add new entry
-				var entryResult = await fileEntries.addFileEntry({
+				// Build entry and extract FILE_ID.DIZ if archive
+				var entryObj = {
 					area_id: area.id,
 					area_shortcode: shortcode,
 					filename: fname,
@@ -1585,7 +1748,10 @@ router.post('/fileArea/:shortcode/scan', urlencodedParser, requireAdmin, async (
 					file_date: stat.mtime,
 					source_type: 'local',
 					source_data: { import_method: 'directory_scan' }
-				});
+				};
+				applyDescriptions(entryObj, fullPath);
+
+				var entryResult = await fileEntries.addFileEntry(entryObj);
 
 				if (entryResult.status) {
 					added++;

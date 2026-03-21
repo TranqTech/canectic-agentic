@@ -1,0 +1,90 @@
+extends ../../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-folder2-open
+                    |
+                    if fileGroup
+                      = fileGroup.name
+                    else
+                      | File Group
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-light(href='/files')
+                      i.bi.bi-arrow-left
+                      |  Groups
+            .card-body
+              if !fileGroup
+                .text-center.py-4
+                  h5.text-muted Group not found
+              else
+                if fileGroup.description
+                  p.text-muted= fileGroup.description
+                if arealist && arealist.length > 0
+                  table#areaTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Area
+                        th(scope='col') Description
+                        th.text-center(scope='col') Files
+                        th.text-center(scope='col') Size
+                        th(scope='col') Latest
+                        th.text-center(scope='col') New
+                    tbody
+                      for area of arealist
+                        tr.clickable-row(data-href=`/files/area/${area.shortcode}`)
+                          td
+                            strong= area.name
+                            if area.canUpload
+                              |
+                              i.bi.bi-upload.text-success(title='Upload available')
+                          td= area.description
+                          td.text-center= area.file_count || 0
+                          td.text-center= formatBytes(area.total_bytes || 0)
+                          td
+                            if area.last_upload
+                              .small
+                                - var ldate = Date.parse(area.last_upload)
+                                - var ld = DateTime.fromMillis(ldate)
+                                span.fg-yellow= ld.toFormat('MMM dd, yyyy')
+                                if area.last_filename
+                                  br
+                                  span.fg-green= area.last_filename
+                            else
+                              span.text-muted —
+                          td.text-center
+                            if area.new_count && area.new_count > 0
+                              span.badge.bg-info= area.new_count
+                            else
+                              span.text-muted —
+                else
+                  .text-center.py-4
+                    h5.text-muted No file areas in this group
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.clickable-row').forEach(function(row) {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function() {
+          var href = this.getAttribute('data-href');
+          if (href) window.location.href = href;
+        });
+      });
+    });

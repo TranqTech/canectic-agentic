@@ -307,9 +307,9 @@ async function updateStatsForArea(shortcode) {
 		[
 			fileCount,
 			totalBytes,
-			lastResult ? lastResult.upload_date : dbarea.last_upload,
-			lastResult ? lastResult.filename : dbarea.last_filename,
-			lastResult ? lastResult.uploader_name : dbarea.last_uploader,
+			lastResult ? lastResult.upload_date : null,
+			lastResult ? lastResult.filename : null,
+			lastResult ? lastResult.uploader_name : null,
 			dbarea.id
 		]
 	);

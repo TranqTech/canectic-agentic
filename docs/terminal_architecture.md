@@ -327,6 +327,8 @@ _Section for tracking development plans, priorities, and stage completion._
 | Admin | Menu admin (web) | **Done** | PostgreSQL-backed menus + menu_entries. Full CRUD via `/admin/menus`. Color picker selects with ANSI color map. |
 | Admin | Door admin (web) | **Done** | PostgreSQL-backed doors. Full CRUD via `/admin/doors`. Two-column layout, tooltip labels, variable reference. |
 | Admin | Config variable substitution | **Done** | `configvars.js` — %X token engine for door commands, directories, arguments. 36 variables. |
+| Files | Phase 5: File area selector | **Done** | `fileAreaSelector.js` — lightbar selector with groups, new counts, search |
+| Files | Phase 5: File browser | **Done** | `fileBrowser.js` — file list + detail view + download info. ZMODEM transfer pending. |
 
 ---
 
@@ -1055,12 +1057,16 @@ The menu command dispatch in `menuhandler.js` already has slots for these comman
 | `markAreaRead` | Inline in menu dispatch | Calls `markAreaRead()` directly, no sub-module needed |
 | `email` | `pmReader` | Full terminal mail reader with inbox/sent/trash folders |
 | `checkEmail` | `pmCheck` | Unread count prompt, optionally launches pmReader |
+| `fileGroupChange` | `fileAreaSelector` (Phase 5) | Unified file area selector — same module for both commands |
+| `fileAreaChange` | `fileAreaSelector` (Phase 5) | Same module — both hotkeys open same selector |
+| `fileBrowser` | `fileBrowser` (Phase 5) | File listing browser for current file area |
+| `fileList` | `fileBrowser` (Phase 5) | Alias for fileBrowser |
 
 The `readMessages` wrapper should detect `call.term_type` and route to line reader (dumb terminals) or fullscreen reader (ANSI terminals). Same pattern for the editor.
 
 ### Future Considerations
 
-- File transfer protocols (Zmodem, etc.)
+- File transfer protocols (Zmodem, etc.) — terminal download from fileBrowser currently shows web URL
 - Announcement handler
 - Top menu handler
 - Logoff handler with call statistics
@@ -1151,6 +1157,54 @@ Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "
 
 ---
 
+## File Areas — Terminal Side (Phase 5)
+
+Terminal-side file browsing is provided by two `BaseSubModule` modules. They follow the same architecture as the echomail/PM modules (state machine, geometry, CP437/UTF-8 glyphs, dumb terminal fallback).
+
+### File Area Selector (`handlers/menucommands/fileAreaSelector.js`)
+
+Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups and areas in a lightbar list with group headers. Shows file count and new file count per area.
+
+**Key behaviors:**
+- Loads active file groups via `fileGroups.getActiveGroups()`, areas via `fileAreas.getAreasInGroup()`
+- Access control: security level + permission flags + restriction flags (both groups and areas)
+- Groups with zero accessible areas are excluded
+- New file count per area using `userFilePointers.getNewCount()`
+- Selecting an area updates `call.file_group`, `call.file_area`, titles, and persists via `updateUserFileGroup/Area()`
+- Search mode (S key) — live filtering by name/shortcode/description/group
+- Dumb terminal fallback with numbered list
+
+**Menu commands:** `fileGroupChange`, `fileAreaChange` — both launch the same selector
+
+### File Browser (`handlers/menucommands/fileBrowser.js`)
+
+**State machine:** `LOADING → FILE_LIST ↔ FILE_DETAIL`
+
+**FILE_LIST state:**
+- Header with area name, file count, new file count
+- Lightbar list with columns: Filename, Description, Size, Date
+- Files sorted by `upload_date DESC` (newest first)
+- New files (id > scan pointer) highlighted in bright green
+- Lazy loading: initial batch of 50, more loaded on scroll
+- Search mode (S key) — uses DB-backed `searchEntries()` for 2+ char queries
+- Mark Read (M key) — advances scan pointer to max
+
+**FILE_DETAIL state:**
+- Full-screen detail view: filename, size, date, uploader, download count, description, area
+- Long description displayed in scrollable body zone (centered, max 100 cols)
+- Left/Right arrows navigate between files
+- Download info (D key) shows web URL: `/files/download/<uuid>`
+
+**Download:** Terminal file transfer (ZMODEM) is a future feature. Currently displays the web download URL and filename.
+
+**Dumb terminal fallback:** Numbered file list with pagination, `#` for detail, `D#` for download info.
+
+**Geometry:** Same pattern as `msgReader` — `_calcGeometry()` computes `bodyWidth`, `bodyLeft`, `bodyRight` centered on wide terminals, capped at `MAX_BODY_WIDTH` (100).
+
+**Scan pointer management:** Viewing a file detail advances the pointer via `userFilePointers.advancePointer()`. "Mark Read" jumps to max file ID.
+
+---
+
 ## File Index
 
 | File | Location | Purpose |
@@ -1172,6 +1226,8 @@ Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "
 | `pmReader.js` | handlers/menucommands | Terminal private mail reader — inbox/sent/trash folders, message view, compose/reply launch |
 | `pmEditor.js` | handlers/menucommands | Terminal PM editor — From/To/Addr/Subject fields, transport cycling, LOCAL+network save, quote system |
 | `pmCheck.js` | handlers/menucommands | Unread mail check prompt — also works as call flow stage via SubModuleAdapter |
+| `fileAreaSelector.js` | handlers/menucommands | File group/area selector with lightbar, search, new file counts (Phase 5) |
+| `fileBrowser.js` | handlers/menucommands | File listing browser — file list, detail view, download info (Phase 5) |
 | `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring, paragraph reflow (`reflowText`/`reflowParagraphs`), ANSI art detection (`detectAnsiArt`), ANSI-aware word wrapping (`wordWrapLineAnsi`) |
 | `userAreaSubs.js` | models | Per-user newscan subscription overrides — resolution cascade, T key toggle in area selector |
 | **Maintenance** | | |
@@ -1184,6 +1240,10 @@ Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "
 | `menus.js` | models | PostgreSQL-backed menu and menu entry CRUD, color map, command list, display file types |
 | `doors.js` | models | PostgreSQL-backed door game config CRUD, slug→camelCase normalization, launch/dropfile type validation |
 | `userMsgPointers.js` | models | Two-tier read tracking (area pointers + thread pointers) |
+| `fileGroups.js` | models | File group CRUD, active group listing |
+| `fileAreas.js` | models | File area CRUD, directory resolution, stats |
+| `fileEntries.js` | models | File entry CRUD, search, dupe checking, download counts |
+| `userFilePointers.js` | models | Per-user per-area file scan pointers |
 | `echomail.js` | models | FTN echomail import/export, threading. Shared thread helpers: `createThreadRow`, `updateThreadStats`, `rollbackThread` |
 | `terminalText.js` | utils | VirtualTerminal, `formatTerminalText`, `formatBodyHtml` (consolidated single source for all tossers) |
 | `configvars.js` | utils | Runtime %X variable substitution for door commands, directories, and arguments. Single-pass O(n) engine, 36 tokens. |

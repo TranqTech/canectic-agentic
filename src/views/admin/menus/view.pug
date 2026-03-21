@@ -323,7 +323,7 @@ block content
                 | ? This will also delete all menu entries.
               form(action='/admin/menus/' + menu.id + '/delete' method='POST')
                 .text-end
-                  button.btn.btn-secondary.me-2(data-bs-dismiss='modal') Cancel
+                  button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
                   input.btn.btn-danger(type='submit' value='Delete Menu')
 
       //- New Entry Modal

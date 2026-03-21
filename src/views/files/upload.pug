@@ -1,0 +1,93 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else if !canUpload
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          .card
+            .card-header.bg-darkblue.text-white
+              h2
+                i.bi.bi-lock
+                |  Upload Not Permitted
+            .card-body
+              .text-center.py-4
+                h5.text-muted You do not have sufficient access to upload files to this area.
+                if fileArea
+                  a.btn.btn-outline-light.mt-3(href='/files/area/' + fileArea.shortcode) Back to Area
+                else
+                  a.btn.btn-outline-light.mt-3(href='/files') Back to Files
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          //- Breadcrumb
+          nav(aria-label='breadcrumb')
+            ol.breadcrumb
+              li.breadcrumb-item
+                a(href='/files') Files
+              if fileGroup
+                li.breadcrumb-item
+                  a(href='/files/group/' + fileGroup.shortcode)= fileGroup.name
+              if fileArea
+                li.breadcrumb-item
+                  a(href='/files/area/' + fileArea.shortcode)= fileArea.name
+              li.breadcrumb-item.active(aria-current='page') Upload
+
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-upload
+                    |  Upload to #{fileArea.name}
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-light(href='/files/area/' + fileArea.shortcode)
+                      i.bi.bi-arrow-left
+                      |  Back to Area
+            .card-body
+              form(action='/files/area/' + fileArea.shortcode + '/upload' method='POST' enctype='multipart/form-data')
+                .row
+                  .col-md-8.offset-md-2
+
+                    .mb-3
+                      label.form-label(for='file')
+                        strong Select File
+                      input#file.form-control(type='file' name='file' required)
+                      if maxSize
+                        small.form-text.text-muted
+                          | Maximum file size: #{formatBytes(maxSize)}
+                      if allowedExtensions && allowedExtensions.length > 0
+                        br
+                        small.form-text.text-muted
+                          | Allowed types: #{allowedExtensions}
+
+                    .mb-3
+                      label.form-label(for='short_desc')
+                        strong Short Description
+                        small.text-muted.ms-2 (optional — will be extracted from FILE_ID.DIZ if available)
+                      input#short_desc.form-control(
+                        type='text'
+                        name='short_desc'
+                        maxlength='255'
+                        placeholder='Brief description of this file'
+                      )
+
+                    .text-center.mt-4
+                      button.btn.btn-success.btn-lg(type='submit')
+                        i.bi.bi-upload.me-1
+                        | Upload File

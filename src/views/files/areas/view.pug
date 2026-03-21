@@ -1,0 +1,139 @@
+extends ../../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          .card
+            .card-header.bg-darkblue.text-white
+              h2
+                i.bi.bi-lock
+                |  Access Denied
+            .card-body
+              .text-center.py-4
+                h5.text-muted You do not have sufficient access to view this file area.
+                a.btn.btn-outline-light.mt-3(href='/files') Back to Files
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          //- Breadcrumb
+          nav(aria-label='breadcrumb')
+            ol.breadcrumb
+              li.breadcrumb-item
+                a(href='/files') Files
+              if fileGroup
+                li.breadcrumb-item
+                  a(href=`/files/group/${fileGroup.shortcode}`)= fileGroup.name
+              li.breadcrumb-item.active(aria-current='page')
+                if fileArea
+                  = fileArea.name
+                else
+                  | File Area
+
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-files
+                    |
+                    if fileArea
+                      = fileArea.name
+                    else
+                      | File Area
+                .col-4
+                  .text-end
+                    if fileGroup
+                      a.btn.btn-sm.btn-outline-light.me-2(href=`/files/group/${fileGroup.shortcode}`)
+                        i.bi.bi-arrow-left
+                        |  Group
+                    if canUpload
+                      a.btn.btn-sm.btn-success(href='/files/area/' + fileArea.shortcode + '/upload')
+                        i.bi.bi-upload
+                        |  Upload
+            .card-body
+              if uploaded
+                .alert.alert-success.alert-dismissible.fade.show
+                  i.bi.bi-check-circle.me-1
+                  | File uploaded successfully: #{uploaded}
+                  button.btn-close(type='button' data-bs-dismiss='alert')
+              if error
+                .alert.alert-danger.alert-dismissible.fade.show
+                  i.bi.bi-exclamation-triangle.me-1
+                  | #{error}
+                  button.btn-close(type='button' data-bs-dismiss='alert')
+              if fileArea && fileArea.description
+                p.text-muted= fileArea.description
+              if filelist && filelist.length > 0
+                .table-responsive
+                  table#fileTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Filename
+                        th.text-center(scope='col') Size
+                        th(scope='col') Date
+                        th(scope='col') Description
+                        th.text-center(scope='col') Downloads
+                    tbody
+                      for file of filelist
+                        tr.clickable-row(data-href=`/files/view/${file.uuid}`)
+                          td
+                            i.bi.bi-file-earmark.me-1
+                            strong= file.filename
+                          td.text-center.text-nowrap= formatBytes(file.file_size || 0)
+                          td.text-nowrap
+                            if file.upload_date
+                              - var fdate = Date.parse(file.upload_date)
+                              - var fd = DateTime.fromMillis(fdate)
+                              = fd.toFormat('MMM dd, yyyy')
+                            else
+                              span.text-muted —
+                          td= file.short_desc || ''
+                          td.text-center= file.download_count || 0
+                .text-muted.small.mt-2
+                  | Showing #{filelist.length} of #{totalFiles} files
+              else
+                .text-center.py-4
+                  h5.text-muted No files in this area
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.clickable-row').forEach(function(row) {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function() {
+          var href = this.getAttribute('data-href');
+          if (href) window.location.href = href;
+        });
+      });
+
+      // Initialize DataTables if available and more than a few rows
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+        var table = document.getElementById('fileTable');
+        if (table && table.querySelectorAll('tbody tr').length > 5) {
+          jQuery('#fileTable').DataTable({
+            paging: false,
+            searching: true,
+            info: false,
+            order: [],
+            language: {
+              search: 'Filter:'
+            }
+          });
+        }
+      }
+    });

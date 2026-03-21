@@ -17,6 +17,7 @@ import { pgpool } from "../src/middleware/db/postgres.js";
 import * as redis from "../src/middleware/db/redis.js";
 import * as userMsgPointers from '../src/models/userMsgPointers.js';
 import * as userAreaSubs from '../src/models/userAreaSubs.js';
+import * as userFilePointers from '../src/models/userFilePointers.js';
 
 // --- Queue infrastructure ---
 import { closeQueues } from "../src/queues/queues.js";
@@ -101,6 +102,7 @@ process.on('SIGTERM', async () => {
 async function prerunMaint(){
 	await userMsgPointers.ensureConstraintsAndIndexes();
 	await userAreaSubs.ensureConstraintsAndIndexes();
+	await userFilePointers.ensureConstraintsAndIndexes();
 }
 
 async function startSocatManager(){

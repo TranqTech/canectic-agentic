@@ -351,6 +351,11 @@ function getAvailableCommands() {
 		{ name: 'email',           label: 'Private Messages',  needsArg: false },
 		{ name: 'checkEmail',      label: 'Check Email',       needsArg: false },
 		{ name: 'testDownload',    label: 'Test Download',     needsArg: false },
+		{ name: 'fileAreaChange',  label: 'Change File Area',  needsArg: false },
+		{ name: 'fileGroupChange', label: 'Change File Group', needsArg: false },
+		{ name: 'fileBrowser',     label: 'File Browser',      needsArg: false },
+		{ name: 'downloadBatch',   label: 'Download Batch',    needsArg: false },
+		{ name: 'fileUpload',      label: 'Upload File',       needsArg: false },
 	];
 }
 

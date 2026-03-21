@@ -36,6 +36,7 @@ import appConfig from "../src/config/appConfig.js";
 import * as ftnTosser from "../src/middleware/tossers/ftnTosser.js";
 import * as nntpTosser from "../src/middleware/tossers/nntpTosser.js";
 import * as qwkTosser from "../src/middleware/tossers/qwkTosser.js";
+import * as ticTosser from "../src/middleware/tossers/ticTosser.js";
 
 // Shared post-toss helpers (thread finalization, area stats)
 import * as echomail from "../src/models/echomail.js";
@@ -47,6 +48,7 @@ import * as messageBase from "../src/maintenance/messageBase.js";
 import * as privateMessages from "../src/models/privateMessages.js";
 import * as userMsgPointers from "../src/models/userMsgPointers.js";
 import * as userAreaSubs from "../src/models/userAreaSubs.js";
+import * as userFilePointers from "../src/models/userFilePointers.js";
 
 dotenv.config();
 alogger.setProcessName('worker');
@@ -187,6 +189,22 @@ function createTossProcessor() {
 					});
 					break;
 
+				// --- TIC (file echoes) ---------------------------------------------
+
+				case 'tic:inbound':
+					await ticTosser.tossInbound();
+					eventPublisher.publish(EVENTS.FILES_IMPORTED, {
+						source: 'tic', direction: 'inbound'
+					});
+					break;
+
+				case 'tic:outbound':
+					await ticTosser.tossOutbound();
+					eventPublisher.publish(EVENTS.TOSS_COMPLETE, {
+						source: 'tic', direction: 'outbound'
+					});
+					break;
+
 				// --- NNTP ----------------------------------------------------------
 
 				// Per-connection pull
@@ -291,6 +309,7 @@ async function main() {
 	// Run startup constraint checks (same as gateway prerunMaint)
 	await userMsgPointers.ensureConstraintsAndIndexes();
 	await userAreaSubs.ensureConstraintsAndIndexes();
+	await userFilePointers.ensureConstraintsAndIndexes();
 
 	// Event publisher for notifying other processes
 	eventPublisher = createEventPublisher();

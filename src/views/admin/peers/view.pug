@@ -343,6 +343,88 @@ block content
                                           li.text-success= area.name
                               if !anyEnabled
                                 p.text-muted None
+                      // File area subscriptions row
+                      .row.mt-3
+                        .col-4
+                        // Allowed file areas
+                        .col-4
+                          .card
+                            .card-header
+                              .row
+                                .col-7
+                                  h6 Allowed File Areas
+                                .col-5
+                                  .text-end
+                                    button.btn.btn-xs.btn-sm.btn-success(
+                                      data-bs-toggle='modal'
+                                      data-bs-target='#setFileAllowedModal'
+                                      data-bs-connuuid=conn.uuid
+                                      data-bs-connname=(conn.network_name || conn.network_id)
+                                      data-bs-networkid=conn.network_id
+                                    )
+                                      | Edit
+                            .card-body
+                              - var fileSubIds = new Set((conn.fileSubscriptions || []).map(s => s.file_area_id))
+                              - var anyFileAllowed = false
+                              if fileGrouplist && fileGrouplist.length > 0
+                                for fgroup of fileGrouplist
+                                  if fgroup.areas && fgroup.areas.length > 0
+                                    - var seen = new Set()
+                                    - var allowedFileAreas = []
+                                    each farea in fgroup.areas
+                                      - var faid = parseInt(farea.id)
+                                      if !seen.has(faid) && fileSubIds.has(faid)
+                                        - seen.add(faid)
+                                        - var fsub = conn.fileSubscriptions.find(s => s.file_area_id === faid)
+                                        if fsub && fsub.allowed
+                                          - allowedFileAreas.push(farea)
+                                    if allowedFileAreas.length > 0
+                                      - anyFileAllowed = true
+                                      h6.text-info= fgroup.name
+                                      ul
+                                        for farea of allowedFileAreas
+                                          li.text-success= farea.name
+                              if !anyFileAllowed
+                                p.text-muted None
+                        // Enabled file areas
+                        .col-4
+                          .card
+                            .card-header
+                              .row
+                                .col-7
+                                  h6 Enabled File Areas
+                                .col-5
+                                  .text-end
+                                    button.btn.btn-xs.btn-sm.btn-success(
+                                      data-bs-toggle='modal'
+                                      data-bs-target='#setFileEnabledModal'
+                                      data-bs-connuuid=conn.uuid
+                                      data-bs-connname=(conn.network_name || conn.network_id)
+                                      data-bs-networkid=conn.network_id
+                                    )
+                                      | Edit
+                            .card-body
+                              - var anyFileEnabled = false
+                              if fileGrouplist && fileGrouplist.length > 0
+                                for fgroup of fileGrouplist
+                                  if fgroup.areas && fgroup.areas.length > 0
+                                    - var seen = new Set()
+                                    - var enabledFileAreas = []
+                                    each farea in fgroup.areas
+                                      - var faid = parseInt(farea.id)
+                                      if !seen.has(faid) && fileSubIds.has(faid)
+                                        - seen.add(faid)
+                                        - var fsub = conn.fileSubscriptions.find(s => s.file_area_id === faid)
+                                        if fsub && fsub.enabled
+                                          - enabledFileAreas.push(farea)
+                                    if enabledFileAreas.length > 0
+                                      - anyFileEnabled = true
+                                      h6.text-info= fgroup.name
+                                      ul
+                                        for farea of enabledFileAreas
+                                          li.text-success= farea.name
+                              if !anyFileEnabled
+                                p.text-muted None
 
               // -------------------------------------------------------
               // Modals
@@ -954,10 +1036,71 @@ block content
                                 class='btn btn-lg btn-success btn-block'
                               )
 
+              // Set File Allowed Areas Modal (dynamically populated)
+              #setFileAllowedModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Allowed File Areas — 
+                        span#setFileAllowedTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#setFileAllowedForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            h5 File areas this connection may request
+                            hr
+                            fieldset#setFileAllowedFieldset
+                              p.text-muted.small.mb-0 Loading file areas…
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save'
+                                class='btn btn-lg btn-success btn-block'
+                              )
+
+              // Set File Enabled Areas Modal (dynamically populated)
+              #setFileEnabledModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered.modal-lg
+                  .modal-content
+                    .modal-header.bg-dark.text-white
+                      h3.modal-title
+                        | Enabled File Areas — 
+                        span#setFileEnabledTitle
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    .modal-body
+                      form#setFileEnabledForm(method='POST' class='form-registration')
+                        .row
+                          .col-1
+                          .col-10
+                            h5 File areas to toss TIC to/from this connection
+                            hr
+                            fieldset#setFileEnabledFieldset
+                              p.text-muted.small.mb-0 Loading file areas…
+                        .row
+                          .col-1
+                          .col-10
+                            br
+                            .text-end
+                              input(
+                                type='submit'
+                                value='Save'
+                                class='btn btn-lg btn-success btn-block'
+                              )
+
   - var _subData = (connections || []).reduce(function(acc, conn) { acc[conn.uuid] = (conn.subscriptions || []); return acc; }, {})
+  - var _fileSubData = (connections || []).reduce(function(acc, conn) { acc[conn.uuid] = (conn.fileSubscriptions || []); return acc; }, {})
   script!= 'const subscriptionData = ' + JSON.stringify(_subData) + ';'
+  script!= 'const fileSubscriptionData = ' + JSON.stringify(_fileSubData) + ';'
   script!= 'const networkAddressMap = ' + JSON.stringify(networkAddressMap || {}) + ';'
   script!= 'const grouplistData = ' + JSON.stringify(grouplist || []) + ';'
+  script!= 'const fileGrouplistData = ' + JSON.stringify(fileGrouplist || []) + ';'
 
   script.
     function populateSystemAddressSelect(selectEl, networkId, selectedId) {
@@ -1190,6 +1333,76 @@ block content
           const subs       = subscriptionData[uuid] || [];
           const checkedIds = subs.filter(s => s.enabled).map(s => s.area_id);
           buildAreaCheckboxes('setEnabledFieldset', 'enabled-check', 'enabledareas', 'sen', networkId, checkedIds);
+        });
+      });
+
+      // Build file area checkbox list filtered to a specific network_id
+      function buildFileAreaCheckboxes(fieldsetId, checkClass, nameAttr, idPrefix, networkId, checkedIds) {
+        const fieldset = document.getElementById(fieldsetId);
+        fieldset.innerHTML = '';
+        const netId      = parseInt(networkId);
+        const checkedSet = new Set(checkedIds.map(id => parseInt(id)));
+        let anyShown = false;
+        fileGrouplistData.forEach(group => {
+          const filtered = (group.areas || []).filter(a => a.network_id === netId);
+          if (filtered.length === 0) return;
+          anyShown = true;
+          const h = document.createElement('h6');
+          h.className = 'text-info';
+          h.textContent = group.name + ':';
+          fieldset.appendChild(h);
+          filtered.forEach(area => {
+            const wrap = document.createElement('div');
+            wrap.className = 'form-check';
+            const cb = document.createElement('input');
+            cb.className = 'form-check-input ' + checkClass;
+            cb.id = idPrefix + '-' + area.id;
+            cb.type = 'checkbox';
+            cb.name = nameAttr;
+            cb.value = area.id;
+            cb.checked = checkedSet.has(parseInt(area.id));
+            const lbl = document.createElement('label');
+            lbl.setAttribute('for', cb.id);
+            lbl.textContent = area.name;
+            wrap.appendChild(cb);
+            wrap.appendChild(lbl);
+            fieldset.appendChild(wrap);
+          });
+          fieldset.appendChild(document.createElement('br'));
+        });
+        if (!anyShown) {
+          const p = document.createElement('p');
+          p.className = 'text-muted';
+          p.textContent = 'No file areas on this network';
+          fieldset.appendChild(p);
+        }
+      }
+
+      // Set File Allowed modal
+      document.querySelectorAll('[data-bs-target="#setFileAllowedModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const uuid      = this.dataset.bsConnuuid;
+          const name      = this.dataset.bsConnname;
+          const networkId = this.dataset.bsNetworkid;
+          document.getElementById('setFileAllowedTitle').textContent = name || '';
+          document.getElementById('setFileAllowedForm').action = `/admin/connection/${uuid}/setfileallowed`;
+          const subs      = fileSubscriptionData[uuid] || [];
+          const checkedIds = subs.filter(s => s.allowed).map(s => s.file_area_id);
+          buildFileAreaCheckboxes('setFileAllowedFieldset', 'file-allowed-check', 'allowedfileareas', 'sfal', networkId, checkedIds);
+        });
+      });
+
+      // Set File Enabled modal
+      document.querySelectorAll('[data-bs-target="#setFileEnabledModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const uuid      = this.dataset.bsConnuuid;
+          const name      = this.dataset.bsConnname;
+          const networkId = this.dataset.bsNetworkid;
+          document.getElementById('setFileEnabledTitle').textContent = name || '';
+          document.getElementById('setFileEnabledForm').action = `/admin/connection/${uuid}/setfileenabled`;
+          const subs       = fileSubscriptionData[uuid] || [];
+          const checkedIds = subs.filter(s => s.enabled).map(s => s.file_area_id);
+          buildFileAreaCheckboxes('setFileEnabledFieldset', 'file-enabled-check', 'enabledfileareas', 'sfen', networkId, checkedIds);
         });
       });
 

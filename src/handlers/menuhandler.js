@@ -12,6 +12,10 @@ import { newscan } from "./menucommands/newscan.js";
 import { testDownloader } from "./menucommands/testdownload.js";
 import { pmReader } from "./menucommands/pmReader.js";
 import { pmCheck } from "./menucommands/pmCheck.js";
+import { fileAreaSelector } from "./menucommands/fileAreaSelector.js";
+import { fileBrowser } from "./menucommands/fileBrowser.js";
+import { fileBatchDownload } from "./menucommands/fileBatchDownload.js";
+import { fileUpload } from "./menucommands/fileUpload.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -623,6 +627,23 @@ class MenuHandler extends BaseHandler {
 				this._runSubModule(new pmCheck(this.call));
 				return;
 
+			case "fileGroupChange":
+			case "fileAreaChange":
+				this._runSubModule(new fileAreaSelector(this.call));
+				return;
+
+			case "fileBrowser":
+			case "fileList":
+				this._runSubModule(new fileBrowser(this.call));
+				return;
+
+			case "downloadBatch":
+				this._runSubModule(new fileBatchDownload(this.call));
+				return;
+
+			case "fileUpload":
+				this._runSubModule(new fileUpload(this.call));
+				return;
 
 			default:
 				alogger.writeAlog(4, this.loggingId + "\n  Unknown command: " + cmd, "yellow");

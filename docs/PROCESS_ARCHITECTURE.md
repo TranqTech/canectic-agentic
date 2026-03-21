@@ -143,6 +143,8 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `qwk:hub:inbound` | Gateway (node drops .rep) | Worker | `{ connectionUUID }` | Process inbound .rep from hub node |
 | `nntp:pull` | Scheduler (repeatable), Admin | Worker | `{ connectionUUID }` | Pull articles from NNTP server |
 | `nntp:push` | Scheduler (repeatable), Admin | Worker | `{ connectionUUID }` | Post local messages to NNTP server |
+| `tic:inbound` | Mailer (after file receive), Admin, CLI | Worker | `{ connectionUUID?, sourceDir? }` | Process inbound .tic files and attached files |
+| `tic:outbound` | Upload handler (networked area), tic:inbound (forwarding), Admin, CLI | Worker | `{ connectionUUID? }` | Build TIC descriptors and stage outbound files |
 
 ### `mailer` queue
 

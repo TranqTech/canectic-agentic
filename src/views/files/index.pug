@@ -1,0 +1,58 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          .card
+            .card-header.bg-darkblue.text-white
+              h2
+                i.bi.bi-folder
+                |  File Groups
+            .card-body
+              if grouplist && grouplist.length > 0
+                table#groupTable.table.table-hover
+                  thead
+                    tr
+                      th(scope='col') Group
+                      th(scope='col') Description
+                      th.text-center(scope='col') Areas
+                      th.text-center(scope='col') Files
+                      th.text-center(scope='col') New
+                  tbody
+                    for group of grouplist
+                      tr.clickable-row(data-href=`/files/group/${group.shortcode}`)
+                        td
+                          strong= group.name
+                        td= group.description
+                        td.text-center= group._areaCount || 0
+                        td.text-center= group.total_file_count || 0
+                        td.text-center
+                          if group.new_count && group.new_count > 0
+                            span.badge.bg-info= group.new_count
+                          else
+                            span.text-muted —
+              else
+                .text-center.py-4
+                  h5.text-muted No file groups available
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.clickable-row').forEach(function(row) {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function() {
+          var href = this.getAttribute('data-href');
+          if (href) window.location.href = href;
+        });
+      });
+    });

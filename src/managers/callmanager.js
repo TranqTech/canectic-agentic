@@ -150,6 +150,7 @@ class IncomingCall{
 		this.file_group_title = ""
 		this.file_area = ""
 		this.file_area_title = ""
+		this.file_batch = []        // tagged files for batch download [{uuid, id, filename, file_size, area_shortcode}]
 		this.echo_on = true
 		this.escapebuffer = ""
 		this.nodenum = newnodenum
