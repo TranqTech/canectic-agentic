@@ -9,13 +9,11 @@ import { v4 as uuidv4 } from 'uuid';
 import * as userAccounts from '../models/useraccounts.js';
 import * as sessionStore from '../middleware/db/sessionstore.js';
 import * as alogger from '../utils/alogger.js';
+import appConfig from "../config/appConfig.js";
 
 //setup
 router.use(cookieParser());
 var urlencodedParser = bodyParser.urlencoded({ limit: '1mb', extended: true });
-
-//variables and const
-const sitetld      = process.env.sitetld;
 const cookieMaxAge = 1000 * 60 * 60 * 24 * 7; // 7 days
 
 // Inject shared locals for all user views
@@ -29,7 +27,7 @@ function setSessionCookie(res, sessionid) {
 	res.cookie('sessionid', sessionid, {
 		httpOnly: true,
 		maxAge:   cookieMaxAge,
-		domain:   sitetld || undefined,
+		domain:   appConfig.get('sitetld') || undefined,
 		sameSite: 'lax'
 	});
 }
@@ -133,7 +131,7 @@ router.get('/logout', async (req, res) => {
 		await sessionStore.sessionDestroy(sessionid);
 		res.clearCookie('sessionid', {
 			httpOnly: true,
-			domain:   sitetld || undefined,
+			domain:   appConfig.get('sitetld') || undefined,
 			sameSite: 'lax'
 		});
 	}

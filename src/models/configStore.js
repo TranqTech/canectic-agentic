@@ -166,8 +166,26 @@ async function seedDefaults(definitions) {
 /**
  * Ensure the settings table exists with the current schema.
  * Called early in appConfig.load() before any queries.
+ *
+ * If the old settings table exists (has 'name' column instead of 'key'),
+ * drop and recreate it — the old table was unused (model was a stub).
  */
 async function ensureTable() {
+	// Check if old schema exists (has 'name' column but no 'key' column)
+	var hasOldSchema = await postgres.queryOne(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.columns " +
+		"WHERE table_name = 'settings' AND column_name = 'name') AS has_name"
+	);
+	var hasNewSchema = await postgres.queryOne(
+		"SELECT EXISTS (SELECT 1 FROM information_schema.columns " +
+		"WHERE table_name = 'settings' AND column_name = 'key') AS has_key"
+	);
+
+	if (hasOldSchema && hasOldSchema.has_name && (!hasNewSchema || !hasNewSchema.has_key)) {
+		alogger.writeAlog(2, "[configStore] Dropping old settings table (name→key migration)", "yellow");
+		await postgres.write("DROP TABLE IF EXISTS " + TABLE);
+	}
+
 	await postgres.write(
 		"CREATE TABLE IF NOT EXISTS " + TABLE + " (" +
 		"  id BIGSERIAL PRIMARY KEY," +

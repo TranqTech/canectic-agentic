@@ -11,20 +11,16 @@ import * as privateMessages from '../models/privateMessages.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as flash from '../middleware/db/flash.js';
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
 //setup
 router.use(cookieParser());
 var urlencodedParser = bodyParser.urlencoded({ limit: '1mb', extended: true });
 
-//variables and const
-const faviconlink = process.env.faviconlink || "/images/favicon.ico";
-const boardname = process.env.boardname;
-const adminsecurity = parseInt(process.env.adminsecurity) || 200;
-
 // Inject shared locals for all PM views
 router.use(async function(req, res, next) {
-	res.locals.boardname   = boardname || 'BBS';
-	res.locals.faviconlink = faviconlink || '/images/favicon.ico';
+	res.locals.boardname   = appConfig.get('boardname', 'BBS');
+	res.locals.faviconlink = appConfig.get('faviconlink', '/images/favicon.ico');
 	res.locals.currentPath = '/pm' + req.path;
 	res.locals.activelink  = 'pm';
 	res.locals.DateTime    = DateTime;
@@ -87,7 +83,7 @@ function hydrateSessionFlags(sessionUser) {
 function checkAdminAccess(user) {
 	if (!user) return false;
 	var sec = parseInt(user.security) || 0;
-	if (sec < adminsecurity) return false;
+	if (sec < appConfig.getNumber('adminsecurity', 200)) return false;
 	var perms = parseFlags(user.permissionflags);
 	return perms.includes('Sysop');
 }

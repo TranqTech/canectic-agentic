@@ -28,28 +28,21 @@ import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
 import * as jobs from "../queues/jobs.js";
 import {getVariableList} from "../utils/configvars.js"
+import appConfig from "../config/appConfig.js";
 
 //setup
 router.use(cookieParser());
 var urlencodedParser = bodyParser.urlencoded({ limit: '250mb', extended: true });
 
 //variables and const
-const faviconlink    = process.env.faviconlink  || "/images/favicon.ico";
-const boardname      = process.env.boardname;
-const sitetld        = process.env.sitetld;
-const loadcorsorigin = process.env.corsorigin;
-const sitedomain     = process.env.sitedomain;
-const fulldomain     = "https://" + sitedomain;
 const basedir        = process.cwd();
-const defaultUser    = process.env.DefaultUser || "John Doe";
-const adminsecurity  = parseInt(process.env.adminsecurity) || 200;
 const availablePermissions  = ["Sysop", "Mod", "Adult", "Admin", "Email", "Netmail"];
 const availableRestrictions = ["Underage", "Banned", "Email", "Netmail","Private Messages"];
 
 // Inject shared locals for all admin views
 router.use(async function(req, res, next) {
-	res.locals.boardname    = boardname    || 'BBS Admin';
-	res.locals.faviconlink  = faviconlink  || '/images/favicon.ico';
+	res.locals.boardname    = appConfig.get('boardname', 'BBS Admin');
+	res.locals.faviconlink  = appConfig.get('faviconlink', '/images/favicon.ico');
 	res.locals.currentPath  = '/admin' + req.path;
 	res.locals.activelink   = '';
 	if (req.cookies.sessionid) {
@@ -74,7 +67,7 @@ async function getCurrentUser(req) {
 function checkAdminAccess(user) {
 	if (!user) return false;
 	var security = parseInt(user.security) || 0;
-	if (security < adminsecurity) return false;
+	if (security < appConfig.getNumber('adminsecurity', 200)) return false;
 	var perms = Array.isArray(user.permissionflags) ? user.permissionflags : [];
 	return perms.includes('Sysop');
 }
@@ -184,7 +177,7 @@ router.post('/netmail/new', urlencodedParser, requireAdmin, async (req, res) => 
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var formObj     = req.body;
-	formObj.FromUser = currentuser ? currentuser.name : defaultUser;
+	formObj.FromUser = currentuser ? currentuser.name : appConfig.get('DefaultUser', 'John Doe');
 	var result = await netmail.newOutboundNetmail(formObj);
 	if (result.status === true) {
 		res.redirect('/admin/netmail');

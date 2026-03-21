@@ -18,25 +18,20 @@ import * as msgAreas from '../models/msgAreas.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as userMsgPointers from '../models/userMsgPointers.js';
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
 //setup
 router.use(cookieParser());
 var urlencodedParser = bodyParser.urlencoded({ limit: '250mb', extended: true })
 
 //variables and const
-const faviconlink = process.env.faviconlink || "/images/favicon.ico"
-const boardname = process.env.boardname;
-const sitetld = process.env.sitetld
-const loadcorsorigin = process.env.corsorigin
-const sitedomain = process.env.sitedomain
-const fulldomain = "https://" + sitedomain
 const basedir = process.cwd()
 
 
 // Inject shared locals for all user views
 router.use(async function(req, res, next) {
-	res.locals.boardname   = boardname   || 'BBS';
-	res.locals.faviconlink = faviconlink || '/images/favicon.ico';
+	res.locals.boardname   = appConfig.get('boardname', 'BBS');
+	res.locals.faviconlink = appConfig.get('faviconlink', '/images/favicon.ico');
 	res.locals.currentPath = req.path;
 	res.locals.activelink  = '';
 	res.locals.DateTime    = DateTime;

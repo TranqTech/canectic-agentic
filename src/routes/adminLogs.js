@@ -17,20 +17,20 @@ import * as redis from '../middleware/db/redis.js';
 import * as alogger from '../utils/alogger.js';
 import * as sessionStore from '../middleware/db/sessionstore.js';
 import * as privateMessages from '../models/privateMessages.js';
+import appConfig from "../config/appConfig.js";
 
 const router = express.Router();
 router.use(cookieParser());
 
 const VALID_PROCESSES = ['gateway', 'worker', 'mailer'];
-const adminsecurity   = parseInt(process.env.adminsecurity) || 200;
 
 // ---------------------------------------------------------------------------
 // Shared middleware — inject common locals (same pattern as admin.js)
 // ---------------------------------------------------------------------------
 
 router.use(async function(req, res, next) {
-	res.locals.boardname    = process.env.boardname || 'BBS Admin';
-	res.locals.faviconlink  = process.env.faviconlink || '/images/favicon.ico';
+	res.locals.boardname    = appConfig.get('boardname', 'BBS Admin');
+	res.locals.faviconlink  = appConfig.get('faviconlink', '/images/favicon.ico');
 	res.locals.currentPath  = '/adminlogs' + req.path;
 	res.locals.activelink   = 'logs';
 	if (req.cookies.sessionid) {
@@ -57,7 +57,7 @@ async function getCurrentUser(req) {
 function checkAdminAccess(user) {
 	if (!user) return false;
 	var security = parseInt(user.security) || 0;
-	if (security < adminsecurity) return false;
+	if (security < appConfig.getNumber('adminsecurity', 200)) return false;
 	var perms = Array.isArray(user.permissionflags) ? user.permissionflags : [];
 	return perms.includes('Sysop');
 }
@@ -96,7 +96,7 @@ router.get('/history/:process', requireAdmin, async (req, res) => {
 		return res.status(400).json({ error: 'Invalid process name. Valid: ' + VALID_PROCESSES.join(', ') });
 	}
 
-	var retentionMs = (parseInt(process.env.LOG_BUS_RETENTION_HOURS) || 8) * 60 * 60 * 1000;
+	var retentionMs = appConfig.getNumber('LOG_BUS_RETENTION_HOURS', 8) * 60 * 60 * 1000;
 	var since = parseInt(req.query.since) || (Date.now() - retentionMs);
 	var limit = Math.min(parseInt(req.query.limit) || 500, 2000);
 
@@ -131,7 +131,7 @@ router.get('/history/:process', requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.get('/history', requireAdmin, async (req, res) => {
-	var retentionMs = (parseInt(process.env.LOG_BUS_RETENTION_HOURS) || 8) * 60 * 60 * 1000;
+	var retentionMs = appConfig.getNumber('LOG_BUS_RETENTION_HOURS', 8) * 60 * 60 * 1000;
 	var since = parseInt(req.query.since) || (Date.now() - retentionMs);
 	var limit = Math.min(parseInt(req.query.limit) || 500, 2000);
 
