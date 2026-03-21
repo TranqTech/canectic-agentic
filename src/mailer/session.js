@@ -17,8 +17,7 @@ import { TransferEngine } from './transfer.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as systemAddresses from '../models/systemAddresses.js';
 import * as alogger from '../utils/alogger.js';
-
-const SESSION_TIMEOUT = parseInt(process.env.MAILER_SESSION_TIMEOUT) || 300;
+import appConfig from '../config/appConfig.js';
 
 class SessionController extends EventEmitter {
 	constructor(transport, role, options) {
@@ -49,9 +48,9 @@ class SessionController extends EventEmitter {
 		this._sessionTimer = null;
 
 		// Directories
-		this._inboundDir  = this.options.inboundDir  || process.env.MAILER_INBOUND_DIR  || process.env.ftninbound  || 'ftn/in';
-		this._outboundDir = this.options.outboundDir  || process.env.MAILER_OUTBOUND_DIR || process.env.ftnoutbound || 'ftn/out';
-		this._tempDir     = this.options.tempDir      || process.env.MAILER_TEMP_DIR     || 'ftn/tmp';
+		this._inboundDir  = this.options.inboundDir  || appConfig.get('MAILER_INBOUND_DIR')  || appConfig.get('ftninbound', 'ftn/in');
+		this._outboundDir = this.options.outboundDir  || appConfig.get('MAILER_OUTBOUND_DIR') || appConfig.get('ftnoutbound', 'ftn/out');
+		this._tempDir     = this.options.tempDir      || appConfig.get('MAILER_TEMP_DIR', 'ftn/tmp');
 	}
 
 	// -----------------------------------------------------------------------
@@ -62,10 +61,11 @@ class SessionController extends EventEmitter {
 		this.state = 'handshake';
 
 		// Start session timeout
+		var sessionTimeout = appConfig.getNumber('MAILER_SESSION_TIMEOUT', 300);
 		this._sessionTimer = setTimeout(() => {
-			alogger.writeClog(3, 'Session ' + this.uuid + ': timeout after ' + SESSION_TIMEOUT + 's', 'mailer', 'redbright');
+			alogger.writeClog(3, 'Session ' + this.uuid + ': timeout after ' + sessionTimeout + 's', 'mailer', 'redbright');
 			this._endSession('timeout');
-		}, SESSION_TIMEOUT * 1000);
+		}, sessionTimeout * 1000);
 
 		// ---------------------------------------------------------------
 		// Phase 1: All async work happens here — before the protocol is
@@ -83,8 +83,8 @@ class SessionController extends EventEmitter {
 		}
 
 		// Resolve system name and sysop from env
-		var systemName = process.env.boardname || 'Canectic BBS';
-		var sysopName  = process.env.sysopname || 'Sysop';
+		var systemName = appConfig.get('boardname', 'Canectic BBS');
+		var sysopName  = appConfig.get('sysopname', 'Sysop');
 
 		// Build protocol options
 		var protocolOpts = {

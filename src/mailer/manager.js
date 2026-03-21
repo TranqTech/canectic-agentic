@@ -17,15 +17,11 @@ import { TcpTransport } from './transports/tcp.js';
 import { SessionController } from './session.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as alogger from '../utils/alogger.js';
+import appConfig from '../config/appConfig.js';
 
+// Bootstrap — these bind at startup and can't hot-reload
 const MAILER_ENABLED        = process.env.MAILER_ENABLED === 'true';
 const BINKP_PORT            = parseInt(process.env.MAILER_BINKP_PORT) || 24554;
-const MAX_SESSIONS          = parseInt(process.env.MAILER_MAX_SESSIONS) || 10;
-const CONNECT_TIMEOUT       = (parseInt(process.env.MAILER_CONNECT_TIMEOUT) || 30) * 1000;
-const POLL_INTERVAL         = (parseInt(process.env.MAILER_POLL_INTERVAL) || 900) * 1000;
-const INBOUND_DIR           = process.env.MAILER_INBOUND_DIR  || process.env.ftninbound  || 'ftn/in';
-const OUTBOUND_DIR          = process.env.MAILER_OUTBOUND_DIR || process.env.ftnoutbound || 'ftn/out';
-const TEMP_DIR              = process.env.MAILER_TEMP_DIR     || 'ftn/tmp';
 
 class MailerManager extends EventEmitter {
 	constructor(options) {
@@ -113,7 +109,7 @@ class MailerManager extends EventEmitter {
 
 		var remoteAddr = (socket.remoteAddress || '?') + ':' + (socket.remotePort || '?');
 
-		if (this._sessions.length >= MAX_SESSIONS) {
+		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
 			alogger.writeClog(3, 'Mailer: rejecting inbound from ' + remoteAddr + ' (max sessions)', 'mailer', 'yellow');
 			// Send a binkp M_BSY frame before closing
 			var bsyMsg = Buffer.from('System busy, try later');
@@ -208,7 +204,7 @@ class MailerManager extends EventEmitter {
 			return;
 		}
 
-		if (this._sessions.length >= MAX_SESSIONS) {
+		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
 			alogger.writeClog(4, 'Mailer: cannot connect to ' + cd.address + ' — max sessions reached', 'mailer', 'yellow');
 			return;
 		}
@@ -216,7 +212,7 @@ class MailerManager extends EventEmitter {
 		alogger.writeClog(5, 'Mailer: connecting to ' + (cd.address || conn.uuid) + ' at ' + host + ':' + port, 'mailer', 'cyan');
 
 		if (mailerTransport === 'tcp') {
-			var transport = TcpTransport.connect(host, port, CONNECT_TIMEOUT);
+			var transport = TcpTransport.connect(host, port, appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) * 1000);
 			transport.once('connect', () => {
 				this._createSession(transport, 'caller', { connectionUUID: conn.uuid });
 			});
@@ -235,9 +231,9 @@ class MailerManager extends EventEmitter {
 	_createSession(transport, role, options) {
 		var session = new SessionController(transport, role, {
 			...options,
-			inboundDir:  INBOUND_DIR,
-			outboundDir: OUTBOUND_DIR,
-			tempDir:     TEMP_DIR
+			inboundDir:  appConfig.get('MAILER_INBOUND_DIR') || appConfig.get('ftninbound', 'ftn/in'),
+			outboundDir: appConfig.get('MAILER_OUTBOUND_DIR') || appConfig.get('ftnoutbound', 'ftn/out'),
+			tempDir:     appConfig.get('MAILER_TEMP_DIR', 'ftn/tmp')
 		});
 
 		this._sessions.push(session);
@@ -303,12 +299,13 @@ class MailerManager extends EventEmitter {
 	// Default zone (1): ftn/out/
 	// Alternate zones:  ftn/out.002/, ftn/out.003/, etc.
 	_getOutboundDirForZone(zone) {
+		var outDir = appConfig.get('MAILER_OUTBOUND_DIR') || appConfig.get('ftnoutbound', 'ftn/out');
 		var z = parseInt(zone) || 1;
 		if (z === 1) {
-			return OUTBOUND_DIR;
+			return outDir;
 		}
 		var zoneHex = z.toString(16).padStart(3, '0');
-		return OUTBOUND_DIR + '.' + zoneHex;
+		return outDir + '.' + zoneHex;
 	}
 
 	_hasOutboundMail(peerAddress) {
@@ -363,7 +360,7 @@ class MailerManager extends EventEmitter {
 				if (cd.status === 'CRASH') continue;
 
 				// NORMAL connections get timed polling
-				var interval = POLL_INTERVAL;
+				var interval = appConfig.getNumber('MAILER_POLL_INTERVAL', 900) * 1000;
 				var timer = setInterval(() => {
 					this.pollConnection(conn.uuid);
 				}, interval);

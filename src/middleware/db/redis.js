@@ -7,7 +7,6 @@ dotenv.config();
 // --- Connection ---
 const redisUrl = process.env.redis_url || 'redis://localhost:6379';
 const defaultCacheTTL = parseInt(process.env.cache_ttl) || 3600;
-const sessionTTL = parseInt(process.env.session_ttl) || 3600;
 
 let client = null;
 let connected = false;

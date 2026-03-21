@@ -1,11 +1,7 @@
 //node imports
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import * as dotenv from 'dotenv';
-
-//setup
-dotenv.config();
-const textdir = process.env.textdir
+import appConfig from "../config/appConfig.js";
 const escape_intermed = new RegExp("[!\"#$%&'()*+,-./]")
 const escape_terminator1 = new RegExp("[A-Za-z]")
 const escape_terminator2 = new RegExp("[@\\[\\]^_`\\{\\}\\|~]")
@@ -142,7 +138,7 @@ class BaseCommands {
 		var formats = this._getArtFormats();
 
 		for (var fmt of formats) {
-			var artdir = textdir + "/" + fmt.dir + "/" + subdir;
+			var artdir = appConfig.get('textdir', '') + "/" + fmt.dir + "/" + subdir;
 			if (!existsSync(artdir)) continue;
 
 			var artfile = artdir + "/" + filename + fmt.ext;
@@ -158,7 +154,7 @@ class BaseCommands {
 		var formats = this._getArtFormats();
 
 		for (var fmt of formats) {
-			var artdir = textdir + "/" + fmt.dir + "/" + subdir;
+			var artdir = appConfig.get('textdir', '') + "/" + fmt.dir + "/" + subdir;
 			if (!existsSync(artdir)) continue;
 
 			var filearray = readdirSync(artdir);

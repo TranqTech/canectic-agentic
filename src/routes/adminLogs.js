@@ -104,14 +104,16 @@ router.get('/history/:process', requireAdmin, async (req, res) => {
 		var rc = await redis.getClient();
 		var key = alogger.HISTORY_PREFIX + proc;
 
-		var entries = await rc.zRangeByScore(key, since, '+inf', {
-			LIMIT: { offset: 0, count: limit }
+		// Query newest entries first (REV), then reverse to chronological order.
+		// Without REV, LIMIT would return the oldest N and cut off recent entries.
+		var entries = await rc.zRange(key, '+inf', since, {
+			BY: 'SCORE', REV: true, LIMIT: { offset: 0, count: limit }
 		});
 
 		var parsed = [];
-		for (var entry of entries) {
+		for (var i = entries.length - 1; i >= 0; i--) {
 			try {
-				parsed.push(JSON.parse(entry));
+				parsed.push(JSON.parse(entries[i]));
 			} catch (_) {}
 		}
 
@@ -141,14 +143,15 @@ router.get('/history', requireAdmin, async (req, res) => {
 
 		for (var proc of VALID_PROCESSES) {
 			var key = alogger.HISTORY_PREFIX + proc;
-			var entries = await rc.zRangeByScore(key, since, '+inf', {
-				LIMIT: { offset: 0, count: limit }
+			// Newest first (REV), then reverse to chronological order
+			var entries = await rc.zRange(key, '+inf', since, {
+				BY: 'SCORE', REV: true, LIMIT: { offset: 0, count: limit }
 			});
 
 			result[proc] = [];
-			for (var entry of entries) {
+			for (var i = entries.length - 1; i >= 0; i--) {
 				try {
-					result[proc].push(JSON.parse(entry));
+					result[proc].push(JSON.parse(entries[i]));
 				} catch (_) {}
 			}
 		}

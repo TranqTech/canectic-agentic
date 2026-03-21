@@ -1,10 +1,6 @@
-import * as dotenv from 'dotenv';
 import * as alogger from "../../utils/alogger.js";
 import { getClient, hSet, hGetAll, del, exists, expire, keys } from "./redis.js";
-
-dotenv.config();
-
-const sessionTTL = parseInt(process.env.session_ttl) || 3600;
+import appConfig from "../../config/appConfig.js";
 
 const SESSION_PREFIX = "session:";
 const SESSION_INDEX_PREFIX = "session_index:";
@@ -15,7 +11,7 @@ async function sessionStore(sessionId, data, ttl) {
 	var sessionKey = SESSION_PREFIX + sessionId;
 	var ok = await hSet(sessionKey, data);
 	if (ok) {
-		await expire(sessionKey, ttl || sessionTTL);
+		await expire(sessionKey, ttl || appConfig.getNumber('session_ttl', 3600));
 		// Index this session by username for reverse lookup
 		if (data.username) {
 			await _addSessionIndex(data.username, sessionId);
@@ -60,7 +56,7 @@ async function sessionExists(sessionId) {
 }
 
 async function sessionRenew(sessionId, ttl) {
-	return await expire(SESSION_PREFIX + sessionId, ttl || sessionTTL);
+	return await expire(SESSION_PREFIX + sessionId, ttl || appConfig.getNumber('session_ttl', 3600));
 }
 
 async function sessionList() {
@@ -75,7 +71,7 @@ async function _addSessionIndex(username, sessionId) {
 		var rc = await getClient();
 		var indexKey = SESSION_INDEX_PREFIX + username.toLowerCase();
 		await rc.sAdd(indexKey, sessionId);
-		await rc.expire(indexKey, sessionTTL * 2);
+		await rc.expire(indexKey, appConfig.getNumber('session_ttl', 3600) * 2);
 	} catch (err) {
 		alogger.writeAlog(4, "Session index add error: " + err.message, "yellow");
 	}

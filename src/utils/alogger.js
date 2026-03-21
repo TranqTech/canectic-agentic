@@ -10,11 +10,12 @@ dotenv.config();
 const nodeenv = process.env.NODE_ENV || 'development';
 const loglevel = process.env.loglevel || 3;
 const logtoconsole = process.env.logtoconsole;
-const logallindev = process.env.logeverything
-const logfileindev = process.env.logfileindev
+const logallindev = process.env.logeverything;
+const logfileindev = process.env.logfileindev;
+const logfilename = process.env.defaultlogfile || "system.log";
 const logpath = path.join(path.dirname("./"), 'logs', nodeenv);
-const logfilename = process.env.defaultlogfile || "system.log"
 const logfile = logpath + '/' + logfilename;
+const LOG_BUS_RETENTION = (parseInt(process.env.LOG_BUS_RETENTION_HOURS) || 8) * 60 * 60 * 1000;
 
 // -----------------------------------------------------------------------
 // Log bus — Redis pub/sub + sorted set history
@@ -48,7 +49,6 @@ const logfile = logpath + '/' + logfilename;
 
 const LOG_CHANNEL = 'alog:stream';
 const HISTORY_PREFIX = 'alog:history:';
-const LOG_BUS_RETENTION = (parseInt(process.env.LOG_BUS_RETENTION_HOURS) || 8) * 60 * 60 * 1000;
 const TRIM_INTERVAL = 15 * 60 * 1000;  // trim every 15 minutes
 
 var _processName = 'unknown';
