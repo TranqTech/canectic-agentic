@@ -1,0 +1,110 @@
+//- File Info Modal — AJAX-loaded, reusable across file views
+//- Include this partial in any page that needs file info popups.
+//- Requires: clickable elements with data-file-uuid attribute.
+
+#fileInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
+  .modal-dialog.modal-dialog-centered.modal-lg
+    .modal-content.bg-dark.text-white
+      .modal-header
+        h4.modal-title#fim_title
+          i.bi.bi-file-earmark.me-2
+          span#fim_filename Loading...
+        button.btn-close.btn-close-white(type='button' data-bs-dismiss='modal')
+      .modal-body#fim_body
+        .text-center.py-4
+          .spinner-border.text-info(role='status')
+            span.visually-hidden Loading...
+      .modal-footer
+        a#fim_detail_link.btn.btn-outline-light.btn-sm(href='#')
+          i.bi.bi-box-arrow-up-right.me-1
+          | Full Detail
+        a#fim_download_link.btn.btn-success(href='#')
+          i.bi.bi-download.me-1
+          | Download
+
+script.
+  (function() {
+    var modal = new bootstrap.Modal(document.getElementById('fileInfoModal'));
+    var modalEl = document.getElementById('fileInfoModal');
+    var titleEl = document.getElementById('fim_filename');
+    var bodyEl = document.getElementById('fim_body');
+    var detailLink = document.getElementById('fim_detail_link');
+    var downloadLink = document.getElementById('fim_download_link');
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '—';
+      var d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '—';
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() + ' ' +
+        String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    }
+
+    function showFileInfo(uuid) {
+      // Reset to loading state
+      titleEl.textContent = 'Loading...';
+      bodyEl.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-info" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+      detailLink.href = '#';
+      downloadLink.href = '#';
+      modal.show();
+
+      fetch('/files/info/' + uuid + '.json')
+        .then(function(r) { return r.json(); })
+        .then(function(f) {
+          if (f.error) {
+            bodyEl.innerHTML = '<div class="text-center py-4"><p class="text-danger">' + f.error + '</p></div>';
+            return;
+          }
+
+          titleEl.textContent = f.filename;
+          detailLink.href = f.detail_url;
+          downloadLink.href = f.download_url;
+
+          var html = '<div class="row"><div class="col-md-6"><table class="table table-sm">';
+          html += '<tr><td class="text-muted">Filename</td><td><strong>' + escHtml(f.filename) + '</strong></td></tr>';
+          html += '<tr><td class="text-muted">Size</td><td>' + escHtml(f.file_size_display) + '</td></tr>';
+          html += '<tr><td class="text-muted">Uploaded</td><td>' + formatDate(f.upload_date) + '</td></tr>';
+          if (f.file_date) html += '<tr><td class="text-muted">File Date</td><td>' + formatDate(f.file_date) + '</td></tr>';
+          html += '</table></div><div class="col-md-6"><table class="table table-sm">';
+          html += '<tr><td class="text-muted">Downloads</td><td>' + (f.download_count || 0) + '</td></tr>';
+          if (f.uploader_name) html += '<tr><td class="text-muted">Uploader</td><td>' + escHtml(f.uploader_name) + '</td></tr>';
+          if (f.area_name) html += '<tr><td class="text-muted">Area</td><td>' + (f.group_name ? '<span class="text-muted">' + escHtml(f.group_name) + ' / </span>' : '') + '<a href="/files/area/' + f.area_shortcode + '">' + escHtml(f.area_name) + '</a></td></tr>';
+          if (f.source_type) html += '<tr><td class="text-muted">Source</td><td>' + escHtml(f.source_type) + '</td></tr>';
+          if (f.file_hash_crc32) html += '<tr><td class="text-muted">CRC-32</td><td><code>' + escHtml(f.file_hash_crc32) + '</code></td></tr>';
+          html += '</table></div></div>';
+
+          if (f.short_desc) {
+            html += '<div class="mt-2"><strong>Description</strong><p>' + escHtml(f.short_desc) + '</p></div>';
+          }
+
+          if (f.long_desc_html) {
+            html += '<div class="mt-2"><strong>Details</strong><div class="file-long-desc">' + f.long_desc_html + '</div></div>';
+          } else if (f.long_desc) {
+            html += '<div class="mt-2"><strong>Details</strong><pre class="bg-dark p-3 rounded border">' + escHtml(f.long_desc) + '</pre></div>';
+          }
+
+          bodyEl.innerHTML = html;
+        })
+        .catch(function(err) {
+          bodyEl.innerHTML = '<div class="text-center py-4"><p class="text-danger">Failed to load file info.</p></div>';
+        });
+    }
+
+    function escHtml(s) {
+      if (!s) return '';
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Expose globally for use by any page
+    window.showFileInfo = showFileInfo;
+
+    // Auto-bind: any element with data-file-uuid triggers the modal
+    document.addEventListener('click', function(e) {
+      var row = e.target.closest('[data-file-uuid]');
+      if (!row) return;
+      // Don't intercept clicks on links or buttons inside the row
+      if (e.target.closest('a, button')) return;
+      e.preventDefault();
+      showFileInfo(row.getAttribute('data-file-uuid'));
+    });
+  })();

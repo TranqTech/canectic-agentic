@@ -1,0 +1,773 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            if !network
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/nodelists')
+                          | Back
+                .card-body
+                  br
+                  h3 Network Not Found
+                  br
+            else
+              //- Breadcrumb
+              nav(aria-label='breadcrumb')
+                ol.breadcrumb
+                  li.breadcrumb-item
+                    a(href='/admin') Admin
+                  li.breadcrumb-item
+                    a(href='/admin/nodelists') Nodelists
+                  li.breadcrumb-item.active(aria-current='page')= network.name
+
+              //- Network info card
+              .card.mb-3
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2
+                        i.bi.bi-diagram-3.me-2
+                        = network.name
+                        |  Nodelist
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/nodelists')
+                          | Back
+                .card-body
+                  .row
+                    .col-md-3
+                      strong Domain:
+                      |  #{network.domain}
+                    .col-md-3
+                      strong Nodelist #:
+                      |  #{importInfo && importInfo.nodelist_number ? importInfo.nodelist_number : 'N/A'}
+                    .col-md-3
+                      strong Last Import:
+                      if importInfo && importInfo.last_import
+                        |  #{new Date(importInfo.last_import).toLocaleString()}
+                      else
+                        |  Never
+                    .col-md-3
+                      span.badge.bg-success.me-1= (stats && stats.totalActive) || 0
+                      |  active
+                      span.mx-1 |
+                      span.badge.bg-secondary.me-1= (stats && stats.totalInactive) || 0
+                      |  historical
+
+              //- Search and filter
+              .card.mb-3
+                .card-body
+                  .row
+                    .col-md-6
+                      .input-group
+                        span.input-group-text
+                          i.bi.bi-search
+                        input#nodeSearch.form-control(
+                          type='text'
+                          placeholder='Search by name, sysop, or address (e.g. 1:123/456)...'
+                          autocomplete='off'
+                        )
+                        button#searchClear.btn.btn-outline-secondary(type='button')
+                          i.bi.bi-x-lg
+                    .col-md-6
+                      .btn-group(role='group')
+                        input#filterActive.btn-check(type='radio' name='nodeFilter' value='active' autocomplete='off' checked)
+                        label.btn.btn-outline-success(for='filterActive') Active
+                        input#filterAdded.btn-check(type='radio' name='nodeFilter' value='added' autocomplete='off')
+                        label.btn.btn-outline-info(for='filterAdded') Recently Added
+                        input#filterRemoved.btn-check(type='radio' name='nodeFilter' value='removed' autocomplete='off')
+                        label.btn.btn-outline-warning(for='filterRemoved') Recently Removed
+                        input#filterAll.btn-check(type='radio' name='nodeFilter' value='all' autocomplete='off')
+                        label.btn.btn-outline-secondary(for='filterAll') All
+                      |
+                      button.btn.btn-outline-light.btn-sm(data-bs-toggle='modal' data-bs-target='#glossaryModal')
+                        i.bi.bi-book.me-1
+                        | Flag Glossary
+
+              //- Results table
+              .card
+                .card-body
+                  #loadingIndicator.text-center.d-none
+                    .spinner-border.text-info(role='status')
+                      span.visually-hidden Loading...
+                  table#nodeTable.table.table-hover.table-sm
+                    thead
+                      tr
+                        th Address
+                        th System Name
+                        th Sysop
+                        th Location
+                        th Hostname
+                        th Port
+                        th Connects Via
+                        th Flags
+                        th Status
+                    tbody
+                      if nodes && nodes.length > 0
+                        each node in nodes
+                          - var addr = node.zone + ':' + node.net + '/' + node.node
+                          - if (node.point > 0) addr += '.' + node.point
+                          - var statusKw = (node.keyword || '').toLowerCase()
+                          tr.node-row(
+                            style='cursor: pointer'
+                            data-zone=node.zone
+                            data-net=node.net
+                            data-node=node.node
+                            data-point=node.point || 0
+                            data-addr=addr
+                            data-system=node.system_name || ''
+                            data-sysop=node.sysop_name || ''
+                            data-location=node.location || ''
+                            data-hostname=node.hostname || ''
+                            data-binkp-port=node.binkp_port || ''
+                            data-telnet-port=node.telnet_port || ''
+                            data-phone=node.phone || ''
+                            data-baud=node.baud || ''
+                            data-flags=node.flags || ''
+                            data-keyword=node.keyword || ''
+                            data-is-cm=(node.is_cm ? 'true' : 'false')
+                            data-is-ip=(node.is_ip ? 'true' : 'false')
+                            data-is-ibn=(node.is_ibn ? 'true' : 'false')
+                            data-connection-types=JSON.stringify(node.connection_types || [])
+                            data-active=node.active
+                            data-first-seen=node.first_seen || ''
+                            data-last-seen=node.last_seen || ''
+                            data-removed-at=node.removed_at || ''
+                          )
+                            td
+                              code= addr
+                            td= node.system_name || ''
+                            td= node.sysop_name || ''
+                            td= node.location || ''
+                            td
+                              if node.hostname
+                                small= node.hostname
+                            td
+                              if node.binkp_port
+                                small= node.binkp_port
+                            td
+                              - var ctypes = node.connection_types || []
+                              each ct in ctypes
+                                span.badge.bg-info.me-1.mb-1= ct
+                            td
+                              if node.flags
+                                small.text-muted= node.flags.length > 30 ? node.flags.substring(0, 30) + '...' : node.flags
+                            td
+                              if !node.active
+                                span.badge.bg-dark.text-decoration-line-through Removed
+                              else if statusKw === 'down'
+                                span.badge.bg-danger Down
+                              else if statusKw === 'hold'
+                                span.badge.bg-warning Hold
+                              else if statusKw === 'pvt'
+                                span.badge.bg-secondary Pvt
+                              else
+                                span.badge.bg-success Active
+                      else
+                        tr
+                          td.text-center.text-muted(colspan='8') No nodes found. Import a nodelist to populate this list.
+
+          .col-1
+
+      //- Node Detail Modal
+      #nodeDetailModal.modal.fade(tabindex='-1' aria-labelledby='nodeDetailModalLabel' aria-hidden='true')
+        .modal-dialog.modal-lg
+          .modal-content
+            .modal-header
+              h5#nodeDetailModalLabel.modal-title Node Details
+              button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+            .modal-body
+              .row
+                .col-md-6
+                  h6 Address Information
+                  table.table.table-sm
+                    tr
+                      td
+                        strong Address:
+                      td
+                        code#detailAddr
+                    tr
+                      td
+                        strong Keyword:
+                      td
+                        span#detailKeyword
+                    tr
+                      td
+                        strong Status:
+                      td
+                        span#detailStatus
+                .col-md-6
+                  h6 System Information
+                  table.table.table-sm
+                    tr
+                      td
+                        strong System Name:
+                      td
+                        span#detailSystem
+                    tr
+                      td
+                        strong Sysop:
+                      td
+                        span#detailSysop
+                    tr
+                      td
+                        strong Location:
+                      td
+                        span#detailLocation
+              hr
+              .row
+                .col-md-6
+                  h6 Connectivity
+                  table.table.table-sm
+                    tr
+                      td
+                        strong Hostname:
+                      td
+                        span#detailHostname
+                    tr
+                      td
+                        strong BinkP Port:
+                      td
+                        span#detailBinkpPort
+                    tr
+                      td
+                        strong Telnet Port:
+                      td
+                        span#detailTelnetPort
+                    tr
+                      td
+                        strong Phone:
+                      td
+                        span#detailPhone
+                    tr
+                      td
+                        strong Baud:
+                      td
+                        span#detailBaud
+                .col-md-6
+                  h6 Capabilities
+                  table.table.table-sm
+                    tr
+                      td
+                        strong CM (Continuous Mail):
+                      td
+                        span#detailCM
+                    tr
+                      td
+                        strong IP Capable:
+                      td
+                        span#detailIP
+                    tr
+                      td
+                        strong IBN (BinkP):
+                      td
+                        span#detailIBN
+              hr
+              h6 Connects Via
+              p#detailConnectionTypes
+              hr
+              h6 Flags
+              p#detailFlags.text-muted.text-break
+              hr
+              .row
+                .col-md-4
+                  strong First Seen:
+                  br
+                  span#detailFirstSeen.text-muted
+                .col-md-4
+                  strong Last Seen:
+                  br
+                  span#detailLastSeen.text-muted
+                .col-md-4
+                  strong Removed At:
+                  br
+                  span#detailRemovedAt.text-muted
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Close
+
+      //- Flag Glossary Modal
+      #glossaryModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-xl.modal-dialog-scrollable
+          .modal-content
+            .modal-header
+              h5.modal-title
+                i.bi.bi-book.me-2
+                | FTN Nodelist Flag Glossary
+              button.btn-close(type='button' data-bs-dismiss='modal')
+            .modal-body
+              - var fc = flagCounts || {}
+              h6 Connection Types
+              p.text-muted These are derived from flags and indicate how a node can be reached.
+              table.table.table-sm
+                thead
+                  tr
+                    th Badge
+                    th Flag(s)
+                    th Description
+                    th.text-end Count
+                tbody
+                  tr
+                    td
+                      span.badge.bg-info binkp
+                    td
+                      code IBN
+                    td BinkP protocol — primary FTN internet transport. Default port 24554.
+                    td.text-end= fc['_ct_binkp'] || 0
+                  tr
+                    td
+                      span.badge.bg-info telnet
+                    td
+                      code ITN
+                    td Telnet accessible. Default port 23.
+                    td.text-end= fc['_ct_telnet'] || 0
+                  tr
+                    td
+                      span.badge.bg-info ip
+                    td
+                      code IP, INA, IBN, ITN
+                    td IP-capable node (inferred from any internet connectivity flag).
+                    td.text-end= fc['_ct_ip'] || 0
+                  tr
+                    td
+                      span.badge.bg-info vmodem
+                    td
+                      code IVM
+                    td Virtual Modem — IP-based modem emulation for legacy software.
+                    td.text-end= fc['_ct_vmodem'] || 0
+                  tr
+                    td
+                      span.badge.bg-info ssh
+                    td
+                      code ISSH
+                    td SSH accessible.
+                    td.text-end= fc['_ct_ssh'] || 0
+                  tr
+                    td
+                      span.badge.bg-info ifcico
+                    td
+                      code IFC
+                    td IFCico protocol — an older internet FTN mailer protocol.
+                    td.text-end= fc['_ct_ifcico'] || 0
+                  tr
+                    td
+                      span.badge.bg-info ift
+                    td
+                      code IFT
+                    td Internet File Transfer — file transfer capability.
+                    td.text-end= fc['_ct_ift'] || 0
+                  tr
+                    td
+                      span.badge.bg-info imi
+                    td
+                      code IMI
+                    td Internet Mail Interface — FTN mail transport via internet email.
+                    td.text-end= fc['_ct_imi'] || 0
+                  tr
+                    td
+                      span.badge.bg-info email
+                    td
+                      code IEM
+                    td Internet Email — email-based FTN transport.
+                    td.text-end= fc['_ct_email'] || 0
+                  tr
+                    td
+                      span.badge.bg-info icm
+                    td
+                      code ICM
+                    td Internet Call Manager.
+                    td.text-end= fc['_ct_icm'] || 0
+                  tr
+                    td
+                      span.badge.bg-info uucp
+                    td
+                      code IUC
+                    td UUCP (Unix-to-Unix Copy) transport.
+                    td.text-end= fc['_ct_uucp'] || 0
+                  tr
+                    td
+                      span.badge.bg-info ipv6
+                    td
+                      code IPV6
+                    td Supports IPv6 connections.
+                    td.text-end= fc['_ct_ipv6'] || 0
+                  tr
+                    td
+                      span.badge.bg-info ipv6only
+                    td
+                      code INO4
+                    td IPv6 only — no IPv4 connectivity.
+                    td.text-end= fc['_ct_ipv6only'] || 0
+                  tr
+                    td
+                      span.badge.bg-info binkd
+                    td
+                      code BINK, BND
+                    td BinkD software (alternate binkp indicator).
+                    td.text-end= fc['_ct_binkd'] || 0
+                  tr
+                    td
+                      span.badge.bg-info isdn
+                    td
+                      code ISDN
+                    td ISDN digital phone connection.
+                    td.text-end= fc['_ct_isdn'] || 0
+                  tr
+                    td
+                      span.badge.bg-info pots
+                    td (phone number)
+                    td Plain Old Telephone Service — has a published dialable phone number.
+                    td.text-end= fc['_ct_pots'] || 0
+
+              hr
+              h6 Nodelist Keywords
+              p.text-muted The keyword at the start of a nodelist entry defines the node's role in the FTN hierarchy.
+              table.table.table-sm
+                thead
+                  tr
+                    th Keyword
+                    th Description
+                    th.text-end Count
+                tbody
+                  tr
+                    td
+                      strong Zone
+                    td Zone Coordinator — top-level administrator for an entire zone (e.g., Zone 1 = North America).
+                    td.text-end= fc['_kw_zone'] || 0
+                  tr
+                    td
+                      strong Region
+                    td Region Coordinator — administers a region within a zone.
+                    td.text-end= fc['_kw_region'] || 0
+                  tr
+                    td
+                      strong Host
+                    td Net Host/Coordinator — administers a local network (net). Address ends in /0.
+                    td.text-end= fc['_kw_host'] || 0
+                  tr
+                    td
+                      strong Hub
+                    td Hub node — routes mail for a group of nodes within a net.
+                    td.text-end= fc['_kw_hub'] || 0
+                  tr
+                    td (none)
+                    td Regular node — a standard system on the network.
+                    td.text-end= fc['_kw_node'] || fc['_kw_'] || 0
+                  tr
+                    td
+                      span.text-danger Down
+                    td System is currently offline/unavailable.
+                    td.text-end= fc['_kw_down'] || 0
+                  tr
+                    td
+                      span.text-warning Hold
+                    td System is on hold — mail will be held for pickup rather than delivered.
+                    td.text-end= fc['_kw_hold'] || 0
+                  tr
+                    td
+                      span.text-secondary Pvt
+                    td Private node — listed but not accepting unsolicited connections.
+                    td.text-end= fc['_kw_pvt'] || 0
+
+              hr
+              h6 Common Capability Flags
+              table.table.table-sm
+                thead
+                  tr
+                    th Flag
+                    th Description
+                    th.text-end Count
+                tbody
+                  tr
+                    td
+                      code CM
+                    td Continuous Mail — system is available 24/7 for mail pickup/delivery.
+                    td.text-end= fc['CM'] || 0
+                  tr
+                    td
+                      code MO
+                    td Mail Only — no human callers, mail/file transfers only.
+                    td.text-end= fc['MO'] || 0
+                  tr
+                    td
+                      code XA
+                    td Bark and WaZOO file request protocols available.
+                    td.text-end= fc['XA'] || 0
+                  tr
+                    td
+                      code XX
+                    td WaZOO file request protocol available.
+                    td.text-end= fc['XX'] || 0
+                  tr
+                    td
+                      code XW
+                    td WaZOO file request only during Zone Mail Hour.
+                    td.text-end= fc['XW'] || 0
+                  tr
+                    td
+                      code INA:host
+                    td Internet Address — the hostname or IP for TCP connections.
+                    td.text-end= fc['INA'] || 0
+                  tr
+                    td
+                      code PING
+                    td System responds to ICMP ping.
+                    td.text-end= fc['PING'] || 0
+                  tr
+                    td
+                      code ENC
+                    td Encryption supported.
+                    td.text-end= fc['ENC'] || 0
+                  tr
+                    td
+                      code NPK
+                    td No packet encryption.
+                    td.text-end= fc['NPK'] || 0
+                  tr
+                    td
+                      code U
+                    td User (caller) access available.
+                    td.text-end= fc['U'] || 0
+                  tr
+                    td
+                      code NC
+                    td No compress — does not support packet compression.
+                    td.text-end= fc['NC'] || 0
+                  tr
+                    td
+                      code LO
+                    td Listed Only — accepts calls only from listed nodes.
+                    td.text-end= fc['LO'] || 0
+
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Close
+
+      script.
+        var networkId = !{JSON.stringify(network ? network.id : null)};
+        var searchTimeout = null;
+
+        // DataTables init
+        $(document).ready(function() {
+          var table = $('#nodeTable').DataTable({
+            pageLength: 50,
+            order: [[0, 'asc']],
+            language: {
+              search: '',
+              searchPlaceholder: 'Filter table...',
+              emptyTable: 'No nodes found'
+            },
+            columnDefs: [
+              { targets: [5, 6], orderable: false }
+            ]
+          });
+
+          // Row click -> detail modal
+          $('#nodeTable tbody').on('click', 'tr.node-row', function() {
+            var row = $(this);
+            document.getElementById('detailAddr').textContent = row.data('addr') || '';
+            document.getElementById('detailKeyword').textContent = row.data('keyword') || 'Normal';
+            document.getElementById('detailSystem').textContent = row.data('system') || '';
+            document.getElementById('detailSysop').textContent = row.data('sysop') || '';
+            document.getElementById('detailLocation').textContent = row.data('location') || '';
+            document.getElementById('detailHostname').textContent = row.data('hostname') || 'N/A';
+            document.getElementById('detailBinkpPort').textContent = row.data('binkp-port') || 'N/A';
+            document.getElementById('detailTelnetPort').textContent = row.data('telnet-port') || 'N/A';
+            document.getElementById('detailPhone').textContent = row.data('phone') || 'N/A';
+            document.getElementById('detailBaud').textContent = row.data('baud') || '';
+            document.getElementById('detailFlags').textContent = row.data('flags') || 'None';
+
+            // Connection types badges
+            var ctypes = row.data('connection-types') || [];
+            if (typeof ctypes === 'string') { try { ctypes = JSON.parse(ctypes); } catch(_) { ctypes = []; } }
+            var ctHtml = '';
+            if (ctypes.length > 0) {
+              for (var ci = 0; ci < ctypes.length; ci++) {
+                ctHtml += '<span class="badge bg-info me-1">' + ctypes[ci] + '</span>';
+              }
+            } else {
+              ctHtml = '<span class="text-muted">None detected</span>';
+            }
+            document.getElementById('detailConnectionTypes').innerHTML = ctHtml;
+            document.getElementById('detailFirstSeen').textContent = row.data('first-seen') ? new Date(row.data('first-seen')).toLocaleString() : 'N/A';
+            document.getElementById('detailLastSeen').textContent = row.data('last-seen') ? new Date(row.data('last-seen')).toLocaleString() : 'N/A';
+            document.getElementById('detailRemovedAt').textContent = row.data('removed-at') ? new Date(row.data('removed-at')).toLocaleString() : 'N/A';
+
+            // Boolean badges
+            document.getElementById('detailCM').innerHTML = row.data('is-cm') === true || row.data('is-cm') === 'true' ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+            document.getElementById('detailIP').innerHTML = row.data('is-ip') === true || row.data('is-ip') === 'true' ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+            document.getElementById('detailIBN').innerHTML = row.data('is-ibn') === true || row.data('is-ibn') === 'true' ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+
+            // Status badge
+            var active = row.data('active');
+            var kw = (row.data('keyword') || '').toLowerCase();
+            var statusHtml = '';
+            if (active === false || active === 'false') {
+              statusHtml = '<span class="badge bg-dark text-decoration-line-through">Removed</span>';
+            } else if (kw === 'down') {
+              statusHtml = '<span class="badge bg-danger">Down</span>';
+            } else if (kw === 'hold') {
+              statusHtml = '<span class="badge bg-warning">Hold</span>';
+            } else if (kw === 'pvt') {
+              statusHtml = '<span class="badge bg-secondary">Pvt</span>';
+            } else {
+              statusHtml = '<span class="badge bg-success">Active</span>';
+            }
+            document.getElementById('detailStatus').innerHTML = statusHtml;
+
+            // Update modal title
+            document.getElementById('nodeDetailModalLabel').textContent = 'Node ' + (row.data('addr') || '');
+
+            var modal = new bootstrap.Modal(document.getElementById('nodeDetailModal'));
+            modal.show();
+          });
+
+          // AJAX search with debounce
+          var searchInput = document.getElementById('nodeSearch');
+          var searchClear = document.getElementById('searchClear');
+
+          searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            var term = this.value.trim();
+            if (term.length === 0) {
+              // Reset: just use DataTables built-in filter
+              table.search('').draw();
+              return;
+            }
+            if (term.length < 2) return;
+
+            searchTimeout = setTimeout(function() {
+              doAjaxSearch(term, table);
+            }, 400);
+          });
+
+          searchClear.addEventListener('click', function() {
+            searchInput.value = '';
+            table.search('').draw();
+            // Reload page to reset to default filter
+            var activeFilter = document.querySelector('input[name="nodeFilter"]:checked');
+            if (activeFilter) {
+              loadFilteredResults(activeFilter.value, table);
+            }
+          });
+
+          // Filter button group
+          document.querySelectorAll('input[name="nodeFilter"]').forEach(function(radio) {
+            radio.addEventListener('change', function() {
+              searchInput.value = '';
+              loadFilteredResults(this.value, table);
+            });
+          });
+        });
+
+        function doAjaxSearch(term, table) {
+          document.getElementById('loadingIndicator').classList.remove('d-none');
+          fetch('/admin/nodelist/' + networkId + '/search.json?q=' + encodeURIComponent(term) + '&limit=100')
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              rebuildTable(data.nodes || [], table);
+              document.getElementById('loadingIndicator').classList.add('d-none');
+            })
+            .catch(function(err) {
+              console.error('Search error:', err);
+              document.getElementById('loadingIndicator').classList.add('d-none');
+            });
+        }
+
+        function loadFilteredResults(filter, table) {
+          document.getElementById('loadingIndicator').classList.remove('d-none');
+          var url = '/admin/nodelist/' + networkId + '/search.json?filter=' + encodeURIComponent(filter) + '&limit=500';
+          fetch(url)
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              rebuildTable(data.nodes || [], table);
+              document.getElementById('loadingIndicator').classList.add('d-none');
+            })
+            .catch(function(err) {
+              console.error('Filter error:', err);
+              document.getElementById('loadingIndicator').classList.add('d-none');
+            });
+        }
+
+        function rebuildTable(nodes, table) {
+          table.clear();
+          for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            var addr = n.zone + ':' + n.net + '/' + n.node;
+            if (n.point > 0) addr += '.' + n.point;
+            var kw = (n.keyword || '').toLowerCase();
+
+            var statusBadge = '';
+            if (!n.active) {
+              statusBadge = '<span class="badge bg-dark text-decoration-line-through">Removed</span>';
+            } else if (kw === 'down') {
+              statusBadge = '<span class="badge bg-danger">Down</span>';
+            } else if (kw === 'hold') {
+              statusBadge = '<span class="badge bg-warning">Hold</span>';
+            } else if (kw === 'pvt') {
+              statusBadge = '<span class="badge bg-secondary">Pvt</span>';
+            } else {
+              statusBadge = '<span class="badge bg-success">Active</span>';
+            }
+
+            var flags = n.flags || '';
+            var flagsTrunc = flags.length > 30 ? flags.substring(0, 30) + '...' : flags;
+
+            var rowNode = table.row.add([
+              '<code>' + addr + '</code>',
+              n.system_name || '',
+              n.sysop_name || '',
+              n.location || '',
+              n.hostname ? '<small>' + n.hostname + '</small>' : '',
+              n.binkp_port ? '<small>' + n.binkp_port + '</small>' : '',
+              flags ? '<small class="text-muted">' + flagsTrunc + '</small>' : '',
+              statusBadge
+            ]).node();
+
+            // Attach data attributes for detail modal
+            var $row = $(rowNode);
+            $row.addClass('node-row').css('cursor', 'pointer');
+            $row.data('addr', addr);
+            $row.data('zone', n.zone);
+            $row.data('net', n.net);
+            $row.data('node', n.node);
+            $row.data('point', n.point || 0);
+            $row.data('system', n.system_name || '');
+            $row.data('sysop', n.sysop_name || '');
+            $row.data('location', n.location || '');
+            $row.data('hostname', n.hostname || '');
+            $row.data('binkp-port', n.binkp_port || '');
+            $row.data('telnet-port', n.telnet_port || '');
+            $row.data('phone', n.phone || '');
+            $row.data('baud', n.baud || '');
+            $row.data('flags', n.flags || '');
+            $row.data('keyword', n.keyword || '');
+            $row.data('is-cm', n.is_cm);
+            $row.data('is-ip', n.is_ip);
+            $row.data('is-ibn', n.is_ibn);
+            $row.data('active', n.active);
+            $row.data('first-seen', n.first_seen || '');
+            $row.data('last-seen', n.last_seen || '');
+            $row.data('removed-at', n.removed_at || '');
+          }
+          table.draw();
+        }

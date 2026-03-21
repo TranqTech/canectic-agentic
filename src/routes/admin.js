@@ -38,8 +38,12 @@ import * as fileNetworkAreas from '../models/fileNetworkAreas.js';
 import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
 import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
+import * as ftnNodelist from '../models/ftnNodelist.js';
+import * as flash from '../middleware/db/flash.js';
+import multer from 'multer';
 import * as fs from 'fs';
 import * as path from 'path';
+import os from 'os';
 
 //setup
 router.use(cookieParser());
@@ -546,7 +550,9 @@ router.get('/network/:uuid', async (req, res, next) => {
 		networkareas: networkareas || [],
 		arealist: arealist || [],
 		fileAreaMappings: fileAreaMappings || [],
-		fileArealist: fileArealist || []
+		fileArealist: fileArealist || [],
+		allFileAreasList: (network && network.network_type === 'FTN') ? (fileAreaMappings || []) : [],
+		networkConfig: (network && network.config) ? (typeof network.config === 'string' ? JSON.parse(network.config) : network.config) : {}
 	});
 });
 
@@ -557,6 +563,14 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 	if (currentuser) {
 		formObj.updatedByName = currentuser.name;
 		formObj.updatedByUUID = currentuser.uuid;
+	}
+	// Merge nodelist_area_shortcode into the network's config JSONB
+	if (formObj.nodelist_area_shortcode !== undefined) {
+		var dbnet = await msgNetworks.getNetworkByUUID(uuid);
+		var existingConfig = (dbnet && dbnet.config) ? (typeof dbnet.config === 'string' ? JSON.parse(dbnet.config) : dbnet.config) : {};
+		existingConfig.nodelist_area_shortcode = formObj.nodelist_area_shortcode || null;
+		formObj.config = existingConfig;
+		delete formObj.nodelist_area_shortcode;
 	}
 	var result = await msgNetworks.updateNetwork(uuid, formObj);
 	if (result.status !== true) {
@@ -1430,6 +1444,9 @@ router.get('/fileGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 		return res.status(404).json({ error: 'Group not found' });
 	}
 	res.json({
+		browse_security: group.browse_security || 0,
+		browse_perm_flags: group.browse_perm_flags || [],
+		browse_rest_flags: group.browse_rest_flags || [],
 		read_security: group.read_security || 0,
 		post_security: group.post_security || 0,
 		read_perm_flags: group.read_perm_flags || [],
@@ -2143,6 +2160,216 @@ router.post('/config/reset/:key', urlencodedParser, requireAdmin, async (req, re
 	}
 
 	res.redirect('/admin/config');
+});
+
+// ---------------------------------------------------------------------------
+// Nodelist Management
+// ---------------------------------------------------------------------------
+
+var nodelistUpload = multer({
+	dest: path.join(os.tmpdir(), 'canectic-nodelist-uploads'),
+	limits: { fileSize: 50 * 1024 * 1024 }  // 50 MB max
+});
+
+// GET /admin/nodelists — Main nodelist management page
+router.get('/nodelists', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var ftnNetworks      = await msgNetworks.getNetworksByType('FTN');
+	var importInfoMap    = {};
+	var statsMap         = {};
+	for (var i = 0; i < ftnNetworks.length; i++) {
+		var net = ftnNetworks[i];
+		importInfoMap[net.id] = await ftnNodelist.getImportInfo(net.id);
+		statsMap[net.id]      = await ftnNodelist.getNetworkStats(net.id);
+	}
+	res.locals.flash = await flash.get(req);
+	res.render('admin/nodelists/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Nodelist Management',
+		activelink: 'networks',
+		currentuser: currentuser,
+		ftnNetworks: ftnNetworks,
+		importInfoMap: importInfoMap,
+		statsMap: statsMap
+	});
+});
+
+// POST /admin/nodelists/import — Upload and enqueue nodelist import
+router.post('/nodelists/import', nodelistUpload.single('nodelist'), requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.body.network_id);
+	if (!networkId || !req.file) {
+		await flash.setOne(req, 'danger', 'Network and nodelist file are required.');
+		return res.redirect('/admin/nodelists');
+	}
+
+	// Verify the network exists and is FTN
+	var network = await msgNetworks.getNetworkById(networkId);
+	if (!network || network.network_type !== 'FTN') {
+		await flash.setOne(req, 'danger', 'Invalid FTN network selected.');
+		// Clean up uploaded file
+		if (req.file && req.file.path) {
+			try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+		}
+		return res.redirect('/admin/nodelists');
+	}
+
+	var filePath = req.file.path;
+	alogger.writeAlog(3, '[admin/nodelists] Import queued for network ' + network.name + ' (id=' + networkId + '), file: ' + req.file.originalname, 'cyan');
+
+	try {
+		await jobs.enqueueNodelistImport({ filePath: filePath, networkId: networkId, originalName: req.file.originalname });
+		await flash.setOne(req, 'success', 'Nodelist import queued for ' + network.name + '. The file will be processed by the worker.');
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/nodelists] Failed to enqueue import: ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Failed to queue import: ' + err.message);
+		// Clean up uploaded file on failure
+		try { fs.unlinkSync(filePath); } catch (e) { /* ignore */ }
+	}
+
+	res.redirect('/admin/nodelists');
+});
+
+// POST /admin/nodelists/clear/:networkId — Clear all nodelist data for a network
+router.post('/nodelists/clear/:networkId', urlencodedParser, requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	if (!networkId) {
+		await flash.setOne(req, 'danger', 'Invalid network ID.');
+		return res.redirect('/admin/nodelists');
+	}
+
+	var network = await msgNetworks.getNetworkById(networkId);
+	if (!network) {
+		await flash.setOne(req, 'danger', 'Network not found.');
+		return res.redirect('/admin/nodelists');
+	}
+
+	try {
+		await ftnNodelist.clearNetwork(networkId);
+		alogger.writeAlog(3, '[admin/nodelists] Cleared all nodelist data for ' + network.name + ' (id=' + networkId + ')', 'yellow');
+		await flash.setOne(req, 'success', 'All nodelist data cleared for ' + network.name + '.');
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/nodelists] Clear failed for network ' + networkId + ': ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Failed to clear nodelist data: ' + err.message);
+	}
+
+	res.redirect('/admin/nodelists');
+});
+
+// GET /admin/nodelist/:networkId — Browse/search nodelist for a specific network
+router.get('/nodelist/:networkId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+
+	if (!network || network.network_type !== 'FTN') {
+		return res.render('admin/nodelists/view', {
+			sufficientAccess: sufficientAccess,
+			title: 'Nodelist Browser',
+			activelink: 'networks',
+			currentuser: currentuser,
+			network: null,
+			importInfo: null,
+			stats: null,
+			nodes: []
+		});
+	}
+
+	var importInfo = await ftnNodelist.getImportInfo(networkId);
+	var stats      = await ftnNodelist.getNetworkStats(networkId);
+	// Default: load active nodes (limited to first 500 for performance)
+	var nodes = await ftnNodelist.searchNodes(networkId, '', 50000);
+
+	// Count connection types and flags for glossary
+	var flagCounts = {};
+	try {
+		var allFlags = await postgres.query(
+			"SELECT flags, connection_types FROM ftn_nodelist WHERE network_id = $1 AND active = true",
+			[networkId]
+		);
+		for (var fr of (allFlags || [])) {
+			// Count raw flags
+			if (fr.flags) {
+				var parts = fr.flags.split(',');
+				for (var fp of parts) {
+					var fk = fp.trim().split(':')[0].toUpperCase();
+					if (fk) flagCounts[fk] = (flagCounts[fk] || 0) + 1;
+				}
+			}
+			// Count connection types
+			var ct = fr.connection_types || [];
+			if (typeof ct === 'string') { try { ct = JSON.parse(ct); } catch(_) { ct = []; } }
+			for (var c of ct) {
+				var ck = '_ct_' + c;
+				flagCounts[ck] = (flagCounts[ck] || 0) + 1;
+			}
+		}
+		// Count keywords
+		var kwRows = await postgres.query(
+			"SELECT keyword, COUNT(*) as cnt FROM ftn_nodelist WHERE network_id = $1 AND active = true GROUP BY keyword",
+			[networkId]
+		);
+		for (var kw of (kwRows || [])) {
+			flagCounts['_kw_' + (kw.keyword || 'node').toLowerCase()] = parseInt(kw.cnt);
+		}
+	} catch (_) {}
+
+	res.render('admin/nodelists/view', {
+		sufficientAccess: sufficientAccess,
+		title: 'Nodelist Browser',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		importInfo: importInfo,
+		stats: stats,
+		nodes: nodes || [],
+		flagCounts: flagCounts
+	});
+});
+
+// GET /admin/nodelist/:networkId/search.json — JSON search/filter endpoint
+router.get('/nodelist/:networkId/search.json', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	if (!sufficientAccess) {
+		return res.status(403).json({ error: 'Unauthorized' });
+	}
+
+	var networkId = parseInt(req.params.networkId);
+	if (!networkId) {
+		return res.status(400).json({ error: 'Invalid network ID' });
+	}
+
+	var searchTerm = req.query.q || '';
+	var filter     = req.query.filter || 'active';
+	var limit      = Math.min(parseInt(req.query.limit) || 50000, 50000);
+	var nodes      = [];
+
+	try {
+		if (searchTerm) {
+			nodes = await ftnNodelist.searchNodes(networkId, searchTerm, limit);
+		} else if (filter === 'added') {
+			nodes = await ftnNodelist.getRecentlyAdded(networkId, 7);
+		} else if (filter === 'removed') {
+			nodes = await ftnNodelist.getRecentlyRemoved(networkId, 7);
+		} else if (filter === 'all') {
+			// All nodes (active + inactive), limited
+			nodes = await postgres.query(
+				'SELECT * FROM ftn_nodelist WHERE network_id = $1 ORDER BY zone, net, node LIMIT $2',
+				[networkId, limit]
+			);
+			nodes = nodes || [];
+		} else {
+			// Default: active nodes
+			nodes = await ftnNodelist.searchNodes(networkId, '', limit);
+		}
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/nodelists] Search error: ' + err.message, 'redbright');
+		return res.status(500).json({ error: 'Search failed' });
+	}
+
+	res.json({ nodes: nodes });
 });
 
 export { router };

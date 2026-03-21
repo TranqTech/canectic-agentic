@@ -20,6 +20,10 @@ import * as userFilePointers from '../models/userFilePointers.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
+import * as fileNetworkAreas from '../models/fileNetworkAreas.js';
+import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
+import * as fileDistribution from '../models/fileDistribution.js';
+import * as jobs from '../queues/jobs.js';
 
 //setup
 router.use(cookieParser());
@@ -77,6 +81,28 @@ function parseFlags(val) {
 }
 
 // Helper: check if user has sufficient access to read a file area or group.
+function checkFileAreaBrowseAccess(sessionUser, areaOrGroup) {
+	if (!areaOrGroup) return false;
+	var userSecurity = parseInt(sessionUser.security) || 0;
+	// browse_security is the visibility gate; falls back to read_security if not set
+	var browseSec = areaOrGroup.browse_security !== null && areaOrGroup.browse_security !== undefined
+		? parseInt(areaOrGroup.browse_security)
+		: (areaOrGroup.read_security ? parseInt(areaOrGroup.read_security) : 0);
+	if (userSecurity < browseSec) return false;
+
+	var userPerms  = parseFlags(sessionUser.permissionflags);
+	var userRestrs = parseFlags(sessionUser.restrictionflags);
+	// browse flags fall back to read flags if not set
+	var reqFlags   = parseFlags(areaOrGroup.browse_perm_flags || areaOrGroup.read_perm_flags);
+	var restFlags  = parseFlags(areaOrGroup.browse_rest_flags || areaOrGroup.read_rest_flags);
+
+	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
+	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
+
+	return true;
+}
+
+// Helper: check if user has sufficient access to download from a file area or group.
 function checkFileAreaReadAccess(sessionUser, areaOrGroup) {
 	if (!areaOrGroup) return false;
 	var userSecurity = parseInt(sessionUser.security) || 0;
@@ -121,6 +147,103 @@ function formatBytes(bytes) {
 }
 
 // -------------------------------------------------------
+// File info JSON (for modal AJAX load)
+// -------------------------------------------------------
+
+router.get('/info/:uuid.json', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) {
+		return res.status(401).json({ error: 'Not authenticated' });
+	}
+
+	var uuid = req.params.uuid.toLowerCase().trim();
+	var entry = await fileEntries.getEntryByUUID(uuid);
+	if (!entry) {
+		return res.status(404).json({ error: 'File not found' });
+	}
+
+	var fileArea = entry.area_shortcode ? await fileAreas.getAreaByShortcode(entry.area_shortcode) : null;
+	if (!fileArea || !checkFileAreaReadAccess(currentuser, fileArea)) {
+		return res.status(403).json({ error: 'Access denied' });
+	}
+
+	var fileGroup = fileArea.group_shortcode ? await fileGroups.getGroupByShortcode(fileArea.group_shortcode) : null;
+
+	res.json({
+		uuid: entry.uuid,
+		filename: entry.filename,
+		file_size: parseInt(entry.file_size) || 0,
+		file_size_display: formatBytes(entry.file_size),
+		file_date: entry.file_date,
+		upload_date: entry.upload_date,
+		uploader_name: entry.uploader_name || null,
+		download_count: entry.download_count || 0,
+		short_desc: entry.short_desc || null,
+		long_desc: entry.long_desc || null,
+		long_desc_html: entry.long_desc_html || null,
+		file_hash_crc32: entry.file_hash_crc32 || null,
+		file_hash_sha256: entry.file_hash_sha256 || null,
+		source_type: entry.source_type || null,
+		area_name: fileArea ? fileArea.name : null,
+		area_shortcode: fileArea ? fileArea.shortcode : null,
+		group_name: fileGroup ? fileGroup.name : null,
+		download_url: '/files/download/' + entry.uuid,
+		detail_url: '/files/view/' + entry.uuid
+	});
+});
+
+// -------------------------------------------------------
+// Search
+// -------------------------------------------------------
+
+router.get('/search', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) {
+		return res.render('files/search', {
+			title: 'File Search',
+			currentuser: null,
+			results: [],
+			query: '',
+			totalResults: 0,
+			formatBytes: formatBytes
+		});
+	}
+
+	var query = (req.query.q || '').trim();
+	var results = [];
+	var totalResults = 0;
+
+	if (query.length > 0) {
+		var userId = await resolveUserId(currentuser);
+		var allResults = await fileEntries.searchEntries(query, { limit: 200 });
+
+		// Filter results by access control — only show files in areas the user can access
+		for (var entry of allResults) {
+			var area = entry.area_shortcode ? await fileAreas.getAreaByShortcode(entry.area_shortcode) : null;
+			if (area && checkFileAreaBrowseAccess(currentuser, area)) {
+				var group = area.group_shortcode ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
+				entry._areaName = area.name;
+				entry._areaShortcode = area.shortcode;
+				entry._groupName = group ? group.name : '';
+				results.push(entry);
+			}
+		}
+		totalResults = results.length;
+		// Trim to display limit
+		if (results.length > 50) results = results.slice(0, 50);
+	}
+
+	res.render('files/search', {
+		title: query ? 'Search: ' + query : 'File Search',
+		currentuser: currentuser,
+		results: results,
+		query: query,
+		totalResults: totalResults,
+		formatBytes: formatBytes
+	});
+});
+
+// -------------------------------------------------------
 // File Routes
 // -------------------------------------------------------
 
@@ -139,12 +262,12 @@ router.get('/', async (req, res) => {
 	var grouplist = await fileGroups.getActiveGroups();
 
 	// Filter groups by read access
-	grouplist = grouplist.filter(function(g) { return checkFileAreaReadAccess(currentuser, g); });
+	grouplist = grouplist.filter(function(g) { return checkFileAreaBrowseAccess(currentuser, g); });
 
 	// Attach new file counts per group and filter out groups with zero accessible areas
 	for (var group of grouplist) {
 		var areas = await fileAreas.getAreasInGroup(group.shortcode);
-		areas = areas.filter(function(a) { return a.active && checkFileAreaReadAccess(currentuser, a); });
+		areas = areas.filter(function(a) { return a.active && checkFileAreaBrowseAccess(currentuser, a); });
 		var groupNewCount = 0;
 		var groupFileCount = 0;
 		for (var area of areas) {
@@ -194,7 +317,7 @@ router.get('/group/:shortcode', async (req, res) => {
 	}
 
 	// Check group-level read access
-	if (!checkFileAreaReadAccess(currentuser, fileGroup)) {
+	if (!checkFileAreaBrowseAccess(currentuser, fileGroup)) {
 		return res.render('files/groups/view', {
 			title: 'Access Denied',
 			currentuser: currentuser,
@@ -206,7 +329,7 @@ router.get('/group/:shortcode', async (req, res) => {
 	var arealist = await fileAreas.getAreasInGroup(shortcode);
 
 	// Filter areas by active + read access
-	arealist = arealist.filter(function(a) { return a.active && checkFileAreaReadAccess(currentuser, a); });
+	arealist = arealist.filter(function(a) { return a.active && checkFileAreaBrowseAccess(currentuser, a); });
 
 	// Attach new counts and upload access per area
 	var userId = await resolveUserId(currentuser);
@@ -232,7 +355,7 @@ router.get('/area/:shortcode', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var shortcode = req.params.shortcode.toUpperCase().trim();
 	var fileArea = currentuser ? await fileAreas.getAreaByShortcode(shortcode) : null;
-	var sufficientAccess = currentuser && fileArea && checkFileAreaReadAccess(currentuser, fileArea);
+	var sufficientAccess = currentuser && fileArea && checkFileAreaBrowseAccess(currentuser, fileArea);
 
 	if (!currentuser || !fileArea || !sufficientAccess) {
 		return res.render('files/areas/view', {
@@ -248,6 +371,7 @@ router.get('/area/:shortcode', async (req, res) => {
 		});
 	}
 
+	var canDownload = checkFileAreaReadAccess(currentuser, fileArea);
 	var canUpload = checkFileAreaUploadAccess(currentuser, fileArea);
 
 	// Load parent group for breadcrumb
@@ -270,6 +394,7 @@ router.get('/area/:shortcode', async (req, res) => {
 		title: fileArea.name,
 		currentuser: currentuser,
 		sufficientAccess: true,
+		canDownload: canDownload,
 		canUpload: canUpload,
 		fileArea: fileArea,
 		fileGroup: fileGroup,
@@ -419,7 +544,7 @@ router.get('/area/:shortcode/files.json', async (req, res) => {
 		return res.status(404).json({ error: 'Area not found' });
 	}
 
-	if (!checkFileAreaReadAccess(currentuser, fileArea)) {
+	if (!checkFileAreaBrowseAccess(currentuser, fileArea)) {
 		return res.status(403).json({ error: 'Access denied' });
 	}
 
@@ -629,6 +754,22 @@ router.post('/area/:shortcode/upload', upload.single('file'), async (req, res) =
 
 		// Update area stats
 		await fileAreas.updateStatsForArea(shortcode);
+
+		// If this area is mapped to a network, create distribution rows and enqueue TIC outbound
+		try {
+			var networkMappings = await fileNetworkAreas.getNetworksByFileArea(fileArea.id);
+			if (networkMappings && networkMappings.length > 0) {
+				var subscribedConns = await filePeerSubscriptions.getSubscribedConnections(fileArea.id);
+				if (subscribedConns && subscribedConns.length > 0) {
+					var connIds = subscribedConns.map(function(c) { return c.peer_connection_id; });
+					await fileDistribution.createDistributionRows(result.entryId, connIds, 'tic');
+					await jobs.enqueueTicOutbound();
+					alogger.writeAlog(3, "File upload hatched to " + connIds.length + " peer(s) for TIC distribution", "cyan");
+				}
+			}
+		} catch (distErr) {
+			alogger.writeAlog(3, "File upload TIC distribution error: " + distErr.message, "yellow");
+		}
 
 		alogger.writeAlog(3, "File uploaded: " + originalName + " to " + shortcode + " by " + (currentuser.username || 'unknown'), "greenbright");
 

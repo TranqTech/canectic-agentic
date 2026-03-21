@@ -107,8 +107,9 @@ async function main() {
 	// completes inbound file transfers.
 	if (typeof mailerManager.on === 'function') {
 		mailerManager.on('filesReceived', async (data) => {
-			alogger.writeAlog(2, `[Mailer] Files received from ${data.connectionUUID || 'unknown'}, enqueueing FTN inbound toss`, "cyan");
+			alogger.writeAlog(2, `[Mailer] Files received from ${data.connectionUUID || 'unknown'}, enqueueing FTN inbound + TIC toss`, "cyan");
 			await jobs.enqueueFtnInbound({ connectionUUID: data.connectionUUID });
+			await jobs.enqueueTicInbound({ connectionUUID: data.connectionUUID });
 			eventPublisher.publish(EVENTS.MAILER_SESSION_END, {
 				connectionUUID: data.connectionUUID,
 				filesReceived: data.fileCount || 0,

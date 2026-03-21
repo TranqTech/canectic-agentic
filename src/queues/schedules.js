@@ -44,6 +44,17 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily nodelist auto-import scan
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('scan-nodelists-daily', {
+			pattern: '0 4 * * *',   // 4:00 AM daily
+		}, {
+			name: 'scan-nodelists',
+			data: {},
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// FTN: mailer poll schedules
 		// -----------------------------------------------------------------
 		var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');

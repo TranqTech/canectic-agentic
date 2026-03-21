@@ -1,0 +1,78 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          //- Breadcrumb
+          nav(aria-label='breadcrumb')
+            ol.breadcrumb
+              li.breadcrumb-item
+                a(href='/files') Files
+              li.breadcrumb-item.active(aria-current='page') Search
+
+          .card
+            .card-header.bg-darkblue.text-white
+              h2
+                i.bi.bi-search
+                |  File Search
+            .card-body
+              form(action='/files/search' method='GET')
+                .row
+                  .col-md-8.offset-md-2
+                    .input-group.mb-3
+                      input.form-control(
+                        type='text'
+                        name='q'
+                        value=query
+                        placeholder='Search by filename, description, or content...'
+                        autofocus
+                      )
+                      button.btn.btn-success(type='submit')
+                        i.bi.bi-search
+                        |  Search
+
+              if query && query.length > 0
+                if results && results.length > 0
+                  p.text-muted
+                    = totalResults + ' result(s) for "'
+                    strong= query
+                    | '"'
+                  .table-responsive
+                    table.table.table-hover
+                      thead
+                        tr
+                          th Filename
+                          th Area
+                          th Size
+                          th Description
+                          th Downloads
+                      tbody
+                        each file in results
+                          tr(data-file-uuid=file.uuid style='cursor:pointer')
+                            td
+                              i.bi.bi-file-earmark.me-1
+                              strong= file.filename
+                            td
+                              if file._groupName
+                                span.text-muted= file._groupName + ' / '
+                              if file._areaShortcode
+                                a(href='/files/area/' + file._areaShortcode)= file._areaName || file._areaShortcode
+                            td.text-nowrap= formatBytes(file.file_size || 0)
+                            td= file.short_desc || ''
+                            td.text-center= file.download_count || 0
+                else
+                  .text-center.py-4
+                    h5.text-muted No results found for "#{query}"
+
+  include partials/_fileInfoModal

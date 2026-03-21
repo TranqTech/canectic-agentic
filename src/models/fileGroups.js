@@ -46,6 +46,9 @@ async function newGroup(formObj) {
 		description: formObj.description.trim(),
 		shortcode: shorty,
 		base_dir: formObj.base_dir ? formObj.base_dir.trim() : null,
+		browse_security: parseInt(formObj.browsesecurity) || 0,
+		browse_perm_flags: normalizeFlags(formObj.browse_perm_flags),
+		browse_rest_flags: normalizeFlags(formObj.browse_rest_flags),
 		read_security: parseInt(formObj.readsecurity) || 0,
 		post_security: parseInt(formObj.postsecurity) || 0,
 		created_at: new Date(),
@@ -140,9 +143,12 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.name        !== undefined) updateObj.name        = formObj.name.trim();
 	if (formObj.description !== undefined) updateObj.description = formObj.description.trim();
 	if (formObj.base_dir    !== undefined) updateObj.base_dir    = formObj.base_dir.trim() || null;
+	if (formObj.browsesecurity !== undefined) updateObj.browse_security = parseInt(formObj.browsesecurity);
 	if (formObj.readsecurity  !== undefined) updateObj.read_security = parseInt(formObj.readsecurity);
 	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
 	if (formObj.active      !== undefined) updateObj.active      = (formObj.active === "true" || formObj.active === true);
+	if (formObj.browse_perm_flags !== undefined) updateObj.browse_perm_flags = normalizeFlags(formObj.browse_perm_flags);
+	if (formObj.browse_rest_flags !== undefined) updateObj.browse_rest_flags = normalizeFlags(formObj.browse_rest_flags);
 	if (formObj.read_perm_flags !== undefined) updateObj.read_perm_flags = normalizeFlags(formObj.read_perm_flags);
 	if (formObj.read_rest_flags !== undefined) updateObj.read_rest_flags = normalizeFlags(formObj.read_rest_flags);
 	if (formObj.post_perm_flags !== undefined) updateObj.post_perm_flags = normalizeFlags(formObj.post_perm_flags);

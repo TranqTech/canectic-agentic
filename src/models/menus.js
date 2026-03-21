@@ -356,6 +356,7 @@ function getAvailableCommands() {
 		{ name: 'fileBrowser',     label: 'File Browser',      needsArg: false },
 		{ name: 'downloadBatch',   label: 'Download Batch',    needsArg: false },
 		{ name: 'fileUpload',      label: 'Upload File',       needsArg: false },
+		{ name: 'fileSearch',      label: 'File Search',       needsArg: false },
 	];
 }
 

@@ -288,3 +288,51 @@ export async function enqueueRecalcAreaCounts() {
 		jobId: 'recalc-area-counts',
 	});
 }
+
+/**
+ * Regenerate long_desc_html for file entries.
+ * Called by: admin panel, CLI.
+ */
+export async function enqueueRegenFileDescHtml(opts = {}) {
+	return maintenanceQueue.add('regen-file-desc-html', {
+		batchSize: opts.batchSize || 100,
+	}, {
+		jobId: 'regen-file-desc-html',
+	});
+}
+
+/**
+ * Recalculate file counts and sizes for all file areas.
+ * Called by: admin panel.
+ */
+export async function enqueueRecalcFileCounts() {
+	return maintenanceQueue.add('recalc-file-counts', {}, {
+		jobId: 'recalc-file-counts',
+	});
+}
+
+/**
+ * Scan a file area directory for untracked files.
+ * Called by: admin panel, CLI.
+ */
+export async function enqueueScanFileArea(areaShortcode) {
+	return maintenanceQueue.add('scan-file-area', {
+		areaShortcode: areaShortcode,
+	}, {
+		jobId: `scan-file-area--${areaShortcode}`,
+	});
+}
+
+/**
+ * Import an FTN nodelist file into the database.
+ * Called by: admin panel, CLI.
+ */
+export async function enqueueNodelistImport(opts = {}) {
+	return maintenanceQueue.add('import-nodelist', {
+		filePath:     opts.filePath,
+		networkId:    opts.networkId,
+		originalName: opts.originalName || null,
+	}, {
+		jobId: `import-nodelist--${opts.networkId || 'unknown'}--${Date.now()}`,
+	});
+}

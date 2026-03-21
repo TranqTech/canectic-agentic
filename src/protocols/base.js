@@ -52,10 +52,13 @@ class BaseProtocol extends EventEmitter {
 	}
 
 	// Client data → child stdin
+	// Ensure binary Buffer — WebSocket may deliver text frames as strings,
+	// which UTF-8 decodes and corrupts bytes > 127.
 	_onClientData(data) {
 		if (!this.active || !this._child || !this._child.stdin || this._child.stdin.destroyed) return;
 		try {
-			this._child.stdin.write(data);
+			var buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'binary');
+			this._child.stdin.write(buf);
 		} catch (err) {
 			alogger.writeAlog(4, this.loggingId + " stdin write error: " + err.message, "yellow");
 		}

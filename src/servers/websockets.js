@@ -209,7 +209,6 @@ class WsManager{
         // Single upgrade handler for all pools
         httpServer.on('upgrade', (request, socket, head) => {
             const { pathname } = new URL(request.url, `http://${request.headers.host}`);
-
             const pool = this.pathMap.get(pathname);
             if (pool) {
                 pool.handleUpgrade(request, socket, head);

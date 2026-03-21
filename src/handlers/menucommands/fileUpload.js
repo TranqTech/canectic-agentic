@@ -12,6 +12,10 @@ import { computeHashes } from "../../utils/fileHasher.js";
 import { applyDescriptions } from "../../utils/fileDescExtractor.js";
 import { ZmodemReceiveProtocol } from "../../protocols/zmodem_receive.js";
 import appConfig from "../../config/appConfig.js";
+import * as fileNetworkAreas from "../../models/fileNetworkAreas.js";
+import * as filePeerSubscriptions from "../../models/filePeerSubscriptions.js";
+import * as fileDistribution from "../../models/fileDistribution.js";
+import * as jobs from "../../queues/jobs.js";
 import * as alogger from "../../utils/alogger.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -142,6 +146,7 @@ class fileUpload extends BaseSubModule {
 		}
 
 		var processed = 0;
+		var entryIds = [];
 		var dupes = 0;
 		var errors = 0;
 
@@ -185,6 +190,7 @@ class fileUpload extends BaseSubModule {
 				var addResult = await addFileEntry(entryObj);
 				if (addResult.status) {
 					processed++;
+					if (addResult.entryId) entryIds.push(addResult.entryId);
 				} else {
 					errors++;
 					alogger.writeAlog(3, "FileUpload: failed to add " + sf.filename + ": " + addResult.errormessages.join(", "), "yellow");
@@ -199,6 +205,26 @@ class fileUpload extends BaseSubModule {
 
 		// Update area stats
 		await updateStatsForArea(areaShortcode);
+
+		// If area is networked, create distribution rows and enqueue TIC outbound
+		if (entryIds.length > 0) {
+			try {
+				var networkMappings = await fileNetworkAreas.getNetworksByFileArea(area.id);
+				if (networkMappings && networkMappings.length > 0) {
+					var subscribedConns = await filePeerSubscriptions.getSubscribedConnections(area.id);
+					if (subscribedConns && subscribedConns.length > 0) {
+						var connIds = subscribedConns.map(function(c) { return c.peer_connection_id; });
+						for (var eid of entryIds) {
+							await fileDistribution.createDistributionRows(eid, connIds, 'tic');
+						}
+						await jobs.enqueueTicOutbound();
+						alogger.writeAlog(3, "FileUpload: hatched " + entryIds.length + " file(s) to " + connIds.length + " peer(s)", "cyan");
+					}
+				}
+			} catch (distErr) {
+				alogger.writeAlog(3, "FileUpload: TIC distribution error: " + distErr.message, "yellow");
+			}
+		}
 
 		// Show results
 		var msg = "Upload complete: " + processed + " file(s) added";

@@ -91,7 +91,7 @@ block content
                         th.text-center(scope='col') Downloads
                     tbody
                       for file of filelist
-                        tr.clickable-row(data-href=`/files/view/${file.uuid}`)
+                        tr(data-file-uuid=file.uuid style='cursor:pointer')
                           td
                             i.bi.bi-file-earmark.me-1
                             strong= file.filename
@@ -111,16 +111,10 @@ block content
                 .text-center.py-4
                   h5.text-muted No files in this area
 
+  include ../partials/_fileInfoModal
+
   script.
     document.addEventListener('DOMContentLoaded', function() {
-      document.querySelectorAll('.clickable-row').forEach(function(row) {
-        row.style.cursor = 'pointer';
-        row.addEventListener('click', function() {
-          var href = this.getAttribute('data-href');
-          if (href) window.location.href = href;
-        });
-      });
-
       // Initialize DataTables if available and more than a few rows
       if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
         var table = document.getElementById('fileTable');

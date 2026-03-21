@@ -563,6 +563,21 @@ block content
                             select#en_active(name='active' tabindex='5').form-select
                               option(value='true'  selected=(network.active === true))  Active
                               option(value='false' selected=(network.active === false)) Inactive
+                        if network.network_type === 'FTN'
+                          .row
+                            .col-1
+                            .col-10
+                              br
+                              label(for='en_nodelist_area')
+                                | Nodelist File Area:
+                                |
+                                span(data-bs-toggle='tooltip' title='Select a file area where nodelists for this network are received. The system will auto-import new nodelists daily.') ⓘ
+                              select#en_nodelist_area(name='nodelist_area_shortcode' tabindex='6').form-select
+                                option(value='' selected=(!networkConfig || !networkConfig.nodelist_area_shortcode)) None (manual import only)
+                                if allFileAreasList && allFileAreasList.length > 0
+                                  each fa in allFileAreasList
+                                    option(value=fa.shortcode selected=(networkConfig && networkConfig.nodelist_area_shortcode === fa.shortcode))
+                                      = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
                         .row
                           .col-1
                           .col-10
@@ -572,7 +587,7 @@ block content
                                 type='submit'
                                 value='Save Changes'
                                 class='btn btn-lg btn-warning btn-block'
-                                tabindex='6'
+                                tabindex='7'
                               )
 
               // New Zone Modal

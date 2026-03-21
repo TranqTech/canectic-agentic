@@ -20,7 +20,8 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | File | Purpose |
 |------|---------|
 | `ftnClasses.js` | FTN data classes. `Packet` (FTN type-2 packet envelope: source/dest addresses, password, timestamps, message array) and `Message` (single FTN message: type, area tag, addressing, kludge fields, body, origin line). Used by both the tosser and netmail modules. |
-| `ftnRouter.js` | FTN routing resolver. Given a destination FTN address, determines the next-hop peer connection. Cascade: direct connection match → routing rule wildcard match → (future) nodelist direct → (future) coordinator walk. Returns `routeResult` with nextHop, connection UUID, method, and packet flavour. |
+| `ftnNodelist.js` | FTN nodelist database model. `ensureTable()` creates the `ftn_nodelist` table with unique constraint on (network_id, zone, net, node, point). `importNodelist()` performs batch upsert (500/batch) with historical tracking (first_seen preserved, last_seen updated, absent nodes deactivated). Lookups: `getNode`, `getNetHost`, `getNodeHub`, `getRegionCoord`, `getZoneCoord`, `findConnectable` (IBN+hostname+not Down/Hold/Pvt), `searchNodes`, `getNodesInNet`. Historical: `getRecentlyAdded`, `getRecentlyRemoved`, `getNetworkStats`, `getNodeHistory`. Utility: `getImportInfo`, `clearNetwork`. |
+| `ftnRouter.js` | FTN routing resolver. Given a destination FTN address, determines the next-hop peer connection. Cascade: direct connection match → routing rule wildcard match → nodelist direct → coordinator walk (hub → host → region → zone). Returns `routeResult` with nextHop, connection UUID, method, packet flavour, and `nodelistData` for nodelist-resolved routes. Accepts optional `networkId` parameter. |
 | `ftnUtils.js` | FTN utility functions. Message-ID generation, datetime string formatting, system time parsing with timezone offset handling. |
 | `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
@@ -386,7 +387,7 @@ The `ftnClasses.js` `Packet` and `Message` classes model these structures. `ftnT
 
 ### FTN Routing
 
-`ftnRouter.resolveRoute(destinationAddress)` implements a cascade:
+`ftnRouter.resolveRoute(destinationAddress, networkId)` implements a cascade:
 
 1. **Direct connection** — `connection_data.address` exactly matches the destination. Used when we have a direct link to the target system.
 
@@ -394,14 +395,33 @@ The `ftnClasses.js` `Packet` and `Message` classes model these structures. `ftnT
    - `1:*` — route all zone 1 traffic through this connection
    - `2:234/*` — route all nodes in net 234 of zone 2
    - `3:512/100` — route a specific node (explicit override)
-   
+
    First match wins. Connection order from the DB is the tie-break.
 
-3. **Nodelist direct** — (future) look up destination in `ftn_nodelist` table, check for dialable/CM flag.
+3. **Nodelist direct** — Look up destination in `ftn_nodelist` table via `ftnNodelist.findConnectable()`. If found with hostname + IBN port and not Down/Hold/Pvt, returns a route with `method='nodelist_direct'` and `nodelistData` containing hostname, port, systemName, isCM.
 
-4. **Coordinator walk** — (future) strip address to hub → region coord → zone coord, checking connections and nodelist at each level.
+4. **Coordinator walk** — If direct nodelist lookup fails, walk up the FTN hierarchy:
+   - **Hub** — if destination has `hub_node` set, check hub via connections then nodelist
+   - **Host** — net coordinator (keyword='Host'), check via connections then nodelist
+   - **Region** — region coordinator, check via connections then nodelist
+   - **Zone** — zone coordinator, check via connections then nodelist
 
-The `routeResult` object includes the next-hop address, connection UUID, routing method, packet flavour (Normal/Crash/Hold from connection status), and the matched rule pattern.
+   At each level, configured peer connections are checked first (for authenticated routing), then nodelist dialability. Returns `method='coordinator'` with the coordinator's address and `nodelistData`.
+
+The optional `networkId` parameter provides explicit network context for nodelist lookups (steps 3-4). When omitted, the network is inferred from the zone of existing FTN connections.
+
+The `routeResult` object shape:
+```
+{
+  nextHop:        string,      // FTN address to send to
+  connectionUUID: string|null, // peer_connection UUID (null for nodelist routes)
+  connectionId:   number|null, // peer_connection id (null for nodelist routes)
+  method:         string,      // 'direct' | 'routing_rule' | 'nodelist_direct' | 'coordinator'
+  flavour:        string,      // 'Normal' | 'Crash' | 'Hold'
+  ruleMatched:    string|null, // matched wildcard pattern (routing_rule only)
+  nodelistData:   object|null  // { hostname, binkpPort, systemName, isCM } (nodelist routes only)
+}
+```
 
 ### Netmail
 

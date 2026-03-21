@@ -288,6 +288,38 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'regen-file-desc-html': {
+				var fileEntries = await import("../src/models/fileEntries.js");
+				await fileEntries.regenerateDescHtml({
+					batchSize: job.data.batchSize,
+				});
+				break;
+			}
+
+			case 'recalc-file-counts': {
+				var fileAreas = await import("../src/models/fileAreas.js");
+				await fileAreas.recalculateFileCounts();
+				break;
+			}
+
+			case 'scan-file-area': {
+				var fileEntriesMod = await import("../src/models/fileEntries.js");
+				await fileEntriesMod.scanAreaDirectory(job.data.areaShortcode);
+				break;
+			}
+
+			case 'import-nodelist': {
+				var nodelistImport = await import("../src/maintenance/nodelistImport.js");
+				await nodelistImport.importFromFile(job.data.filePath, job.data.networkId, { originalName: job.data.originalName });
+				break;
+			}
+
+			case 'scan-nodelists': {
+				var nodelistScan = await import("../src/maintenance/nodelistImport.js");
+				await nodelistScan.scanForNewNodelists();
+				break;
+			}
+
 			default:
 				alogger.writeAlog(3, `[Worker] Unknown maintenance job: ${job.name}`, "yellowbright");
 		}
@@ -310,6 +342,10 @@ async function main() {
 	await userMsgPointers.ensureConstraintsAndIndexes();
 	await userAreaSubs.ensureConstraintsAndIndexes();
 	await userFilePointers.ensureConstraintsAndIndexes();
+
+	// Ensure FTN nodelist table exists for import jobs and router lookups
+	var ftnNodelist = await import("../src/models/ftnNodelist.js");
+	await ftnNodelist.ensureTable();
 
 	// Event publisher for notifying other processes
 	eventPublisher = createEventPublisher();

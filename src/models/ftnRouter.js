@@ -21,6 +21,7 @@
 // }
 
 import * as peerConnections from './peerConnections.js';
+import * as ftnNodelist from './ftnNodelist.js';
 import * as alogger from '../utils/alogger.js';
 
 // ---------------------------------------------------------------------------
@@ -92,11 +93,81 @@ function flavourFromStatus(status) {
 }
 
 // ---------------------------------------------------------------------------
-// resolveRoute(destinationAddress)
+// nodelistRouteResult — build a routeResult from a nodelist entry
+// ---------------------------------------------------------------------------
+function nodelistRouteResult(entry, method, nextHopAddress) {
+	return {
+		nextHop:        nextHopAddress,
+		connectionUUID: null,
+		connectionId:   null,
+		method:         method,
+		flavour:        'Normal',
+		ruleMatched:    null,
+		nodelistData: {
+			hostname:   entry.hostname,
+			binkpPort:  entry.binkp_port,
+			systemName: entry.system_name,
+			isCM:       entry.is_cm
+		}
+	};
+}
+
+// ---------------------------------------------------------------------------
+// isNodelistConnectable — check if a nodelist entry is dialable via binkp
+// ---------------------------------------------------------------------------
+function isNodelistConnectable(entry) {
+	if (!entry) return false;
+	if (!entry.is_ibn || !entry.hostname) return false;
+	if (entry.keyword === 'Down' || entry.keyword === 'Hold' || entry.keyword === 'Pvt') return false;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// inferNetworkId — determine the network_id for a zone from connections
+// ---------------------------------------------------------------------------
+function inferNetworkId(connlist, zone) {
+	for (var conn of connlist) {
+		var cd = conn.connection_data || {};
+		if (cd.address) {
+			var connParsed = parseFtnAddress(cd.address);
+			if (connParsed && connParsed.zone === zone) {
+				return conn.network_id;
+			}
+		}
+	}
+	// Fallback: return the first FTN connection's network_id
+	if (connlist.length > 0) return connlist[0].network_id;
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// checkConnectionForAddress — check if any configured connection matches addr
+// ---------------------------------------------------------------------------
+function checkConnectionForAddress(connlist, zone, net, node) {
+	var addr = zone + ':' + net + '/' + node;
+	for (var conn of connlist) {
+		var cd = conn.connection_data || {};
+		if (cd.address && cd.address.trim() === addr) {
+			return {
+				nextHop:        addr,
+				connectionUUID: conn.uuid,
+				connectionId:   conn.id,
+				method:         'coordinator',
+				flavour:        flavourFromStatus(cd.status),
+				ruleMatched:    null
+			};
+		}
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// resolveRoute(destinationAddress, networkId)
 //
 // Main entry point. Returns routeResult or null.
+// Optional networkId parameter for explicit network context.
 // ---------------------------------------------------------------------------
-async function resolveRoute(destinationAddress) {
+async function resolveRoute(destinationAddress, networkId) {
 	var parsed = parseFtnAddress(destinationAddress);
 	if (!parsed) {
 		alogger.writeAlog(3, 'ftnRouter: cannot parse destination address: ' + destinationAddress, 'redbright');
@@ -159,21 +230,115 @@ async function resolveRoute(destinationAddress) {
 	}
 
 	// -------------------------------------------------------------------
-	// Step 3: Nodelist direct (stub — implement when ftn_nodelist exists)
+	// Resolve network_id for nodelist lookups (steps 3 and 4)
 	// -------------------------------------------------------------------
-	// TODO: query ftn_nodelist for destination, check for CM/dialable flag
-	// if found and dialable, return method: 'nodelist_direct'
+	var resolvedNetworkId = networkId || inferNetworkId(connlist, zone);
+	if (!resolvedNetworkId) {
+		alogger.writeAlog(4, 'ftnRouter: no route found for ' + destinationAddress + ' (no network_id for nodelist)', 'yellow');
+		return null;
+	}
 
 	// -------------------------------------------------------------------
-	// Step 4: Coordinator walk (stub — implement with nodelist)
+	// Step 3: Nodelist direct — destination found in nodelist and dialable
 	// -------------------------------------------------------------------
-	// Walk order: point's node → node's hub → hub's region → zone coord
-	// At each level: check connections first, then nodelist
-	// TODO: implement when ftn_nodelist exists
+	try {
+		var directEntry = await ftnNodelist.findConnectable(resolvedNetworkId, zone, net, node);
+		if (directEntry && isNodelistConnectable(directEntry)) {
+			alogger.writeAlog(5,
+				'ftnRouter: nodelist direct route to ' + destinationAddress +
+				' via ' + directEntry.hostname + ':' + directEntry.binkp_port,
+				'greenbright'
+			);
+			return nodelistRouteResult(directEntry, 'nodelist_direct', destinationAddress);
+		}
+	} catch (err) {
+		alogger.writeAlog(3, 'ftnRouter: nodelist lookup error: ' + err.message, 'yellow');
+	}
+
+	// -------------------------------------------------------------------
+	// Step 4: Coordinator walk — hub → host → region → zone
+	// At each level, check connections first, then nodelist dialability.
+	// -------------------------------------------------------------------
+	try {
+		// 4a: Check if node has a hub — try routing through the hub
+		var destNode = await ftnNodelist.getNode(resolvedNetworkId, zone, net, node, 0);
+		if (destNode && destNode.hub_node != null) {
+			// Check connections for hub
+			var hubConnResult = checkConnectionForAddress(connlist, zone, net, destNode.hub_node);
+			if (hubConnResult) {
+				alogger.writeAlog(5, 'ftnRouter: coordinator route via hub connection ' + zone + ':' + net + '/' + destNode.hub_node, 'greenbright');
+				return hubConnResult;
+			}
+			// Check nodelist for hub
+			var hubEntry = await ftnNodelist.findConnectable(resolvedNetworkId, zone, net, destNode.hub_node);
+			if (hubEntry && isNodelistConnectable(hubEntry)) {
+				var hubAddr = zone + ':' + net + '/' + destNode.hub_node;
+				alogger.writeAlog(5, 'ftnRouter: coordinator route via hub ' + hubAddr, 'greenbright');
+				return nodelistRouteResult(hubEntry, 'coordinator', hubAddr);
+			}
+		}
+
+		// 4b: Net host (keyword='Host' for this net)
+		var hostEntry = await ftnNodelist.getNetHost(resolvedNetworkId, zone, net);
+		if (hostEntry) {
+			// Check connections for host
+			var hostConnResult = checkConnectionForAddress(connlist, zone, net, 0);
+			if (hostConnResult) {
+				alogger.writeAlog(5, 'ftnRouter: coordinator route via host connection ' + zone + ':' + net + '/0', 'greenbright');
+				return hostConnResult;
+			}
+			// Check nodelist for host — host is at node 0 but look for connectable entry
+			var hostConnectable = await ftnNodelist.findConnectable(resolvedNetworkId, zone, net, 0);
+			if (hostConnectable && isNodelistConnectable(hostConnectable)) {
+				var hostAddr = zone + ':' + net + '/0';
+				alogger.writeAlog(5, 'ftnRouter: coordinator route via host ' + hostAddr, 'greenbright');
+				return nodelistRouteResult(hostConnectable, 'coordinator', hostAddr);
+			}
+		}
+
+		// 4c: Region coordinator
+		if (destNode && destNode.region) {
+			var regionEntry = await ftnNodelist.getRegionCoord(resolvedNetworkId, zone, destNode.region);
+			if (regionEntry) {
+				// Check connections for region coord
+				var regionConnResult = checkConnectionForAddress(connlist, zone, destNode.region, 0);
+				if (regionConnResult) {
+					alogger.writeAlog(5, 'ftnRouter: coordinator route via region connection ' + zone + ':' + destNode.region + '/0', 'greenbright');
+					return regionConnResult;
+				}
+				// Check nodelist for region coord
+				var regionConnectable = await ftnNodelist.findConnectable(resolvedNetworkId, zone, destNode.region, 0);
+				if (regionConnectable && isNodelistConnectable(regionConnectable)) {
+					var regionAddr = zone + ':' + destNode.region + '/0';
+					alogger.writeAlog(5, 'ftnRouter: coordinator route via region ' + regionAddr, 'greenbright');
+					return nodelistRouteResult(regionConnectable, 'coordinator', regionAddr);
+				}
+			}
+		}
+
+		// 4d: Zone coordinator
+		var zoneEntry = await ftnNodelist.getZoneCoord(resolvedNetworkId, zone);
+		if (zoneEntry) {
+			// Check connections for zone coord
+			var zoneConnResult = checkConnectionForAddress(connlist, zone, zone, 0);
+			if (zoneConnResult) {
+				alogger.writeAlog(5, 'ftnRouter: coordinator route via zone connection ' + zone + ':' + zone + '/0', 'greenbright');
+				return zoneConnResult;
+			}
+			// Check nodelist for zone coord
+			var zoneConnectable = await ftnNodelist.findConnectable(resolvedNetworkId, zone, zone, 0);
+			if (zoneConnectable && isNodelistConnectable(zoneConnectable)) {
+				var zoneAddr = zone + ':' + zone + '/0';
+				alogger.writeAlog(5, 'ftnRouter: coordinator route via zone ' + zoneAddr, 'greenbright');
+				return nodelistRouteResult(zoneConnectable, 'coordinator', zoneAddr);
+			}
+		}
+	} catch (err) {
+		alogger.writeAlog(3, 'ftnRouter: coordinator walk error: ' + err.message, 'yellow');
+	}
 
 	alogger.writeAlog(4,
-		'ftnRouter: no route found for ' + destinationAddress +
-		' (nodelist walk not yet implemented)',
+		'ftnRouter: no route found for ' + destinationAddress,
 		'yellow'
 	);
 	return null;

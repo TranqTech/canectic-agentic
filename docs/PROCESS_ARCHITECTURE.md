@@ -162,6 +162,7 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `regen-pm-html` | Admin, Scheduler | Worker | `{ batchSize?, forceWidth? }` | Regenerate PM body_html |
 | `purge-pm-trash` | Scheduler (repeatable) | Worker | `{ days? }` | Hard-delete old soft-deleted PMs |
 | `recalc-area-counts` | Admin | Worker | `{}` | Recalculate all area message counts |
+| `import-nodelist` | Admin, CLI | Worker | `{ filePath, networkId }` | Import FTN nodelist file into ftn_nodelist table |
 
 ### Concurrency and deduplication
 

@@ -1,0 +1,208 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-lg.btn-info(href='/admin/networks')
+                        | Networks
+              .card-body
+                include ../../partials/flash
+
+                if !ftnNetworks || ftnNetworks.length === 0
+                  center
+                    h4 No FTN Networks Found
+                    p.text-muted
+                      | Create an FTN-type network in the
+                      a(href='/admin/networks') Networks
+                      |  section first.
+                else
+                  each net in ftnNetworks
+                    - var info = importInfoMap[net.id] || {}
+                    - var stats = statsMap[net.id] || {}
+                    .card.mb-3
+                      .card-header
+                        .row
+                          .col-8
+                            h5
+                              i.bi.bi-diagram-3.me-2
+                              = net.name
+                              |
+                              span.badge.bg-secondary.ms-2 FTN
+                          .col-4
+                            .text-end
+                              button.btn.btn-sm.btn-success.me-1(
+                                data-bs-toggle='modal'
+                                data-bs-target='#importModal'
+                                data-network-id=net.id
+                                data-network-name=net.name
+                              )
+                                i.bi.bi-upload.me-1
+                                | Import
+                              a.btn.btn-sm.btn-info.me-1(href=`/admin/nodelist/${net.id}`)
+                                i.bi.bi-search.me-1
+                                | Browse
+                              button.btn.btn-sm.btn-danger(
+                                data-bs-toggle='modal'
+                                data-bs-target='#clearModal'
+                                data-network-id=net.id
+                                data-network-name=net.name
+                                data-node-count=(stats.totalActive || 0)
+                              )
+                                i.bi.bi-trash.me-1
+                                | Clear
+                      .card-body
+                        .row
+                          .col-md-6
+                            h6 Import Status
+                            if info.last_import
+                              table.table.table-sm
+                                tr
+                                  td
+                                    strong Last Import:
+                                  td= new Date(info.last_import).toLocaleString()
+                                tr
+                                  td
+                                    strong Nodelist Number:
+                                  td= info.nodelist_number || 'N/A'
+                                tr
+                                  td
+                                    strong Entries Loaded:
+                                  td= info.entry_count || 0
+                            else
+                              p.text-muted
+                                i.bi.bi-info-circle.me-1
+                                | No nodelist imported yet
+                          .col-md-6
+                            h6 Statistics
+                            table.table.table-sm
+                              tr
+                                td
+                                  strong Active Nodes:
+                                td
+                                  span.badge.bg-success= stats.totalActive || 0
+                              tr
+                                td
+                                  strong Inactive/Historical:
+                                td
+                                  span.badge.bg-secondary= stats.totalInactive || 0
+                              tr
+                                td
+                                  strong Added This Week:
+                                td
+                                  if stats.addedThisWeek > 0
+                                    span.badge.bg-info= stats.addedThisWeek
+                                  else
+                                    span.badge.bg-secondary 0
+                              tr
+                                td
+                                  strong Removed This Week:
+                                td
+                                  if stats.removedThisWeek > 0
+                                    span.badge.bg-warning= stats.removedThisWeek
+                                  else
+                                    span.badge.bg-secondary 0
+
+          .col-1
+
+      //- Import Nodelist Modal
+      #importModal.modal.fade(tabindex='-1' aria-labelledby='importModalLabel' aria-hidden='true')
+        .modal-dialog
+          .modal-content
+            form(method='POST' action='/admin/nodelists/import' enctype='multipart/form-data')
+              .modal-header
+                h5#importModalLabel.modal-title Import Nodelist
+                button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+              .modal-body
+                .mb-3
+                  label.form-label(for='importNetworkId') Network
+                  select#importNetworkId.form-select(name='network_id' required)
+                    if ftnNetworks
+                      each net in ftnNetworks
+                        option(value=net.id)= net.name + ' (' + net.domain + ')'
+                .mb-3
+                  label.form-label(for='nodelistFile') Nodelist File
+                  input#nodelistFile.form-control(type='file' name='nodelist' required accept='.txt,.lst,.074,.075,.076,.077,.078,.079,.080,.081,.082,.083,.084,.085,.086,.087,.088,.089,.090,.091,.092,.093,.094,.095,.096,.097,.098,.099,.*')
+                  .form-text Standard FTN nodelist format (e.g. NODELIST.074). The file extension determines the nodelist number.
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                button.btn.btn-success(type='submit')
+                  i.bi.bi-upload.me-1
+                  | Upload &amp; Import
+
+      //- Clear Confirmation Modal
+      #clearModal.modal.fade(tabindex='-1' aria-labelledby='clearModalLabel' aria-hidden='true')
+        .modal-dialog
+          .modal-content
+            form#clearForm(method='POST' action='')
+              .modal-header
+                h5#clearModalLabel.modal-title Clear Nodelist Data
+                button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+              .modal-body
+                p
+                  | Are you sure you want to delete all nodelist data for
+                  strong#clearNetworkName
+                  | ?
+                p.text-danger
+                  i.bi.bi-exclamation-triangle.me-1
+                  | This will remove
+                  strong
+                    span#clearNodeCount
+                  |  active nodes and all historical data. This action cannot be undone.
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                button.btn.btn-danger(type='submit')
+                  i.bi.bi-trash.me-1
+                  | Delete All
+
+      script.
+        // Pre-select network in import modal when opened from a specific card
+        var importModal = document.getElementById('importModal');
+        if (importModal) {
+          importModal.addEventListener('show.bs.modal', function(event) {
+            var button = event.relatedTarget;
+            if (button) {
+              var networkId = button.getAttribute('data-network-id');
+              if (networkId) {
+                var select = document.getElementById('importNetworkId');
+                if (select) select.value = networkId;
+              }
+            }
+          });
+        }
+
+        // Populate clear modal with network details
+        var clearModal = document.getElementById('clearModal');
+        if (clearModal) {
+          clearModal.addEventListener('show.bs.modal', function(event) {
+            var button = event.relatedTarget;
+            if (button) {
+              var networkId = button.getAttribute('data-network-id');
+              var networkName = button.getAttribute('data-network-name');
+              var nodeCount = button.getAttribute('data-node-count');
+              document.getElementById('clearNetworkName').textContent = networkName || '';
+              document.getElementById('clearNodeCount').textContent = nodeCount || '0';
+              document.getElementById('clearForm').action = '/admin/nodelists/clear/' + networkId;
+            }
+          });
+        }

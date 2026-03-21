@@ -21,13 +21,17 @@ function parseFlags(val) {
 }
 
 // Check if user has read access to a group or area
-function checkReadFlags(userRecord, item) {
+function checkBrowseFlags(userRecord, item) {
 	var userSecurity = parseInt(userRecord.security) || 0;
-	if (item.read_security && userSecurity < item.read_security) return false;
+	// browse_security gates visibility; falls back to read_security if not set
+	var browseSec = item.browse_security !== null && item.browse_security !== undefined
+		? parseInt(item.browse_security)
+		: (item.read_security ? parseInt(item.read_security) : 0);
+	if (userSecurity < browseSec) return false;
 	var userPerms  = parseFlags(userRecord.permissionflags);
 	var userRestrs = parseFlags(userRecord.restrictionflags);
-	var reqFlags   = parseFlags(item.read_perm_flags);
-	var restFlags  = parseFlags(item.read_rest_flags);
+	var reqFlags   = parseFlags(item.browse_perm_flags || item.read_perm_flags);
+	var restFlags  = parseFlags(item.browse_rest_flags || item.read_rest_flags);
 	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
 	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
 	return true;
@@ -138,7 +142,7 @@ class fileAreaSelector extends BaseSubModule {
 		var userRec = this.call.user_record || {};
 
 		// Filter groups by security level + read flags
-		groups = groups.filter(function(g) { return checkReadFlags(userRec, g); });
+		groups = groups.filter(function(g) { return checkBrowseFlags(userRec, g); });
 
 		this.allRows = [];
 		this.areaCount = 0;
@@ -150,7 +154,7 @@ class fileAreaSelector extends BaseSubModule {
 			// Filter to active areas accessible to user
 			areas = (areas || []).filter(function(a) {
 				if (!a.active) return false;
-				return checkReadFlags(userRec, a);
+				return checkBrowseFlags(userRec, a);
 			});
 
 			// Only show groups that have at least one accessible area

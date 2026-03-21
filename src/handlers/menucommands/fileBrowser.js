@@ -66,8 +66,8 @@ const CLR_TAGGED = 13;    // magenta for batch-tagged files
 const CP437_HLINE  = 0xC4;
 const CP437_CORNER = 0xDA;
 const CP437_ARROW  = 0xAF;
-const CP437_LARROW = 0x1B;  // ← in CP437
-const CP437_RARROW = 0x1A;  // → in CP437
+const CP437_LARROW = 0x3C;  // < as safe left arrow for CP437 (0x1B is ESC)
+const CP437_RARROW = 0x3E;  // > as safe right arrow for CP437 (0x1A is SUB)
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 

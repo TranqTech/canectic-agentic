@@ -178,6 +178,11 @@ Two-layer admin check:
 | Directory Scan | `POST /admin/fileArea/:shortcode/scan` | Scans area directory for untracked files, creates file_entries rows for new files, updates area stats |
 | File Group Defaults | `GET /admin/fileGroup/:shortcode/defaults` | JSON endpoint — returns file group security/flag defaults for new area modal auto-populate |
 | Config | `GET /admin/config`, `POST /admin/config`, `POST /admin/config/reset/:key` | System configuration management — view/edit all config settings organized by category, reset individual keys to defaults. Uses accordion layout with per-category save forms. Environment-overridden settings shown as read-only. |
+| Nodelists | `GET /admin/nodelists` | FTN nodelist management — per-network import status, stats, upload/clear actions. Requires admin access. |
+| Nodelist Import | `POST /admin/nodelists/import` | Multipart file upload (multer). Saves to temp dir, enqueues `import-nodelist` BullMQ job. Flash message confirms queuing. |
+| Nodelist Clear | `POST /admin/nodelists/clear/:networkId` | Deletes all nodelist data for a network via `ftnNodelist.clearNetwork()`. Confirmation modal in UI. |
+| Nodelist Browser | `GET /admin/nodelist/:networkId` | Browse imported nodelist for a specific FTN network. DataTables listing with row-click detail modal. |
+| Nodelist Search | `GET /admin/nodelist/:networkId/search.json` | JSON endpoint for AJAX search/filter. Params: `q` (search term), `filter` (active/added/removed/all), `limit`. |
 
 ### Modal-Driven Editing Pattern
 
@@ -252,7 +257,8 @@ The file group and area admin views (`src/views/admin/fileGroups/`, `src/views/a
 | All File Areas | `admin/fileAreas/index.pug` | DataTables listing across all groups, group selector in new area modal, AJAX defaults |
 
 Key differences from message area views:
-- **Labels**: "Download Security" / "Upload Security" instead of "Read Security" / "Post Security" (underlying field names remain `read_security`/`post_security` for consistency)
+- **Three-tier access model**: File areas have Browse Security (controls visibility in listings), Download Security (controls file download), and Upload Security (controls file upload). Each tier has a security level number plus permission and restriction flag arrays. Browse security fields are `browse_security`, `browse_perm_flags`, `browse_rest_flags`; download/upload use the existing `read_security`/`post_security` naming internally.
+- **Labels**: "Browse Security" / "Download Security" / "Upload Security" instead of "Read Security" / "Post Security" (underlying field names for download/upload remain `read_security`/`post_security` for consistency)
 - **File-specific fields**: `base_dir` (group), `sub_dir` (area), `newscan_default` (area)
 - **File stats columns**: File Count, Total Size (formatted as B/KB/MB/GB), Last Upload date
 - **Delete options**: "Delete files from disk" instead of "Delete tables and all data"

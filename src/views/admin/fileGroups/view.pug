@@ -49,6 +49,9 @@ block content
                         | Shortcode:
                         = fileGroup.shortcode
                       h5
+                        | Browse Security:
+                        = fileGroup.browse_security || '—'
+                      h5
                         | Download Security:
                         = fileGroup.read_security || '—'
                       if fileGroup.base_dir
@@ -87,6 +90,7 @@ block content
                                 data-bs-name=area.name
                                 data-bs-description=area.description
                                 data-bs-subdir=(area.sub_dir || '')
+                                data-bs-browsesecurity=area.browse_security
                                 data-bs-readsecurity=area.read_security
                                 data-bs-postsecurity=area.post_security
                                 data-bs-active=(area.active ? 'true' : 'false')
@@ -96,6 +100,8 @@ block content
                                 data-bs-lastupload=area.last_upload || ''
                                 data-bs-lastfilename=area.last_filename || ''
                                 data-bs-lastuploader=area.last_uploader || ''
+                                data-bs-browsepermflags=JSON.stringify(area.browse_perm_flags || [])
+                                data-bs-browserestflags=JSON.stringify(area.browse_rest_flags || [])
                                 data-bs-readpermflags=JSON.stringify(area.read_perm_flags || [])
                                 data-bs-readrestflags=JSON.stringify(area.read_rest_flags || [])
                                 data-bs-postpermflags=JSON.stringify(area.post_perm_flags || [])
@@ -191,6 +197,10 @@ block content
                         span#areaInfoNewscan
                     .col-6
                       p
+                        strong Browse Security:
+                        |
+                        span#areaInfoBrowseSec
+                      p
                         strong Download Security:
                         |
                         span#areaInfoReadSec
@@ -206,6 +216,17 @@ block content
                         strong Total Size:
                         |
                         span#areaInfoTotalSize
+                  hr.border-secondary
+                  .row
+                    .col-12
+                      p
+                        strong Browse Perm Flags:
+                        |
+                        span#areaInfoBrowsePermFlags
+                      p
+                        strong Browse Restrict Flags:
+                        |
+                        span#areaInfoBrowseRestFlags
                   hr.border-secondary
                   .row
                     .col-6
@@ -300,6 +321,18 @@ block content
                           option(value='true') Yes
                           option(value='false') No
                       .col-5
+                        label(for='ea_browsesecurity') Browse Security:
+                        input(
+                          type='number'
+                          id='ea_browsesecurity'
+                          name='browsesecurity'
+                          class='form-control'
+                          min=0
+                          max=255
+                          tabindex='5'
+                          required
+                        )
+                        br
                         label(for='ea_readsecurity') Download Security:
                         input(
                           type='number'
@@ -308,7 +341,7 @@ block content
                           class='form-control'
                           min=1
                           max=255
-                          tabindex='5'
+                          tabindex='6'
                           required
                         )
                         br
@@ -320,7 +353,7 @@ block content
                           class='form-control'
                           min=1
                           max=255
-                          tabindex='6'
+                          tabindex='7'
                           required
                         )
                         br
@@ -329,14 +362,29 @@ block content
                           id='ea_active'
                           name='active'
                           class='form-control'
-                          tabindex='7'
+                          tabindex='8'
                         )
                           option(value='true') Active
                           option(value='false') Inactive
                     .row
                       .col-1
-                      .col-5
+                      .col-10
                         //- Hidden inputs for flags — managed by JS
+                        #ea_browse_perm_inputs
+                        #ea_browse_rest_inputs
+                        label Browse Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ea_browse_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ea_browse_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ea_browse_perm_add(type='button') Add
+                        label Browse Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ea_browse_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ea_browse_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ea_browse_rest_add(type='button') Add
+                    .row
+                      .col-1
+                      .col-5
                         #ea_read_perm_inputs
                         #ea_read_rest_inputs
                         label Download Permission Flags:
@@ -371,7 +419,7 @@ block content
                             type='submit'
                             value='Save Changes'
                             class='btn btn-lg btn-warning btn-block'
-                            tabindex='8'
+                            tabindex='9'
                           )
 
           // Delete Area Modal (dynamically populated)
@@ -467,6 +515,18 @@ block content
                           option(value='true' selected) Yes
                           option(value='false') No
                       .col-5
+                        label(for='na_browsesecurity') Browse Security:
+                        input(
+                          type='number'
+                          id='na_browsesecurity'
+                          min=0
+                          max=255
+                          name='browsesecurity'
+                          class='form-control'
+                          value=(fileGroup.browse_security || 0)
+                          required
+                        )
+                        br
                         label(for='na_readsecurity') Download Security:
                         input(
                           type='number'
@@ -495,6 +555,21 @@ block content
                         select#na_active(name='active').form-select
                           option(value='true' selected) Active
                           option(value='false') Inactive
+                    .row
+                      .col-1
+                      .col-10
+                        #na_browse_perm_inputs
+                        #na_browse_rest_inputs
+                        label Browse Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#na_browse_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#na_browse_perm_select.form-control
+                          button.btn.btn-sm.btn-success#na_browse_perm_add(type='button') Add
+                        label Browse Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#na_browse_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#na_browse_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#na_browse_rest_add(type='button') Add
                     .row
                       .col-1
                       .col-5
@@ -581,13 +656,25 @@ block content
                     .row
                       .col-1
                       .col-5
+                        label(for='edit_browsesecurity') Browse Security:
+                        input(
+                          type='number'
+                          id='edit_browsesecurity'
+                          name='browsesecurity'
+                          class='form-control'
+                          tabindex='4'
+                          min=0
+                          max=255
+                          value=fileGroup.browse_security || 0
+                        )
+                        br
                         label(for='edit_readsecurity') Download Security:
                         input(
                           type='number'
                           id='edit_readsecurity'
                           name='readsecurity'
                           class='form-control'
-                          tabindex='4'
+                          tabindex='5'
                           min=0
                           max=255
                           value=fileGroup.read_security || 0
@@ -599,7 +686,7 @@ block content
                           id='edit_postsecurity'
                           name='postsecurity'
                           class='form-control'
-                          tabindex='5'
+                          tabindex='6'
                           min=0
                           max=255
                           value=fileGroup.post_security || 0
@@ -610,10 +697,26 @@ block content
                           id='edit_active'
                           name='active'
                           class='form-control'
-                          tabindex='6'
+                          tabindex='7'
                         )
                           option(value='true'  selected=(fileGroup.active == true))  Active
                           option(value='false' selected=(fileGroup.active == false)) Inactive
+                    .row
+                      .col-1
+                      .col-10
+                        #eg_browse_perm_inputs
+                        #eg_browse_rest_inputs
+                        br
+                        label Browse Perm Flags (default for areas):
+                        .border.rounded.p-2.mb-2.bg-light#eg_browse_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#eg_browse_perm_select.form-control
+                          button.btn.btn-sm.btn-success#eg_browse_perm_add(type='button') Add
+                        label Browse Restrict Flags:
+                        .border.rounded.p-2.mb-2.bg-light#eg_browse_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#eg_browse_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#eg_browse_rest_add(type='button') Add
                     .row
                       .col-1
                       .col-5
@@ -653,7 +756,7 @@ block content
                             type='submit'
                             value='Save Changes'
                             class='btn btn-lg btn-warning btn-block'
-                            tabindex='7'
+                            tabindex='8'
                           )
 
           // Delete Group Modal
@@ -794,7 +897,9 @@ block content
         }
 
         // Wire edit-area flag add buttons (only exist when fileGroup is set)
-        if (document.getElementById('ea_read_perm_add')) {
+        if (document.getElementById('ea_browse_perm_add')) {
+          wireAddBtn('ea_browse_perm', 'browse_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('ea_browse_rest', 'browse_rest_flags', allRestrs, 'bg-danger');
           wireAddBtn('ea_read_perm', 'read_perm_flags', allPerms, 'bg-success');
           wireAddBtn('ea_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
           wireAddBtn('ea_post_perm', 'post_perm_flags', allPerms, 'bg-success');
@@ -802,7 +907,9 @@ block content
         }
 
         // Wire new-area flag add buttons
-        if (document.getElementById('na_read_perm_add')) {
+        if (document.getElementById('na_browse_perm_add')) {
+          wireAddBtn('na_browse_perm', 'browse_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('na_browse_rest', 'browse_rest_flags', allRestrs, 'bg-danger');
           wireAddBtn('na_read_perm', 'read_perm_flags', allPerms, 'bg-success');
           wireAddBtn('na_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
           wireAddBtn('na_post_perm', 'post_perm_flags', allPerms, 'bg-success');
@@ -810,24 +917,32 @@ block content
         }
 
         // Wire edit-group flag add buttons
+        wireAddBtn('eg_browse_perm', 'browse_perm_flags', allPerms, 'bg-success');
+        wireAddBtn('eg_browse_rest', 'browse_rest_flags', allRestrs, 'bg-danger');
         wireAddBtn('eg_read_perm', 'read_perm_flags', allPerms, 'bg-success');
         wireAddBtn('eg_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
         wireAddBtn('eg_post_perm', 'post_perm_flags', allPerms, 'bg-success');
         wireAddBtn('eg_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
 
         // Initialize edit-group flags from current group data
+        var groupBrowsePermFlags = !{JSON.stringify(fileGroup ? (fileGroup.browse_perm_flags || []) : [])};
+        var groupBrowseRestFlags = !{JSON.stringify(fileGroup ? (fileGroup.browse_rest_flags || []) : [])};
         var groupReadPermFlags = !{JSON.stringify(fileGroup ? (fileGroup.read_perm_flags || []) : [])};
         var groupReadRestFlags = !{JSON.stringify(fileGroup ? (fileGroup.read_rest_flags || []) : [])};
         var groupPostPermFlags = !{JSON.stringify(fileGroup ? (fileGroup.post_perm_flags || []) : [])};
         var groupPostRestFlags = !{JSON.stringify(fileGroup ? (fileGroup.post_rest_flags || []) : [])};
 
         // Wire edit-group flag add buttons (only exist when fileGroup is set)
-        if (document.getElementById('eg_read_perm_add')) {
+        if (document.getElementById('eg_browse_perm_add')) {
+          wireAddBtn('eg_browse_perm', 'browse_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('eg_browse_rest', 'browse_rest_flags', allRestrs, 'bg-danger');
           wireAddBtn('eg_read_perm', 'read_perm_flags', allPerms, 'bg-success');
           wireAddBtn('eg_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
           wireAddBtn('eg_post_perm', 'post_perm_flags', allPerms, 'bg-success');
           wireAddBtn('eg_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
 
+          renderAreaFlags('eg_browse_perm', 'browse_perm_flags', parseFlags(JSON.stringify(groupBrowsePermFlags)), allPerms, 'bg-success');
+          renderAreaFlags('eg_browse_rest', 'browse_rest_flags', parseFlags(JSON.stringify(groupBrowseRestFlags)), allRestrs, 'bg-danger');
           renderAreaFlags('eg_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(groupReadPermFlags)), allPerms, 'bg-success');
           renderAreaFlags('eg_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(groupReadRestFlags)), allRestrs, 'bg-danger');
           renderAreaFlags('eg_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(groupPostPermFlags)), allPerms, 'bg-success');
@@ -835,7 +950,9 @@ block content
         }
 
         // Initialize new area flags from group defaults (only exist when fileGroup is set)
-        if (document.getElementById('na_read_perm_add')) {
+        if (document.getElementById('na_browse_perm_add')) {
+          renderAreaFlags('na_browse_perm', 'browse_perm_flags', parseFlags(JSON.stringify(groupBrowsePermFlags)), allPerms, 'bg-success');
+          renderAreaFlags('na_browse_rest', 'browse_rest_flags', parseFlags(JSON.stringify(groupBrowseRestFlags)), allRestrs, 'bg-danger');
           renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(groupReadPermFlags)), allPerms, 'bg-success');
           renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(groupReadRestFlags)), allRestrs, 'bg-danger');
           renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(groupPostPermFlags)), allPerms, 'bg-success');
@@ -856,10 +973,13 @@ block content
               document.getElementById('areaInfoSubDir').textContent      = d.bsSubdir || '—';
               document.getElementById('areaInfoActive').textContent      = d.bsActive === 'true' ? 'Active' : 'Inactive';
               document.getElementById('areaInfoNewscan').textContent     = d.bsNewscandefault === 'true' ? 'Yes' : 'No';
+              document.getElementById('areaInfoBrowseSec').textContent   = d.bsBrowsesecurity;
               document.getElementById('areaInfoReadSec').textContent     = d.bsReadsecurity;
               document.getElementById('areaInfoPostSec').textContent     = d.bsPostsecurity;
               document.getElementById('areaInfoFileCount').textContent   = parseInt(d.bsFilecount || 0).toLocaleString();
               document.getElementById('areaInfoTotalSize').textContent   = formatBytes(d.bsTotalbytes);
+              document.getElementById('areaInfoBrowsePermFlags').textContent = fmtFlags(d.bsBrowsepermflags);
+              document.getElementById('areaInfoBrowseRestFlags').textContent = fmtFlags(d.bsBrowserestflags);
               document.getElementById('areaInfoReadPermFlags').textContent  = fmtFlags(d.bsReadpermflags);
               document.getElementById('areaInfoReadRestFlags').textContent  = fmtFlags(d.bsReadrestflags);
               document.getElementById('areaInfoPostPermFlags').textContent  = fmtFlags(d.bsPostpermflags);
@@ -887,11 +1007,14 @@ block content
           document.getElementById('ea_name').value           = d.bsName;
           document.getElementById('ea_description').value    = d.bsDescription;
           document.getElementById('ea_subdir').value         = d.bsSubdir || '';
+          document.getElementById('ea_browsesecurity').value = d.bsBrowsesecurity;
           document.getElementById('ea_readsecurity').value   = d.bsReadsecurity;
           document.getElementById('ea_postsecurity').value   = d.bsPostsecurity;
           document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
           document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
 
+          renderAreaFlags('ea_browse_perm', 'browse_perm_flags', parseFlags(d.bsBrowsepermflags), allPerms, 'bg-success');
+          renderAreaFlags('ea_browse_rest', 'browse_rest_flags', parseFlags(d.bsBrowserestflags), allRestrs, 'bg-danger');
           renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
           renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');
           renderAreaFlags('ea_post_perm', 'post_perm_flags', parseFlags(d.bsPostpermflags), allPerms, 'bg-success');

@@ -461,6 +461,15 @@ class MailerManager {
 | `MAILER_CONNECT_TIMEOUT` | `30` | Outbound connection timeout in seconds |
 | `MAILER_SESSION_TIMEOUT` | `300` | Maximum session duration in seconds |
 
+### Nodelist-Resolved Outbound Connections (Phase 3)
+
+When the FTN router returns a `routeResult` with `method='nodelist_direct'` or `method='coordinator'`, the result has `connectionUUID: null` and carries `nodelistData` instead of referencing a peer_connection. The mailer needs a separate code path:
+
+1. If `routeResult.connectionUUID` exists: use existing `_connectToPeer(conn)` path (host/port from connection_data).
+2. If `routeResult.nodelistData` exists: connect to `nodelistData.hostname:nodelistData.binkpPort`. No session password (present `-` or use CRAM-MD5 with empty secret). Session runs in caller mode without a connectionUUID.
+
+Nodelist routes are stored in `ftn_nodelist` (imported via `import-nodelist` maintenance job). The `ftnNodelist.findConnectable()` lookup filters for `is_ibn=true`, `hostname IS NOT NULL`, and `keyword NOT IN ('Down','Hold','Pvt')`.
+
 ---
 
 ## Transfer Engine (`mailer/transfer.js`)

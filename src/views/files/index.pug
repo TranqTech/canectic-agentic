@@ -16,9 +16,16 @@ block content
         .col-10
           .card
             .card-header.bg-darkblue.text-white
-              h2
-                i.bi.bi-folder
-                |  File Groups
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-folder
+                    |  File Groups
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-light(href='/files/search')
+                      i.bi.bi-search
+                      |  Search Files
             .card-body
               if grouplist && grouplist.length > 0
                 table#groupTable.table.table-hover

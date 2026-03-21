@@ -16,6 +16,7 @@ import { fileAreaSelector } from "./menucommands/fileAreaSelector.js";
 import { fileBrowser } from "./menucommands/fileBrowser.js";
 import { fileBatchDownload } from "./menucommands/fileBatchDownload.js";
 import { fileUpload } from "./menucommands/fileUpload.js";
+import { fileSearch } from "./menucommands/fileSearch.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -643,6 +644,10 @@ class MenuHandler extends BaseHandler {
 
 			case "fileUpload":
 				this._runSubModule(new fileUpload(this.call));
+				return;
+
+			case "fileSearch":
+				this._runSubModule(new fileSearch(this.call));
 				return;
 
 			default:
