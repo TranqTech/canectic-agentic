@@ -89,13 +89,13 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'doorInactivityTO',      defaultValue: '300000',      type: 'number',  category: 'doors',       description: 'Door inactivity timeout (ms)' },
 	{ key: 'syncjsdoorTO',          defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'SyncJS door launch timeout (ms)' },
 	{ key: 'doorAuthTO',            defaultValue: '15000',       type: 'number',  category: 'doors',       description: 'Door auth timeout (ms)' },
+	{ key: 'doordir',               defaultValue: '',            type: 'string',  category: 'doors',       description: 'Door game base directory' },
+	{ key: 'dosemu_drive_c',        defaultValue: '~/.dosemu/drive_c', type: 'string', category: 'doors', description: 'DOSemu virtual drive C path' },
 
 	// -----------------------------------------------------------------------
 	// Paths
 	// -----------------------------------------------------------------------
 	{ key: 'textdir',               defaultValue: '',            type: 'string',  category: 'paths',       description: 'Text/art file directory' },
-	{ key: 'doordir',               defaultValue: '',            type: 'string',  category: 'paths',       description: 'Door game base directory' },
-	{ key: 'dosemu_drive_c',        defaultValue: '',            type: 'string',  category: 'paths',       description: 'DOSemu virtual drive C path' },
 	{ key: 'ftninbound',            defaultValue: 'ftn/in',      type: 'string',  category: 'paths',       description: 'FTN inbound packet directory' },
 	{ key: 'ftnoutbound',           defaultValue: 'ftn/out',     type: 'string',  category: 'paths',       description: 'FTN outbound packet directory' },
 	{ key: 'ftntossed',             defaultValue: 'ftn/tossed',  type: 'string',  category: 'paths',       description: 'FTN tossed (processed) packet directory' },
