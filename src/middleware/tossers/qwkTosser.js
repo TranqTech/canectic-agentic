@@ -17,7 +17,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import * as dotenv from 'dotenv';
 
 import * as postgres from '../db/postgres.js';
 import * as alogger from '../../utils/alogger.js';
@@ -37,7 +36,6 @@ import {
 } from '../../models/qwkClasses.js';
 import appConfig from "../../config/appConfig.js";
 
-dotenv.config();
 
 // ---------------------------------------------------------------------------
 // Helpers

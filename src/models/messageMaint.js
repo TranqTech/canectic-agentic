@@ -9,12 +9,10 @@
 // Can be run as a standalone CLI tool or imported and called from
 // dbmigrations.js as part of a full migration run.
 
-import * as dotenv from 'dotenv';
 import * as pgdb from '../middleware/db/postgres.js';
 import * as tableTools from '../middleware/db/tableTools.js';
 import * as alogger from '../utils/alogger.js';
 
-dotenv.config();
 
 const workingdir = process.cwd();
 

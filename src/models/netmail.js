@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
@@ -9,7 +8,6 @@ import * as ftn from "./ftnClasses.js";
 import * as ftnUtils from "../utils/ftnUtils.js";
 import appConfig from "../config/appConfig.js";
 
-dotenv.config();
 
 async function getInboundMsgByMsgId(msgId) {
 	var idupper = msgId.toUpperCase().trim();

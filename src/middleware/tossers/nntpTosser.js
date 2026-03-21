@@ -11,7 +11,6 @@
 import * as net from 'net';
 import * as tls from 'tls';
 import { v4 as uuidv4 } from 'uuid';
-import * as dotenv from 'dotenv';
 
 import * as postgres from '../db/postgres.js';
 import * as alogger from '../../utils/alogger.js';
@@ -21,7 +20,6 @@ import { formatBodyHtml } from '../../utils/terminalText.js';
 import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
 import { createThreadRow, updateThreadStats, rollbackThread } from '../../models/echomail.js';
 
-dotenv.config();
 
 // ---------------------------------------------------------------------------
 // NNTPClient — raw socket NNTP client

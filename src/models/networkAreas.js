@@ -1,12 +1,10 @@
 // imports
-import * as dotenv from 'dotenv';
 
 // internal modules
 import * as postgres from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
 import * as alogger from '../utils/alogger.js';
 
-dotenv.config();
 
 const CACHE_NS = 'network_areas';
 const CACHE_TTL = 3600;

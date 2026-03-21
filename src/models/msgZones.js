@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
@@ -8,7 +7,6 @@ import * as redis from '../middleware/db/redis.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 
-dotenv.config();
 
 const ZONES_CACHE_NS = "zones";
 

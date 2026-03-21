@@ -1,12 +1,10 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 
-dotenv.config();
 
 async function newNetwork(formObj) {
 	var returnObj = {

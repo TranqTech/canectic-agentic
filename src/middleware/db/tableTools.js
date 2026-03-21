@@ -1,10 +1,8 @@
 //postgres
-import * as dotenv from 'dotenv';
 import * as postgres from "./postgres.js";
 import * as fs from 'fs';
 import * as alogger from "../../utils/alogger.js";
 
-dotenv.config();
 
 async function dropTable(table) {
 	var dropsql = "DROP TABLE IF EXISTS " + table;

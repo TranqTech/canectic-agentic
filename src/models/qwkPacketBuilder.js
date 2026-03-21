@@ -16,7 +16,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import * as dotenv from 'dotenv';
 
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
@@ -32,7 +31,6 @@ import {
 } from './qwkClasses.js';
 import appConfig from "../config/appConfig.js";
 
-dotenv.config();
 
 // ---------------------------------------------------------------------------
 // Low-level: CONTROL.DAT

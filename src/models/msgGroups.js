@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
@@ -7,7 +6,6 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
 
-dotenv.config();
 
 // Normalize flag input from forms — may arrive as a string, an array, or undefined.
 function normalizeFlags(input) {

@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from "luxon";
 import { EventEmitter } from 'node:events';
@@ -32,11 +31,9 @@ import {logCall, logCallDuration} from "../models/callers.js"
 import appConfig from "../config/appConfig.js"
 
 //setup
-dotenv.config()
 const system_ver_msg = systeminfo.versionMsg()
 const connect_msg = system_ver_msg
 const configdir = path.join(path.dirname("./"), 'config');
-const configcount = 1
 
 // --- Handler registry ---
 // Maps stage names to factory functions
@@ -119,7 +116,6 @@ class IncomingCall{
 		this.uuid = uuidv4();
 		this.connection = connection;
 		this.connection_type = connection.connectionType;
-		this.config_load_count = 0;
 		this.port = connection.port;
 		this.callPool = callpool;
 		this.nodeManager = callpool.nodeManager;
@@ -234,19 +230,7 @@ class IncomingCall{
 	}
 
 	loadConfigs(){
-		console.log("Loading Call Config")
-		var cfwpath = configdir + "/system.json"
-		readFile(cfwpath, 'utf8', (error, data) => {
-			if(error){
-				console.log(error);
-				return;
-			}
-			this.config = JSON.parse(data)
-			this.config_load_count += 1
-			if (this.config_load_count >= configcount){
-				this.loadTheme();
-			}
-		})
+		this.loadTheme();
 	}
 	loadTheme(){
 		console.log("Loading Theme")

@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
@@ -15,7 +14,6 @@ async function getPeerConnections() {
 	return mod;
 }
 
-dotenv.config();
 
 // Normalize flag input from forms — may arrive as a string, an array, or undefined.
 // Always returns a JSON array (or null if empty).

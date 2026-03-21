@@ -1,5 +1,4 @@
 // imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 // internal modules
@@ -17,7 +16,6 @@ async function getPeers() {
 	return mod;
 }
 
-dotenv.config();
 
 const VALID_FTN_STATUS = ['NORMAL', 'CRASH', 'HOLD'];
 

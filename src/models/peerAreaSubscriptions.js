@@ -1,11 +1,9 @@
 // imports
-import * as dotenv from 'dotenv';
 
 // internal modules
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 
-dotenv.config();
 
 // peerConnections is imported lazily where needed to avoid the circular
 // dependency: peerConnections -> peerAreaSubscriptions -> peerConnections

@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
@@ -8,7 +7,6 @@ import * as msgNetworks from './msgNetworks.js';
 import * as msgZones from './msgZones.js';
 import * as alogger from "../utils/alogger.js";
 
-dotenv.config();
 
 async function newAddress(formObj) {
 	var returnObj = {

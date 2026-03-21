@@ -1,5 +1,4 @@
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
@@ -16,7 +15,6 @@ import { formatBodyHtml } from "../utils/terminalText.js";
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 
-dotenv.config();
 
 const maxOutbound     = 1000;
 const default_tzutc   = "-0600";

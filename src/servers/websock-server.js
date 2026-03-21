@@ -1,7 +1,6 @@
 //old port-based websocket server attempt. Obsoleted by new portless websocket server.
 
 //imports
-import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocketServer } from 'ws';
 import { EventEmitter } from 'node:events';
@@ -10,7 +9,6 @@ import * as alogger from "../utils/alogger.js"
 
 
 // variable setup
-dotenv.config();
 const terminator = Buffer.from("0d0a", 'hex')
 const noringtolimit = 6000;
 const ringlimit = 6
