@@ -60,6 +60,7 @@ export async function registerSchedules() {
 		var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
 		if (ftnConns && ftnConns.length > 0) {
 			for (var conn of ftnConns) {
+				if (!conn.poll_enabled) continue;
 				var cd = conn.connection_data || {};
 				// Skip HOLD connections — they don't get polled
 				if (cd.status === 'HOLD') continue;
@@ -83,11 +84,12 @@ export async function registerSchedules() {
 		var qwkConns = await peerConnections.getActiveConnectionsByNetworkType('QWK');
 		if (qwkConns && qwkConns.length > 0) {
 			for (var conn of qwkConns) {
+				if (!conn.poll_enabled) continue;
 				var cd = conn.connection_data || {};
 				// Hub transport is on-demand — nodes pull when they're ready
 				if (cd.transport === 'hub') continue;
 
-				var pullMinutes = parseInt(cd.pull_interval) || 120;
+				var pullMinutes = parseInt(cd.pull_interval_minutes || cd.pull_interval) || 120;
 				await tossQueue.upsertJobScheduler(
 					`qwk-pull:${conn.uuid}`, {
 						every: pullMinutes * 60 * 1000,
@@ -114,8 +116,9 @@ export async function registerSchedules() {
 		var nntpConns = await peerConnections.getActiveConnectionsByNetworkType('NNTP');
 		if (nntpConns && nntpConns.length > 0) {
 			for (var conn of nntpConns) {
+				if (!conn.poll_enabled) continue;
 				var cd = conn.connection_data || {};
-				var pullMinutes = parseInt(cd.pull_interval) || 60;
+				var pullMinutes = parseInt(cd.pull_interval_minutes || cd.pull_interval) || 60;
 
 				await tossQueue.upsertJobScheduler(
 					`nntp-pull:${conn.uuid}`, {

@@ -1321,6 +1321,16 @@ async function TossOutboundNetmail(){
 	if ((pktresult)&&(pktresult.processedmsgs)){
 		console.log("Wrote", pktresult.pktcount, "Packets")
 		await privateMessages.markSentArray(pktresult.processedmsgs, TosserName)
+
+		// Signal the mailer to scan the BSO outbound directory.
+		// The scanner handles route resolution (peer and nodelist) for all
+		// discovered addresses, replacing the previous inline routing logic.
+		try {
+			var jobsMod = (await import('../../queues/jobs.js'));
+			await jobsMod.enqueueMailerBsoScan();
+		} catch (scanErr) {
+			console.log("BSO scan signal error:", scanErr.message);
+		}
 	}else{
 		console.log("No outbound msgs processed")
 	}
@@ -1344,6 +1354,15 @@ async function TossOutbound(){
 	console.log("\r\n-------------------\r\nTossing Oubound\r\n-------------------")
 	await TossOutboundNetmail()
 	await TossOutboundEchomail()
+
+	// Signal the mailer to scan the BSO outbound directory for any
+	// echomail or netmail packets that were created above.
+	try {
+		var jobsMod = (await import('../../queues/jobs.js'));
+		await jobsMod.enqueueMailerBsoScan();
+	} catch (scanErr) {
+		console.log("BSO scan signal error:", scanErr.message);
+	}
 }
 
 export {

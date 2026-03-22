@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TcpTransport } from './transports/tcp.js';
 import { SessionController } from './session.js';
+import { BsoScanner } from './bsoScanner.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
@@ -30,6 +31,7 @@ class MailerManager extends EventEmitter {
 		this._sessions   = [];        // Active SessionController instances
 		this._tcpServer  = null;
 		this._wsPool     = null;      // WsPool from WsManager (Phase 3)
+		this._bsoScanner = null;      // BsoScanner instance
 		this._pollTimers = new Map(); // connectionUUID -> timer
 		this._running    = false;
 	}
@@ -59,14 +61,25 @@ class MailerManager extends EventEmitter {
 			alogger.writeClog(1, 'Mailer: binkp listening on port ' + BINKP_PORT, 'mailer', 'cyanbright');
 		});
 
-		// Start poll scheduling for active FTN connections
-		this._startPollScheduling();
+		// Start BSO outbound directory scanner
+		this._bsoScanner = new BsoScanner({
+			outboundDir: appConfig.get('MAILER_OUTBOUND_DIR') || appConfig.get('ftnoutbound', 'ftn/out'),
+			defaultZone: appConfig.getNumber('MAILER_DEFAULT_ZONE', 1),
+			manager:     this
+		});
+		this._bsoScanner.start();
 
 		alogger.writeClog(1, 'Mailer: started', 'mailer', 'cyanbright');
 	}
 
 	stop() {
 		this._running = false;
+
+		// Stop BSO scanner
+		if (this._bsoScanner) {
+			this._bsoScanner.stop();
+			this._bsoScanner = null;
+		}
 
 		// Stop poll timers
 		for (var [uuid, timer] of this._pollTimers) {
@@ -192,7 +205,7 @@ class MailerManager extends EventEmitter {
 		this._connectToPeer(conn);
 	}
 
-	// Internal — initiate TCP/WS connection to a peer
+	// Internal — initiate TCP/WS connection to a peer (from peer_connections record)
 	_connectToPeer(conn) {
 		var cd = conn.connection_data || {};
 		var mailerTransport = cd.mailer_transport || 'tcp';
@@ -221,7 +234,46 @@ class MailerManager extends EventEmitter {
 				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
 			});
 		}
-		// WebSocket transport: Phase 3
+	}
+
+	// Internal — initiate TCP connection to a nodelist-resolved address (no peer record)
+	connectToNodelistAddress(nodelistData, destinationAddress) {
+		if (!nodelistData || !nodelistData.hostname) {
+			alogger.writeClog(3, 'Mailer: nodelist connect — no hostname for ' + destinationAddress, 'mailer', 'yellow');
+			return;
+		}
+
+		var host = nodelistData.hostname;
+		var port = nodelistData.binkpPort || BINKP_PORT;
+
+		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
+			alogger.writeClog(4, 'Mailer: cannot connect to ' + destinationAddress + ' — max sessions reached', 'mailer', 'yellow');
+			return;
+		}
+
+		if (this._hasSessionForAddress(destinationAddress)) {
+			alogger.writeClog(5, 'Mailer: skipping nodelist connect to ' + destinationAddress + ' — session already active', 'mailer', 'cyan');
+			return;
+		}
+
+		alogger.writeClog(3,
+			'Mailer: nodelist connect to ' + destinationAddress +
+			' (' + (nodelistData.systemName || 'unknown') + ') at ' + host + ':' + port,
+			'mailer', 'cyan'
+		);
+
+		var transport = TcpTransport.connect(host, port, appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) * 1000);
+		transport.once('connect', () => {
+			this._createSession(transport, 'caller', {
+				connectionUUID: null,
+				nodelistAddress: destinationAddress,
+				nodelistData: nodelistData
+			});
+		});
+		transport.once('error', (err) => {
+			alogger.writeClog(3, 'Mailer: nodelist connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
+			this.emit('pollFailed', { address: destinationAddress, error: err.message });
+		});
 	}
 
 	// -----------------------------------------------------------------------
@@ -341,41 +393,6 @@ class MailerManager extends EventEmitter {
 	// Poll scheduling
 	// -----------------------------------------------------------------------
 
-	async _startPollScheduling() {
-		try {
-			var connections = await peerConnections.getActiveConnectionsByNetworkType('FTN');
-			if (!connections) return;
-
-			for (var conn of connections) {
-				var cd = conn.connection_data || {};
-
-				// HOLD connections are passive — never poll
-				if (cd.status === 'HOLD') continue;
-
-				// Need a host to poll
-				var host = cd.mailer_host || cd.remote_host;
-				if (!host) continue;
-
-				// CRASH connections are event-driven only (no timed poll)
-				if (cd.status === 'CRASH') continue;
-
-				// NORMAL connections get timed polling
-				var interval = appConfig.getNumber('MAILER_POLL_INTERVAL', 900) * 1000;
-				var timer = setInterval(() => {
-					this.pollConnection(conn.uuid);
-				}, interval);
-
-				this._pollTimers.set(conn.uuid, timer);
-				alogger.writeClog(5,
-					'Mailer: scheduled polling for ' + (cd.address || conn.uuid) +
-					' every ' + Math.floor(interval / 1000) + 's',
-					'mailer', 'cyan'
-				);
-			}
-		} catch (err) {
-			alogger.writeClog(3, 'Mailer: poll scheduling error: ' + err.message, 'mailer', 'redbright');
-		}
-	}
 
 	// Notify the mailer that new outbound mail exists for a connection.
 	// Called by the tosser after TossOutbound() completes.
@@ -394,6 +411,14 @@ class MailerManager extends EventEmitter {
 		}
 		// NORMAL = will be picked up by the next poll cycle
 		// HOLD = wait for inbound call
+	}
+
+	// Trigger an immediate BSO directory scan.
+	// Called by the mailer queue consumer when a bso-scan job arrives.
+	async scanOutboundNow() {
+		if (this._bsoScanner) {
+			return this._bsoScanner.scanNow();
+		}
 	}
 
 	// -----------------------------------------------------------------------

@@ -113,6 +113,9 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'MAILER_INBOUND_DIR',    defaultValue: '',           type: 'string',  category: 'mailer',      description: 'Mailer inbound directory (overrides ftninbound)' },
 	{ key: 'MAILER_OUTBOUND_DIR',   defaultValue: '',           type: 'string',  category: 'mailer',      description: 'Mailer outbound directory (overrides ftnoutbound)' },
 	{ key: 'MAILER_TEMP_DIR',       defaultValue: 'ftn/tmp',    type: 'string',  category: 'mailer',      description: 'Mailer temp directory' },
+	{ key: 'MAILER_BSO_SCAN_INTERVAL', defaultValue: '60',      type: 'number',  category: 'mailer',      description: 'BSO outbound directory scan interval (seconds)' },
+	{ key: 'MAILER_BSO_SCAN_ENABLED',  defaultValue: 'true',    type: 'boolean', category: 'mailer',      description: 'Enable periodic BSO outbound directory scanning' },
+	{ key: 'MAILER_DEFAULT_ZONE',      defaultValue: '1',       type: 'number',  category: 'mailer',      description: 'Default FTN zone for the base outbound directory' },
 
 	// -----------------------------------------------------------------------
 	// Worker

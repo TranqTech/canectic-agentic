@@ -60,9 +60,8 @@ export async function startEmbeddedWorkers(opts = {}) {
 
 			case 'ftn:outbound':
 				await ftnTosser.TossOutbound();
-				if (job.data.connectionUUID) {
-					await jobs.enqueueMailerSignalOutbound(job.data.connectionUUID);
-				}
+				// TossOutbound() now enqueues bso-scan internally;
+				// no additional signal needed here.
 				eventPublisher.publish(EVENTS.TOSS_COMPLETE, { source: 'ftn', direction: 'outbound' });
 				break;
 

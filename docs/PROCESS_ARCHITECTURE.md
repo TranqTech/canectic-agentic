@@ -150,9 +150,10 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 
 | Job name | Producer | Consumer | Payload | Notes |
 |----------|----------|----------|---------|-------|
-| `signal-outbound` | Worker (after FTN outbound toss) | Mailer | `{ connectionUUID }` | Triggers immediate poll for CRASH connections |
+| `signal-outbound` | Worker (after FTN outbound toss) | Mailer | `{ connectionUUID }` | Triggers immediate poll for CRASH connections (legacy, being replaced by `bso-scan`) |
 | `trigger-poll` | Admin (manual) | Mailer | `{ connectionUUID }` | Force a session regardless of outbound state |
 | `poll-scheduled` | Scheduler (repeatable) | Mailer | `{ connectionUUID }` | Regular poll cycle for NORMAL connections |
+| `bso-scan` | Worker (after outbound toss), Admin, CLI | Mailer | `{}` | Triggers immediate BSO directory scan; discovers all pending outbound mail and resolves routes |
 
 ### `maintenance` queue
 

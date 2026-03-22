@@ -676,16 +676,6 @@ async function tossOutbound() {
 				}
 			}
 
-			// Signal mailer for CRASH connections
-			if (cd.status === 'CRASH') {
-				try {
-					var jobsMod = await import('../../queues/jobs.js');
-					await jobsMod.enqueueMailerSignalOutbound(conn.uuid);
-				} catch (sigErr) {
-					alogger.writeAlog(3, '[TIC] Could not signal mailer for CRASH connection: ' + sigErr.message, 'yellow');
-				}
-			}
-
 		} catch (connErr) {
 			alogger.writeAlog(2, '[TIC] Error processing connection ' + cid + ': ' + connErr.message, 'redbright');
 			for (var f of files) {
@@ -700,6 +690,17 @@ async function tossOutbound() {
 		summary.skipped + ' skipped, ' + summary.errors + ' errors',
 		summary.errors > 0 ? 'yellowbright' : 'greenbright'
 	);
+
+	// Signal the mailer to scan the BSO outbound directory for staged files.
+	// Replaces the previous per-connection CRASH signalling.
+	if (summary.sent > 0) {
+		try {
+			var jobsMod = await import('../../queues/jobs.js');
+			await jobsMod.enqueueMailerBsoScan();
+		} catch (scanErr) {
+			alogger.writeAlog(3, '[TIC] BSO scan signal error: ' + scanErr.message, 'yellow');
+		}
+	}
 
 	return summary;
 }

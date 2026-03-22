@@ -236,6 +236,31 @@ export async function enqueueMailerTriggerPoll(connectionUUID) {
 	});
 }
 
+/**
+ * Trigger an immediate BSO outbound directory scan in the mailer process.
+ * Called by: worker (after outbound toss), admin, CLI.
+ * Replaces per-connection signal-outbound and nodelist-connect for
+ * outbound delivery triggering.
+ */
+export async function enqueueMailerBsoScan() {
+	return mailerQueue.add('bso-scan', {}, {
+		jobId: `bso-scan--${Date.now()}`,
+	});
+}
+
+/**
+ * Connect to a nodelist-resolved address (no peer connection record).
+ * Called by: outbound tosser when routing via nodelist.
+ */
+export async function enqueueMailerNodelistConnect(nodelistData, destinationAddress) {
+	return mailerQueue.add('nodelist-connect', {
+		nodelistData: nodelistData,
+		destinationAddress: destinationAddress,
+	}, {
+		jobId: `nodelist-connect--${destinationAddress}--${Date.now()}`,
+	});
+}
+
 // =========================================================================
 // Maintenance jobs
 // =========================================================================

@@ -406,10 +406,23 @@ The tosser currently writes `.pkt` files to the base outbound directory and crea
 
 Outbound calls are triggered by:
 
-1. **Event-driven** — when the tosser generates new outbound packets for a connection, signal the mailer manager. If the connection's status is CRASH, attempt immediate delivery.
-2. **Timed poll** — configurable per-connection poll interval (e.g., every 15 minutes). Only for connections with status NORMAL.
-3. **Manual** — admin triggers an outbound call via route or CLI.
-4. **HOLD** connections are never polled — they wait for the remote system to call us.
+1. **BSO scanner** — periodic directory scan discovers pending outbound mail and triggers connections via `ftnRouter.resolveRoute()`. Handles both peer connections and nodelist-resolved addresses. See `BSO_SCANNER_DESIGN.md`.
+2. **On-demand BSO scan** — tossers enqueue `bso-scan` jobs on the mailer queue after writing outbound packets, triggering an immediate scan cycle.
+3. **Timed poll** — BullMQ repeatable `poll-scheduled` jobs for NORMAL connections (receive-only polls).
+4. **Manual** — admin triggers an outbound call via route or CLI.
+5. **HOLD** connections are never polled — they wait for the remote system to call us.
+
+### BSO Scanner (`mailer/bsoScanner.js`)
+
+The BSO scanner runs inside the mailer process on a configurable `setInterval` timer (default 60s). It reads the BSO outbound directory tree, parses filenames to extract destination addresses and delivery flavours, and triggers mailer connections for each address with pending non-Hold mail.
+
+Key behaviors:
+- **Source-agnostic**: discovers files regardless of who created them (tossers, external tools, manual drops)
+- **Flavour-aware**: Crash/Immediate trigger immediate connections, Normal/Direct connect on scan, Hold waits for inbound
+- **Debounced**: multiple rapid `scanNow()` calls collapse into at most two scans
+- **Route resolution**: uses `ftnRouter.resolveRoute()` for the full 4-step cascade (direct peer, routing rule, nodelist direct, coordinator walk)
+
+BSO filename format: `NNNNNNNN.ext` where first 4 hex chars = net, last 4 = node, zone from directory.
 
 ### Connection Deduplication
 
@@ -433,6 +446,7 @@ class MailerManager {
     pollConnection(connectionUUID)       // Production path — checks _running, outbound mail, then connects
     triggerPoll(connectionUUID)          // Manual path — bypasses _running and outbound mail checks, always connects
     signalOutbound(connectionUUID)       // Called by tosser — CRASH = immediate poll, NORMAL = next cycle
+    scanOutboundNow()                    // Trigger immediate BSO scan (delegates to BsoScanner)
 
     // Internal
     _onInboundTcp(socket)                // Wrap in TcpTransport, create answerer session
@@ -460,6 +474,9 @@ class MailerManager {
 | `MAILER_POLL_INTERVAL` | `900` | Default poll interval in seconds |
 | `MAILER_CONNECT_TIMEOUT` | `30` | Outbound connection timeout in seconds |
 | `MAILER_SESSION_TIMEOUT` | `300` | Maximum session duration in seconds |
+| `MAILER_BSO_SCAN_INTERVAL` | `60` | BSO outbound directory scan interval (seconds) |
+| `MAILER_BSO_SCAN_ENABLED` | `true` | Enable/disable periodic BSO scanning |
+| `MAILER_DEFAULT_ZONE` | `1` | Default FTN zone for the base outbound directory |
 
 ### Nodelist-Resolved Outbound Connections (Phase 3)
 

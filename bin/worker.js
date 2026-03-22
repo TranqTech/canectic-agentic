@@ -129,10 +129,8 @@ function createTossProcessor() {
 
 				case 'ftn:outbound': {
 					await ftnTosser.TossOutbound();
-					// Signal mailer for any connections with CRASH status
-					if (job.data.connectionUUID) {
-						await jobs.enqueueMailerSignalOutbound(job.data.connectionUUID);
-					}
+					// TossOutbound() now enqueues bso-scan internally;
+					// no additional signal needed here.
 					eventPublisher.publish(EVENTS.TOSS_COMPLETE, {
 						source: 'ftn', direction: 'outbound'
 					});

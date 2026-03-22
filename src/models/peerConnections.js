@@ -51,6 +51,7 @@ function buildConnectionData(networkType, formObj) {
 			if (rawStatus && VALID_FTN_STATUS.includes(rawStatus.toUpperCase().trim())) {
 				status = rawStatus.toUpperCase().trim();
 			}
+			var rawPollInterval = formObj.poll_interval_minutes || formObj.poll_interval || null;
 			return {
 				address:          rawAddress  ? rawAddress.trim()        : '',
 				direct:           rawDirect !== 'No' && rawDirect !== false ? true : false,
@@ -62,7 +63,8 @@ function buildConnectionData(networkType, formObj) {
 				session_password: rawSessPw   ? rawSessPw.trim()         : '',
 				packet_password:  rawPktPw    ? rawPktPw.trim()          : '',
 				tic_password:     rawTicPw    ? rawTicPw.trim()          : '',
-				areafix_password: rawAreafix  ? rawAreafix.trim()        : ''
+				areafix_password: rawAreafix  ? rawAreafix.trim()        : '',
+				poll_interval:    rawPollInterval ? parseInt(rawPollInterval) : 60
 			};
 		}
 		case 'NNTP': {
@@ -71,7 +73,7 @@ function buildConnectionData(networkType, formObj) {
 			var nTls      = formObj.nntp_use_tls               !== undefined ? formObj.nntp_use_tls : formObj.use_tls;
 			var nUser     = formObj.nntp_username              || formObj.username              || '';
 			var nPass     = formObj.nntp_password              || formObj.password              || '';
-			var nInterval = formObj.nntp_pull_interval_minutes || formObj.pull_interval_minutes || 60;
+			var nInterval = formObj.nntp_pull_interval_minutes || formObj.poll_interval_minutes || formObj.pull_interval_minutes || 60;
 			return {
 				host:                  nHost     ? nHost.trim()        : '',
 				port:                  nPort     ? parseInt(nPort)     : 119,
@@ -98,15 +100,17 @@ function buildConnectionData(networkType, formObj) {
 			var qInbox     = pick(formObj.qwk_remote_inbox,   formObj.remote_inbox,   '/');
 			var qOutbox    = pick(formObj.qwk_remote_outbox,  formObj.remote_outbox,  '/');
 			var qRemoteId  = pick(formObj.qwk_remote_qwk_id, formObj.remote_qwk_id,  '');
+			var qPollInterval = formObj.poll_interval_minutes || formObj.pull_interval_minutes || formObj.pull_interval || null;
 			return {
-				transport:      qTransport ? qTransport.toString().trim().toLowerCase() : 'ftp',
-				host:           qHost ? qHost.toString().trim() : '',
-				port:           qPort ? parseInt(qPort) : 21,
-				username:       qUser ? qUser.toString().trim() : '',
-				password:       typeof qPass === 'string' ? qPass.trim() : '',
-				remote_inbox:   typeof qInbox === 'string'  ? qInbox.trim()  : '',
-				remote_outbox:  typeof qOutbox === 'string' ? qOutbox.trim() : '',
-				remote_qwk_id:  qRemoteId ? qRemoteId.toString().trim().toUpperCase() : ''
+				transport:             qTransport ? qTransport.toString().trim().toLowerCase() : 'ftp',
+				host:                  qHost ? qHost.toString().trim() : '',
+				port:                  qPort ? parseInt(qPort) : 21,
+				username:              qUser ? qUser.toString().trim() : '',
+				password:              typeof qPass === 'string' ? qPass.trim() : '',
+				remote_inbox:          typeof qInbox === 'string'  ? qInbox.trim()  : '',
+				remote_outbox:         typeof qOutbox === 'string' ? qOutbox.trim() : '',
+				remote_qwk_id:         qRemoteId ? qRemoteId.toString().trim().toUpperCase() : '',
+				pull_interval_minutes: qPollInterval ? parseInt(qPollInterval) : 120
 			};
 		}
 		case 'LOCAL':
@@ -231,6 +235,9 @@ async function newConnection(formObj) {
 		connection_data:   JSON.stringify(connectionData),
 		system_address_id: systemAddressId,
 		active:            true,
+		poll_enabled:      formObj.poll_enabled !== undefined
+			? (formObj.poll_enabled === 'true' || formObj.poll_enabled === true)
+			: (formObj.connection_type === 'NNTP' || (formObj.connection_type === 'QWK' && connectionData.transport !== 'hub')),
 		created_at:        currtime,
 		updated_at:        null,
 		created_by_uuid:   formObj.createdByUUID || '',
@@ -328,7 +335,7 @@ async function updateConnection(uuid, formObj) {
 		'address', 'direct', 'route_to', 'status', 'remote_host', 'remote_port',
 		'session_password', 'packet_password', 'tic_password', 'areafix_password',
 		'routing_rules', 'host', 'port', 'use_tls', 'username', 'password',
-		'pull_interval_minutes', 'transport', 'remote_inbox', 'remote_outbox',
+		'poll_interval_minutes', 'pull_interval_minutes', 'transport', 'remote_inbox', 'remote_outbox',
 		'remote_qwk_id',
 		// FTN form fields
 		'ftn_address', 'ftn_direct', 'ftn_route_to', 'ftn_status',
@@ -356,6 +363,10 @@ async function updateConnection(uuid, formObj) {
 			return returnObj;
 		}
 		updateObj.connection_data = JSON.stringify(connectionData);
+	}
+
+	if (formObj.poll_enabled !== undefined) {
+		updateObj.poll_enabled = (formObj.poll_enabled === 'true' || formObj.poll_enabled === true);
 	}
 
 	if (Object.keys(updateObj).length === 0) {

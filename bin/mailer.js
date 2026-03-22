@@ -140,6 +140,20 @@ async function main() {
 				await mailerManager.pollConnection(job.data.connectionUUID);
 				break;
 
+			case 'nodelist-connect':
+				// Connect to a nodelist-resolved address (no peer record)
+				mailerManager.connectToNodelistAddress(
+					job.data.nodelistData,
+					job.data.destinationAddress
+				);
+				break;
+
+			case 'bso-scan':
+				// On-demand BSO directory scan — triggered by tossers after
+				// outbound packets are written
+				await mailerManager.scanOutboundNow();
+				break;
+
 			default:
 				alogger.writeAlog(3, `[Mailer] Unknown job: ${job.name}`, "yellowbright");
 		}
