@@ -1,7 +1,7 @@
 // fileBatchDownload.js — Download all tagged files in call.file_batch
 //
-// Lightweight sub-module: shows batch contents, initiates ZMODEM transfer,
-// clears batch on success, returns to menu.
+// Lightweight sub-module: shows batch contents, asks about hangup,
+// initiates ZMODEM transfer, clears batch on success, returns to menu.
 
 import { BaseSubModule } from "../basesubmodule.js";
 import { getAreaByShortcode, resolveAreaPath } from "../../models/fileAreas.js";
@@ -12,9 +12,12 @@ import * as alogger from "../../utils/alogger.js";
 import * as fs from "fs";
 import * as path from "path";
 
+// States: idle → hangup_ask → downloading → result → done
 class fileBatchDownload extends BaseSubModule {
 	constructor(call) {
 		super(call, "FileBatchDownload");
+		this._state = 'idle';
+		this._hangupAfter = false;
 	}
 
 	async run() {
@@ -24,6 +27,7 @@ class fileBatchDownload extends BaseSubModule {
 		if (!batch || batch.length === 0) {
 			if (this.dumb) {
 				this.call.cmds.senddata("\r\n  No files tagged for download.\r\n\r\n");
+				this.call.cmds.senddata("  Tag files with T in the file browser, then use this command.\r\n\r\n");
 			} else {
 				this.call.cmds.clearscreen();
 				this.call.cmds.movecursor(1, 2);
@@ -37,17 +41,17 @@ class fileBatchDownload extends BaseSubModule {
 				this.call.cmds.senddata("  Press any key to continue...");
 				this.call.cmds.resetcolors();
 			}
-			this._waitingForKey = true;
+			this._state = 'done';
 			return;
 		}
 
 		// Show batch summary
 		if (this.dumb) {
-			this.call.cmds.senddata("\r\n  Batch Download — " + batch.length + " file(s):\r\n");
+			this.call.cmds.senddata("\r\n  Batch Download - " + batch.length + " file(s):\r\n");
 			for (var i = 0; i < batch.length; i++) {
 				this.call.cmds.senddata("    " + (i + 1) + ". " + batch[i].filename + "\r\n");
 			}
-			this.call.cmds.senddata("\r\n  Starting ZMODEM transfer...\r\n\r\n");
+			this.call.cmds.senddata("\r\n  Hang up after transfer? [Y/n]: ");
 		} else {
 			this.call.cmds.clearscreen();
 			this.call.cmds.movecursor(1, 1);
@@ -63,11 +67,67 @@ class fileBatchDownload extends BaseSubModule {
 				this.call.cmds.setfgcolor(8);
 				this.call.cmds.senddata("  ... and " + (batch.length - 15) + " more");
 			}
-			this.call.cmds.movecursor(1, 20);
-			this.call.cmds.setfgcolor(10);
-			this.call.cmds.senddata("  Starting ZMODEM transfer...");
+			var promptRow = Math.min(batch.length, 15) + 4;
+			this._promptRow = promptRow;
+			this.call.cmds.movecursor(1, promptRow);
+			this.call.cmds.setfgcolor(11);
+			this.call.cmds.senddata("  Hang up after transfer? [Y/n]");
 			this.call.cmds.resetcolors();
 		}
+
+		this._state = 'hangup_ask';
+	}
+
+	onChar(ch) {
+		if (!this.active || !this.call) return;
+		var lower = ch.toLowerCase();
+
+		if (this._state === 'hangup_ask') {
+			if (lower === 'y' || ch === '\r' || ch === '\n') {
+				this._hangupAfter = true;
+				this._doTransfer();
+			} else if (lower === 'n') {
+				this._hangupAfter = false;
+				this._doTransfer();
+			}
+			return;
+		}
+
+		if (this._state === 'result') {
+			if (this._hangupAfter) {
+				this.signalHangup();
+			} else {
+				this.signalReturn();
+			}
+			return;
+		}
+
+		if (this._state === 'done') {
+			this.signalReturn();
+			return;
+		}
+	}
+
+	onKey(key) {
+		if (!this.active || !this.call) return;
+
+		if (this._state === 'result') {
+			if (this._hangupAfter) {
+				this.signalHangup();
+			} else {
+				this.signalReturn();
+			}
+			return;
+		}
+
+		if (this._state === 'done') {
+			this.signalReturn();
+			return;
+		}
+	}
+
+	async _doTransfer() {
+		var batch = this.call.file_batch;
 
 		// Resolve file paths
 		var filePaths = [];
@@ -88,16 +148,27 @@ class fileBatchDownload extends BaseSubModule {
 
 		if (filePaths.length === 0) {
 			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  No tagged files found on disk.\r\n\r\n");
+				this.call.cmds.senddata("\r\n  No tagged files found on disk. Press any key...\r\n\r\n");
 			} else {
-				this.call.cmds.movecursor(1, 22);
+				this.call.cmds.movecursor(1, (this._promptRow || 20) + 2);
 				this.call.cmds.setfgcolor(9);
 				this.call.cmds.senddata("  No tagged files found on disk. Press any key...");
 				this.call.cmds.resetcolors();
 			}
-			this._waitingForKey = true;
+			this._state = 'done';
 			return;
 		}
+
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Starting ZMODEM transfer (" + filePaths.length + " files)...\r\n\r\n");
+		} else {
+			this.call.cmds.movecursor(1, (this._promptRow || 20) + 2);
+			this.call.cmds.setfgcolor(10);
+			this.call.cmds.senddata("  Starting ZMODEM transfer...");
+			this.call.cmds.resetcolors();
+		}
+
+		this._state = 'downloading';
 
 		// Run ZMODEM transfer
 		var protocol = new ZmodemProtocol(this.call);
@@ -114,40 +185,39 @@ class fileBatchDownload extends BaseSubModule {
 			}
 			alogger.writeAlog(3, "Batch download complete: " + filePaths.length + " files by " + (this.call.caller_username || "unknown"), "greenbright");
 
-			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  Transfer complete: " + filePaths.length + " files.\r\n\r\n");
+			this._state = 'result';
+			if (this._hangupAfter) {
+				if (this.dumb) {
+					this.call.cmds.senddata("\r\n  Transfer complete! Disconnecting...\r\n");
+				} else {
+					this.call.cmds.movecursor(1, (this._promptRow || 20) + 4);
+					this.call.cmds.setfgcolor(10);
+					this.call.cmds.senddata("  Transfer complete! Disconnecting...");
+					this.call.cmds.resetcolors();
+				}
+				var self = this;
+				setTimeout(function() { self.signalHangup(); }, 1500);
 			} else {
-				this.call.cmds.movecursor(1, 22);
-				this.call.cmds.setfgcolor(10);
-				this.call.cmds.senddata("  Transfer complete: " + filePaths.length + " files. Press any key...");
-				this.call.cmds.resetcolors();
+				if (this.dumb) {
+					this.call.cmds.senddata("\r\n  Transfer complete: " + filePaths.length + " files. Press any key...\r\n\r\n");
+				} else {
+					this.call.cmds.movecursor(1, (this._promptRow || 20) + 4);
+					this.call.cmds.setfgcolor(10);
+					this.call.cmds.senddata("  Transfer complete: " + filePaths.length + " files. Press any key...");
+					this.call.cmds.resetcolors();
+				}
 			}
 		} else {
 			alogger.writeAlog(3, "Batch download failed: " + (result.error || "unknown"), "yellow");
 			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  Transfer failed: " + (result.error || "unknown") + "\r\n\r\n");
+				this.call.cmds.senddata("\r\n  Transfer failed: " + (result.error || "unknown") + ". Press any key...\r\n\r\n");
 			} else {
-				this.call.cmds.movecursor(1, 22);
+				this.call.cmds.movecursor(1, (this._promptRow || 20) + 4);
 				this.call.cmds.setfgcolor(9);
-				this.call.cmds.senddata("  Transfer failed: " + (result.error || "unknown") + " Press any key...");
+				this.call.cmds.senddata("  Transfer failed: " + (result.error || "unknown") + ". Press any key...");
 				this.call.cmds.resetcolors();
 			}
-		}
-
-		this._waitingForKey = true;
-	}
-
-	onKey(key) {
-		if (this._waitingForKey) {
-			this.signalReturn();
-			return;
-		}
-	}
-
-	onChar(ch) {
-		if (this._waitingForKey) {
-			this.signalReturn();
-			return;
+			this._state = 'done';
 		}
 	}
 }

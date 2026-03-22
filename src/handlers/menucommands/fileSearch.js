@@ -525,6 +525,28 @@ class fileSearch extends BaseSubModule {
 			return;
 		}
 
+		this._pendingDownloadFile = file;
+		this._hangupPrompt = true;
+		this._hangupAfter = false;
+
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Hang up after transfer? [Y/n]: ");
+		} else {
+			this.call.cmds.movecursor(this._bodyLeft, this._statusRow);
+			this.call.cmds.cleartoeol();
+			this.call.cmds.setfgcolor(CLR_PROMPT);
+			this.call.cmds.senddata("  Hang up after transfer? [Y/n]");
+			this.call.cmds.resetcolors();
+		}
+	}
+
+	async _doFileTransfer(file) {
+		if (!file) return;
+		this._pendingDownloadFile = null;
+
+		var area = file._areaShortcode ? await getAreaByShortcode(file._areaShortcode) : null;
+		if (!area) return;
+
 		var group = area.group_shortcode ? await getGroupByShortcode(area.group_shortcode) : null;
 		var areaPath = resolveAreaPath(group, area);
 		var fullPath = path.join(areaPath, file.disk_path || file.filename);
@@ -545,20 +567,68 @@ class fileSearch extends BaseSubModule {
 		if (result.success) {
 			await incrementDownloadCount(file.id);
 			alogger.writeAlog(3, "File downloaded via search: " + file.filename + " by " + (this.call.caller_username || "unknown"), "greenbright");
+
+			if (this._hangupAfter) {
+				if (this.dumb) {
+					this.call.cmds.senddata("\r\n  Transfer complete! Disconnecting...\r\n");
+				} else {
+					this.call.cmds.movecursor(this._bodyLeft, this._statusRow);
+					this.call.cmds.cleartoeol();
+					this.call.cmds.setfgcolor(10);
+					this.call.cmds.senddata("  Transfer complete! Disconnecting...");
+					this.call.cmds.resetcolors();
+				}
+				var self = this;
+				setTimeout(function() { self.signalHangup(); }, 1500);
+				return;
+			}
+
+			if (this.dumb) {
+				this.call.cmds.senddata("\r\n  Transfer complete. Press any key...\r\n");
+			} else {
+				this.call.cmds.movecursor(this._bodyLeft, this._statusRow);
+				this.call.cmds.cleartoeol();
+				this.call.cmds.setfgcolor(10);
+				this.call.cmds.senddata("  Transfer complete. Press any key...");
+				this.call.cmds.resetcolors();
+			}
+		} else {
+			alogger.writeAlog(3, "Search download failed: " + file.filename + ": " + (result.error || "unknown"), "yellow");
+			if (this.dumb) {
+				this.call.cmds.senddata("\r\n  Transfer failed. Press any key...\r\n");
+			} else {
+				this.call.cmds.movecursor(this._bodyLeft, this._statusRow);
+				this.call.cmds.cleartoeol();
+				this.call.cmds.setfgcolor(CLR_ERROR);
+				this.call.cmds.senddata("  Transfer failed: " + (result.error || "unknown") + ". Press any key...");
+				this.call.cmds.resetcolors();
+			}
 		}
 
-		// Redraw current view after transfer
-		if (this._state === STATE.RESULTS) {
-			this._drawResultsScreen();
-		} else {
-			this._drawDetailScreen();
-		}
+		this._hangupResult = !this._hangupAfter;
+		this._downloadInfoShown = true;
 	}
 
 	// ===== INPUT HANDLING =====
 
 	onKey(key) {
 		if (!this.active || !this.call) return;
+
+		if (this._hangupPrompt) return;
+
+		if (this._hangupResult) {
+			if (this._hangupAfter) {
+				this.signalHangup();
+			} else {
+				this._hangupResult = false;
+				if (this._state === STATE.RESULTS) {
+					this._drawResultsScreen();
+				} else if (this._state === STATE.DETAIL) {
+					this._drawDetailScreen();
+				}
+			}
+			return;
+		}
 
 		if (this._downloadInfoShown) {
 			this._downloadInfoShown = false;
@@ -637,6 +707,34 @@ class fileSearch extends BaseSubModule {
 
 	onChar(ch) {
 		if (!this.active || !this.call) return;
+
+		if (this._hangupPrompt) {
+			var lower = ch.toLowerCase();
+			if (lower === 'y' || ch === '\r' || ch === '\n') {
+				this._hangupAfter = true;
+				this._hangupPrompt = false;
+				this._doFileTransfer(this._pendingDownloadFile);
+			} else if (lower === 'n') {
+				this._hangupAfter = false;
+				this._hangupPrompt = false;
+				this._doFileTransfer(this._pendingDownloadFile);
+			}
+			return;
+		}
+
+		if (this._hangupResult) {
+			if (this._hangupAfter) {
+				this.signalHangup();
+			} else {
+				this._hangupResult = false;
+				if (this._state === STATE.RESULTS) {
+					this._drawResultsScreen();
+				} else if (this._state === STATE.DETAIL) {
+					this._drawDetailScreen();
+				}
+			}
+			return;
+		}
 
 		if (this._downloadInfoShown) {
 			this._downloadInfoShown = false;

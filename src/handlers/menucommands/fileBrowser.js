@@ -897,6 +897,13 @@ class fileBrowser extends BaseSubModule {
 
 	async _startDownload(file) {
 		if (!file || !this.call) return;
+		this._pendingDownloadFile = file;
+		this._pendingBatchDownload = false;
+		this._showHangupPrompt();
+	}
+
+	async _doFileTransfer(file) {
+		if (!file || !this.call) return;
 
 		// Resolve the full filesystem path
 		var group = this._areaConfig ? await getGroupByShortcode(this._areaConfig.group_shortcode) : null;
@@ -907,11 +914,12 @@ class fileBrowser extends BaseSubModule {
 		var fs = await import("fs");
 		if (!fs.existsSync(fullPath)) {
 			this._showTransferMessage("File not found on disk: " + file.filename, true);
+			this._downloadInfoShown = true;
 			return;
 		}
 
 		if (this.dumb) {
-			this.call.cmds.senddata("\r\n\r\n  Starting ZMODEM download of: " + file.filename + "\r\n");
+			this.call.cmds.senddata("\r\n  Starting ZMODEM download of: " + file.filename + "\r\n");
 			this.call.cmds.senddata("  Your terminal should auto-detect the transfer.\r\n\r\n");
 		} else {
 			this._showTransferMessage("Starting ZMODEM transfer: " + file.filename + "...", false);
@@ -929,22 +937,34 @@ class fileBrowser extends BaseSubModule {
 			await incrementDownloadCount(file.id);
 			alogger.writeAlog(3, "File downloaded via ZMODEM: " + file.filename + " by " + (this.call.caller_username || "unknown"), "greenbright");
 
+			if (this._hangupAfter) {
+				if (this.dumb) {
+					this.call.cmds.senddata("\r\n  Transfer complete! Disconnecting...\r\n");
+				} else {
+					this._showTransferMessage("Transfer complete! Disconnecting...", false);
+				}
+				var self = this;
+				setTimeout(function() { self.signalHangup(); }, 1500);
+				return;
+			}
+
 			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  Transfer complete: " + file.filename + "\r\n\r\n");
+				this.call.cmds.senddata("\r\n  Transfer complete: " + file.filename + ". Press any key...\r\n\r\n");
 			} else {
-				this._showTransferMessage("Transfer complete: " + file.filename, false);
+				this._showTransferMessage("Transfer complete: " + file.filename + ". Press any key...", false);
 			}
 		} else {
 			alogger.writeAlog(3, "ZMODEM download failed for " + file.filename + ": " + (result.error || "unknown"), "yellow");
 
 			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  Transfer failed: " + (result.error || "unknown") + "\r\n\r\n");
+				this.call.cmds.senddata("\r\n  Transfer failed: " + (result.error || "unknown") + ". Press any key...\r\n\r\n");
 			} else {
 				this._showTransferMessage("Transfer failed: " + (result.error || "unknown"), true);
 			}
 		}
 
 		// After transfer, show "press any key" before redrawing
+		this._hangupResult = !this._hangupAfter;
 		this._downloadInfoShown = true;
 	}
 
@@ -964,6 +984,37 @@ class fileBrowser extends BaseSubModule {
 		this.call.cmds.setfgcolor(CLR_STATUS);
 		this.call.cmds.senddata("Press any key to continue...");
 		this.call.cmds.resetcolors();
+	}
+
+	// --- Hangup prompt ---
+
+	_showHangupPrompt() {
+		this._hangupPrompt = true;
+		this._hangupAfter = false;
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Hang up after transfer? [Y/n]: ");
+		} else {
+			var msgRow = this._detailBodyStart || 5;
+			for (var i = 0; i < (this._detailBodyHeight || 10); i++) {
+				this.call.cmds.movecursor(this._bodyLeft || 1, msgRow + i);
+				this.call.cmds.cleartoeol();
+			}
+			this.call.cmds.movecursor((this._bodyLeft || 1) + 1, msgRow + 2);
+			this.call.cmds.setfgcolor(11);
+			this.call.cmds.senddata("Hang up after transfer? [Y/n]");
+			this.call.cmds.resetcolors();
+		}
+	}
+
+	_runPendingDownload() {
+		if (this._pendingBatchDownload) {
+			this._pendingBatchDownload = false;
+			this._doBatchTransfer();
+		} else if (this._pendingDownloadFile) {
+			var file = this._pendingDownloadFile;
+			this._pendingDownloadFile = null;
+			this._doFileTransfer(file);
+		}
 	}
 
 	// --- Batch tagging ---
@@ -1015,6 +1066,12 @@ class fileBrowser extends BaseSubModule {
 			return;
 		}
 
+		this._pendingDownloadFile = null;
+		this._pendingBatchDownload = true;
+		this._showHangupPrompt();
+	}
+
+	async _doBatchTransfer() {
 		var batch = this.call.file_batch;
 		var filePaths = [];
 		var fileIds = [];
@@ -1031,7 +1088,7 @@ class fileBrowser extends BaseSubModule {
 				filePaths.push(fullPath);
 				fileIds.push(item.id);
 			} else {
-				alogger.writeAlog(3, this.loggingId + " Batch skip — file not on disk: " + item.filename, "yellow");
+				alogger.writeAlog(3, this.loggingId + " Batch skip - file not on disk: " + item.filename, "yellow");
 			}
 		}
 
@@ -1072,20 +1129,32 @@ class fileBrowser extends BaseSubModule {
 				try { var bmc = await import("../../models/userFileBatch.js"); await bmc.clearBatch(this._userId); } catch (_) {}
 			}
 
+			if (this._hangupAfter) {
+				if (this.dumb) {
+					this.call.cmds.senddata("\r\n  Batch complete! Disconnecting...\r\n");
+				} else {
+					this._showTransferMessage("Batch complete! Disconnecting...", false);
+				}
+				var self = this;
+				setTimeout(function() { self.signalHangup(); }, 1500);
+				return;
+			}
+
 			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  Batch transfer complete: " + filePaths.length + " files.\r\n\r\n");
+				this.call.cmds.senddata("\r\n  Batch transfer complete: " + filePaths.length + " files. Press any key...\r\n\r\n");
 			} else {
-				this._showTransferMessage("Batch complete: " + filePaths.length + " files transferred.", false);
+				this._showTransferMessage("Batch complete: " + filePaths.length + " files. Press any key...", false);
 			}
 		} else {
 			alogger.writeAlog(3, "Batch download failed: " + (result.error || "unknown"), "yellow");
 			if (this.dumb) {
-				this.call.cmds.senddata("\r\n  Batch transfer failed: " + (result.error || "unknown") + "\r\n\r\n");
+				this.call.cmds.senddata("\r\n  Batch transfer failed: " + (result.error || "unknown") + ". Press any key...\r\n\r\n");
 			} else {
 				this._showTransferMessage("Batch failed: " + (result.error || "unknown"), true);
 			}
 		}
 
+		this._hangupResult = !this._hangupAfter;
 		this._downloadInfoShown = true;
 	}
 
@@ -1204,6 +1273,26 @@ class fileBrowser extends BaseSubModule {
 	// ===========================================================================
 
 	onKey(key) {
+		if (this._hangupPrompt) {
+			// Waiting for hangup answer — only onChar handles it
+			return;
+		}
+
+		if (this._hangupResult) {
+			if (this._hangupAfter) {
+				this.signalHangup();
+			} else {
+				this._hangupResult = false;
+				if (this._state === STATE.FILE_DETAIL) {
+					this._showCurrentFileDetail();
+				} else {
+					this._drawFileRows();
+					this._drawFileStatusBar();
+				}
+			}
+			return;
+		}
+
 		if (this.dumb && this._dumbInputMode) {
 			this._onKeyDumb(key);
 			return;
@@ -1217,6 +1306,35 @@ class fileBrowser extends BaseSubModule {
 	}
 
 	onChar(ch) {
+		if (this._hangupPrompt) {
+			var lower = ch.toLowerCase();
+			if (lower === 'y' || ch === '\r' || ch === '\n') {
+				this._hangupAfter = true;
+				this._hangupPrompt = false;
+				this._runPendingDownload();
+			} else if (lower === 'n') {
+				this._hangupAfter = false;
+				this._hangupPrompt = false;
+				this._runPendingDownload();
+			}
+			return;
+		}
+
+		if (this._hangupResult) {
+			if (this._hangupAfter) {
+				this.signalHangup();
+			} else {
+				this._hangupResult = false;
+				if (this._state === STATE.FILE_DETAIL) {
+					this._showCurrentFileDetail();
+				} else {
+					this._drawFileRows();
+					this._drawFileStatusBar();
+				}
+			}
+			return;
+		}
+
 		if (this.dumb && this._dumbInputMode) {
 			this._onCharDumb(ch);
 			return;
@@ -1348,6 +1466,10 @@ class fileBrowser extends BaseSubModule {
 		// If download info is shown, any key goes back to the detail view
 		if (this._downloadInfoShown) {
 			this._downloadInfoShown = false;
+			if (this._hangupResult) {
+				this._hangupResult = false;
+				if (this._hangupAfter) { this.signalHangup(); return; }
+			}
 			this._showCurrentFileDetail();
 			return;
 		}
@@ -1381,6 +1503,10 @@ class fileBrowser extends BaseSubModule {
 		// If download info is shown, any key goes back
 		if (this._downloadInfoShown) {
 			this._downloadInfoShown = false;
+			if (this._hangupResult) {
+				this._hangupResult = false;
+				if (this._hangupAfter) { this.signalHangup(); return; }
+			}
 			this._showCurrentFileDetail();
 			return;
 		}
