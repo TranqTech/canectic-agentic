@@ -1,4 +1,4 @@
-// transfers/zmodem.js — Native ZMODEM engine (send path).
+// transfers/zmodem.js — Native ZMODEM engine (send + receive).
 //
 // Pure byte-stream state machine. Works over any bidirectional channel
 // via the StreamAdapter duck-type: { write(buf), onData(cb), offData() }.
@@ -6,6 +6,8 @@
 // Implements: ZRQINIT/ZRINIT negotiation, ZFILE metadata, ZDATA streaming,
 // ZDLE escaping, hex and binary headers, CRC-32 subpackets, ZRPOS error
 // recovery, crash recovery (resume), ESCCTL negotiation, ZFIN shutdown.
+// Receive: auto-start detection, file metadata parsing, data subpacket
+// CRC-32 validation, file writing, multi-file sessions.
 //
 // Does NOT implement: ZBIN32 headers, ZedZap (8K blocks), ZRLE compression,
 // ZCOMMAND, ZCHALLENGE. These can be added later.
@@ -168,6 +170,11 @@ class ZmodemEngine extends EventEmitter {
 		this._fileOffset = 0;      // Current send position
 		this._resolveMain = null;
 		this._rejectMain = null;
+
+		// Receive mode flag and subpacket parser state
+		this._recvMode = false;
+		this._inDataPhase = false;
+		this._state_sub = 'data';  // 'data' or 'crc'
 
 		// ZRQINIT retry counter
 		this._initRetries = 0;
@@ -470,6 +477,27 @@ class ZmodemEngine extends EventEmitter {
 
 	_processInput() {
 		while (this._rxBuf.length > 0 && !this._aborted) {
+			// In receive data phase, process bytes through subpacket parser
+			if (this._recvMode && this._inDataPhase) {
+				// Check if a header marker appeared (sender exiting data phase)
+				if (this._rxBuf.length >= 2 && this._hasHeaderMarker(this._rxBuf)) {
+					this._inDataPhase = false;
+					// Fall through to header parsing
+				} else {
+					// Process data bytes through subpacket parser
+					var len = this._rxBuf.length;
+					for (var i = 0; i < len && this._inDataPhase && !this._aborted; i++) {
+						if (this._state_sub === 'crc') {
+							this._rxProcessCrcByte(this._rxBuf[i]);
+						} else {
+							this._rxProcessDataByte(this._rxBuf[i]);
+						}
+					}
+					this._rxBuf = this._rxBuf.subarray(len);
+					continue;
+				}
+			}
+
 			// Look for ZPAD (start of hex header) or ZDLE (start of binary header)
 			var consumed = this._tryParseHeader();
 			if (consumed === 0) break; // Need more data
@@ -480,6 +508,14 @@ class ZmodemEngine extends EventEmitter {
 			}
 			this._rxBuf = this._rxBuf.subarray(consumed);
 		}
+	}
+
+	_hasHeaderMarker(buf) {
+		// Check first few bytes for header start patterns
+		for (var i = 0; i < Math.min(buf.length - 1, 8); i++) {
+			if (buf[i] === ZPAD && (buf[i + 1] === ZPAD || buf[i + 1] === ZDLE)) return true;
+		}
+		return false;
 	}
 
 	_tryParseHeader() {
@@ -497,16 +533,25 @@ class ZmodemEngine extends EventEmitter {
 			return -1; // Discard
 		}
 
-		// Hex header: ZPAD ZPAD ZDLE ZHEX ...
+		// Check for headers starting with ZPAD
 		if (buf[0] === ZPAD) {
-			return this._tryParseHexHeader();
+			if (buf.length < 2) return 0;
+			// Binary header: ZPAD ZDLE ZBIN
+			if (buf[1] === ZDLE) {
+				if (buf.length < 3) return 0;
+				if (buf[2] === ZBIN) {
+					return this._tryParseBinHeader(0);
+				}
+			}
+			// Hex header: ZPAD ZPAD ZDLE ZHEX
+			if (buf[1] === ZPAD) {
+				return this._tryParseHexHeader();
+			}
+			return -1;
 		}
 
-		// Binary header: ZPAD ZDLE ZBIN ... (buf[0] might be ZDLE from mid-stream)
-		// Actually binary headers start with ZPAD ZDLE ZBIN, but we might see
-		// the ZPAD already consumed. Handle both.
+		// Binary header from mid-stream: ZDLE ZBIN
 		if (buf[0] === ZDLE) {
-			// Could be start of binary header if next byte is ZBIN
 			if (buf.length < 2) return 0;
 			if (buf[1] === ZBIN) {
 				return this._tryParseBinHeader(0);
@@ -617,6 +662,12 @@ class ZmodemEngine extends EventEmitter {
 		var name = FRAME_NAMES[frameType] || ('UNKNOWN_' + frameType);
 		this.emit('headerRx', { type: name, position: bytesToPosition(p0, p1, p2, p3) });
 
+		// Route to receive handler if in receive mode
+		if (this._recvMode) {
+			this._rxDispatchHeader(frameType, p0, p1, p2, p3);
+			return;
+		}
+
 		switch (frameType) {
 			case ZRINIT:
 				if (this._state === 'await_zrinit' || this._state === 'await_zrinit_next') {
@@ -686,6 +737,303 @@ class ZmodemEngine extends EventEmitter {
 	// FINISH
 	// ======================================================================
 
+	// ======================================================================
+	// PUBLIC API — RECEIVE
+	// ======================================================================
+
+	/**
+	 * Receive files via ZMODEM.
+	 * @param {string} targetDir — directory to write received files into
+	 * @returns {Promise<{success: boolean, files: Array, error?: string}>}
+	 */
+	receive(targetDir) {
+		var self = this;
+		this._recvMode = true;
+		this._targetDir = targetDir;
+		this._recvFiles = [];
+		this._recvDataBuf = [];       // Accumulated data for current file
+		this._recvFileName = '';
+		this._recvFileSize = 0;
+		this._recvFileMtime = 0;
+		this._recvOffset = 0;
+		this._recvWriteStream = null;
+		this._inDataPhase = false;
+		this._subpacketAccum = [];     // ZDLE unescape accumulator for subpackets
+		this._subpacketEscaped = false; // Previous byte was ZDLE
+
+		return new Promise(function(resolve, reject) {
+			self._resolveMain = resolve;
+			self._rejectMain = reject;
+			self._state = 'rx_await_zrqinit';
+
+			// Wire adapter
+			self._adapter.onData(function(data) { self._onData(data); });
+
+			// Send ZRINIT to announce we are ready
+			self._sendRecvZRINIT();
+			self._startTimer(HEADER_TIMEOUT, 'rx_init_timeout');
+		});
+	}
+
+	_sendRecvZRINIT() {
+		var flags = CANFDX | CANOVIO | CANFC32;
+		if (this._escapeAll) flags |= ESCCTL;
+		this._sendHexHeader(ZRINIT, flags, 0, 0, 0);
+	}
+
+	// ======================================================================
+	// RECEIVE — STATE MACHINE
+	// ======================================================================
+
+	_rxDispatchHeader(frameType, p0, p1, p2, p3) {
+		switch (frameType) {
+			case ZRQINIT:
+				// Sender announcing — if we haven't already sent ZRINIT, send it
+				if (this._state === 'rx_await_zrqinit') {
+					this._clearTimer();
+					this._state = 'rx_await_zfile';
+					// ZRINIT was already sent in receive(), no need to resend
+					this._startTimer(HEADER_TIMEOUT, 'rx_zfile_timeout');
+				}
+				break;
+
+			case ZFILE:
+				this._clearTimer();
+				// Metadata will be parsed from the following data subpacket
+				this._state = 'rx_zfile_data';
+				this._inDataPhase = true;
+				this._subpacketAccum = [];
+				this._subpacketEscaped = false;
+				break;
+
+			case ZDATA:
+				this._clearTimer();
+				this._state = 'rx_receiving';
+				this._inDataPhase = true;
+				this._subpacketAccum = [];
+				this._subpacketEscaped = false;
+				break;
+
+			case ZEOF: {
+				this._clearTimer();
+				this._inDataPhase = false;
+				var eofPos = bytesToPosition(p0, p1, p2, p3);
+				this._rxFinalizeFile();
+				// Ready for next file
+				this._state = 'rx_await_zfile';
+				this._sendRecvZRINIT();
+				this._startTimer(HEADER_TIMEOUT, 'rx_next_timeout');
+				break;
+			}
+
+			case ZFIN:
+				this._clearTimer();
+				this._inDataPhase = false;
+				this._sendHexHeader(ZFIN, 0, 0, 0, 0);
+				this._finishRecv(true);
+				break;
+
+			case ZNAK:
+				// Sender wants us to resend — resend ZRINIT or ZRPOS
+				if (this._state === 'rx_await_zfile' || this._state === 'rx_await_zrqinit') {
+					this._sendRecvZRINIT();
+				}
+				break;
+
+			case ZABORT:
+			case ZCAN:
+				this._finishRecv(false, 'Transfer cancelled by sender');
+				break;
+		}
+	}
+
+	_rxOnSubpacket(data, frameEnd) {
+		if (this._state === 'rx_zfile_data') {
+			// This is the ZFILE metadata subpacket
+			this._rxParseFileMeta(data);
+			this._inDataPhase = false;
+
+			// Open file and send ZRPOS
+			this._rxOpenFile();
+			return;
+		}
+
+		if (this._state === 'rx_receiving') {
+			// Write data to file
+			if (this._recvWriteStream) {
+				this._recvWriteStream.write(data);
+			}
+			this._recvOffset += data.length;
+
+			this.emit('progress', {
+				file: this._recvFileName,
+				bytesReceived: this._recvOffset,
+				totalSize: this._recvFileSize
+			});
+
+			// ZCRCQ = sender wants ZACK
+			if (frameEnd === ZCRCQ) {
+				var pos = positionToBytes(this._recvOffset);
+				this._sendHexHeader(ZACK, pos[0], pos[1], pos[2], pos[3]);
+			}
+
+			// ZCRCE or ZCRCW = end of this data frame
+			if (frameEnd === ZCRCE || frameEnd === ZCRCW) {
+				this._inDataPhase = false;
+				if (frameEnd === ZCRCW) {
+					var pos2 = positionToBytes(this._recvOffset);
+					this._sendHexHeader(ZACK, pos2[0], pos2[1], pos2[2], pos2[3]);
+				}
+			}
+		}
+	}
+
+	_rxParseFileMeta(data) {
+		var str = data.toString('binary');
+		var nullIdx = str.indexOf('\0');
+		if (nullIdx >= 0) {
+			this._recvFileName = str.substring(0, nullIdx);
+			var rest = str.substring(nullIdx + 1);
+			var parts = rest.split(' ');
+			this._recvFileSize = parseInt(parts[0]) || 0;
+			if (parts[1]) {
+				this._recvFileMtime = parseInt(parts[1], 8) || 0;
+			}
+		} else {
+			this._recvFileName = 'unknown_' + Date.now();
+			this._recvFileSize = 0;
+		}
+
+		this.emit('fileStart', {
+			name: this._recvFileName,
+			size: this._recvFileSize,
+			mtime: this._recvFileMtime
+		});
+	}
+
+	_rxOpenFile() {
+		var fullPath = path.join(this._targetDir, this._recvFileName);
+		this._recvFullPath = fullPath;
+		this._recvOffset = 0;
+
+		// Check for existing partial file (crash recovery / resume)
+		var resumeOffset = 0;
+		try {
+			var stats = fs.statSync(fullPath);
+			if (stats.size > 0 && stats.size < this._recvFileSize) {
+				resumeOffset = stats.size;
+			}
+		} catch (_) {}
+
+		if (resumeOffset > 0) {
+			// Resume: append to existing file
+			this._recvWriteStream = fs.createWriteStream(fullPath, { flags: 'a' });
+			this._recvOffset = resumeOffset;
+		} else {
+			this._recvWriteStream = fs.createWriteStream(fullPath);
+			this._recvOffset = 0;
+		}
+
+		this._state = 'rx_receiving';
+		var pos = positionToBytes(this._recvOffset);
+		this._sendHexHeader(ZRPOS, pos[0], pos[1], pos[2], pos[3]);
+		this._startTimer(DATA_TIMEOUT, 'rx_data_timeout');
+	}
+
+	_rxFinalizeFile() {
+		if (this._recvWriteStream) {
+			this._recvWriteStream.end();
+			this._recvWriteStream = null;
+		}
+
+		this._recvFiles.push({
+			name: this._recvFileName,
+			size: this._recvOffset,
+			path: this._recvFullPath
+		});
+
+		this.emit('fileComplete', {
+			name: this._recvFileName,
+			size: this._recvOffset,
+			path: this._recvFullPath
+		});
+	}
+
+	// ======================================================================
+	// RECEIVE — DATA SUBPACKET PARSING
+	// ======================================================================
+
+	_rxProcessDataByte(b) {
+		if (this._subpacketEscaped) {
+			this._subpacketEscaped = false;
+
+			// Check for frame end markers
+			if (b === ZCRCG || b === ZCRCQ || b === ZCRCE || b === ZCRCW) {
+				// End of subpacket — next 4 bytes (unescaped) are CRC-32
+				this._subpacketFrameEnd = b;
+				this._subpacketCrcBytes = [];
+				this._subpacketCrcEscaped = false;
+				this._state_sub = 'crc';
+				return;
+			}
+
+			// Normal escaped byte
+			this._subpacketAccum.push(b ^ ZDLE_XOR);
+			return;
+		}
+
+		if (b === ZDLE) {
+			this._subpacketEscaped = true;
+			return;
+		}
+
+		this._subpacketAccum.push(b);
+	}
+
+	_rxProcessCrcByte(b) {
+		if (this._subpacketCrcEscaped) {
+			this._subpacketCrcEscaped = false;
+			this._subpacketCrcBytes.push(b ^ ZDLE_XOR);
+		} else if (b === ZDLE) {
+			this._subpacketCrcEscaped = true;
+			return;
+		} else {
+			this._subpacketCrcBytes.push(b);
+		}
+
+		if (this._subpacketCrcBytes.length >= 4) {
+			// Validate CRC-32
+			var data = Buffer.from(this._subpacketAccum);
+			var frameEnd = this._subpacketFrameEnd;
+			var crcInput = Buffer.concat([data, Buffer.from([frameEnd])]);
+			var calcCrc = crc32(crcInput);
+			var rxCrc = (
+				this._subpacketCrcBytes[0] |
+				(this._subpacketCrcBytes[1] << 8) |
+				(this._subpacketCrcBytes[2] << 16) |
+				(this._subpacketCrcBytes[3] << 24)
+			) >>> 0;
+
+			if (calcCrc === rxCrc) {
+				this._rxOnSubpacket(data, frameEnd);
+			} else {
+				// CRC error — request retransmit from current offset
+				this.emit('error', { message: 'CRC-32 error in data subpacket', recoverable: true });
+				var pos = positionToBytes(this._recvOffset);
+				this._sendHexHeader(ZRPOS, pos[0], pos[1], pos[2], pos[3]);
+			}
+
+			// Reset for next subpacket
+			this._subpacketAccum = [];
+			this._subpacketEscaped = false;
+			this._state_sub = 'data';
+		}
+	}
+
+	// ======================================================================
+	// FINISH — unified for send and receive
+	// ======================================================================
+
 	_finishSuccess() {
 		// Close current file if open
 		if (this._fileHandle) {
@@ -696,6 +1044,30 @@ class ZmodemEngine extends EventEmitter {
 		// _currentFileIndex points past the last file (incremented by _sendNextFile
 		// when it found no more files). The actual count is _currentFileIndex.
 		this._finish(true, null, this._currentFileIndex);
+	}
+
+	_finishRecv(success, error) {
+		if (this._aborted) return;
+		this._aborted = true;
+		this._clearTimer();
+		this._state = 'done';
+
+		if (this._recvWriteStream) {
+			this._recvWriteStream.end();
+			this._recvWriteStream = null;
+		}
+
+		this._adapter.offData();
+
+		if (this._resolveMain) {
+			this._resolveMain({
+				success: success,
+				files: this._recvFiles || [],
+				error: error || null
+			});
+			this._resolveMain = null;
+			this._rejectMain = null;
+		}
 	}
 
 	_finish(success, error, filesSent) {

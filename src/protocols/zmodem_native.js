@@ -37,6 +37,23 @@ class NativeZmodemProtocol {
 		return result;
 	}
 
+	/**
+	 * Receive files via ZMODEM.
+	 * @param {string} targetDir — directory to write received files into
+	 * @returns {Promise<{success: boolean, files?: Array, error?: string}>}
+	 */
+	async receive(targetDir) {
+		var adapter = this._createAdapter();
+		this._engine = new ZmodemEngine(adapter, {
+			escapeCtl: this._opts.escapeCtl || false,
+			timeout: this._opts.timeout || 15000,
+		});
+
+		var result = await this._engine.receive(targetDir);
+		this._restoreRawMode();
+		return result;
+	}
+
 	abort() {
 		if (this._engine) {
 			this._engine.abort();
