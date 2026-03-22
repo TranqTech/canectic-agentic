@@ -19,7 +19,7 @@ import {
 } from '../src/transfers/zmodem.js';
 import { crc16, crc32 } from '../src/transfers/crc.js';
 import {
-	ZPAD, ZDLE, ZBIN, ZHEX,
+	ZPAD, ZDLE, ZBIN, ZHEX, ZBIN32,
 	ZRQINIT, ZRINIT, ZACK, ZFILE, ZRPOS, ZDATA, ZEOF, ZFIN,
 	ZCRCG, ZCRCQ, ZCRCE, ZCRCW,
 	CANFC32, CANFDX, CANOVIO,
@@ -111,16 +111,15 @@ describe('ZMODEM hex header encoding', function() {
 		assert.strictEqual(header[1], ZPAD);
 		assert.strictEqual(header[2], ZDLE);
 		assert.strictEqual(header[3], ZHEX);
-		// Should end with CR LF XON
-		assert.strictEqual(header[header.length - 3], CR);
-		assert.strictEqual(header[header.length - 2], 0x0A);
-		assert.strictEqual(header[header.length - 1], XON);
+		// Should end with CR LF
+		assert.strictEqual(header[header.length - 2], CR);
+		assert.strictEqual(header[header.length - 1], 0x0A);
 	});
 
 	it('should contain valid hex-encoded CRC', function() {
 		var header = encodeHexHeader(ZRINIT, CANFDX | CANOVIO | CANFC32, 0, 0, 0);
-		// Extract hex portion (after ZPAD ZPAD ZDLE ZHEX, before CR LF XON)
-		var hexStr = header.subarray(4, header.length - 3).toString('ascii');
+		// Extract hex portion (after ZPAD ZPAD ZDLE ZHEX, before CR LF)
+		var hexStr = header.subarray(4, header.length - 2).toString('ascii');
 		assert.strictEqual(hexStr.length, 14); // 5 bytes * 2 hex chars + 2 CRC bytes * 2 hex chars
 
 		// Decode and verify CRC
@@ -249,11 +248,13 @@ function createMockReceiver(adapter, targetDir) {
 				};
 			}
 
-			// Look for binary header: ZPAD ZDLE ZBIN
-			if (buf[i] === ZPAD && i + 1 < buf.length && buf[i + 1] === ZDLE && i + 2 < buf.length && buf[i + 2] === ZBIN) {
+			// Look for binary header: ZPAD ZDLE ZBIN or ZPAD ZDLE ZBIN32
+			if (buf[i] === ZPAD && i + 1 < buf.length && buf[i + 1] === ZDLE && i + 2 < buf.length && (buf[i + 2] === ZBIN || buf[i + 2] === ZBIN32)) {
+				var isBin32 = buf[i + 2] === ZBIN32;
+				var binCrcLen = isBin32 ? 4 : 2;
 				var pos = i + 3;
 				var unesc = [];
-				while (unesc.length < 7 && pos < buf.length) {
+				while (unesc.length < (5 + binCrcLen) && pos < buf.length) {
 					if (buf[pos] === ZDLE) {
 						if (pos + 1 >= buf.length) return null;
 						unesc.push(buf[pos + 1] ^ 0x40);
@@ -263,7 +264,7 @@ function createMockReceiver(adapter, targetDir) {
 						pos++;
 					}
 				}
-				if (unesc.length < 7) return null;
+				if (unesc.length < (5 + binCrcLen)) return null;
 
 				// After binary header, read data subpacket if this is ZFILE or ZDATA
 				var frameType = unesc[0];

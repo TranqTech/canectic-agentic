@@ -10,7 +10,7 @@ import { getGroupByShortcode } from "../../models/fileGroups.js";
 import { addFileEntry, checkDupe } from "../../models/fileEntries.js";
 import { computeHashes } from "../../utils/fileHasher.js";
 import { applyDescriptions } from "../../utils/fileDescExtractor.js";
-import { ZmodemReceiveProtocol } from "../../protocols/zmodem_receive.js";
+import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
 import appConfig from "../../config/appConfig.js";
 import * as fileNetworkAreas from "../../models/fileNetworkAreas.js";
 import * as filePeerSubscriptions from "../../models/filePeerSubscriptions.js";
@@ -108,8 +108,8 @@ class fileUpload extends BaseSubModule {
 			this.call.cmds.resetcolors();
 		}
 
-		// Receive files via ZMODEM into staging
-		var protocol = new ZmodemReceiveProtocol(this.call);
+		// Receive files via ZMODEM into staging (native engine)
+		var protocol = new NativeZmodemProtocol(this.call);
 		var result = await protocol.receive(stagingDir);
 
 		if (!result.success) {

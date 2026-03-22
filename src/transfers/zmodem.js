@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { crc16, crc32 } from './crc.js';
 import {
-	ZPAD, ZDLE, ZBIN, ZHEX,
+	ZPAD, ZDLE, ZBIN, ZHEX, ZBIN32,
 	ZRQINIT, ZRINIT, ZSINIT, ZACK, ZFILE, ZSKIP, ZNAK, ZABORT,
 	ZFIN, ZRPOS, ZDATA, ZEOF, ZFERR, ZCAN,
 	ZCRCG, ZCRCQ, ZCRCE, ZCRCW,
@@ -94,8 +94,10 @@ function encodeHexHeader(frameType, p0, p1, p2, p3) {
 	hex += HEXCHARS[(crc >> 4) & 0xF];
 	hex += HEXCHARS[crc & 0xF];
 
-	// ZPAD ZPAD ZDLE ZHEX + hex string + CR LF XON
-	var frame = Buffer.alloc(4 + hex.length + 3);
+	// ZPAD ZPAD ZDLE ZHEX + hex string + CR LF (no XON — optional per spec,
+	// and causes "unexpected back-channel data" errors in terminal clients
+	// that haven't entered ZMODEM mode yet)
+	var frame = Buffer.alloc(4 + hex.length + 2);
 	frame[0] = ZPAD;
 	frame[1] = ZPAD;
 	frame[2] = ZDLE;
@@ -104,7 +106,6 @@ function encodeHexHeader(frameType, p0, p1, p2, p3) {
 	var pos = 4 + hex.length;
 	frame[pos++] = CR;
 	frame[pos++] = 0x0A; // LF
-	frame[pos++] = XON;
 	return frame;
 }
 
@@ -119,6 +120,24 @@ function encodeBinHeader(frameType, p0, p1, p2, p3, escapeAll) {
 	var escaped = zdleEscape(payload, escapeAll);
 
 	return Buffer.concat([Buffer.from([ZPAD, ZDLE, ZBIN]), escaped]);
+}
+
+function encodeBin32Header(frameType, p0, p1, p2, p3, escapeAll) {
+	// Format: ZPAD ZDLE ZBIN32 type p0 p1 p2 p3 crc32[4]
+	// All bytes after ZBIN32 are ZDLE-escaped
+	var headerBytes = Buffer.from([frameType, p0 || 0, p1 || 0, p2 || 0, p3 || 0]);
+	var crcVal = crc32(headerBytes);
+	var crcBytes = Buffer.from([
+		crcVal & 0xFF,
+		(crcVal >> 8) & 0xFF,
+		(crcVal >> 16) & 0xFF,
+		(crcVal >> 24) & 0xFF
+	]);
+
+	var payload = Buffer.concat([headerBytes, crcBytes]);
+	var escaped = zdleEscape(payload, escapeAll);
+
+	return Buffer.concat([Buffer.from([ZPAD, ZDLE, ZBIN32]), escaped]);
 }
 
 function positionToBytes(pos) {
@@ -175,6 +194,7 @@ class ZmodemEngine extends EventEmitter {
 		this._recvMode = false;
 		this._inDataPhase = false;
 		this._state_sub = 'data';  // 'data' or 'crc'
+		this._rxDataCrc32 = true;  // Default CRC-32; updated when binary header is parsed
 
 		// ZRQINIT retry counter
 		this._initRetries = 0;
@@ -264,6 +284,11 @@ class ZmodemEngine extends EventEmitter {
 			this.emit('fileComplete', { name: this._fileName, size: this._fileSize });
 		}
 
+		// Transition state immediately to prevent duplicate ZRINITs from
+		// calling _sendNextFile twice (receiver may send ZRINIT before and
+		// after seeing our ZRQINIT)
+		this._state = 'sending_file';
+
 		// Advance to next file
 		this._sendNextFile();
 	}
@@ -324,7 +349,7 @@ class ZmodemEngine extends EventEmitter {
 			remaining + ' 0\0';
 
 		// Send header + metadata as a single write to ensure they arrive together
-		var header = encodeBinHeader(ZFILE, 0, 0, 0, 0, this._escapeAll);
+		var header = encodeBin32Header(ZFILE, 0, 0, 0, 0, this._escapeAll);
 		var subpacket = this._encodeDataSubpacket(Buffer.from(meta, 'binary'), ZCRCW);
 		this._adapter.write(Buffer.concat([header, subpacket]));
 		this._startTimer(this._timeout, 'zfile_timeout');
@@ -368,14 +393,18 @@ class ZmodemEngine extends EventEmitter {
 			var data = nread < self._subpacketSize ? buf.subarray(0, nread) : buf;
 			self._fileOffset += nread;
 
-			// Use ZCRCG (more data follows, no ack needed) for streaming
-			var subpacket = self._encodeDataSubpacket(data, ZCRCG);
+			// Use ZCRCE for last subpacket (signals end of data frame),
+			// ZCRCG for all others (more data follows, no ack needed).
+			// This ensures the receiver exits data phase before ZEOF arrives.
+			var isLast = self._fileOffset >= self._fileSize;
+			var frameEnd = isLast ? ZCRCE : ZCRCG;
+			var subpacket = self._encodeDataSubpacket(data, frameEnd);
 
 			// Prepend ZDATA header to first subpacket so they arrive together
 			if (self._zdataHeaderPending) {
 				self._zdataHeaderPending = false;
 				var pos = positionToBytes(self._fileOffset - nread);
-				var header = encodeBinHeader(ZDATA, pos[0], pos[1], pos[2], pos[3], self._escapeAll);
+				var header = encodeBin32Header(ZDATA, pos[0], pos[1], pos[2], pos[3], self._escapeAll);
 				self._adapter.write(Buffer.concat([header, subpacket]));
 			} else {
 				self._adapter.write(subpacket);
@@ -426,7 +455,8 @@ class ZmodemEngine extends EventEmitter {
 	}
 
 	_sendBinHeader(type, p0, p1, p2, p3) {
-		this._adapter.write(encodeBinHeader(type, p0, p1, p2, p3, this._escapeAll));
+		// Use ZBIN32 (CRC-32) for data headers to match CRC-32 data subpackets
+		this._adapter.write(encodeBin32Header(type, p0, p1, p2, p3, this._escapeAll));
 	}
 
 	_encodeDataSubpacket(data, frameEnd) {
@@ -477,25 +507,23 @@ class ZmodemEngine extends EventEmitter {
 
 	_processInput() {
 		while (this._rxBuf.length > 0 && !this._aborted) {
-			// In receive data phase, process bytes through subpacket parser
+			// In receive data phase, process bytes through subpacket parser.
+			// The parser handles data/header transitions via frame-end markers:
+			// ZCRCE/ZCRCW exit data phase, then the main loop parses headers.
+			// No header scanning needed — conformant senders use ZCRCE/ZCRCW
+			// before sending headers (ZEOF, ZFIN, new ZDATA).
 			if (this._recvMode && this._inDataPhase) {
-				// Check if a header marker appeared (sender exiting data phase)
-				if (this._rxBuf.length >= 2 && this._hasHeaderMarker(this._rxBuf)) {
-					this._inDataPhase = false;
-					// Fall through to header parsing
-				} else {
-					// Process data bytes through subpacket parser
-					var len = this._rxBuf.length;
-					for (var i = 0; i < len && this._inDataPhase && !this._aborted; i++) {
-						if (this._state_sub === 'crc') {
-							this._rxProcessCrcByte(this._rxBuf[i]);
-						} else {
-							this._rxProcessDataByte(this._rxBuf[i]);
-						}
+				var len = this._rxBuf.length;
+				var i;
+				for (i = 0; i < len && this._inDataPhase && !this._aborted; i++) {
+					if (this._state_sub === 'crc') {
+						this._rxProcessCrcByte(this._rxBuf[i]);
+					} else {
+						this._rxProcessDataByte(this._rxBuf[i]);
 					}
-					this._rxBuf = this._rxBuf.subarray(len);
-					continue;
 				}
+				this._rxBuf = this._rxBuf.subarray(i);
+				continue;
 			}
 
 			// Look for ZPAD (start of hex header) or ZDLE (start of binary header)
@@ -510,13 +538,6 @@ class ZmodemEngine extends EventEmitter {
 		}
 	}
 
-	_hasHeaderMarker(buf) {
-		// Check first few bytes for header start patterns
-		for (var i = 0; i < Math.min(buf.length - 1, 8); i++) {
-			if (buf[i] === ZPAD && (buf[i + 1] === ZPAD || buf[i + 1] === ZDLE)) return true;
-		}
-		return false;
-	}
 
 	_tryParseHeader() {
 		var buf = this._rxBuf;
@@ -536,11 +557,14 @@ class ZmodemEngine extends EventEmitter {
 		// Check for headers starting with ZPAD
 		if (buf[0] === ZPAD) {
 			if (buf.length < 2) return 0;
-			// Binary header: ZPAD ZDLE ZBIN
+			// Binary header: ZPAD ZDLE ZBIN or ZPAD ZDLE ZBIN32
 			if (buf[1] === ZDLE) {
 				if (buf.length < 3) return 0;
 				if (buf[2] === ZBIN) {
-					return this._tryParseBinHeader(0);
+					return this._tryParseBinHeader(0, false);
+				}
+				if (buf[2] === ZBIN32) {
+					return this._tryParseBinHeader(0, true);
 				}
 			}
 			// Hex header: ZPAD ZPAD ZDLE ZHEX
@@ -550,11 +574,14 @@ class ZmodemEngine extends EventEmitter {
 			return -1;
 		}
 
-		// Binary header from mid-stream: ZDLE ZBIN
+		// Binary header from mid-stream: ZDLE ZBIN or ZDLE ZBIN32
 		if (buf[0] === ZDLE) {
 			if (buf.length < 2) return 0;
 			if (buf[1] === ZBIN) {
-				return this._tryParseBinHeader(0);
+				return this._tryParseBinHeader(0, false);
+			}
+			if (buf[1] === ZBIN32) {
+				return this._tryParseBinHeader(0, true);
 			}
 			return -1;
 		}
@@ -608,18 +635,19 @@ class ZmodemEngine extends EventEmitter {
 		return consumed;
 	}
 
-	_tryParseBinHeader(startOffset) {
+	_tryParseBinHeader(startOffset, isCrc32) {
 		var buf = this._rxBuf;
+		var headerByte = isCrc32 ? ZBIN32 : ZBIN;
 
-		// Find ZPAD ZDLE ZBIN (or just ZDLE ZBIN if ZPAD was consumed)
+		// Find ZPAD ZDLE headerByte (or just ZDLE headerByte if ZPAD was consumed)
 		var headerStart;
-		if (startOffset === 0 && buf[0] === ZDLE && buf[1] === ZBIN) {
+		if (startOffset === 0 && buf[0] === ZDLE && buf[1] === headerByte) {
 			headerStart = 2;
 		} else {
-			// Look for ZPAD ZDLE ZBIN
+			// Look for ZPAD ZDLE headerByte
 			var found = -1;
 			for (var i = startOffset; i <= buf.length - 3; i++) {
-				if (buf[i] === ZPAD && buf[i + 1] === ZDLE && buf[i + 2] === ZBIN) {
+				if (buf[i] === ZPAD && buf[i + 1] === ZDLE && buf[i + 2] === headerByte) {
 					found = i;
 					break;
 				}
@@ -628,11 +656,13 @@ class ZmodemEngine extends EventEmitter {
 			headerStart = found + 3;
 		}
 
-		// Need to unescape 5 header bytes + 2 CRC bytes = 7 raw bytes
-		// But escaped bytes take 2 bytes each, so we need up to 14 bytes
+		var crcSize = isCrc32 ? 4 : 2;
+		var totalRaw = 5 + crcSize; // 5 header bytes + CRC bytes
+
+		// Unescape header bytes + CRC
 		var unescaped = [];
 		var pos = headerStart;
-		while (unescaped.length < 7 && pos < buf.length) {
+		while (unescaped.length < totalRaw && pos < buf.length) {
 			if (buf[pos] === ZDLE) {
 				if (pos + 1 >= buf.length) return 0; // Need more
 				unescaped.push(buf[pos + 1] ^ ZDLE_XOR);
@@ -643,13 +673,27 @@ class ZmodemEngine extends EventEmitter {
 			}
 		}
 
-		if (unescaped.length < 7) return 0; // Need more
+		if (unescaped.length < totalRaw) return 0; // Need more
 
-		// Validate CRC-16
+		// Validate CRC
 		var headerData = Buffer.from(unescaped.slice(0, 5));
-		var rxCrc = (unescaped[5] << 8) | unescaped[6];
-		var calcCrc = crc16(headerData);
-		if (rxCrc !== calcCrc) return -1;
+		if (isCrc32) {
+			var rxCrc32 = (
+				unescaped[5] |
+				(unescaped[6] << 8) |
+				(unescaped[7] << 16) |
+				(unescaped[8] << 24)
+			) >>> 0;
+			var calcCrc32 = crc32(headerData);
+			if (rxCrc32 !== calcCrc32) return -1;
+		} else {
+			var rxCrc16 = (unescaped[5] << 8) | unescaped[6];
+			var calcCrc16 = crc16(headerData);
+			if (rxCrc16 !== calcCrc16) return -1;
+		}
+
+		// Track CRC mode for subsequent data subpackets
+		this._rxDataCrc32 = isCrc32;
 
 		var frameType = unescaped[0];
 		var p0 = unescaped[1], p1 = unescaped[2], p2 = unescaped[3], p3 = unescaped[4];
@@ -717,6 +761,8 @@ class ZmodemEngine extends EventEmitter {
 			self._timer = null;
 			if (reason === 'zrqinit_timeout') {
 				self._sendZRQINIT(); // Retry
+			} else if (reason === 'rx_zrinit_retry') {
+				self._sendRecvZRINIT(); // Retry ZRINIT
 			} else if (reason === 'zfin_timeout') {
 				// ZFIN timeout — assume success (receiver may have disconnected)
 				self._finishSuccess();
@@ -760,6 +806,7 @@ class ZmodemEngine extends EventEmitter {
 		this._inDataPhase = false;
 		this._subpacketAccum = [];     // ZDLE unescape accumulator for subpackets
 		this._subpacketEscaped = false; // Previous byte was ZDLE
+		this._rxInitRetries = 0;
 
 		return new Promise(function(resolve, reject) {
 			self._resolveMain = resolve;
@@ -769,16 +816,26 @@ class ZmodemEngine extends EventEmitter {
 			// Wire adapter
 			self._adapter.onData(function(data) { self._onData(data); });
 
-			// Send ZRINIT to announce we are ready
+			// Send rz autostart + ZRINIT to trigger sender's ZMODEM auto-detect
 			self._sendRecvZRINIT();
-			self._startTimer(HEADER_TIMEOUT, 'rx_init_timeout');
 		});
 	}
 
 	_sendRecvZRINIT() {
+		this._rxInitRetries++;
+		if (this._rxInitRetries > ZRQINIT_RETRIES) {
+			this._finishRecv(false, 'No response from sender (ZRINIT timeout)');
+			return;
+		}
+
 		var flags = CANFDX | CANOVIO | CANFC32;
-		if (this._escapeAll) flags |= ESCCTL;
-		this._sendHexHeader(ZRINIT, flags, 0, 0, 0);
+
+		// Build "rz\r" + ZRINIT as a single buffer so terminal clients see
+		// the complete auto-start sequence in one chunk
+		var autostart = Buffer.from('rz\r');
+		var zrinit = encodeHexHeader(ZRINIT, flags, 0, 0, 0);
+		this._adapter.write(Buffer.concat([autostart, zrinit]));
+		this._startTimer(2000, 'rx_zrinit_retry'); // Retry every 2s
 	}
 
 	// ======================================================================
@@ -788,11 +845,13 @@ class ZmodemEngine extends EventEmitter {
 	_rxDispatchHeader(frameType, p0, p1, p2, p3) {
 		switch (frameType) {
 			case ZRQINIT:
-				// Sender announcing — if we haven't already sent ZRINIT, send it
+				// Sender announcing — transition to await_zfile if we haven't already
 				if (this._state === 'rx_await_zrqinit') {
 					this._clearTimer();
 					this._state = 'rx_await_zfile';
-					// ZRINIT was already sent in receive(), no need to resend
+					// Send ZRINIT in response (the init ZRINIT may have crossed with ZRQINIT)
+					var rxFlags = CANFDX | CANOVIO | CANFC32;
+					this._sendHexHeader(ZRINIT, rxFlags, 0, 0, 0);
 					this._startTimer(HEADER_TIMEOUT, 'rx_zfile_timeout');
 				}
 				break;
@@ -1001,32 +1060,45 @@ class ZmodemEngine extends EventEmitter {
 			this._subpacketCrcBytes.push(b);
 		}
 
-		if (this._subpacketCrcBytes.length >= 4) {
-			// Validate CRC-32
+		// CRC size depends on header type: ZBIN → CRC-16 (2 bytes), ZBIN32 → CRC-32 (4 bytes)
+		var crcSize = this._rxDataCrc32 ? 4 : 2;
+		if (this._subpacketCrcBytes.length >= crcSize) {
 			var data = Buffer.from(this._subpacketAccum);
 			var frameEnd = this._subpacketFrameEnd;
 			var crcInput = Buffer.concat([data, Buffer.from([frameEnd])]);
-			var calcCrc = crc32(crcInput);
-			var rxCrc = (
-				this._subpacketCrcBytes[0] |
-				(this._subpacketCrcBytes[1] << 8) |
-				(this._subpacketCrcBytes[2] << 16) |
-				(this._subpacketCrcBytes[3] << 24)
-			) >>> 0;
+			var crcOk = false;
 
-			if (calcCrc === rxCrc) {
-				this._rxOnSubpacket(data, frameEnd);
+			if (this._rxDataCrc32) {
+				var calcCrc32 = crc32(crcInput);
+				var rxCrc32 = (
+					this._subpacketCrcBytes[0] |
+					(this._subpacketCrcBytes[1] << 8) |
+					(this._subpacketCrcBytes[2] << 16) |
+					(this._subpacketCrcBytes[3] << 24)
+				) >>> 0;
+				crcOk = (calcCrc32 === rxCrc32);
 			} else {
-				// CRC error — request retransmit from current offset
-				this.emit('error', { message: 'CRC-32 error in data subpacket', recoverable: true });
-				var pos = positionToBytes(this._recvOffset);
-				this._sendHexHeader(ZRPOS, pos[0], pos[1], pos[2], pos[3]);
+				var calcCrc16 = crc16(crcInput);
+				var rxCrc16 = (this._subpacketCrcBytes[0] << 8) | this._subpacketCrcBytes[1];
+				crcOk = (calcCrc16 === rxCrc16);
 			}
 
-			// Reset for next subpacket
+			// Reset parser for next subpacket
 			this._subpacketAccum = [];
 			this._subpacketEscaped = false;
 			this._state_sub = 'data';
+
+			if (crcOk) {
+				this._rxOnSubpacket(data, frameEnd);
+			} else {
+				// CRC error — exit data phase, flush stale bytes, request retransmit
+				this.emit('error', { message: 'CRC error in data subpacket', recoverable: true });
+				this._inDataPhase = false;
+				this._rxBuf = Buffer.alloc(0);
+				var pos = positionToBytes(this._recvOffset);
+				this._sendHexHeader(ZRPOS, pos[0], pos[1], pos[2], pos[3]);
+				this._startTimer(DATA_TIMEOUT, 'rx_data_timeout');
+			}
 		}
 	}
 
@@ -1100,6 +1172,7 @@ export {
 	ZmodemEngine,
 	encodeHexHeader,
 	encodeBinHeader,
+	encodeBin32Header,
 	zdleEscape,
 	needsEscape,
 	positionToBytes,

@@ -75,8 +75,8 @@ class NativeXmodemProtocol {
 
 		return {
 			write: function(buf) {
-				if (call && call.connection) {
-					call.connection.sendRawBinary(buf);
+				if (call && call.cmds) {
+					call.cmds.senddata(buf);
 				}
 			},
 			onData: function(cb) {

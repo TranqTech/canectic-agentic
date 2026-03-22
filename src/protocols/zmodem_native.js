@@ -32,6 +32,9 @@ class NativeZmodemProtocol {
 			timeout: this._opts.timeout || 15000,
 		});
 
+		// Attach error listener to prevent unhandled error crash
+		this._engine.on('error', function() {});
+
 		var result = await this._engine.send(filePaths);
 		this._restoreRawMode();
 		return result;
@@ -48,6 +51,9 @@ class NativeZmodemProtocol {
 			escapeCtl: this._opts.escapeCtl || false,
 			timeout: this._opts.timeout || 15000,
 		});
+
+		// Attach error listener to prevent unhandled error crash
+		this._engine.on('error', function() {});
 
 		var result = await this._engine.receive(targetDir);
 		this._restoreRawMode();
@@ -67,8 +73,8 @@ class NativeZmodemProtocol {
 
 		return {
 			write: function(buf) {
-				if (call && call.connection) {
-					call.connection.sendRawBinary(buf);
+				if (call && call.cmds) {
+					call.cmds.senddata(buf);
 				}
 			},
 			onData: function(cb) {
