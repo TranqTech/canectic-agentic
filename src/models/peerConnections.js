@@ -52,6 +52,9 @@ function buildConnectionData(networkType, formObj) {
 				status = rawStatus.toUpperCase().trim();
 			}
 			var rawPollInterval = formObj.poll_interval_minutes || formObj.poll_interval || null;
+			var rawMailerTransport = formObj.ftn_mailer_transport || formObj.mailer_transport || 'tcp';
+			var rawMailerProtocol  = formObj.ftn_mailer_protocol  || formObj.mailer_protocol  || 'binkp';
+			var rawMailerWsUrl     = formObj.ftn_mailer_ws_url    || formObj.mailer_ws_url    || '';
 			return {
 				address:          rawAddress  ? rawAddress.trim()        : '',
 				direct:           rawDirect !== 'No' && rawDirect !== false ? true : false,
@@ -64,7 +67,10 @@ function buildConnectionData(networkType, formObj) {
 				packet_password:  rawPktPw    ? rawPktPw.trim()          : '',
 				tic_password:     rawTicPw    ? rawTicPw.trim()          : '',
 				areafix_password: rawAreafix  ? rawAreafix.trim()        : '',
-				poll_interval:    rawPollInterval ? parseInt(rawPollInterval) : 60
+				poll_interval:    rawPollInterval ? parseInt(rawPollInterval) : 60,
+				mailer_transport: rawMailerTransport ? rawMailerTransport.trim().toLowerCase() : 'tcp',
+				mailer_protocol:  rawMailerProtocol  ? rawMailerProtocol.trim().toLowerCase()  : 'binkp',
+				mailer_ws_url:    rawMailerWsUrl     ? rawMailerWsUrl.trim()                   : ''
 			};
 		}
 		case 'NNTP': {

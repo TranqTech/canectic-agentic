@@ -143,6 +143,7 @@ MenuHandler._runSubModule(new FileTransferHandler(call, files, opts))
 FileTransferHandler.run()
   |-- Validate files array (non-empty, all paths exist)
   |-- Show pre-transfer screen (file list, total size, protocol)
+  |-- Prompt: "Hang up after transfer?" [Y/n] (Enter defaults to Yes)
   |-- Wait for user confirmation (Enter to start, Q to cancel)
   |
   v (on confirmation)
@@ -161,8 +162,8 @@ FileTransferHandler.run()
   |-- Increment download counts for successfully transferred files
   |-- Clear batch if this was a batch download
   |-- Show result screen ("Transfer complete" or error details)
-  |-- Wait for keypress
-  |-- signalReturn() -> back to menu/file browser
+  |-- If hangup chosen: auto-disconnect after 1500 ms delay
+  |-- Otherwise: wait for keypress, signalReturn() -> back to menu/file browser
 ```
 
 ### 3.3 Pre-transfer screen
@@ -177,12 +178,28 @@ Before starting the transfer, display a confirmation screen:
   ────────────────────────────────
   Total: 2 files, 2.4 MB
 
+  Hang up after transfer? [Y/n]
+
   Your terminal client should auto-detect the transfer.
 
   [Enter] Start   [Q] Cancel
 ```
 
-### 3.4 Post-transfer screen
+### 3.4 Hangup-after-transfer prompt
+
+All four download handlers (`fileBatchCheck`, `fileBatchDownload`, `fileBrowser`, `fileSearch`) present a "Hang up after transfer?" `[Y/n]` prompt before starting the ZMODEM transfer. Enter defaults to Yes.
+
+This is a common BBS pattern — users who are downloading a batch often want to disconnect immediately rather than navigate back through menus. The prompt appears after file confirmation but before `sz` is spawned.
+
+**Implementation varies by handler:**
+- `fileBatchDownload` uses a state machine (`hangup_ask → downloading → result → done`).
+- `fileBrowser` uses `_hangupPrompt`/`_hangupResult` flags on the browser instance (both D and B keys).
+- `fileSearch` shows the prompt on the status row during the D key flow.
+- `fileBatchCheck` includes the prompt in its login-flow batch check sequence.
+
+After a successful transfer, if hangup was chosen the system auto-disconnects after a 1500 ms delay. Otherwise it shows "press any key" and returns to the previous view.
+
+### 3.5 Post-transfer screen
 
 After transfer completion:
 
@@ -191,7 +208,9 @@ After transfer completion:
   ────────────────────────────────
   2 files sent successfully.
 
-  Press any key to continue...
+  Press any key to continue...       (if hangup=no)
+  -- or --
+  Disconnecting...                   (if hangup=yes, after 1500 ms)
 ```
 
 On error:
@@ -205,7 +224,7 @@ On error:
   Press any key to continue...
 ```
 
-### 3.5 Error handling
+### 3.6 Error handling
 
 - **File not found on disk**: Skip the file, log a warning, continue with remaining files. Show which files were skipped in the post-transfer screen.
 - **sz not installed**: Detect at handler start (`which sz` or check exit code). Show a message: "ZMODEM transfer is not available. Please download via the web interface." Fall back to showing the web URL.
@@ -213,7 +232,7 @@ On error:
 - **Connection dropped**: `call.connectionClosed()` propagates through the handler chain. `BaseSubModule.clearHandler()` deactivates. The protocol's `_cleanup()` kills the PTY process.
 - **Timeout**: Configurable inactivity timeout (default 120 seconds). If no data flows for the timeout period, abort the transfer.
 
-### 3.6 Dumb terminal fallback
+### 3.7 Dumb terminal fallback
 
 Dumb terminals cannot run ZMODEM. The handler detects `this.dumb` and falls back to displaying the web download URL for each file:
 

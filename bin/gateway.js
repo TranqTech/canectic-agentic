@@ -234,6 +234,11 @@ async function startEmbeddedMailer(){
 	}
 	mailerManager = new MailerManager();
 	mailerManager.start();
+	// Wire gateway's WsManager so binkp WS connections route to the mailer
+	if (wsManager) {
+		var mailerWsPool = wsManager.createNewPool('/ws/mailer/binkp', 'Mailer Binkp Pool');
+		mailerManager.setWebSocketPool(mailerWsPool);
+	}
 	alogger.writeAlog(2, "  Embedded mailer started", "cyan");
 }
 

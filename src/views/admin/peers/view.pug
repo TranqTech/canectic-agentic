@@ -596,28 +596,50 @@ block content
                                 )
                                 small.form-text.text-muted Packet destination when not direct.
                                 br
-                              label(for='nc_ftn_remote_host') Mailer Host:
-                                |  
-                                span(data-bs-toggle='tooltip' data-bs-placement='right' title='Hostname or IP for outbound binkp connections. Leave blank if this peer calls us.')
-                                  i.bi.bi-info-circle.text-muted
-                              input(
-                                type='text'
-                                id='nc_ftn_remote_host'
-                                name='ftn_remote_host'
-                                class='form-control'
-                                placeholder='bbs.example.com'
-                              )
+                              label(for='nc_ftn_mailer_transport') Mailer Transport:
+                              select#nc_ftn_mailer_transport(name='ftn_mailer_transport' tabindex='7').form-select
+                                option(value='tcp' selected) TCP
+                                option(value='websocket') WebSocket
                               br
-                              label(for='nc_ftn_remote_port') Mailer Port:
-                              input(
-                                type='number'
-                                id='nc_ftn_remote_port'
-                                name='ftn_remote_port'
-                                class='form-control'
-                                value='24554'
-                                min=1
-                                max=65535
-                              )
+                              #nc_ftn_tcp_fields
+                                label(for='nc_ftn_remote_host') Mailer Host:
+                                  |
+                                  span(data-bs-toggle='tooltip' data-bs-placement='right' title='Hostname or IP for outbound binkp connections. Leave blank if this peer calls us.')
+                                    i.bi.bi-info-circle.text-muted
+                                input(
+                                  type='text'
+                                  id='nc_ftn_remote_host'
+                                  name='ftn_remote_host'
+                                  class='form-control'
+                                  placeholder='bbs.example.com'
+                                )
+                                br
+                                label(for='nc_ftn_remote_port') Mailer Port:
+                                input(
+                                  type='number'
+                                  id='nc_ftn_remote_port'
+                                  name='ftn_remote_port'
+                                  class='form-control'
+                                  value='24554'
+                                  min=1
+                                  max=65535
+                                )
+                                br
+                              #nc_ftn_ws_url_wrap(style='display:none')
+                                label(for='nc_ftn_mailer_ws_url') WebSocket URL:
+                                input(
+                                  type='text'
+                                  id='nc_ftn_mailer_ws_url'
+                                  name='ftn_mailer_ws_url'
+                                  class='form-control'
+                                  placeholder='ws://bbs.example.com:24555/ws/mailer/binkp'
+                                )
+                                small.form-text.text-muted Full URL including path.
+                                br
+                              label(for='nc_ftn_mailer_protocol') Mailer Protocol:
+                              select#nc_ftn_mailer_protocol(name='ftn_mailer_protocol' tabindex='8').form-select
+                                option(value='binkp' selected) binkp
+                                option(value='emsi' disabled) EMSI/Wazoo (future)
                               br
                           .col-5
                             label(for='nc_active') Status:
@@ -867,14 +889,30 @@ block content
                                 input(type='text' id='ec_ftn_route_to' name='ftn_route_to' class='form-control' placeholder='1:123/0')
                                 small.form-text.text-muted Packet destination when not direct.
                                 br
-                              label(for='ec_ftn_remote_host') Mailer Host:
-                                |  
-                                span(data-bs-toggle='tooltip' data-bs-placement='right' title='Hostname or IP for outbound binkp connections. Leave blank if this peer calls us.')
-                                  i.bi.bi-info-circle.text-muted
-                              input(type='text' id='ec_ftn_remote_host' name='ftn_remote_host' class='form-control' placeholder='bbs.example.com')
+                              label(for='ec_ftn_mailer_transport') Mailer Transport:
+                              select#ec_ftn_mailer_transport(name='ftn_mailer_transport' tabindex='6').form-select
+                                option(value='tcp') TCP
+                                option(value='websocket') WebSocket
                               br
-                              label(for='ec_ftn_remote_port') Mailer Port:
-                              input(type='number' id='ec_ftn_remote_port' name='ftn_remote_port' class='form-control' value='24554' min=1 max=65535)
+                              #ec_ftn_tcp_fields
+                                label(for='ec_ftn_remote_host') Mailer Host:
+                                  |
+                                  span(data-bs-toggle='tooltip' data-bs-placement='right' title='Hostname or IP for outbound binkp connections. Leave blank if this peer calls us.')
+                                    i.bi.bi-info-circle.text-muted
+                                input(type='text' id='ec_ftn_remote_host' name='ftn_remote_host' class='form-control' placeholder='bbs.example.com')
+                                br
+                                label(for='ec_ftn_remote_port') Mailer Port:
+                                input(type='number' id='ec_ftn_remote_port' name='ftn_remote_port' class='form-control' value='24554' min=1 max=65535)
+                                br
+                              #ec_ftn_ws_url_wrap(style='display:none')
+                                label(for='ec_ftn_mailer_ws_url') WebSocket URL:
+                                input(type='text' id='ec_ftn_mailer_ws_url' name='ftn_mailer_ws_url' class='form-control' placeholder='ws://bbs.example.com:24555/ws/mailer/binkp')
+                                small.form-text.text-muted Full URL including path.
+                                br
+                              label(for='ec_ftn_mailer_protocol') Mailer Protocol:
+                              select#ec_ftn_mailer_protocol(name='ftn_mailer_protocol' tabindex='7').form-select
+                                option(value='binkp') binkp
+                                option(value='emsi' disabled) EMSI/Wazoo (future)
                               br
                             label(for='ec_system_address') System Address:
                             select#ec_system_address(name='system_address_id' tabindex='5').form-select
@@ -1198,6 +1236,18 @@ block content
         }
       }
 
+      // Toggle TCP host/port vs WS URL based on mailer transport selection
+      function toggleFtnWsUrlField(prefix) {
+        var sel     = document.getElementById(prefix + '_ftn_mailer_transport');
+        var wsWrap  = document.getElementById(prefix + '_ftn_ws_url_wrap');
+        var tcpWrap = document.getElementById(prefix + '_ftn_tcp_fields');
+        if (sel) {
+          var isWs = sel.value === 'websocket';
+          if (wsWrap)  wsWrap.style.display  = isWs ? '' : 'none';
+          if (tcpWrap) tcpWrap.style.display = isWs ? 'none' : '';
+        }
+      }
+
       // FTN direct select change events
       var ncFtnDirect = document.getElementById('nc_ftn_direct');
       if (ncFtnDirect) {
@@ -1206,6 +1256,16 @@ block content
       var ecFtnDirect = document.getElementById('ec_ftn_direct');
       if (ecFtnDirect) {
         ecFtnDirect.addEventListener('change', function() { toggleFtnRouteField('ec'); });
+      }
+
+      // FTN mailer transport change events
+      var ncFtnTransport = document.getElementById('nc_ftn_mailer_transport');
+      if (ncFtnTransport) {
+        ncFtnTransport.addEventListener('change', function() { toggleFtnWsUrlField('nc'); });
+      }
+      var ecFtnTransport = document.getElementById('ec_ftn_mailer_transport');
+      if (ecFtnTransport) {
+        ecFtnTransport.addEventListener('change', function() { toggleFtnWsUrlField('ec'); });
       }
 
       // New connection type switcher
@@ -1270,7 +1330,11 @@ block content
             document.getElementById('ec_ftn_route_to').value        = cd.route_to || '';
             document.getElementById('ec_ftn_remote_host').value     = cd.remote_host || '';
             document.getElementById('ec_ftn_remote_port').value     = cd.remote_port || 24554;
+            document.getElementById('ec_ftn_mailer_transport').value = cd.mailer_transport || 'tcp';
+            document.getElementById('ec_ftn_mailer_protocol').value  = cd.mailer_protocol || 'binkp';
+            document.getElementById('ec_ftn_mailer_ws_url').value    = cd.mailer_ws_url || '';
             toggleFtnRouteField('ec');
+            toggleFtnWsUrlField('ec');
           } else if (type === 'NNTP') {
             document.getElementById('ec_nntp_host').value     = cd.host || '';
             document.getElementById('ec_nntp_port').value     = cd.port || 119;

@@ -11,9 +11,12 @@
 
 import { EventEmitter } from 'node:events';
 import * as net from 'net';
+import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import { WebSocketServer } from 'ws';
 import { TcpTransport } from './transports/tcp.js';
+import { WsTransport } from './transports/ws.js';
 import { SessionController } from './session.js';
 import { BsoScanner } from './bsoScanner.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -27,13 +30,15 @@ const BINKP_PORT            = parseInt(process.env.MAILER_BINKP_PORT) || 24554;
 class MailerManager extends EventEmitter {
 	constructor(options) {
 		super();
-		this._options    = options || {};
-		this._sessions   = [];        // Active SessionController instances
-		this._tcpServer  = null;
-		this._wsPool     = null;      // WsPool from WsManager (Phase 3)
-		this._bsoScanner = null;      // BsoScanner instance
-		this._pollTimers = new Map(); // connectionUUID -> timer
-		this._running    = false;
+		this._options       = options || {};
+		this._sessions      = [];        // Active SessionController instances
+		this._tcpServer     = null;
+		this._wsHttpServer  = null;      // HTTP server for WS upgrades (separate mode)
+		this._wss           = null;      // WebSocketServer instance (separate mode)
+		this._wsPool        = null;      // WsPool from WsManager (embedded mode)
+		this._bsoScanner    = null;      // BsoScanner instance
+		this._pollTimers    = new Map(); // connectionUUID -> timer
+		this._running       = false;
 	}
 
 	// -----------------------------------------------------------------------
@@ -58,8 +63,40 @@ class MailerManager extends EventEmitter {
 		});
 
 		this._tcpServer.listen(BINKP_PORT, () => {
-			alogger.writeClog(1, 'Mailer: binkp listening on port ' + BINKP_PORT, 'mailer', 'cyanbright');
+			alogger.writeClog(1, 'Mailer: binkp TCP listening on port ' + BINKP_PORT, 'mailer', 'cyanbright');
 		});
+
+		// Start WebSocket listener for binkp (separate mode only —
+		// embedded mode uses setWebSocketPool() from the gateway's WsManager)
+		var wsPort = parseInt(process.env.MAILER_WS_PORT) || 24555;
+		if (wsPort > 0 && !this._wsPool) {
+			this._wsHttpServer = http.createServer(function(req, res) {
+				res.writeHead(426); // Upgrade Required
+				res.end();
+			});
+
+			this._wss = new WebSocketServer({ noServer: true });
+
+			this._wsHttpServer.on('upgrade', (request, socket, head) => {
+				var pathname = new URL(request.url, 'http://localhost').pathname;
+				if (pathname === '/ws/mailer/binkp') {
+					this._wss.handleUpgrade(request, socket, head, (ws) => {
+						this._onInboundWebSocket(ws, request);
+					});
+				} else {
+					socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+					socket.destroy();
+				}
+			});
+
+			this._wsHttpServer.listen(wsPort, () => {
+				alogger.writeClog(1, 'Mailer: binkp WebSocket listening on port ' + wsPort + ' (path: /ws/mailer/binkp)', 'mailer', 'cyanbright');
+			});
+
+			this._wsHttpServer.on('error', (err) => {
+				alogger.writeClog(1, 'Mailer WS server error: ' + err.message, 'mailer', 'redbright');
+			});
+		}
 
 		// Start BSO outbound directory scanner
 		this._bsoScanner = new BsoScanner({
@@ -93,6 +130,16 @@ class MailerManager extends EventEmitter {
 			this._tcpServer = null;
 		}
 
+		// Close WebSocket server
+		if (this._wss) {
+			this._wss.close();
+			this._wss = null;
+		}
+		if (this._wsHttpServer) {
+			this._wsHttpServer.close();
+			this._wsHttpServer = null;
+		}
+
 		// End active sessions gracefully
 		for (var session of this._sessions) {
 			if (session.protocol) {
@@ -103,11 +150,13 @@ class MailerManager extends EventEmitter {
 		alogger.writeClog(1, 'Mailer: stopped', 'mailer', 'cyanbright');
 	}
 
-	// Phase 3: accept inbound WebSocket connections from existing WsManager
+	// Accept inbound WebSocket connections from gateway's WsManager (embedded mode)
 	setWebSocketPool(wsPool) {
 		this._wsPool = wsPool;
-		// TODO: wire wsPool connection events to _onInboundWebSocket()
-		alogger.writeClog(2, 'Mailer: WebSocket pool registered', 'mailer', 'cyan');
+		wsPool.wss.on('connection', (ws, request) => {
+			this._onInboundWebSocket(ws, request);
+		});
+		alogger.writeClog(2, 'Mailer: WebSocket pool registered (embedded mode)', 'mailer', 'cyan');
 	}
 
 	// -----------------------------------------------------------------------
@@ -138,6 +187,32 @@ class MailerManager extends EventEmitter {
 		alogger.writeClog(5, 'Mailer: inbound TCP connection from ' + remoteAddr, 'mailer', 'cyan');
 
 		var transport = TcpTransport.fromSocket(socket);
+		this._createSession(transport, 'answerer', {});
+	}
+
+	_onInboundWebSocket(ws, request) {
+		if (!this._running) {
+			ws.close();
+			return;
+		}
+
+		var remoteAddr = (request && request.socket ? request.socket.remoteAddress : '?') || '?';
+
+		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
+			alogger.writeClog(3, 'Mailer: rejecting inbound WS from ' + remoteAddr + ' (max sessions)', 'mailer', 'yellow');
+			// Send a binkp M_BSY frame before closing
+			var bsyMsg = Buffer.from('System busy, try later');
+			var frame  = Buffer.alloc(2 + 1 + bsyMsg.length);
+			frame.writeUInt16BE(0x8000 | (1 + bsyMsg.length), 0);
+			frame[2] = 8; // M_BSY
+			ws.send(frame);
+			ws.close();
+			return;
+		}
+
+		alogger.writeClog(5, 'Mailer: inbound WebSocket connection from ' + remoteAddr, 'mailer', 'cyan');
+
+		var transport = WsTransport.fromWebSocket(ws, request);
 		this._createSession(transport, 'answerer', {});
 	}
 
@@ -231,6 +306,23 @@ class MailerManager extends EventEmitter {
 			});
 			transport.once('error', (err) => {
 				alogger.writeClog(3, 'Mailer: outbound connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
+				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
+			});
+		} else if (mailerTransport === 'websocket') {
+			var wsUrl = cd.mailer_ws_url;
+			if (!wsUrl) {
+				alogger.writeClog(4, 'Mailer: no mailer_ws_url for ' + (cd.address || conn.uuid) + ' — cannot connect via WebSocket', 'mailer', 'yellow');
+				return;
+			}
+
+			alogger.writeClog(5, 'Mailer: connecting via WebSocket to ' + (cd.address || conn.uuid) + ' at ' + wsUrl, 'mailer', 'cyan');
+
+			var wsTransport = WsTransport.connect(wsUrl, appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) * 1000);
+			wsTransport.once('connect', () => {
+				this._createSession(wsTransport, 'caller', { connectionUUID: conn.uuid });
+			});
+			wsTransport.once('error', (err) => {
+				alogger.writeClog(3, 'Mailer: outbound WS connect to ' + wsUrl + ' failed: ' + err.message, 'mailer', 'redbright');
 				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
 			});
 		}

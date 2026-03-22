@@ -86,29 +86,30 @@ Standard TCP sockets. Server binds to configurable port (default 24554 for binkp
 
 Uses Node.js `net` module. Straightforward 1:1 mapping to the transport interface.
 
-### WebSocket Transport (`mailer/transports/websocket.js`)
+### WebSocket Transport (`mailer/transports/ws.js`)
 
-Serverless WebSocket connections over the existing HTTP server. Follows the same pattern as the terminal WebSocket system (`websockets.js`):
+WebSocket connections for binkp sessions. Two operating modes depending on the process model:
 
-**Inbound (server):** The mailer registers a `WsPool` on the existing `WsManager` at a dedicated path (e.g., `/ws/mailer`). The `WsManager`'s shared `httpServer.on('upgrade')` handler routes upgrade requests by pathname — terminal paths go to terminal pools, the mailer path goes to the mailer pool. No separate WebSocket server or port. The mailer pool does not forward to a `CallPool`; instead, it hands the raw WebSocket connection to the `MailerManager` which wraps it in a `WebSocketTransport` and creates an answerer session.
+**Inbound — Separate mode (default):** The mailer process binds its own HTTP server on `MAILER_WS_PORT` (default 24555, 0 to disable). Only the `/ws/mailer/binkp` upgrade path is accepted; all other requests get 404. The `MailerManager` wraps accepted WebSocket connections in `WsTransport` and creates answerer sessions.
 
-**Outbound (client):** For outbound calls to peers configured with `mailer_transport: 'websocket'`, the transport creates a `ws` client connection to the peer's `mailer_ws_url`. The client WebSocket is wrapped in the same `WebSocketTransport` class.
+**Inbound — Embedded mode:** The gateway's `WsManager` creates a `WsPool` at `/ws/mailer/binkp` and passes it to `mailerManager.setWebSocketPool()`. The pool's `wss` `connection` event routes directly to `_onInboundWebSocket()`. No separate HTTP server needed — the gateway's shared upgrade handler routes by pathname.
 
-Binary frames — all data is transmitted as `Buffer` payloads in binary WebSocket frames, not text. The session layer sees the same byte stream it would over TCP.
+**Outbound (client):** For peers configured with `mailer_transport: 'websocket'`, the transport creates a `ws` client connection to the peer's `mailer_ws_url`. The client WebSocket is wrapped in `WsTransport` with the same interface.
+
+Binary frames — all data is transmitted as `Buffer` payloads in binary WebSocket frames, not text. The `ws` library sends `Buffer` arguments as binary frames automatically. The session layer sees the same byte stream it would over TCP.
+
+**Flow control:** WebSocket has no kernel-level pause/resume like TCP sockets. The transport buffers incoming messages in an array while paused and replays them on resume. The pause window is only during the brief async setup in `SessionController.start()` before the protocol layer is wired.
 
 **Integration with existing infrastructure:**
 ```javascript
-// Embedded mode (PROCESS_MODE=embedded) — in bin/gateway.js after startWebsockets():
-var mailerWsPool = wsManager.createNewPool('/ws/mailer', 'Mailer Websocket Pool');
-// mailerWsPool does NOT setCallPool() — instead:
+// Embedded mode (PROCESS_MODE=embedded) — in bin/gateway.js startEmbeddedMailer():
+var mailerWsPool = wsManager.createNewPool('/ws/mailer/binkp', 'Mailer Binkp Pool');
 mailerManager.setWebSocketPool(mailerWsPool);
 
 // Separate mode (PROCESS_MODE=separate) — the mailer process (bin/mailer.js)
-// binds its own HTTP listener on MAILER_WS_PORT for WebSocket transport.
-// See PROCESS_ARCHITECTURE.md for the full process model.
+// creates its own HTTP server on MAILER_WS_PORT with WebSocketServer({ noServer: true }).
+// Only /ws/mailer/binkp upgrade path is accepted.
 ```
-
-The `MailerManager` listens for connections on the pool and creates answerer sessions, rather than the pool forwarding to the call manager. This keeps the mailer's session lifecycle separate from the terminal's call lifecycle while sharing the HTTP server and upgrade routing.
 
 Use case: systems behind CGN/restrictive firewalls that can't accept inbound TCP, or browser-based BBS frontends that want to relay mailer traffic through a WebSocket bridge. Also useful for serverless deployments where raw TCP listeners aren't available.
 
@@ -430,15 +431,15 @@ Before initiating an outbound call, check the active session pool. If a session 
 
 ### Server Listeners
 
-TCP listener is owned by the MailerManager. WebSocket listener is a `WsPool` on the shared `WsManager` — the MailerManager receives connections from it but doesn't manage the HTTP server or upgrade routing.
+TCP listener is owned by the MailerManager on `MAILER_BINKP_PORT` (default 24554). WebSocket listener operates in two modes: **separate mode** — the manager creates its own HTTP server on `MAILER_WS_PORT` (default 24555) with a `WebSocketServer({ noServer: true })`; **embedded mode** — a `WsPool` on the gateway's `WsManager` at `/ws/mailer/binkp` routes connections to the manager via `setWebSocketPool()`.
 
 ```javascript
 class MailerManager {
     constructor(options)
 
-    start()                              // Bind TCP listener, start poll timers
-    stop()                               // Graceful shutdown — finish active sessions, unbind
-    setWebSocketPool(wsPool)             // Receive inbound WS connections from existing WsManager
+    start()                              // Bind TCP + WS listeners, start BSO scanner
+    stop()                               // Graceful shutdown — finish active sessions, unbind all listeners
+    setWebSocketPool(wsPool)             // Receive inbound WS connections (embedded mode)
     getActiveSessions()                  // Array of session status objects
     isRunning()                          // Boolean
 
@@ -450,7 +451,7 @@ class MailerManager {
 
     // Internal
     _onInboundTcp(socket)                // Wrap in TcpTransport, create answerer session
-    _onInboundWebSocket(wsConnection)    // Wrap in WebSocketTransport, create answerer session (Phase 3)
+    _onInboundWebSocket(ws, request)     // Wrap in WsTransport, create answerer session
     _connectToPeer(conn)                 // Shared: resolve host/port/transport, create caller session
     _createSession(transport, role, opts) // Instantiate SessionController, wire events, add to pool
     _hasSessionForAddress(address)       // Deduplication check
@@ -465,8 +466,8 @@ class MailerManager {
 |----------|---------|-------------|
 | `MAILER_ENABLED` | `false` | Master enable/disable |
 | `MAILER_BINKP_PORT` | `24554` | TCP listen port for binkp |
-| `MAILER_EMSI_PORT` | `60179` | TCP listen port for EMSI (0 to disable) |
-| `MAILER_WS_PATH` | `/ws/mailer` | WebSocket path registered on WsManager |
+| `MAILER_WS_PORT` | `24555` | HTTP listen port for binkp WebSocket (0 to disable; separate mode only) |
+| `MAILER_EMSI_PORT` | `60179` | TCP listen port for EMSI (0 to disable, Phase 4) |
 | `MAILER_INBOUND_DIR` | `ftn/in` | Inbound file directory (falls back to `ftninbound` env var) |
 | `MAILER_OUTBOUND_DIR` | `ftn/out` | Outbound file directory (falls back to `ftnoutbound` env var) |
 | `MAILER_TEMP_DIR` | `ftn/tmp` | Temp directory for in-progress transfers |
@@ -590,7 +591,7 @@ src/mailer/
   transports/
     base.js           — BaseTransport (interface definition)
     tcp.js            — TCP client/server transport
-    websocket.js      — WebSocket client/server transport (Phase 3)
+    ws.js             — WebSocket client/server transport
   protocols/
     base.js           — BaseProtocol (interface definition)
     binkp.js          — binkp/1.1 protocol implementation
@@ -638,11 +639,11 @@ Items 8–10 from the original plan (resume support, CRAM-MD5, poll scheduling) 
 13. **Admin status route** — `GET /admin/mailer` with active session display, recent session history.
 14. ~~**Startup integration**~~ — **DONE.** In embedded mode, `bin/gateway.js` starts the mailer in-process. In separate mode, `bin/mailer.js` is the standalone entry point. Both are gated by `MAILER_ENABLED` env var. See `PROCESS_ARCHITECTURE.md`.
 
-### Phase 3: WebSocket Transport
+### Phase 3: WebSocket Transport (Implemented)
 
-15. **WebSocket transport** — `WebSocketTransport` class wrapping `ws` connections. **Inbound (embedded mode):** register a `WsPool` at `/ws/mailer` on the gateway's `WsManager` (same HTTP server as terminal WebSockets). **Inbound (separate mode):** the mailer process binds its own HTTP listener on `MAILER_WS_PORT` for WebSocket mailer connections — no shared infrastructure with the gateway. **Outbound:** `ws` client to remote `mailer_ws_url`. Binary frame mode.
-16. **Admin UI for transport selection** — per-connection transport type in the peer connection editor
-17. **Connection testing** — admin button to test connectivity to a peer
+15. **WebSocket transport** — `WsTransport` class (`mailer/transports/ws.js`) wrapping `ws` connections. **Inbound (separate mode):** the mailer process binds its own HTTP listener on `MAILER_WS_PORT` (default 24555) at path `/ws/mailer/binkp`. **Inbound (embedded mode):** a `WsPool` registered on the gateway's `WsManager` at `/ws/mailer/binkp`. **Outbound:** `ws` client to remote `mailer_ws_url`. Binary frame mode. Application-level pause buffering for flow control during async session setup.
+16. **Admin UI for transport selection** — per-connection transport type in the peer connection editor (TODO)
+17. **Connection testing** — admin button to test connectivity to a peer (TODO)
 
 ### Phase 4: EMSI/Wazoo Support
 

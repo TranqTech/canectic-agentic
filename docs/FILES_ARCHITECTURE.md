@@ -55,10 +55,11 @@ Cross-references:
 | File | Purpose |
 |------|---------|
 | `menucommands/fileAreaSelector.js` | Lightbar area selector. Flattened group/area list, cursor navigation, incremental search, new file counts per area. Persists selection to `call.file_group`/`call.file_area` and user record. Dumb terminal fallback with numbered list. |
-| `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. ZMODEM download (single and batch), batch tagging (T key, max 50 files stored on `call.file_batch`), search (DB-backed via ILIKE when >= 2 chars), mark area read. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
-| `menucommands/fileBatchDownload.js` | Standalone batch download module. Shows batch summary, resolves disk paths, runs `ZmodemProtocol.send()` with all paths, increments download counts, clears batch on success. |
+| `menucommands/fileBatchCheck.js` | Login flow batch check. If `call.file_batch` is non-empty at login, prompts user to download pending batch with hangup-after-transfer option. |
+| `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. ZMODEM download (single and batch) with hangup-after-transfer prompt, batch tagging (T key, max 50 files stored on `call.file_batch`), search (DB-backed via ILIKE when >= 2 chars), mark area read. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
+| `menucommands/fileBatchDownload.js` | Standalone batch download module. State machine: `hangup_ask → downloading → result → done`. Shows batch summary, hangup prompt, resolves disk paths, runs `ZmodemProtocol.send()` with all paths, increments download counts, clears batch on success. Auto-disconnects or returns based on hangup choice. |
 | `menucommands/fileUpload.js` | Terminal upload handler. Checks upload access, receives files via `ZmodemReceiveProtocol` into staging dir, then for each file: hash, dupe check, move to area dir, extract FILE_ID.DIZ, create entry, update stats. Note: ZMODEM receive with SyncTERM has known issues — see Known Issues. |
-| `menucommands/fileSearch.js` | Terminal file search with scope selection (area/group/global), search input, lightbar results with detail view. Filters by browse access. Supports ZMODEM download and batch tagging from search results. |
+| `menucommands/fileSearch.js` | Terminal file search with scope selection (area/group/global), search input, lightbar results with detail view. Filters by browse access. Supports ZMODEM download (with hangup-after-transfer prompt on status row) and batch tagging from search results. |
 
 ### Tosser
 
@@ -298,19 +299,23 @@ ftn/
 
 ### Download — Terminal (Single)
 
-1. In `fileBrowser`, user presses `D` on a file (list or detail view)
+1. In `fileBrowser` or `fileSearch`, user presses `D` on a file (list or detail view)
 2. Path resolved, existence verified
-3. `ZmodemProtocol.send([fullPath])` spawns `sz` with raw stdio pipes
-4. Client auto-detects ZMODEM initiation sequence
-5. On success: `incrementDownloadCount()`
+3. User prompted: "Hang up after transfer?" `[Y/n]` (Enter defaults to Yes)
+4. `ZmodemProtocol.send([fullPath])` spawns `sz` with raw stdio pipes
+5. Client auto-detects ZMODEM initiation sequence
+6. On success: `incrementDownloadCount()`
+7. If hangup chosen: auto-disconnect after 1500 ms delay. Otherwise: "press any key" returns to previous view.
 
 ### Download — Terminal (Batch)
 
 1. User tags files with `T` in fileBrowser (stored on `call.file_batch`, max 50)
-2. User presses `B` or invokes `fileBatchDownload` menu command
-3. All tagged file paths resolved and existence verified
-4. `ZmodemProtocol.send(filePaths)` — `sz` supports multiple files in one invocation
-5. On success: increment counts for all files, clear batch
+2. User presses `B` in fileBrowser, or invokes `fileBatchDownload` menu command, or is prompted at login via `fileBatchCheck`
+3. User prompted: "Hang up after transfer?" `[Y/n]` (Enter defaults to Yes)
+4. All tagged file paths resolved and existence verified
+5. `ZmodemProtocol.send(filePaths)` — `sz` supports multiple files in one invocation
+6. On success: increment counts for all files, clear batch
+7. If hangup chosen: auto-disconnect after 1500 ms delay. Otherwise: "press any key" returns to previous view.
 
 ---
 
@@ -560,11 +565,17 @@ Two-state file browser with state machine (`STATE.LOADING`, `STATE.FILE_LIST`, `
 
 **Batch System**: Files tagged with T are stored on `call.file_batch` (array of `{ uuid, id, filename, file_size, area_shortcode, disk_path }`). Maximum 50 files. Batch persists across file browser sessions within the same call. B key triggers batch download from either list or detail view.
 
+**Hangup-After-Transfer Prompt**: All download paths (D key single file, B key batch) display a "Hang up after transfer?" `[Y/n]` prompt before starting ZMODEM. Enter defaults to Yes. After a successful transfer, if the user chose hangup the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. Managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
+
 **Dumb Terminal**: Numbered list with 20-line paging, text-mode detail, `D#` download command, `S` search, `M` mark read.
+
+### fileBatchCheck
+
+Login flow batch check. If `call.file_batch` is non-empty when the user logs in, prompts to download the pending batch. Includes the same hangup-after-transfer prompt and auto-disconnect behaviour as other download paths.
 
 ### fileBatchDownload
 
-Standalone sub-module for batch downloads (can be invoked as a separate menu command). Shows batch summary, resolves all file paths, runs single `ZmodemProtocol.send()` with all paths, increments download counts on success, clears batch.
+Standalone sub-module for batch downloads (can be invoked as a separate menu command). Implements a state machine: `hangup_ask → downloading → result → done`. Shows batch summary, presents hangup prompt, resolves all file paths, runs single `ZmodemProtocol.send()` with all paths, increments download counts on success, clears batch. Auto-disconnects after 1500 ms if hangup was chosen, otherwise returns on keypress.
 
 ### fileUpload
 
