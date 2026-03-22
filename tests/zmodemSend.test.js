@@ -349,7 +349,7 @@ function createMockReceiver(adapter, targetDir) {
 		if (type === ZRQINIT && state === 'await_zrqinit') {
 			state = 'send_zrinit';
 			// Send ZRINIT with CRC-32 capability
-			sendHexHeader(ZRINIT, CANFDX | CANOVIO | CANFC32, 0, 0, 0);
+			sendHexHeader(ZRINIT, 0, 0, 0, CANFDX | CANOVIO | CANFC32);
 			state = 'await_zfile';
 		} else if (type === ZFILE && state === 'await_zfile') {
 			// Parse file metadata from subpacket data
@@ -380,7 +380,7 @@ function createMockReceiver(adapter, targetDir) {
 			files.push({ name: fileName, size: content.length, path: filePath });
 			receivedData = [];
 			// Send ZRINIT to request next file
-			sendHexHeader(ZRINIT, CANFDX | CANOVIO | CANFC32, 0, 0, 0);
+			sendHexHeader(ZRINIT, 0, 0, 0, CANFDX | CANOVIO | CANFC32);
 			state = 'await_zfile';
 		} else if (type === ZFIN) {
 			// Session done

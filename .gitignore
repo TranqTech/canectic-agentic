@@ -49,6 +49,12 @@ qwk/
 ftn/
 qnet/
 
+#potential file store
+files/
+
+#File upload staging
+files/staging/
+
 # TypeScript v1 declaration files
 typings/
 

@@ -328,11 +328,19 @@ class XmodemEngine extends EventEmitter {
 				return;
 			}
 
-			// Must be SOH or STX
+			// Must be SOH or STX — skip known noise bytes (NUL, XON, XOFF,
+			// parity-masked versions) but break on anything else to avoid
+			// misaligning block boundaries
 			if (first !== SOH && first !== STX) {
-				// Unknown byte — discard and continue
-				this._recvBuf = this._recvBuf.subarray(1);
-				continue;
+				if (first === 0x00 || first === 0x11 || first === 0x13 ||
+					first === 0x91 || first === 0x93) {
+					// Skip flow control / padding noise
+					this._recvBuf = this._recvBuf.subarray(1);
+					continue;
+				}
+				// Unknown byte — don't discard blindly, wait for more data
+				// in case this is a partial block that hasn't fully arrived
+				break;
 			}
 
 			var blockDataSize = first === STX ? 1024 : 128;
@@ -390,7 +398,8 @@ class XmodemEngine extends EventEmitter {
 		// Check block number
 		var expected = this._expectedBlock & 0xFF;
 		if (blockNum === expected) {
-			// Good block
+			// Good block — transition state so timeouts send NAK, not 'C'
+			this._state = 'receiving';
 			this._writeStream.write(data);
 			this._bytesReceived += blockDataSize;
 			this._expectedBlock = (this._expectedBlock + 1) & 0xFF;

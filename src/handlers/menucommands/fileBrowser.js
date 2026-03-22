@@ -4,7 +4,8 @@ import { getGroupByShortcode } from "../../models/fileGroups.js";
 import { getEntriesForArea, getEntryCount, searchEntries, getMaxIdForArea, incrementDownloadCount } from "../../models/fileEntries.js";
 import * as userFilePointers from "../../models/userFilePointers.js";
 import * as alogger from "../../utils/alogger.js";
-import { ZmodemProtocol } from "../../protocols/zmodem.js";
+import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
+import { NativeXmodemProtocol } from "../../protocols/xmodem_native.js";
 import * as path from "path";
 
 // --- Flag helpers ---
@@ -899,7 +900,7 @@ class fileBrowser extends BaseSubModule {
 		if (!file || !this.call) return;
 		this._pendingDownloadFile = file;
 		this._pendingBatchDownload = false;
-		this._showHangupPrompt();
+		this._showProtocolPrompt();
 	}
 
 	async _doFileTransfer(file) {
@@ -918,17 +919,18 @@ class fileBrowser extends BaseSubModule {
 			return;
 		}
 
+		var protoName = this._useXmodem ? "XMODEM" : "ZMODEM";
 		if (this.dumb) {
-			this.call.cmds.senddata("\r\n  Starting ZMODEM download of: " + file.filename + "\r\n");
+			this.call.cmds.senddata("\r\n  Starting " + protoName + " download: " + file.filename + "\r\n");
 			this.call.cmds.senddata("  Your terminal should auto-detect the transfer.\r\n\r\n");
 		} else {
-			this._showTransferMessage("Starting ZMODEM transfer: " + file.filename + "...", false);
+			this._showTransferMessage("Starting " + protoName + " transfer: " + file.filename + "...", false, true);
 		}
 
 		// Pause inactivity timeouts during transfer
 		this._transferring = true;
 
-		var protocol = new ZmodemProtocol(this.call);
+		var protocol = this._useXmodem ? new NativeXmodemProtocol(this.call) : new NativeZmodemProtocol(this.call);
 		var result = await protocol.send([fullPath]);
 
 		this._transferring = false;
@@ -968,7 +970,7 @@ class fileBrowser extends BaseSubModule {
 		this._downloadInfoShown = true;
 	}
 
-	_showTransferMessage(msg, isError) {
+	_showTransferMessage(msg, isError, noPrompt) {
 		if (this.dumb) return;
 
 		var msgRow = this._detailBodyStart || 5;
@@ -980,10 +982,32 @@ class fileBrowser extends BaseSubModule {
 		this.call.cmds.movecursor((this._bodyLeft || 1) + 1, msgRow + 2);
 		this.call.cmds.setfgcolor(isError ? CLR_DOWNLOAD : CLR_STATUS);
 		this.call.cmds.senddata(msg);
-		this.call.cmds.movecursor((this._bodyLeft || 1) + 1, msgRow + 4);
-		this.call.cmds.setfgcolor(CLR_STATUS);
-		this.call.cmds.senddata("Press any key to continue...");
+		if (!noPrompt) {
+			this.call.cmds.movecursor((this._bodyLeft || 1) + 1, msgRow + 4);
+			this.call.cmds.setfgcolor(CLR_STATUS);
+			this.call.cmds.senddata("Press any key to continue...");
+		}
 		this.call.cmds.resetcolors();
+	}
+
+	// --- Protocol prompt ---
+
+	_showProtocolPrompt() {
+		this._protocolPrompt = true;
+		this._useXmodem = false;
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Protocol: x/[Z]: ");
+		} else {
+			var msgRow = this._detailBodyStart || 5;
+			for (var i = 0; i < (this._detailBodyHeight || 10); i++) {
+				this.call.cmds.movecursor(this._bodyLeft || 1, msgRow + i);
+				this.call.cmds.cleartoeol();
+			}
+			this.call.cmds.movecursor((this._bodyLeft || 1) + 1, msgRow + 2);
+			this.call.cmds.setfgcolor(11);
+			this.call.cmds.senddata("Protocol: [X]modem / [Z]modem (default)");
+			this.call.cmds.resetcolors();
+		}
 	}
 
 	// --- Hangup prompt ---
@@ -1068,7 +1092,7 @@ class fileBrowser extends BaseSubModule {
 
 		this._pendingDownloadFile = null;
 		this._pendingBatchDownload = true;
-		this._showHangupPrompt();
+		this._showProtocolPrompt();
 	}
 
 	async _doBatchTransfer() {
@@ -1102,16 +1126,17 @@ class fileBrowser extends BaseSubModule {
 			return;
 		}
 
+		var protoName = this._useXmodem ? "XMODEM" : "ZMODEM";
 		if (this.dumb) {
-			this.call.cmds.senddata("\r\n  Starting ZMODEM batch download (" + filePaths.length + " files)...\r\n\r\n");
+			this.call.cmds.senddata("\r\n  Starting " + protoName + " batch download (" + filePaths.length + " files)...\r\n\r\n");
 		} else {
-			this._showTransferMessage("Starting ZMODEM batch: " + filePaths.length + " files...", false);
+			this._showTransferMessage("Starting " + protoName + " batch: " + filePaths.length + " files...", false, true);
 		}
 
 		this._transferring = true;
 
 		// ZMODEM sz supports multiple files in one invocation
-		var protocol = new ZmodemProtocol(this.call);
+		var protocol = this._useXmodem ? new NativeXmodemProtocol(this.call) : new NativeZmodemProtocol(this.call);
 		var result = await protocol.send(filePaths);
 
 		this._transferring = false;
@@ -1273,8 +1298,20 @@ class fileBrowser extends BaseSubModule {
 	// ===========================================================================
 
 	onKey(key) {
+		if (this._protocolPrompt) {
+			if (key === 'Enter') {
+				this._useXmodem = false;
+				this._protocolPrompt = false;
+				this._showHangupPrompt();
+			}
+			return;
+		}
 		if (this._hangupPrompt) {
-			// Waiting for hangup answer — only onChar handles it
+			if (key === 'Enter') {
+				this._hangupAfter = true;
+				this._hangupPrompt = false;
+				this._runPendingDownload();
+			}
 			return;
 		}
 
@@ -1306,6 +1343,20 @@ class fileBrowser extends BaseSubModule {
 	}
 
 	onChar(ch) {
+		if (this._protocolPrompt) {
+			var lower = ch.toLowerCase();
+			if (lower === 'z' || ch === '\r' || ch === '\n') {
+				this._useXmodem = false;
+				this._protocolPrompt = false;
+				this._showHangupPrompt();
+			} else if (lower === 'x') {
+				this._useXmodem = true;
+				this._protocolPrompt = false;
+				this._showHangupPrompt();
+			}
+			return;
+		}
+
 		if (this._hangupPrompt) {
 			var lower = ch.toLowerCase();
 			if (lower === 'y' || ch === '\r' || ch === '\n') {
@@ -1628,7 +1679,7 @@ class fileBrowser extends BaseSubModule {
 			var num = parseInt(numStr);
 			if (!isNaN(num) && num >= 1 && num <= this._filteredFiles.length) {
 				var file = this._filteredFiles[num - 1];
-				this.call.cmds.senddata("\r\n\r\n  Starting ZMODEM download: " + file.filename + "\r\n");
+				this.call.cmds.senddata("\r\n\r\n  Download: " + file.filename + "\r\n");
 				this._startDownload(file);
 			} else {
 				this.call.cmds.senddata("\r\n  Invalid file number.\r\n");

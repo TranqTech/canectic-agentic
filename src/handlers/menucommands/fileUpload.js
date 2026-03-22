@@ -11,6 +11,7 @@ import { addFileEntry, checkDupe } from "../../models/fileEntries.js";
 import { computeHashes } from "../../utils/fileHasher.js";
 import { applyDescriptions } from "../../utils/fileDescExtractor.js";
 import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
+import { NativeXmodemProtocol } from "../../protocols/xmodem_native.js";
 import appConfig from "../../config/appConfig.js";
 import * as fileNetworkAreas from "../../models/fileNetworkAreas.js";
 import * as filePeerSubscriptions from "../../models/filePeerSubscriptions.js";
@@ -54,9 +55,13 @@ class fileUpload extends BaseSubModule {
 	constructor(call) {
 		super(call, "FileUpload");
 		this._waitingForKey = false;
+		this._waitingForProtocol = false;
+		this._waitingForFilename = false;
+		this._filenameBuffer = '';
+		this._useXmodem = false;
 		this._waitingForDesc = false;
 		this._descBuffer = "";
-		this._receivedFiles = [];  // files received from ZMODEM
+		this._receivedFiles = [];
 		this._currentDescIndex = 0;
 	}
 
@@ -93,24 +98,61 @@ class fileUpload extends BaseSubModule {
 
 		if (this.dumb) {
 			this.call.cmds.senddata("\r\n  Upload to: " + area.name + "\r\n");
-			this.call.cmds.senddata("  Your terminal will prompt you to select files.\r\n\r\n");
+			this.call.cmds.senddata("  Protocol: x/[Z]: ");
 		} else {
 			this.call.cmds.clearscreen();
 			this.call.cmds.movecursor(1, 1);
 			this.call.cmds.setfgcolor(14);
 			this.call.cmds.senddata("  Upload to: " + area.name);
 			this.call.cmds.movecursor(1, 3);
-			this.call.cmds.setfgcolor(7);
-			this.call.cmds.senddata("  Your terminal will prompt you to select files.");
-			this.call.cmds.movecursor(1, 5);
-			this.call.cmds.setfgcolor(10);
-			this.call.cmds.senddata("  Starting ZMODEM receive...");
+			this.call.cmds.setfgcolor(11);
+			this.call.cmds.senddata("  Protocol: [X]modem / [Z]modem (default)");
 			this.call.cmds.resetcolors();
 		}
 
-		// Receive files via ZMODEM into staging (native engine)
-		var protocol = new NativeZmodemProtocol(this.call);
-		var result = await protocol.receive(stagingDir);
+		// Wait for protocol selection
+		this._stagingDir = stagingDir;
+		this._area = area;
+		this._group = group;
+		this._areaShortcode = areaShortcode;
+		this._waitingForProtocol = true;
+	}
+
+	async _startReceive() {
+		var stagingDir = this._stagingDir;
+		var area = this._area;
+		var group = this._group;
+		var areaShortcode = this._areaShortcode;
+
+		var protoName = this._useXmodem ? "XMODEM" : "ZMODEM";
+		var promptRow = this._useXmodem ? 7 : 5;
+
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Your terminal will prompt you to select files.\r\n");
+			this.call.cmds.senddata("  Starting " + protoName + " receive...\r\n\r\n");
+		} else {
+			this.call.cmds.movecursor(1, promptRow);
+			this.call.cmds.setfgcolor(10);
+			this.call.cmds.senddata("  Starting " + protoName + " receive...");
+			this.call.cmds.resetcolors();
+		}
+
+		// Snapshot staging dir BEFORE transfer to only process new files after
+		var existingFiles = new Set();
+		try {
+			var priorContents = fs.readdirSync(stagingDir);
+			for (var ef of priorContents) existingFiles.add(ef);
+		} catch (_) {}
+
+		// Receive files into staging
+		var result;
+		if (this._useXmodem) {
+			var protocol = new NativeXmodemProtocol(this.call);
+			result = await protocol.receive(stagingDir, this._xmodemFilename || ('upload_' + Date.now()));
+		} else {
+			var protocol = new NativeZmodemProtocol(this.call);
+			result = await protocol.receive(stagingDir);
+		}
 
 		if (!result.success) {
 			this._showMessage("Upload failed: " + (result.error || "unknown"), true);
@@ -118,14 +160,15 @@ class fileUpload extends BaseSubModule {
 			return;
 		}
 
-		// Scan staging dir for new files (compare before/after)
+		// Scan staging dir for NEW files only (not pre-existing from failed transfers)
 		var stagedFiles = [];
 		try {
 			var dirContents = fs.readdirSync(stagingDir);
 			for (var fname of dirContents) {
+				if (existingFiles.has(fname)) continue; // Skip pre-existing
 				var fullPath = path.join(stagingDir, fname);
 				var stat = fs.statSync(fullPath);
-				if (stat.isFile()) {
+				if (stat.isFile() && stat.size > 0) {
 					stagedFiles.push({ filename: fname, fullPath: fullPath, size: stat.size, mtime: stat.mtime });
 				}
 			}
@@ -254,7 +297,47 @@ class fileUpload extends BaseSubModule {
 		this.call.cmds.resetcolors();
 	}
 
+	_showFilenamePrompt() {
+		this._waitingForFilename = true;
+		this._filenameBuffer = '';
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Filename: ");
+		} else {
+			this.call.cmds.movecursor(1, 5);
+			this.call.cmds.setfgcolor(11);
+			this.call.cmds.senddata("  Filename: ");
+			this.call.cmds.setfgcolor(15);
+		}
+	}
+
 	onKey(key) {
+		if (this._waitingForProtocol) {
+			if (key === 'Enter') {
+				this._useXmodem = false;
+				this._waitingForProtocol = false;
+				this._startReceive();
+			}
+			return;
+		}
+		if (this._waitingForFilename) {
+			if (key === 'Enter') {
+				var fname = this._filenameBuffer.trim();
+				if (fname.length > 0) {
+					this._waitingForFilename = false;
+					this._xmodemFilename = fname;
+					this._startReceive();
+				}
+			} else if (key === 'Backspace') {
+				if (this._filenameBuffer.length > 0) {
+					this._filenameBuffer = this._filenameBuffer.slice(0, -1);
+					this.call.cmds.senddata('\b \b');
+				}
+			} else if (key === 'ESC') {
+				this._waitingForFilename = false;
+				this.signalReturn();
+			}
+			return;
+		}
 		if (this._waitingForKey) {
 			this.signalReturn();
 			return;
@@ -262,6 +345,29 @@ class fileUpload extends BaseSubModule {
 	}
 
 	onChar(ch) {
+		if (this._waitingForProtocol) {
+			var lower = ch.toLowerCase();
+			if (lower === 'z' || ch === '\r' || ch === '\n') {
+				this._useXmodem = false;
+				this._waitingForProtocol = false;
+				this._startReceive();
+			} else if (lower === 'x') {
+				this._useXmodem = true;
+				this._waitingForProtocol = false;
+				this._showFilenamePrompt();
+			}
+			return;
+		}
+		if (this._waitingForFilename) {
+			if (ch.length === 1 && ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) < 127) {
+				// Filter unsafe filename characters
+				if (ch !== '/' && ch !== '\\' && ch !== '..' && ch !== ':') {
+					this._filenameBuffer += ch;
+					this.call.cmds.senddata(ch);
+				}
+			}
+			return;
+		}
 		if (this._waitingForKey) {
 			this.signalReturn();
 			return;

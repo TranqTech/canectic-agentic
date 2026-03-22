@@ -10,7 +10,8 @@ import { getGroupByShortcode } from "../../models/fileGroups.js";
 import { searchEntries, incrementDownloadCount } from "../../models/fileEntries.js";
 import { resolveAreaPath } from "../../models/fileAreas.js";
 import { getAreasInGroup, getActiveAreas } from "../../models/fileAreas.js";
-import { ZmodemProtocol } from "../../protocols/zmodem.js";
+import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
+import { NativeXmodemProtocol } from "../../protocols/xmodem_native.js";
 import * as alogger from "../../utils/alogger.js";
 import * as path from "path";
 
@@ -526,9 +527,23 @@ class fileSearch extends BaseSubModule {
 		}
 
 		this._pendingDownloadFile = file;
+		this._protocolPrompt = true;
+		this._useXmodem = false;
+
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Protocol: x/[Z]: ");
+		} else {
+			this.call.cmds.movecursor(this._bodyLeft, this._statusRow);
+			this.call.cmds.cleartoeol();
+			this.call.cmds.setfgcolor(CLR_PROMPT);
+			this.call.cmds.senddata("  Protocol: [X]modem / [Z]modem (default)");
+			this.call.cmds.resetcolors();
+		}
+	}
+
+	_showSearchHangupPrompt() {
 		this._hangupPrompt = true;
 		this._hangupAfter = false;
-
 		if (this.dumb) {
 			this.call.cmds.senddata("\r\n  Hang up after transfer? [Y/n]: ");
 		} else {
@@ -561,7 +576,7 @@ class fileSearch extends BaseSubModule {
 			return;
 		}
 
-		var protocol = new ZmodemProtocol(this.call);
+		var protocol = this._useXmodem ? new NativeXmodemProtocol(this.call) : new NativeZmodemProtocol(this.call);
 		var result = await protocol.send([fullPath]);
 
 		if (result.success) {
@@ -614,7 +629,22 @@ class fileSearch extends BaseSubModule {
 	onKey(key) {
 		if (!this.active || !this.call) return;
 
-		if (this._hangupPrompt) return;
+		if (this._protocolPrompt) {
+			if (key === 'Enter') {
+				this._useXmodem = false;
+				this._protocolPrompt = false;
+				this._showSearchHangupPrompt();
+			}
+			return;
+		}
+		if (this._hangupPrompt) {
+			if (key === 'Enter') {
+				this._hangupAfter = true;
+				this._hangupPrompt = false;
+				this._doFileTransfer(this._pendingDownloadFile);
+			}
+			return;
+		}
 
 		if (this._hangupResult) {
 			if (this._hangupAfter) {
@@ -707,6 +737,20 @@ class fileSearch extends BaseSubModule {
 
 	onChar(ch) {
 		if (!this.active || !this.call) return;
+
+		if (this._protocolPrompt) {
+			var lower = ch.toLowerCase();
+			if (lower === 'z' || ch === '\r' || ch === '\n') {
+				this._useXmodem = false;
+				this._protocolPrompt = false;
+				this._showSearchHangupPrompt();
+			} else if (lower === 'x') {
+				this._useXmodem = true;
+				this._protocolPrompt = false;
+				this._showSearchHangupPrompt();
+			}
+			return;
+		}
 
 		if (this._hangupPrompt) {
 			var lower = ch.toLowerCase();

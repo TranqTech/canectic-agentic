@@ -7,17 +7,19 @@ import { BaseSubModule } from "../basesubmodule.js";
 import { getAreaByShortcode, resolveAreaPath } from "../../models/fileAreas.js";
 import { getGroupByShortcode } from "../../models/fileGroups.js";
 import { incrementDownloadCount } from "../../models/fileEntries.js";
-import { ZmodemProtocol } from "../../protocols/zmodem.js";
+import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
+import { NativeXmodemProtocol } from "../../protocols/xmodem_native.js";
 import * as alogger from "../../utils/alogger.js";
 import * as fs from "fs";
 import * as path from "path";
 
-// States: idle → hangup_ask → downloading → result → done
+// States: idle → protocol_ask → hangup_ask → downloading → result → done
 class fileBatchDownload extends BaseSubModule {
 	constructor(call) {
 		super(call, "FileBatchDownload");
 		this._state = 'idle';
 		this._hangupAfter = false;
+		this._useXmodem = false;
 	}
 
 	async run() {
@@ -51,7 +53,7 @@ class fileBatchDownload extends BaseSubModule {
 			for (var i = 0; i < batch.length; i++) {
 				this.call.cmds.senddata("    " + (i + 1) + ". " + batch[i].filename + "\r\n");
 			}
-			this.call.cmds.senddata("\r\n  Hang up after transfer? [Y/n]: ");
+			this.call.cmds.senddata("\r\n  Protocol: x/[Z]: ");
 		} else {
 			this.call.cmds.clearscreen();
 			this.call.cmds.movecursor(1, 1);
@@ -71,16 +73,27 @@ class fileBatchDownload extends BaseSubModule {
 			this._promptRow = promptRow;
 			this.call.cmds.movecursor(1, promptRow);
 			this.call.cmds.setfgcolor(11);
-			this.call.cmds.senddata("  Hang up after transfer? [Y/n]");
+			this.call.cmds.senddata("  Protocol: [X]modem / [Z]modem (default)");
 			this.call.cmds.resetcolors();
 		}
 
-		this._state = 'hangup_ask';
+		this._state = 'protocol_ask';
 	}
 
 	onChar(ch) {
 		if (!this.active || !this.call) return;
 		var lower = ch.toLowerCase();
+
+		if (this._state === 'protocol_ask') {
+			if (lower === 'z' || ch === '\r' || ch === '\n') {
+				this._useXmodem = false;
+				this._showHangupAsk();
+			} else if (lower === 'x') {
+				this._useXmodem = true;
+				this._showHangupAsk();
+			}
+			return;
+		}
 
 		if (this._state === 'hangup_ask') {
 			if (lower === 'y' || ch === '\r' || ch === '\n') {
@@ -111,6 +124,18 @@ class fileBatchDownload extends BaseSubModule {
 	onKey(key) {
 		if (!this.active || !this.call) return;
 
+		if (this._state === 'protocol_ask' && key === 'Enter') {
+			this._useXmodem = false;
+			this._showHangupAsk();
+			return;
+		}
+
+		if (this._state === 'hangup_ask' && key === 'Enter') {
+			this._hangupAfter = true;
+			this._doTransfer();
+			return;
+		}
+
 		if (this._state === 'result') {
 			if (this._hangupAfter) {
 				this.signalHangup();
@@ -123,6 +148,18 @@ class fileBatchDownload extends BaseSubModule {
 		if (this._state === 'done') {
 			this.signalReturn();
 			return;
+		}
+	}
+
+	_showHangupAsk() {
+		this._state = 'hangup_ask';
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  Hang up after transfer? [Y/n]: ");
+		} else {
+			this.call.cmds.movecursor(1, (this._promptRow || 20) + 2);
+			this.call.cmds.setfgcolor(11);
+			this.call.cmds.senddata("  Hang up after transfer? [Y/n]");
+			this.call.cmds.resetcolors();
 		}
 	}
 
@@ -171,7 +208,7 @@ class fileBatchDownload extends BaseSubModule {
 		this._state = 'downloading';
 
 		// Run ZMODEM transfer
-		var protocol = new ZmodemProtocol(this.call);
+		var protocol = this._useXmodem ? new NativeXmodemProtocol(this.call) : new NativeZmodemProtocol(this.call);
 		var result = await protocol.send(filePaths);
 
 		if (result.success) {
