@@ -398,22 +398,30 @@ class fileSearch extends BaseSubModule {
 		return this.call.file_batch.some(function(b) { return b.uuid === file.uuid; });
 	}
 
-	_toggleBatchTag(file) {
+	async _toggleBatchTag(file) {
 		if (!file || !this.call) return;
 		var batch = this.call.file_batch;
+		var userId = this._userRecord ? this._userRecord.id : null;
 		var idx = batch.findIndex(function(b) { return b.uuid === file.uuid; });
 		if (idx >= 0) {
 			batch.splice(idx, 1);
+			if (userId) {
+				try { var bm = await import("../../models/userFileBatch.js"); await bm.removeFromBatch(userId, file.uuid); } catch (_) {}
+			}
 		} else {
 			if (batch.length >= 50) return;
-			batch.push({
+			var item = {
 				uuid: file.uuid,
 				id: file.id,
 				filename: file.filename,
 				file_size: file.file_size,
 				area_shortcode: file.area_shortcode,
 				disk_path: file.disk_path || file.filename
-			});
+			};
+			batch.push(item);
+			if (userId) {
+				try { var bm2 = await import("../../models/userFileBatch.js"); await bm2.addToBatch(userId, item); } catch (_) {}
+			}
 		}
 	}
 

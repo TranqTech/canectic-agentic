@@ -33,12 +33,33 @@ const netmailkeys = ["SourceZone", "DestinationZone", "SourceNode", "SourceNet",
 //However, we may want to address this as a size limitation for radio based transfers of files in the future. (LoRa, etc.)
 const maxMsg = 256
 
+// --- Ensure all required FTN directories exist ---
+function ensureDirectories() {
+	var dirs = [
+		appConfig.get('ftninbound', 'ftn/in'),
+		appConfig.get('ftnoutbound', 'ftn/out'),
+		appConfig.get('ftntossed', 'ftn/tossed'),
+		appConfig.get('ftnbad', 'ftn/bad'),
+		appConfig.get('MAILER_TEMP_DIR', 'ftn/tmp')
+	];
+	for (var dir of dirs) {
+		if (dir && !fs.existsSync(dir)) {
+			try {
+				fs.mkdirSync(dir, { recursive: true });
+			} catch (_) {}
+		}
+	}
+}
+
 // --- 8.3-safe unique packet filename generator ---
 // 4 hex chars from lower 16 bits of epoch seconds (time-ordered, ~18hr cycle)
 // + 4 hex chars from a monotonic counter (wraps at 0xFFFF, 65536 per cycle)
 // Filesystem collision check as final safety net.
 var _pktSeq = 0;
 function generatePktFilename(outDir) {
+	if (!fs.existsSync(outDir)) {
+		fs.mkdirSync(outDir, { recursive: true });
+	}
 	var timePart = (Math.floor(Date.now() / 1000) & 0xFFFF).toString(16).padStart(4, '0');
 	var seqPart = (_pktSeq & 0xFFFF).toString(16).padStart(4, '0');
 	_pktSeq++;
@@ -78,6 +99,7 @@ async function FindAndExtractArchives(inboundDir){
 	if (inboundDir){
 		inDir = inboundDir
 	}
+	if (!fs.existsSync(inDir)) return { zipArray: [], pktArray: [] };
 	var zipArray = []
 	var pktArray = []
 	const filelist = fs.readdirSync(inDir);
@@ -120,6 +142,7 @@ async function FindAndExtractArchives(inboundDir){
 //ideally we should process non archives, extract archives, then run the process loop again.
 async function TossInbound(inboundDir){
 	console.log("\r\n-------------------\r\nTossing Inbound\r\n-------------------")
+	ensureDirectories();
 	var successcount = 0
 	var importcount = 0
 	var dupecount = 0
@@ -135,8 +158,12 @@ async function TossInbound(inboundDir){
 	var arjArray = []
 	var pktArray = []
 	var ticArray = []
+	if (!fs.existsSync(inDir)) {
+		console.log("Inbound directory does not exist: " + inDir);
+		return { successcount, importcount, dupecount, skipcount, processcount };
+	}
 	const filelist = await fs.readdirSync(inDir);
-	
+
 	//filelist.forEach(file => {	
 	for await (var file of filelist){
 		var filepath = inDir + "/" + file
@@ -539,6 +566,10 @@ async function OldTossInbound(inboundDir){
 	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
 		inDir = inboundDir
+	}
+	if (!fs.existsSync(inDir)) {
+		console.log("Inbound directory does not exist: " + inDir);
+		return;
 	}
 	var importcount = 0
 	var dupecount = 0
@@ -1352,6 +1383,7 @@ async function TossOutboundEchomail(){
 
 async function TossOutbound(){
 	console.log("\r\n-------------------\r\nTossing Oubound\r\n-------------------")
+	ensureDirectories();
 	await TossOutboundNetmail()
 	await TossOutboundEchomail()
 

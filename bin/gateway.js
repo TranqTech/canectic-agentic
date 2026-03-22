@@ -6,6 +6,7 @@
 import chalk from 'chalk';
 import * as alogger from "../src/utils/alogger.js"
 import {WsManager, WsPool} from "../src/servers/websockets.js"
+import { TcpPool, TcpServer } from "../src/servers/tcpserver.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
@@ -39,6 +40,7 @@ var systemshutdownmsg = systemvermsg + "\n  Gateway Shutdown"
 const webport = process.env.webport || 8080
 const processMode = process.env.PROCESS_MODE || 'separate';
 var runwssrv = true
+var runtcpsrv = true
 var servercount = 0
 var callservcount = 0
 var lastservercount = 0
@@ -47,6 +49,7 @@ var callManager
 var primaryNodeManager
 var socatManager
 var httpServer
+var tcpServer         // TCP terminal server
 var eventSubscriber
 var embeddedWorkers   // only used in embedded mode
 var mailerManager     // only used in embedded mode
@@ -81,6 +84,7 @@ process.on('SIGINT', async () => {
 	if (embeddedWorkers) await embeddedWorkers.shutdown();
 	if (mailerManager) mailerManager.stop();
 	if (eventSubscriber) eventSubscriber.shutdown();
+	if (tcpServer) tcpServer.stop();
 	alogger.shutdownLogBus();
 	await closeQueues();
 	socatManager.shutdown();
@@ -93,6 +97,7 @@ process.on('SIGTERM', async () => {
 	if (embeddedWorkers) await embeddedWorkers.shutdown();
 	if (mailerManager) mailerManager.stop();
 	if (eventSubscriber) eventSubscriber.shutdown();
+	if (tcpServer) tcpServer.stop();
 	alogger.shutdownLogBus();
 	await closeQueues();
 	socatManager.shutdown();
@@ -161,6 +166,30 @@ async function startWebsockets(){
 
 	servercount += 1
 	callservcount += 1
+}
+
+// --- TCP terminal server ---
+
+async function startTcpServer(){
+	var tcpport = appConfig.getNumber('tcpport', 2023);
+	if (!tcpport || tcpport <= 0) {
+		alogger.writeAlog(2, "  TCP terminal server disabled (tcpport = 0)", "yellow");
+		return;
+	}
+
+	var tcpPool = new TcpPool("TCP Terminal Pool");
+	var targetPool = callPoolMap["PrimaryBBS"];
+	if (targetPool) {
+		tcpPool.setCallPool(targetPool);
+		alogger.writeAlog(2, "  TCP pool -> call pool: PrimaryBBS", "cyan");
+	} else {
+		alogger.writeAlog(3, "  TCP pool has no matching call pool", "yellowbright");
+	}
+
+	tcpServer = new TcpServer(tcpport, tcpPool);
+	tcpServer.start();
+	servercount += 1;
+	callservcount += 1;
 }
 
 // --- Event subscriber ---
@@ -246,6 +275,9 @@ async function main(){
 	if (runwssrv){
 		await startWebsockets()
 		await registerLogWebSocket(wsManager);
+	}
+	if (runtcpsrv){
+		await startTcpServer()
 	}
 
 	// Mode-dependent startup

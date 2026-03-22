@@ -55,6 +55,20 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: periodic inbound directory scan (backstop)
+		// -----------------------------------------------------------------
+		var inboundInterval = appConfig.getNumber('inbound_scan_interval', 300);
+		if (inboundInterval > 0) {
+			await maintenanceQueue.upsertJobScheduler('scan-inbound', {
+				every: inboundInterval * 1000,
+			}, {
+				name: 'scan-inbound',
+				data: {},
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// FTN: mailer poll schedules
 		// -----------------------------------------------------------------
 		var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');

@@ -31,6 +31,13 @@ block content
                 p.text-muted.mb-3
                   | Settings are loaded from three tiers: defaults, database overrides, and environment variables. Environment variables take highest precedence and cannot be changed here.
 
+                .input-group.mb-3
+                  span.input-group-text
+                    i.bi.bi-search
+                  input#configSearch.form-control(type='text' placeholder='Search settings by name or description...' autocomplete='off')
+                  button#configSearchClear.btn.btn-outline-secondary(type='button')
+                    i.bi.bi-x-lg
+
                 .accordion#configAccordion
                   each cat in categories
                     - var catId = 'cat_' + cat
@@ -141,3 +148,70 @@ block content
                               button.btn.btn-success(type='submit')
                                 i.bi.bi-check-lg.me-1
                                 | Save #{catTitle} Settings
+
+      script.
+        (function() {
+          var searchInput = document.getElementById('configSearch');
+          var clearBtn = document.getElementById('configSearchClear');
+          var accordion = document.getElementById('configAccordion');
+          var debounceTimer = null;
+
+          function doSearch() {
+            var term = (searchInput.value || '').toLowerCase().trim();
+            var rows = accordion.querySelectorAll('.row.mb-3');
+            var visibleCats = new Set();
+
+            for (var i = 0; i < rows.length; i++) {
+              var row = rows[i];
+              var keyEl = row.querySelector('code');
+              var descEl = row.querySelector('.form-text');
+              var key = keyEl ? keyEl.textContent.toLowerCase() : '';
+              var desc = descEl ? descEl.textContent.toLowerCase() : '';
+
+              if (!term || key.includes(term) || desc.includes(term)) {
+                row.style.display = '';
+                if (term) {
+                  var accordionItem = row.closest('.accordion-item');
+                  if (accordionItem) visibleCats.add(accordionItem);
+                }
+              } else {
+                row.style.display = 'none';
+              }
+            }
+
+            // Show/hide entire accordion sections
+            var items = accordion.querySelectorAll('.accordion-item');
+            for (var j = 0; j < items.length; j++) {
+              var item = items[j];
+              if (!term) {
+                item.style.display = '';
+                continue;
+              }
+              var hasVisible = false;
+              var itemRows = item.querySelectorAll('.row.mb-3');
+              for (var k = 0; k < itemRows.length; k++) {
+                if (itemRows[k].style.display !== 'none') { hasVisible = true; break; }
+              }
+              item.style.display = hasVisible ? '' : 'none';
+
+              // Auto-expand matching sections
+              if (hasVisible && term) {
+                var collapse = item.querySelector('.accordion-collapse');
+                if (collapse && !collapse.classList.contains('show')) {
+                  new bootstrap.Collapse(collapse, { toggle: true });
+                }
+              }
+            }
+          }
+
+          searchInput.addEventListener('input', function() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(doSearch, 200);
+          });
+
+          clearBtn.addEventListener('click', function() {
+            searchInput.value = '';
+            doSearch();
+            searchInput.focus();
+          });
+        })();

@@ -57,7 +57,8 @@ Cross-references:
 | `menucommands/fileAreaSelector.js` | Lightbar area selector. Flattened group/area list, cursor navigation, incremental search, new file counts per area. Persists selection to `call.file_group`/`call.file_area` and user record. Dumb terminal fallback with numbered list. |
 | `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. ZMODEM download (single and batch), batch tagging (T key, max 50 files stored on `call.file_batch`), search (DB-backed via ILIKE when >= 2 chars), mark area read. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
 | `menucommands/fileBatchDownload.js` | Standalone batch download module. Shows batch summary, resolves disk paths, runs `ZmodemProtocol.send()` with all paths, increments download counts, clears batch on success. |
-| `menucommands/fileUpload.js` | Terminal upload handler. Checks upload access, receives files via `ZmodemReceiveProtocol` into staging dir, then for each file: hash, dupe check, move to area dir, extract FILE_ID.DIZ, create entry, update stats. |
+| `menucommands/fileUpload.js` | Terminal upload handler. Checks upload access, receives files via `ZmodemReceiveProtocol` into staging dir, then for each file: hash, dupe check, move to area dir, extract FILE_ID.DIZ, create entry, update stats. Note: ZMODEM receive with SyncTERM has known issues — see Known Issues. |
+| `menucommands/fileSearch.js` | Terminal file search with scope selection (area/group/global), search input, lightbar results with detail view. Filters by browse access. Supports ZMODEM download and batch tagging from search results. |
 
 ### Tosser
 
@@ -363,15 +364,23 @@ File read tracking uses a single-tier pointer system (simpler than messages' two
 
 ## Access Control
 
-Same pattern as the message system: security level + permission flags + restriction flags.
+Three-tier access model, extending the message system's two-tier pattern:
 
-### Read Access (`checkFileAreaReadAccess` / `checkReadFlags`)
+### Browse Access (`checkFileAreaBrowseAccess` / `checkBrowseFlags`)
 
-1. `user.security >= area.read_security` (or group's `read_security`)
-2. User has ALL flags in `read_perm_flags` (must-have)
-3. User has NONE of the flags in `read_rest_flags` (must-not-have)
+1. `user.security >= area.browse_security` (falls back to `read_security` if not set)
+2. User has ALL flags in `browse_perm_flags` (falls back to `read_perm_flags`)
+3. User has NONE of the flags in `browse_rest_flags` (falls back to `read_rest_flags`)
 
-Applied to: group listing, area listing, file listing, file detail, download, JSON pagination.
+Applied to: group listing, area listing, file listing in area, search results filtering, terminal file area selector.
+
+### Download Access (`checkFileAreaReadAccess`)
+
+1. `user.security >= area.read_security`
+2. User has ALL flags in `read_perm_flags`
+3. User has NONE of the flags in `read_rest_flags`
+
+Applied to: file detail view, file download, file info JSON endpoint.
 
 ### Upload Access (`checkFileAreaUploadAccess` / `checkUploadAccess`)
 
@@ -381,7 +390,9 @@ Applied to: group listing, area listing, file listing, file detail, download, JS
 
 Applied to: upload form display, upload POST, terminal upload handler.
 
-Groups and areas use the same column names (`read_security`, `post_security`, `read_perm_flags`, etc.) so the same check functions work on both.
+The browse tier allows users to see files they cannot download. If `browse_security` / `browse_*_flags` are not set (null), they fall back to the download-tier values for backward compatibility.
+
+Groups and areas use the same column names so the same check functions work on both. Admin UI labels: "Browse Security" / "Download Security" / "Upload Security".
 
 ---
 

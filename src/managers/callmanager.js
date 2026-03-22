@@ -24,6 +24,7 @@ import { SubModuleAdapter } from "../handlers/submoduleadapter.js";
 import { LastCallers } from "../handlers/lastcallers.js";
 import { WhosOnline } from "../handlers/whosonline.js";
 import { pmCheck } from "../handlers/menucommands/pmCheck.js";
+import { fileBatchCheck } from "../handlers/menucommands/fileBatchCheck.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
@@ -48,6 +49,7 @@ const handlerRegistry = {
 	"last_callers": (call) => new SubModuleAdapter(call, LastCallers, "LastCallers"),
 	"whos_online":  (call) => new SubModuleAdapter(call, WhosOnline, "WhosOnline"),
 	"check_email":  (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
+	"check_batch":  (call) => new SubModuleAdapter(call, fileBatchCheck, "FileBatchCheck"),
 	//"announcements": (call) => new AnnouncementHandler(call),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
@@ -64,6 +66,7 @@ const callFlows = {
 		"logon",
 		"last_callers",
 		"check_email",
+		"check_batch",
 		//"announcements",
 		"menu",
 		"goodbye",
@@ -314,13 +317,26 @@ class IncomingCall{
 
 	_wireHandlerEvents(handler, stageName){
 		// Login-specific events
-		handler.emitter.on("LoginOK", () => {
+		handler.emitter.on("LoginOK", async () => {
 			var logmsg = this.loggingId + "\n  Login successful for " + this.caller_username;
 			alogger.writeAlog(4, logmsg, "greenbright");
 			// Update node registry with the logged-in username
 			if (this.nodeManager) {
 				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
 				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
+			}
+			// Load persisted file batch from DB
+			if (this.user_record && this.user_record.id) {
+				try {
+					var batchMod = await import('../models/userFileBatch.js');
+					this.file_batch = await batchMod.loadBatch(this.user_record.id);
+					if (this.file_batch.length > 0) {
+						alogger.writeAlog(5, this.loggingId + "\n  Loaded " + this.file_batch.length + " file(s) in download batch", "cyan");
+					}
+				} catch (batchErr) {
+					alogger.writeAlog(4, "Failed to load file batch: " + batchErr.message, "yellow");
+					this.file_batch = [];
+				}
 			}
 			// LoginOK advances through the flow (no explicit override)
 			this.logCallStart()

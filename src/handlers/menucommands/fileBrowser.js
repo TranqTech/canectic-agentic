@@ -968,22 +968,32 @@ class fileBrowser extends BaseSubModule {
 
 	// --- Batch tagging ---
 
-	_toggleBatchTag(file) {
+	async _toggleBatchTag(file) {
 		if (!file || !this.call) return;
 		var batch = this.call.file_batch;
+		var userId = this._userId;
 		var idx = batch.findIndex(function(b) { return b.uuid === file.uuid; });
 		if (idx >= 0) {
 			batch.splice(idx, 1);
+			// Persist removal
+			if (userId) {
+				try { var bm = await import("../../models/userFileBatch.js"); await bm.removeFromBatch(userId, file.uuid); } catch (_) {}
+			}
 		} else {
 			if (batch.length >= 50) return; // max batch size
-			batch.push({
+			var item = {
 				uuid: file.uuid,
 				id: file.id,
 				filename: file.filename,
 				file_size: file.file_size,
 				area_shortcode: file.area_shortcode || this._areaShortcode,
 				disk_path: file.disk_path || file.filename
-			});
+			};
+			batch.push(item);
+			// Persist addition
+			if (userId) {
+				try { var bm2 = await import("../../models/userFileBatch.js"); await bm2.addToBatch(userId, item); } catch (_) {}
+			}
 		}
 	}
 
@@ -1056,8 +1066,11 @@ class fileBrowser extends BaseSubModule {
 			}
 			alogger.writeAlog(3, "Batch download complete: " + filePaths.length + " files by " + (this.call.caller_username || "unknown"), "greenbright");
 
-			// Clear the batch
+			// Clear the batch (memory + DB)
 			this.call.file_batch = [];
+			if (this._userId) {
+				try { var bmc = await import("../../models/userFileBatch.js"); await bmc.clearBatch(this._userId); } catch (_) {}
+			}
 
 			if (this.dumb) {
 				this.call.cmds.senddata("\r\n  Batch transfer complete: " + filePaths.length + " files.\r\n\r\n");

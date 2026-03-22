@@ -318,6 +318,51 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'scan-inbound': {
+				var fs = await import('fs');
+				var path = await import('path');
+				var inDir = appConfig.get('MAILER_INBOUND_DIR') || appConfig.get('ftninbound', 'ftn/in');
+				var ticDir = appConfig.get('tic_inbound_dir') || inDir;
+
+				try {
+					var hasPkt = false;
+					var hasTic = false;
+
+					if (fs.existsSync(inDir)) {
+						var files = fs.readdirSync(inDir);
+						for (var f of files) {
+							var lower = f.toLowerCase();
+							if (lower.endsWith('.pkt')) hasPkt = true;
+							if (lower.endsWith('.tic')) hasTic = true;
+							if (hasPkt && hasTic) break;
+						}
+					}
+
+					// Check TIC dir separately if different from inbound
+					if (ticDir !== inDir && !hasTic && fs.existsSync(ticDir)) {
+						var ticFiles = fs.readdirSync(ticDir);
+						for (var tf of ticFiles) {
+							if (tf.toLowerCase().endsWith('.tic')) { hasTic = true; break; }
+						}
+					}
+
+					if (hasPkt) {
+						alogger.writeAlog(3, "[Worker] Inbound scan: .pkt files found, enqueueing ftn:inbound", "cyan");
+						await jobs.enqueueFtnInbound();
+					}
+					if (hasTic) {
+						alogger.writeAlog(3, "[Worker] Inbound scan: .tic files found, enqueueing tic:inbound", "cyan");
+						await jobs.enqueueTicInbound();
+					}
+					if (!hasPkt && !hasTic) {
+						alogger.writeAlog(4, "[Worker] Inbound scan: no files", "cyan");
+					}
+				} catch (scanErr) {
+					alogger.writeAlog(3, "[Worker] Inbound scan error: " + scanErr.message, "yellow");
+				}
+				break;
+			}
+
 			default:
 				alogger.writeAlog(3, `[Worker] Unknown maintenance job: ${job.name}`, "yellowbright");
 		}

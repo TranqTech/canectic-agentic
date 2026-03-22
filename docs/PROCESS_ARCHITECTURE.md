@@ -164,6 +164,11 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `purge-pm-trash` | Scheduler (repeatable) | Worker | `{ days? }` | Hard-delete old soft-deleted PMs |
 | `recalc-area-counts` | Admin | Worker | `{}` | Recalculate all area message counts |
 | `import-nodelist` | Admin, CLI | Worker | `{ filePath, networkId }` | Import FTN nodelist file into ftn_nodelist table |
+| `scan-inbound` | Scheduler (repeatable, default 300s) | Worker | `{}` | Backstop scan of FTN inbound dir for unprocessed .pkt/.tic files |
+| `scan-nodelists` | Scheduler (daily 4AM) | Worker | `{}` | Auto-import nodelists from configured file areas |
+| `regen-file-desc-html` | Admin, CLI | Worker | `{ batchSize? }` | Regenerate long_desc_html for file entries |
+| `recalc-file-counts` | Admin | Worker | `{}` | Recalculate file_count/total_bytes for all file areas |
+| `scan-file-area` | Admin, CLI | Worker | `{ areaShortcode }` | Scan file area directory for untracked files |
 
 ### Concurrency and deduplication
 
@@ -991,9 +996,15 @@ Schedules are registered by the gateway on startup (`registerSchedules()` in `ma
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `poll_interval` | integer (minutes) | 60 | Mailer poll interval for FTN connections |
-| `pull_interval` | integer (minutes) | 120 (QWK) / 60 (NNTP) | Toss pull/push interval |
+| `pull_interval_minutes` | integer (minutes) | 120 (QWK) / 60 (NNTP) | Toss pull/push interval |
 
-These replace the mailer's internal timer-based poll loop. The mailer no longer has its own scheduler — it just processes jobs from the queue.
+### `peer_connections` schema additions
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `poll_enabled` | boolean | false | Whether this connection should be periodically polled. Defaults to true for non-hub QWK and NNTP on creation. Only connections with `poll_enabled = true` get BullMQ scheduled poll jobs. |
+
+The mailer's internal `_startPollScheduling()` timer has been removed. Polling is now entirely driven by BullMQ scheduled jobs (registered in `schedules.js`) and the BSO outbound scanner (`bsoScanner.js`). The BSO scanner handles send-driven connections; scheduled polls handle receive-only polling.
 
 ---
 

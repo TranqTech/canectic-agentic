@@ -108,6 +108,10 @@ class fileBatchDownload extends BaseSubModule {
 				await incrementDownloadCount(fid);
 			}
 			this.call.file_batch = [];
+			// Clear persisted batch from DB
+			if (this.call.user_record && this.call.user_record.id) {
+				try { var bmc = await import("../../models/userFileBatch.js"); await bmc.clearBatch(this.call.user_record.id); } catch (_) {}
+			}
 			alogger.writeAlog(3, "Batch download complete: " + filePaths.length + " files by " + (this.call.caller_username || "unknown"), "greenbright");
 
 			if (this.dumb) {
