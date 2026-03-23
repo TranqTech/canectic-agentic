@@ -42,6 +42,7 @@ class TelnetParser {
 		this._state = 'data';  // 'data', 'iac', 'will', 'wont', 'do', 'dont', 'sb', 'sb_data'
 		this._sbOption = 0;
 		this._sbBuffer = [];
+		this._acceptedOptions = new Set(); // Track options we've already accepted
 	}
 
 	// Parse incoming data — returns clean data bytes with IAC stripped
@@ -162,19 +163,20 @@ class TelnetParser {
 	// --- Telnet negotiation handlers ---
 
 	_handleWill(option) {
+		// Only respond once per option to prevent negotiation loops
+		if (this._acceptedOptions.has(option)) return;
+
 		switch (option) {
 			case OPT_NAWS:
-				// Client will send window size — accept
+				this._acceptedOptions.add(option);
 				this._sendCommand(DO, option);
 				break;
 			case OPT_TTYPE:
-				// Client will send terminal type — accept and request it
+				this._acceptedOptions.add(option);
 				this._sendCommand(DO, option);
-				// Request terminal type via SB
 				this._sendSB(OPT_TTYPE, [1]); // SEND = 1
 				break;
 			default:
-				// Decline options we don't handle
 				this._sendCommand(DONT, option);
 				break;
 		}

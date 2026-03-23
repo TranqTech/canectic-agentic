@@ -874,6 +874,8 @@ class ZmodemEngine extends EventEmitter {
 			self._timer = null;
 			if (reason === 'zrqinit_timeout') {
 				self._sendZRQINIT(); // Retry
+			} else if (reason === 'rx_init_timeout') {
+				self._finishRecv(false, 'No upload initiated by client');
 			} else if (reason === 'rx_zrinit_retry') {
 				self._sendRecvZRINIT(); // Retry ZRINIT
 			} else if (reason === 'zfile_timeout' && self._zfileRetries < 2) {
@@ -955,13 +957,18 @@ class ZmodemEngine extends EventEmitter {
 		}
 
 		var flags = CANFDX | CANOVIO | CANFC32;
-
-		// Build "rz\r" + ZRINIT as a single buffer so terminal clients see
-		// the complete auto-start sequence in one chunk
-		var autostart = Buffer.from('rz\r');
 		var zrinit = encodeHexHeader(ZRINIT, 0, 0, 0, flags);
-		this._adapter.write(Buffer.concat([autostart, zrinit]));
-		this._startTimer(2000, 'rx_zrinit_retry'); // Retry every 2s
+
+		if (this._rxInitRetries === 1) {
+			// First attempt: send "rz\r" autostart prefix to trigger the
+			// terminal client's ZMODEM auto-detection
+			var autostart = Buffer.from('rz\r');
+			this._adapter.write(Buffer.concat([autostart, zrinit]));
+		} else {
+			// Retries: just send ZRINIT — client is already in ZMODEM mode
+			this._adapter.write(zrinit);
+		}
+		this._startTimer(5000, 'rx_zrinit_retry');
 	}
 
 	// ======================================================================

@@ -128,8 +128,7 @@ class fileUpload extends BaseSubModule {
 		var promptRow = this._useXmodem ? 7 : 5;
 
 		if (this.dumb) {
-			this.call.cmds.senddata("\r\n  Your terminal will prompt you to select files.\r\n");
-			this.call.cmds.senddata("  Starting " + protoName + " receive...\r\n\r\n");
+			this.call.cmds.senddata("\r\n  Starting " + protoName + " receive...\r\n\r\n");
 		} else {
 			this.call.cmds.movecursor(1, promptRow);
 			this.call.cmds.setfgcolor(10);
