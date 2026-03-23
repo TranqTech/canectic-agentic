@@ -15,7 +15,7 @@
 import { EventEmitter } from 'node:events';
 import * as fs from 'fs';
 import * as path from 'path';
-import { crc16, crc32, crc32update, crc32finalize } from './crc.js';
+import { crc16, crc16zmodem, crc32, crc32update, crc32finalize } from './crc.js';
 import {
 	ZPAD, ZDLE, ZBIN, ZHEX, ZBIN32,
 	ZRQINIT, ZRINIT, ZSINIT, ZACK, ZFILE, ZSKIP, ZNAK, ZABORT,
@@ -381,10 +381,9 @@ class ZmodemEngine extends EventEmitter {
 			: encodeBinHeader(ZFILE, 0, 0, 0, 0, this._escapeAll);
 		var subpacket = this._encodeDataSubpacket(Buffer.from(meta, 'binary'), ZCRCW);
 		this._adapter.write(Buffer.concat([header, subpacket]));
-		// Timeout for ZFILE — enables fallback if client can't parse current
-		// header type. 5s gives older clients time to recover from unrecognized
-		// ZBIN32 bytes before we retry with ZBIN.
-		this._startTimer(5000, 'zfile_timeout');
+		// Timeout for ZFILE — enables fallback through CRC modes.
+		// 3s gives older clients time to recover from unrecognized headers.
+		this._startTimer(3000, 'zfile_timeout');
 	}
 
 	_onZRPOS(p0, p1, p2, p3) {
@@ -571,6 +570,8 @@ class ZmodemEngine extends EventEmitter {
 				(crc32val >> 24) & 0xFF
 			]);
 		} else {
+			// ZMODEM data CRC-16: standard CCITT, no augmentation needed.
+			// Sent big-endian (MSB first) per lrzsz zsdata: zsendline(crc>>8); zsendline(crc);
 			var crc16val = crc16(crcInput);
 			crcBuf = Buffer.from([
 				(crc16val >> 8) & 0xFF,

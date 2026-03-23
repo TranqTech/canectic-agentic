@@ -36,6 +36,23 @@ function crc16(buf, init) {
 	return crc;
 }
 
+/**
+ * Compute CRC-16 using the lrzsz/ZMODEM data subpacket variant.
+ * Formula: table[(crc>>8) & 0xFF] ^ (crc<<8) ^ byte
+ * This differs from standard CCITT by applying the byte AFTER the table lookup.
+ * Used by ZMODEM data subpackets. Must be augmented with two zero bytes.
+ * @param {Buffer} buf
+ * @param {number} [init=0]
+ * @returns {number} — 16-bit CRC
+ */
+function crc16zmodem(buf, init) {
+	var crc = (init !== undefined ? init : 0) & 0xFFFF;
+	for (var i = 0; i < buf.length; i++) {
+		crc = (crc16Table[(crc >>> 8) & 0xFF] ^ (crc << 8) ^ buf[i]) & 0xFFFF;
+	}
+	return crc;
+}
+
 // --- CRC-32 lookup table (polynomial 0xEDB88320, reflected) ---
 
 var crc32Table = new Uint32Array(256);
@@ -92,4 +109,4 @@ function crc32finalize(running) {
 	return (running ^ 0xFFFFFFFF) >>> 0;
 }
 
-export { crc16, crc32, crc32update, crc32finalize };
+export { crc16, crc16zmodem, crc32, crc32update, crc32finalize };
