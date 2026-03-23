@@ -28,7 +28,7 @@ import {
 // --- Constants ---
 
 var ZDLE_XOR = 0x40;         // XOR mask for escaped bytes
-var SUBPACKET_SIZE = 8192;   // Default data subpacket size (8K for throughput)
+var SUBPACKET_SIZE = 1024;   // Default data subpacket size (1K for max compatibility)
 var ZRQINIT_RETRIES = 10;   // Max ZRQINIT retransmissions
 var ZRQINIT_TIMEOUT = 5000; // Timeout per ZRQINIT attempt (ms)
 var HEADER_TIMEOUT = 15000;  // Timeout waiting for a response header
@@ -196,6 +196,13 @@ class ZmodemEngine extends EventEmitter {
 		this._state_sub = 'data';  // 'data' or 'crc'
 		this._rxDataCrc32 = true;  // Default CRC-32; updated when binary header is parsed
 
+		// Send CRC mode with auto-fallback:
+		// 'zbin32'     — ZBIN32 headers + CRC-32 data (modern clients)
+		// 'zbin_crc32' — ZBIN headers + CRC-32 data (lrzsz compat)
+		// 'zbin_crc16' — ZBIN headers + CRC-16 data (last resort)
+		this._sendCrcMode = 'zbin32';
+		this._zfileRetries = 0;
+
 		// ZRQINIT retry counter
 		this._initRetries = 0;
 	}
@@ -273,11 +280,13 @@ class ZmodemEngine extends EventEmitter {
 		this._rxEscCtl = !!(p3 & ESCCTL);
 		this._rxWindowSize = p0 | (p1 << 8); // ZP0 + ZP1
 
-		// Log receiver capabilities for debugging interop issues
+		// Log receiver capabilities with raw bytes for debugging interop
 		this.emit('headerRx', {
 			type: 'ZRINIT_CAPS',
 			position: 0,
-			flags: p3,
+			raw: { p0: p0, p1: p1, p2: p2, p3: p3 },
+			flags_ZF0: p3,
+			flags_ZF1: p2,
 			canFC32: this._rxCanFC32,
 			escCtl: this._rxEscCtl,
 			window: this._rxWindowSize
@@ -286,6 +295,13 @@ class ZmodemEngine extends EventEmitter {
 		// If receiver wants escape-all, comply
 		if (this._rxEscCtl) {
 			this._escapeAll = true;
+		}
+
+		// Set initial CRC mode based on capabilities
+		if (this._rxCanFC32 && this._zfileRetries === 0) {
+			this._sendCrcMode = 'zbin32';
+		} else if (!this._rxCanFC32) {
+			this._sendCrcMode = 'zbin_crc16';
 		}
 
 		// If we were streaming a file, this ZRINIT confirms ZEOF — file complete
@@ -360,12 +376,15 @@ class ZmodemEngine extends EventEmitter {
 			remaining + ' 0\0';
 
 		// Send header + metadata as a single write to ensure they arrive together
-		var header = this._rxCanFC32
+		var header = this._sendCrcMode === 'zbin32'
 			? encodeBin32Header(ZFILE, 0, 0, 0, 0, this._escapeAll)
 			: encodeBinHeader(ZFILE, 0, 0, 0, 0, this._escapeAll);
 		var subpacket = this._encodeDataSubpacket(Buffer.from(meta, 'binary'), ZCRCW);
 		this._adapter.write(Buffer.concat([header, subpacket]));
-		this._startTimer(this._timeout, 'zfile_timeout');
+		// Timeout for ZFILE — enables fallback if client can't parse current
+		// header type. 5s gives older clients time to recover from unrecognized
+		// ZBIN32 bytes before we retry with ZBIN.
+		this._startTimer(5000, 'zfile_timeout');
 	}
 
 	_onZRPOS(p0, p1, p2, p3) {
@@ -402,7 +421,11 @@ class ZmodemEngine extends EventEmitter {
 					if (self._aborted) return;
 					var eofPos = positionToBytes(self._fileOffset);
 					self._sendHexHeader(ZEOF, eofPos[0], eofPos[1], eofPos[2], eofPos[3]);
-					self._startTimer(self._timeout, 'zeof_timeout');
+					// Proportional timeout — client may still be draining the TCP
+					// buffer on slow connections (e.g. DosBox at 38400 bps).
+					// Allow ~1s per KB with a minimum of 60s.
+					var eofTimeout = Math.max(60000, Math.ceil(self._fileSize / 1024) * 1000);
+					self._startTimer(eofTimeout, 'zeof_timeout');
 				}, 100);
 				return;
 			}
@@ -420,7 +443,7 @@ class ZmodemEngine extends EventEmitter {
 			if (self._zdataHeaderPending) {
 				self._zdataHeaderPending = false;
 				var pos = positionToBytes(self._fileOffset - nread);
-				var header = self._rxCanFC32
+				var header = self._sendCrcMode === 'zbin32'
 					? encodeBin32Header(ZDATA, pos[0], pos[1], pos[2], pos[3], self._escapeAll)
 					: encodeBinHeader(ZDATA, pos[0], pos[1], pos[2], pos[3], self._escapeAll);
 				self._adapter.write(Buffer.concat([header, subpacket]));
@@ -519,9 +542,7 @@ class ZmodemEngine extends EventEmitter {
 	}
 
 	_sendBinHeader(type, p0, p1, p2, p3) {
-		// ZBIN32 + CRC-32 when receiver supports it (proven with SyncTERM,
-		// IcyTerm, NetRunner). ZBIN + CRC-16 for clients without CANFC32.
-		if (this._rxCanFC32) {
+		if (this._sendCrcMode === 'zbin32') {
 			this._adapter.write(encodeBin32Header(type, p0, p1, p2, p3, this._escapeAll));
 		} else {
 			this._adapter.write(encodeBinHeader(type, p0, p1, p2, p3, this._escapeAll));
@@ -537,9 +558,11 @@ class ZmodemEngine extends EventEmitter {
 		// Frame end: ZDLE + frameEnd
 		var endMarker = Buffer.from([ZDLE, frameEnd]);
 
-		// CRC type matches header type: ZBIN32 → CRC-32, ZBIN → CRC-16.
+		// CRC type follows the send mode:
+		// zbin32/zbin_crc32 → CRC-32 (4 bytes LE)
+		// zbin_crc16 → CRC-16 (2 bytes BE)
 		var crcBuf;
-		if (this._rxCanFC32) {
+		if (this._sendCrcMode !== 'zbin_crc16') {
 			var crc32val = crc32(crcInput);
 			crcBuf = Buffer.from([
 				crc32val & 0xFF,
@@ -786,7 +809,11 @@ class ZmodemEngine extends EventEmitter {
 
 	_dispatchHeader(frameType, p0, p1, p2, p3) {
 		var name = FRAME_NAMES[frameType] || ('UNKNOWN_' + frameType);
-		this.emit('headerRx', { type: name, position: bytesToPosition(p0, p1, p2, p3) });
+		this.emit('headerRx', {
+			type: name,
+			position: bytesToPosition(p0, p1, p2, p3),
+			raw: { p0: p0, p1: p1, p2: p2, p3: p3 }
+		});
 
 		// Route to receive handler if in receive mode
 		if (this._recvMode) {
@@ -848,6 +875,19 @@ class ZmodemEngine extends EventEmitter {
 				self._sendZRQINIT(); // Retry
 			} else if (reason === 'rx_zrinit_retry') {
 				self._sendRecvZRINIT(); // Retry ZRINIT
+			} else if (reason === 'zfile_timeout' && self._zfileRetries < 2) {
+				// ZFILE not acknowledged — try next CRC mode fallback.
+				// zbin32 → zbin_crc32 → zbin_crc16
+				self._zfileRetries++;
+				if (self._sendCrcMode === 'zbin32') {
+					self._sendCrcMode = 'zbin_crc32';
+					self.emit('error', { message: 'ZBIN32 not supported, falling back to ZBIN+CRC32', recoverable: true });
+				} else if (self._sendCrcMode === 'zbin_crc32') {
+					self._sendCrcMode = 'zbin_crc16';
+					self.emit('error', { message: 'ZBIN+CRC32 not supported, falling back to ZBIN+CRC16', recoverable: true });
+				}
+				// Re-send ZFILE with new encoding
+				self._sendZFILE();
 			} else if (reason === 'zfin_timeout') {
 				// ZFIN timeout — assume success (receiver may have disconnected)
 				self._finishSuccess();

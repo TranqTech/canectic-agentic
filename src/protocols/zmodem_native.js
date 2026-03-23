@@ -29,7 +29,7 @@ class NativeZmodemProtocol {
 
 		var adapter = this._createAdapter();
 		this._engine = new ZmodemEngine(adapter, {
-			subpacketSize: this._opts.subpacketSize || 8192,
+			subpacketSize: this._opts.subpacketSize || 1024,
 			escapeCtl: this._opts.escapeCtl || false,
 			timeout: this._opts.timeout || 15000,
 		});
@@ -39,7 +39,12 @@ class NativeZmodemProtocol {
 			if (h.type === 'ZRINIT_CAPS') {
 				var alogger = import('../utils/alogger.js');
 				alogger.then(function(m) {
-					m.writeAlog(3, 'ZMODEM ZRINIT caps: flags=0x' + (h.flags || 0).toString(16) +
+					var raw = h.raw || {};
+					m.writeAlog(3, 'ZMODEM ZRINIT raw bytes: p0=0x' + (raw.p0 || 0).toString(16) +
+						' p1=0x' + (raw.p1 || 0).toString(16) +
+						' p2=0x' + (raw.p2 || 0).toString(16) +
+						' p3=0x' + (raw.p3 || 0).toString(16) +
+						' | ZF0(p3)=0x' + (h.flags_ZF0 || 0).toString(16) +
 						' canFC32=' + h.canFC32 + ' escCtl=' + h.escCtl + ' window=' + h.window, 'cyan');
 				});
 			}
