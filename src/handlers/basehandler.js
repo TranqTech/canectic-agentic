@@ -13,8 +13,8 @@ class BaseHandler {
 
         // Timeout config — subclasses can override in constructor.
         // Config values are in human-friendly units; convert to ms internally.
-        this.inactivityTO = appConfig.getNumber('inactivityTO', 1) * 60 * 1000; // minutes → ms
-        this.warnBuff = appConfig.getNumber('warnbuff', 10) * 1000;             // seconds → ms
+        this.inactivityTO = appConfig.getNumber('inactivityTO', 10) * 60 * 1000; // minutes → ms
+        this.warnBuff = appConfig.getNumber('warnbuff', 30) * 1000;             // seconds → ms
         this.warnMsg = appConfig.get('warnmsg', "Are you there?");
         this.inactiveMsg = appConfig.get('inactivemsg', "You have been inactive too long");
 

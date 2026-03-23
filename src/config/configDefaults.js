@@ -79,8 +79,8 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// Terminal
 	// -----------------------------------------------------------------------
-	{ key: 'inactivityTO',          defaultValue: '1',           type: 'number',  category: 'terminal',    description: 'Terminal inactivity timeout in minutes (default 1)' },
-	{ key: 'warnbuff',              defaultValue: '10',          type: 'number',  category: 'terminal',    description: 'Warning buffer before timeout in seconds (default 10)' },
+	{ key: 'inactivityTO',          defaultValue: '10',          type: 'number',  category: 'terminal',    description: 'Terminal inactivity timeout in minutes (default 10)' },
+	{ key: 'warnbuff',              defaultValue: '30',          type: 'number',  category: 'terminal',    description: 'Warning buffer before timeout in seconds (default 30)' },
 	{ key: 'warnmsg',               defaultValue: 'Are you there?', type: 'string', category: 'terminal',  description: 'Inactivity warning message' },
 	{ key: 'inactivemsg',           defaultValue: 'You have been inactive too long', type: 'string', category: 'terminal', description: 'Inactivity disconnect message' },
 	{ key: 'inputTO',               defaultValue: '20',          type: 'number',  category: 'terminal',    description: 'Input field timeout in seconds (default 20)' },
