@@ -45,12 +45,18 @@ class WsTransport extends BaseTransport {
 		});
 		ws.binaryType = 'nodebuffer';
 
+		var settled = false;
+
 		var timer = setTimeout(function() {
+			if (settled) return;
+			settled = true;
 			try { ws.terminate(); } catch (_) {}
 			transport.emit('error', new Error('WS connection timeout after ' + connectTimeout + 'ms'));
 		}, connectTimeout);
 
 		ws.on('open', function() {
+			if (settled) return;
+			settled = true;
 			clearTimeout(timer);
 			transport._remoteAddr = url;
 			transport._attachWebSocket(ws);
@@ -59,6 +65,8 @@ class WsTransport extends BaseTransport {
 		});
 
 		ws.once('error', function(err) {
+			if (settled) return;
+			settled = true;
 			clearTimeout(timer);
 			transport._connected = false;
 			transport.emit('error', err);
