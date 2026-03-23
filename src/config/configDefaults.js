@@ -62,6 +62,7 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	{ key: 'pm_trash_retention_days', defaultValue: '30',       type: 'number',  category: 'maintenance', description: 'Days before hard-deleting trashed PMs' },
 	{ key: 'inbound_scan_interval', defaultValue: '300',      type: 'number',  category: 'maintenance', description: 'Inbound directory scan interval in seconds (0 = disabled)' },
+	{ key: 'outbound_toss_interval', defaultValue: '120',    type: 'number',  category: 'maintenance', description: 'Outbound toss sweep interval in minutes (0 = disabled). Catches messages not tossed on-demand.' },
 
 	// -----------------------------------------------------------------------
 	// Logging

@@ -69,6 +69,22 @@ export async function registerSchedules() {
 		}
 
 		// -----------------------------------------------------------------
+		// Toss: periodic outbound sweep for all protocols
+		// Catches queued outbound messages that weren't tossed on-demand
+		// (e.g., web posts during worker downtime, race conditions).
+		// -----------------------------------------------------------------
+		var outboundInterval = appConfig.getNumber('outbound_toss_interval', 120); // minutes
+		if (outboundInterval > 0) {
+			await tossQueue.upsertJobScheduler('outbound-sweep', {
+				every: outboundInterval * 60 * 1000,
+			}, {
+				name: 'outbound-sweep',
+				data: {},
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// FTN: mailer poll schedules
 		// -----------------------------------------------------------------
 		var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
