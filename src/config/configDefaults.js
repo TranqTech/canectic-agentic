@@ -100,7 +100,7 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// Paths
 	// -----------------------------------------------------------------------
-	{ key: 'textdir',               defaultValue: '',            type: 'string',  category: 'paths',       description: 'Text/art file directory' },
+	{ key: 'textdir',               defaultValue: 'txtfiles',    type: 'string',  category: 'paths',       description: 'Text/art file directory' },
 	{ key: 'ftninbound',            defaultValue: 'ftn/in',      type: 'string',  category: 'paths',       description: 'FTN inbound packet directory' },
 	{ key: 'ftnoutbound',           defaultValue: 'ftn/out',     type: 'string',  category: 'paths',       description: 'FTN outbound packet directory' },
 	{ key: 'ftntossed',             defaultValue: 'ftn/tossed',  type: 'string',  category: 'paths',       description: 'FTN tossed (processed) packet directory' },
