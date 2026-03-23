@@ -6,7 +6,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as ftn from "./ftnClasses.js";
 import * as ftnUtils from "../utils/ftnUtils.js";
-import appConfig from "../config/appConfig.js";
+import * as systemAddresses from "./systemAddresses.js";
 
 
 async function getInboundMsgByMsgId(msgId) {
@@ -121,7 +121,16 @@ async function newOutboundNetmail(formObj) {
 		return returnObj;
 	}
 
-	var dSource = formObj.Source || appConfig.get('DefaultAddress', '1:1/1');
+	var dSource = formObj.Source || '';
+	if (!dSource) {
+		// Look up default FTN address from system addresses
+		var defaultAddr = await systemAddresses.getDefaultAddressByNetworkType('FTN');
+		if (defaultAddr) {
+			dSource = defaultAddr.address || '1:1/1';
+		} else {
+			dSource = '1:1/1';
+		}
+	}
 
 	var currtime = new Date();
 	var destsplit1  = formObj.Destination.split(":");
