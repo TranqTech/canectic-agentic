@@ -15,6 +15,7 @@ import * as path from 'path';
 import { BinkpProtocol, verifyCramMD5 } from './protocols/binkp.js';
 import { EmsiProtocol } from './protocols/emsi.js';
 import { TransferEngine } from './transfer.js';
+import { WazooTransferEngine } from './wazooTransfer.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as systemAddresses from '../models/systemAddresses.js';
 import * as alogger from '../utils/alogger.js';
@@ -306,14 +307,9 @@ class SessionController extends EventEmitter {
 		);
 
 		if (this.protocolType === 'emsi') {
-			// EMSI/Wazoo — detach EMSI parser and start Wazoo transfer.
-			// WazooTransferEngine will be implemented in Phase 3.
+			// EMSI/Wazoo — detach EMSI parser and start Wazoo batch transfer
 			this.protocol.detachTransport();
-			alogger.writeClog(5, 'Session ' + this.uuid +
-				': EMSI handshake complete, ready for Wazoo transfer (not yet implemented)',
-				'mailer', 'yellow');
-			// TODO: Phase 3 — create WazooTransferEngine, build outbound list, start batch
-			this._endSession('complete');
+			await this._runWazooTransfer();
 			return;
 		}
 
@@ -344,7 +340,106 @@ class SessionController extends EventEmitter {
 	}
 
 	// -----------------------------------------------------------------------
-	// File list — find outbound files for this peer
+	// Wazoo transfer (EMSI sessions)
+	// -----------------------------------------------------------------------
+
+	async _runWazooTransfer() {
+		// Build outbound file list (reuses the same BSO scanning logic)
+		var outboundFiles = await this._buildOutboundFileList();
+
+		alogger.writeClog(5,
+			'Session ' + this.uuid + ': starting Wazoo transfer (' +
+			outboundFiles.length + ' outbound file(s))',
+			'mailer', 'cyan'
+		);
+
+		var wazoo = new WazooTransferEngine(this.transport, {
+			role: this.role,
+			inboundDir: this._inboundDir,
+			tempDir: this._tempDir,
+			outboundFiles: outboundFiles,
+			sessionId: this.uuid
+		});
+
+		wazoo.on('sendComplete', (info) => {
+			this.filesSent++;
+			alogger.writeClog(5, 'Session ' + this.uuid + ': Wazoo sent ' + info.name, 'mailer', 'green');
+		});
+		wazoo.on('receiveComplete', (info) => {
+			this.filesReceived++;
+			this.bytesReceived += info.size;
+			alogger.writeClog(5, 'Session ' + this.uuid + ': Wazoo received ' + info.name +
+				' (' + info.size + ' bytes)', 'mailer', 'green');
+		});
+
+		var result = await wazoo.run();
+
+		if (result.success) {
+			this._endSession('complete');
+		} else {
+			this._endSession(result.error || 'wazoo error');
+		}
+	}
+
+	// Build outbound file list as an array of { path } objects for WazooTransferEngine
+	async _buildOutboundFileList() {
+		if (!this.peerConnection) return [];
+
+		// Reuse the existing BSO file scanning logic
+		var cd = this.peerConnection.connection_data || {};
+		var peerAddr = cd.address || '';
+		if (!peerAddr) return [];
+
+		var addrParts = this._parseAddress(peerAddr);
+		if (!addrParts) return [];
+
+		var outDir = this._getOutboundDirForZone(addrParts.zone);
+		var netHex = addrParts.net.toString(16).padStart(4, '0');
+		var nodeHex = addrParts.node.toString(16).padStart(4, '0');
+		var desthex = netHex + nodeHex;
+
+		var files = [];
+		var fs = await import('fs');
+
+		if (!fs.existsSync(outDir)) return [];
+
+		// Flow files (.flo, .clo, .dlo, .hlo, .ilo)
+		var floExtensions = ['.flo', '.clo', '.dlo', '.hlo', '.ilo'];
+		for (var ext of floExtensions) {
+			var floPath = outDir + '/' + desthex + ext;
+			if (fs.existsSync(floPath)) {
+				var content = fs.readFileSync(floPath, 'utf8');
+				var lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+				for (var line of lines) {
+					var prefix = '';
+					var filepath = line;
+					if (line[0] === '^' || line[0] === '#' || line[0] === '~') {
+						prefix = line[0];
+						filepath = line.substring(1).trim();
+					}
+					if (prefix === '~') continue;
+					filepath = filepath.replace(/\r/g, '');
+					if (filepath && fs.existsSync(filepath)) {
+						files.push({ path: filepath });
+					}
+				}
+			}
+		}
+
+		// Direct packet files (.out, .cut, .hut)
+		var pktExtensions = ['.out', '.cut', '.hut'];
+		for (var pktExt of pktExtensions) {
+			var pktPath = outDir + '/' + desthex + pktExt;
+			if (fs.existsSync(pktPath)) {
+				files.push({ path: pktPath });
+			}
+		}
+
+		return files;
+	}
+
+	// -----------------------------------------------------------------------
+	// File list — find outbound files for this peer (binkp)
 	// -----------------------------------------------------------------------
 
 	// Resolve the BSO outbound directory for a given zone.

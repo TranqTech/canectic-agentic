@@ -243,6 +243,27 @@ class ZmodemEngine extends EventEmitter {
 		});
 	}
 
+	/**
+	 * Send an empty batch — signals "no files" in a Wazoo context.
+	 * Sends ZRQINIT, waits for ZRINIT, then immediately sends ZFIN.
+	 * @returns {Promise<{success: boolean, filesSent: number}>}
+	 */
+	sendEmpty() {
+		var self = this;
+		this._fileQueue = [];
+
+		return new Promise(function(resolve, reject) {
+			self._resolveMain = resolve;
+			self._rejectMain = reject;
+			self._currentFileIndex = 0;
+			self._state = 'init';
+			self._emptyBatch = true;
+
+			self._adapter.onData(function(data) { self._onData(data); });
+			self._sendZRQINIT();
+		});
+	}
+
 	abort() {
 		if (this._aborted) return;
 		this._sendHexHeader(ZABORT, 0, 0, 0, 0);
@@ -315,6 +336,14 @@ class ZmodemEngine extends EventEmitter {
 		// calling _sendNextFile twice (receiver may send ZRINIT before and
 		// after seeing our ZRQINIT)
 		this._state = 'sending_file';
+
+		// Empty batch: immediately send ZFIN (no files to transfer)
+		if (this._emptyBatch) {
+			this._state = 'await_zfin';
+			this._sendHexHeader(ZFIN, 0, 0, 0, 0);
+			this._startTimer(ZFIN_TIMEOUT, 'zfin_timeout');
+			return;
+		}
 
 		// Advance to next file
 		this._sendNextFile();
