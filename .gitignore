@@ -3,6 +3,9 @@ CLAUDE.md
 GEMINI.md
 .claude/
 
+#Reference source code
+reference/source
+
 # Logs
 logs
 *.log

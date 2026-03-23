@@ -26,6 +26,7 @@ var GA   = 0xF9;  // Go Ahead
 var NOP  = 0xF1;
 
 // Telnet options we care about
+var OPT_BINARY     = 0;   // Binary Transmission (disable IAC in data)
 var OPT_ECHO       = 1;
 var OPT_SGA        = 3;   // Suppress Go Ahead
 var OPT_TTYPE      = 24;  // Terminal Type
@@ -171,6 +172,11 @@ class TelnetParser {
 				this._acceptedOptions.add(option);
 				this._sendCommand(DO, option);
 				break;
+			case OPT_BINARY:
+				// Client will send binary — accept
+				this._acceptedOptions.add(option);
+				this._sendCommand(DO, option);
+				break;
 			case OPT_TTYPE:
 				this._acceptedOptions.add(option);
 				this._sendCommand(DO, option);
@@ -187,6 +193,10 @@ class TelnetParser {
 			case OPT_ECHO:
 			case OPT_SGA:
 				// We will echo and suppress go-ahead (character mode)
+				this._sendCommand(WILL, option);
+				break;
+			case OPT_BINARY:
+				// Client agrees to binary mode (or requests it)
 				this._sendCommand(WILL, option);
 				break;
 			default:
@@ -250,6 +260,25 @@ class TelnetParser {
 		this._sendCommand(DO, OPT_NAWS);
 		this._sendCommand(DO, OPT_TTYPE);
 		this._sendCommand(DO, OPT_SGA);
+	}
+
+	// Enable binary mode — disables IAC processing for file transfers.
+	// Both sides must agree: we WILL send binary, client should DO binary.
+	enableBinaryMode() {
+		this._binaryMode = true;
+		this._sendCommand(WILL, OPT_BINARY);
+		this._sendCommand(DO, OPT_BINARY);
+	}
+
+	// Disable binary mode — re-enables IAC processing after transfer.
+	disableBinaryMode() {
+		this._binaryMode = false;
+		this._sendCommand(WONT, OPT_BINARY);
+		this._sendCommand(DONT, OPT_BINARY);
+	}
+
+	get binaryMode() {
+		return this._binaryMode || false;
 	}
 }
 
