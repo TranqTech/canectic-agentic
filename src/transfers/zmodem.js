@@ -395,20 +395,23 @@ class ZmodemEngine extends EventEmitter {
 			}
 
 			if (nread === 0) {
-				// End of file — send ZEOF
+				// All data sent — brief delay to let receiver process the
+				// ZCRCE subpacket before we send ZEOF header
 				self._state = 'await_zrinit_next';
-				var eofPos = positionToBytes(self._fileOffset);
-				self._sendHexHeader(ZEOF, eofPos[0], eofPos[1], eofPos[2], eofPos[3]);
-				self._startTimer(self._timeout, 'zeof_timeout');
+				setTimeout(function() {
+					if (self._aborted) return;
+					var eofPos = positionToBytes(self._fileOffset);
+					self._sendHexHeader(ZEOF, eofPos[0], eofPos[1], eofPos[2], eofPos[3]);
+					self._startTimer(self._timeout, 'zeof_timeout');
+				}, 100);
 				return;
 			}
 
 			var data = nread < self._subpacketSize ? buf.subarray(0, nread) : buf;
 			self._fileOffset += nread;
 
-			// Use ZCRCE for last subpacket (signals end of data frame),
-			// ZCRCG for all others (more data follows, no ack needed).
-			// This ensures the receiver exits data phase before ZEOF arrives.
+			// Use ZCRCE for last subpacket (end of data frame, no ack needed).
+			// ZCRCG for all others (more data follows).
 			var isLast = self._fileOffset >= self._fileSize;
 			var frameEnd = isLast ? ZCRCE : ZCRCG;
 			var subpacket = self._encodeDataSubpacket(data, frameEnd);
@@ -444,8 +447,6 @@ class ZmodemEngine extends EventEmitter {
 	}
 
 	_onZACK(p0, p1, p2, p3) {
-		// Receiver acknowledged data — used for windowed flow control
-		// For now we stream without windows, so ZACK is informational
 		var pos = bytesToPosition(p0, p1, p2, p3);
 		this.emit('headerRx', { type: 'ZACK', position: pos });
 	}
@@ -518,8 +519,8 @@ class ZmodemEngine extends EventEmitter {
 	}
 
 	_sendBinHeader(type, p0, p1, p2, p3) {
-		// Header type determines data CRC: ZBIN32 → CRC-32, ZBIN → CRC-16.
-		// Receivers tie these together, so match header to capability.
+		// ZBIN32 + CRC-32 when receiver supports it (proven with SyncTERM,
+		// IcyTerm, NetRunner). ZBIN + CRC-16 for clients without CANFC32.
 		if (this._rxCanFC32) {
 			this._adapter.write(encodeBin32Header(type, p0, p1, p2, p3, this._escapeAll));
 		} else {
@@ -536,9 +537,7 @@ class ZmodemEngine extends EventEmitter {
 		// Frame end: ZDLE + frameEnd
 		var endMarker = Buffer.from([ZDLE, frameEnd]);
 
-		// CRC type tied to header type (which follows CANFC32 capability):
-		// - CANFC32: ZBIN32 headers + CRC-32 data (4 bytes, LE)
-		// - No CANFC32: ZBIN headers + CRC-16 data (2 bytes, BE, augmented)
+		// CRC type matches header type: ZBIN32 → CRC-32, ZBIN → CRC-16.
 		var crcBuf;
 		if (this._rxCanFC32) {
 			var crc32val = crc32(crcInput);
@@ -549,10 +548,7 @@ class ZmodemEngine extends EventEmitter {
 				(crc32val >> 24) & 0xFF
 			]);
 		} else {
-			// CRC-16 with two-zero-byte augmentation per lrzsz reference:
-			// compute CRC over data + frameEnd, then feed two zero bytes
 			var crc16val = crc16(crcInput);
-			crc16val = crc16(Buffer.from([0, 0]), crc16val);
 			crcBuf = Buffer.from([
 				(crc16val >> 8) & 0xFF,
 				crc16val & 0xFF
@@ -778,17 +774,8 @@ class ZmodemEngine extends EventEmitter {
 		}
 
 		// Track CRC mode for subsequent data subpackets.
-		// If we advertised CANFC32 in ZRINIT (which we always do), the sender
-		// may use CRC-32 data subpackets even with ZBIN (CRC-16) headers.
-		// This matches lrzsz behavior. Only use CRC-16 data if the sender
-		// explicitly sends ZBIN AND we're NOT in receive mode (i.e., loopback
-		// where we know our own sender uses CRC-32 data with ZBIN headers).
-		// In receive mode, always default to CRC-32 since we advertised CANFC32.
-		if (this._recvMode) {
-			this._rxDataCrc32 = true; // We advertised CANFC32, expect CRC-32 data
-		} else {
-			this._rxDataCrc32 = isCrc32;
-		}
+		// Data CRC follows header type: ZBIN → CRC-16, ZBIN32 → CRC-32.
+		this._rxDataCrc32 = isCrc32;
 
 		var frameType = unescaped[0];
 		var p0 = unescaped[1], p1 = unescaped[2], p2 = unescaped[3], p3 = unescaped[4];
@@ -1194,9 +1181,7 @@ class ZmodemEngine extends EventEmitter {
 				) >>> 0;
 				crcOk = (calcCrc32 === rxCrc32);
 			} else {
-				// CRC-16 with augmentation: feed two zero bytes after data+frameEnd
 				var calcCrc16 = crc16(crcInput);
-				calcCrc16 = crc16(Buffer.from([0, 0]), calcCrc16);
 				var rxCrc16 = (this._subpacketCrcBytes[0] << 8) | this._subpacketCrcBytes[1];
 				crcOk = (calcCrc16 === rxCrc16);
 			}

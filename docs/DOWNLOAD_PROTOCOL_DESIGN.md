@@ -1,6 +1,6 @@
-# Terminal File Download System -- Design Document
+# Terminal File Transfer System -- Design Document
 
-Design document for terminal-side file downloads in Canectic BBS. Covers protocol architecture, ZMODEM implementation approach, batch management, and integration with the existing file browser and menu system.
+Design document for terminal-side file transfers in Canectic BBS. Covers protocol architecture, native XMODEM and ZMODEM engine implementation, batch management, and integration with the existing file browser and menu system.
 
 For the file area system (schemas, storage, TIC networking), see `FILE_SYSTEM_DESIGN.md`.
 For the terminal architecture (handlers, call lifecycle, raw mode, doors), see `terminal_architecture.md`.
@@ -10,31 +10,28 @@ For the process model, see `PROCESS_ARCHITECTURE.md`.
 
 ## 1. Architecture Summary
 
-### 1.1 Approach: External `sz` via PTY
+### 1.1 Approach: Native Protocol Engines
 
-The system uses the external `lrzsz` package (`sz` command) spawned via `node-pty` to handle ZMODEM transfers. This is the same PTY-based approach used by `DoorRunner` for native shell doors, and is the standard approach used by modern BBS software (Synchronet, Enigma 1/2, SBBS).
+The system uses native JavaScript XMODEM and ZMODEM protocol engines (`src/transfers/`) for all file transfers. Terminal wrappers in `src/protocols/` bridge these engines to call objects using a StreamAdapter pattern. The previous lrzsz-based wrappers (`zmodem.js`, `zmodem_receive.js`) remain as fallback but are no longer the default path.
 
-**Rationale**:
+**Architecture**:
 
-- ZMODEM is a complex protocol (CRC-16/CRC-32 negotiation, windowed streaming, error recovery, auto-start detection). A native JS implementation would be thousands of lines with extensive edge-case handling for different terminal clients.
-- `lrzsz` is battle-tested, handles all ZMODEM variants, and is available as a system package on every Linux distribution (`apt install lrzsz`).
-- The existing `DoorRunner` already demonstrates the PTY + raw mode pattern. The download handler reuses the same architecture.
-- Terminal clients (SyncTERM, NetRunner, Tera Term, MagiTerm) auto-detect ZMODEM initiation sequences from `sz` and switch to receive mode automatically -- no manual protocol selection needed on the client side.
+- `src/transfers/` contains protocol-agnostic engines: `XmodemEngine` (XMODEM-CRC and XMODEM-1K) and `ZmodemEngine` (full ZMODEM with ZDLE escaping, hex/binary/ZBIN32 headers, CRC-16/CRC-32, streaming, crash recovery, ZCRC).
+- `src/protocols/xmodem_native.js` and `src/protocols/zmodem_native.js` are terminal wrappers that use the StreamAdapter pattern to bridge engine I/O to `call` objects. They suppress terminal output during transfers and reset inactivity timeouts on data flow.
+- All five terminal download/upload handlers prompt for protocol selection (XMODEM or ZMODEM) before transfers begin. XMODEM uploads also prompt for a filename.
+- ZMODEM sender adapts to receiver capabilities: uses ZBIN32+CRC-32 when the receiver advertises CANFC32, falls back to ZBIN+CRC-16 otherwise. ZRINIT flags use the ZF0=p3 byte position per the ZMODEM specification.
 
-**System dependency**: `lrzsz` package must be installed (`apt install lrzsz`). The `sz` binary must be in PATH. This should be documented alongside the existing `zip` (Info-ZIP) requirement.
+**No external dependencies**: Native engines eliminate the `lrzsz` system package requirement. The `lrzsz` wrappers remain available as fallback.
 
-### 1.2 Why not native JS ZMODEM?
+### 1.2 Engine vs Wrapper Separation
 
-| Factor | External `sz` | Native JS |
-|--------|--------------|-----------|
-| Implementation time | Hours (wrapper only) | Weeks (full protocol) |
-| Protocol correctness | Proven, decades of use | Risk of client-specific bugs |
-| Client compatibility | All terminal clients | Requires extensive testing |
-| YMODEM/XMODEM | `sb`/`sx` from same package | Separate implementations |
-| Maintenance burden | None (system package) | Ongoing |
-| Dependency | `lrzsz` package | None |
+| Layer | Directory | Purpose |
+|-------|-----------|---------|
+| Engine | `src/transfers/` | Pure protocol logic. No call/terminal dependencies. Testable in isolation. |
+| Wrapper | `src/protocols/` | Bridges engine to call object. Manages raw mode, output suppression, timeout resets. |
+| Handler | `src/handlers/menucommands/` | User-facing. Protocol selection prompt, file resolution, download counts, batch management. |
 
-The dependency cost is minimal -- `lrzsz` is a standard package in every Linux distribution and is already expected by any sysop running a BBS.
+Shared constants and CRC routines (`constants.js`, `crc.js`) are used by both XMODEM and ZMODEM engines.
 
 ### 1.3 WebSocket binary considerations
 
@@ -49,80 +46,49 @@ The `ws` library (used by the Gateway) sends `Buffer` data as binary WebSocket f
 ### 2.1 Directory structure
 
 ```
+src/transfers/
+  constants.js           -- Shared byte constants for XMODEM and ZMODEM
+  crc.js                 -- CRC-16 (CCITT) and CRC-32 routines
+  xmodem.js              -- XmodemEngine: XMODEM-CRC and XMODEM-1K send/receive state machine
+  zmodem.js              -- ZmodemEngine: ZMODEM send/receive with full protocol support
+
 src/protocols/
-  base.js              -- BaseProtocol class (abstract)
-  zmodem.js            -- ZMODEM via external sz
-  ymodem.js            -- YMODEM via external sb (future)
-  xmodem.js            -- XMODEM via external sx (future)
+  base.js                -- BaseProtocol class (abstract, used by lrzsz fallback wrappers)
+  xmodem_native.js       -- StreamAdapter wrapper for XmodemEngine
+  zmodem_native.js       -- StreamAdapter wrapper for ZmodemEngine
+  zmodem.js              -- lrzsz fallback: ZMODEM send via sz
+  zmodem_receive.js      -- lrzsz fallback: ZMODEM receive via rz
 ```
 
-### 2.2 BaseProtocol class
+### 2.2 Native Engine Classes
 
-Abstract base providing the shared lifecycle for all external-tool-based transfer protocols.
+#### XmodemEngine (`src/transfers/xmodem.js`)
 
-```
-class BaseProtocol
-  constructor(call, files, opts)
-    -- call: IncomingCall reference
-    -- files: array of { filePath, filename, fileSize }
-    -- opts: { timeout, onProgress, onFileStart, onFileComplete }
+XMODEM-CRC and XMODEM-1K send/receive state machine. Single-file protocol.
 
-  Properties:
-    call, files, emitter, active, _ptySocket
-    _previousRawmode, _previousRawtarget   -- saved state for restore
+- **Send**: Waits for NAK (checksum) or 'C' (CRC) from receiver, then sends 128-byte (XMODEM-CRC) or 1024-byte (XMODEM-1K) blocks with CRC-16. Handles ACK/NAK retries.
+- **Receive**: Sends 'C' to initiate CRC mode, receives blocks, validates CRC-16, sends ACK/NAK.
 
-  Methods:
-    start()              -- spawn external tool, enable raw mode, wire I/O
-    abort()              -- kill process, restore state, emit Aborted
-    _enableRawMode()     -- save + hijack call.rawmode/rawtarget (DoorRunner pattern)
-    _disableRawMode()    -- restore saved state
-    _onRawInput(data)    -- forward client bytes to PTY stdin
-    _onProcessData(data) -- forward PTY stdout to client via call.cmds.senddata()
-    _onProcessExit(code) -- disable raw mode, emit Complete or Error
-    _cleanup()           -- kill PTY, restore raw mode, null references
+#### ZmodemEngine (`src/transfers/zmodem.js`)
 
-  Events (via emitter):
-    "Complete"           -- transfer finished successfully
-    "Error"              -- transfer failed (with error info)
-    "Aborted"            -- transfer cancelled by user or timeout
-    "FileStart"          -- individual file transfer starting (batch)
-    "FileComplete"       -- individual file transfer complete (batch)
-```
+Full ZMODEM implementation with streaming, crash recovery, and receiver capability adaptation.
 
-### 2.3 ZmodemProtocol class
+- **Send**: ZRINIT negotiation, ZFILE/ZDATA/ZEOF/ZFIN sequence, ZDLE escaping, streaming with ZCRCG/ZCRCQ subpackets. Adapts to receiver: ZBIN32+CRC-32 when CANFC32 advertised, ZBIN+CRC-16 otherwise. Crash recovery via ZRPOS. ZCRC file integrity support.
+- **Receive**: Sends ZRINIT with capability flags (ZF0=p3 byte position per spec), receives ZFILE metadata, ZDATA streaming, validates CRC per subpacket, sends ZRPOS on errors.
+- **Headers**: Hex (ZPAD+ZDLE+ZHEX), binary (ZBIN+CRC-16), binary32 (ZBIN32+CRC-32).
 
-Extends `BaseProtocol`. Spawns `sz` via `node-pty`.
+### 2.3 StreamAdapter Wrappers
 
-```
-class ZmodemProtocol extends BaseProtocol
-  start():
-    -- Validate all file paths exist on disk
-    -- Build command: sz [options] file1 file2 file3 ...
-    -- Options: --zmodem --binary --overwrite
-    -- Spawn via pty.spawn("sz", args, { name: "xterm", cols, rows })
-    -- Wire PTY data -> call.cmds.senddata()
-    -- Wire raw input -> PTY write
-    -- Wire PTY close -> _onProcessExit()
-    -- Enable raw mode
-```
+`xmodem_native.js` and `zmodem_native.js` bridge engines to call objects:
 
-**sz command construction**:
-```
-sz --zmodem --binary --overwrite /full/path/to/file1.zip /full/path/to/file2.zip
-```
+- Suppress normal terminal output during transfers (prevent protocol bytes from being interpreted as terminal commands)
+- Reset call inactivity timeouts on data flow (prevents session timeout during long transfers)
+- Wire `call.cmds.senddata()` for outbound data and `call.rawtarget` for inbound data
+- Restore terminal state on completion or error
 
-Key `sz` flags:
-- `--zmodem`: Force ZMODEM protocol (default, but explicit is clearer)
-- `--binary`: Binary transfer mode (no text conversion)
-- `--overwrite`: Allow overwriting on the receiver side
+### 2.4 Legacy lrzsz Wrappers
 
-### 2.4 Future protocol stubs
-
-YMODEM and XMODEM follow the same pattern with different binaries:
-- `sb` for YMODEM (batch capable, uses `--ymodem` flag)
-- `sx` for XMODEM (single file only)
-
-These are stub files initially, to be implemented when needed. The base class does all the heavy lifting.
+`BaseProtocol`, `ZmodemProtocol`, and `ZmodemReceiveProtocol` remain for fallback use. They spawn external `sz`/`rz` via child_process with raw stdio pipes. These require the `lrzsz` system package.
 
 ---
 
@@ -142,23 +108,22 @@ MenuHandler._runSubModule(new FileTransferHandler(call, files, opts))
   v
 FileTransferHandler.run()
   |-- Validate files array (non-empty, all paths exist)
-  |-- Show pre-transfer screen (file list, total size, protocol)
+  |-- Show pre-transfer screen (file list, total size)
+  |-- Prompt: protocol selection (XMODEM / ZMODEM)
   |-- Prompt: "Hang up after transfer?" [Y/n] (Enter defaults to Yes)
   |-- Wait for user confirmation (Enter to start, Q to cancel)
   |
   v (on confirmation)
-  |-- Instantiate ZmodemProtocol(call, files)
-  |-- protocol.start()
-  |     |-- Spawns sz via PTY
-  |     |-- Enables raw mode (client bytes -> sz, sz bytes -> client)
-  |     |-- Terminal client auto-detects ZMODEM, switches to receive
-  |     |-- Transfer runs...
-  |     |-- PTY exits
+  |-- Instantiate native protocol wrapper (zmodem_native or xmodem_native)
+  |-- protocol.send(filePaths) / protocol.receive(targetDir)
+  |     |-- StreamAdapter bridges engine I/O to call object
+  |     |-- Suppresses terminal output, resets inactivity timeout on data flow
+  |     |-- Transfer runs via native engine state machine
   |     v
-  |-- protocol emits "Complete" or "Error"
+  |-- Protocol resolves on completion or rejects on error
   |
   v
-  |-- Disable raw mode (automatic via BaseProtocol._onProcessExit)
+  |-- Restore terminal state (automatic via wrapper cleanup)
   |-- Increment download counts for successfully transferred files
   |-- Clear batch if this was a batch download
   |-- Show result screen ("Transfer complete" or error details)
@@ -171,25 +136,25 @@ FileTransferHandler.run()
 Before starting the transfer, display a confirmation screen:
 
 ```
-  Download Files via ZMODEM
+  Download Files
   ────────────────────────────────
   1) filename1.zip          2.4 MB
   2) filename2.txt         14.1 KB
   ────────────────────────────────
   Total: 2 files, 2.4 MB
 
-  Hang up after transfer? [Y/n]
+  Protocol: [Z] ZMODEM  [X] XMODEM
 
-  Your terminal client should auto-detect the transfer.
+  Hang up after transfer? [Y/n]
 
   [Enter] Start   [Q] Cancel
 ```
 
 ### 3.4 Hangup-after-transfer prompt
 
-All four download handlers (`fileBatchCheck`, `fileBatchDownload`, `fileBrowser`, `fileSearch`) present a "Hang up after transfer?" `[Y/n]` prompt before starting the ZMODEM transfer. Enter defaults to Yes.
+All four download handlers (`fileBatchCheck`, `fileBatchDownload`, `fileBrowser`, `fileSearch`) prompt for protocol selection (XMODEM or ZMODEM) and present a "Hang up after transfer?" `[Y/n]` prompt before starting the transfer. Enter defaults to Yes.
 
-This is a common BBS pattern — users who are downloading a batch often want to disconnect immediately rather than navigate back through menus. The prompt appears after file confirmation but before `sz` is spawned.
+This is a common BBS pattern — users who are downloading a batch often want to disconnect immediately rather than navigate back through menus. The prompt appears after file confirmation but before the transfer starts. XMODEM uploads additionally prompt for a filename since the protocol does not transmit filenames.
 
 **Implementation varies by handler:**
 - `fileBatchDownload` uses a state machine (`hangup_ask → downloading → result → done`).
@@ -227,10 +192,9 @@ On error:
 ### 3.6 Error handling
 
 - **File not found on disk**: Skip the file, log a warning, continue with remaining files. Show which files were skipped in the post-transfer screen.
-- **sz not installed**: Detect at handler start (`which sz` or check exit code). Show a message: "ZMODEM transfer is not available. Please download via the web interface." Fall back to showing the web URL.
-- **Transfer cancelled by user**: `sz` exits with a non-zero code. Clean up and return to caller.
-- **Connection dropped**: `call.connectionClosed()` propagates through the handler chain. `BaseSubModule.clearHandler()` deactivates. The protocol's `_cleanup()` kills the PTY process.
-- **Timeout**: Configurable inactivity timeout (default 120 seconds). If no data flows for the timeout period, abort the transfer.
+- **Transfer cancelled by user**: Engine detects receiver abort (CAN bytes for XMODEM, ZCAN for ZMODEM). Clean up and return to caller.
+- **Connection dropped**: `call.connectionClosed()` propagates through the handler chain. `BaseSubModule.clearHandler()` deactivates. The wrapper cleans up engine state.
+- **Timeout**: The wrapper resets the call inactivity timeout on every data flow event. If no data flows for the configured timeout period, the transfer is aborted.
 
 ### 3.7 Dumb terminal fallback
 
@@ -406,72 +370,31 @@ This can be a simple implementation -- the batch is small (max 50 items), so no 
 
 ---
 
-## 8. Implementation Phases
+## 8. Implementation Status
 
-### Phase 1: Core Protocol + Single File Download
+All phases are complete. The system uses native XMODEM and ZMODEM engines with protocol selection prompts in all handlers.
 
-**Goal**: Get a working ZMODEM download from the file browser detail view.
+### Completed
 
-1. Install `lrzsz` package on the server.
-2. Create `src/protocols/base.js` -- `BaseProtocol` class with PTY spawn, raw mode save/restore, I/O wiring, cleanup.
-3. Create `src/protocols/zmodem.js` -- `ZmodemProtocol` extending base, builds `sz` command, spawns via PTY.
-4. Modify `fileBrowser.js` -- Replace `_showDownloadInfo()` with actual download when `D` is pressed. The browser directly instantiates `ZmodemProtocol`, runs the transfer, then redraws.
-5. Add `file_batch` property to `IncomingCall` constructor (prep for Phase 2).
-6. Test with SyncTERM and NetRunner over both TCP and WebSocket.
-
-**Estimated scope**: ~200-300 lines of new code across 3 files.
-
-### Phase 2: Batch Management
-
-**Goal**: Users can tag files and download them as a batch.
-
-1. Add batch utility functions (add, remove, clear, dedupe).
-2. Add `T` hotkey to `fileBrowser.js` for tagging in both list and detail views.
-3. Add tag indicator to file list row rendering.
-4. Add batch count to status bar.
-5. Add `B` hotkey for batch download trigger.
-6. Increment download counts after successful batch transfer.
-
-**Estimated scope**: ~150-200 lines of modifications to `fileBrowser.js`, ~50 lines for batch utilities.
-
-### Phase 3: Menu Commands + Transfer Handler Sub-Module
-
-**Goal**: Downloads accessible from menu commands, not just the file browser.
-
-1. Create `src/handlers/menucommands/fileTransfer.js` -- `FileTransferHandler` sub-module with pre-transfer screen, confirmation, protocol launch, post-transfer screen, download count incrementing.
-2. Add `downloadBatch`, `viewBatch`, `clearBatch` commands to `menuhandler.js` dispatch.
-3. Add command entries to `menus.js` command list.
-4. Create `viewBatch` sub-module with batch display/management.
-
-**Estimated scope**: ~300-400 lines across new files, ~30 lines of wiring in existing files.
-
-### Phase 4: Polish + Future Protocols (Lower Priority)
-
-1. Add configurable transfer timeout (appConfig key).
-2. Add server-side transfer logging (alogger entries for started/completed/failed transfers).
-3. Implement YMODEM stub (`sb` binary).
-4. Implement XMODEM stub (`sx` binary).
-5. Add protocol selection if multiple protocols are available (most users will just use ZMODEM).
-6. Consider upload support (reverse direction -- `rz` binary, `call.file_batch` for staging).
+1. Native protocol engines in `src/transfers/` (XmodemEngine, ZmodemEngine, shared CRC and constants).
+2. StreamAdapter wrappers in `src/protocols/` (xmodem_native.js, zmodem_native.js).
+3. All five terminal handlers (fileBrowser, fileBatchDownload, fileBatchCheck, fileSearch, fileUpload) use native engines with protocol selection.
+4. Batch management with tagging, batch download, login-flow batch check.
+5. Menu commands: `downloadBatch`, `viewBatch`, `clearBatch`.
+6. Upload support via native XMODEM and ZMODEM receive. XMODEM uploads prompt for filename.
+7. Test suite: `tests/transferCrc.test.js`, `tests/xmodem.test.js`, `tests/zmodemSend.test.js`, `tests/zmodemRecv.test.js`.
 
 ---
 
 ## 9. Dependency Requirements
 
-### 9.1 System packages
+### 9.1 No required system packages
 
-Add to the documented system requirements:
-
-```bash
-apt install lrzsz    # provides sz, sb, sx (ZMODEM/YMODEM/XMODEM send)
-                     # and rz, rb, rx (receive, for future upload support)
-```
+Native engines have no external dependencies. The `lrzsz` package (`sz`/`rz`) is optional for fallback use only.
 
 ### 9.2 No new npm dependencies
 
-The implementation uses only existing npm packages:
-- `node-pty` (already used by DoorRunner)
-- `path`, `fs` (Node.js built-ins)
+The implementation uses only Node.js built-ins (`path`, `fs`, `zlib` for CRC-32).
 
 ---
 
@@ -482,16 +405,12 @@ The implementation uses only existing npm packages:
 When resolving file paths for download, the handler must:
 - Verify the file entry exists in the database and is `active = true`.
 - Resolve the path through `resolveAreaPath()` (never accept user-supplied paths).
-- Verify the resolved file exists on disk before passing to `sz`.
+- Verify the resolved file exists on disk before passing to the engine.
 - Check that the user has read access to the file's area (security level + permission flags + restriction flags).
 
-### 10.2 sz command construction
+### 10.2 File path handling
 
-The `sz` command receives only fully resolved absolute file paths computed from database records. No user input is interpolated into the command string. The PTY spawn uses an argument array, not a shell string:
-
-```js
-pty.spawn("sz", ["--zmodem", "--binary", fullPath1, fullPath2], opts)
-```
+Native engines receive only fully resolved absolute file paths computed from database records. No user input is used in path construction. Upload filenames from ZMODEM ZFILE headers or XMODEM user prompts are sanitized before use.
 
 ### 10.3 Rate limiting
 
@@ -503,20 +422,17 @@ No explicit rate limiting in the initial implementation. The batch size limit (5
 
 ### 11.1 Old testdownload.js
 
-The file `src/handlers/menucommands/Old/testdownload.js` contains an earlier attempt that referenced a `transferHandler` and `sexyz` (Synchronet's external protocol handler). That code is inactive -- the current `testdownload.js` is an empty stub class. The old approach used `sexyz` which is a Synchronet-specific binary and not appropriate for a standalone system.
+The file `src/handlers/menucommands/Old/testdownload.js` contains an earlier attempt that referenced a `transferHandler` and `sexyz` (Synchronet's external protocol handler). That code is inactive and replaced by the native engine implementation.
 
-The new design replaces this entirely with the standard `lrzsz` package, which is protocol-native and does not depend on Synchronet infrastructure.
+### 11.2 Raw mode pattern
 
-### 11.2 DoorRunner pattern reuse
-
-The protocol classes reuse the exact same raw mode pattern from `DoorRunner`:
+The StreamAdapter wrappers reuse the same raw mode pattern as `DoorRunner`:
 
 - Save `call.rawmode` and `call.rawtarget`
-- Set `call.rawmode = true`
-- Set `call.rawtarget` to a function that forwards data to the PTY
-- On exit, restore both saved values
-
-This is a proven pattern already handling door games across all connection types.
+- Set `call.rawmode = true` and `call.rawtarget` to forward data to the engine
+- Suppress terminal output during transfer to prevent protocol bytes from being interpreted
+- Reset inactivity timeout on data flow
+- On completion, restore saved state
 
 ### 11.3 File path resolution
 

@@ -328,7 +328,7 @@ _Section for tracking development plans, priorities, and stage completion._
 | Admin | Door admin (web) | **Done** | PostgreSQL-backed doors. Full CRUD via `/admin/doors`. Two-column layout, tooltip labels, variable reference. |
 | Admin | Config variable substitution | **Done** | `configvars.js` — %X token engine for door commands, directories, arguments. 36 variables. |
 | Files | Phase 5: File area selector | **Done** | `fileAreaSelector.js` — lightbar selector with groups, new counts, search |
-| Files | Phase 5: File browser | **Done** | `fileBrowser.js` — file list + detail view + ZMODEM download (single + batch) with hangup-after-transfer prompt. |
+| Files | Phase 5: File browser | **Done** | `fileBrowser.js` — file list + detail view + XMODEM/ZMODEM download (single + batch) with protocol selection and hangup-after-transfer prompt. |
 
 ---
 
@@ -1067,7 +1067,7 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 
 ### Future Considerations
 
-- ~~File transfer protocols (Zmodem, etc.)~~ — **Done**. ZMODEM downloads work from fileBrowser, fileBatchDownload, fileSearch, and fileBatchCheck. All paths include hangup-after-transfer prompt.
+- ~~File transfer protocols (Zmodem, etc.)~~ — **Done**. Native XMODEM and ZMODEM engines (`src/transfers/`) with protocol selection prompts. All five handlers (fileBrowser, fileBatchDownload, fileSearch, fileBatchCheck, fileUpload) use native engines. lrzsz wrappers remain as fallback.
 - Announcement handler
 - Top menu handler
 - Logoff handler with call statistics
@@ -1194,9 +1194,9 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 - Full-screen detail view: filename, size, date, uploader, download count, description, area
 - Long description displayed in scrollable body zone (centered, max 100 cols)
 - Left/Right arrows navigate between files
-- Download (D key) triggers ZMODEM transfer with hangup-after-transfer prompt
+- Download (D key) triggers transfer with protocol selection (XMODEM/ZMODEM) and hangup-after-transfer prompt
 
-**Download:** Single file download via `D` key and batch download via `B` key both use ZMODEM transfer through `ZmodemProtocol`. All download paths present a "Hang up after transfer?" `[Y/n]` prompt before starting the ZMODEM transfer (Enter defaults to Yes). After a successful transfer, if the user chose hangup, the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. The hangup prompt is managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
+**Download:** Single file download via `D` key and batch download via `B` key prompt for protocol selection (XMODEM or ZMODEM) then use native engines via StreamAdapter wrappers. All download paths present a "Hang up after transfer?" `[Y/n]` prompt (Enter defaults to Yes). After a successful transfer, if the user chose hangup, the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. The hangup prompt is managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
 
 **Dumb terminal fallback:** Numbered file list with pagination, `#` for detail, `D#` for download info.
 
@@ -1228,8 +1228,8 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 | `pmEditor.js` | handlers/menucommands | Terminal PM editor — From/To/Addr/Subject fields, transport cycling, LOCAL+network save, quote system |
 | `pmCheck.js` | handlers/menucommands | Unread mail check prompt — also works as call flow stage via SubModuleAdapter |
 | `fileAreaSelector.js` | handlers/menucommands | File group/area selector with lightbar, search, new file counts (Phase 5) |
-| `fileBatchCheck.js` | handlers/menucommands | Login flow batch check — prompts to download pending batch on login, with hangup-after-transfer option |
-| `fileBrowser.js` | handlers/menucommands | File listing browser — file list, detail view, ZMODEM download (single + batch), batch tagging (Phase 5) |
+| `fileBatchCheck.js` | handlers/menucommands | Login flow batch check — prompts to download pending batch on login, with protocol selection and hangup-after-transfer option |
+| `fileBrowser.js` | handlers/menucommands | File listing browser — file list, detail view, XMODEM/ZMODEM download (single + batch) via native engines, batch tagging (Phase 5) |
 | `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring, paragraph reflow (`reflowText`/`reflowParagraphs`), ANSI art detection (`detectAnsiArt`), ANSI-aware word wrapping (`wordWrapLineAnsi`) |
 | `userAreaSubs.js` | models | Per-user newscan subscription overrides — resolution cascade, T key toggle in area selector |
 | **Maintenance** | | |

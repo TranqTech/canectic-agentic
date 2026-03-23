@@ -42,13 +42,24 @@ Cross-references:
 | `fileHasher.js` | `computeCRC32` (via `zlib.crc32`, uppercase hex, zero-padded to 8), `computeSHA256`, `computeHashes` (both in one read). Used by TIC tosser, web upload, terminal upload. |
 | `fileDescExtractor.js` | `extractDescription(filePath)` — extracts FILE_ID.DIZ from ZIP archives (via `adm-zip`), returns `{ long_desc, long_desc_html, short_desc }`. `long_desc_html` generated via `formatBodyHtml()` (shared with message system). `applyDescriptions(entryObj, filePath)` — mutates entry object in place, only filling empty fields. |
 
-### Transfer Protocols
+### Native Transfer Engines
 
 | File | Purpose |
 |------|---------|
-| `protocols/base.js` | `BaseProtocol` — EventEmitter-based file transfer executor. Raw mode management (saves/restores `call.rawmode` and `call.rawtarget`). `send(filePaths)` — spawns child process with raw stdio pipes, wires client<->child data flow. `receiveInto(targetDir, cmdInfo)` — spawns via node-pty (rz requires tty). `receiveIntoRaw(targetDir, cmdInfo)` — raw pipe fallback. Safety timeout (5 min/file for send, 5 min for receive). |
-| `protocols/zmodem.js` | `ZmodemProtocol` extends `BaseProtocol`. Builds `sz` command: `-b` (binary), `-e` (escape control chars), `-B 4096` (buffer). Supports batch — multiple file paths in one `sz` invocation. |
-| `protocols/zmodem_receive.js` | `ZmodemReceiveProtocol` extends `BaseProtocol`. `receive(targetDir)` calls `receiveIntoRaw` with `rz -b -e`. |
+| `transfers/constants.js` | Shared byte constants for XMODEM and ZMODEM protocols. |
+| `transfers/crc.js` | CRC-16 (CCITT) and CRC-32 routines used by both engines. |
+| `transfers/xmodem.js` | `XmodemEngine` — XMODEM-CRC and XMODEM-1K send/receive state machine. Single-file protocol. |
+| `transfers/zmodem.js` | `ZmodemEngine` — ZMODEM send/receive with ZDLE escaping, hex/binary/ZBIN32 headers, CRC-16/CRC-32, streaming, crash recovery, ZCRC support. Adapts to receiver capabilities (ZBIN32+CRC-32 when CANFC32, ZBIN+CRC-16 otherwise). |
+
+### Transfer Protocol Wrappers
+
+| File | Purpose |
+|------|---------|
+| `protocols/xmodem_native.js` | StreamAdapter wrapper bridging `XmodemEngine` to call objects. Suppresses terminal output during transfers, resets inactivity timeouts on data flow. |
+| `protocols/zmodem_native.js` | StreamAdapter wrapper bridging `ZmodemEngine` to call objects. Same output suppression and timeout reset pattern. |
+| `protocols/base.js` | `BaseProtocol` — legacy lrzsz fallback. EventEmitter-based executor with raw mode management and child process spawning. |
+| `protocols/zmodem.js` | `ZmodemProtocol` — lrzsz fallback, spawns `sz` for ZMODEM send. |
+| `protocols/zmodem_receive.js` | `ZmodemReceiveProtocol` — lrzsz fallback, spawns `rz` for ZMODEM receive. |
 
 ### Terminal Handlers
 
@@ -56,10 +67,10 @@ Cross-references:
 |------|---------|
 | `menucommands/fileAreaSelector.js` | Lightbar area selector. Flattened group/area list, cursor navigation, incremental search, new file counts per area. Persists selection to `call.file_group`/`call.file_area` and user record. Dumb terminal fallback with numbered list. |
 | `menucommands/fileBatchCheck.js` | Login flow batch check. If `call.file_batch` is non-empty at login, prompts user to download pending batch with hangup-after-transfer option. |
-| `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. ZMODEM download (single and batch) with hangup-after-transfer prompt, batch tagging (T key, max 50 files stored on `call.file_batch`), search (DB-backed via ILIKE when >= 2 chars), mark area read. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
-| `menucommands/fileBatchDownload.js` | Standalone batch download module. State machine: `hangup_ask → downloading → result → done`. Shows batch summary, hangup prompt, resolves disk paths, runs `ZmodemProtocol.send()` with all paths, increments download counts, clears batch on success. Auto-disconnects or returns based on hangup choice. |
-| `menucommands/fileUpload.js` | Terminal upload handler. Checks upload access, receives files via `ZmodemReceiveProtocol` into staging dir, then for each file: hash, dupe check, move to area dir, extract FILE_ID.DIZ, create entry, update stats. Note: ZMODEM receive with SyncTERM has known issues — see Known Issues. |
-| `menucommands/fileSearch.js` | Terminal file search with scope selection (area/group/global), search input, lightbar results with detail view. Filters by browse access. Supports ZMODEM download (with hangup-after-transfer prompt on status row) and batch tagging from search results. |
+| `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. Download (single and batch) with protocol selection prompt (XMODEM/ZMODEM) and hangup-after-transfer prompt, batch tagging (T key, max 50 files stored on `call.file_batch`), search (DB-backed via ILIKE when >= 2 chars), mark area read. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
+| `menucommands/fileBatchDownload.js` | Standalone batch download module. State machine: `hangup_ask → downloading → result → done`. Shows batch summary, protocol selection and hangup prompts, resolves disk paths, runs native engine send with all paths, increments download counts, clears batch on success. Auto-disconnects or returns based on hangup choice. |
+| `menucommands/fileUpload.js` | Terminal upload handler. Checks upload access, prompts for protocol selection (XMODEM/ZMODEM), receives files via native engine into staging dir, then for each file: hash, dupe check, move to area dir, extract FILE_ID.DIZ, create entry, update stats. XMODEM uploads prompt for filename. |
+| `menucommands/fileSearch.js` | Terminal file search with scope selection (area/group/global), search input, lightbar results with detail view. Filters by browse access. Supports download with protocol selection (with hangup-after-transfer prompt on status row) and batch tagging from search results. |
 
 ### Tosser
 
@@ -275,10 +286,11 @@ ftn/
 ### Local Upload — Terminal
 
 1. `fileUpload` sub-module checks area selection and upload access
-2. `ZmodemReceiveProtocol.receive()` spawns `rz -b -e` in staging dir
-3. After transfer, scans staging dir for received files
-4. For each file: hash, dupe check, move to area dir, `applyDescriptions()`, `addFileEntry()` with `source_data: { upload_method: 'terminal', upload_ip }`
-5. `updateStatsForArea()` refreshes stats
+2. User prompted for protocol selection (XMODEM / ZMODEM). XMODEM uploads also prompt for filename.
+3. Native engine receives file(s) into staging dir via StreamAdapter wrapper
+4. After transfer, scans staging dir for received files
+5. For each file: hash, dupe check, move to area dir, `applyDescriptions()`, `addFileEntry()` with `source_data: { upload_method: 'terminal', upload_ip }`
+6. `updateStatsForArea()` refreshes stats
 
 ### Network Import — TIC
 
@@ -301,9 +313,9 @@ ftn/
 
 1. In `fileBrowser` or `fileSearch`, user presses `D` on a file (list or detail view)
 2. Path resolved, existence verified
-3. User prompted: "Hang up after transfer?" `[Y/n]` (Enter defaults to Yes)
-4. `ZmodemProtocol.send([fullPath])` spawns `sz` with raw stdio pipes
-5. Client auto-detects ZMODEM initiation sequence
+3. User prompted for protocol selection (XMODEM / ZMODEM)
+4. User prompted: "Hang up after transfer?" `[Y/n]` (Enter defaults to Yes)
+5. Native engine sends file via StreamAdapter wrapper
 6. On success: `incrementDownloadCount()`
 7. If hangup chosen: auto-disconnect after 1500 ms delay. Otherwise: "press any key" returns to previous view.
 
@@ -311,11 +323,12 @@ ftn/
 
 1. User tags files with `T` in fileBrowser (stored on `call.file_batch`, max 50)
 2. User presses `B` in fileBrowser, or invokes `fileBatchDownload` menu command, or is prompted at login via `fileBatchCheck`
-3. User prompted: "Hang up after transfer?" `[Y/n]` (Enter defaults to Yes)
-4. All tagged file paths resolved and existence verified
-5. `ZmodemProtocol.send(filePaths)` — `sz` supports multiple files in one invocation
-6. On success: increment counts for all files, clear batch
-7. If hangup chosen: auto-disconnect after 1500 ms delay. Otherwise: "press any key" returns to previous view.
+3. User prompted for protocol selection (XMODEM / ZMODEM)
+4. User prompted: "Hang up after transfer?" `[Y/n]` (Enter defaults to Yes)
+5. All tagged file paths resolved and existence verified
+6. Native engine sends files (ZMODEM supports batch natively; XMODEM sends sequentially)
+7. On success: increment counts for all files, clear batch
+8. If hangup chosen: auto-disconnect after 1500 ms delay. Otherwise: "press any key" returns to previous view.
 
 ---
 
@@ -514,20 +527,22 @@ ZmodemReceiveProtocol extends BaseProtocol
 File transfers use the same raw mode pattern as door games:
 
 1. Save current `call.rawmode` and `call.rawtarget`
-2. Set `call.rawmode = true` and `call.rawtarget` to write to child stdin
-3. Child stdout piped to client via `call.cmds.senddata()`
+2. Set `call.rawmode = true` and `call.rawtarget` to forward data to the engine
+3. Engine output sent to client via `call.cmds.senddata()`
 4. On completion, restore previous raw mode state
 
-This ensures WebSocket client bytes go directly to `sz`/`rz` without handler interpretation.
+The StreamAdapter wrappers additionally suppress terminal output during transfers (preventing protocol bytes from being interpreted as terminal commands) and reset call inactivity timeouts on data flow.
 
 ### Send vs Receive
 
-- **Send (`sz`)**: Uses `child_process.spawn` with raw stdio pipes. Binary data integrity preserved — no terminal line-ending conversion. The terminal client auto-detects the ZMODEM initiation sequence.
-- **Receive (`rz`)**: Currently uses `receiveIntoRaw` (raw pipes). The `receiveInto` method with node-pty is available but not currently used for ZMODEM receive.
+- **Send (ZMODEM)**: ZmodemEngine handles ZRINIT negotiation, ZFILE/ZDATA/ZEOF/ZFIN sequence, ZDLE escaping, streaming subpackets. Adapts header format to receiver capabilities (ZBIN32+CRC-32 when CANFC32, ZBIN+CRC-16 otherwise).
+- **Send (XMODEM)**: XmodemEngine waits for receiver initiation ('C' for CRC mode, NAK for checksum), sends 128-byte or 1024-byte blocks with CRC-16.
+- **Receive (ZMODEM)**: ZmodemEngine sends ZRINIT with capability flags, receives ZDATA stream, validates CRC per subpacket, supports crash recovery via ZRPOS.
+- **Receive (XMODEM)**: XmodemEngine sends 'C' to initiate CRC mode, validates each block, sends ACK/NAK. Prompts user for filename since XMODEM does not transmit filenames.
 
 ### Safety
 
-- Timeout: 5 minutes per file for send (minimum 60 seconds), 5 minutes flat for receive
+- Inactivity timeout reset on data flow via StreamAdapter wrappers
 - Binary integrity: `Buffer.isBuffer()` check on client data; string data converted via `Buffer.from(data, 'binary')` to avoid UTF-8 corruption of bytes > 127
 
 ---
@@ -565,7 +580,7 @@ Two-state file browser with state machine (`STATE.LOADING`, `STATE.FILE_LIST`, `
 
 **Batch System**: Files tagged with T are stored on `call.file_batch` (array of `{ uuid, id, filename, file_size, area_shortcode, disk_path }`). Maximum 50 files. Batch persists across file browser sessions within the same call. B key triggers batch download from either list or detail view.
 
-**Hangup-After-Transfer Prompt**: All download paths (D key single file, B key batch) display a "Hang up after transfer?" `[Y/n]` prompt before starting ZMODEM. Enter defaults to Yes. After a successful transfer, if the user chose hangup the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. Managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
+**Hangup-After-Transfer Prompt**: All download paths (D key single file, B key batch) prompt for protocol selection (XMODEM/ZMODEM) and display a "Hang up after transfer?" `[Y/n]` prompt. Enter defaults to Yes. After a successful transfer, if the user chose hangup the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. Managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
 
 **Dumb Terminal**: Numbered list with 20-line paging, text-mode detail, `D#` download command, `S` search, `M` mark read.
 
@@ -575,11 +590,11 @@ Login flow batch check. If `call.file_batch` is non-empty when the user logs in,
 
 ### fileBatchDownload
 
-Standalone sub-module for batch downloads (can be invoked as a separate menu command). Implements a state machine: `hangup_ask → downloading → result → done`. Shows batch summary, presents hangup prompt, resolves all file paths, runs single `ZmodemProtocol.send()` with all paths, increments download counts on success, clears batch. Auto-disconnects after 1500 ms if hangup was chosen, otherwise returns on keypress.
+Standalone sub-module for batch downloads (can be invoked as a separate menu command). Implements a state machine: `hangup_ask → downloading → result → done`. Shows batch summary, presents protocol selection and hangup prompts, resolves all file paths, runs native engine send with all paths, increments download counts on success, clears batch. Auto-disconnects after 1500 ms if hangup was chosen, otherwise returns on keypress.
 
 ### fileUpload
 
-Standalone upload sub-module. Validates area selection and upload access, runs `ZmodemReceiveProtocol.receive()` into staging dir, processes each received file (hash, dupe check, move, describe, create entry).
+Standalone upload sub-module. Validates area selection and upload access, prompts for protocol selection (XMODEM/ZMODEM), receives files via native engine into staging dir, processes each received file (hash, dupe check, move, describe, create entry). XMODEM uploads prompt for filename.
 
 ---
 
@@ -645,21 +660,9 @@ Files use a single scan pointer (floor-based) without the second thread-pointer 
 
 Network import metadata (TIC path, seenby, origin, passwords) is stored as JSONB rather than in dedicated columns. This keeps the schema clean for local uploads while preserving full TIC metadata for outbound re-generation without column sprawl.
 
-### External Transfer Tools
+### Native Transfer Engines
 
-ZMODEM transfers use external `sz`/`rz` (lrzsz package) rather than a pure-JS implementation. This is the pragmatic choice for protocol correctness and compatibility with terminal clients. The `BaseProtocol` class handles the spawn/pipe/rawmode lifecycle.
-
----
-
-## Known Issues
-
-### SyncTERM ZMODEM Upload Bug
-
-SyncTERM has a known issue with ZMODEM uploads where the protocol handshake may not complete properly through WebSocket connections. The `ZmodemReceiveProtocol` currently uses `receiveIntoRaw` (raw pipes) rather than a PTY-based approach. The `receiveInto` method with node-pty exists in `BaseProtocol` as an alternative but is not currently wired into the receive path.
-
-### `rz` TTY Requirement
-
-The `rz` command may require a TTY for proper ZMODEM handshaking. The current raw pipes approach (`receiveIntoRaw`) works in some configurations but may fail in others. The `BaseProtocol.receiveInto()` method provides a PTY-based alternative using node-pty.
+File transfers use native JavaScript XMODEM and ZMODEM engines (`src/transfers/`) rather than external tools. The engines are protocol-agnostic and testable in isolation. StreamAdapter wrappers (`src/protocols/xmodem_native.js`, `zmodem_native.js`) bridge engines to call objects. The lrzsz-based wrappers remain as fallback.
 
 ### Cross-Area Search
 
@@ -674,6 +677,5 @@ The `rz` command may require a TTY for proper ZMODEM handshaking. The current ra
 - **Global file search** — web route for cross-area search with access filtering
 - **Maintenance tasks** — `--regen-file-html` for regenerating `long_desc_html`, `--recalc-file-stats` for refreshing all area stats
 - **Additional archive formats** — RAR, 7z, ARJ, LHA support in `fileDescExtractor.js`
-- **Upload protocol improvements** — resolve SyncTERM ZMODEM receive compatibility
 - **File newscan** — terminal newscan integration for new file notifications (user_file_subscriptions infrastructure is in place)
 - **QWK/NNTP file support** — currently TIC-only for network distribution

@@ -198,6 +198,12 @@ function createMockReceiver(adapter, targetDir) {
 
 					if (result.frameEnd === ZCRCE || result.frameEnd === ZCRCW) {
 						inDataPhase = false;
+						if (result.frameEnd === ZCRCW) {
+							// Send ZACK with current position
+							var ackPos = [currentOffset & 0xFF, (currentOffset >> 8) & 0xFF,
+								(currentOffset >> 16) & 0xFF, (currentOffset >> 24) & 0xFF];
+							sendHexHeader(ZACK, ackPos[0], ackPos[1], ackPos[2], ackPos[3]);
+						}
 					}
 					continue;
 				}
@@ -311,7 +317,7 @@ function createMockReceiver(adapter, targetDir) {
 				if (next === ZCRCG || next === ZCRCQ || next === ZCRCE || next === ZCRCW) {
 					frameEnd = next;
 					pos += 2;
-					// Read CRC-32 (4 bytes, ZDLE-escaped)
+					// Read CRC-32 (4 bytes, ZDLE-escaped) — sender uses ZBIN32 + CRC-32
 					var crcBytes = [];
 					while (crcBytes.length < 4 && pos < buf.length) {
 						if (buf[pos] === ZDLE) {
