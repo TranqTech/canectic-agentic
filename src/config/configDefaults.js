@@ -49,7 +49,7 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	{ key: 'adminsecurity',     defaultValue: '200',            type: 'number',  category: 'security',    description: 'Minimum security level for admin access' },
 	{ key: 'defaultsecurity',   defaultValue: '50',             type: 'number',  category: 'security',    description: 'Security level for new user accounts' },
-	{ key: 'session_ttl',       defaultValue: '3600',           type: 'number',  category: 'security',    description: 'Redis session TTL in seconds' },
+	{ key: 'session_ttl',       defaultValue: '60',             type: 'number',  category: 'security',    description: 'Web session expiry in minutes (default 60 = 1 hour)' },
 	{ key: 'pwmin',             defaultValue: '12',             type: 'number',  category: 'security',    description: 'Minimum password length' },
 	{ key: 'minage',            defaultValue: '13',             type: 'number',  category: 'security',    description: 'Minimum registration age' },
 

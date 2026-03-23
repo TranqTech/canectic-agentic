@@ -11,7 +11,7 @@ async function sessionStore(sessionId, data, ttl) {
 	var sessionKey = SESSION_PREFIX + sessionId;
 	var ok = await hSet(sessionKey, data);
 	if (ok) {
-		await expire(sessionKey, ttl || appConfig.getNumber('session_ttl', 3600));
+		await expire(sessionKey, ttl || appConfig.getNumber('session_ttl', 60) * 60);
 		// Index this session by username for reverse lookup
 		if (data.username) {
 			await _addSessionIndex(data.username, sessionId);
@@ -56,7 +56,7 @@ async function sessionExists(sessionId) {
 }
 
 async function sessionRenew(sessionId, ttl) {
-	return await expire(SESSION_PREFIX + sessionId, ttl || appConfig.getNumber('session_ttl', 3600));
+	return await expire(SESSION_PREFIX + sessionId, ttl || appConfig.getNumber('session_ttl', 60) * 60);
 }
 
 async function sessionList() {
@@ -71,7 +71,7 @@ async function _addSessionIndex(username, sessionId) {
 		var rc = await getClient();
 		var indexKey = SESSION_INDEX_PREFIX + username.toLowerCase();
 		await rc.sAdd(indexKey, sessionId);
-		await rc.expire(indexKey, appConfig.getNumber('session_ttl', 3600) * 2);
+		await rc.expire(indexKey, appConfig.getNumber('session_ttl', 60) * 60 * 2);
 	} catch (err) {
 		alogger.writeAlog(4, "Session index add error: " + err.message, "yellow");
 	}
