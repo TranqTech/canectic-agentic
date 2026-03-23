@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import * as alogger from "../src/utils/alogger.js"
 import {WsManager, WsPool} from "../src/servers/websockets.js"
 import { TcpPool, TcpServer } from "../src/servers/tcpserver.js"
+import { TelnetPool, TelnetServer } from "../src/servers/telnetserver.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
@@ -50,6 +51,7 @@ var primaryNodeManager
 var socatManager
 var httpServer
 var tcpServer         // TCP terminal server
+var telnetServer      // Telnet terminal server
 var eventSubscriber
 var embeddedWorkers   // only used in embedded mode
 var mailerManager     // only used in embedded mode
@@ -192,6 +194,28 @@ async function startTcpServer(){
 	callservcount += 1;
 }
 
+async function startTelnetServer(){
+	var telnetport = appConfig.getNumber('telnetport', 23);
+	if (!telnetport || telnetport <= 0) {
+		alogger.writeAlog(2, "  Telnet terminal server disabled (telnetport = 0)", "yellow");
+		return;
+	}
+
+	var telnetPool = new TelnetPool("Telnet Terminal Pool");
+	var targetPool = callPoolMap["PrimaryBBS"];
+	if (targetPool) {
+		telnetPool.setCallPool(targetPool);
+		alogger.writeAlog(2, "  Telnet pool -> call pool: PrimaryBBS", "cyan");
+	} else {
+		alogger.writeAlog(3, "  Telnet pool has no matching call pool", "yellowbright");
+	}
+
+	telnetServer = new TelnetServer(telnetport, telnetPool);
+	telnetServer.start();
+	servercount += 1;
+	callservcount += 1;
+}
+
 // --- Event subscriber ---
 // Listens for cross-process events from the worker and mailer
 
@@ -284,6 +308,7 @@ async function main(){
 	if (runtcpsrv){
 		await startTcpServer()
 	}
+	await startTelnetServer()
 
 	// Mode-dependent startup
 	if (processMode === 'embedded') {

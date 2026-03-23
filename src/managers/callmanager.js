@@ -484,6 +484,9 @@ class IncomingCall{
 				break;
 			case "Telnet":
 				this.cmds = new telnetCommands(this.connection.socket, this);
+				if (!this.inputParser) {
+					this.inputParser = new ansiInputParser(this);
+				}
 				break;
 			default:
 				console.log("Could not determine connection type. Assuming TCP");

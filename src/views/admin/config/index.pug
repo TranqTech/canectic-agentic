@@ -9,6 +9,8 @@ block content
     else if !sufficientAccess
       include ../../partials/status/unauthorized.pug
     else
+      .px-4.pt-2
+        include ../../partials/flash
       if !ismobile
         .row
           .col-12
@@ -137,10 +139,13 @@ block content
 
                                 .col-md-3.text-end
                                   if s.source === 'db'
-                                    form.d-inline(action='/admin/config/reset/' + s.key method='POST')
-                                      button.btn.btn-sm.btn-outline-secondary(type='submit' title='Reset to default: ' + s.defaultValue)
-                                        i.bi.bi-arrow-counterclockwise.me-1
-                                        | Reset
+                                    button.btn.btn-sm.btn-outline-secondary(
+                                      type='button'
+                                      title='Reset to default: ' + s.defaultValue
+                                      onclick='fetch("/admin/config/reset/' + s.key + '", {method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"}}).then(function(){location.reload();})'
+                                    )
+                                      i.bi.bi-arrow-counterclockwise.me-1
+                                      | Reset
                                   else
                                     small.text-muted= s.source === 'env' ? '' : 'Default: ' + s.defaultValue
 

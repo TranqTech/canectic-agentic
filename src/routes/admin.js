@@ -2098,6 +2098,7 @@ router.get('/config', async (req, res) => {
 		});
 	}
 
+	res.locals.flash = await flash.get(req);
 	res.render('admin/config/index', {
 		sufficientAccess: sufficientAccess,
 		title: 'System Configuration',
@@ -2136,8 +2137,10 @@ router.post('/config', urlencodedParser, requireAdmin, async (req, res) => {
 		var ok = await configStore.setValues(kvArray);
 		if (ok) {
 			alogger.writeAlog(3, "[admin/config] Saved " + kvArray.length + " " + category + " settings", "cyan");
+			await flash.setOne(req, 'success', 'Saved ' + kvArray.length + ' ' + category + ' setting(s).');
 		} else {
 			alogger.writeAlog(2, "[admin/config] Error saving " + category + " settings", "redbright");
+			await flash.setOne(req, 'danger', 'Error saving ' + category + ' settings.');
 		}
 	}
 
@@ -2155,8 +2158,10 @@ router.post('/config/reset/:key', urlencodedParser, requireAdmin, async (req, re
 	var ok = await configStore.setValue(key, def.defaultValue);
 	if (ok) {
 		alogger.writeAlog(3, "[admin/config] Reset " + key + " to default: " + def.defaultValue, "cyan");
+		await flash.setOne(req, 'success', 'Reset ' + key + ' to default (' + def.defaultValue + ').');
 	} else {
 		alogger.writeAlog(2, "[admin/config] Error resetting " + key, "redbright");
+		await flash.setOne(req, 'danger', 'Error resetting ' + key + '.');
 	}
 
 	res.redirect('/admin/config');

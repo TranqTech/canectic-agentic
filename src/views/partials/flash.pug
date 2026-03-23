@@ -3,7 +3,7 @@
 //- type: 'danger', 'warning', 'success', 'info'
 if flash && flash.length > 0
   each msg in flash
-    .alert.alert-dismissible.fade.show.mb-2(
+    .alert.alert-dismissible.fade.show.mb-2.flash-shake(
       class=`alert-${msg.type || 'info'}`
       role='alert'
     )
@@ -17,3 +17,27 @@ if flash && flash.length > 0
         i.bi.bi-info-circle-fill.me-2
       = msg.text
       button.btn-close(type='button' data-bs-dismiss='alert' aria-label='Close')
+  style.
+    @keyframes flashShake {
+      0%, 100% { transform: translateX(0); }
+      15% { transform: translateX(-6px); }
+      30% { transform: translateX(5px); }
+      45% { transform: translateX(-4px); }
+      60% { transform: translateX(3px); }
+      75% { transform: translateX(-2px); }
+    }
+    .flash-shake {
+      animation: flashShake 0.5s ease-in-out;
+    }
+  script.
+    (function() {
+      var alerts = document.querySelectorAll('.flash-shake');
+      for (var i = 0; i < alerts.length; i++) {
+        (function(el) {
+          setTimeout(function() {
+            var bsAlert = bootstrap.Alert.getOrCreateInstance(el);
+            if (bsAlert) bsAlert.close();
+          }, 10000);
+        })(alerts[i]);
+      }
+    })();

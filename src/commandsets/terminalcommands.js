@@ -381,8 +381,23 @@ class telnetCommands extends BaseCommands {
 	}
 
 	_send(data) {
-		// TODO: implement telnet-specific send with IAC escaping
-		this.socket.write(Buffer.from(data));
+		// Escape 0xFF bytes as 0xFF 0xFF to prevent IAC interpretation.
+		// Fast path: skip escaping if no 0xFF present.
+		var buf = Buffer.from(data);
+		var hasFF = false;
+		for (var i = 0; i < buf.length; i++) {
+			if (buf[i] === 0xFF) { hasFF = true; break; }
+		}
+		if (!hasFF) {
+			this.socket.write(buf);
+			return;
+		}
+		var out = [];
+		for (var j = 0; j < buf.length; j++) {
+			out.push(buf[j]);
+			if (buf[j] === 0xFF) out.push(0xFF);
+		}
+		this.socket.write(Buffer.from(out));
 	}
 }
 
