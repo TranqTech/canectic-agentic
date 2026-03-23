@@ -11,9 +11,10 @@ class BaseHandler {
         this.emitter = new EventEmitter();
         this.loggingId = this.type + " Handler (Node " + this.call.nodenum + ")";
 
-        // Timeout config — subclasses can override in constructor
-        this.inactivityTO = appConfig.getNumber('inactivityTO', 60000);
-        this.warnBuff = appConfig.getNumber('warnbuff', 10000);
+        // Timeout config — subclasses can override in constructor.
+        // Config values are in human-friendly units; convert to ms internally.
+        this.inactivityTO = appConfig.getNumber('inactivityTO', 1) * 60 * 1000; // minutes → ms
+        this.warnBuff = appConfig.getNumber('warnbuff', 10) * 1000;             // seconds → ms
         this.warnMsg = appConfig.get('warnmsg', "Are you there?");
         this.inactiveMsg = appConfig.get('inactivemsg', "You have been inactive too long");
 

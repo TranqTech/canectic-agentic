@@ -55,7 +55,7 @@ class SyncJSDoorRunner extends BaseHandler {
 
 		// Timeouts
 		this.launchTO = appConfig.getNumber('syncjsdoorTO', 30000);
-		this.inactivityTO = appConfig.getNumber('doorInactivityTO', 300000);
+		this.inactivityTO = appConfig.getNumber('doorInactivityTO', 5) * 60 * 1000; // minutes → ms
 
 		this.loggingId = "SyncJSDoor (Node " + this.call.nodenum + ") [" + this.doorScript + "]";
 	}

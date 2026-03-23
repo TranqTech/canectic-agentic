@@ -79,11 +79,11 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// Terminal
 	// -----------------------------------------------------------------------
-	{ key: 'inactivityTO',          defaultValue: '60000',       type: 'number',  category: 'terminal',    description: 'Terminal inactivity timeout (ms)' },
-	{ key: 'warnbuff',              defaultValue: '10000',       type: 'number',  category: 'terminal',    description: 'Warning buffer before timeout (ms)' },
+	{ key: 'inactivityTO',          defaultValue: '1',           type: 'number',  category: 'terminal',    description: 'Terminal inactivity timeout in minutes (default 1)' },
+	{ key: 'warnbuff',              defaultValue: '10',          type: 'number',  category: 'terminal',    description: 'Warning buffer before timeout in seconds (default 10)' },
 	{ key: 'warnmsg',               defaultValue: 'Are you there?', type: 'string', category: 'terminal',  description: 'Inactivity warning message' },
 	{ key: 'inactivemsg',           defaultValue: 'You have been inactive too long', type: 'string', category: 'terminal', description: 'Inactivity disconnect message' },
-	{ key: 'inputTO',               defaultValue: '20000',       type: 'number',  category: 'terminal',    description: 'Input field timeout (ms)' },
+	{ key: 'inputTO',               defaultValue: '20',          type: 'number',  category: 'terminal',    description: 'Input field timeout in seconds (default 20)' },
 	{ key: 'termNegotiateDelay',    defaultValue: '500',         type: 'number',  category: 'terminal',    description: 'Terminal negotiation delay (ms)' },
 	{ key: 'termNegotiateMsg',      defaultValue: 'Detecting Terminal...\r\n', type: 'string', category: 'terminal', description: 'Terminal negotiation message' },
 
@@ -91,9 +91,9 @@ var CONFIG_DEFINITIONS = [
 	// Doors
 	// -----------------------------------------------------------------------
 	{ key: 'xtrnTO',                defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'Door launch timeout (ms)' },
-	{ key: 'doorInactivityTO',      defaultValue: '300000',      type: 'number',  category: 'doors',       description: 'Door inactivity timeout (ms)' },
+	{ key: 'doorInactivityTO',      defaultValue: '5',           type: 'number',  category: 'doors',       description: 'Door inactivity timeout in minutes (default 5)' },
 	{ key: 'syncjsdoorTO',          defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'SyncJS door launch timeout (ms)' },
-	{ key: 'doorAuthTO',            defaultValue: '15000',       type: 'number',  category: 'doors',       description: 'Door auth timeout (ms)' },
+	{ key: 'doorAuthTO',            defaultValue: '15',          type: 'number',  category: 'doors',       description: 'Door auth timeout in seconds (default 15)' },
 	{ key: 'doordir',               defaultValue: '',            type: 'string',  category: 'doors',       description: 'Door game base directory' },
 	{ key: 'dosemu_drive_c',        defaultValue: '~/.dosemu/drive_c', type: 'string', category: 'doors', description: 'DOSemu virtual drive C path' },
 

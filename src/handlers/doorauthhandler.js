@@ -8,7 +8,7 @@ const maxAuthBuffer = 4096; // Max bytes we'll accept before giving up
 class DoorAuthHandler extends BaseHandler {
 	constructor(call) {
 		super(call, "DoorAuth");
-		this.inactivityTO = appConfig.getNumber('doorAuthTO', 15000);
+		this.inactivityTO = appConfig.getNumber('doorAuthTO', 15) * 1000; // seconds → ms
 		this.warnMsg = ""; // No warn for machine clients
 		this.authBuffer = "";
 		this.authenticated = false;

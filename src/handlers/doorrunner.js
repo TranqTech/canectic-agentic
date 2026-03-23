@@ -47,7 +47,7 @@ class DoorRunner extends BaseHandler {
 
 		// Timeouts
 		this.launchTO = appConfig.getNumber('xtrnTO', 30000);
-		this.inactivityTO = appConfig.getNumber('doorInactivityTO', 300000);
+		this.inactivityTO = appConfig.getNumber('doorInactivityTO', 5) * 60 * 1000; // minutes → ms
 
 		// Process handles
 		this._child = null;

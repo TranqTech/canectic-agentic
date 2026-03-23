@@ -50,7 +50,7 @@ class RegistrationHandler extends BaseHandler {
 		this.dumb = (call.term_type === "Dumb");
 
 		// Use shorter inactivity timeout for input fields
-		this.inactivityTO = appConfig.getNumber('inputTO', 20000);
+		this.inactivityTO = appConfig.getNumber('inputTO', 20) * 1000; // seconds → ms
 
 		// User data
 		this.firstname = "";
