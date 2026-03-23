@@ -10,6 +10,7 @@ import { TcpPool, TcpServer } from "../src/servers/tcpserver.js"
 import { TelnetPool, TelnetServer } from "../src/servers/telnetserver.js"
 import { TerminalPool, TerminalServer } from "../src/servers/terminalserver.js"
 import { ImapServer } from "../src/servers/imapServer.js"
+import { SmtpServer } from "../src/servers/smtpServer.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
@@ -56,6 +57,7 @@ var tcpServer         // TCP terminal server (legacy, use terminalServer instead
 var telnetServer      // Telnet terminal server (legacy, use terminalServer instead)
 var terminalServer    // Unified TCP/Telnet auto-detect server
 var imapServer        // IMAP server for PM access
+var smtpServer        // SMTP submission server for sending PMs
 var eventSubscriber
 var embeddedWorkers   // only used in embedded mode
 var mailerManager     // only used in embedded mode
@@ -259,6 +261,23 @@ async function startImapServer(){
 	servercount += 1;
 }
 
+async function startSmtpServer(){
+	var smtpport = appConfig.getNumber('smtpport', 10587);
+	if (!smtpport || smtpport <= 0) {
+		alogger.writeAlog(2, "  SMTP server disabled (smtpport = 0)", "yellow");
+		return;
+	}
+	var domain = appConfig.get('mail_domain', '');
+	if (!domain) {
+		alogger.writeAlog(2, "  SMTP server disabled (mail_domain not configured)", "yellow");
+		return;
+	}
+
+	smtpServer = new SmtpServer(smtpport, domain);
+	smtpServer.start();
+	servercount += 1;
+}
+
 // --- Event subscriber ---
 // Listens for cross-process events from the worker and mailer
 
@@ -351,6 +370,7 @@ async function main(){
 	// Unified terminal server (auto-detects TCP vs Telnet)
 	await startTerminalServer()
 	await startImapServer()
+	await startSmtpServer()
 
 	// Mode-dependent startup
 	if (processMode === 'embedded') {

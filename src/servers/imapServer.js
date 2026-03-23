@@ -18,7 +18,7 @@ import {
 import appConfig from '../config/appConfig.js';
 
 var GREETING = 'Canectic BBS IMAP4rev1 ready';
-var CAPABILITIES = 'IMAP4rev1';
+var CAPABILITIES = 'IMAP4rev1 IDLE';
 
 // Valid mailbox names
 var MAILBOXES = ['INBOX', 'Sent', 'Trash'];
@@ -165,8 +165,21 @@ class ImapSession {
 					this._send(tag + ' OK CLOSE completed');
 					break;
 
+				case 'SEARCH':
+					await this._cmdSearch(tag, args, false);
+					break;
+
 				case 'UID':
 					await this._cmdUid(tag, args);
+					break;
+
+				case 'IDLE':
+					this._cmdIdle(tag);
+					break;
+
+				case 'DONE':
+					// DONE is handled inside IDLE state, shouldn't reach here
+					this._send(tag + ' BAD Not in IDLE state');
 					break;
 
 				default:
@@ -506,8 +519,89 @@ class ImapSession {
 			case 'STORE':
 				await this._doStore(tag, subargs, true);
 				break;
+			case 'SEARCH':
+				await this._cmdSearch(tag, subargs, true);
+				break;
 			default:
 				this._send(tag + ' BAD Unknown UID subcommand');
+		}
+	}
+
+	// --- SEARCH ---
+
+	async _cmdSearch(tag, args, useUid) {
+		if (this.state !== 'selected') {
+			this._send(tag + ' NO Not selected');
+			return;
+		}
+
+		var criteria = args.toUpperCase().trim();
+		var results = [];
+
+		for (var i = 0; i < this.uidList.length; i++) {
+			var uid = this.uidList[i];
+			var row = this.messageMap[uid];
+			if (!row) continue;
+
+			var match = true;
+
+			if (criteria.includes('UNSEEN') || criteria.includes('NOT SEEN')) {
+				if (row.read) match = false;
+			}
+			if (criteria.includes('SEEN') && !criteria.includes('UNSEEN') && !criteria.includes('NOT SEEN')) {
+				if (!row.read) match = false;
+			}
+			if (criteria.includes('DELETED')) {
+				if (!row.deleted) match = false;
+			}
+			if (criteria.includes('UNDELETED')) {
+				if (row.deleted) match = false;
+			}
+			// ALL matches everything (default)
+
+			if (match) {
+				results.push(useUid ? uid : (i + 1));
+			}
+		}
+
+		this._send('* SEARCH ' + results.join(' '));
+		this._send(tag + ' OK SEARCH completed');
+	}
+
+	// --- IDLE ---
+
+	_cmdIdle(tag) {
+		if (this.state !== 'selected') {
+			this._send(tag + ' NO Not selected');
+			return;
+		}
+
+		this._send('+ idling');
+		this._idleTag = tag;
+		this._idleActive = true;
+
+		// Replace data handler to watch for DONE
+		this._idlePrevHandler = this._onData.bind(this);
+		var self = this;
+		this._onData = function(data) {
+			var str = data.toString('utf8').trim();
+			if (str.toUpperCase() === 'DONE') {
+				self._idleActive = false;
+				self._onData = self._idlePrevHandler;
+				self._send(self._idleTag + ' OK IDLE terminated');
+			}
+		};
+	}
+
+	// Notify IDLE session of new messages (called externally)
+	notifyNewMessage() {
+		if (this._idleActive && this.selectedMailbox === 'INBOX') {
+			// Refresh mailbox and send EXISTS
+			getMailboxMessages(this.userId, 'INBOX').then((rows) => {
+				if (rows.length > this.uidList.length) {
+					this._send('* ' + rows.length + ' EXISTS');
+				}
+			}).catch(() => {});
 		}
 	}
 
