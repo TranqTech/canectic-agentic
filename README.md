@@ -19,3 +19,4 @@ A BBS for the modern world and beyond.
 
 ## Recommended installs
 - PM2 (Process and worker start/restart management)
+- Dosemu2 (Door game support)
