@@ -28,8 +28,9 @@ var CONFIG_DEFINITIONS = [
 	// Network
 	// -----------------------------------------------------------------------
 	{ key: 'webport',              defaultValue: '8080',         type: 'number',  category: 'network',     description: 'HTTP server port (requires restart)',                        restart: true },
-	{ key: 'tcpport',              defaultValue: '2060',         type: 'number',  category: 'network',     description: 'TCP terminal server port (requires restart, 0 = disabled)',   restart: true },
-	{ key: 'telnetport',           defaultValue: '2023',         type: 'number',  category: 'network',     description: 'Telnet terminal server port (requires restart, 0 = disabled)', restart: true },
+	{ key: 'terminalport',         defaultValue: '2023',         type: 'number',  category: 'network',     description: 'Terminal server port - auto-detects TCP vs Telnet (requires restart, 0 = disabled)', restart: true },
+	{ key: 'tcpport',              defaultValue: '0',            type: 'number',  category: 'network',     description: 'Legacy TCP-only server port (0 = disabled, use terminalport instead)', restart: true },
+	{ key: 'telnetport',           defaultValue: '0',            type: 'number',  category: 'network',     description: 'Legacy Telnet-only server port (0 = disabled, use terminalport instead)', restart: true },
 	{ key: 'sitetld',             defaultValue: '',              type: 'string',  category: 'network',     description: 'Cookie domain (e.g. example.com)' },
 	{ key: 'sitedomain',          defaultValue: '',              type: 'string',  category: 'network',     description: 'Full domain for URL generation' },
 	{ key: 'corsorigin',          defaultValue: '',              type: 'string',  category: 'network',     description: 'CORS allowed origin' },

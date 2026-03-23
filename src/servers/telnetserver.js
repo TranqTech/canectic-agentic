@@ -48,6 +48,9 @@ class TelnetParser {
 
 	// Parse incoming data — returns clean data bytes with IAC stripped
 	filterInbound(buf) {
+		// Disabled = raw TCP mode, pass through unchanged
+		if (this._disabled) return buf;
+
 		var clean = [];
 		for (var i = 0; i < buf.length; i++) {
 			var b = buf[i];
@@ -144,7 +147,8 @@ class TelnetParser {
 	}
 
 	// Escape outbound data — double any 0xFF bytes
-	static escapeOutbound(buf) {
+	static escapeOutbound(buf, disabled) {
+		if (disabled) return buf;
 		// Fast path: if no 0xFF in buffer, return as-is
 		var hasFF = false;
 		for (var i = 0; i < buf.length; i++) {
@@ -364,19 +368,19 @@ class TelnetConnection {
 
 	sendtext(text) {
 		if (!this.socket.destroyed) {
-			this.socket.write(TelnetParser.escapeOutbound(Buffer.from(text)));
+			this.socket.write(TelnetParser.escapeOutbound(Buffer.from(text), this.telnetParser._disabled));
 		}
 	}
 
 	sendString(stringdata) {
 		if (!this.socket.destroyed) {
-			this.socket.write(TelnetParser.escapeOutbound(Buffer.from(stringdata)));
+			this.socket.write(TelnetParser.escapeOutbound(Buffer.from(stringdata), this.telnetParser._disabled));
 		}
 	}
 
 	sendData(data) {
 		if (!this.socket.destroyed) {
-			this.socket.write(TelnetParser.escapeOutbound(Buffer.from(data)));
+			this.socket.write(TelnetParser.escapeOutbound(Buffer.from(data), this.telnetParser._disabled));
 		}
 	}
 

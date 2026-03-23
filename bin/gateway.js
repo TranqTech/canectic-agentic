@@ -8,6 +8,7 @@ import * as alogger from "../src/utils/alogger.js"
 import {WsManager, WsPool} from "../src/servers/websockets.js"
 import { TcpPool, TcpServer } from "../src/servers/tcpserver.js"
 import { TelnetPool, TelnetServer } from "../src/servers/telnetserver.js"
+import { TerminalPool, TerminalServer } from "../src/servers/terminalserver.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
@@ -50,8 +51,9 @@ var callManager
 var primaryNodeManager
 var socatManager
 var httpServer
-var tcpServer         // TCP terminal server
-var telnetServer      // Telnet terminal server
+var tcpServer         // TCP terminal server (legacy, use terminalServer instead)
+var telnetServer      // Telnet terminal server (legacy, use terminalServer instead)
+var terminalServer    // Unified TCP/Telnet auto-detect server
 var eventSubscriber
 var embeddedWorkers   // only used in embedded mode
 var mailerManager     // only used in embedded mode
@@ -216,6 +218,28 @@ async function startTelnetServer(){
 	callservcount += 1;
 }
 
+async function startTerminalServer(){
+	var termport = appConfig.getNumber('terminalport', 2023);
+	if (!termport || termport <= 0) {
+		alogger.writeAlog(2, "  Terminal server disabled (terminalport = 0)", "yellow");
+		return;
+	}
+
+	var termPool = new TerminalPool("Terminal Pool");
+	var targetPool = callPoolMap["PrimaryBBS"];
+	if (targetPool) {
+		termPool.setCallPool(targetPool);
+		alogger.writeAlog(2, "  Terminal pool -> call pool: PrimaryBBS", "cyan");
+	} else {
+		alogger.writeAlog(3, "  Terminal pool has no matching call pool", "yellowbright");
+	}
+
+	terminalServer = new TerminalServer(termport, termPool);
+	terminalServer.start();
+	servercount += 1;
+	callservcount += 1;
+}
+
 // --- Event subscriber ---
 // Listens for cross-process events from the worker and mailer
 
@@ -305,10 +329,8 @@ async function main(){
 		await startWebsockets()
 		await registerLogWebSocket(wsManager);
 	}
-	if (runtcpsrv){
-		await startTcpServer()
-	}
-	await startTelnetServer()
+	// Unified terminal server (auto-detects TCP vs Telnet)
+	await startTerminalServer()
 
 	// Mode-dependent startup
 	if (processMode === 'embedded') {

@@ -381,6 +381,12 @@ class telnetCommands extends BaseCommands {
 	}
 
 	_send(data) {
+		// In raw TCP mode (downgraded), send without escaping
+		if (this.call && this.call.connection && this.call.connection.telnetParser &&
+			this.call.connection.telnetParser._disabled) {
+			this.socket.write(Buffer.from(data));
+			return;
+		}
 		// Escape 0xFF bytes as 0xFF 0xFF to prevent IAC interpretation.
 		// Fast path: skip escaping if no 0xFF present.
 		var buf = Buffer.from(data);
