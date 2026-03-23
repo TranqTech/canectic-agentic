@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BinkpProtocol, verifyCramMD5 } from './protocols/binkp.js';
+import { EmsiProtocol } from './protocols/emsi.js';
 import { TransferEngine } from './transfer.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as systemAddresses from '../models/systemAddresses.js';
@@ -34,8 +35,9 @@ class SessionController extends EventEmitter {
 		this.peerName       = '';     // System name from M_NUL
 
 		// Protocol and transfer
-		this.protocol  = null;
-		this.transfer  = null;
+		this.protocol     = null;
+		this.protocolType = null;   // 'binkp' or 'emsi' — set during start()
+		this.transfer     = null;
 
 		// Stats
 		this.startTime     = Date.now();
@@ -108,36 +110,120 @@ class SessionController extends EventEmitter {
 		}
 
 		// ---------------------------------------------------------------
-		// Phase 2: Protocol creation + event wiring + handshake start.
-		// All synchronous from here — no awaits, no event loop yields.
-		// The transport data listener is wired in the BinkpProtocol
-		// constructor, so frames arriving after this point are captured.
+		// Phase 2: Determine protocol type.
+		// Outbound: read from connection_data.mailer_protocol
+		// Inbound: auto-detect by peeking at first bytes from remote
 		// ---------------------------------------------------------------
 
-		// Create protocol
-		this.protocol = new BinkpProtocol(this.transport, protocolOpts);
+		if (this.role === 'caller') {
+			// Outbound — use configured protocol
+			var cd = this.peerConnection ? (this.peerConnection.connection_data || {}) : {};
+			this.protocolType = cd.mailer_protocol || 'binkp';
 
-		// Wire protocol events
+			this._createProtocol(protocolOpts);
+			this.protocol.startSession(this.role);
+			this.transport.resume();
+
+			alogger.writeClog(5,
+				'Session ' + this.uuid + ': started as caller (' + this.protocolType +
+				') via ' + this.transport.remoteAddress,
+				'mailer', 'cyan'
+			);
+		} else {
+			// Inbound — auto-detect protocol from first bytes
+			this.state = 'detecting';
+			this._detectProtocol(protocolOpts);
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Protocol detection (inbound) and creation
+	// -----------------------------------------------------------------------
+
+	_detectProtocol(protocolOpts) {
+		var self = this;
+		var detected = false;
+
+		function onFirstData(data) {
+			if (detected) return;
+			detected = true;
+			clearTimeout(detectTimer);
+			self.transport.removeListener('data', onFirstData);
+
+			// Peek at first byte to determine protocol:
+			// - Byte >= 0x80: binkp (binary frame with command flag bit set)
+			// - Byte == 0x2A (*): EMSI (ASCII **EMSI_INQ or **EMSI_REQ)
+			if (data.length > 0 && data[0] >= 0x80) {
+				self.protocolType = 'binkp';
+			} else if (data.length > 0 && data[0] === 0x2A) {
+				self.protocolType = 'emsi';
+			} else {
+				// Default to binkp for unrecognized data
+				self.protocolType = 'binkp';
+			}
+
+			alogger.writeClog(5,
+				'Session ' + self.uuid + ': detected ' + self.protocolType +
+				' from ' + self.transport.remoteAddress +
+				' (first byte: 0x' + data[0].toString(16) + ')',
+				'mailer', 'cyan'
+			);
+
+			// Create protocol and feed it the peeked data
+			self._createProtocol(protocolOpts);
+			self.protocol.startSession(self.role);
+
+			// Feed the peeked data into the protocol — it contains the
+			// remote's first frame/packet that triggered detection.
+			// Both protocols wire transport.on('data'), so re-emit through
+			// the transport to reach the protocol's handler.
+			if (self.protocolType === 'emsi' && self.protocol.pushInitialData) {
+				self.protocol.pushInitialData(data);
+			} else {
+				self.transport.emit('data', data);
+			}
+		}
+
+		// Resume transport and listen for first data
+		this.transport.on('data', onFirstData);
+		this.transport.resume();
+
+		// Timeout: default to binkp if no data arrives
+		var detectTimer = setTimeout(function() {
+			if (detected) return;
+			detected = true;
+			self.transport.removeListener('data', onFirstData);
+
+			alogger.writeClog(5,
+				'Session ' + self.uuid + ': no data during detection, defaulting to binkp',
+				'mailer', 'cyan'
+			);
+
+			self.protocolType = 'binkp';
+			self._createProtocol(protocolOpts);
+			self.protocol.startSession(self.role);
+		}, 5000);
+	}
+
+	_createProtocol(protocolOpts) {
+		this.state = 'handshake';
+
+		if (this.protocolType === 'emsi') {
+			this.protocol = new EmsiProtocol(this.transport, protocolOpts);
+		} else {
+			this.protocol = new BinkpProtocol(this.transport, protocolOpts);
+		}
+
+		// Wire protocol events — same interface for both protocols
 		this.protocol.on('authenticated', (info) => this._onAuthenticated(info));
 		this.protocol.on('passwordReceived', (info) => this._onPasswordReceived(info));
-		this.protocol.on('remoteEOB', () => this._onRemoteEOB());
 		this.protocol.on('sessionEnd', () => this._onSessionEnd());
 		this.protocol.on('error', (err) => this._onError(err));
 
-		// Start the handshake (sends our M_NUL + M_ADR)
-		this.protocol.startSession(this.role);
-
-		// Resume the transport — for inbound connections, the socket was
-		// paused in TcpTransport.fromSocket() to prevent data loss during
-		// async setup. Now that the protocol is wired and listening for
-		// data events, we can let the buffered frames flow through.
-		this.transport.resume();
-
-		alogger.writeClog(5,
-			'Session ' + this.uuid + ': started as ' + this.role +
-			' via ' + this.transport.remoteAddress,
-			'mailer', 'cyan'
-		);
+		// binkp-specific events (EMSI doesn't use these)
+		if (this.protocolType === 'binkp') {
+			this.protocol.on('remoteEOB', () => this._onRemoteEOB());
+		}
 	}
 
 	getStatus() {
@@ -213,13 +299,25 @@ class SessionController extends EventEmitter {
 		this.peerName      = (info.options && info.options.systemName) || '';
 
 		alogger.writeClog(5,
-			'Session ' + this.uuid + ': authenticated with ' +
+			'Session ' + this.uuid + ': authenticated (' + this.protocolType + ') with ' +
 			this.peerAddresses.join(', ') +
 			(this.peerName ? ' (' + this.peerName + ')' : ''),
 			'mailer', 'greenbright'
 		);
 
-		// Create transfer engine
+		if (this.protocolType === 'emsi') {
+			// EMSI/Wazoo — detach EMSI parser and start Wazoo transfer.
+			// WazooTransferEngine will be implemented in Phase 3.
+			this.protocol.detachTransport();
+			alogger.writeClog(5, 'Session ' + this.uuid +
+				': EMSI handshake complete, ready for Wazoo transfer (not yet implemented)',
+				'mailer', 'yellow');
+			// TODO: Phase 3 — create WazooTransferEngine, build outbound list, start batch
+			this._endSession('complete');
+			return;
+		}
+
+		// binkp — use the existing TransferEngine
 		this.transfer = new TransferEngine(this.protocol, {
 			inboundDir: this._inboundDir,
 			tempDir:    this._tempDir,
