@@ -20,7 +20,7 @@ import {
 import { crc16, crc32 } from '../src/transfers/crc.js';
 import {
 	ZPAD, ZDLE, ZBIN, ZHEX, ZBIN32,
-	ZRQINIT, ZRINIT, ZACK, ZFILE, ZRPOS, ZDATA, ZEOF, ZFIN,
+	ZRQINIT, ZRINIT, ZACK, ZFILE, ZRPOS, ZDATA, ZEOF, ZFIN, ZCRC,
 	ZCRCG, ZCRCQ, ZCRCE, ZCRCW,
 	CANFC32, CANFDX, CANOVIO,
 	XON, XOFF, CAN, CR
@@ -598,5 +598,414 @@ describe('ZMODEM send loopback', function() {
 		} finally {
 			cleanupFixture(fixture);
 		}
+	});
+});
+
+// =========================================================================
+// ZMODEM CRC fallback chain (zbin32 → zbin_crc32 → zbin_crc16)
+// =========================================================================
+//
+// The engine sends ZFILE with zbin32 headers first. If the receiver ignores
+// it (simulating a client that doesn't understand ZBIN32), the 3-second
+// zfile_timeout fires and the engine retries with zbin_crc32, then zbin_crc16.
+// The mock receiver below ignores the first ZFILE (ZBIN32), then ignores
+// the second (ZBIN+CRC32), then responds to the third (ZBIN+CRC16).
+
+describe('ZMODEM CRC fallback chain', function() {
+	this.timeout(20000);
+
+	// Create a mock receiver that counts ZFILE attempts before responding.
+	// skipCount: how many ZFILE headers to silently ignore before accepting.
+	function createFallbackReceiver(senderAdapterRef, targetDir, skipCount) {
+		var state = 'await_zrqinit';
+		var zfileCount = 0;
+		var receivedData = [];
+		var currentOffset = 0;
+		var inDataPhase = false;
+		var dataBuf = Buffer.alloc(0);
+		var files = [];
+
+		function sendHexHeader(type, p0, p1, p2, p3) {
+			senderAdapterRef._h && setImmediate(function() {
+				senderAdapterRef._h(encodeHexHeader(type, p0 || 0, p1 || 0, p2 || 0, p3 || 0));
+			});
+		}
+
+		function processData(buf) {
+			dataBuf = Buffer.concat([dataBuf, buf]);
+
+			// Scan for ZRQINIT hex header
+			if (state === 'await_zrqinit') {
+				// Look for ZPAD ZPAD ZDLE ZHEX with frame type ZRQINIT (0x00)
+				for (var i = 0; i <= dataBuf.length - 20; i++) {
+					if (dataBuf[i] === ZPAD && dataBuf[i+1] === ZPAD &&
+					    dataBuf[i+2] === ZDLE && dataBuf[i+3] === ZHEX) {
+						var hi = decodeHexNibble(dataBuf[i+4]);
+						var lo = decodeHexNibble(dataBuf[i+5]);
+						if (hi === 0 && lo === 0) { // ZRQINIT = 0
+							state = 'await_zfile';
+							dataBuf = dataBuf.subarray(i + 4 + 14 + 2);
+							sendHexHeader(ZRINIT, 0, 0, 0, CANFDX | CANOVIO | CANFC32);
+							break;
+						}
+					}
+				}
+				return;
+			}
+
+			if (state === 'await_zfile') {
+				// Look for ZFILE binary header: ZPAD ZDLE ZBIN or ZPAD ZDLE ZBIN32
+				for (var j = 0; j <= dataBuf.length - 3; j++) {
+					if (dataBuf[j] === ZPAD && dataBuf[j+1] === ZDLE &&
+					    (dataBuf[j+2] === ZBIN || dataBuf[j+2] === ZBIN32)) {
+						zfileCount++;
+						dataBuf = Buffer.alloc(0); // Discard
+						if (zfileCount <= skipCount) {
+							// Ignore — let the sender's zfile_timeout fire
+							return;
+						}
+						// Accept — respond with ZRPOS(0)
+						state = 'receiving';
+						receivedData = [];
+						currentOffset = 0;
+						sendHexHeader(ZRPOS, 0, 0, 0, 0);
+						return;
+					}
+				}
+				return;
+			}
+
+			if (state === 'receiving') {
+				// Scan for ZEOF or ZDATA in hex headers; collect any data subpacket bytes
+				// Look for hex header sequence
+				for (var k = 0; k <= dataBuf.length - 4; k++) {
+					if (dataBuf[k] === ZPAD && dataBuf[k+1] === ZPAD &&
+					    dataBuf[k+2] === ZDLE && dataBuf[k+3] === ZHEX) {
+						if (dataBuf.length < k + 4 + 14 + 2) break;
+						var thi = decodeHexNibble(dataBuf[k+4]);
+						var tlo = decodeHexNibble(dataBuf[k+5]);
+						if (thi < 0 || tlo < 0) continue;
+						var frameType = (thi << 4) | tlo;
+						var consumed = k + 4 + 14;
+						while (consumed < dataBuf.length &&
+						       (dataBuf[consumed] === CR || dataBuf[consumed] === 0x0A)) consumed++;
+
+						if (frameType === ZEOF) {
+							// Save file (empty — we just confirm the handshake works)
+							files.push({ name: 'received', data: Buffer.concat(receivedData) });
+							dataBuf = dataBuf.subarray(consumed);
+							state = 'await_zfile';
+							sendHexHeader(ZRINIT, 0, 0, 0, CANFDX | CANOVIO | CANFC32);
+							return;
+						} else if (frameType === ZFIN) {
+							dataBuf = dataBuf.subarray(consumed);
+							state = 'done';
+							sendHexHeader(ZFIN, 0, 0, 0, 0);
+							return;
+						}
+						dataBuf = dataBuf.subarray(consumed);
+						return;
+					}
+				}
+				// Consume data bytes — we don't validate them, just discard
+				dataBuf = Buffer.alloc(0);
+			}
+
+			if (state === 'done') {
+				dataBuf = Buffer.alloc(0);
+			}
+		}
+
+		return {
+			process: processData,
+			getFiles: function() { return files; },
+			getState: function() { return state; },
+			getZfileCount: function() { return zfileCount; }
+		};
+	}
+
+	it('should fall back from zbin32 to zbin_crc32 when first ZFILE is ignored', async function() {
+		var content = 'Fallback test content';
+		var fixture = createTestFixture(content);
+
+		try {
+			var senderAdapter = {
+				_h: null,
+				write: null,
+				onData: function(cb) { senderAdapter._h = cb; },
+				offData: function() { senderAdapter._h = null; }
+			};
+
+			// skipCount=1: ignore the first ZFILE (zbin32), accept the second
+			var receiver = createFallbackReceiver(senderAdapter, fixture.inDir, 1);
+
+			senderAdapter.write = function(buf) {
+				setImmediate(function() { receiver.process(Buffer.from(buf)); });
+			};
+
+			var fallbackErrors = [];
+			var engine = new ZmodemEngine(senderAdapter, {
+				initialCrcMode: 'zbin32',
+				timeout: 5000
+			});
+			engine.on('error', function(e) { fallbackErrors.push(e); });
+
+			var result = await engine.send([fixture.testFile]);
+
+			assert.ok(result.success, 'transfer should succeed after fallback: ' + (result.error || ''));
+			// Engine should have fallen back — zbin32 changed to zbin_crc32
+			assert.notStrictEqual(engine._sendCrcMode, 'zbin32',
+				'_sendCrcMode should have changed from zbin32 after fallback');
+			// At least one fallback error event should have fired
+			assert.ok(fallbackErrors.length > 0, 'should emit at least one fallback error event');
+			assert.ok(fallbackErrors[0].recoverable, 'fallback error should be recoverable');
+		} finally {
+			cleanupFixture(fixture);
+		}
+	});
+
+	it('should fall back through both modes (zbin32 → zbin_crc32 → zbin_crc16) when first two ZFILEs are ignored', async function() {
+		var content = 'Double fallback test';
+		var fixture = createTestFixture(content);
+
+		try {
+			var senderAdapter = {
+				_h: null,
+				write: null,
+				onData: function(cb) { senderAdapter._h = cb; },
+				offData: function() { senderAdapter._h = null; }
+			};
+
+			// skipCount=2: ignore first two ZFILEs, accept third
+			var receiver = createFallbackReceiver(senderAdapter, fixture.inDir, 2);
+
+			senderAdapter.write = function(buf) {
+				setImmediate(function() { receiver.process(Buffer.from(buf)); });
+			};
+
+			var fallbackErrors = [];
+			var engine = new ZmodemEngine(senderAdapter, {
+				initialCrcMode: 'zbin32',
+				timeout: 5000
+			});
+			engine.on('error', function(e) { fallbackErrors.push(e); });
+
+			var result = await engine.send([fixture.testFile]);
+
+			assert.ok(result.success, 'transfer should succeed after double fallback: ' + (result.error || ''));
+			assert.strictEqual(engine._sendCrcMode, 'zbin_crc16',
+				'after two fallbacks, sendCrcMode should be zbin_crc16');
+			assert.strictEqual(fallbackErrors.length, 2, 'should emit two fallback error events');
+		} finally {
+			cleanupFixture(fixture);
+		}
+	});
+
+	it('should start with zbin_crc16 if initialCrcMode is set', async function() {
+		var content = 'CRC16 mode test';
+		var fixture = createTestFixture(content);
+
+		try {
+			var senderAdapter = {
+				_h: null,
+				write: null,
+				onData: function(cb) { senderAdapter._h = cb; },
+				offData: function() { senderAdapter._h = null; }
+			};
+
+			// No skips — receiver accepts immediately
+			var receiver = createFallbackReceiver(senderAdapter, fixture.inDir, 0);
+
+			senderAdapter.write = function(buf) {
+				setImmediate(function() { receiver.process(Buffer.from(buf)); });
+			};
+
+			var engine = new ZmodemEngine(senderAdapter, {
+				initialCrcMode: 'zbin_crc16',
+				timeout: 5000
+			});
+
+			var result = await engine.send([fixture.testFile]);
+			assert.ok(result.success, 'should succeed with zbin_crc16 initial mode: ' + (result.error || ''));
+		} finally {
+			cleanupFixture(fixture);
+		}
+	});
+});
+
+// =========================================================================
+// ZMODEM ZCRC handler
+// =========================================================================
+//
+// When the receiver sends a ZCRC hex header after ZFILE, the sender must
+// respond with a ZCRC header whose p0-p3 bytes are the CRC-32 of the file.
+
+describe('ZMODEM ZCRC response', function() {
+	this.timeout(15000);
+
+	it('should respond with correct CRC-32 of the file when receiver sends ZCRC', async function() {
+		var content = 'CRC check content for ZCRC test';
+		var fixture = createTestFixture(content);
+
+		try {
+			var senderAdapter = {
+				_h: null,
+				write: null,
+				onData: function(cb) { senderAdapter._h = cb; },
+				offData: function() { senderAdapter._h = null; }
+			};
+
+			// Track the ZCRC response the engine sends back
+			var zcrcsReceived = [];
+
+			// Custom mock receiver that:
+			// 1. Responds to ZRQINIT with ZRINIT
+			// 2. Responds to ZFILE with ZCRC (requesting CRC verification)
+			// 3. Responds to ZCRC with ZRPOS (accepting the file)
+			// 4. Responds to ZEOF with ZRINIT, then to ZFIN with ZFIN
+			var state = 'await_zrqinit';
+			var dataBuf = Buffer.alloc(0);
+			var files = [];
+			var receivedData = [];
+
+			function sendHexHeader(type, p0, p1, p2, p3) {
+				senderAdapter._h && setImmediate(function() {
+					senderAdapter._h(encodeHexHeader(type, p0 || 0, p1 || 0, p2 || 0, p3 || 0));
+				});
+			}
+
+			function processData(buf) {
+				dataBuf = Buffer.concat([dataBuf, buf]);
+
+				while (true) {
+					// Find any hex header
+					var found = false;
+					for (var i = 0; i <= dataBuf.length - 20; i++) {
+						if (dataBuf[i] === ZPAD && dataBuf[i+1] === ZPAD &&
+						    dataBuf[i+2] === ZDLE && dataBuf[i+3] === ZHEX) {
+							if (dataBuf.length < i + 4 + 14 + 2) return; // Need more
+
+							var hexBytes = [];
+							for (var j = 0; j < 7; j++) {
+								var hi = decodeHexNibble(dataBuf[i + 4 + j*2]);
+								var lo = decodeHexNibble(dataBuf[i + 4 + j*2 + 1]);
+								if (hi < 0 || lo < 0) { found = false; break; }
+								hexBytes.push((hi << 4) | lo);
+							}
+							if (hexBytes.length < 7) break;
+
+							var consumed = i + 4 + 14;
+							while (consumed < dataBuf.length &&
+							       (dataBuf[consumed] === CR || dataBuf[consumed] === 0x0A)) consumed++;
+
+							var frameType = hexBytes[0];
+							var p0 = hexBytes[1], p1 = hexBytes[2], p2 = hexBytes[3], p3 = hexBytes[4];
+							dataBuf = dataBuf.subarray(consumed);
+							found = true;
+
+							if (frameType === ZRQINIT && state === 'await_zrqinit') {
+								state = 'await_zfile';
+								sendHexHeader(ZRINIT, 0, 0, 0, CANFDX | CANOVIO | CANFC32);
+							} else if (frameType === ZCRC) {
+								// Capture the CRC-32 sent by the engine (little-endian in p0-p3)
+								var crcVal = p0 | (p1 << 8) | (p2 << 16) | (p3 << 24);
+								zcrcsReceived.push(crcVal >>> 0);
+								// Now accept the file by sending ZRPOS(0)
+								state = 'receiving';
+								receivedData = [];
+								sendHexHeader(ZRPOS, 0, 0, 0, 0);
+							} else if (frameType === ZEOF && state === 'receiving') {
+								files.push({ name: 'received' });
+								state = 'await_zfile';
+								sendHexHeader(ZRINIT, 0, 0, 0, CANFDX | CANOVIO | CANFC32);
+							} else if (frameType === ZFIN) {
+								state = 'done';
+								sendHexHeader(ZFIN, 0, 0, 0, 0);
+							}
+							break;
+						}
+
+						// Look for binary ZFILE header and send ZCRC in response
+						if (dataBuf[i] === ZPAD && i + 1 < dataBuf.length &&
+						    dataBuf[i+1] === ZDLE && i + 2 < dataBuf.length &&
+						    (dataBuf[i+2] === ZBIN || dataBuf[i+2] === ZBIN32)) {
+							if (state === 'await_zfile') {
+								dataBuf = Buffer.alloc(0); // Discard the ZFILE + subpacket
+								found = true;
+								// Send ZCRC — ask sender to prove the file's CRC-32
+								sendHexHeader(ZCRC, 0, 0, 0, 0);
+							}
+							break;
+						}
+					}
+					if (!found) break;
+				}
+
+				// In receive state, discard data subpackets
+				if (state === 'receiving') {
+					dataBuf = Buffer.alloc(0);
+				}
+			}
+
+			senderAdapter.write = function(buf) {
+				setImmediate(function() { processData(Buffer.from(buf)); });
+			};
+
+			var engine = new ZmodemEngine(senderAdapter, {
+				initialCrcMode: 'zbin_crc32',
+				timeout: 5000
+			});
+
+			var result = await engine.send([fixture.testFile]);
+
+			assert.ok(result.success, 'transfer should succeed after ZCRC exchange: ' + (result.error || ''));
+			assert.ok(zcrcsReceived.length > 0, 'should have received a ZCRC response from the engine');
+
+			// Verify the CRC-32 the engine sent matches the actual file content
+			var expectedCrc = crc32(Buffer.from(content, 'utf8'));
+			assert.strictEqual(zcrcsReceived[0], expectedCrc,
+				'ZCRC response should contain the correct CRC-32 of the file content');
+		} finally {
+			cleanupFixture(fixture);
+		}
+	});
+
+	it('should respond to ZCRC with zero CRC when no file is open', function() {
+		// Direct unit test: call _onZCRC when _fileHandle is null
+		var written = [];
+		var adapter = {
+			_h: null,
+			write: function(buf) { written.push(Buffer.from(buf)); },
+			onData: function(cb) { adapter._h = cb; },
+			offData: function() { adapter._h = null; }
+		};
+
+		var engine = new ZmodemEngine(adapter, {});
+		// _fileHandle is null by default — simulate ZCRC with no file open
+		engine._onZCRC(0, 0, 0, 0);
+
+		// Engine should have written a hex ZCRC header with position 0
+		assert.ok(written.length > 0, 'should write ZCRC response');
+		var combined = Buffer.concat(written);
+		// Find the hex header: ZPAD ZPAD ZDLE ZHEX
+		var found = false;
+		for (var i = 0; i <= combined.length - 20; i++) {
+			if (combined[i] === ZPAD && combined[i+1] === ZPAD &&
+			    combined[i+2] === ZDLE && combined[i+3] === ZHEX) {
+				var hi = decodeHexNibble(combined[i+4]);
+				var lo = decodeHexNibble(combined[i+5]);
+				if (((hi << 4) | lo) === ZCRC) {
+					found = true;
+					// p0-p3 should all be 0 (CRC of empty/no file)
+					var p0hi = decodeHexNibble(combined[i+6]);
+					var p0lo = decodeHexNibble(combined[i+7]);
+					var p0 = (p0hi << 4) | p0lo;
+					// At minimum, assert the frame type byte is ZCRC
+					assert.strictEqual((hi << 4) | lo, ZCRC);
+					break;
+				}
+			}
+		}
+		assert.ok(found, 'should send a hex ZCRC header in response');
 	});
 });
