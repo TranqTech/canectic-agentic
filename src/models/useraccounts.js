@@ -182,6 +182,16 @@ async function createNewUser(newrecord) {
 			resultobj.resultid = dbres.insertId;
 			alogger.writeAlog(5, "User created: " + rec.username + " (id: " + dbres.insertId + ")", "greenbright");
 
+			// Auto-promote first registered user to Sysop
+			if (usernumber === 1) {
+				try {
+					await makeSysop(rec.username);
+					alogger.writeAlog(1, "First user " + rec.username + " auto-promoted to Sysop", "greenbright", true);
+				} catch (e) {
+					alogger.writeAlog(3, "Auto-promote Sysop failed: " + (e.message || e), "yellow");
+				}
+			}
+
 			// Pre-populate message scan pointers for the new user
 			try {
 				var pointerMod = await import('./userMsgPointers.js');
