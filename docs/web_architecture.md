@@ -404,11 +404,15 @@ Maintains a `pathMap` (Map<string, WsPool>) for O(1) path lookup.
 
 Each pool wraps a `WebSocketServer({ noServer: true })` — no standalone port, no standalone listener. Upgrade requests are handed off by the manager via `pool.handleUpgrade(request, socket, head)`.
 
+The `WsPool` constructor accepts an `options` object. `WsManager.createNewPool(path, name, options)` passes options through. Currently supported option:
+
+- `legacy` (boolean, default false) — marks this pool as serving legacy/connector clients (e.g. DosBox via vmodem). Connections on a legacy pool inherit the flag, which forces ZBIN+CRC-16 for ZMODEM transfers during terminal negotiation.
+
 On connection, the pool creates a `WsConnection` and either forwards it to a linked `CallPool` (terminal BBS connections) or handles it directly (mailer connections).
 
 ### WsConnection
 
-Wraps a single WebSocket connection. Provides `sendtext()`, `sendString()`, `sendData()` for output and routes incoming `message` events to the call handler. Announces connections and disconnections to the pool and alogger. Handles cleanup on close (removes from pool, notifies call handler).
+Wraps a single WebSocket connection. Provides `sendtext()`, `sendString()`, `sendData()` for output and routes incoming `message` events to the call handler. Announces connections and disconnections to the pool and alogger. Handles cleanup on close (removes from pool, notifies call handler). Inherits `legacy` from the parent `WsPool`; `IncomingCall` reads this flag to set the initial `call.zmodem_crc_mode`.
 
 ### Path Configuration
 
@@ -418,6 +422,7 @@ Configured in `bin/gateway.js` as an array of `{ name, path, callpool }` objects
 |---|---|---|---|
 | `/ws/bbs` | BBS | PrimaryBBS | Main BBS terminal connections |
 | `/ws/doorserver` | Doorserver | Doorserver | Door game server connections |
+| `/ws/legacy` | Legacy | PrimaryBBS | Legacy connector clients (DosBox/vmodem); pool created with `{ legacy: true }` |
 | `/` | Catchall | PrimaryBBS | Default path for clients that don't specify |
 
 In **embedded mode**, an additional pool is registered for the mailer:

@@ -64,7 +64,7 @@ Maps stage names to factory functions:
 
 | Stage | Handler | Notes |
 |-------|---------|-------|
-| `negotiate` | `TerminalNegotiator` | Detects terminal capabilities |
+| `negotiate` | `TerminalNegotiator` | Detects terminal capabilities, sets `call.zmodem_crc_mode` |
 | `logon` | `LogonHandler` | Pre-login display/new user flow |
 | `login` | `LoginHandler` | Authentication |
 | `door_auth` | `DoorAuthHandler` | External door authentication |
@@ -74,6 +74,12 @@ Maps stage names to factory functions:
 | `last_callers` | `SubModuleAdapter(LastCallers)` | Recent caller display |
 | `whos_online` | `SubModuleAdapter(WhosOnline)` | Active node display |
 | `check_email` | `SubModuleAdapter(pmCheck)` | Unread PM prompt, optionally launches reader |
+
+### TerminalNegotiator (`terminalnegotiator.js`)
+
+Detects terminal type, encoding, and dimensions. Also sets ZMODEM transfer parameters:
+
+- **ZMODEM CRC mode**: `call.zmodem_crc_mode` is set based on the detected terminal. `ZMODEM_MODERN_TERMINALS` (a Set containing SyncTERM, IcyTerm, MagiTerm) get ZBIN32+CRC-32; legacy/unknown terminals get ZBIN+CRC-16. Connections arriving on a WebSocket pool with the `legacy` flag inherit CRC-16 unconditionally. The `zmodem_default_crc` appConfig setting (`auto`/`zbin32`/`zbin_crc16`) can override auto-detection.
 
 ---
 

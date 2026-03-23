@@ -133,6 +133,11 @@ class IncomingCall{
 		this.term_rip_string = ""
 		this.use_rip = false
 		this.use_sixel = false
+		// ZMODEM CRC mode: safe default based on connection type.
+		// WebSocket non-legacy = modern, TCP = conservative.
+		// Terminal negotiator upgrades this for known modern terminals.
+		this.zmodem_crc_mode = (this.connection_type === "Websocket" && !connection.legacy)
+			? "zbin32" : "zbin_crc16";
 		this.call_type = "Incoming";
 		this.call_status = "Setting Up";
 		this.call_stage = 0

@@ -129,6 +129,7 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	{ key: 'file_base_dir',           defaultValue: 'files',          type: 'string',  category: 'files',       description: 'Base directory for file area storage' },
 	{ key: 'file_upload_staging_dir', defaultValue: 'files/staging',  type: 'string',  category: 'files',       description: 'Staging directory for file uploads' },
+	{ key: 'zmodem_default_crc',      defaultValue: 'auto',           type: 'string',  category: 'files',       description: 'ZMODEM CRC mode: auto (detect from terminal), zbin32 (force CRC-32), zbin_crc16 (force CRC-16)' },
 	{ key: 'file_max_upload_size',    defaultValue: '10485760',       type: 'number',  category: 'files',       description: 'Maximum upload file size in bytes (default 10MB)' },
 	{ key: 'file_allowed_extensions', defaultValue: '',               type: 'string',  category: 'files',       description: 'Comma-separated allowed file extensions (empty = all)' },
 	{ key: 'tic_staging_dir',         defaultValue: 'ftn/tic_staging', type: 'string', category: 'files',       description: 'TIC processing staging directory' },

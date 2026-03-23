@@ -22,6 +22,14 @@ const CTERM_VARIANTS = [
 // A '4' in the parameter list indicates sixel support
 const DA1_SIXEL_FLAG = 4;
 
+// Modern terminals that support ZBIN32+CRC-32 ZMODEM headers.
+// If the negotiator identifies the terminal as one of these, the
+// ZMODEM engine starts with ZBIN32 for optimal performance.
+// Unknown/legacy terminals start with ZBIN+CRC-16 for safety.
+var ZMODEM_MODERN_TERMINALS = new Set([
+	"SyncTerm", "MagiTerm", "MagiTerm-Older", "IcyTerm"
+]);
+
 // Known terminal sixel support lookup
 // Used for terminals that don't report via standard DA1 flags
 const SIXEL_SUPPORT = {
@@ -512,6 +520,28 @@ class TerminalNegotiator extends BaseHandler {
 		}
 	}
 
+	_detectZmodemCrcMode() {
+		// appConfig override takes highest precedence
+		var override = appConfig.get('zmodem_default_crc', 'auto');
+		if (override === 'zbin32') {
+			this.call.zmodem_crc_mode = 'zbin32';
+			return;
+		}
+		if (override === 'zbin_crc16') {
+			this.call.zmodem_crc_mode = 'zbin_crc16';
+			return;
+		}
+
+		// Auto: known modern terminals get ZBIN32, regardless of connection type
+		if (ZMODEM_MODERN_TERMINALS.has(this.call.term_type)) {
+			this.call.zmodem_crc_mode = 'zbin32';
+			return;
+		}
+
+		// Otherwise keep the connection default (set in callmanager):
+		// WebSocket non-legacy = zbin32, TCP/legacy WS = zbin_crc16
+	}
+
 	_compareVersions(a, b) {
 		var partsA = String(a).split(".").map(Number);
 		var partsB = String(b).split(".").map(Number);
@@ -549,6 +579,11 @@ class TerminalNegotiator extends BaseHandler {
 		// Check sixel support after all detection is done
 		this._checkSixelSupport();
 
+		// ZMODEM CRC mode: known modern terminals get ZBIN32+CRC-32,
+		// others keep the connection default (CRC-16 for TCP/legacy WS).
+		// appConfig override takes precedence over auto-detection.
+		this._detectZmodemCrcMode();
+
 		this.call.charset = new charSet(this.call.term_encoding);
 
 		alogger.writeAlog(4, this.loggingId + "\n  Negotiation complete:"
@@ -558,7 +593,8 @@ class TerminalNegotiator extends BaseHandler {
 			+ "\n  Encoding: " + this.call.term_encoding
 			+ "\n  Size: " + this.call.term_width + "x" + this.call.term_height
 			+ (this.call.use_rip ? "\n  RIP: v" + this.call.term_rip_string : "")
-			+ "\n  Sixel: " + (this.call.use_sixel ? "Yes" : "No"),
+			+ "\n  Sixel: " + (this.call.use_sixel ? "Yes" : "No")
+			+ "\n  ZMODEM: " + this.call.zmodem_crc_mode,
 			"greenbright");
 
 		this.finished = true;

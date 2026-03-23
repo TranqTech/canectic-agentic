@@ -20,6 +20,8 @@ The system uses native JavaScript XMODEM and ZMODEM protocol engines (`src/trans
 - `src/protocols/xmodem_native.js` and `src/protocols/zmodem_native.js` are terminal wrappers that use the StreamAdapter pattern to bridge engine I/O to `call` objects. They suppress terminal output during transfers and reset inactivity timeouts on data flow.
 - All five terminal download/upload handlers prompt for protocol selection (XMODEM or ZMODEM) before transfers begin. XMODEM uploads also prompt for a filename.
 - ZMODEM sender adapts to receiver capabilities: uses ZBIN32+CRC-32 when the receiver advertises CANFC32, falls back to ZBIN+CRC-16 otherwise. ZRINIT flags use the ZF0=p3 byte position per the ZMODEM specification.
+- ZMODEM CRC mode is pre-selected per session based on terminal type (see section 2.5).
+- Default subpacket size is 1024 bytes for broad legacy client compatibility.
 
 **No external dependencies**: Native engines eliminate the `lrzsz` system package requirement. The `lrzsz` wrappers remain available as fallback.
 
@@ -76,6 +78,29 @@ Full ZMODEM implementation with streaming, crash recovery, and receiver capabili
 - **Send**: ZRINIT negotiation, ZFILE/ZDATA/ZEOF/ZFIN sequence, ZDLE escaping, streaming with ZCRCG/ZCRCQ subpackets. Adapts to receiver: ZBIN32+CRC-32 when CANFC32 advertised, ZBIN+CRC-16 otherwise. Crash recovery via ZRPOS. ZCRC file integrity support.
 - **Receive**: Sends ZRINIT with capability flags (ZF0=p3 byte position per spec), receives ZFILE metadata, ZDATA streaming, validates CRC per subpacket, sends ZRPOS on errors.
 - **Headers**: Hex (ZPAD+ZDLE+ZHEX), binary (ZBIN+CRC-16), binary32 (ZBIN32+CRC-32).
+- **Data subpackets (CRC-16)**: When using ZBIN+CRC-16 mode, data subpacket CRCs use standard CRC-16-CCITT (same polynomial as hex headers). The CRC-16 is sent big-endian (MSB first). `crc.js` includes `crc16zmodem()` as a reference implementation of the lrzsz `updcrc` variant, which with augmentation produces the same final value as standard CCITT.
+- **ZEOF timeout**: Proportional to file size — 1 second per KB with a minimum of 60 seconds. Allows slow connections time to drain their buffers before the sender gives up waiting for ZEOF acknowledgement.
+
+### 2.5 CRC Mode Auto-Detection
+
+The ZMODEM sender's initial CRC mode is pre-selected during terminal negotiation based on the connected terminal type, stored on `call.zmodem_crc_mode`.
+
+**Terminal-based selection** (`terminalnegotiator.js`):
+- `ZMODEM_MODERN_TERMINALS` set (SyncTERM, IcyTerm, MagiTerm) — start with ZBIN32+CRC-32 (fast path)
+- Legacy/unknown terminals — start with ZBIN+CRC-16 (universal fallback)
+- WebSocket pools with the `legacy` flag set (e.g. `/ws/legacy` for DosBox/vmodem connector clients) — always CRC-16
+
+**Sysop override**: The `zmodem_default_crc` appConfig setting allows overriding auto-detection:
+- `auto` (default) — terminal-based detection as above
+- `zbin32` — force ZBIN32+CRC-32 for all sessions
+- `zbin_crc16` — force ZBIN+CRC-16 for all sessions
+
+**Auto-fallback chain**: If the receiver does not respond to ZFILE within 3 seconds, the sender steps down:
+1. ZBIN32+CRC-32 (timeout)
+2. ZBIN+CRC-32 (timeout)
+3. ZBIN+CRC-16 (final attempt)
+
+This ensures transfers succeed even when terminal detection is wrong.
 
 ### 2.3 StreamAdapter Wrappers
 

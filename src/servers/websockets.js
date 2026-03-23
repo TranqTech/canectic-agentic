@@ -24,6 +24,7 @@ class WsConnection{
 	constructor(socket, rawsocket, pool){
 		this.uuid = uuidv4()
 		this.connectionType = "Websocket"
+		this.legacy = pool.legacy || false
 		this.socket = socket
 		this.rawsocket = rawsocket.socket
 		this.parentPool = pool
@@ -138,13 +139,14 @@ class WsConnection{
 
 
 class WsPool{
-	constructor(path, name){
+	constructor(path, name, options){
 		this.name = name;
 		this.uuid = uuidv4();
 		this.connections = []
 		this.callPool = ""
 		this.forwardtoPool = false
 		this.path = path; // e.g. '/ws/bbs1'
+		this.legacy = (options && options.legacy) || false; // Legacy client flag for CRC mode
 		this.loggingId = "WsPool " + name
         
         // noServer mode — no port, no standalone listener
@@ -222,8 +224,8 @@ class WsManager{
 	listPools(){
 		//
 	}
-	createNewPool(path, name){
-		var newpool = new WsPool(path, name);
+	createNewPool(path, name, options){
+		var newpool = new WsPool(path, name, options);
 		this.pools.push(newpool);
 		this.pathMap.set(path, newpool); // register the route
 		return newpool;

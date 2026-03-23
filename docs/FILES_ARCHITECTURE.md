@@ -47,9 +47,9 @@ Cross-references:
 | File | Purpose |
 |------|---------|
 | `transfers/constants.js` | Shared byte constants for XMODEM and ZMODEM protocols. |
-| `transfers/crc.js` | CRC-16 (CCITT) and CRC-32 routines used by both engines. |
+| `transfers/crc.js` | CRC-16 (CCITT), CRC-32, and `crc16zmodem()` (lrzsz-variant reference) routines used by both engines. |
 | `transfers/xmodem.js` | `XmodemEngine` — XMODEM-CRC and XMODEM-1K send/receive state machine. Single-file protocol. |
-| `transfers/zmodem.js` | `ZmodemEngine` — ZMODEM send/receive with ZDLE escaping, hex/binary/ZBIN32 headers, CRC-16/CRC-32, streaming, crash recovery, ZCRC support. Adapts to receiver capabilities (ZBIN32+CRC-32 when CANFC32, ZBIN+CRC-16 otherwise). |
+| `transfers/zmodem.js` | `ZmodemEngine` — ZMODEM send/receive with ZDLE escaping, hex/binary/ZBIN32 headers, CRC-16/CRC-32, streaming, crash recovery, ZCRC support. CRC mode pre-selected per session via `call.zmodem_crc_mode` (set during terminal negotiation). Auto-fallback chain: ZBIN32 -> ZBIN+CRC-32 -> ZBIN+CRC-16 (3s ZFILE timeout per step). Default 1024-byte subpackets. |
 
 ### Transfer Protocol Wrappers
 
@@ -535,7 +535,7 @@ The StreamAdapter wrappers additionally suppress terminal output during transfer
 
 ### Send vs Receive
 
-- **Send (ZMODEM)**: ZmodemEngine handles ZRINIT negotiation, ZFILE/ZDATA/ZEOF/ZFIN sequence, ZDLE escaping, streaming subpackets. Adapts header format to receiver capabilities (ZBIN32+CRC-32 when CANFC32, ZBIN+CRC-16 otherwise).
+- **Send (ZMODEM)**: ZmodemEngine handles ZRINIT negotiation, ZFILE/ZDATA/ZEOF/ZFIN sequence, ZDLE escaping, streaming subpackets. Initial CRC mode pre-selected from `call.zmodem_crc_mode` (terminal-based: modern terminals get ZBIN32+CRC-32, legacy/unknown get ZBIN+CRC-16). Auto-fallback chain on ZFILE timeout (3s per step): ZBIN32 -> ZBIN+CRC-32 -> ZBIN+CRC-16. ZEOF timeout is proportional (1s/KB, min 60s). Default 1024-byte subpackets for legacy compatibility.
 - **Send (XMODEM)**: XmodemEngine waits for receiver initiation ('C' for CRC mode, NAK for checksum), sends 128-byte or 1024-byte blocks with CRC-16.
 - **Receive (ZMODEM)**: ZmodemEngine sends ZRINIT with capability flags, receives ZDATA stream, validates CRC per subpacket, supports crash recovery via ZRPOS.
 - **Receive (XMODEM)**: XmodemEngine sends 'C' to initiate CRC mode, validates each block, sends ACK/NAK. Prompts user for filename since XMODEM does not transmit filenames.
@@ -662,7 +662,7 @@ Network import metadata (TIC path, seenby, origin, passwords) is stored as JSONB
 
 ### Native Transfer Engines
 
-File transfers use native JavaScript XMODEM and ZMODEM engines (`src/transfers/`) rather than external tools. The engines are protocol-agnostic and testable in isolation. StreamAdapter wrappers (`src/protocols/xmodem_native.js`, `zmodem_native.js`) bridge engines to call objects. The lrzsz-based wrappers remain as fallback.
+File transfers use native JavaScript XMODEM and ZMODEM engines (`src/transfers/`) rather than external tools. The engines are protocol-agnostic and testable in isolation. StreamAdapter wrappers (`src/protocols/xmodem_native.js`, `zmodem_native.js`) bridge engines to call objects. The lrzsz-based wrappers remain as fallback. ZMODEM CRC mode is pre-selected per session during terminal negotiation (`call.zmodem_crc_mode`) with an auto-fallback chain for misdetected terminals. See `DOWNLOAD_PROTOCOL_DESIGN.md` section 2.5.
 
 ### Cross-Area Search
 

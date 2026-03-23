@@ -199,8 +199,8 @@ class ZmodemEngine extends EventEmitter {
 		// Send CRC mode with auto-fallback:
 		// 'zbin32'     — ZBIN32 headers + CRC-32 data (modern clients)
 		// 'zbin_crc32' — ZBIN headers + CRC-32 data (lrzsz compat)
-		// 'zbin_crc16' — ZBIN headers + CRC-16 data (last resort)
-		this._sendCrcMode = 'zbin32';
+		// 'zbin_crc16' — ZBIN headers + CRC-16 data (universal fallback)
+		this._sendCrcMode = this._opts.initialCrcMode || 'zbin32';
 		this._zfileRetries = 0;
 
 		// ZRQINIT retry counter
@@ -297,10 +297,10 @@ class ZmodemEngine extends EventEmitter {
 			this._escapeAll = true;
 		}
 
-		// Set initial CRC mode based on capabilities
-		if (this._rxCanFC32 && this._zfileRetries === 0) {
-			this._sendCrcMode = 'zbin32';
-		} else if (!this._rxCanFC32) {
+		// On first ZRINIT, keep the initialCrcMode from constructor.
+		// On subsequent ZRINITs (after fallback), keep the current mode.
+		// Only force CRC-16 if receiver doesn't advertise CANFC32.
+		if (!this._rxCanFC32) {
 			this._sendCrcMode = 'zbin_crc16';
 		}
 

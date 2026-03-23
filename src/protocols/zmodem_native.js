@@ -32,6 +32,7 @@ class NativeZmodemProtocol {
 			subpacketSize: this._opts.subpacketSize || 1024,
 			escapeCtl: this._opts.escapeCtl || false,
 			timeout: this._opts.timeout || 15000,
+			initialCrcMode: this._call.zmodem_crc_mode || 'zbin_crc16',
 		});
 
 		this._engine.on('error', function() {});
