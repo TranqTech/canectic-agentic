@@ -9,6 +9,7 @@ import {WsManager, WsPool} from "../src/servers/websockets.js"
 import { TcpPool, TcpServer } from "../src/servers/tcpserver.js"
 import { TelnetPool, TelnetServer } from "../src/servers/telnetserver.js"
 import { TerminalPool, TerminalServer } from "../src/servers/terminalserver.js"
+import { ImapServer } from "../src/servers/imapServer.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
@@ -54,6 +55,7 @@ var httpServer
 var tcpServer         // TCP terminal server (legacy, use terminalServer instead)
 var telnetServer      // Telnet terminal server (legacy, use terminalServer instead)
 var terminalServer    // Unified TCP/Telnet auto-detect server
+var imapServer        // IMAP server for PM access
 var eventSubscriber
 var embeddedWorkers   // only used in embedded mode
 var mailerManager     // only used in embedded mode
@@ -240,6 +242,23 @@ async function startTerminalServer(){
 	callservcount += 1;
 }
 
+async function startImapServer(){
+	var imapport = appConfig.getNumber('imapport', 10143);
+	if (!imapport || imapport <= 0) {
+		alogger.writeAlog(2, "  IMAP server disabled (imapport = 0)", "yellow");
+		return;
+	}
+	var domain = appConfig.get('mail_domain', '');
+	if (!domain) {
+		alogger.writeAlog(2, "  IMAP server disabled (mail_domain not configured)", "yellow");
+		return;
+	}
+
+	imapServer = new ImapServer(imapport, domain);
+	imapServer.start();
+	servercount += 1;
+}
+
 // --- Event subscriber ---
 // Listens for cross-process events from the worker and mailer
 
@@ -331,6 +350,7 @@ async function main(){
 	}
 	// Unified terminal server (auto-detects TCP vs Telnet)
 	await startTerminalServer()
+	await startImapServer()
 
 	// Mode-dependent startup
 	if (processMode === 'embedded') {
