@@ -1,0 +1,392 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper.log-viewer-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+
+      //- Controls bar
+      .card.mb-2#logControls
+        .card-header.bg-darkblue.text-white.py-2
+          .row.align-items-center
+            .col-4
+              h5.mb-0
+                i.bi.bi-terminal.me-2
+                | System Logs
+            .col-4.text-center
+              .d-inline-flex.align-items-center
+                label.form-label.text-white.mb-0.me-2.small Level:
+                select#levelFilter.form-select.form-select-sm(style='width:auto;min-width:100px')
+                  option(value='99') All
+                  option(value='0') 0 — Critical
+                  option(value='1' selected) 1 — Startup
+                  option(value='2') 2 — Operational
+                  option(value='3') 3 — Info
+                  option(value='4') 4 — Debug
+                  option(value='5') 5 — Verbose
+            .col-4.text-end
+              .btn-group.btn-group-sm
+                button#btnAll.btn.btn-outline-light.active(type='button') All
+                button#btnTiled.btn.btn-outline-light(type='button') Tiled
+              button#btnClear.btn.btn-sm.btn-outline-danger.ms-2(type='button' title='Clear')
+                i.bi.bi-trash
+
+      //- Log panes
+      .row.g-2#logPanes
+
+        //- All-in-one pane
+        .col-12#paneAll
+          .card
+            .card-header.bg-dark.text-white.py-1
+              .d-flex.justify-content-between.align-items-center
+                small.fw-bold All Processes
+                small#allCount.text-muted 0 entries
+            .card-body.p-0
+              #logAll.log-pane(data-process='all')
+
+        //- Tiled panes — 2 columns, 2 rows
+        .col-6.d-none#paneGateway
+          .card
+            .card-header.bg-dark.text-white.py-1
+              .d-flex.justify-content-between.align-items-center
+                small.fw-bold
+                  span.text-info ●
+                  |  Gateway
+                small#gatewayCount.text-muted 0
+            .card-body.p-0
+              #logGateway.log-pane(data-process='gateway')
+
+        .col-6.d-none#paneMail
+          .card
+            .card-header.bg-dark.text-white.py-1
+              .d-flex.justify-content-between.align-items-center
+                small.fw-bold
+                  span.text-purple ●
+                  |  Mail
+                small#mailCount.text-muted 0
+            .card-body.p-0
+              #logMail.log-pane(data-process='mail')
+
+        .col-6.d-none#paneWorker
+          .card
+            .card-header.bg-dark.text-white.py-1
+              .d-flex.justify-content-between.align-items-center
+                small.fw-bold
+                  span.text-success ●
+                  |  Worker
+                small#workerCount.text-muted 0
+            .card-body.p-0
+              #logWorker.log-pane(data-process='worker')
+
+        .col-6.d-none#paneMailer
+          .card
+            .card-header.bg-dark.text-white.py-1
+              .d-flex.justify-content-between.align-items-center
+                small.fw-bold
+                  span.text-warning ●
+                  |  Mailer
+                small#mailerCount.text-muted 0
+            .card-body.p-0
+              #logMailer.log-pane(data-process='mailer')
+
+      //- Status indicator below panes
+      .row.mt-2.mb-3
+        .col-12.text-center
+          small#wsStatus.text-muted Connecting...
+
+  style.
+    body { overflow: hidden; }
+    .log-viewer-wrapper {
+      padding-top: 64px;
+      padding-bottom: 20px;
+      margin-bottom: 0;
+    }
+    .log-pane {
+      overflow-y: auto;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      padding: 8px;
+    }
+    .log-entry { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
+    .log-entry.filtered { display: none; }
+    .log-ts { color: #666; }
+    .log-process { font-weight: bold; }
+    .log-process-gateway { color: #0dcaf0; }
+    .log-process-worker  { color: #20c997; }
+    .log-process-mailer  { color: #ffc107; }
+    .log-process-mail    { color: #b38bfa; }
+    .log-level { color: #888; margin: 0 4px; }
+    .log-msg { }
+    .text-purple { color: #b38bfa !important; }
+    .clr-black { color: #333; }
+    .clr-red { color: #dc3545; }
+    .clr-green { color: #198754; }
+    .clr-yellow { color: #ffc107; }
+    .clr-blue { color: #0d6efd; }
+    .clr-magenta { color: #d63384; }
+    .clr-cyan { color: #0dcaf0; }
+    .clr-white { color: #f8f9fa; }
+    .clr-gray { color: #6c757d; }
+    .clr-redbright { color: #ff6b6b; }
+    .clr-greenbright { color: #51cf66; }
+    .clr-yellowbright { color: #ffd43b; }
+    .clr-bluebright { color: #74c0fc; }
+    .clr-magentabright { color: #e599f7; }
+    .clr-cyanbright { color: #66d9e8; }
+    .clr-whitebright { color: #fff; }
+    .clr-bold { font-weight: bold; }
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var sessionId = '#{sessionId}';
+      var maxEntries = 2000;
+      var autoScroll = {};
+      var entryCounts = { gateway: 0, worker: 0, mailer: 0, mail: 0 };
+      var currentView = 'all';
+      var ws = null;
+      var PROCESSES = ['gateway', 'worker', 'mailer', 'mail'];
+
+      // --- Size log panes to fill viewport ---
+      function sizePanes() {
+        var controlsEl = document.getElementById('logControls');
+        var controlsBottom = controlsEl ? controlsEl.getBoundingClientRect().bottom : 80;
+        var statusHeight = 55;
+
+        if (currentView === 'all') {
+          var allPane = panes.all;
+          if (allPane) {
+            var h = window.innerHeight - controlsBottom - statusHeight - 40;
+            if (h < 100) h = 100;
+            allPane.style.height = h + 'px';
+          }
+        } else {
+          // Tiled: 2 rows share the space
+          var available = window.innerHeight - controlsBottom - statusHeight - 20;
+          var rowHeight = Math.floor(available / 2) - 30;
+          if (rowHeight < 80) rowHeight = 80;
+          document.querySelectorAll('.log-pane').forEach(function(p) {
+            if (p.id !== 'logAll') p.style.height = rowHeight + 'px';
+          });
+        }
+      }
+      window.addEventListener('resize', sizePanes);
+
+      // Scroll all visible panes to bottom
+      function scrollAllToBottom() {
+        Object.keys(panes).forEach(function(key) {
+          var p = panes[key];
+          p.scrollTop = p.scrollHeight;
+          autoScroll[key] = true;
+        });
+      }
+
+      // --- Pane references ---
+      var panes = {
+        all:     document.getElementById('logAll'),
+        gateway: document.getElementById('logGateway'),
+        worker:  document.getElementById('logWorker'),
+        mailer:  document.getElementById('logMailer'),
+        mail:    document.getElementById('logMail')
+      };
+
+      Object.keys(panes).forEach(function(key) {
+        autoScroll[key] = true;
+        panes[key].addEventListener('scroll', function() {
+          var el = this;
+          autoScroll[key] = (el.scrollHeight - el.scrollTop - el.clientHeight) < 40;
+        });
+      });
+
+      // --- View switching ---
+      var btnAll   = document.getElementById('btnAll');
+      var btnTiled = document.getElementById('btnTiled');
+
+      function setView(view) {
+        currentView = view;
+        btnAll.classList.remove('active');
+        btnTiled.classList.remove('active');
+
+        if (view === 'all') {
+          btnAll.classList.add('active');
+          document.getElementById('paneAll').className = 'col-12';
+          document.getElementById('paneGateway').className = 'col-6 d-none';
+          document.getElementById('paneMail').className = 'col-6 d-none';
+          document.getElementById('paneWorker').className = 'col-6 d-none';
+          document.getElementById('paneMailer').className = 'col-6 d-none';
+        } else {
+          btnTiled.classList.add('active');
+          document.getElementById('paneAll').className = 'col-12 d-none';
+          document.getElementById('paneGateway').className = 'col-6';
+          document.getElementById('paneMail').className = 'col-6';
+          document.getElementById('paneWorker').className = 'col-6';
+          document.getElementById('paneMailer').className = 'col-6';
+        }
+        setTimeout(function() { sizePanes(); scrollAllToBottom(); }, 0);
+      }
+
+      btnAll.addEventListener('click', function() { setView('all'); });
+      btnTiled.addEventListener('click', function() { setView('tiled'); });
+
+      // --- Level filter ---
+      var levelFilter = document.getElementById('levelFilter');
+
+      function applyLevelFilter() {
+        var maxLevel = parseInt(levelFilter.value);
+        document.querySelectorAll('.log-entry').forEach(function(el) {
+          var entryLevel = parseInt(el.dataset.level);
+          if (entryLevel > maxLevel) {
+            el.classList.add('filtered');
+          } else {
+            el.classList.remove('filtered');
+          }
+        });
+        scrollAllToBottom();
+      }
+
+      levelFilter.addEventListener('change', applyLevelFilter);
+
+      // --- Clear ---
+      document.getElementById('btnClear').addEventListener('click', function() {
+        Object.keys(panes).forEach(function(key) { panes[key].innerHTML = ''; });
+        entryCounts = { gateway: 0, worker: 0, mailer: 0, mail: 0 };
+        updateCounts();
+      });
+
+      // --- Entry rendering ---
+      function renderEntry(entry) {
+        var ts = new Date(entry.ts).toLocaleTimeString();
+        var proc = (entry.process || 'unknown').padEnd(7);
+        var maxLevel = parseInt(levelFilter.value);
+
+        var div = document.createElement('div');
+        div.className = 'log-entry';
+        if (entry.level > maxLevel) div.className += ' filtered';
+        div.dataset.level = entry.level;
+        div.dataset.process = entry.process;
+
+        var colorClass = entry.color ? ' clr-' + entry.color.toLowerCase() : '';
+        var boldClass = entry.bold ? ' clr-bold' : '';
+
+        div.innerHTML =
+          '<span class="log-ts">' + ts + '</span> ' +
+          '<span class="log-process log-process-' + entry.process + '">[' + escHtml(proc) + ']</span>' +
+          '<span class="log-level">L' + entry.level + '</span>' +
+          '<span class="log-msg' + colorClass + boldClass + '">' + escHtml(entry.message) + '</span>';
+
+        return div;
+      }
+
+      function escHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+
+      function appendEntry(entry) {
+        var el = renderEntry(entry);
+
+        panes.all.appendChild(el.cloneNode(true));
+        trimPane(panes.all);
+        if (autoScroll.all) panes.all.scrollTop = panes.all.scrollHeight;
+
+        var proc = entry.process;
+        if (panes[proc]) {
+          panes[proc].appendChild(el);
+          trimPane(panes[proc]);
+          if (autoScroll[proc]) panes[proc].scrollTop = panes[proc].scrollHeight;
+          entryCounts[proc] = (entryCounts[proc] || 0) + 1;
+        }
+
+        updateCounts();
+      }
+
+      function trimPane(pane) {
+        while (pane.children.length > maxEntries) {
+          pane.removeChild(pane.firstChild);
+        }
+      }
+
+      function updateCounts() {
+        var total = 0;
+        PROCESSES.forEach(function(p) { total += entryCounts[p] || 0; });
+        document.getElementById('allCount').textContent = total + ' entries';
+        document.getElementById('gatewayCount').textContent = entryCounts.gateway || 0;
+        document.getElementById('workerCount').textContent = entryCounts.worker || 0;
+        document.getElementById('mailerCount').textContent = entryCounts.mailer || 0;
+        document.getElementById('mailCount').textContent = entryCounts.mail || 0;
+      }
+
+      // --- Load history ---
+      function loadHistory() {
+        fetch('/adminlogs/history?limit=500')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (!data.processes) return;
+            var all = [];
+            PROCESSES.forEach(function(proc) {
+              if (data.processes[proc]) {
+                data.processes[proc].forEach(function(e) { all.push(e); });
+              }
+            });
+            all.sort(function(a, b) { return a.ts - b.ts || (a.seq || 0) - (b.seq || 0); });
+            all.forEach(function(entry) { appendEntry(entry); });
+          })
+          .catch(function(err) {
+            console.log('History load failed:', err);
+          });
+      }
+
+      // --- WebSocket connection ---
+      function connectWs() {
+        var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var url = proto + '//' + location.host + '/ws/adminlogs';
+        var statusEl = document.getElementById('wsStatus');
+        ws = new WebSocket(url);
+
+        ws.onopen = function() {
+          statusEl.innerHTML = '<span class="text-warning">\u25CF Authenticating...</span>';
+          ws.send(JSON.stringify({ type: 'auth', sessionId: sessionId }));
+        };
+
+        ws.onmessage = function(event) {
+          try {
+            var msg = JSON.parse(event.data);
+            if (msg.type === 'auth') {
+              if (msg.status === 'ok') {
+                statusEl.innerHTML = '<span class="text-success">\u25CF Connected</span> \u2014 streaming live';
+              }
+              return;
+            }
+            if (msg.process && msg.ts) {
+              appendEntry(msg);
+            }
+          } catch (_) {}
+        };
+
+        ws.onclose = function(e) {
+          statusEl.innerHTML = '<span class="text-danger">\u25CF Disconnected</span>' +
+            (e.code === 4003 ? ' \u2014 insufficient permissions' :
+             e.code === 4001 ? ' \u2014 auth timeout' :
+             ' \u2014 reconnecting in 5s...');
+          if (e.code !== 4003 && e.code !== 4001) {
+            setTimeout(connectWs, 5000);
+          }
+        };
+
+        ws.onerror = function() {
+          statusEl.innerHTML = '<span class="text-danger">\u25CF Connection error</span>';
+        };
+      }
+
+      // --- Init ---
+      sizePanes();
+      loadHistory();
+      connectWs();
+    });

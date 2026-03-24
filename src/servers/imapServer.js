@@ -20,7 +20,7 @@ import appConfig from '../config/appConfig.js';
 import { createEventPublisher, createEventSubscriber, EVENTS } from '../queues/events.js';
 
 var GREETING = 'Canectic BBS IMAP4rev1 ready';
-var CAPABILITIES = 'IMAP4rev1 IDLE';
+var CAPABILITIES = 'IMAP4rev1 IDLE UIDPLUS MOVE';
 
 // Valid mailbox names
 var MAILBOXES = ['INBOX', 'Sent', 'Trash'];
@@ -157,6 +157,14 @@ class ImapSession {
 					await this._cmdStore(tag, args);
 					break;
 
+				case 'COPY':
+					await this._cmdCopy(tag, args, false);
+					break;
+
+				case 'MOVE':
+					await this._cmdMove(tag, args, false);
+					break;
+
 				case 'EXPUNGE':
 					await this._cmdExpunge(tag);
 					break;
@@ -220,6 +228,10 @@ class ImapSession {
 
 		var username = parsed[0];
 		var password = parsed[1];
+
+		// Allow username@domain login style — strip the domain part
+		var atIdx = username.indexOf('@');
+		if (atIdx >= 0) username = username.substring(0, atIdx);
 
 		var result = await checkUserPass(username, password);
 		if (result.isvalid) {
@@ -385,10 +397,7 @@ class ImapSession {
 			var parts = [];
 
 			if (wantFlags) {
-				var flags = [];
-				// Sent messages are always \Seen (you wrote them)
-				if (row.read || this.selectedMailbox === 'Sent') flags.push('\\Seen');
-				if (row.deleted) flags.push('\\Deleted');
+				var flags = this._buildFlags(row, uid);
 				parts.push('FLAGS (' + flags.join(' ') + ')');
 			}
 
@@ -425,8 +434,8 @@ class ImapSession {
 					if (wantBodyFull) {
 						var bodyKey = peek ? 'BODY[]' : 'BODY[]';
 						parts.push(bodyKey + ' {' + Buffer.byteLength(rfc2822, 'utf8') + '}\r\n' + rfc2822);
-						if (!peek && !row.read && this.selectedMailbox === 'INBOX') {
-							await this._markRead(row.id);
+						if (!peek && !row.read && (this.selectedMailbox === 'INBOX' || this.selectedMailbox === 'Trash')) {
+							await this._markRead(row, uid);
 							row.read = true;
 						}
 					}
@@ -514,10 +523,10 @@ class ImapSession {
 
 			if (wantSeen) {
 				if (add) {
-					await this._markRead(row.id);
+					await this._markRead(row, uid);
 					row.read = true;
 				} else if (remove) {
-					await this._markUnread(row.id);
+					await this._markUnread(row, uid);
 					row.read = false;
 				}
 			}
@@ -531,9 +540,7 @@ class ImapSession {
 
 			if (!silent) {
 				var seqNum = this.uidList.indexOf(uid) + 1;
-				var flags = [];
-				if (row.read || this.selectedMailbox === 'Sent') flags.push('\\Seen');
-				if (row.deleted) flags.push('\\Deleted');
+				var flags = this._buildFlags(row, uid);
 				this._send('* ' + seqNum + ' FETCH (FLAGS (' + flags.join(' ') + ')' +
 					(useUid ? ' UID ' + uid : '') + ')');
 			}
@@ -554,20 +561,108 @@ class ImapSession {
 		this._send(tag + ' OK EXPUNGE completed');
 	}
 
-	async _doExpunge() {
+	async _doExpunge(uidSet) {
 		// Remove messages flagged as \Deleted
-		var removed = [];
+		// If uidSet provided, only expunge those UIDs (UID EXPUNGE)
 		for (var i = this.uidList.length - 1; i >= 0; i--) {
 			var uid = this.uidList[i];
 			var row = this.messageMap[uid];
 			if (row && row.deleted) {
+				if (uidSet && !uidSet.includes(uid)) continue;
 				var seqNum = i + 1;
 				this._send('* ' + seqNum + ' EXPUNGE');
 				this.uidList.splice(i, 1);
 				delete this.messageMap[uid];
-				removed.push(uid);
 			}
 		}
+	}
+
+	async _cmdUidExpunge(tag, args) {
+		if (this.state !== 'selected') {
+			this._send(tag + ' NO Not selected');
+			return;
+		}
+		var uids = this._resolveSequenceSet(args.trim(), true);
+		await this._doExpunge(uids);
+		this._send(tag + ' OK UID EXPUNGE completed');
+	}
+
+	// --- COPY ---
+	// Thunderbird deletes by: COPY to Trash, STORE \Deleted, EXPUNGE
+	// We map COPY to Trash as soft-delete, COPY from Trash to INBOX as restore.
+
+	async _cmdCopy(tag, args, useUid) {
+		if (this.state !== 'selected') {
+			this._send(tag + ' NO Not selected');
+			return;
+		}
+
+		var parts = args.match(/^(\S+)\s+(.+)$/);
+		if (!parts) {
+			this._send(tag + ' BAD Invalid COPY syntax');
+			return;
+		}
+
+		var seqSet = parts[1];
+		var targetMailbox = this._unquote(parts[2].trim());
+		var uids = this._resolveSequenceSet(seqSet, useUid);
+
+		alogger.writeAlog(5, 'IMAP COPY: uids=' + JSON.stringify(uids) +
+			' from=' + this.selectedMailbox + ' to=' + targetMailbox, 'cyan');
+
+		for (var uid of uids) {
+			var row = this.messageMap[uid];
+			if (!row) continue;
+
+			if (targetMailbox.toUpperCase() === 'TRASH') {
+				// Copy to Trash = soft-delete
+				await this._markDeleted(row, uid);
+				row.deleted = true;
+			} else if (targetMailbox.toUpperCase() === 'INBOX' && this.selectedMailbox === 'Trash') {
+				// Restore from Trash
+				await this._restoreFromTrash(row, uid);
+			}
+			// Other copies silently accepted (no actual cross-folder copy needed)
+		}
+
+		this._send(tag + ' OK COPY completed');
+	}
+
+	// --- MOVE (RFC 6851) ---
+	// MOVE = COPY + STORE \Deleted + EXPUNGE in one step
+
+	async _cmdMove(tag, args, useUid) {
+		if (this.state !== 'selected') {
+			this._send(tag + ' NO Not selected');
+			return;
+		}
+
+		var parts = args.match(/^(\S+)\s+(.+)$/);
+		if (!parts) {
+			this._send(tag + ' BAD Invalid MOVE syntax');
+			return;
+		}
+
+		var seqSet = parts[1];
+		var targetMailbox = this._unquote(parts[2].trim());
+		var uids = this._resolveSequenceSet(seqSet, useUid);
+
+		for (var uid of uids) {
+			var row = this.messageMap[uid];
+			if (!row) continue;
+
+			if (targetMailbox.toUpperCase() === 'TRASH') {
+				await this._markDeleted(row, uid);
+				row.deleted = true;
+			} else if (targetMailbox.toUpperCase() === 'INBOX' && this.selectedMailbox === 'Trash') {
+				await this._restoreFromTrash(row, uid);
+				row.deleted = true; // Mark for expunge from current view
+			}
+		}
+
+		// Expunge the moved messages from the current mailbox view
+		await this._doExpunge(uids);
+		this._send(tag + ' OK MOVE completed');
 	}
 
 	// --- UID prefix command ---
@@ -589,8 +684,18 @@ class ImapSession {
 			case 'STORE':
 				await this._doStore(tag, subargs, true);
 				break;
+			case 'COPY':
+				await this._cmdCopy(tag, subargs, true);
+				break;
+			case 'MOVE':
+				await this._cmdMove(tag, subargs, true);
+				break;
 			case 'SEARCH':
 				await this._cmdSearch(tag, subargs, true);
+				break;
+			case 'EXPUNGE':
+				// UID EXPUNGE (UIDPLUS extension) — expunge only specified UIDs
+				await this._cmdUidExpunge(tag, subargs);
 				break;
 			default:
 				this._send(tag + ' BAD Unknown UID subcommand');
@@ -670,9 +775,7 @@ class ImapSession {
 				var oldRow = this.messageMap[nuid];
 				var newRow = newMap[nuid];
 				if (oldRow && newRow && oldRow.read !== newRow.read) {
-					var flags = [];
-					if (newRow.read || this.selectedMailbox === 'Sent') flags.push('\\Seen');
-					if (newRow.deleted) flags.push('\\Deleted');
+					var flags = this._buildFlags(newRow, nuid);
 					this._send('* ' + (i + 1) + ' FETCH (FLAGS (' + flags.join(' ') + '))');
 				}
 			}
@@ -700,12 +803,15 @@ class ImapSession {
 			if (!row) continue;
 
 			var match = true;
+			var isSentItem = this.selectedMailbox === 'Sent' ||
+				(this.selectedMailbox === 'Trash' && row._source === 'sent');
+			var isSeen = row.read || isSentItem;
 
 			if (criteria.includes('UNSEEN') || criteria.includes('NOT SEEN')) {
-				if (row.read) match = false;
+				if (isSeen) match = false;
 			}
 			if (criteria.includes('SEEN') && !criteria.includes('UNSEEN') && !criteria.includes('NOT SEEN')) {
-				if (!row.read) match = false;
+				if (!isSeen) match = false;
 			}
 			if (criteria.includes('DELETED')) {
 				if (!row.deleted) match = false;
@@ -764,9 +870,7 @@ class ImapSession {
 					var oldRow = self.messageMap[nuid];
 					var newRow = newMap[nuid];
 					if (oldRow && newRow && oldRow.read !== newRow.read) {
-						var flags = [];
-						if (newRow.read || self.selectedMailbox === 'Sent') flags.push('\\Seen');
-						if (newRow.deleted) flags.push('\\Deleted');
+						var flags = self._buildFlags(newRow, nuid);
 						self._send('* ' + (i + 1) + ' FETCH (FLAGS (' + flags.join(' ') + '))');
 					}
 				}
@@ -829,52 +933,87 @@ class ImapSession {
 
 	// --- DB operations ---
 
-	async _markRead(id) {
-		if (this.selectedMailbox === 'INBOX' || this.selectedMailbox === 'Trash') {
-			await postgres.write(
-				"UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
-				[id, this.userId]
-			);
-			if (this._eventPublisher) {
-				this._eventPublisher.publish(EVENTS.PM_READ_CHANGED, {
-					userId: this.userId, pmId: id, read: true, source: 'imap'
-				});
-			}
+	// Resolve a UID to its source table name and real row ID.
+	// For Trash, UIDs are interleaved (even=inbox, odd=outbox).
+	_resolveTable(uid) {
+		if (this.selectedMailbox === 'Trash') {
+			var resolved = trashUidToSource(uid);
+			return { table: resolved.table === 'sent' ? 'pm_outbox' : 'pm_inbox', source: resolved.table };
+		}
+		if (this.selectedMailbox === 'Sent') return { table: 'pm_outbox', source: 'sent' };
+		return { table: 'pm_inbox', source: 'inbox' };
+	}
+
+	async _markRead(row, uid) {
+		var info = this._resolveTable(uid);
+		// pm_outbox has no read column — skip silently
+		if (info.source === 'sent') return;
+
+		await postgres.write(
+			"UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
+			[row.id, this.userId]
+		);
+		if (this._eventPublisher) {
+			this._eventPublisher.publish(EVENTS.PM_READ_CHANGED, {
+				userId: this.userId, pmId: row.id, read: true, source: 'imap'
+			});
 		}
 	}
 
-	async _markUnread(id) {
-		if (this.selectedMailbox === 'INBOX' || this.selectedMailbox === 'Trash') {
-			await postgres.write(
-				"UPDATE pm_inbox SET read = false, read_at = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2",
-				[id, this.userId]
-			);
-			if (this._eventPublisher) {
-				this._eventPublisher.publish(EVENTS.PM_READ_CHANGED, {
-					userId: this.userId, pmId: id, read: false, source: 'imap'
-				});
-			}
+	async _markUnread(row, uid) {
+		var info = this._resolveTable(uid);
+		if (info.source === 'sent') return;
+
+		await postgres.write(
+			"UPDATE pm_inbox SET read = false, read_at = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2",
+			[row.id, this.userId]
+		);
+		if (this._eventPublisher) {
+			this._eventPublisher.publish(EVENTS.PM_READ_CHANGED, {
+				userId: this.userId, pmId: row.id, read: false, source: 'imap'
+			});
 		}
 	}
 
 	async _markDeleted(row, uid) {
-		var table;
+		var info = this._resolveTable(uid);
+
 		if (this.selectedMailbox === 'Trash') {
-			var resolved = trashUidToSource(uid);
-			table = resolved.table === 'sent' ? 'pm_outbox' : 'pm_inbox';
-		} else if (this.selectedMailbox === 'Sent') {
-			table = 'pm_outbox';
+			// Already in Trash — hard delete (purge)
+			await postgres.write(
+				"DELETE FROM " + info.table + " WHERE id = $1 AND user_id = $2",
+				[row.id, this.userId]
+			);
 		} else {
-			table = 'pm_inbox';
+			// Soft-delete (move to Trash)
+			await postgres.write(
+				"UPDATE " + info.table + " SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
+				[row.id, this.userId]
+			);
 		}
+	}
+
+	async _restoreFromTrash(row, uid) {
+		var info = this._resolveTable(uid);
 
 		await postgres.write(
-			"UPDATE " + table + " SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
+			"UPDATE " + info.table + " SET deleted = false, deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2",
 			[row.id, this.userId]
 		);
 	}
 
 	// --- Helpers ---
+
+	// Build the flags array for a message row.
+	// Sent messages (and outbox items in Trash) are always \Seen.
+	_buildFlags(row, uid) {
+		var flags = [];
+		var isSentItem = this.selectedMailbox === 'Sent' ||
+			(this.selectedMailbox === 'Trash' && row._source === 'sent');
+		if (row.read || isSentItem) flags.push('\\Seen');
+		if (row.deleted) flags.push('\\Deleted');
+		return flags;
+	}
 
 	_resolveSequenceSet(seqSet, useUid) {
 		// Resolve a sequence set like "1:*", "3", "1,3,5" to UIDs

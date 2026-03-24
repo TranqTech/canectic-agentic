@@ -22,7 +22,7 @@ import appConfig from "../config/appConfig.js";
 const router = express.Router();
 router.use(cookieParser());
 
-const VALID_PROCESSES = ['gateway', 'worker', 'mailer'];
+const VALID_PROCESSES = ['gateway', 'worker', 'mailer', 'mail'];
 
 // ---------------------------------------------------------------------------
 // Shared middleware — inject common locals (same pattern as admin.js)

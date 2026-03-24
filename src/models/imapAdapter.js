@@ -23,17 +23,62 @@ function encodeAddress(displayName, localPart, domain) {
 	return localPart + '@' + domain;
 }
 
+// Build an email address encoding the network transport in the domain.
+// The pseudo-TLD indicates transport type, the domain encodes the address.
+//
+//   FTN  "1:134/101"           → local: "kostie",  domain: "1.134.101.ftn"
+//   FTN  "1:134/101.2"         → local: "kostie",  domain: "1.134.101.2.ftn"
+//   FTN  "1:134/101@fidonet"   → local: "kostie",  domain: "1.134.101-fidonet.ftn"
+//   FTN  "1:134/101.2@fidonet" → local: "kostie",  domain: "1.134.101.2-fidonet.ftn"
+//   QWK  "UNDRMINE"            → local: "kostie",  domain: "undrmine.qwk"
+//   LOCAL / empty               → local: "kostie",  domain: mailDomain
+//
+function networkEmailAddress(username, networkAddress, transportType, mailDomain) {
+	var local = (username || 'unknown').toLowerCase().replace(/\s+/g, '.');
+	if (!networkAddress || !transportType || transportType === 'LOCAL') {
+		return { local: local, domain: mailDomain };
+	}
+
+	if (transportType === 'FTN') {
+		var addr = networkAddress;
+		var ftnDomain = '';
+		var atIdx = addr.indexOf('@');
+		if (atIdx >= 0) {
+			ftnDomain = addr.substring(atIdx + 1);
+			addr = addr.substring(0, atIdx);
+		}
+		// zone:net/node[.point] → zone.net.node[.point]
+		var encoded = addr.replace(/:/g, '.').replace(/\//g, '.');
+		// 5D domain appended as trailing dot-label (always non-numeric, so unambiguous)
+		if (ftnDomain) encoded += '.' + ftnDomain.toLowerCase();
+		return { local: local, domain: encoded + '.ftn' };
+	}
+
+	if (transportType === 'QWK') {
+		return { local: local, domain: networkAddress.toLowerCase() + '.qwk' };
+	}
+
+	// Other transports — fall back to mailDomain
+	return { local: local, domain: mailDomain };
+}
+
+// Build a display name that includes the network address for non-local messages.
+//   FTN:   "kostie (1:134/101)"
+//   QWK:   "kostie (UNDRMINE)"
+//   LOCAL:  "kostie"
+function networkDisplayName(username, networkAddress, transportType) {
+	var name = username || 'Unknown';
+	if (!networkAddress || !transportType || transportType === 'LOCAL') return name;
+	return name + ' (' + networkAddress + ')';
+}
+
 function renderRfc2822(pmRow, mailDomain) {
-	var from = encodeAddress(
-		pmRow.from_user || 'Unknown',
-		(pmRow.from_user || 'unknown').toLowerCase().replace(/\s+/g, '.'),
-		mailDomain
-	);
-	var to = encodeAddress(
-		pmRow.to_user || 'Unknown',
-		(pmRow.to_user || 'unknown').toLowerCase().replace(/\s+/g, '.'),
-		mailDomain
-	);
+	var fromAddr = networkEmailAddress(pmRow.from_user, pmRow.from_address, pmRow.transport_type, mailDomain);
+	var toAddr = networkEmailAddress(pmRow.to_user, pmRow.to_address, pmRow.transport_type, mailDomain);
+	var fromName = networkDisplayName(pmRow.from_user, pmRow.from_address, pmRow.transport_type);
+	var toName = networkDisplayName(pmRow.to_user, pmRow.to_address, pmRow.transport_type);
+	var from = encodeAddress(fromName, fromAddr.local, fromAddr.domain);
+	var to = encodeAddress(toName, toAddr.local, toAddr.domain);
 
 	var source = pmRow._source || 'inbox';
 	var msgId = '<pm-' + source + '-' + pmRow.id + '@' + mailDomain + '>';
@@ -85,15 +130,17 @@ function renderRfc2822(pmRow, mailDomain) {
 function renderEnvelope(pmRow, mailDomain) {
 	var date = formatDate2822(pmRow.system_time || pmRow.created_at);
 	var subject = pmRow.subject || '';
-	var fromLocal = (pmRow.from_user || 'unknown').toLowerCase().replace(/\s+/g, '.');
-	var toLocal = (pmRow.to_user || 'unknown').toLowerCase().replace(/\s+/g, '.');
+	var fromEmail = networkEmailAddress(pmRow.from_user, pmRow.from_address, pmRow.transport_type, mailDomain);
+	var toEmail = networkEmailAddress(pmRow.to_user, pmRow.to_address, pmRow.transport_type, mailDomain);
 	var source = pmRow._source || 'inbox';
 	var msgId = '<pm-' + source + '-' + pmRow.id + '@' + mailDomain + '>';
 
 	// IMAP ENVELOPE format: (date subject from sender reply-to to cc bcc in-reply-to message-id)
 	// Each address is ((display NIL local domain))
-	var fromAddr = '(("' + (pmRow.from_user || 'Unknown').replace(/"/g, '\\"') + '" NIL "' + fromLocal + '" "' + mailDomain + '"))';
-	var toAddr = '(("' + (pmRow.to_user || 'Unknown').replace(/"/g, '\\"') + '" NIL "' + toLocal + '" "' + mailDomain + '"))';
+	var fromName = networkDisplayName(pmRow.from_user, pmRow.from_address, pmRow.transport_type);
+	var toName = networkDisplayName(pmRow.to_user, pmRow.to_address, pmRow.transport_type);
+	var fromAddr = '(("' + fromName.replace(/"/g, '\\"') + '" NIL "' + fromEmail.local + '" "' + fromEmail.domain + '"))';
+	var toAddr = '(("' + toName.replace(/"/g, '\\"') + '" NIL "' + toEmail.local + '" "' + toEmail.domain + '"))';
 
 	return '("' + date + '" "' + subject.replace(/"/g, '\\"') + '" ' +
 		fromAddr + ' ' + fromAddr + ' ' + fromAddr + ' ' +

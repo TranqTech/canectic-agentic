@@ -169,6 +169,10 @@ class SmtpSession {
 			var username = parts[1] || '';
 			var password = parts[2] || '';
 
+			// Allow username@domain login style
+			var atIdx = username.indexOf('@');
+			if (atIdx >= 0) username = username.substring(0, atIdx);
+
 			var result = await checkUserPass(username, password);
 			if (result.isvalid) {
 				this.authenticated = true;
@@ -195,6 +199,10 @@ class SmtpSession {
 	async _authLoginPass(base64Str) {
 		var password = Buffer.from(base64Str, 'base64').toString('utf8');
 		var username = this._authLoginUsername || '';
+
+		// Allow username@domain login style
+		var atIdx = username.indexOf('@');
+		if (atIdx >= 0) username = username.substring(0, atIdx);
 
 		var result = await checkUserPass(username, password);
 		if (result.isvalid) {
@@ -284,8 +292,8 @@ class SmtpSession {
 				user_id: this.userId,
 				from_user: this.username,
 				to_user: rcpt.username || rcpt.toUser || '',
-				from_address: rcpt.transportType === 'FTN' ? '' : '',
-				to_address: rcpt.ftnAddress || '',
+				from_address: '',
+				to_address: rcpt.ftnAddress || rcpt.qwkPeerId || '',
 				subject: parsed.subject || '(no subject)',
 				body_text: parsed.bodyPlain || parsed.bodyHtml || '',
 				utf8: parsed.bodyPlain || '',
@@ -325,34 +333,112 @@ class SmtpSession {
 		if (atIdx === -1) return null;
 
 		var localPart = address.substring(0, atIdx);
-		var domain = address.substring(atIdx + 1);
+		var domainLower = address.substring(atIdx + 1).toLowerCase();
 
-		// Must be our domain
-		if (domain.toLowerCase() !== this.mailDomain.toLowerCase()) {
-			return null; // No relay
+		// --- FTN pseudo-TLD: user@zone.net.node[.point][.ftndomain].ftn ---
+		// Leading numeric dot-parts are the address, trailing non-numeric part
+		// (if any) is the 5D FTN domain. Point numbers are always numeric,
+		// FTN domain names are always alphabetic — no ambiguity.
+		if (domainLower.endsWith('.ftn')) {
+			var ftnBody = domainLower.slice(0, -4); // strip .ftn
+			var parts = ftnBody.split('.');
+
+			// Split into leading numeric parts (address) and trailing non-numeric (domain)
+			var numericParts = [];
+			var ftnDomain = '';
+			for (var i = 0; i < parts.length; i++) {
+				if (/^\d+$/.test(parts[i])) {
+					numericParts.push(parts[i]);
+				} else {
+					// First non-numeric part is the 5D domain (rest shouldn't exist, but join if so)
+					ftnDomain = parts.slice(i).join('.');
+					break;
+				}
+			}
+
+			if (numericParts.length >= 3) {
+				var ftnAddr = numericParts[0] + ':' + numericParts[1] + '/' + numericParts[2];
+				if (numericParts.length >= 4) ftnAddr += '.' + numericParts[3];
+				if (ftnDomain) ftnAddr += '@' + ftnDomain;
+
+				return {
+					address: address,
+					transportType: 'FTN',
+					toUser: localPart || 'Sysop',
+					username: localPart || 'Sysop',
+					ftnAddress: ftnAddr,
+					transportData: {
+						ftn_to_address: ftnAddr,
+						ftn_to_name: localPart || 'Sysop'
+					}
+				};
+			}
+			return null; // Malformed .ftn address
 		}
 
-		// Check for FTN encoding: user%zone.net.node
-		var pctIdx = localPart.indexOf('%');
-		if (pctIdx >= 0) {
-			var ftnUser = localPart.substring(0, pctIdx);
-			var ftnAddr = localPart.substring(pctIdx + 1).replace(/\./g, ':').replace(/:([^:]+)$/, '/$1');
-			// Convert a.b.c → a:b/c (zone:net/node)
-			var addrParts = localPart.substring(pctIdx + 1).split('.');
-			if (addrParts.length >= 3) {
-				ftnAddr = addrParts[0] + ':' + addrParts[1] + '/' + addrParts[2];
-				if (addrParts.length >= 4) ftnAddr += '.' + addrParts[3]; // point
-			}
+		// --- QWK pseudo-TLD: user@peerid.qwk ---
+		if (domainLower.endsWith('.qwk')) {
+			var qwkPeerId = domainLower.slice(0, -4).toUpperCase();
+			if (!qwkPeerId) return null;
 
 			return {
 				address: address,
-				transportType: 'FTN',
-				toUser: ftnUser || 'Sysop',
-				username: ftnUser || 'Sysop',
-				ftnAddress: ftnAddr,
+				transportType: 'QWK',
+				toUser: localPart || 'Sysop',
+				username: localPart || 'Sysop',
+				qwkPeerId: qwkPeerId,
 				transportData: {
-					ftn_to_address: ftnAddr,
-					ftn_to_name: ftnUser || 'Sysop'
+					destination: qwkPeerId
+				}
+			};
+		}
+
+		// --- Our mail domain: local delivery or legacy % encoding ---
+		if (domainLower !== this.mailDomain.toLowerCase()) {
+			return null; // No relay
+		}
+
+		// Legacy % encoding (backwards compat): user%zone.net.node or user%peerid
+		var pctIdx = localPart.indexOf('%');
+		if (pctIdx >= 0) {
+			var netUser = localPart.substring(0, pctIdx);
+			var netAddr = localPart.substring(pctIdx + 1);
+
+			var ftnDomain2 = '';
+			var addrStr = netAddr;
+			var bangIdx = addrStr.indexOf('!');
+			if (bangIdx >= 0) {
+				ftnDomain2 = addrStr.substring(bangIdx + 1);
+				addrStr = addrStr.substring(0, bangIdx);
+			}
+			var addrParts = addrStr.split('.');
+			if (addrParts.length >= 3 && addrParts.every(function(p) { return /^\d+$/.test(p); })) {
+				var ftnAddr2 = addrParts[0] + ':' + addrParts[1] + '/' + addrParts[2];
+				if (addrParts.length >= 4) ftnAddr2 += '.' + addrParts[3];
+				if (ftnDomain2) ftnAddr2 += '@' + ftnDomain2;
+
+				return {
+					address: address,
+					transportType: 'FTN',
+					toUser: netUser || 'Sysop',
+					username: netUser || 'Sysop',
+					ftnAddress: ftnAddr2,
+					transportData: {
+						ftn_to_address: ftnAddr2,
+						ftn_to_name: netUser || 'Sysop'
+					}
+				};
+			}
+
+			// % but not FTN → QWK
+			return {
+				address: address,
+				transportType: 'QWK',
+				toUser: netUser || 'Sysop',
+				username: netUser || 'Sysop',
+				qwkPeerId: netAddr.toUpperCase(),
+				transportData: {
+					destination: netAddr.toUpperCase()
 				}
 			};
 		}
