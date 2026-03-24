@@ -1,8 +1,8 @@
 {
-  "name": "door-server",
+  "name": "canectic-bbs",
   "type": "module",
-  "version": "1.0.0",
-  "description": "Canectic Door Server",
+  "version": "0.9.0-alpha.1",
+  "description": "Canectic BBS — Modern Bulletin Board System",
   "scripts": {
     "start": "node ./bin/gateway.js",
     "test": "mocha"
