@@ -48,8 +48,11 @@ async function _triggerOutboundToss(transportType) {
       case 'QWK':
         await jobs.enqueueQwkPushAll();
         break;
+      case 'EMAIL':
+        await jobs.enqueueEmailOutbound();
+        break;
       // NNTP PMs are not currently supported
-      // EMAIL, MESHTASTIC — future transports
+      // MESHTASTIC — future transport
     }
   } catch (err) {
     alogger.writeAlog(4, 'PM outbound trigger failed for ' + transportType + ': ' + err.message, 'yellow');

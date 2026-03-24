@@ -37,6 +37,7 @@ import * as ftnTosser from "../src/middleware/tossers/ftnTosser.js";
 import * as nntpTosser from "../src/middleware/tossers/nntpTosser.js";
 import * as qwkTosser from "../src/middleware/tossers/qwkTosser.js";
 import * as ticTosser from "../src/middleware/tossers/ticTosser.js";
+import * as emailTosser from "../src/middleware/tossers/emailTosser.js";
 
 // Shared post-toss helpers (thread finalization, area stats)
 import * as echomail from "../src/models/echomail.js";
@@ -242,6 +243,12 @@ function createTossProcessor() {
 					});
 					break;
 
+				// --- EMAIL ---------------------------------------------------------
+
+				case 'email:outbound':
+					await emailTosser.tossOutbound();
+					break;
+
 				// --- Outbound sweep (all protocols) ----------------------------
 
 				case 'outbound-sweep': {
@@ -273,6 +280,10 @@ function createTossProcessor() {
 						}
 					} catch (e) {
 						alogger.writeAlog(3, "[Worker] NNTP outbound sweep error: " + e.message, "yellow");
+					}
+					// Email outbound
+					try { await emailTosser.tossOutbound(); } catch (e) {
+						alogger.writeAlog(3, "[Worker] Email outbound sweep error: " + e.message, "yellow");
 					}
 					eventPublisher.publish(EVENTS.TOSS_COMPLETE, {
 						source: 'sweep', direction: 'outbound'
@@ -466,6 +477,7 @@ async function main() {
 		if (event.type === EVENTS.CONFIG_CHANGED) {
 			alogger.writeAlog(3, "[Worker] Config changed, reloading", "cyan");
 			appConfig.reload();
+			emailTosser.resetTransporter();
 		}
 	});
 

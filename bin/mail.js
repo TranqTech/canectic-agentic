@@ -39,6 +39,7 @@ alogger.setProcessName('mail');
 var systemvermsg = systeminfo.versionMsg();
 var imapServer;
 var smtpServer;
+var inboundSmtpServer;
 
 // ---------------------------------------------------------------------------
 // Safety catches
@@ -56,6 +57,7 @@ async function shutdown() {
 	alogger.writeAlog(1, "[Mail] Shutting down", "yellowbright", true);
 	if (imapServer) imapServer.stop();
 	if (smtpServer) smtpServer.stop();
+	if (inboundSmtpServer) inboundSmtpServer.stop();
 	alogger.shutdownLogBus();
 	pgpool.end();
 	redis.shutdown();
@@ -100,6 +102,18 @@ async function main() {
 		started++;
 	} else {
 		alogger.writeAlog(2, "[Mail] SMTP disabled (smtpport = 0)", "yellow");
+	}
+
+	// Inbound SMTP (trusted gateway injection from external MTA)
+	var inboundPort = appConfig.getNumber('email_inbound_port', 0);
+	if (inboundPort && inboundPort > 0) {
+		var trustedHosts = appConfig.get('email_trusted_hosts', '127.0.0.1');
+		inboundSmtpServer = new SmtpServer(inboundPort, domain, {
+			trusted: true,
+			trustedHosts: trustedHosts
+		});
+		inboundSmtpServer.start();
+		started++;
 	}
 
 	if (started === 0) {

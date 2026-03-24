@@ -140,6 +140,20 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'tic_staging_dir',         defaultValue: 'ftn/tic_staging', type: 'string', category: 'files',       description: 'TIC processing staging directory' },
 	{ key: 'tic_inbound_dir',         defaultValue: '',               type: 'string',  category: 'files',       description: 'TIC inbound directory (defaults to ftninbound)' },
 	{ key: 'tic_auto_forward',        defaultValue: 'true',           type: 'boolean', category: 'files',       description: 'Auto-forward received TIC files to subscribed peers' },
+
+	// -----------------------------------------------------------------------
+	// Email (Internet email transport)
+	// -----------------------------------------------------------------------
+	{ key: 'email_relay_host',          defaultValue: '',               type: 'string',  category: 'email',       description: 'SMTP relay hostname for outbound internet email (empty = disabled)' },
+	{ key: 'email_relay_port',          defaultValue: '587',            type: 'number',  category: 'email',       description: 'SMTP relay port (587 = STARTTLS, 465 = implicit TLS)' },
+	{ key: 'email_relay_secure',        defaultValue: 'false',          type: 'boolean', category: 'email',       description: 'Use implicit TLS (true) or STARTTLS (false)' },
+	{ key: 'email_relay_user',          defaultValue: '',               type: 'string',  category: 'email',       description: 'SMTP relay auth username' },
+	{ key: 'email_relay_password',      defaultValue: '',               type: 'string',  category: 'email',       description: 'SMTP relay auth password' },
+	{ key: 'email_from_address',        defaultValue: '',               type: 'string',  category: 'email',       description: 'Envelope From address for outbound email (e.g. bbs@mybbs.com)' },
+	{ key: 'email_from_name',           defaultValue: '',               type: 'string',  category: 'email',       description: 'Display name for outbound email (falls back to boardname)' },
+	{ key: 'email_max_outbound_batch',  defaultValue: '50',             type: 'number',  category: 'email',       description: 'Maximum emails per outbound toss cycle' },
+	{ key: 'email_inbound_port',        defaultValue: '0',              type: 'number',  category: 'email',       description: 'Trusted inbound SMTP port for gateway injection (e.g. 1026, 0 = disabled, requires restart)', restart: true },
+	{ key: 'email_trusted_hosts',       defaultValue: '127.0.0.1',     type: 'string',  category: 'email',       description: 'Comma-separated IPs allowed to inject inbound email without auth' },
 ];
 
 // ---------------------------------------------------------------------------

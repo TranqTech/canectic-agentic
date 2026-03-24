@@ -371,6 +371,13 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 			errors.push('Invalid FTN address format — expected zone:net/node (e.g. 1:123/456)');
 		}
 	}
+	if (transportType === 'EMAIL' && toAddress) {
+		// Basic email validation: must contain @ with non-empty local and domain parts
+		var emailAtIdx = toAddress.indexOf('@');
+		if (emailAtIdx <= 0 || emailAtIdx >= toAddress.length - 1 || !toAddress.substring(emailAtIdx + 1).includes('.')) {
+			errors.push('Invalid email address format');
+		}
+	}
 
 	if (errors.length > 0) {
 		await flash.set(req, errors.map(function(e) { return { type: 'danger', text: e }; }));
@@ -409,6 +416,11 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 				source_node: 0
 			};
 		}
+	} else if (transportType === 'EMAIL') {
+		messageObj.to_address = toAddress;
+		messageObj.transport_data = {
+			email_address: toAddress
+		};
 	}
 
 	var result = await privateMessages.queueMessage(messageObj, currentuser);

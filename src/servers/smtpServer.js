@@ -11,7 +11,7 @@
 import * as net from 'net';
 import * as alogger from '../utils/alogger.js';
 import { checkUserPass, getUserRecord } from '../models/useraccounts.js';
-import { resolveRecipient, queueMessage } from '../models/privateMessages.js';
+import { resolveRecipient, queueMessage, deliverMessage } from '../models/privateMessages.js';
 import appConfig from '../config/appConfig.js';
 
 // ---------------------------------------------------------------------------
@@ -19,11 +19,12 @@ import appConfig from '../config/appConfig.js';
 // ---------------------------------------------------------------------------
 
 class SmtpSession {
-	constructor(socket, mailDomain) {
+	constructor(socket, mailDomain, options) {
 		this.socket = socket;
 		this.mailDomain = mailDomain;
+		this.trustedMode = !!(options && options.trusted);
 		this.state = 'greeting'; // greeting, ready, auth_login_user, auth_login_pass, data
-		this.authenticated = false;
+		this.authenticated = this.trustedMode; // trusted sessions skip auth
 		this.userId = null;
 		this.username = null;
 		this.userRecord = null;
@@ -287,6 +288,20 @@ class SmtpSession {
 		// Parse RFC 2822 message
 		var parsed = this._parseMessage(rawMessage);
 
+		if (this.trustedMode) {
+			// Trusted inbound: deliver directly as EMAIL transport PM
+			await this._processInboundData(parsed);
+		} else {
+			// Authenticated submission: queue outbound via queueMessage
+			await this._processSubmissionData(parsed);
+		}
+
+		this._send('250 OK message queued');
+		this.mailFrom = null;
+		this.rcptTo = [];
+	}
+
+	async _processSubmissionData(parsed) {
 		for (var rcpt of this.rcptTo) {
 			var messageObj = {
 				user_id: this.userId,
@@ -320,10 +335,45 @@ class SmtpSession {
 					' from ' + this.username, 'green');
 			}
 		}
+	}
 
-		this._send('250 OK message queued');
-		this.mailFrom = null;
-		this.rcptTo = [];
+	async _processInboundData(parsed) {
+		// Trusted inbound: deliver each recipient as a LOCAL inbox message
+		// from an external email sender.
+		var senderAddress = this.mailFrom || '';
+		var senderName = parsed.headers['from'] || senderAddress;
+		// Strip angle brackets if present: "Name <addr>" → use as-is for display
+		var displayFrom = senderName.replace(/<[^>]*>/g, '').trim() || senderAddress;
+
+		for (var rcpt of this.rcptTo) {
+			if (!rcpt.transportData || !rcpt.transportData.recipient_user_id) continue;
+
+			var messageObj = {
+				user_id: rcpt.transportData.recipient_user_id,
+				from_user: displayFrom,
+				to_user: rcpt.username || rcpt.toUser || '',
+				from_address: senderAddress,
+				to_address: '',
+				subject: parsed.subject || '(no subject)',
+				body_text: parsed.bodyPlain || parsed.bodyHtml || '',
+				utf8: parsed.bodyPlain || '',
+				transport_type: 'EMAIL',
+				transport_data: {
+					email_address: senderAddress,
+					inbound: true
+				},
+				system_time: new Date()
+			};
+
+			var result = await deliverMessage(messageObj);
+			if (!result.status) {
+				alogger.writeAlog(3, 'SMTP inbound delivery failed to ' + rcpt.address +
+					': ' + (result.errormessages || []).join(', '), 'yellow');
+			} else {
+				alogger.writeAlog(3, 'SMTP inbound delivered to ' + rcpt.address +
+					' from ' + senderAddress, 'green');
+			}
+		}
 	}
 
 	// --- Address resolution ---
@@ -334,6 +384,24 @@ class SmtpSession {
 
 		var localPart = address.substring(0, atIdx);
 		var domainLower = address.substring(atIdx + 1).toLowerCase();
+
+		// Trusted inbound mode: only accept local users on our domain — no network relay
+		if (this.trustedMode) {
+			if (domainLower !== this.mailDomain.toLowerCase()) return null;
+			var resolved = await resolveRecipient(localPart);
+			if (resolved.resolved) {
+				return {
+					address: address,
+					transportType: 'LOCAL',
+					username: resolved.username,
+					toUser: resolved.username,
+					transportData: {
+						recipient_user_id: resolved.userId
+					}
+				};
+			}
+			return null;
+		}
 
 		// --- FTN pseudo-TLD: user@zone.net.node[.point][.ftndomain].ftn ---
 		// Leading numeric dot-parts are the address, trailing non-numeric part
@@ -395,7 +463,18 @@ class SmtpSession {
 
 		// --- Our mail domain: local delivery or legacy % encoding ---
 		if (domainLower !== this.mailDomain.toLowerCase()) {
-			return null; // No relay
+			// In trusted inbound mode, only accept local recipients — no relay out
+			if (this.trustedMode) return null;
+			// Authenticated submission: treat as outbound internet email
+			return {
+				address: address,
+				transportType: 'EMAIL',
+				toUser: localPart,
+				username: localPart,
+				transportData: {
+					email_address: address
+				}
+			};
 		}
 
 		// Legacy % encoding (backwards compat): user%zone.net.node or user%peerid
@@ -537,27 +616,48 @@ class SmtpSession {
 // ---------------------------------------------------------------------------
 
 class SmtpServer {
-	constructor(port, mailDomain) {
+	constructor(port, mailDomain, options) {
 		this.port = port;
 		this.mailDomain = mailDomain;
+		this.options = options || {};
 		this.server = null;
 		this.sessions = new Set();
+
+		// Trusted mode: parse allowed hosts into a Set for fast lookup
+		if (this.options.trusted) {
+			var hostStr = this.options.trustedHosts || '127.0.0.1';
+			this._trustedHosts = new Set(hostStr.split(',').map(function(h) { return h.trim(); }));
+		}
 	}
 
 	start() {
+		var self = this;
 		this.server = net.createServer((socket) => {
-			var session = new SmtpSession(socket, this.mailDomain);
-			this.sessions.add(session);
-			socket.on('close', () => this.sessions.delete(session));
+			// In trusted mode, verify connecting IP
+			if (self.options.trusted) {
+				var remoteAddr = socket.remoteAddress || '';
+				// Normalize IPv6-mapped IPv4 (::ffff:127.0.0.1 → 127.0.0.1)
+				var normalizedAddr = remoteAddr.replace(/^::ffff:/, '');
+				if (!self._trustedHosts.has(normalizedAddr)) {
+					alogger.writeAlog(3, 'SMTP inbound: rejected untrusted host ' + remoteAddr, 'yellow');
+					socket.write('554 Connection refused\r\n');
+					socket.end();
+					return;
+				}
+			}
+			var session = new SmtpSession(socket, self.mailDomain, self.options);
+			self.sessions.add(session);
+			socket.on('close', () => self.sessions.delete(session));
 		});
 
 		this.server.on('error', (err) => {
 			alogger.writeAlog(0, 'SMTP server error: ' + err.message, 'redbright');
 		});
 
+		var label = this.options.trusted ? 'SMTP inbound (trusted)' : 'SMTP submission';
 		this.server.listen(this.port, () => {
-			alogger.writeAlog(1, 'SMTP submission server listening on port ' + this.port +
-				' (domain: ' + this.mailDomain + ')', 'magentabright', true);
+			alogger.writeAlog(1, label + ' server listening on port ' + self.port +
+				' (domain: ' + self.mailDomain + ')', 'magentabright', true);
 		});
 	}
 

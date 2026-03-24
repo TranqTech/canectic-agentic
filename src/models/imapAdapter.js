@@ -58,6 +58,16 @@ function networkEmailAddress(username, networkAddress, transportType, mailDomain
 		return { local: local, domain: networkAddress.toLowerCase() + '.qwk' };
 	}
 
+	if (transportType === 'EMAIL' && networkAddress) {
+		// networkAddress is a real email address — split at @
+		var emailAt = networkAddress.indexOf('@');
+		if (emailAt >= 0) {
+			return { local: networkAddress.substring(0, emailAt), domain: networkAddress.substring(emailAt + 1) };
+		}
+		// Bare address (no @) — use as local part with mailDomain
+		return { local: networkAddress, domain: mailDomain };
+	}
+
 	// Other transports — fall back to mailDomain
 	return { local: local, domain: mailDomain };
 }
@@ -69,6 +79,9 @@ function networkEmailAddress(username, networkAddress, transportType, mailDomain
 function networkDisplayName(username, networkAddress, transportType) {
 	var name = username || 'Unknown';
 	if (!networkAddress || !transportType || transportType === 'LOCAL') return name;
+	if (transportType === 'EMAIL') {
+		return name + ' <' + networkAddress + '>';
+	}
 	return name + ' (' + networkAddress + ')';
 }
 

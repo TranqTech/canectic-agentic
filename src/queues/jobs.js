@@ -173,6 +173,16 @@ export async function enqueueTicOutbound(opts = {}) {
 }
 
 /**
+ * Email outbound toss.  Send queued internet email via SMTP relay.
+ * Called by: privateMessages (after EMAIL PM queued), outbound-sweep.
+ */
+export async function enqueueEmailOutbound() {
+	return tossQueue.add('email:outbound', {}, {
+		jobId: `email-outbound--${Date.now()}`,
+	});
+}
+
+/**
  * Full toss cycle.  Enqueues inbound+outbound for the specified protocols.
  * Used by the CLI tosser and admin panel "run toss" button.
  *
