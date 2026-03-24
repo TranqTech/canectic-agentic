@@ -130,10 +130,10 @@ Items that must be complete before handing to testers.
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 1 | `.env.example` template | [x] | `examples/env.example` — all bootstrap vars documented |
-| 2 | `INSTALL.md` setup guide | [ ] | OS deps, PostgreSQL/Redis setup, first config, first sysop account |
+| 2 | `INSTALL.md` setup guide | [x] | `docs/sysop/INSTALL.md` — full walkthrough with troubleshooting |
 | 3 | First-run sysop account creation | [x] | User #1 auto-promotes to Sysop (document in INSTALL.md) |
 | 4 | Fix `npm start` script | [x] | Points to `gateway.js` now |
-| 5 | README overhaul | [ ] | Features, quickstart, requirements, screenshots |
+| 5 | README overhaul | [x] | Full feature list, quick start, ports, running, docs links |
 
 ### Security
 
@@ -154,7 +154,7 @@ Items that must be complete before handing to testers.
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 10 | Health check endpoint | [x] | `GET /health` — returns DB and Redis status, 503 if degraded |
-| 11 | Install/update script | [ ] | Clone-to-run-dir copy, release archive install, avoids git conflicts on pull |
+| 11 | Install/update script | [x] | `setup/install.sh` — interactive target selection, fresh install + update with merge prompts |
 
 ---
 
@@ -194,5 +194,5 @@ Items that would improve the experience but aren't blocking the initial test rel
 | `LOGGING_SYSTEM.md` | [x] |
 | `CONFIG_SYSTEM_DESIGN.md` | [x] |
 | `EMSI_WAZOO_DESIGN.md` | [x] |
-| `INSTALL.md` (user-facing) | [ ] |
-| `README.md` (user-facing) | [~] Exists but minimal |
+| `INSTALL.md` (sysop-facing) | [x] |
+| `README.md` (user-facing) | [x] |
