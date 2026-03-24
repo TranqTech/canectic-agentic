@@ -9,6 +9,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { formatBodyHtml } from '../utils/terminalText.js';
 import { sanitizeMessageFields } from './messages.js';
 import appConfig from "../config/appConfig.js";
+import { createEventPublisher, EVENTS } from '../queues/events.js';
+
+// Lazy-initialized event publisher for PM read/delivery notifications
+var _pmEventPublisher = null;
+function getPmEventPublisher() {
+	if (!_pmEventPublisher) _pmEventPublisher = createEventPublisher();
+	return _pmEventPublisher;
+}
 
 // --- Outbound toss trigger ---
 // After a non-LOCAL message is queued in pm_outbox, signal the worker to
@@ -366,6 +374,9 @@ async function getMessage(userId, uuid) {
     );
     row.read = true;
     row.read_at = new Date();
+    getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
+      userId: userId, pmId: row.id, read: true, source: 'model'
+    });
   }
 
   return row;
@@ -376,24 +387,36 @@ async function getMessage(userId, uuid) {
 // ============================================================
 
 async function markRead(userId, uuid) {
-  return await postgres.write(
+  var result = await postgres.write(
     "UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE uuid = $1 AND user_id = $2",
     [uuid, userId]
   );
+  getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
+    userId: userId, read: true, source: 'model'
+  });
+  return result;
 }
 
 async function markUnread(userId, uuid) {
-  return await postgres.write(
+  var result = await postgres.write(
     "UPDATE pm_inbox SET read = false, read_at = NULL, updated_at = NOW() WHERE uuid = $1 AND user_id = $2",
     [uuid, userId]
   );
+  getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
+    userId: userId, read: false, source: 'model'
+  });
+  return result;
 }
 
 async function markAllRead(userId) {
-  return await postgres.write(
+  var result = await postgres.write(
     "UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE user_id = $1 AND read = false AND deleted = false",
     [userId]
   );
+  getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
+    userId: userId, read: true, source: 'model'
+  });
+  return result;
 }
 
 // Unread count for nav badge (excludes deleted)
@@ -575,6 +598,12 @@ async function queueMessage(messageObj, userSession) {
       retObj.errormessages.push("Local delivery failed: " + deliveryResult.errormessages.join(', '));
       return retObj;
     }
+
+    // Notify other processes (IMAP IDLE push, gateway unread badge)
+    getPmEventPublisher().publish(EVENTS.PM_DELIVERED, {
+      userId: recipientId,
+      fromUser: messageObj.from_user
+    });
   }
 
   retObj.status = true;

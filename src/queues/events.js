@@ -24,8 +24,11 @@ export const EVENTS = {
 	// Worker → Gateway: new messages imported into areas
 	MESSAGES_IMPORTED: 'messages:imported',
 
-	// Worker → Gateway: PM delivered to a user's inbox
+	// Worker → Gateway/Mail: PM delivered to a user's inbox
 	PM_DELIVERED: 'pm:delivered',
+
+	// Any → Mail/Gateway: PM read status changed (sync IMAP ↔ web/terminal)
+	PM_READ_CHANGED: 'pm:read:changed',
 
 	// Worker → Gateway: new files imported into file areas
 	FILES_IMPORTED: 'files:imported',

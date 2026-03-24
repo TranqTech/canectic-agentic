@@ -9,13 +9,15 @@
 // Mailboxes: INBOX (pm_inbox), Sent (pm_outbox), Trash (soft-deleted)
 
 import * as net from 'net';
+import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import { checkUserPass } from '../models/useraccounts.js';
 import {
-	renderRfc2822, renderEnvelope, getMailboxMessages,
+	renderRfc2822, renderEnvelope, formatDate2822, getMailboxMessages,
 	getFullMessage, getMailboxStatus, trashUid, trashUidToSource
 } from '../models/imapAdapter.js';
 import appConfig from '../config/appConfig.js';
+import { createEventPublisher, createEventSubscriber, EVENTS } from '../queues/events.js';
 
 var GREETING = 'Canectic BBS IMAP4rev1 ready';
 var CAPABILITIES = 'IMAP4rev1 IDLE';
@@ -50,6 +52,10 @@ class ImapSession {
 	}
 
 	close() {
+		if (this._idleTimer) {
+			clearInterval(this._idleTimer);
+			this._idleTimer = null;
+		}
 		if (!this._closed && !this.socket.destroyed) {
 			this.socket.end();
 		}
@@ -80,6 +86,8 @@ class ImapSession {
 	// --- Command dispatch ---
 
 	async _processCommand(line) {
+		alogger.writeAlog(5, 'IMAP rx: ' + line.substring(0, 200), 'cyan');
+
 		// IMAP format: tag SP command [SP arguments]
 		var spaceIdx = line.indexOf(' ');
 		if (spaceIdx === -1) {
@@ -108,7 +116,7 @@ class ImapSession {
 					break;
 
 				case 'NOOP':
-					this._send(tag + ' OK NOOP completed');
+					await this._cmdNoop(tag);
 					break;
 
 				case 'LOGOUT':
@@ -167,6 +175,10 @@ class ImapSession {
 
 				case 'SEARCH':
 					await this._cmdSearch(tag, args, false);
+					break;
+
+				case 'APPEND':
+					this._cmdAppend(tag, args);
 					break;
 
 				case 'UID':
@@ -260,9 +272,9 @@ class ImapSession {
 		for (var row of rows) {
 			var uid;
 			if (mailbox === 'Trash') {
-				uid = trashUid(row.id, row._source || 'inbox');
+				uid = trashUid(parseInt(row.id), row._source || 'inbox');
 			} else {
-				uid = row.id;
+				uid = parseInt(row.id);
 			}
 			this.uidList.push(uid);
 			this.messageMap[uid] = row;
@@ -340,15 +352,30 @@ class ImapSession {
 		// Resolve sequence set to UIDs
 		var uids = this._resolveSequenceSet(seqSet, useUid);
 
-		// Parse fetch items
-		var items = itemsStr.replace(/[()]/g, '').toUpperCase();
-		var wantFlags = items.includes('FLAGS');
-		var wantUid = items.includes('UID') || useUid;
-		var wantSize = items.includes('RFC822.SIZE');
-		var wantEnvelope = items.includes('ENVELOPE');
-		var wantBody = items.includes('BODY[]') || items.includes('RFC822') || items.includes('BODY.PEEK[]');
-		var wantBodyStructure = items.includes('BODYSTRUCTURE');
-		var peek = items.includes('PEEK');
+		// Parse fetch items — keep original case/brackets for BODY[] keys
+		var itemsUpper = itemsStr.toUpperCase();
+		var wantFlags = itemsUpper.includes('FLAGS');
+		var wantUid = itemsUpper.includes('UID') || useUid;
+		var wantSize = itemsUpper.includes('RFC822.SIZE');
+		var wantEnvelope = itemsUpper.includes('ENVELOPE');
+		var wantBodyFull = itemsUpper.includes('BODY[]') || itemsUpper.includes('BODY.PEEK[]') ||
+			itemsUpper.includes('RFC822 ') || itemsUpper === 'RFC822' || itemsUpper.includes('RFC822)');
+		var wantBodyStructure = itemsUpper.includes('BODYSTRUCTURE');
+		var wantHeaderFields = itemsUpper.includes('HEADER.FIELDS');
+		var wantHeader = (itemsUpper.includes('BODY.PEEK[HEADER]') || itemsUpper.includes('BODY[HEADER]'))
+			&& !wantHeaderFields;
+		var wantBodyText = itemsUpper.includes('BODY[TEXT]') || itemsUpper.includes('BODY.PEEK[TEXT]');
+		var wantInternalDate = itemsUpper.includes('INTERNALDATE');
+		var peek = itemsUpper.includes('PEEK');
+
+		// Extract requested header field names if HEADER.FIELDS
+		var headerFieldNames = [];
+		if (wantHeaderFields) {
+			var hfMatch = itemsStr.match(/HEADER\.FIELDS\s*\(([^)]+)\)/i);
+			if (hfMatch) {
+				headerFieldNames = hfMatch[1].trim().split(/\s+/).map(function(h) { return h.toUpperCase(); });
+			}
+		}
 
 		for (var uid of uids) {
 			var row = this.messageMap[uid];
@@ -359,7 +386,8 @@ class ImapSession {
 
 			if (wantFlags) {
 				var flags = [];
-				if (row.read) flags.push('\\Seen');
+				// Sent messages are always \Seen (you wrote them)
+				if (row.read || this.selectedMailbox === 'Sent') flags.push('\\Seen');
 				if (row.deleted) flags.push('\\Deleted');
 				parts.push('FLAGS (' + flags.join(' ') + ')');
 			}
@@ -368,32 +396,67 @@ class ImapSession {
 				parts.push('UID ' + uid);
 			}
 
+			if (wantInternalDate) {
+				var dt = row.system_time || row.created_at || new Date();
+				if (!(dt instanceof Date)) dt = new Date(dt);
+				parts.push('INTERNALDATE "' + formatDate2822(dt) + '"');
+			}
+
 			if (wantEnvelope) {
 				parts.push('ENVELOPE ' + renderEnvelope(row, this.mailDomain));
 			}
 
-			if (wantSize || wantBody) {
-				// Need full message — fetch from DB
+			// Anything that needs the full rendered message
+			if (wantSize || wantBodyFull || wantHeader || wantHeaderFields || wantBodyText) {
 				var table = (this.selectedMailbox === 'Sent') ? 'sent' :
 					(row._source === 'sent') ? 'sent' : 'inbox';
 				var fullRow = await getFullMessage(this.userId, table, row.id);
 				if (fullRow) {
 					fullRow._source = table;
 					var rfc2822 = renderRfc2822(fullRow, this.mailDomain);
+					var headerEnd = rfc2822.indexOf('\r\n\r\n');
+					var headerSection = headerEnd >= 0 ? rfc2822.substring(0, headerEnd + 2) : rfc2822;
+					var bodySection = headerEnd >= 0 ? rfc2822.substring(headerEnd + 4) : '';
 
 					if (wantSize) {
 						parts.push('RFC822.SIZE ' + Buffer.byteLength(rfc2822, 'utf8'));
 					}
 
-					if (wantBody) {
+					if (wantBodyFull) {
 						var bodyKey = peek ? 'BODY[]' : 'BODY[]';
 						parts.push(bodyKey + ' {' + Buffer.byteLength(rfc2822, 'utf8') + '}\r\n' + rfc2822);
-
-						// Mark as read unless PEEK
 						if (!peek && !row.read && this.selectedMailbox === 'INBOX') {
 							await this._markRead(row.id);
 							row.read = true;
 						}
+					}
+
+					if (wantHeader) {
+						var hdrBytes = Buffer.byteLength(headerSection, 'utf8');
+						parts.push('BODY[HEADER] {' + hdrBytes + '}\r\n' + headerSection);
+					}
+
+					if (wantHeaderFields) {
+						// Extract only requested headers
+						var filteredHeaders = '';
+						var allHeaders = headerSection.split('\r\n');
+						for (var h of allHeaders) {
+							var colonIdx = h.indexOf(':');
+							if (colonIdx > 0) {
+								var headerName = h.substring(0, colonIdx).trim().toUpperCase();
+								if (headerFieldNames.includes(headerName)) {
+									filteredHeaders += h + '\r\n';
+								}
+							}
+						}
+						filteredHeaders += '\r\n'; // Blank line terminates headers
+						var fhBytes = Buffer.byteLength(filteredHeaders, 'utf8');
+						parts.push('BODY[HEADER.FIELDS (' + headerFieldNames.join(' ') + ')] {' + fhBytes + '}\r\n' + filteredHeaders);
+					}
+
+					if (wantBodyText) {
+						var btBytes = Buffer.byteLength(bodySection, 'utf8');
+						parts.push('BODY[TEXT] {' + btBytes + '}\r\n' + bodySection);
 					}
 				}
 			}
@@ -438,9 +501,16 @@ class ImapSession {
 		var wantSeen = flagStr.includes('\\SEEN');
 		var wantDeleted = flagStr.includes('\\DELETED');
 
+		alogger.writeAlog(5, 'IMAP STORE: uids=' + JSON.stringify(uids) +
+			' action=' + action + ' wantSeen=' + wantSeen + ' wantDeleted=' + wantDeleted +
+			' mailbox=' + this.selectedMailbox, 'cyan');
+
 		for (var uid of uids) {
 			var row = this.messageMap[uid];
-			if (!row) continue;
+			if (!row) {
+				alogger.writeAlog(5, 'IMAP STORE: UID ' + uid + ' not found in messageMap', 'yellow');
+				continue;
+			}
 
 			if (wantSeen) {
 				if (add) {
@@ -462,7 +532,7 @@ class ImapSession {
 			if (!silent) {
 				var seqNum = this.uidList.indexOf(uid) + 1;
 				var flags = [];
-				if (row.read) flags.push('\\Seen');
+				if (row.read || this.selectedMailbox === 'Sent') flags.push('\\Seen');
 				if (row.deleted) flags.push('\\Deleted');
 				this._send('* ' + seqNum + ' FETCH (FLAGS (' + flags.join(' ') + ')' +
 					(useUid ? ' UID ' + uid : '') + ')');
@@ -527,6 +597,92 @@ class ImapSession {
 		}
 	}
 
+	// --- APPEND (accept and discard — SMTP already saved the message) ---
+
+	_cmdAppend(tag, args) {
+		if (this.state === 'not_authenticated') {
+			this._send(tag + ' NO Not authenticated');
+			return;
+		}
+
+		// Parse the literal size from {N} or {N+} (non-synchronizing)
+		var literalMatch = args.match(/\{(\d+)\+?\}\s*$/);
+		if (literalMatch) {
+			var size = parseInt(literalMatch[1]);
+			// Tell client to send the literal data
+			this._send('+ Ready');
+
+			// Temporarily hijack data handler to consume the literal
+			var self = this;
+			var collected = Buffer.alloc(0);
+			var origOnData = ImapSession.prototype._onData;
+			this._onData = function(data) {
+				var buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8');
+				collected = Buffer.concat([collected, buf]);
+				if (collected.length >= size) {
+					// Restore normal data handler
+					self._onData = origOnData;
+					self._send(tag + ' OK APPEND completed');
+					// Any bytes beyond the literal + trailing CRLF need normal processing
+					var excess = collected.length - size;
+					if (excess > 2) {
+						// Skip the trailing CRLF after the literal, process the rest
+						var leftover = collected.slice(size + 2);
+						if (leftover.length > 0) {
+							self._onData(leftover);
+						}
+					}
+				}
+			};
+		} else {
+			this._send(tag + ' OK APPEND completed');
+		}
+	}
+
+	// --- NOOP (with mailbox refresh) ---
+
+	async _cmdNoop(tag) {
+		if (this.state === 'selected' && this.selectedMailbox) {
+			// Refresh the mailbox — check for new messages
+			var rows = await getMailboxMessages(this.userId, this.selectedMailbox);
+			var newUidList = [];
+			var newMap = {};
+
+			for (var row of rows) {
+				var uid;
+				if (this.selectedMailbox === 'Trash') {
+					uid = trashUid(parseInt(row.id), row._source || 'inbox');
+				} else {
+					uid = parseInt(row.id);
+				}
+				newUidList.push(uid);
+				newMap[uid] = row;
+			}
+
+			// Report new messages if count changed
+			if (newUidList.length !== this.uidList.length) {
+				this._send('* ' + newUidList.length + ' EXISTS');
+			}
+
+			// Push flag changes for existing messages
+			for (var i = 0; i < newUidList.length; i++) {
+				var nuid = newUidList[i];
+				var oldRow = this.messageMap[nuid];
+				var newRow = newMap[nuid];
+				if (oldRow && newRow && oldRow.read !== newRow.read) {
+					var flags = [];
+					if (newRow.read || this.selectedMailbox === 'Sent') flags.push('\\Seen');
+					if (newRow.deleted) flags.push('\\Deleted');
+					this._send('* ' + (i + 1) + ' FETCH (FLAGS (' + flags.join(' ') + '))');
+				}
+			}
+
+			this.uidList = newUidList;
+			this.messageMap = newMap;
+		}
+		this._send(tag + ' OK NOOP completed');
+	}
+
 	// --- SEARCH ---
 
 	async _cmdSearch(tag, args, useUid) {
@@ -580,15 +736,81 @@ class ImapSession {
 		this._idleTag = tag;
 		this._idleActive = true;
 
-		// Replace data handler to watch for DONE
-		this._idlePrevHandler = this._onData.bind(this);
+		// Poll for new messages every 30 seconds during IDLE
 		var self = this;
+		this._idleTimer = setInterval(async function() {
+			if (!self._idleActive) return;
+			try {
+				var rows = await getMailboxMessages(self.userId, self.selectedMailbox);
+				var newCount = rows.length;
+				var newUidList = [];
+				var newMap = {};
+				for (var row of rows) {
+					var uid = self.selectedMailbox === 'Trash'
+						? trashUid(parseInt(row.id), row._source || 'inbox')
+						: parseInt(row.id);
+					newUidList.push(uid);
+					newMap[uid] = row;
+				}
+
+				// Report new messages
+				if (newCount > self.uidList.length) {
+					self._send('* ' + newCount + ' EXISTS');
+				}
+
+				// Push flag changes
+				for (var i = 0; i < newUidList.length; i++) {
+					var nuid = newUidList[i];
+					var oldRow = self.messageMap[nuid];
+					var newRow = newMap[nuid];
+					if (oldRow && newRow && oldRow.read !== newRow.read) {
+						var flags = [];
+						if (newRow.read || self.selectedMailbox === 'Sent') flags.push('\\Seen');
+						if (newRow.deleted) flags.push('\\Deleted');
+						self._send('* ' + (i + 1) + ' FETCH (FLAGS (' + flags.join(' ') + '))');
+					}
+				}
+
+				self.uidList = newUidList;
+				self.messageMap = newMap;
+			} catch (_) {}
+		}, 30000);
+
+		// Watch for DONE — must handle line-by-line since DONE and the
+		// next command may arrive in the same TCP chunk
+		this._idleBuf = '';
+		this._idlePrevOnData = ImapSession.prototype._onData;
 		this._onData = function(data) {
-			var str = data.toString('utf8').trim();
-			if (str.toUpperCase() === 'DONE') {
-				self._idleActive = false;
-				self._onData = self._idlePrevHandler;
-				self._send(self._idleTag + ' OK IDLE terminated');
+			self._idleBuf += data.toString('utf8');
+			var lines = self._idleBuf.split('\r\n');
+			self._idleBuf = lines.pop(); // Keep incomplete line
+
+			for (var line of lines) {
+				if (line.trim().toUpperCase() === 'DONE') {
+					self._idleActive = false;
+					clearInterval(self._idleTimer);
+					self._idleTimer = null;
+					self._onData = self._idlePrevOnData;
+					self._send(self._idleTag + ' OK IDLE terminated');
+
+					// Process any remaining lines as regular commands
+					var remaining = lines.slice(lines.indexOf(line) + 1);
+					for (var rem of remaining) {
+						if (rem.length > 0) self._processCommand(rem);
+					}
+					// Also process any leftover in buffer
+					if (self._idleBuf.length > 0) {
+						var leftover = self._idleBuf;
+						self._idleBuf = '';
+						self._buffer += leftover;
+						var moreLines = self._buffer.split('\r\n');
+						self._buffer = moreLines.pop();
+						for (var ml of moreLines) {
+							if (ml.length > 0) self._processCommand(ml);
+						}
+					}
+					return;
+				}
 			}
 		};
 	}
@@ -613,6 +835,11 @@ class ImapSession {
 				"UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
 				[id, this.userId]
 			);
+			if (this._eventPublisher) {
+				this._eventPublisher.publish(EVENTS.PM_READ_CHANGED, {
+					userId: this.userId, pmId: id, read: true, source: 'imap'
+				});
+			}
 		}
 	}
 
@@ -622,6 +849,11 @@ class ImapSession {
 				"UPDATE pm_inbox SET read = false, read_at = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2",
 				[id, this.userId]
 			);
+			if (this._eventPublisher) {
+				this._eventPublisher.publish(EVENTS.PM_READ_CHANGED, {
+					userId: this.userId, pmId: id, read: false, source: 'imap'
+				});
+			}
 		}
 	}
 
@@ -736,11 +968,34 @@ class ImapServer {
 		this.mailDomain = mailDomain;
 		this.server = null;
 		this.sessions = new Set();
+		this._eventPublisher = null;
+		this._eventSubscriber = null;
 	}
 
 	start() {
+		// Event publisher — shared across all sessions for PM read notifications
+		this._eventPublisher = createEventPublisher();
+
+		// Event subscriber — push notifications to IDLE sessions
+		this._eventSubscriber = createEventSubscriber((event) => {
+			switch (event.type) {
+				case EVENTS.PM_DELIVERED:
+					this._notifySessions(event.data.userId);
+					break;
+				case EVENTS.PM_READ_CHANGED:
+					// Skip events we published ourselves
+					if (event.data.source === 'imap') break;
+					this._refreshSessions(event.data.userId);
+					break;
+				case EVENTS.CONFIG_CHANGED:
+					appConfig.reload();
+					break;
+			}
+		});
+
 		this.server = net.createServer((socket) => {
 			var session = new ImapSession(socket, this.mailDomain);
+			session._eventPublisher = this._eventPublisher;
 			this.sessions.add(session);
 			socket.on('close', () => this.sessions.delete(session));
 		});
@@ -757,9 +1012,36 @@ class ImapServer {
 
 	stop() {
 		for (var session of this.sessions) session.close();
+		if (this._eventSubscriber) {
+			this._eventSubscriber.shutdown();
+			this._eventSubscriber = null;
+		}
+		if (this._eventPublisher) {
+			this._eventPublisher.shutdown();
+			this._eventPublisher = null;
+		}
 		if (this.server) {
 			this.server.close();
 			this.server = null;
+		}
+	}
+
+	// Push new-message notification to IDLE sessions for a specific user
+	_notifySessions(userId) {
+		for (var session of this.sessions) {
+			if (session.userId === userId) {
+				session.notifyNewMessage();
+			}
+		}
+	}
+
+	// Trigger a mailbox refresh for IDLE sessions when read status changed externally
+	_refreshSessions(userId) {
+		for (var session of this.sessions) {
+			if (session.userId === userId && session._idleActive) {
+				// Force an immediate poll cycle by calling the IDLE timer logic
+				session.notifyNewMessage();
+			}
 		}
 	}
 }

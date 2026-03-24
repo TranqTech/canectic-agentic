@@ -1,8 +1,9 @@
 /**
  * PM2 Ecosystem File — Canectic BBS
  *
- * Manages the three process model:
- *   gateway  — user connections, web UI, job producer
+ * Manages the four process model:
+ *   gateway  — user connections, web UI, terminal sessions, job producer
+ *   mail     — IMAP + SMTP servers for PM access from mail clients
  *   mailer   — FTN mailer sessions, file transfer
  *   worker   — tossers, maintenance, batch processing
  *
@@ -38,6 +39,23 @@ module.exports = {
 			// Logging
 			error_file: './logs/production/gateway-error.log',
 			out_file: './logs/production/gateway-out.log',
+			merge_logs: true,
+			log_date_format: 'YYYY-MM-DD HH:mm:ss',
+		},
+		{
+			name: 'mail',
+			script: './bin/mail.js',
+			node_args: '--experimental-vm-modules',
+			env: {
+				NODE_ENV: 'production',
+			},
+			// Mail servers are stateless per-connection — safe to restart
+			max_restarts: 15,
+			min_uptime: '5s',
+			restart_delay: 2000,
+			// Logging
+			error_file: './logs/production/mail-error.log',
+			out_file: './logs/production/mail-out.log',
 			merge_logs: true,
 			log_date_format: 'YYYY-MM-DD HH:mm:ss',
 		},

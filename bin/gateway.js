@@ -369,11 +369,12 @@ async function main(){
 	}
 	// Unified terminal server (auto-detects TCP vs Telnet)
 	await startTerminalServer()
-	await startImapServer()
-	await startSmtpServer()
 
 	// Mode-dependent startup
 	if (processMode === 'embedded') {
+		// In embedded mode, run IMAP/SMTP/mailer/workers in-process
+		await startImapServer()
+		await startSmtpServer()
 		await startEmbeddedMailer()
 		await startEmbeddedWorkers()
 		alogger.writeAlog(1, "Running in EMBEDDED mode (all-in-one)", "yellowbright", true)
