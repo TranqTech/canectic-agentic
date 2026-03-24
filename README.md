@@ -7,7 +7,7 @@ Canectic brings together the BBS experience with modern infrastructure: a full-f
 ## Features
 
 ### Terminal
-- WebSocket terminal access — connect from any web browser, no client software needed
+- WebSocket terminal support — proxy-friendly connections, reduced bot exposure vs open Telnet ports
 - ANSI/CP437 and UTF-8 terminal support with auto-detection
 - Telnet and raw TCP with auto-detection on a single port
 - Wide terminal formatting and auto-scaling geometry
