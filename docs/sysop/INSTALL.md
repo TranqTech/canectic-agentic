@@ -41,16 +41,24 @@ nvm use 20
 
 ### 1. Get the Source
 
-**From git:**
+**From a release archive (recommended):**
+
+Download the latest release from the [Canectic Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases) and extract:
 ```bash
-git clone https://gitlab.tranqsoft.com/drog007/canectic.git
+tar xzf canectic-v0.9.0-alpha.1.tar.gz
+cd canectic-v0.9.0-alpha.1
+```
+
+**From git (specific release):**
+```bash
+git clone --branch v0.9.0-alpha.1 --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
 cd canectic
 ```
 
-**From a release archive:**
+**From git (latest development):**
 ```bash
-tar xzf canectic-x.x.x.tar.gz
-cd canectic-x.x.x
+git clone https://gitlab.tranqsoft.com/drog007/canectic.git
+cd canectic
 ```
 
 ### 2. Run the Installer
