@@ -77,8 +77,8 @@ sudo npm install -g pm2
 ### Install
 
 ```bash
-git clone https://github.com/your-org/canectic-bbs.git
-cd canectic-bbs
+git clone https://gitlab.tranqsoft.com/drog007/canectic.git
+cd canectic
 bash setup/install.sh          # choose install directory
 cd /opt/canectic               # or your chosen path
 

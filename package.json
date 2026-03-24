@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://gitlab.tranqsoft.com/drog007/door-server.git"
+    "url": "https://gitlab.tranqsoft.com/drog007/canectic.git"
   },
   "keywords": [
     "Door",
@@ -18,7 +18,7 @@
     "Server"
   ],
   "author": "Kostie Muirhead",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "adm-zip": "^0.5.16",
     "basic-ftp": "^5.2.0",

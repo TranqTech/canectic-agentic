@@ -43,14 +43,14 @@ nvm use 20
 
 **From git:**
 ```bash
-git clone https://github.com/your-org/canectic-bbs.git
-cd canectic-bbs
+git clone https://gitlab.tranqsoft.com/drog007/canectic.git
+cd canectic
 ```
 
 **From a release archive:**
 ```bash
-tar xzf canectic-bbs-x.x.x.tar.gz
-cd canectic-bbs-x.x.x
+tar xzf canectic-x.x.x.tar.gz
+cd canectic-x.x.x
 ```
 
 ### 2. Run the Installer
