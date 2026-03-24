@@ -1,13 +1,13 @@
 # Canectic BBS
 
-A modern Bulletin Board System built with Node.js — terminal and web, classic and connected.
+A modern Bulletin Board System built with Node.js. Terminal and web, classic and connected.
 
 Canectic brings together the BBS experience with modern infrastructure: a full-featured terminal server alongside a responsive web interface, three message networking protocols, file areas with native transfer engines, door game support, and internet email integration.
 
 ## Features
 
 ### Terminal
-- WebSocket terminal support — proxy-friendly connections, reduced bot exposure vs open Telnet ports
+- WebSocket terminal support for proxy-friendly connections and reduced bot exposure vs open Telnet ports
 - ANSI/CP437 and UTF-8 terminal support with auto-detection
 - Telnet and raw TCP with auto-detection on a single port
 - Wide terminal formatting and auto-scaling geometry
@@ -29,15 +29,15 @@ Canectic brings together the BBS experience with modern infrastructure: a full-f
 - Admin dashboard with full CRUD for all system entities
 
 ### Networking
-- **FTN** — Type-2 packet tosser, binkp mailer (TCP + WebSocket), BSO outbound scanner, nodelist import
-- **QWK** — Client pull/push and hub mode with REP packet support
-- **NNTP** — Article pull/push with standard newsgroup interop
-- **TIC** — File echo distribution with auto-forwarding
-- **Email** — Internet email via SMTP relay (outbound) and trusted gateway (inbound)
+- **FTN** - Type-2 packet tosser, binkp mailer (TCP + WebSocket), BSO outbound scanner, nodelist import
+- **QWK** - Client pull/push and hub mode with REP packet support
+- **NNTP** - Article pull/push with standard newsgroup interop
+- **TIC** - File echo distribution with auto-forwarding
+- **Email** - Internet email via SMTP relay (outbound) and trusted gateway (inbound)
 
 ### Mail Client Access
-- IMAP4rev1 server — access BBS private messages from Thunderbird, etc.
-- SMTP submission server — send PMs from mail clients with multi-transport addressing
+- IMAP4rev1 server for accessing BBS private messages from Thunderbird, etc.
+- SMTP submission server for sending PMs from mail clients with multi-transport addressing
 - Cross-process event push for IMAP IDLE notifications
 
 ### Administration
@@ -57,7 +57,7 @@ Canectic brings together the BBS experience with modern infrastructure: a full-f
 - BullMQ job queues backed by Redis for inter-process work
 - Redis pub/sub event bus for cross-process notifications
 - PostgreSQL primary data store with declarative schema migrations
-- Three-tier configuration: `.env` → database → defaults
+- Three-tier configuration: `.env` > database > defaults
 - Health check endpoint for monitoring and container orchestration
 - CSRF protection via Origin/Referer verification
 
@@ -93,7 +93,7 @@ node src/tools/dbmigrations.js    # create tables
 pm2 start ecosystem.config.cjs    # start all processes
 ```
 
-Register your first account at `http://localhost:8080/users/register` — the first user is automatically promoted to Sysop.
+Register your first account at `http://localhost:8080/users/register`. The first user is automatically promoted to Sysop.
 
 See [docs/sysop/INSTALL.md](docs/sysop/INSTALL.md) for the full installation guide.
 
@@ -133,11 +133,11 @@ npm test
 
 ## Documentation
 
-- [Installation Guide](docs/sysop/INSTALL.md) — full setup walkthrough
-- [Architecture Reference](docs/reference/) — developer documentation for all subsystems
-- [Release Tracker](docs/RELEASE_TRACKER.md) — feature completion status
-- [Example .env](examples/env.example) — environment configuration template
+- [Installation Guide](docs/sysop/INSTALL.md) - Full setup walkthrough
+- [Architecture Reference](docs/reference/) - Developer documentation for all subsystems
+- [Release Tracker](docs/RELEASE_TRACKER.md) - Feature completion status
+- [Example .env](examples/env.example) - Environment configuration template
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+[MIT](LICENSE)
