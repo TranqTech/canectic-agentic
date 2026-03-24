@@ -357,6 +357,24 @@ async function exitWatch(){
 
 async function main(){
 	await alogger.initLogBus()
+
+	// --- Startup validation: fail fast if DB or Redis is unreachable ---
+	try {
+		await pgpool.query('SELECT 1');
+	} catch (err) {
+		alogger.writeAlog(0, "PostgreSQL is not reachable: " + err.message, "redbright", true);
+		alogger.writeAlog(0, "Check dbhost/dbname/dbuser/dbpass in .env", "redbright");
+		process.exit(1);
+	}
+	try {
+		var rc = await redis.getClient();
+		await rc.ping();
+	} catch (err) {
+		alogger.writeAlog(0, "Redis is not reachable: " + err.message, "redbright", true);
+		alogger.writeAlog(0, "Check redis_url in .env (default: redis://localhost:6379)", "redbright");
+		process.exit(1);
+	}
+
 	await appConfig.load()
 	await prerunMaint()
 	await startNodeManager()

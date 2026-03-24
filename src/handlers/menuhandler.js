@@ -4,6 +4,7 @@ import * as alogger from "../utils/alogger.js";
 // Sub-module commands (simple, stay within menu)
 import { userList } from "./menucommands/userlist.js";
 import { LastCallers } from "./lastcallers.js";
+import { AnnouncementHandler } from "./announcementhandler.js";
 import { WhosOnline } from "./whosonline.js";
 import { msgAreaSelector } from "./menucommands/msgAreaSelector.js";
 import { msgReader } from "./menucommands/msgReader.js";
@@ -216,11 +217,16 @@ class MenuHandler extends BaseHandler {
 		var availWidth = termWidth - entryStartX - 1;
 		if (availWidth < 10) availWidth = 10;
 
-		// Find the widest display string
+		// Find the widest display string (account for hotkey prefix "X " = 2 chars)
+		var hotkeyPrefix = (this.display_entries) ? 2 : 0;
 		var maxDisplayLen = 0;
 		for (var i = 0; i < displayable.length; i++) {
-			if (displayable[i].display.length > maxDisplayLen) {
-				maxDisplayLen = displayable[i].display.length;
+			var entryWidth = displayable[i].display.length;
+			if (hotkeyPrefix && displayable[i].hotkey && displayable[i].display) {
+				entryWidth += hotkeyPrefix;
+			}
+			if (entryWidth > maxDisplayLen) {
+				maxDisplayLen = entryWidth;
 			}
 		}
 
@@ -316,8 +322,18 @@ class MenuHandler extends BaseHandler {
 			var entry = page[i];
 
 			this.call.cmds.movecursor(drawX, drawY);
-			if (entry.bg_clr !== undefined) this.call.cmds.setbgcolor(entry.bg_clr);
-			if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+			// Show hotkey prefix if display_entries is on, entry has display text and a hotkey
+			if (this.display_entries && entry.hotkey && entry.display) {
+				var hasBg = (entry.bg_clr !== undefined && entry.bg_clr !== 0);
+				if (hasBg) this.call.cmds.setbgcolor(entry.bg_clr);
+				this.call.cmds.setfgcolor(this.hotkey_clr);
+				this.call.cmds.senddata(entry.hotkey.toUpperCase());
+				if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+				this.call.cmds.senddata(' ');
+			} else {
+				if (entry.bg_clr !== undefined) this.call.cmds.setbgcolor(entry.bg_clr);
+				if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+			}
 			this.call.cmds.senddata(entry.display);
 			this.call.cmds.resetcolors();
 		}
@@ -343,6 +359,9 @@ class MenuHandler extends BaseHandler {
 		for (var i = 0; i < page.length; i++) {
 			if (page[i].display) {
 				this.call.cmds.senddata("\r\n");
+				if (this.display_entries && page[i].hotkey) {
+					this.call.cmds.senddata(page[i].hotkey.toUpperCase() + " ");
+				}
 				this.call.cmds.senddata(page[i].display);
 				lineCount++;
 				// Pause on dumb terminals if we run out of space
@@ -612,6 +631,10 @@ class MenuHandler extends BaseHandler {
 
 			case "lastCallers":
 				this._runSubModule(new LastCallers(this.call));
+				return;
+
+			case "announcements":
+				this._runSubModule(new AnnouncementHandler(this.call));
 				return;
 
 			case "whosOnline":

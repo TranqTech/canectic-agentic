@@ -17,6 +17,16 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'dashboard'
               span.visually-hidden  (current)
 
+        //- Announcements
+        li.nav-item
+          a.nav-link(
+            href='/admin/announcements'
+            class=activenav === 'announcements' ? 'active' : ''
+          )
+            | Announcements
+            if activenav === 'announcements'
+              span.visually-hidden  (current)
+
         //- Messages
         li.nav-item.dropdown
           a.nav-link.dropdown-toggle(

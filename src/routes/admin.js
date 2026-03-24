@@ -18,6 +18,7 @@ import * as netmail from '../models/netmail.js';
 import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
+import * as announcements from '../models/announcements.js';
 import * as menus from '../models/menus.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as peerAreaSubscriptions from '../models/peerAreaSubscriptions.js';
@@ -2375,6 +2376,59 @@ router.get('/nodelist/:networkId/search.json', async (req, res) => {
 	}
 
 	res.json({ nodes: nodes });
+});
+
+// -------------------------------------------------------
+// Announcements
+// -------------------------------------------------------
+
+router.get('/announcements', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var announcementList = await announcements.getAllAnnouncements();
+	res.render('admin/announcements/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Announcements',
+		activelink: 'announcements',
+		currentuser: currentuser,
+		announcements: announcementList
+	});
+});
+
+router.post('/announcements/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	req.body.author_id = currentuser ? currentuser.id : null;
+	req.body.author_name = currentuser ? currentuser.username : 'System';
+	var result = await announcements.createAnnouncement(req.body);
+	if (result.status) {
+		res.redirect('/admin/announcements');
+	} else {
+		var sufficientAccess = checkAdminAccess(currentuser);
+		var announcementList = await announcements.getAllAnnouncements();
+		res.render('admin/announcements/index', {
+			sufficientAccess: sufficientAccess,
+			title: 'Announcements',
+			activelink: 'announcements',
+			currentuser: currentuser,
+			announcements: announcementList,
+			errormessages: result.errormessages
+		});
+	}
+});
+
+router.post('/announcements/update/:id', urlencodedParser, requireAdmin, async (req, res) => {
+	var announcementId = parseInt(req.params.id);
+	var result = await announcements.updateAnnouncement(announcementId, req.body);
+	if (!result.status) {
+		alogger.writeAlog(3, "updateAnnouncement failed for id " + announcementId + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect('/admin/announcements');
+});
+
+router.post('/announcements/delete/:id', urlencodedParser, requireAdmin, async (req, res) => {
+	var announcementId = parseInt(req.params.id);
+	await announcements.deleteAnnouncement(announcementId);
+	res.redirect('/admin/announcements');
 });
 
 export { router };

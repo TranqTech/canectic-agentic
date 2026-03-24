@@ -1,0 +1,259 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info.me-2(href='/admin')
+                        | Exit
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newAnnouncementModal')
+                        | Add Announcement
+              .card-body
+                if errormessages && errormessages.length > 0
+                  ul.text-danger
+                    for error of errormessages
+                      li.text-danger= error
+                  br
+
+                if announcements && announcements.length > 0
+                  table#announcementTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Title
+                        th(scope='col') Author
+                        th(scope='col') Status
+                        th(scope='col') Pinned
+                        th(scope='col') Published
+                        th(scope='col') Expires
+                        th(scope='col' style='width:140px') Actions
+                    tbody
+                      for ann of announcements
+                        tr(
+                          data-id=ann.id
+                          data-title=ann.title || ''
+                          data-pinned=(ann.pinned ? 'true' : 'false')
+                          data-active=(ann.active ? 'true' : 'false')
+                          data-publish_at=(ann.publish_at ? new Date(ann.publish_at).toISOString().slice(0, 16) : '')
+                          data-expire_at=(ann.expire_at ? new Date(ann.expire_at).toISOString().slice(0, 16) : '')
+                          data-sort_order=ann.sort_order || 0
+                        )
+                          td= ann.title
+                          td= ann.author_name || '—'
+                          td
+                            if ann.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-danger Inactive
+                          td
+                            if ann.pinned
+                              span.badge.bg-warning Pinned
+                            else
+                              | —
+                          td
+                            if ann.publish_at
+                              small= new Date(ann.publish_at).toLocaleString()
+                            else
+                              span.text-muted Immediate
+                          td
+                            if ann.expire_at
+                              small= new Date(ann.expire_at).toLocaleString()
+                            else
+                              span.text-muted Never
+                          td
+                            button.btn.btn-xs.btn-outline-warning.me-1.edit-ann-btn(type='button' title='Edit')
+                              i.bi.bi-pencil
+                            button.btn.btn-xs.btn-outline-danger.delete-ann-btn(type='button' title='Delete')
+                              i.bi.bi-trash
+                else
+                  center
+                    .h4 No Announcements
+                    p.text-muted Add your first announcement to get started.
+
+    //- Hidden store for body_html per announcement (data attributes mangle HTML)
+    each ann of (announcements || [])
+      textarea.d-none(id='ann_html_' + ann.id)= ann.body_html || ''
+
+    //- New Announcement Modal
+    #newAnnouncementModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Add Announcement
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form#newAnnouncementForm(action='/admin/announcements/new' method='POST')
+              label.form-label Title:
+              input.form-control.mb-2(type='text' name='title' required placeholder='Announcement title')
+              label.form-label Body:
+              textarea#new_body_html(name='body_html')
+              .row.mt-2
+                .col-6
+                  label.form-label Publish At:
+                  input.form-control.mb-2(type='datetime-local' name='publish_at')
+                .col-6
+                  label.form-label Expire At:
+                  input.form-control.mb-2(type='datetime-local' name='expire_at')
+              .row
+                .col-4
+                  label.form-label Sort Order:
+                  input.form-control.mb-2(type='number' name='sort_order' value='0')
+                .col-4
+                  .form-check.mt-4
+                    input#newPinned.form-check-input(type='checkbox' name='pinned' value='true')
+                    label.form-check-label(for='newPinned') Pinned
+                .col-4
+                  .form-check.mt-4
+                    input#newActive.form-check-input(type='checkbox' name='active' value='true' checked)
+                    label.form-check-label(for='newActive') Active
+              .row.mt-3
+                .col-12
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Create Announcement')
+
+    //- Edit Announcement Modal
+    #editAnnouncementModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Edit Announcement
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form#editAnnouncementForm(method='POST')
+              label.form-label Title:
+              input#ed_title.form-control.mb-2(type='text' name='title' required)
+              label.form-label Body:
+              textarea#ed_body_html(name='body_html')
+              .row.mt-2
+                .col-6
+                  label.form-label Publish At:
+                  input#ed_publish_at.form-control.mb-2(type='datetime-local' name='publish_at')
+                .col-6
+                  label.form-label Expire At:
+                  input#ed_expire_at.form-control.mb-2(type='datetime-local' name='expire_at')
+              .row
+                .col-4
+                  label.form-label Sort Order:
+                  input#ed_sort_order.form-control.mb-2(type='number' name='sort_order')
+                .col-4
+                  .form-check.mt-4
+                    input#ed_pinned.form-check-input(type='checkbox' name='pinned' value='true')
+                    label.form-check-label(for='ed_pinned') Pinned
+                .col-4
+                  .form-check.mt-4
+                    input#ed_active.form-check-input(type='checkbox' name='active' value='true')
+                    label.form-check-label(for='ed_active') Active
+              .row.mt-3
+                .col-12
+                  .text-end
+                    input.btn.btn-lg.btn-success(type='submit' value='Save Changes')
+
+    //- Delete Announcement Modal
+    #deleteAnnouncementModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-danger.text-white
+            h3.modal-title Delete Announcement
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            p
+              | Are you sure you want to delete
+              strong#deleteAnnouncementName
+              | ?
+            form#deleteAnnouncementForm(method='POST')
+              .text-end
+                button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+                input.btn.btn-danger(type='submit' value='Delete Announcement')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      // TinyMCE config shared by both editors
+      var mceConfig = {
+        menubar: false,
+        plugins: 'lists link autolink',
+        toolbar: 'bold italic underline strikethrough | forecolor backcolor | bullist numlist | link | removeformat',
+        skin: 'oxide-dark',
+        content_css: 'dark',
+        height: 300,
+        branding: false,
+        promotion: false,
+        setup: function(editor) {
+          // Sync content to textarea before form submit
+          editor.on('change', function() { editor.save(); });
+        }
+      };
+
+      // Init TinyMCE on both textareas
+      tinymce.init(Object.assign({}, mceConfig, { selector: '#new_body_html' }));
+      tinymce.init(Object.assign({}, mceConfig, { selector: '#ed_body_html' }));
+
+      var editModal   = new bootstrap.Modal(document.getElementById('editAnnouncementModal'));
+      var deleteModal = new bootstrap.Modal(document.getElementById('deleteAnnouncementModal'));
+
+      // Sync TinyMCE before form submit
+      document.getElementById('newAnnouncementForm').addEventListener('submit', function() {
+        tinymce.get('new_body_html').save();
+      });
+      document.getElementById('editAnnouncementForm').addEventListener('submit', function() {
+        tinymce.get('ed_body_html').save();
+      });
+
+      // Edit button
+      document.querySelectorAll('.edit-ann-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var row = this.closest('tr');
+          var d   = row.dataset;
+
+          document.getElementById('editAnnouncementForm').action = '/admin/announcements/update/' + d.id;
+          document.getElementById('ed_title').value              = d.title;
+          document.getElementById('ed_publish_at').value         = d.publish_at;
+          document.getElementById('ed_expire_at').value          = d.expire_at;
+          document.getElementById('ed_sort_order').value         = d.sort_order;
+          document.getElementById('ed_pinned').checked           = d.pinned === 'true';
+          document.getElementById('ed_active').checked           = d.active === 'true';
+
+          // Load body_html from hidden textarea (avoids data-attribute mangling)
+          var hiddenEl = document.getElementById('ann_html_' + d.id);
+          var htmlContent = hiddenEl ? hiddenEl.value : '';
+          var editor = tinymce.get('ed_body_html');
+          if (editor) {
+            editor.setContent(htmlContent);
+          }
+
+          editModal.show();
+        });
+      });
+
+      // Delete button
+      document.querySelectorAll('.delete-ann-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var row = this.closest('tr');
+          var d   = row.dataset;
+
+          document.getElementById('deleteAnnouncementName').textContent = d.title;
+          document.getElementById('deleteAnnouncementForm').action      = '/admin/announcements/delete/' + d.id;
+          deleteModal.show();
+        });
+      });
+    });

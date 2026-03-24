@@ -14,6 +14,14 @@ const validnetmailchars = new RegExp("[A-Za-z0-9:/\\.@]");
 const validpwchars = new RegExp("[A-Za-z0-9]");
 const validdatechars = new RegExp("[0-9]");
 
+// Gender selection options — hotkey is first character of each label
+const GENDER_OPTIONS = [
+	{ key: 'm', value: 'Male',        label: 'Male' },
+	{ key: 'f', value: 'Female',      label: 'Female' },
+	{ key: 'o', value: 'Other',       label: 'Other' },
+	{ key: 'p', value: 'Undisclosed', label: 'Prefer not to say' },
+];
+
 // Config (read at point of use via appConfig)
 
 // Colors
@@ -38,6 +46,7 @@ const regstages = [
 	{ display: "Password Confirmation", field_name: "PasswordConfirm", prompt: "Please re-enter your password",                    inputtype: "Password", prompt_clr: "11" },
 	{ display: "First Name",          field_name: "Firstname",       prompt: "Please enter your full First (given) name",          inputtype: "RealName", prompt_clr: "11" },
 	{ display: "Last Name",           field_name: "Lastname",        prompt: "Please enter your full Last (family) name",          inputtype: "RealName", prompt_clr: "11" },
+	{ display: "Gender",              field_name: "Gender",          prompt: "Please select your gender",                          inputtype: "Gender",   prompt_clr: "11" },
 	{ display: "Location",            field_name: "Location",        prompt: "Where are you calling from?",                        inputtype: "Location", prompt_clr: "11" },
 	{ display: "Netmail",             field_name: "Netmail",         prompt: "Please enter an Email or Netmail address you can be reached at", inputtype: "Netmail", prompt_clr: "11" },
 	{ display: "Birthdate",           field_name: "Birthdate",       prompt: "Please enter your birthdate as YYYY/MM/DD",          inputtype: "Date",     prompt_clr: "11" },
@@ -49,9 +58,6 @@ class RegistrationHandler extends BaseHandler {
 		this.system_name = system_name;
 		this.dumb = (call.term_type === "Dumb");
 
-		// Use shorter inactivity timeout for input fields
-		this.inactivityTO = appConfig.getNumber('inputTO', 20) * 1000; // seconds → ms
-
 		// User data
 		this.firstname = "";
 		this.lastname = "";
@@ -59,6 +65,7 @@ class RegistrationHandler extends BaseHandler {
 		this.username = "";
 		this.password = "";
 		this.location = "";
+		this.gender = "";
 		this.birth_month = "";
 		this.birth_day = "";
 		this.birth_year = "";
@@ -79,11 +86,11 @@ class RegistrationHandler extends BaseHandler {
 
 		// Box geometry
 		this.box_width = 42;
-		this.box_height = 12;
+		this.box_height = 13;
 		this.box_start_x = 0;
 		this.box_start_y = 0;
 		this.box_end_x = 0;
-		this.prompt_height = 3;
+		this.prompt_height = 4;
 		this.label_x = 0;
 		this.label_y = 0;
 		this.prompt_x = 0;
@@ -342,6 +349,9 @@ class RegistrationHandler extends BaseHandler {
 					this.cursor_x += this.birthdate.length;
 				}
 				break;
+			case "Gender":
+				this._drawGenderOptions();
+				break;
 			case "Location":
 				if (this.location) {
 					this.inputbuffer = this.location;
@@ -357,6 +367,60 @@ class RegistrationHandler extends BaseHandler {
 				}
 				break;
 		}
+	}
+
+	_drawGenderOptions() {
+		var selected = this.gender;
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n");
+			for (var gi = 0; gi < GENDER_OPTIONS.length; gi++) {
+				var opt = GENDER_OPTIONS[gi];
+				var marker = (selected === opt.value) ? '*' : ' ';
+				this.call.cmds.senddata("  " + marker + " (" + opt.key.toUpperCase() + ") " + opt.label + "\r\n");
+			}
+			return;
+		}
+		// ANSI: draw options in the prompt area (cleared by _clearPrompt on advance)
+		var optY = this.prompt_y;
+		for (var gi = 0; gi < GENDER_OPTIONS.length; gi++) {
+			var opt = GENDER_OPTIONS[gi];
+			var isSelected = (selected === opt.value);
+			this.call.cmds.movecursor(this.prompt_x, optY);
+			this.call.cmds.cleartoeol();
+			// Redraw right border
+			this.call.cmds.movecursor(this.box_end_x, optY);
+			this.call.cmds.setfgcolor(border_clr);
+			this.call.cmds.senddata(this.menu_vert_block);
+			// Draw option
+			this.call.cmds.movecursor(this.prompt_x, optY);
+			if (isSelected) {
+				this.call.cmds.setfgcolor(input_clr);
+				this.call.cmds.senddata("\xF9 ");
+			} else {
+				this.call.cmds.setfgcolor(6);
+				this.call.cmds.senddata("  ");
+			}
+			this.call.cmds.setfgcolor(6);
+			this.call.cmds.senddata("(");
+			this.call.cmds.setfgcolor(14);
+			this.call.cmds.senddata(opt.key.toUpperCase());
+			this.call.cmds.setfgcolor(6);
+			this.call.cmds.senddata(") " + opt.label);
+			optY++;
+		}
+		this.call.cmds.resetcolors();
+		// Show current selection on the input line
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.movecursor(this.box_end_x, this.input_y);
+		this.call.cmds.setfgcolor(border_clr);
+		this.call.cmds.senddata(this.menu_vert_block);
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+		if (selected) {
+			this.call.cmds.setfgcolor(input_clr);
+			this.call.cmds.senddata(selected);
+		}
+		this.call.cmds.resetcolors();
 	}
 
 	_sendPrompt() {
@@ -467,6 +531,7 @@ class RegistrationHandler extends BaseHandler {
 			this.call.cmds.senddata("  Real Name: " + this.fullname + "\r\n");
 			this.call.cmds.senddata("  Username : " + this.username + "\r\n");
 			this.call.cmds.senddata("  Location : " + this.location + "\r\n");
+			this.call.cmds.senddata("  Gender   : " + (this.gender || 'Not specified') + "\r\n");
 			this.call.cmds.senddata("  Password : *********\r\n");
 			this.call.cmds.senddata("  Netmail  : " + this.mailaddress + "\r\n");
 			this.call.cmds.senddata("  Birthday : " + this.birthdate + "\r\n");
@@ -487,6 +552,7 @@ class RegistrationHandler extends BaseHandler {
 			{ label: "Real Name: ", value: this.fullname },
 			{ label: "Username : ", value: this.username },
 			{ label: "Location : ", value: this.location },
+			{ label: "Gender   : ", value: this.gender || 'Not specified' },
 			{ label: "Password : ", value: "*********" },
 			{ label: "Netmail  : ", value: this.mailaddress },
 			{ label: "Birthday : ", value: this.birthdate },
@@ -526,6 +592,7 @@ class RegistrationHandler extends BaseHandler {
 				this._checkEnter();
 				return;
 			case "Backspace":
+				if (this.current_input_type === "Gender") return;
 				if (this.current_input_type === "Date") {
 					this._doDateBackspace();
 				} else {
@@ -586,6 +653,20 @@ class RegistrationHandler extends BaseHandler {
 					this._evalInput();
 				}
 				break;
+
+			case "Gender": {
+				var lch = ch.toLowerCase();
+				for (var gi = 0; gi < GENDER_OPTIONS.length; gi++) {
+					if (lch === GENDER_OPTIONS[gi].key) {
+						this.gender = GENDER_OPTIONS[gi].value;
+						this.inputbuffer = this.gender;
+						this._drawGenderOptions();
+						this._evalInput();
+						return;
+					}
+				}
+				break;
+			}
 
 			case "Name":
 				if (this.inputbuffer.length < 1) ch = ch.toUpperCase();
@@ -750,6 +831,7 @@ class RegistrationHandler extends BaseHandler {
 		switch (this.current_input_type) {
 			case "YesNo":
 			case "YesNoQuit":
+			case "Gender":
 				this.call.cmds.sendbeep();
 				break;
 			case "Date":
@@ -924,6 +1006,15 @@ class RegistrationHandler extends BaseHandler {
 				}
 				return;
 
+			case "Gender":
+				if (this.gender) {
+					this._showSuccess("");
+					this.inputbuffer = "";
+					this.current_field++;
+					this._sendPrompt();
+				}
+				return;
+
 			case "Location":
 				if (this.inputbuffer.length > 0) {
 					this._showSuccess("");
@@ -1031,6 +1122,7 @@ class RegistrationHandler extends BaseHandler {
 			password: this.password,
 			mailaddress: this.mailaddress,
 			location: this.location,
+			gender: this.gender || null,
 			birthdate: this.birthdate,
 			birth_day: this.birth_day,
 			birth_month: this.birth_month,

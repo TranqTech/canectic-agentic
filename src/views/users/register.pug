@@ -1,0 +1,466 @@
+extends ../layouts/user
+block content
+	-var _errors = errors || []
+	-var _form = form || {}
+	-var _minage = minage || 13
+	-var _pwmin = pwmin || 12
+	-var _boardname = boardname || 'BBS'
+
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+			br
+
+		.row
+			- var colClass = ismobile ? 'col-12' : 'col-6 offset-3'
+			div(class=colClass)
+				.card
+					.card-header.text-white.bg-dark
+						.h3 Register for #{_boardname}
+					.card-body
+						if _errors && _errors.length
+							ul.my-errors.error-wiggle
+								each error in _errors
+									li= error
+						.mb-3.text-muted.text-center
+							span#stepIndicator Step 1 of 6
+						.progress.mb-3
+							.progress-bar(
+								id="progressBar"
+								role="progressbar"
+								style="width: 16.67%"
+								aria-valuenow="1"
+								aria-valuemin="1"
+								aria-valuemax="6"
+							)
+						form(action="/users/register" method="POST" id="registerForm")
+							input(type="hidden" name="age_verified" id="age_verified" value=(_form.age_verified || ""))
+
+							//- Step 1: Age Verification
+							.wizard-step(data-step="1")
+								.text-center.mb-4
+									h4 Age Verification
+									p.text-muted Are you at least #{_minage} years old?
+								.d-flex.justify-content-center.gap-3
+									button.btn.btn-success.btn-lg(type="button" id="ageYes") Yes
+									button.btn.btn-danger.btn-lg(type="button" id="ageNo") No
+								#ageRejected.text-danger.text-center.mt-3(style="display:none")
+									p
+										strong You must be at least #{_minage} years old to register.
+									a.btn.btn-secondary(href="/") Return to Home
+
+							//- Step 2: Account Details
+							.wizard-step(data-step="2" style="display:none")
+								h4.mb-3 Account Details
+								.mb-3
+									label.form-label(for="reg_username") Username
+									input.form-control(
+										type="text"
+										id="reg_username"
+										name="username"
+										minlength="3"
+										required
+										value=(_form.username || "")
+										autocomplete="username"
+									)
+									.invalid-feedback#username_feedback Username must be at least 3 characters
+									.valid-feedback#username_ok(style="display:none")
+										i.bi.bi-check-circle
+										|  Username is available
+								.mb-3
+									label.form-label(for="reg_password") Password
+									input.form-control(
+										type="password"
+										id="reg_password"
+										name="password"
+										required
+										autocomplete="new-password"
+									)
+									.invalid-feedback Password must be at least #{_pwmin} characters
+								.mb-3
+									label.form-label(for="reg_password_confirm") Confirm Password
+									input.form-control(
+										type="password"
+										id="reg_password_confirm"
+										name="password_confirm"
+										required
+										autocomplete="new-password"
+									)
+									.invalid-feedback Passwords do not match
+								.d-flex.justify-content-between
+									button.btn.btn-secondary(type="button" data-nav="prev") Back
+									button.btn.btn-primary(type="button" data-nav="next") Next
+
+							//- Step 3: Personal Info
+							.wizard-step(data-step="3" style="display:none")
+								h4.mb-3 Personal Information
+								.mb-3
+									label.form-label(for="reg_firstname") First Name
+									input.form-control(
+										type="text"
+										id="reg_firstname"
+										name="firstname"
+										required
+										value=(_form.firstname || "")
+									)
+									.invalid-feedback First name is required
+								.mb-3
+									label.form-label(for="reg_lastname") Last Name
+									input.form-control(
+										type="text"
+										id="reg_lastname"
+										name="lastname"
+										required
+										value=(_form.lastname || "")
+									)
+									.invalid-feedback Last name is required
+								.mb-3
+									label.form-label(for="reg_gender") Gender
+									select.form-select(
+										id="reg_gender"
+										name="gender"
+										required
+									)
+										option(value="" selected=(!_form.gender) disabled) -- Select --
+										option(value="Male" selected=(_form.gender === 'Male')) Male
+										option(value="Female" selected=(_form.gender === 'Female')) Female
+										option(value="Other" selected=(_form.gender === 'Other')) Other
+										option(value="Undisclosed" selected=(_form.gender === 'Undisclosed')) Prefer not to say
+									.invalid-feedback Please select a gender option
+								.d-flex.justify-content-between
+									button.btn.btn-secondary(type="button" data-nav="prev") Back
+									button.btn.btn-primary(type="button" data-nav="next") Next
+
+							//- Step 4: Contact & Location
+							.wizard-step(data-step="4" style="display:none")
+								h4.mb-3 Contact &amp; Location
+								.mb-3
+									label.form-label(for="reg_location") Location
+									input.form-control(
+										type="text"
+										id="reg_location"
+										name="location"
+										placeholder="City, State/Country"
+										value=(_form.location || "")
+									)
+								.mb-3
+									label.form-label(for="reg_mailaddress") Email / Netmail Address
+									input.form-control(
+										type="text"
+										id="reg_mailaddress"
+										name="mailaddress"
+										placeholder="user@example.com or 1:234/5"
+										required
+										value=(_form.mailaddress || "")
+									)
+									.invalid-feedback#email_feedback Email or netmail address is required
+									.valid-feedback#email_ok(style="display:none")
+										i.bi.bi-check-circle
+										|  Address is available
+								.d-flex.justify-content-between
+									button.btn.btn-secondary(type="button" data-nav="prev") Back
+									button.btn.btn-primary(type="button" data-nav="next") Next
+
+							//- Step 5: Birthdate
+							.wizard-step(data-step="5" style="display:none")
+								h4.mb-3 Birthdate
+								.mb-3
+									label.form-label(for="reg_birthdate") Date of Birth
+									input.form-control(
+										type="date"
+										id="reg_birthdate"
+										name="birthdate"
+										required
+										value=(_form.birthdate || "")
+									)
+									.invalid-feedback Please enter a valid birthdate
+								.d-flex.justify-content-between
+									button.btn.btn-secondary(type="button" data-nav="prev") Back
+									button.btn.btn-primary(type="button" data-nav="next") Next
+
+							//- Step 6: Review & Submit
+							.wizard-step(data-step="6" style="display:none")
+								h4.mb-3 Review Your Information
+								table.table.table-sm.table-dark
+									tbody
+										tr
+											td.text-muted Username
+											td#review_username
+										tr
+											td.text-muted First Name
+											td#review_firstname
+										tr
+											td.text-muted Last Name
+											td#review_lastname
+										tr
+											td.text-muted Gender
+											td#review_gender
+										tr
+											td.text-muted Location
+											td#review_location
+										tr
+											td.text-muted Email / Netmail
+											td#review_mailaddress
+										tr
+											td.text-muted Birthdate
+											td#review_birthdate
+								.d-flex.justify-content-between
+									button.btn.btn-secondary(type="button" data-nav="prev") Back
+									button.btn.btn-success.btn-lg(type="submit" id="submitBtn") Create Account
+
+	script.
+		(function() {
+			var form = document.getElementById('registerForm');
+			var steps = form.querySelectorAll('.wizard-step');
+			var indicator = document.getElementById('stepIndicator');
+			var progressBar = document.getElementById('progressBar');
+			var ageField = document.getElementById('age_verified');
+			var currentStep = 1;
+			var totalSteps = 6;
+			var pwmin = #{_pwmin};
+			var minage = #{_minage};
+			var validating = false;
+
+			function showStep(n) {
+				for (var i = 0; i < steps.length; i++) {
+					steps[i].style.display = 'none';
+				}
+				var target = form.querySelector('.wizard-step[data-step="' + n + '"]');
+				if (target) target.style.display = 'block';
+				indicator.textContent = 'Step ' + n + ' of ' + totalSteps;
+				var pct = (n / totalSteps) * 100;
+				progressBar.style.width = pct + '%';
+				progressBar.setAttribute('aria-valuenow', n);
+				currentStep = n;
+			}
+
+			// Clear validation state on input/change
+			form.addEventListener('input', function(e) {
+				e.target.classList.remove('is-invalid');
+				e.target.classList.remove('is-valid');
+			});
+			form.addEventListener('change', function(e) {
+				e.target.classList.remove('is-invalid');
+				e.target.classList.remove('is-valid');
+			});
+
+			// --- AJAX helpers ---
+			function setFieldError(el, msg) {
+				el.classList.remove('is-valid');
+				el.classList.add('is-invalid');
+				var fb = el.parentElement.querySelector('.invalid-feedback');
+				if (fb && msg) fb.textContent = msg;
+			}
+			function setFieldValid(el) {
+				el.classList.remove('is-invalid');
+				el.classList.add('is-valid');
+			}
+
+			async function checkUsernameAvailable(username) {
+				try {
+					var resp = await fetch('/users/check-username?username=' + encodeURIComponent(username));
+					var data = await resp.json();
+					return data.available;
+				} catch (e) {
+					return true; // fail open — server-side will catch it
+				}
+			}
+
+			async function checkEmailAvailable(email) {
+				try {
+					var resp = await fetch('/users/check-email?email=' + encodeURIComponent(email));
+					var data = await resp.json();
+					return data.available;
+				} catch (e) {
+					return true;
+				}
+			}
+
+			// --- Live username check on blur ---
+			var usernameInput = document.getElementById('reg_username');
+			var usernameDebounce = null;
+			usernameInput.addEventListener('blur', async function() {
+				var val = usernameInput.value.trim();
+				if (val.length < 3) return;
+				var avail = await checkUsernameAvailable(val);
+				if (usernameInput.value.trim() !== val) return; // changed while checking
+				if (avail) {
+					setFieldValid(usernameInput);
+				} else {
+					setFieldError(usernameInput, 'Username is already taken');
+				}
+			});
+
+			// --- Live email check on blur ---
+			var emailInput = document.getElementById('reg_mailaddress');
+			emailInput.addEventListener('blur', async function() {
+				var val = emailInput.value.trim();
+				if (!val) return;
+				var avail = await checkEmailAvailable(val);
+				if (emailInput.value.trim() !== val) return;
+				if (avail) {
+					setFieldValid(emailInput);
+				} else {
+					setFieldError(emailInput, 'This email address is already registered');
+				}
+			});
+
+			// --- Step validation (async) ---
+			async function validateStep(step) {
+				var valid = true;
+
+				if (step === 2) {
+					var uname = document.getElementById('reg_username');
+					var uval = uname.value.trim();
+					if (!uval || uval.length < 3) {
+						setFieldError(uname, 'Username must be at least 3 characters');
+						valid = false;
+					} else {
+						// AJAX username check
+						var avail = await checkUsernameAvailable(uval);
+						if (!avail) {
+							setFieldError(uname, 'Username is already taken');
+							valid = false;
+						} else {
+							setFieldValid(uname);
+						}
+					}
+
+					var pw = document.getElementById('reg_password');
+					if (!pw.value || pw.value.length < pwmin) {
+						setFieldError(pw, 'Password must be at least ' + pwmin + ' characters');
+						valid = false;
+					}
+
+					var pwc = document.getElementById('reg_password_confirm');
+					if (!pwc.value || pwc.value !== pw.value) {
+						setFieldError(pwc, 'Passwords do not match');
+						valid = false;
+					}
+				}
+
+				if (step === 3) {
+					var fn = document.getElementById('reg_firstname');
+					if (!fn.value.trim()) {
+						setFieldError(fn, 'First name is required');
+						valid = false;
+					}
+					var ln = document.getElementById('reg_lastname');
+					if (!ln.value.trim()) {
+						setFieldError(ln, 'Last name is required');
+						valid = false;
+					}
+					var gn = document.getElementById('reg_gender');
+					if (!gn.value) {
+						setFieldError(gn, 'Please select a gender option');
+						valid = false;
+					}
+				}
+
+				if (step === 4) {
+					var em = document.getElementById('reg_mailaddress');
+					var emval = em.value.trim();
+					if (!emval) {
+						setFieldError(em, 'Email or netmail address is required');
+						valid = false;
+					} else {
+						var emAvail = await checkEmailAvailable(emval);
+						if (!emAvail) {
+							setFieldError(em, 'This email address is already registered');
+							valid = false;
+						} else {
+							setFieldValid(em);
+						}
+					}
+				}
+
+				if (step === 5) {
+					var bd = document.getElementById('reg_birthdate');
+					if (!bd.value) {
+						setFieldError(bd, 'Please enter a valid birthdate');
+						valid = false;
+					} else {
+						var d = new Date(bd.value);
+						if (isNaN(d.getTime())) {
+							setFieldError(bd, 'Please enter a valid birthdate');
+							valid = false;
+						} else {
+							// Check minimum age
+							var today = new Date();
+							var age = today.getFullYear() - d.getFullYear();
+							var md = today.getMonth() - d.getMonth();
+							if (md < 0 || (md === 0 && today.getDate() < d.getDate())) age--;
+							if (age < minage) {
+								setFieldError(bd, 'You must be at least ' + minage + ' years old');
+								valid = false;
+							}
+						}
+					}
+				}
+
+				return valid;
+			}
+
+			// --- Populate review step ---
+			function populateReview() {
+				document.getElementById('review_username').textContent = document.getElementById('reg_username').value;
+				document.getElementById('review_firstname').textContent = document.getElementById('reg_firstname').value;
+				document.getElementById('review_lastname').textContent = document.getElementById('reg_lastname').value;
+				var genderSel = document.getElementById('reg_gender');
+				var genderText = genderSel.selectedIndex > 0 ? genderSel.options[genderSel.selectedIndex].text : 'Not specified';
+				document.getElementById('review_gender').textContent = genderText;
+				document.getElementById('review_location').textContent = document.getElementById('reg_location').value || 'Not specified';
+				document.getElementById('review_mailaddress').textContent = document.getElementById('reg_mailaddress').value || 'Not specified';
+				document.getElementById('review_birthdate').textContent = document.getElementById('reg_birthdate').value;
+			}
+
+			// --- Age verification buttons ---
+			var ageYes = document.getElementById('ageYes');
+			var ageNo = document.getElementById('ageNo');
+			var ageRejected = document.getElementById('ageRejected');
+			if (ageYes) {
+				ageYes.addEventListener('click', function() {
+					ageField.value = 'yes';
+					showStep(2);
+				});
+			}
+			if (ageNo) {
+				ageNo.addEventListener('click', function() {
+					ageField.value = 'no';
+					ageYes.style.display = 'none';
+					ageNo.style.display = 'none';
+					ageRejected.style.display = 'block';
+				});
+			}
+
+			// --- Navigation buttons (async) ---
+			form.addEventListener('click', async function(e) {
+				var btn = e.target.closest('[data-nav]');
+				if (!btn) return;
+				if (validating) return;
+				var dir = btn.getAttribute('data-nav');
+
+				if (dir === 'next') {
+					validating = true;
+					btn.disabled = true;
+					try {
+						var ok = await validateStep(currentStep);
+						if (!ok) return;
+						if (currentStep === 5) populateReview();
+						showStep(currentStep + 1);
+					} finally {
+						validating = false;
+						btn.disabled = false;
+					}
+				} else if (dir === 'prev') {
+					showStep(currentStep - 1);
+				}
+			});
+
+			// If server returned errors, skip past age verification
+			var serverErrors = document.querySelector('.my-errors');
+			if (serverErrors && ageField.value === 'yes') {
+				showStep(2);
+			}
+		})();

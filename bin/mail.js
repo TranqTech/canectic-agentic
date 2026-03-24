@@ -73,6 +73,22 @@ process.on('SIGTERM', shutdown);
 
 async function main() {
 	await alogger.initLogBus();
+
+	// Startup validation: fail fast if DB or Redis is unreachable
+	try {
+		await pgpool.query('SELECT 1');
+	} catch (err) {
+		alogger.writeAlog(0, "PostgreSQL is not reachable: " + err.message, "redbright", true);
+		process.exit(1);
+	}
+	try {
+		var rc = await redis.getClient();
+		await rc.ping();
+	} catch (err) {
+		alogger.writeAlog(0, "Redis is not reachable: " + err.message, "redbright", true);
+		process.exit(1);
+	}
+
 	await appConfig.load();
 	alogger.writeAlog(1, systemvermsg + "\n  Mail Process Startup", "yellowbright", true);
 

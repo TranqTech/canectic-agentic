@@ -23,6 +23,7 @@ import { DoorLaunchHandler } from "../handlers/doorlaunchhandler.js";
 import { SubModuleAdapter } from "../handlers/submoduleadapter.js";
 import { LastCallers } from "../handlers/lastcallers.js";
 import { WhosOnline } from "../handlers/whosonline.js";
+import { AnnouncementHandler } from "../handlers/announcementhandler.js";
 import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 import { fileBatchCheck } from "../handlers/menucommands/fileBatchCheck.js";
 
@@ -50,7 +51,7 @@ const handlerRegistry = {
 	"whos_online":  (call) => new SubModuleAdapter(call, WhosOnline, "WhosOnline"),
 	"check_email":  (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
 	"check_batch":  (call) => new SubModuleAdapter(call, fileBatchCheck, "FileBatchCheck"),
-	//"announcements": (call) => new AnnouncementHandler(call),
+	"announcements": (call) => new SubModuleAdapter(call, AnnouncementHandler, "Announcements"),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
 	//"logoff":       (call) => new LogoffHandler(call),
@@ -65,9 +66,9 @@ const callFlows = {
 		"negotiate",
 		"logon",
 		"last_callers",
+		"announcements",
 		"check_email",
 		"check_batch",
-		//"announcements",
 		"menu",
 		"goodbye",
 	],
@@ -399,6 +400,7 @@ class IncomingCall{
 				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
 				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
 			}
+			this.logCallStart();
 			this._onHandlerComplete(null);
 		});
 	}

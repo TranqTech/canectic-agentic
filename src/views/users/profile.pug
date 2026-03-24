@@ -1,0 +1,73 @@
+extends ../layouts/user
+block content
+	-var _user = user || {}
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+
+		.row
+			- var colClass = ismobile ? 'col-12' : 'col-8 offset-2'
+			div(class=colClass)
+				.card
+					.card-header.text-white.bg-dark
+						.d-flex.justify-content-between.align-items-center
+							.h3.mb-0 My Profile
+							span.badge.bg-secondary= 'User #' + (_user.usernumber || '')
+					.card-body
+						.row
+							.col-md-6
+								h5.text-muted Account
+								table.table.table-sm.table-dark.mb-4
+									tbody
+										tr
+											td.text-muted(style="width:40%") Username
+											td= _user.username
+										tr
+											td.text-muted Security Level
+											td= _user.security
+										tr
+											td.text-muted Member Since
+											td
+												if _user.created_at
+													= new Date(_user.created_at).toLocaleDateString()
+												else
+													| —
+										tr
+											td.text-muted Last Login
+											td
+												if _user.lastlogon
+													= new Date(_user.lastlogon).toLocaleDateString()
+												else
+													| —
+										tr
+											td.text-muted Total Logins
+											td= _user.logoncount || 0
+
+							.col-md-6
+								h5.text-muted Personal
+								table.table.table-sm.table-dark.mb-4
+									tbody
+										tr
+											td.text-muted(style="width:40%") Name
+											td= _user.fullname || (((_user.firstname || '') + ' ' + (_user.lastname || '')).trim()) || '—'
+										tr
+											td.text-muted Location
+											td= _user.location || '—'
+										tr
+											td.text-muted Gender
+											td
+												if _user.gender === 'Undisclosed'
+													| Prefer not to say
+												else
+													= _user.gender || '—'
+										tr
+											td.text-muted Birthdate
+											td
+												if _user.birthdate
+													= new Date(_user.birthdate).toLocaleDateString()
+												else
+													| —
+										tr
+											td.text-muted Email / Netmail
+											td= _user.mailaddress || '—'

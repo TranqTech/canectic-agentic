@@ -101,14 +101,31 @@ Session ID is stored in a `sessionid` HTTP-only cookie. Max age 7 days. Domain s
 | GET | `/users/login` | Login page (redirects to `/` if already authenticated) |
 | POST | `/users/login` | Authenticate — accepts both form and AJAX (JSON). Form redirects; AJAX returns `{ status, redirect }`. |
 | GET | `/users/logout` | Destroys session, clears cookie, redirects to login |
-| GET | `/users/register` | Registration page |
-| POST | `/users/register` | Create account via `userAccounts.saveUser()` |
+| GET | `/users/register` | Multi-step registration wizard (passes `minage`, `pwmin`, `boardname`, `faviconlink`) |
+| POST | `/users/register` | Create account via `userAccounts.createNewUser()` with server-side validation (age, username availability, password length/match, required fields, birthdate age check) |
 
 ### Login Flow
 
 1. `userAccounts.checkUserPass(username, password)` validates credentials (salt+pepper hashing)
 2. On success: `buildSessionData(userobj)` prepares session fields, `sessionStore()` saves to Redis, `setSessionCookie()` sets the HTTP-only cookie
 3. Post-login redirect: `req.body.redirect` with `safeRedirect()` validation (rejects absolute URLs and protocol-relative paths to prevent open redirect)
+
+### Registration Flow
+
+The registration page (`src/views/users/register.pug`) is a 6-step client-side wizard:
+
+1. **Age Verification** — Yes/No buttons; "No" disables proceeding and shows rejection message
+2. **Account Details** — Username (min 3 chars), Password (min `pwmin` chars), Password Confirmation
+3. **Personal Info** — First Name, Last Name, Gender (Male/Female/Other/Undisclosed)
+4. **Contact & Location** — Location, Email/Netmail Address
+5. **Birthdate** — Date input (YYYY-MM-DD)
+6. **Review & Submit** — Summary table of all entered data, single POST submit
+
+Client-side: step navigation via JS (no server round-trips), per-step validation, progress bar. All data submitted as a single POST to `/users/register` on the final step. A hidden `age_verified` field tracks the age gate response.
+
+Server-side POST validation: age verification, username (required, min 3 chars, availability via `checkUsernameAvailable`), password (required, min `pwmin`, confirmation match), first/last name required, birthdate (required, valid date, minimum age check). On validation failure, form data is passed back as `form` local for field repopulation.
+
+The `gender` column (`VARCHAR(16)`) was added to the `users` table schema. Values: `Male`, `Female`, `Other`, `Undisclosed`, or `null`.
 
 ### Shared Login Partial
 
@@ -127,7 +144,7 @@ Both login and register accept `Accept: application/json` requests. Error respon
 Each router (`index.js`, `admin.js`, `users.js`, `pm.js`) uses a consistent pattern:
 
 1. **Cookie parser** — `router.use(cookieParser())`
-2. **Shared locals injection** — A `router.use()` middleware that sets template variables available to all views in that router: `boardname`, `faviconlink`, `currentPath`, `activelink`, and (for index.js) `DateTime` and `ismobile`
+2. **Shared locals injection** — A `router.use()` middleware that sets template variables available to all views in that router: `boardname`, `faviconlink`, `currentPath`, `activelink`, and (for index.js, users.js, files.js) `ismobile`
 3. **Session renewal** — The shared locals middleware also calls `sessionStore.sessionRenew()` on every request if a session cookie exists, keeping active sessions alive
 4. **Unread PM count** — `index.js`, `admin.js`, and `pm.js` all fetch `pmUnreadCount` via `privateMessages.getUnreadCount(userId)` in their shared middleware, making it available to nav templates for the mail badge
 5. **Flash messages** — `pm.js` loads flash messages via `flash.get(req)` into `res.locals.flash` for one-shot user feedback after redirects

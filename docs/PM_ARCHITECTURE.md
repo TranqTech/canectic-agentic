@@ -6,6 +6,7 @@ The private messaging system provides unified user-to-user messaging across mult
 
 For the shared message platform (echomail areas, read tracking, body_html pipeline), see `message_architecture.md`.
 For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`.
+For the internet email transport (outbound relay, inbound gateway), see `EMAIL_ARCHITECTURE.md`.
 For the web application stack (Express, sessions, admin panel), see `web_architecture.md`.
 For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.
 
@@ -17,7 +18,7 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `privateMessages.js` | `src/models/` | Unified PM model. Transport access control, recipient resolution, inbox/outbox/trash CRUD, delivery pipeline, dupe checking, undeliverable queue, sysop notifications, soft delete with trash purge. On non-LOCAL `queueMessage()` and `queueOutbound()`, triggers outbound toss via BullMQ job queue (FTN → `enqueueFtnOutbound`, QWK → `enqueueQwkPushAll`). Dynamic import of queue module — gracefully skips if queue infrastructure is unavailable. |
+| `privateMessages.js` | `src/models/` | Unified PM model. Transport access control, recipient resolution, inbox/outbox/trash CRUD, delivery pipeline, dupe checking, undeliverable queue, sysop notifications, soft delete with trash purge. On non-LOCAL `queueMessage()` and `queueOutbound()`, triggers outbound toss via BullMQ job queue (FTN → `enqueueFtnOutbound`, QWK → `enqueueQwkPushAll`, EMAIL → `enqueueEmailOutbound`). Dynamic import of queue module — gracefully skips if queue infrastructure is unavailable. |
 | `ftnNetmailAdapter.js` | `src/models/` | FTN↔PM bridge. Converts between FTN Message objects and PM objects. Handles inbound routing (local delivery, relay, automated processors). |
 | `flash.js` | `src/middleware/db/` | Session-scoped flash messages via Redis. Used by PM routes for user feedback on compose/reply/delete/restore actions. Generic — usable by any route. |
 
@@ -265,10 +266,13 @@ Web compose form → POST /pm/compose/network   (or terminal pmEditor save)
     → _triggerOutboundToss(transport_type)
         FTN → enqueues ftn:outbound on toss queue
         QWK → enqueues qwk:push-all on toss queue
+        EMAIL → enqueues email:outbound on toss queue
   → flash success message → redirect
 ```
 
 The outbound toss trigger fires from the model layer, so both web routes and terminal `pmEditor` get immediate dispatch without duplicating logic. The trigger uses dynamic import of `jobs.js` and silently skips if queue infrastructure is unavailable.
+
+For EMAIL-specific flow details (relay, inbound gateway, failure handling), see `EMAIL_ARCHITECTURE.md`.
 
 ### FTN Inbound
 
@@ -748,7 +752,6 @@ PM trash purge runs automatically via a BullMQ repeatable job (daily at 3:00 AM)
 ## Future Development
 
 - **Conversation grouping**: `transport_data` preserves `msg_id` / `reply_to` for future `conversation_id` threading
-- **Email transport adapter**: Similar to FTN/QWK adapters but for SMTP/IMAP
 - **Meshtastic transport adapter**: LoRa mesh radio message delivery
 - **`netmail.js` retirement**: Old FTN-specific module can be dropped once all paths confirmed working through the unified PM system
 - **Old `netmail_in` / `netmail_out` tables**: Can be dropped or renamed to `_legacy` after migration verified

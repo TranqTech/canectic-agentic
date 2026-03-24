@@ -19,6 +19,7 @@ import * as userAccounts from '../models/useraccounts.js';
 import * as userMsgPointers from '../models/userMsgPointers.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
+import * as announcements from '../models/announcements.js';
 
 //setup
 router.use(cookieParser());
@@ -134,8 +135,11 @@ function checkAreaPostAccess(sessionUser, msgArea) {
 }
 
 /* GET home page. */
-router.get('/', function(req, res, next) {
-  res.render('public/index', { title: 'Express' });
+router.get('/', async function(req, res, next) {
+  var currentuser = await getCurrentUser(req);
+  res.locals.currentuser = currentuser;
+  var activeAnnouncements = await announcements.getActiveAnnouncements(10);
+  res.render('public/index', { title: appConfig.get('boardname'), announcements: activeAnnouncements });
 });
 
 // -------------------------------------------------------

@@ -162,6 +162,7 @@ async function createNewUser(newrecord) {
 			mailtoken: null,
 			mailtoken_created: null,
 			location: recloc,
+			gender: newrecord.gender || null,
 			birthdate: newrecord.birthdate || null,
 			security: recsec,
 			logoncount: 0,

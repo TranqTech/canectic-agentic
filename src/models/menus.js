@@ -347,6 +347,7 @@ function getAvailableCommands() {
 		{ name: 'newScanGroup',    label: 'New Scan (Group)',   needsArg: false },
 		{ name: 'userList',        label: 'User List',         needsArg: false },
 		{ name: 'lastCallers',     label: 'Last Callers',      needsArg: false },
+		{ name: 'announcements',   label: 'Announcements',     needsArg: false },
 		{ name: 'whosOnline',      label: "Who's Online",      needsArg: false },
 		{ name: 'email',           label: 'Private Messages',  needsArg: false },
 		{ name: 'checkEmail',      label: 'Check Email',       needsArg: false },
