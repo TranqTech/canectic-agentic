@@ -37,7 +37,7 @@ Last updated: 2026-03-24
 - [x] User list
 - [x] Door game support (NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty)
 - [~] Password reset handler (sends message, token/link flow not implemented)
-- [~] ZMODEM upload (works with most clients, known issue with SyncTERM)
+- [~] ZMODEM upload (works with most clients, known issue with IcyTerm)
 
 ### Web
 - [x] Login page
@@ -167,7 +167,7 @@ Items that would improve the experience but aren't blocking the initial test rel
 | 11 | Docker Compose setup | [ ] | Lower barrier to entry for testers |
 | 12 | Password reset flow | [ ] | Token/link system (currently just sends a PM) |
 | 13 | User profile/settings page | [~] | Basic profile view done, settings/edit not yet |
-| 14 | ZMODEM upload SyncTERM fix | [ ] | Known issue, works with other clients |
+| 14 | ZMODEM IcyTerm compatibility | [ ] | ZMODEM send/receive fails with IcyTerm; all other clients work |
 | 15 | Systemd unit files | [ ] | Alternative to PM2 for production |
 | 16 | Terminal reader pagination | [ ] | Lazy-load beyond 50-message batch |
 | 17 | Terminal address book | [ ] | Quick-select recent recipients |
