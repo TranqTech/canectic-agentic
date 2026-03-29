@@ -27,6 +27,7 @@ class WsConnection{
 		this.legacy = pool.legacy || false
 		this.socket = socket
 		this.rawsocket = rawsocket.socket
+		this.requestUrl = rawsocket.url || ''
 		this.parentPool = pool
 		this.wsPath = this.parentPool.path
 		this.path = this.parentPool.path

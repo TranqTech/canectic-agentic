@@ -214,7 +214,13 @@ class DoorRunner extends BaseHandler {
 		}
 
 		if (!this.active) return;
-		console.log("Hitting Switch")
+
+		// Clear screen before door launch to reset terminal viewport.
+		// This ensures absolute cursor positioning (ESC[row;colH) from the door
+		// maps to the visible screen, not a scrolled-up buffer position.
+		this.call.cmds.clearscreen();
+		this.call.cmds.senddata("\x1b[H"); // Home cursor
+
 		switch (this.launchType) {
 			case LAUNCH_TYPES.NATIVE_SHELL:
 				this._launchNativeShell();
@@ -239,25 +245,61 @@ class DoorRunner extends BaseHandler {
 		}
 	}
 
+	// Set up the output parser for CP437 conversion and/or centering.
+	// Called by each launch method before piping output.
+	_setupOutputParser() {
+		var enc = (this.call.term_encoding || '').toLowerCase();
+		var needsUTF8 = (enc === 'utf8' || enc === 'utf-8');
+		var needsCenter = (this.call.term_width > 90) || (this.call.term_height > 30);
+
+		if (needsUTF8 || needsCenter) {
+			this._outputParser = new DoorOutputParser({
+				convertCP437: needsUTF8,
+				centerOutput: needsCenter,
+				debugLog: true,
+				srcCols: 80,
+				srcRows: 25,
+				destCols: this.call.term_width || 80,
+				destRows: this.call.term_height || 25,
+			});
+
+			this._outputParser.emitter.on("data", (processed) => {
+				if (this.call) {
+					this.call.cmds.senddata(processed);
+				}
+			});
+		}
+	}
+
+	// Pipe data through the output parser if active, otherwise send directly.
+	_sendDoorOutput(data) {
+		if (!this.call) return;
+		if (this._outputParser) {
+			this._outputParser.process(data);
+		} else {
+			this.call.cmds.senddata(Buffer.from(data));
+		}
+	}
+
 	_launchNativeShell() {
 		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
 		var logmsg = this.loggingId + "\n  Launching NativeShell: " + runCmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
+		this._setupOutputParser();
+
 		try {
 			this._ptySocket = pty.spawn(runCmd, [], {
 				name: 'xterm-color',
 				cols: this.call.term_width || 80,
-				rows: this.call.term_height || 24,
+				rows: this.call.term_height || 25,
 				cwd: process.env.PWD,
 				env: process.env
 			});
 			this._outputSocket = this._ptySocket;
 
 			this._ptySocket.onData((data) => {
-				if (this.call) {
-					this.call.cmds.senddata(Buffer.from(data));
-				}
+				this._sendDoorOutput(data);
 			});
 
 			this._ptySocket.on('close', () => {
@@ -274,6 +316,8 @@ class DoorRunner extends BaseHandler {
 		var logmsg = this.loggingId + "\n  Launching ExecNative: " + runCmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
+		this._setupOutputParser();
+
 		try {
 			this._child = exec(runCmd, {
 				shell: true,
@@ -284,9 +328,7 @@ class DoorRunner extends BaseHandler {
 			this._outputSocket = this._child.stdin;
 
 			this._child.stdout.on('data', (chunk) => {
-				if (this.call) {
-					this.call.cmds.senddata(Buffer.from(chunk));
-				}
+				this._sendDoorOutput(chunk);
 			});
 
 			this._child.stderr.on('data', (data) => {
@@ -308,6 +350,8 @@ class DoorRunner extends BaseHandler {
 		var logmsg = this.loggingId + "\n  Launching SpawnNative: " + runCmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
+		this._setupOutputParser();
+
 		try {
 			this.call.cmds.clearscreen();
 			this._child = spawn(runCmd, {
@@ -319,9 +363,7 @@ class DoorRunner extends BaseHandler {
 			this._outputSocket = this._child.stdin;
 
 			this._child.stdout.on('data', (chunk) => {
-				if (this.call) {
-					this.call.cmds.senddata(Buffer.from(chunk));
-				}
+				this._sendDoorOutput(chunk);
 			});
 
 			this._child.stderr.on('data', (data) => {
@@ -343,14 +385,14 @@ class DoorRunner extends BaseHandler {
 		var logmsg = this.loggingId + "\n  Launching Dosemu: " + doscmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
+		this._setupOutputParser();
+
 		try {
 			this._child = exec(doscmd);
 			this._outputSocket = this._child.stdin;
 
 			this._child.stdout.on('data', (chunk) => {
-				if (this.call) {
-					this.call.cmds.senddata(chunk);
-				}
+				this._sendDoorOutput(chunk);
 			});
 
 			this._child.stderr.on('data', (data) => {
@@ -400,36 +442,10 @@ class DoorRunner extends BaseHandler {
 
 		this._outputSocket = this._serialport;
 
-		// Set up output parser if needed
-		var needsUTF8 = this.call.term_encoding === "utf8" || this.call.term_encoding === "utf-8";
-		//setting the centering check to slightly above the standard 80x25 to prevent triggering in case of odd terminals with just an extra line or column
-		var needsCenter = (this.call.term_width > 90) || (this.call.term_height > 30);
-
-		if (needsUTF8 || needsCenter) {
-			this._outputParser = new DoorOutputParser({
-				convertCP437: needsUTF8,
-				centerOutput: needsCenter,
-				srcCols: 80,
-				srcRows: 25,
-				destCols: this.call.term_width || 80,
-				destRows: this.call.term_height || 25,
-			});
-
-			this._outputParser.emitter.on("data", (processed) => {
-				if (this.call) {
-					this.call.cmds.senddata(processed);
-				}
-			});
-		}
+		this._setupOutputParser();
 
 		this._serialport.on('data', (data) => {
-			if (this.call) {
-				if (this._outputParser) {
-					this._outputParser.process(data);
-				} else {
-					this.call.cmds.senddata(data);
-				}
-			}
+			this._sendDoorOutput(data);
 		});
 
 		this._serialport.on('error', (err) => {

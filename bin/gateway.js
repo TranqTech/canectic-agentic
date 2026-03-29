@@ -66,6 +66,7 @@ var mailerManager     // only used in embedded mode
 
 var wspaths = [
 	{name: "Doorserver", path: "/ws/doorserver", callpool: "Doorserver"},
+	{name: "WebDoor",    path: "/ws/webdoor",    callpool: "WebDoor"},
 	{name: "Catchall",   path: "/",             callpool: "PrimaryBBS"},
 	{name: "BBS",        path: "/ws/bbs",       callpool: "PrimaryBBS"},
 ]
@@ -73,6 +74,7 @@ var wspaths = [
 var callpools = [
 	{name: "PrimaryBBS",  floworder: "Standard"},
 	{name: "Doorserver",  floworder: "Doorserver"},
+	{name: "WebDoor",     floworder: "WebDoor"},
 ]
 
 // --- Runtime lookups (populated during startup) ---
@@ -387,6 +389,9 @@ async function main(){
 	}
 	// Unified terminal server (auto-detects TCP vs Telnet)
 	await startTerminalServer()
+	// Legacy dedicated servers (only if their ports are explicitly set)
+	await startTcpServer()
+	await startTelnetServer()
 
 	// Mode-dependent startup
 	if (processMode === 'embedded') {

@@ -228,7 +228,9 @@ class TelnetParser {
 				// Terminal type: IS(0) + string
 				if (data.length > 1 && data[0] === 0) {
 					var ttype = Buffer.from(data.slice(1)).toString('ascii').trim();
+					this._conn.ttype = ttype;
 					if (this._conn.callhandler) {
+						this._conn.callhandler.ttype = ttype;
 						alogger.writeAlog(4, this._conn.loggingId +
 							" TTYPE: " + ttype, "cyan");
 					}

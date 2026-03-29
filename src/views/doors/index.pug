@@ -1,0 +1,35 @@
+extends ../layouts/user
+block content
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+
+		.row
+			.col-lg-8.offset-lg-2.col-12
+				h2.mb-4 Door Games
+
+				if !currentuser
+					.alert.alert-info You must be logged in to play door games.
+						a.ms-2(href='/users/login?redirect=/doors') Log in
+
+				if doors && doors.length > 0
+					.row
+						each door in doors
+							.col-md-4.col-sm-6.mb-3
+								.card.h-100
+									.card-body
+										h5.card-title= door.name
+										if door.description
+											p.card-text.text-muted.small= door.description
+									.card-footer
+										if currentuser
+											a.btn.btn-primary.btn-sm.w-100(href='/doors/play/' + door.slug)
+												i.bi.bi-play-fill.me-1
+												| Play
+										else
+											button.btn.btn-secondary.btn-sm.w-100(disabled) Login to Play
+				else
+					.text-center.text-muted
+						h5 No door games configured
+						p Check back later!

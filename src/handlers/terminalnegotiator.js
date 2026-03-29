@@ -64,7 +64,7 @@ class TerminalNegotiator extends BaseHandler {
 		super(call, "TermNegotiate");
 		this.inactivityTO = 0;
 		this.negotiationTO = 15000;
-		this._utf8TestChar = Buffer.from("\xc3\xa9");
+		this._utf8TestChar = Buffer.from([0xc3, 0xa9]); // UTF-8 for U+00E9 (e-acute)
 		this.startupDelay = appConfig.getNumber('termNegotiateDelay', 500);
 		this.startupMessage = appConfig.get('termNegotiateMsg', "Detecting Terminal...\r\n");
 
@@ -574,6 +574,22 @@ class TerminalNegotiator extends BaseHandler {
 
 		if (!this.call.term_height) this.call.term_height = 24;
 		if (!this.call.term_width) this.call.term_width = 80;
+
+		// TTYPE-based encoding override: modern terminal emulators reporting
+		// xterm variants are universally UTF-8 capable. The cursor position
+		// encoding test can give false CP437 results when the telnet client's
+		// locale is not set to UTF-8, even though the terminal supports it.
+		if (this.call.term_encoding === "CP437" || this.call.term_encoding === "Unknown") {
+			var ttype = (this.call.ttype || '').toUpperCase();
+			if (ttype.includes('XTERM') || ttype.includes('VTE') || ttype.includes('GNOME') ||
+				ttype.includes('KONSOLE') || ttype.includes('RXVT') || ttype.includes('SCREEN') ||
+				ttype.includes('TMUX') || ttype.includes('KITTY') || ttype.includes('ALACRITTY') ||
+				ttype.includes('WEZTERM') || ttype.includes('FOOT')) {
+				alogger.writeAlog(4, this.loggingId + "\n  TTYPE override: " + ttype + " -> UTF8 (was " + this.call.term_encoding + ")", "cyan");
+				this.call.term_encoding = "UTF8";
+			}
+		}
+
 		if (this.call.term_encoding === "Unknown") this.call.term_encoding = "CP437";
 
 		// Check sixel support after all detection is done

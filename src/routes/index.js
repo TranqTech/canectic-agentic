@@ -20,6 +20,8 @@ import * as userMsgPointers from '../models/userMsgPointers.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 import * as announcements from '../models/announcements.js';
+import * as doors from '../models/doors.js';
+import * as redis from '../middleware/db/redis.js';
 
 //setup
 router.use(cookieParser());
@@ -875,6 +877,66 @@ router.post('/messages/area/:shortcode/thread/:uuid/reply', urlencodedParser, as
 		return res.redirect('/messages/area/' + shortcode + '?view=flat');
 	}
 	res.redirect('/messages/area/' + shortcode + '/thread/' + uuid);
+});
+
+// -------------------------------------------------------
+// Door Routes
+// -------------------------------------------------------
+
+// Door listing
+router.get('/doors', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.currentuser = currentuser;
+
+	var doorList = await doors.getAllDoors();
+
+	res.render('doors/index', {
+		title: 'Door Games',
+		activelink: 'doors',
+		doors: doorList
+	});
+});
+
+// Launch a door (generates token, renders terminal page)
+router.get('/doors/play/:slug', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) {
+		return res.redirect('/users/login?redirect=/doors/play/' + req.params.slug);
+	}
+	res.locals.currentuser = currentuser;
+
+	var doorSlug = req.params.slug;
+	var doorConfig = await doors.getDoorConfig(doorSlug);
+	if (!doorConfig) {
+		return res.redirect('/doors');
+	}
+
+	// Generate one-time launch token
+	var token = uuidv4().replace(/-/g, '');
+	var tokenData = JSON.stringify({
+		userUuid: currentuser.uuid,
+		doorSlug: doorSlug,
+		termWidth: 80,
+		termHeight: 25,
+		created: Date.now()
+	});
+
+	// Store in Redis with 60-second TTL
+	var rc = await redis.getClient();
+	await rc.set('webdoor:' + token, tokenData, { EX: 60 });
+
+	// Determine WebSocket URL
+	var wsProtocol = req.headers['x-forwarded-proto'] === 'https' ? 'wss' : 'ws';
+	var wsHost = req.headers.host;
+	var wsUrl = wsProtocol + '://' + wsHost + '/ws/webdoor?token=' + token;
+
+	res.render('doors/play', {
+		title: doorConfig.name || 'Door Game',
+		activelink: 'doors',
+		door: doorConfig,
+		wsUrl: wsUrl,
+		returnUrl: '/doors'
+	});
 });
 
 export{router}

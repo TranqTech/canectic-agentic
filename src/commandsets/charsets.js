@@ -1,6 +1,16 @@
 
 
-const utf8chars = [""]
+// UTF-8 hex-encoded equivalents of CP437 glyphs
+// Same indices as cp437chars: arrows, faces, suits, block elements, etc.
+const utf8chars = [
+	"e28691", "e28693", "e28692", "e28690", "e28694", "e28695", // up,down,right,left,horiz,vert arrows
+	"e298ba", "e298bb", "e299a5", "e299a6", "e299a3", "e299a0", // smile,smilefill,heart,diamond,club,spade
+	"e28899", "e29982", "e29980",                                 // bullet,male,female
+	"e299aa", "e299ab", "e298bc",                                 // note,dbnote,sun
+	"e296ba", "e29784", "e296b2", "e296bc",                       // pointright,pointleft,pointup,pointdown
+	"e29691", "e29692", "e29693",                                 // lightshade,medshade,darkshade
+	"e29688", "e29684", "e29680", "e2968c", "e29690"              // block,halfblockb,halfblockt,halfblockl,halfblockr
+]
 
 const cp437chars = [
 	"18", "19", "1a", "1b", "1d", "12", "01", "02", "03", "04",
@@ -18,10 +28,16 @@ const asciiboxes = ["b3", "b4", "b5", "b6", "b7", "b8", "b9", "ba", "bb", "bc",
  	"c7", "c8", "c9", "ca", "cb", "cc", "cd", "ce", "cf", "d0",
  	"d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "da"]
 
-const utf8boxes = ["\u2502", "\u2524", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", ""]
+// UTF-8 hex-encoded box drawing characters (same indices as cp437boxes)
+// Index: 0=vert, 1=vertleft, 2-9=double variants, 10=dblvert, 11-14=corners,
+//        15=topright, 16-19=bottom variants, 20=horiz, 21=cross, 22-29=double variants,
+//        30-39=more corners and variants
+const utf8boxes = [
+	"e29482", "e294a4", "e295a1", "e295a2", "e29596", "e29595", "e295a3", "e29591", "e29597", "e2959d",
+	"e2959c", "e2959b", "e29490", "e29494", "e294b4", "e294ac", "e2949c", "e29480", "e294bc", "e2959e",
+	"e2959f", "e2959a", "e29594", "e295a9", "e295a6", "e295a0", "e29590", "e295ac", "e295a7", "e295a8",
+	"e295a4", "e295a5", "e29599", "e29598", "e29592", "e29593", "e295ab", "e295aa", "e29498", "e2948c"
+]
 
 const defaultchars = utf8chars
 
@@ -88,7 +104,7 @@ class charSet{
 	}
 	getboxes(encoding){
 		if (encoding == "UTF8"){
-			return utf8chars
+			return utf8boxes
 		}
 		if (encoding == "CP437"){
 			return cp437boxes

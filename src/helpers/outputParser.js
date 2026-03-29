@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { appendFileSync } from 'node:fs';
 
 // CP437 to Unicode mapping table
 // Characters 0x00-0x1F are control codes in ASCII but displayable glyphs in CP437
@@ -55,6 +56,9 @@ class DoorOutputParser {
 		// Feature flags
 		this.convertCP437 = options.convertCP437 !== undefined ? options.convertCP437 : false;
 		this.centerOutput = options.centerOutput !== undefined ? options.centerOutput : false;
+		this.debugLog = options.debugLog || false;
+		this._debugChunks = 0;
+		this._debugFile = options.debugFile || 'logs/outputparser-debug.log';
 
 		// Source dimensions (what the door thinks the screen is)
 		this.srcCols = options.srcCols || 80;
@@ -84,6 +88,12 @@ class DoorOutputParser {
 		this._outBuffer = "";
 
 		this.loggingId = "DoorOutputParser";
+
+		if (this.debugLog) {
+			this._debugWrite('=== OutputParser initialized ===');
+			this._debugWrite('convertCP437=' + this.convertCP437 + ' centerOutput=' + this.centerOutput);
+			this._debugWrite('src=' + this.srcCols + 'x' + this.srcRows + ' dest=' + this.destCols + 'x' + this.destRows);
+		}
 	}
 
 	_calcOffsets() {
@@ -94,6 +104,13 @@ class DoorOutputParser {
 			this.offsetCol = 0;
 			this.offsetRow = 0;
 		}
+	}
+
+	_debugWrite(msg) {
+		if (!this.debugLog) return;
+		try {
+			appendFileSync(this._debugFile, '[' + new Date().toISOString() + '] ' + msg + '\n');
+		} catch (_) {}
 	}
 
 	// Update terminal dimensions (e.g. on NAWS update)
@@ -279,9 +296,85 @@ class DoorOutputParser {
 		}
 	}
 
-	// --- Main parse loop ---
-	process(data) {
-		var buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+	// --- Simple CP437 conversion (no cursor tracking) ---
+	// Used when centerOutput is false - just convert bytes, pass ANSI through.
+	// Intercepts ESC[2J to also clear scrollback (ESC[3J) for xterm.js compat.
+	_processSimple(buf) {
+		this._outBuffer = "";
+
+		for (var i = 0; i < buf.length; i++) {
+			var byte = buf[i];
+
+			switch (this._state) {
+				case PARSE_STATE.NORMAL:
+					if (byte === 0x1B) {
+						this._state = PARSE_STATE.ESC;
+						this._paramBuffer = "";
+					} else if (byte === 0x0C) {
+						// Form feed - treat as clear screen + home cursor
+						// DOS doors commonly use FF instead of ESC[2J
+						this._outBuffer += "\x1b[2J\x1b[3J\x1b[H";
+						if (this.debugLog) this._debugWrite('*** Form feed intercepted - emitting clear ***');
+					} else if (this.convertCP437) {
+						this._outBuffer += this._convertByte(byte);
+					} else {
+						this._outBuffer += String.fromCharCode(byte);
+					}
+					break;
+
+				case PARSE_STATE.ESC:
+					if (byte === 0x5B) {
+						this._state = PARSE_STATE.CSI_PARAM;
+					} else if (byte === 0x5D) {
+						this._outBuffer += "\x1b]";
+						this._state = PARSE_STATE.OSC;
+					} else {
+						this._outBuffer += "\x1b" + String.fromCharCode(byte);
+						this._state = PARSE_STATE.NORMAL;
+					}
+					break;
+
+				case PARSE_STATE.CSI_PARAM:
+					if (byte >= 0x40 && byte <= 0x7E) {
+						// Final byte - emit the complete sequence
+						var finalChar = String.fromCharCode(byte);
+						if (this.debugLog) {
+							// Log cursor positioning and screen control sequences
+							if ('HfABCDJKsur'.includes(finalChar)) {
+								this._debugWrite('CSI ' + this._paramBuffer + finalChar);
+							}
+						}
+						this._outBuffer += "\x1b[" + this._paramBuffer + finalChar;
+						// Intercept ESC[2J (clear screen) - reset scrollback,
+						// scroll region, and cursor for xterm.js viewport reset
+						if (finalChar === 'J' && this._paramBuffer === '2') {
+							if (this.debugLog) this._debugWrite('*** Clear screen intercepted - adding reset ***');
+							this._outBuffer += "\x1b[r\x1b[3J\x1b[H";
+						}
+						this._state = PARSE_STATE.NORMAL;
+					} else {
+						// Parameter or intermediate byte - accumulate
+						this._paramBuffer += String.fromCharCode(byte);
+					}
+					break;
+
+				case PARSE_STATE.OSC:
+					if (byte === 0x07) {
+						this._state = PARSE_STATE.NORMAL;
+					} else if (byte === 0x1B) {
+						this._state = PARSE_STATE.ESC;
+					}
+					break;
+			}
+		}
+
+		if (this._outBuffer.length > 0) {
+			this.emitter.emit("data", this._outBuffer);
+		}
+	}
+
+	// --- Full parse loop with cursor tracking (centering mode) ---
+	_processCentered(buf) {
 		this._outBuffer = "";
 
 		for (var i = 0; i < buf.length; i++) {
@@ -293,43 +386,27 @@ class DoorOutputParser {
 						this._state = PARSE_STATE.ESC;
 						this._paramBuffer = "";
 						this._intermediates = "";
-					} else if (byte === 0x0D) {
-						// CR — reset column
+					} else if (byte === 0x0C) {
+						// Form feed - clear screen and reset cursor
+						this._outBuffer += "\x1b[2J\x1b[3J";
 						this.cursorCol = 1;
-						if (this.centerOutput) {
-							this._emitMoveCursor(this.cursorCol, this.cursorRow);
-						} else {
-							this._outBuffer += "\r";
-						}
+						this.cursorRow = 1;
+						this._emitMoveCursor(this.cursorCol, this.cursorRow);
+					} else if (byte === 0x0D) {
+						this.cursorCol = 1;
+						this._emitMoveCursor(this.cursorCol, this.cursorRow);
 					} else if (byte === 0x0A) {
-						// LF — advance row
 						this.cursorRow = Math.min(this.srcRows, this.cursorRow + 1);
-						if (this.centerOutput) {
-							this._emitMoveCursor(this.cursorCol, this.cursorRow);
-						} else {
-							this._outBuffer += "\n";
-						}
+						this._emitMoveCursor(this.cursorCol, this.cursorRow);
 					} else if (byte === 0x08) {
-						// BS — move back
 						this.cursorCol = Math.max(1, this.cursorCol - 1);
-						if (this.centerOutput) {
-							this._emitMoveCursor(this.cursorCol, this.cursorRow);
-						} else {
-							this._outBuffer += "\b";
-						}
+						this._emitMoveCursor(this.cursorCol, this.cursorRow);
 					} else if (byte === 0x09) {
-						// TAB — advance to next tab stop
 						this.cursorCol = Math.min(this.srcCols, ((Math.floor((this.cursorCol - 1) / 8) + 1) * 8) + 1);
-						if (this.centerOutput) {
-							this._emitMoveCursor(this.cursorCol, this.cursorRow);
-						} else {
-							this._outBuffer += "\t";
-						}
+						this._emitMoveCursor(this.cursorCol, this.cursorRow);
 					} else if (byte === 0x07) {
-						// BEL — pass through
 						this._outBuffer += "\x07";
 					} else {
-						// Printable character
 						var ch;
 						if (this.convertCP437) {
 							ch = this._convertByte(byte);
@@ -338,30 +415,23 @@ class DoorOutputParser {
 						}
 						this._outBuffer += ch;
 						this.cursorCol++;
-						// Line wrap
 						if (this.cursorCol > this.srcCols) {
 							this.cursorCol = 1;
 							this.cursorRow = Math.min(this.srcRows, this.cursorRow + 1);
-							if (this.centerOutput) {
-								this._emitMoveCursor(this.cursorCol, this.cursorRow);
-							}
+							this._emitMoveCursor(this.cursorCol, this.cursorRow);
 						}
 					}
 					break;
 
 				case PARSE_STATE.ESC:
 					if (byte === 0x5B) {
-						// [ — CSI
 						this._state = PARSE_STATE.CSI_PARAM;
 					} else if (byte === 0x5D) {
-						// ] — OSC
 						this._state = PARSE_STATE.OSC;
 					} else if (byte >= 0x40 && byte <= 0x5F) {
-						// Other ESC Fe sequences — pass through
 						this._outBuffer += "\x1b" + String.fromCharCode(byte);
 						this._state = PARSE_STATE.NORMAL;
 					} else {
-						// Unknown — dump and reset
 						this._outBuffer += "\x1b" + String.fromCharCode(byte);
 						this._state = PARSE_STATE.NORMAL;
 					}
@@ -369,39 +439,58 @@ class DoorOutputParser {
 
 				case PARSE_STATE.CSI_PARAM:
 					if (byte >= 0x30 && byte <= 0x3F) {
-						// Parameter bytes: 0-9, ;, <, =, >, ?
 						this._paramBuffer += String.fromCharCode(byte);
 					} else if (byte >= 0x20 && byte <= 0x2F) {
-						// Intermediate bytes
 						this._intermediates += String.fromCharCode(byte);
 					} else if (byte >= 0x40 && byte <= 0x7E) {
-						// Final byte — process the sequence
 						this._processCSI(this._paramBuffer, this._intermediates, String.fromCharCode(byte));
 						this._state = PARSE_STATE.NORMAL;
 					} else {
-						// Invalid — dump what we have and reset
 						this._outBuffer += "\x1b[" + this._paramBuffer + String.fromCharCode(byte);
 						this._state = PARSE_STATE.NORMAL;
 					}
 					break;
 
 				case PARSE_STATE.OSC:
-					// Consume until ST (ESC \ or BEL)
 					if (byte === 0x07) {
 						this._state = PARSE_STATE.NORMAL;
 					} else if (byte === 0x1B) {
-						// Could be ESC \ (ST)
-						// Peek ahead handled by going back to ESC state
 						this._state = PARSE_STATE.ESC;
 					}
-					// Discard OSC content — doors don't typically use it
 					break;
 			}
 		}
 
-		// Flush accumulated output
 		if (this._outBuffer.length > 0) {
 			this.emitter.emit("data", this._outBuffer);
+		}
+	}
+
+	// --- Main entry point ---
+	process(data) {
+		var buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+		if (this.debugLog) {
+			this._debugChunks++;
+			// Log raw hex for first 50 chunks to capture the intro-to-UI transition
+			if (this._debugChunks <= 200) {
+				var hexStr = buf.toString('hex').replace(/(.{2})/g, '$1 ').trim();
+				// Also show readable version with escapes marked
+				var readable = '';
+				for (var di = 0; di < buf.length; di++) {
+					var b = buf[di];
+					if (b === 0x1B) readable += '<ESC>';
+					else if (b === 0x0D) readable += '<CR>';
+					else if (b === 0x0A) readable += '<LF>';
+					else if (b >= 0x20 && b <= 0x7E) readable += String.fromCharCode(b);
+					else readable += '<' + b.toString(16).padStart(2, '0') + '>';
+				}
+				this._debugWrite('Chunk #' + this._debugChunks + ' (' + buf.length + ' bytes):\n  ' + readable.substring(0, 500));
+			}
+		}
+		if (this.centerOutput) {
+			this._processCentered(buf);
+		} else {
+			this._processSimple(buf);
 		}
 	}
 

@@ -1,0 +1,178 @@
+doctype html
+html
+  head
+    title= title + ' - ' + (boardname || 'BBS')
+    link(rel='stylesheet', href='/css/darkly/bootstrap.css')
+    link(rel='stylesheet', href='/css/xterm.css')
+    link(rel='stylesheet', href='/css/bootstrap-icons.css')
+    meta(charset='utf-8')
+    meta(name='viewport' content='width=device-width, initial-scale=1')
+    style.
+      body {
+        margin: 0;
+        padding: 0;
+        background: #111;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+      #door-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        max-width: 900px;
+        padding: 10px;
+      }
+      #door-card {
+        background: #000;
+        border: 1px solid #444;
+        border-radius: 6px;
+        overflow: hidden;
+        width: 100%;
+      }
+      #door-header {
+        background: #222;
+        border-bottom: 1px solid #444;
+        padding: 6px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+      }
+      #door-header .door-title { color: #aaa; }
+      #door-header .status-connected { color: #5cb85c; }
+      #door-header .status-disconnected { color: #d9534f; }
+      #door-header .status-text { color: #888; }
+      #terminal-container {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        background: #000;
+        padding: 4px 0;
+      }
+      /* Prevent xterm from expanding beyond our desired size */
+      #terminal-container .xterm {
+        height: auto !important;
+      }
+      #terminal-container .xterm-viewport {
+        overflow: hidden !important;
+      }
+  body
+    #door-wrapper
+      #door-card
+        #door-header
+          span.door-title= title
+          span
+            span#statusText.status-text Connecting...
+            a#exitBtn.btn.btn-outline-secondary.btn-sm.ms-3(href=returnUrl style='font-size:11px; padding:1px 8px;') Exit
+        #terminal-container
+
+    script(src='/js/xterm/xterm.js')
+    script(src='/js/xterm/addon-fit.js')
+    script.
+      (function() {
+        var wsUrl = '#{wsUrl}';
+        var returnUrl = '#{returnUrl}';
+        var TARGET_COLS = 80;
+        var TARGET_ROWS = 25;
+
+        // Calculate optimal font size to fill available vertical space
+        // while maintaining exactly 80x25 cells
+        function calcFontSize() {
+          var availHeight = window.innerHeight - 60; // header + padding
+          var availWidth = document.getElementById('door-card').clientWidth - 20;
+          // xterm cell ratio is approximately 0.5 (width:height)
+          var fromHeight = Math.floor(availHeight / TARGET_ROWS);
+          var fromWidth = Math.floor(availWidth / (TARGET_COLS * 0.6));
+          return Math.max(10, Math.min(fromHeight, fromWidth));
+        }
+
+        var fontSize = calcFontSize();
+
+        var term = new Terminal({
+          cols: TARGET_COLS,
+          rows: TARGET_ROWS,
+          cursorBlink: true,
+          fontSize: fontSize,
+          fontFamily: '"Cascadia Code", "Fira Code", "Consolas", "Courier New", monospace',
+          theme: {
+            background: '#000000',
+            foreground: '#aaaaaa',
+            black: '#000000',
+            brightBlack: '#555555'
+          },
+          scrollback: 100,
+          convertEol: false
+        });
+
+        var container = document.getElementById('terminal-container');
+        term.open(container);
+
+        var statusText = document.getElementById('statusText');
+        var ws = null;
+        var connected = false;
+
+        function setStatus(text, className) {
+          statusText.textContent = text;
+          statusText.className = className;
+        }
+
+        // Resize font on window resize to keep 80x25 filling the space
+        window.addEventListener('resize', function() {
+          var newSize = calcFontSize();
+          if (newSize !== fontSize) {
+            fontSize = newSize;
+            term.options.fontSize = fontSize;
+          }
+        });
+
+        // Connect WebSocket
+        try {
+          ws = new WebSocket(wsUrl);
+          ws.binaryType = 'arraybuffer';
+        } catch (e) {
+          setStatus('Connection failed', 'status-disconnected');
+          return;
+        }
+
+        ws.onopen = function() {
+          connected = true;
+          setStatus('Connected', 'status-connected');
+          term.focus();
+        };
+
+        ws.onmessage = function(event) {
+          if (event.data instanceof ArrayBuffer) {
+            term.write(new Uint8Array(event.data));
+          } else {
+            term.write(event.data);
+          }
+        };
+
+        ws.onclose = function() {
+          connected = false;
+          setStatus('Disconnected', 'status-disconnected');
+          term.write('\r\n\r\n[Session ended - redirecting...]');
+          setTimeout(function() {
+            window.location.href = returnUrl;
+          }, 2000);
+        };
+
+        ws.onerror = function() {
+          setStatus('Connection error', 'status-disconnected');
+        };
+
+        term.onData(function(data) {
+          if (connected && ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
+          }
+        });
+
+        document.getElementById('exitBtn').addEventListener('click', function(e) {
+          if (connected && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
+        });
+      })();

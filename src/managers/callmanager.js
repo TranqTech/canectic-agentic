@@ -20,6 +20,7 @@ import { OutputRingBuffer } from "../handlers/ringbuffer.js";
 import { TerminalNegotiator } from "../handlers/terminalnegotiator.js";
 import { MenuHandler } from "../handlers/menuhandler.js";
 import { DoorLaunchHandler } from "../handlers/doorlaunchhandler.js";
+import { WebDoorAuthHandler } from "../handlers/webdoorauthhandler.js";
 import { SubModuleAdapter } from "../handlers/submoduleadapter.js";
 import { LastCallers } from "../handlers/lastcallers.js";
 import { WhosOnline } from "../handlers/whosonline.js";
@@ -45,6 +46,7 @@ const handlerRegistry = {
 	"logon":        (call) => new LogonHandler(call),
 	"login":        (call) => new LoginHandler(call, appConfig.get('system_name', "Canectic BBS")),
 	"door_auth":    (call) => new DoorAuthHandler(call),
+	"webdoor_auth": (call) => new WebDoorAuthHandler(call),
 	"event_login":  (call) => new DoorAuthHandler(call),
 	"menu":         (call) => new MenuHandler(call),
 	"door_launch":  (call) => new DoorLaunchHandler(call, false),
@@ -77,6 +79,11 @@ const callFlows = {
 	],
 	"Doorserver": [
 		"door_auth",
+		"door_launch",
+		"goodbye",
+	],
+	"WebDoor": [
+		"webdoor_auth",
 		"door_launch",
 		"goodbye",
 	],
