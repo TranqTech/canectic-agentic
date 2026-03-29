@@ -108,6 +108,9 @@ block content
                       h4 Menu Entries
                     .col-4
                       .text-end
+                        button#saveEntryOrderBtn.btn.btn-sm.btn-warning.me-2(style='display:none' title='Save reordered entry positions')
+                          i.bi.bi-arrow-down-up
+                          |  Save Order
                         button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newEntryModal')
                           | Add Entry
                 .card-body
@@ -115,6 +118,7 @@ block content
                     table#entryTable.table.table-hover.table-sm
                       thead
                         tr
+                          th(scope='col' style='width:30px')
                           th(scope='col' style='width:50px') #
                           th(scope='col' style='width:60px') Hotkey
                           th(scope='col') Display Text
@@ -139,6 +143,8 @@ block content
                             data-required_flags=JSON.stringify(entry.required_flags || [])
                             data-prohibited_flags=JSON.stringify(entry.prohibited_flags || [])
                           )
+                            td.drag-handle(style='cursor:grab; text-align:center; color:#888')
+                              i.bi.bi-grip-vertical
                             td.text-muted= entry.sort_order
                             td
                               if entry.hotkey
@@ -478,6 +484,103 @@ block content
         syncSelectColor(sel);
         sel.addEventListener('change', function() { syncSelectColor(this); });
       });
+
+      // --- Drag and drop reorder for entries ---
+      var entryTbody = document.getElementById('sortableEntries');
+      var saveEntryBtn = document.getElementById('saveEntryOrderBtn');
+      var entryDragRow = null;
+      var entryOrderChanged = false;
+
+      if (entryTbody) {
+        entryTbody.addEventListener('dragstart', function(e) {
+          var tr = e.target.closest('tr');
+          if (!tr) return;
+          entryDragRow = tr;
+          tr.style.opacity = '0.4';
+          e.dataTransfer.effectAllowed = 'move';
+        });
+
+        entryTbody.addEventListener('dragend', function(e) {
+          var tr = e.target.closest('tr');
+          if (tr) tr.style.opacity = '';
+          entryDragRow = null;
+          entryTbody.querySelectorAll('tr').forEach(function(r) {
+            r.style.borderTop = '';
+            r.style.borderBottom = '';
+          });
+        });
+
+        entryTbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          var tr = e.target.closest('tr');
+          if (!tr || tr === entryDragRow) return;
+          entryTbody.querySelectorAll('tr').forEach(function(r) {
+            r.style.borderTop = '';
+            r.style.borderBottom = '';
+          });
+          var rect = tr.getBoundingClientRect();
+          var mid = rect.top + rect.height / 2;
+          if (e.clientY < mid) {
+            tr.style.borderTop = '2px solid #f0ad4e';
+          } else {
+            tr.style.borderBottom = '2px solid #f0ad4e';
+          }
+        });
+
+        entryTbody.addEventListener('drop', function(e) {
+          e.preventDefault();
+          var tr = e.target.closest('tr');
+          if (!tr || !entryDragRow || tr === entryDragRow) return;
+          var rect = tr.getBoundingClientRect();
+          var mid = rect.top + rect.height / 2;
+          if (e.clientY < mid) {
+            entryTbody.insertBefore(entryDragRow, tr);
+          } else {
+            entryTbody.insertBefore(entryDragRow, tr.nextSibling);
+          }
+          entryOrderChanged = true;
+          saveEntryBtn.style.display = 'inline-block';
+          entryTbody.querySelectorAll('tr').forEach(function(r) {
+            r.style.borderTop = '';
+            r.style.borderBottom = '';
+          });
+        });
+
+        entryTbody.querySelectorAll('tr').forEach(function(tr) {
+          tr.setAttribute('draggable', 'true');
+        });
+      }
+
+      if (saveEntryBtn && menuId) {
+        saveEntryBtn.addEventListener('click', function() {
+          if (!entryOrderChanged) return;
+          var rows = entryTbody.querySelectorAll('tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(parseInt(r.dataset.id)); });
+          saveEntryBtn.disabled = true;
+          saveEntryBtn.textContent = 'Saving...';
+          fetch('/admin/menus/' + menuId + '/entries/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function(resp) {
+            return resp.json();
+          }).then(function(data) {
+            if (data.status) {
+              saveEntryBtn.style.display = 'none';
+              entryOrderChanged = false;
+              // Update the sort order numbers in the table
+              rows.forEach(function(r, idx) {
+                r.querySelector('td:nth-child(2)').textContent = (idx + 1) * 10;
+              });
+            }
+          }).finally(function() {
+            saveEntryBtn.disabled = false;
+            saveEntryBtn.innerHTML = '<i class="bi bi-arrow-down-up"></i> Save Order';
+          });
+        });
+      }
 
       // Edit entry buttons
       document.querySelectorAll('.edit-entry-btn').forEach(function(btn) {

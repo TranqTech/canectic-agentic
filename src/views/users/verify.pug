@@ -1,0 +1,100 @@
+extends ../layouts/user
+block content
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+			br
+
+		.row
+			- var colClass = ismobile ? 'col-12' : 'col-6 offset-3'
+			div(class=colClass)
+				.card
+					.card-header.text-white.bg-dark
+						.h3 Verify Your Address
+					.card-body
+						if message
+							.alert.alert-success= message
+						if error
+							.alert.alert-danger= error
+
+						if verified
+							.text-center
+								i.bi.bi-check-circle-fill.text-success(style='font-size: 3rem')
+								h4.text-success.mt-2 Verified
+								p.text-muted Your address #[strong= user.mailaddress] is verified.
+								a.btn.btn-primary(href='/users/profile') Back to Profile
+						else
+							if daysRemaining !== null && daysRemaining !== undefined
+								.alert(class=daysRemaining <= 3 ? 'alert-danger' : 'alert-warning')
+									i.bi.bi-exclamation-triangle.me-1
+									| Days remaining to validate: #[strong= daysRemaining]
+
+							p.text-muted
+								| A verification code has been sent to #[strong= user.mailaddress || '(no address)'].
+								| Enter the 6-digit code below to verify your address.
+
+							if user.mailaddress
+								//- Enter code
+								form.mb-4(action='/users/verify/check' method='POST')
+									.row
+										.col-8
+											label.form-label Enter your 6-digit code:
+											input.form-control(
+												type='text'
+												name='code'
+												maxlength='6'
+												pattern='[0-9]{6}'
+												placeholder='000000'
+												required
+												autocomplete='one-time-code'
+												style='font-size: 1.5rem; letter-spacing: 0.5em; text-align: center'
+											)
+										.col-4.d-flex.align-items-end
+											button.btn.btn-success.btn-lg.w-100(type='submit') Verify
+
+								hr
+
+								//- Re-send and change address side by side
+								.row
+									.col-6
+										h6 Didn't receive a code?
+										form(action='/users/verify/send' method='POST')
+											button.btn.btn-outline-info.w-100(type='submit')
+												i.bi.bi-arrow-repeat.me-1
+												| Re-send Verification Code
+
+									.col-6
+										h6 Wrong address?
+										button.btn.btn-outline-warning.w-100(type='button' data-bs-toggle='collapse' data-bs-target='#changeAddressForm')
+											i.bi.bi-pencil.me-1
+											| Change Address
+
+								//- Change address collapsible form
+								#changeAddressForm.collapse.mt-3
+									.card.card-body.bg-dark
+										form(action='/users/verify/change' method='POST')
+											label.form-label New email or netmail address:
+											.input-group
+												input.form-control(
+													type='text'
+													name='new_address'
+													placeholder='user@example.com or 1:234/5'
+													required
+												)
+												button.btn.btn-warning(type='submit') Update
+											.form-text.text-muted A new verification code will be sent to the updated address.
+							else
+								.alert.alert-warning No email or netmail address is set on your account.
+								//- Allow setting an address even if none exists
+								.card.card-body.bg-dark
+									form(action='/users/verify/change' method='POST')
+										label.form-label Enter your email or netmail address:
+										.input-group
+											input.form-control(
+												type='text'
+												name='new_address'
+												placeholder='user@example.com or 1:234/5'
+												required
+											)
+											button.btn.btn-warning(type='submit') Save

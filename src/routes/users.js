@@ -60,10 +60,12 @@ router.get('/login', async (req, res) => {
 		if (existing) return res.redirect('/');
 	}
 	var redirect = safeRedirect(req.query.redirect, '/');
+	var successMsg = req.query.message || null;
 	res.render('users/login', {
 		title:    'Login',
 		redirect: redirect,
-		errors:   null
+		errors:   null,
+		successMessage: successMsg
 	});
 });
 
@@ -147,6 +149,118 @@ router.get('/logout', async (req, res) => {
 		});
 	}
 	res.redirect('/users/login');
+});
+
+/* -----------------------------------------------
+   GET /users/forgot
+   Renders password reset request page.
+----------------------------------------------- */
+router.get('/forgot', async (req, res) => {
+	res.render('users/forgot', {
+		title:   'Forgot Password',
+		message: req.query.message || null,
+		error:   req.query.error || null
+	});
+});
+
+/* -----------------------------------------------
+   POST /users/forgot
+   Sends a reset token to the user's email/netmail.
+----------------------------------------------- */
+router.post('/forgot', urlencodedParser, async (req, res) => {
+	var username = (req.body.username || '').trim();
+	if (!username) {
+		return res.redirect('/users/forgot?error=' + encodeURIComponent('Username is required'));
+	}
+
+	var passwordReset = await import('../models/passwordReset.js');
+	await passwordReset.requestReset(username);
+
+	// Always show the same message regardless of whether user exists
+	return res.redirect('/users/forgot?message=' + encodeURIComponent('If an account exists for that username, a reset link has been sent to the address on file.'));
+});
+
+/* -----------------------------------------------
+   GET /users/reset/:token
+   Validates token and shows password change form.
+----------------------------------------------- */
+router.get('/reset/:token', async (req, res) => {
+	var passwordReset = await import('../models/passwordReset.js');
+	var validation = await passwordReset.validateToken(req.params.token);
+
+	if (!validation.valid) {
+		return res.render('users/forgot', {
+			title:   'Forgot Password',
+			message: null,
+			error:   validation.error || 'Invalid or expired reset link'
+		});
+	}
+
+	res.render('users/reset', {
+		title:    'Reset Password',
+		token:    req.params.token,
+		username: validation.username,
+		pwmin:    appConfig.getNumber('pwmin', 12),
+		error:    null
+	});
+});
+
+/* -----------------------------------------------
+   POST /users/reset
+   Validates token and changes password.
+----------------------------------------------- */
+router.post('/reset', urlencodedParser, async (req, res) => {
+	var token = (req.body.token || '').trim();
+	var newPassword = req.body.password || '';
+	var confirmPassword = req.body.password_confirm || '';
+	var pwmin = appConfig.getNumber('pwmin', 12);
+
+	var passwordReset = await import('../models/passwordReset.js');
+
+	// Validate token first
+	var validation = await passwordReset.validateToken(token);
+	if (!validation.valid) {
+		return res.render('users/forgot', {
+			title:   'Forgot Password',
+			message: null,
+			error:   validation.error || 'Invalid or expired reset link'
+		});
+	}
+
+	// Validate password
+	if (!newPassword || newPassword.length < pwmin) {
+		return res.render('users/reset', {
+			title:    'Reset Password',
+			token:    token,
+			username: validation.username,
+			pwmin:    pwmin,
+			error:    'Password must be at least ' + pwmin + ' characters'
+		});
+	}
+
+	if (newPassword !== confirmPassword) {
+		return res.render('users/reset', {
+			title:    'Reset Password',
+			token:    token,
+			username: validation.username,
+			pwmin:    pwmin,
+			error:    'Passwords do not match'
+		});
+	}
+
+	// Complete the reset
+	var result = await passwordReset.completeReset(validation.userId, newPassword);
+	if (!result.status) {
+		return res.render('users/reset', {
+			title:    'Reset Password',
+			token:    token,
+			username: validation.username,
+			pwmin:    pwmin,
+			error:    result.error || 'Reset failed'
+		});
+	}
+
+	return res.redirect('/users/login?message=' + encodeURIComponent('Password reset successfully. Please log in.'));
 });
 
 /* -----------------------------------------------
@@ -341,11 +455,286 @@ router.get('/profile', async (req, res) => {
 	var userRecord = await userAccounts.getUserByUUID(session.uuid);
 	if (!userRecord) return res.redirect('/users/login');
 
+	// Calculate username change cooldown
+	var cooldownDays = appConfig.getNumber('username_change_cooldown', 90);
+	var canChangeUsername = true;
+	var usernameNextChange = null;
+	if (cooldownDays > 0 && userRecord.username_changed_at) {
+		var changed = new Date(userRecord.username_changed_at);
+		var nextAllowed = new Date(changed.getTime() + cooldownDays * 24 * 60 * 60 * 1000);
+		if (Date.now() < nextAllowed.getTime()) {
+			canChangeUsername = false;
+			usernameNextChange = nextAllowed;
+		}
+	}
+
 	res.render('users/profile', {
-		title:      'My Profile',
-		activelink: '',
-		user:       userRecord
+		title:             'My Profile',
+		activelink:        '',
+		user:              userRecord,
+		canChangeUsername:  canChangeUsername,
+		usernameNextChange: usernameNextChange,
+		cooldownDays:      cooldownDays,
+		pwmin:             appConfig.getNumber('pwmin', 12),
+		message:           req.query.message || null,
+		error:             req.query.error || null
 	});
+});
+
+/* -----------------------------------------------
+   POST /users/profile
+   Updates user profile fields.
+----------------------------------------------- */
+router.post('/profile', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login');
+
+	var uid = parseInt(session.id);
+	var userRecord = await userAccounts.getUserByUUID(session.uuid);
+	if (!userRecord) return res.redirect('/users/login');
+
+	var postgres = await import('../middleware/db/postgres.js');
+	var errors = [];
+	var updateFields = {};
+
+	// Username change (with cooldown)
+	var newUsername = (req.body.username || '').trim();
+	if (newUsername && newUsername !== userRecord.username) {
+		var cooldownDays = appConfig.getNumber('username_change_cooldown', 90);
+		if (cooldownDays > 0 && userRecord.username_changed_at) {
+			var changed = new Date(userRecord.username_changed_at);
+			var nextAllowed = new Date(changed.getTime() + cooldownDays * 24 * 60 * 60 * 1000);
+			if (Date.now() < nextAllowed.getTime()) {
+				errors.push('Username can only be changed every ' + cooldownDays + ' days. Next change allowed: ' + nextAllowed.toLocaleDateString());
+			}
+		}
+		if (newUsername.length < 3) {
+			errors.push('Username must be at least 3 characters');
+		}
+		if (errors.length === 0) {
+			var available = await userAccounts.checkUsernameAvailable(newUsername);
+			if (!available) {
+				errors.push('Username is already taken');
+			} else {
+				updateFields.username = newUsername;
+				updateFields.username_changed_at = new Date();
+			}
+		}
+	}
+
+	// Name fields
+	var firstname = (req.body.firstname || '').trim();
+	var lastname = (req.body.lastname || '').trim();
+	if (firstname && firstname !== (userRecord.firstname || '')) {
+		updateFields.firstname = firstname;
+	}
+	if (lastname && lastname !== (userRecord.lastname || '')) {
+		updateFields.lastname = lastname;
+	}
+	if (updateFields.firstname || updateFields.lastname) {
+		var fn = updateFields.firstname || userRecord.firstname || '';
+		var ln = updateFields.lastname || userRecord.lastname || '';
+		updateFields.fullname = (fn + ' ' + ln).trim();
+	}
+
+	// Location
+	var location = (req.body.location || '').trim();
+	if (location !== (userRecord.location || '')) {
+		updateFields.location = location || null;
+	}
+
+	// Gender
+	var gender = (req.body.gender || '').trim();
+	if (gender && ['Male', 'Female', 'Other', 'Undisclosed'].includes(gender) && gender !== userRecord.gender) {
+		updateFields.gender = gender;
+	}
+
+	if (errors.length > 0) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent(errors.join('. ')));
+	}
+
+	// Apply updates if any
+	if (Object.keys(updateFields).length > 0) {
+		updateFields.updated_at = new Date();
+		await postgres.updateById(userRecord.id, updateFields, 'users');
+
+		// Update session if username changed
+		if (updateFields.username) {
+			var updatedUser = await userAccounts.getUserByUUID(session.uuid);
+			if (updatedUser) {
+				var newSessionData = userAccounts.buildSessionData(updatedUser);
+				await sessionStore.sessionStore(sessionid, newSessionData);
+			}
+		}
+
+		return res.redirect('/users/profile?message=' + encodeURIComponent('Profile updated'));
+	}
+
+	return res.redirect('/users/profile');
+});
+
+/* -----------------------------------------------
+   POST /users/profile/password
+   Changes the user's password (requires current password).
+----------------------------------------------- */
+router.post('/profile/password', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login');
+
+	var currentPassword = req.body.current_password || '';
+	var newPassword = req.body.new_password || '';
+	var confirmPassword = req.body.confirm_password || '';
+	var pwmin = appConfig.getNumber('pwmin', 12);
+
+	// Verify current password
+	var authResult = await userAccounts.checkUserPass(session.username, currentPassword);
+	if (!authResult.isvalid) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('Current password is incorrect'));
+	}
+
+	// Validate new password
+	if (!newPassword || newPassword.length < pwmin) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('New password must be at least ' + pwmin + ' characters'));
+	}
+	if (newPassword !== confirmPassword) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('New passwords do not match'));
+	}
+
+	// Update password
+	var success = await userAccounts.updateUserPassword(session.username, newPassword);
+	if (!success) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('Failed to update password'));
+	}
+
+	return res.redirect('/users/profile?message=' + encodeURIComponent('Password changed successfully'));
+});
+
+/* -----------------------------------------------
+   GET /users/verify
+   Shows email/netmail verification page.
+----------------------------------------------- */
+router.get('/verify', async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login?redirect=/users/verify');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login?redirect=/users/verify');
+
+	res.locals.currentuser = session;
+	var uid = parseInt(session.id);
+	var userRecord = await userAccounts.getUserByUUID(session.uuid);
+	if (!userRecord) return res.redirect('/users/login');
+
+	var mailVerification = await import('../models/mailVerification.js');
+	var verified = await mailVerification.isVerified(uid);
+
+	// Calculate days remaining if unverified retention is configured
+	var daysRemaining = null;
+	if (!verified) {
+		var retDays = appConfig.getNumber('unverified_retention_days', 14);
+		if (retDays > 0 && userRecord.created_at) {
+			var created = new Date(userRecord.created_at);
+			var expires = new Date(created.getTime() + retDays * 24 * 60 * 60 * 1000);
+			daysRemaining = Math.max(0, Math.ceil((expires.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+		}
+	}
+
+	res.render('users/verify', {
+		title:         'Verify Address',
+		activelink:    '',
+		user:          userRecord,
+		verified:      verified,
+		daysRemaining: daysRemaining,
+		message:       req.query.message || null,
+		error:         req.query.error || null
+	});
+});
+
+/* -----------------------------------------------
+   POST /users/verify/send
+   Sends/resends a verification code.
+----------------------------------------------- */
+router.post('/verify/send', async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login');
+
+	var uid = parseInt(session.id);
+	var mailVerification = await import('../models/mailVerification.js');
+	var result = await mailVerification.sendVerificationCode(uid);
+
+	if (result.status) {
+		return res.redirect('/users/verify?message=Verification code sent');
+	}
+	return res.redirect('/users/verify?error=' + encodeURIComponent(result.error || 'Failed to send code'));
+});
+
+/* -----------------------------------------------
+   POST /users/verify/check
+   Validates a submitted verification code.
+----------------------------------------------- */
+router.post('/verify/check', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login');
+
+	var uid = parseInt(session.id);
+	var code = (req.body.code || '').trim();
+	var mailVerification = await import('../models/mailVerification.js');
+	var result = await mailVerification.verifyCode(uid, code);
+
+	if (result.status) {
+		return res.redirect('/users/verify?message=Address verified successfully');
+	}
+	return res.redirect('/users/verify?error=' + encodeURIComponent(result.error || 'Verification failed'));
+});
+
+/* -----------------------------------------------
+   POST /users/verify/change
+   Updates the user's email/netmail address and sends a new code.
+----------------------------------------------- */
+router.post('/verify/change', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login');
+
+	var uid = parseInt(session.id);
+	var newAddr = (req.body.new_address || '').trim().toLowerCase();
+
+	if (!newAddr) {
+		return res.redirect('/users/verify?error=' + encodeURIComponent('Address cannot be empty'));
+	}
+
+	// Check uniqueness
+	var isUnique = await userAccounts.checkMailUnique(newAddr);
+	if (!isUnique) {
+		return res.redirect('/users/verify?error=' + encodeURIComponent('That address is already in use'));
+	}
+
+	// Detect mail type
+	var mailtype = userAccounts.detectMailType(newAddr);
+
+	// Update user record, reset verification
+	var postgres = await import('../middleware/db/postgres.js');
+	await postgres.write(
+		'UPDATE users SET mailaddress = $1, mailtype = $2, mailverified = false, mailverified_at = NULL, mailtoken = NULL, mailtoken_created = NULL, updated_at = NOW() WHERE id = $3',
+		[newAddr, mailtype, uid]
+	);
+
+	// Send verification code to new address
+	var mailVerification = await import('../models/mailVerification.js');
+	var sendResult = await mailVerification.sendVerificationCode(uid);
+
+	if (sendResult.status) {
+		return res.redirect('/users/verify?message=' + encodeURIComponent('Address updated. Verification code sent to ' + newAddr));
+	}
+	return res.redirect('/users/verify?message=' + encodeURIComponent('Address updated to ' + newAddr) + '&error=' + encodeURIComponent(sendResult.error || 'Could not send verification code'));
 });
 
 /* -----------------------------------------------

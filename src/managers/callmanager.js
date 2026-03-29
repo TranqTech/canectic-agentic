@@ -26,6 +26,7 @@ import { WhosOnline } from "../handlers/whosonline.js";
 import { AnnouncementHandler } from "../handlers/announcementhandler.js";
 import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 import { fileBatchCheck } from "../handlers/menucommands/fileBatchCheck.js";
+import { mailVerifyCheck } from "../handlers/menucommands/mailVerifyCheck.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
@@ -52,6 +53,7 @@ const handlerRegistry = {
 	"check_email":  (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
 	"check_batch":  (call) => new SubModuleAdapter(call, fileBatchCheck, "FileBatchCheck"),
 	"announcements": (call) => new SubModuleAdapter(call, AnnouncementHandler, "Announcements"),
+	"verify_mail":   (call) => new SubModuleAdapter(call, mailVerifyCheck, "MailVerifyCheck"),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
 	//"logoff":       (call) => new LogoffHandler(call),
@@ -67,6 +69,7 @@ const callFlows = {
 		"logon",
 		"last_callers",
 		"announcements",
+		"verify_mail",
 		"check_email",
 		"check_batch",
 		"menu",

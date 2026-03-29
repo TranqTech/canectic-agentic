@@ -15,8 +15,14 @@ block content
 							.h3.mb-0 My Profile
 							span.badge.bg-secondary= 'User #' + (_user.usernumber || '')
 					.card-body
+						if message
+							.alert.alert-success= message
+						if error
+							.alert.alert-danger= error
+
 						.row
-							.col-md-6
+							//- Left column: Account info (read-only)
+							.col-md-5
 								h5.text-muted Account
 								table.table.table-sm.table-dark.mb-4
 									tbody
@@ -32,42 +38,112 @@ block content
 												if _user.created_at
 													= new Date(_user.created_at).toLocaleDateString()
 												else
-													| —
+													| -
 										tr
 											td.text-muted Last Login
 											td
 												if _user.lastlogon
 													= new Date(_user.lastlogon).toLocaleDateString()
 												else
-													| —
+													| -
 										tr
 											td.text-muted Total Logins
 											td= _user.logoncount || 0
-
-							.col-md-6
-								h5.text-muted Personal
-								table.table.table-sm.table-dark.mb-4
-									tbody
-										tr
-											td.text-muted(style="width:40%") Name
-											td= _user.fullname || (((_user.firstname || '') + ' ' + (_user.lastname || '')).trim()) || '—'
-										tr
-											td.text-muted Location
-											td= _user.location || '—'
-										tr
-											td.text-muted Gender
-											td
-												if _user.gender === 'Undisclosed'
-													| Prefer not to say
-												else
-													= _user.gender || '—'
-										tr
-											td.text-muted Birthdate
-											td
-												if _user.birthdate
-													= new Date(_user.birthdate).toLocaleDateString()
-												else
-													| —
 										tr
 											td.text-muted Email / Netmail
-											td= _user.mailaddress || '—'
+											td
+												= _user.mailaddress || '-'
+												if _user.mailaddress
+													if _user.mailverified
+														span.badge.bg-success.ms-2 Verified
+													else
+														span.badge.bg-warning.text-dark.ms-2 Unverified
+
+								.d-grid.gap-2
+									a.btn.btn-outline-info(href='/users/verify')
+										i.bi.bi-envelope-check.me-1
+										| Verify / Change Address
+									a.btn.btn-outline-warning(href='#' data-bs-toggle='collapse' data-bs-target='#changePasswordSection')
+										i.bi.bi-key.me-1
+										| Change Password
+
+							//- Right column: Editable fields
+							.col-md-7
+								h5.text-muted Edit Profile
+								form(action='/users/profile' method='POST')
+									.mb-3
+										label.form-label Username
+										.input-group
+											input.form-control(
+												type='text'
+												name='username'
+												value=_user.username
+												minlength='3'
+											)
+										if !canChangeUsername && usernameNextChange
+											.form-text.text-warning
+												i.bi.bi-clock.me-1
+												| Next change allowed: #{new Date(usernameNextChange).toLocaleDateString()}
+										else
+											.form-text Username changes are limited to once every #{cooldownDays || 90} days
+									.row
+										.col-6
+											.mb-3
+												label.form-label First Name
+												input.form-control(
+													type='text'
+													name='firstname'
+													value=_user.firstname || ''
+												)
+										.col-6
+											.mb-3
+												label.form-label Last Name
+												input.form-control(
+													type='text'
+													name='lastname'
+													value=_user.lastname || ''
+												)
+									.mb-3
+										label.form-label Location
+										input.form-control(
+											type='text'
+											name='location'
+											value=_user.location || ''
+											placeholder='City, State/Country'
+										)
+									.mb-3
+										label.form-label Gender
+										select.form-select(name='gender')
+											option(value='' disabled selected=(!_user.gender)) -- Select --
+											option(value='Male' selected=(_user.gender === 'Male')) Male
+											option(value='Female' selected=(_user.gender === 'Female')) Female
+											option(value='Other' selected=(_user.gender === 'Other')) Other
+											option(value='Undisclosed' selected=(_user.gender === 'Undisclosed')) Prefer not to say
+									.text-end
+										button.btn.btn-success(type='submit')
+											i.bi.bi-check-lg.me-1
+											| Save Changes
+
+				//- Collapsible password change section
+				#changePasswordSection.collapse.mt-3
+					.card
+						.card-header.text-white.bg-dark
+							.h5.mb-0 Change Password
+						.card-body
+							form(action='/users/profile/password' method='POST')
+								.row
+									.col-md-6.offset-md-3
+										.mb-3
+											label.form-label Current Password
+											input.form-control(type='password' name='current_password' required autocomplete='current-password')
+										.mb-3
+											label.form-label New Password
+											input.form-control(type='password' name='new_password' required autocomplete='new-password')
+											.form-text Minimum #{pwmin || 12} characters
+										.mb-3
+											label.form-label Confirm New Password
+											input.form-control(type='password' name='confirm_password' required autocomplete='new-password')
+										.text-end
+											button.btn.btn-warning(type='submit')
+												i.bi.bi-key.me-1
+												| Change Password

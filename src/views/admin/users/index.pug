@@ -97,6 +97,12 @@ block content
                     .d-grid.gap-2
                       a.button.btn.btn-danger(href='/admin')
                         |Exit
+                      br
+                      h6.text-white.mb-1 Maintenance:
+                      form(action='/admin/users/maintenance' method='POST')
+                        button.btn.btn-outline-warning.w-100(type='submit' title='Reconcile mail types and other user record hygiene')
+                          i.bi.bi-wrench
+                          |  Run User Maintenance
 
         // User View Modal
         #userViewModal.modal.fade(tabindex='-1' aria-hidden='true')

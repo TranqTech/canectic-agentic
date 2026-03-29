@@ -1,17 +1,17 @@
-# Canectic BBS — Release Tracker
+# Canectic BBS - Release Tracker
 
-Status tracking for the first public test release (alpha).
+Status tracking for releases.
 
-Last updated: 2026-03-24
+Last updated: 2026-03-28
 
 ---
 
 ## Legend
 
-- `[x]` — Complete
-- `[-]` — In progress
-- `[ ]` — Not started
-- `[~]` — Partial / works but needs improvement
+- `[x]` - Complete
+- `[-]` - In progress
+- `[ ]` - Not started
+- `[~]` - Partial / works but needs improvement
 
 ---
 
@@ -19,8 +19,10 @@ Last updated: 2026-03-24
 
 ### Terminal
 - [x] Terminal server (auto-detect TCP/Telnet, WebSocket)
-- [x] Terminal negotiation (NAWS, SGA, binary mode)
-- [x] Menu system (hotkey menus, PostgreSQL-backed)
+- [x] Terminal negotiation (NAWS, SGA, binary mode, sixel detection)
+- [x] Menu system (hotkey menus, PostgreSQL-backed, hotkey prefix display)
+- [x] Menu entry drag-to-reorder in admin
+- [x] Default menu entries on new menu creation (redrawMenu)
 - [x] Message area selector (lightbar)
 - [x] Message reader (threaded, scroll viewport, quoting)
 - [x] Message editor (full-screen, word wrap, quote system)
@@ -36,23 +38,28 @@ Last updated: 2026-03-24
 - [x] Last callers display
 - [x] User list
 - [x] Door game support (NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty)
+- [x] Announcement viewer (scrolling viewport, arrow navigation, call flow + menu command)
+- [x] Mail verification handler (call flow + menu command, send/enter/change address)
+- [x] Registration with gender selection (hotkey selector)
 - [~] Password reset handler (sends message, token/link flow not implemented)
-- [~] ZMODEM upload (works with most clients, known issue with IcyTerm)
+- [~] ZMODEM (works with most clients, known issue with IcyTerm both directions)
 
 ### Web
-- [x] Login page
-- [ ] Registration page (route exists, template missing — will crash)
+- [x] Login page (caller log on login)
+- [x] Registration page (6-step wizard, AJAX validation, gender, auto-login, caller log)
+- [x] User profile page (read-only, verification status badge)
+- [x] Mail verification page (send code, enter code, change address, days remaining)
 - [x] Public message browsing (groups, areas, threads)
 - [x] Message posting (new thread, reply)
 - [x] File browsing (groups, areas, file detail)
 - [x] File download
 - [x] File upload (multipart, hash check, DIZ extraction)
 - [x] Private mail webmail UI (inbox/sent/trash, compose local + network, reply)
+- [x] Landing page with announcements (logged-in user detection)
 - [x] Bootstrap 5 Darkly theme, responsive layout
 - [x] DataTables for sortable/searchable lists
 - [x] TinyMCE rich text editor
-- [ ] Announcement / bulletin system (landing page announcements, news posts)
-- [ ] User profile / settings page
+- [ ] User profile editing (change password, display preferences)
 
 ### Admin Panel
 - [x] Dashboard
@@ -61,13 +68,17 @@ Last updated: 2026-03-24
 - [x] Message areas CRUD (per-area tables, access control)
 - [x] File groups CRUD
 - [x] File areas CRUD (scan, move, delete files)
-- [x] Users CRUD (edit, password reset, flags)
-- [x] Menus CRUD (hotkey entries, ANSI color picker)
+- [x] Users CRUD (edit, password reset, flags, Unverified restriction)
+- [x] Menus CRUD (hotkey entries, ANSI color picker, drag-to-reorder)
 - [x] Doors CRUD (launch types, variable substitution)
 - [x] Peer connections (FTN/QWK/NNTP, enable/disable, poll settings)
 - [x] Nodelists (import, browse, search, flag glossary)
 - [x] Admin log viewer (WebSocket push, live tail)
 - [x] Undeliverable PM queue (review, deliver, discard)
+- [x] Announcements CRUD (TinyMCE editor, drag-to-reorder, pinning, scheduling)
+- [x] Jobs & Maintenance page (manual trigger for all worker jobs by category)
+- [x] SMB message base import (upload .shd/.sdt/.sid, preview, import to area)
+- [ ] JAM message base import
 
 ### Message Networking
 - [x] FTN tosser (inbound/outbound, type-2 packets)
@@ -83,7 +94,7 @@ Last updated: 2026-03-24
 - [x] Transport access control (permission + restriction flags)
 - [x] Recipient resolution (username, realname, sysop alias)
 - [x] Dupe checking
-- [x] Bounce notifications (undeliverable → sender inbox)
+- [x] Bounce notifications (undeliverable to sender inbox)
 - [x] Sysop notifications
 - [x] Soft delete with trash purge
 
@@ -102,14 +113,32 @@ Last updated: 2026-03-24
 - [x] COPY/MOVE between mailboxes
 - [x] IMAP PURGE/EXPUNGE
 
+### User Verification
+- [x] Verification code generation and sending (email + FTN netmail transports)
+- [x] Auto-send on registration
+- [x] Auto-send on address change
+- [x] Unverified restriction flag on new accounts
+- [x] Security level bump on verification (verified_security config)
+- [x] Sysop auto-verified on promotion
+- [x] Unverified account purge (configurable retention, daily maintenance)
+- [x] Mail type auto-detection (email vs netmail, handles 5D FTN addresses)
+- [x] User maintenance worker (reconcile mail types, purge unverified)
+- [x] Terminal verification handler (call flow wrapper + menu command)
+- [x] Web verification page (send, enter, change address, days remaining)
+
 ### Infrastructure
-- [x] Four-process model (gateway, mail, worker, mailer)
+- [x] Four-process model (gateway, worker, mail, mailer)
 - [x] PM2 ecosystem config
 - [x] BullMQ job queues (toss, mailer, maintenance)
 - [x] Redis pub/sub event bus
 - [x] Centralized logging (alogger, Redis bus, admin viewer)
 - [x] Configuration system (3-tier, admin UI, cross-process reload)
 - [x] Database migrations (declarative schema management)
+- [x] Startup DB/Redis validation (fail fast with clear error)
+- [x] Health check endpoint (GET /health)
+- [x] CSRF protection (Origin/Referer check middleware)
+- [x] Install/update script (setup/install.sh)
+- [x] .env.example template (examples/env.example)
 
 ### Testing
 - [x] 1,178 tests passing (mocha)
@@ -121,57 +150,27 @@ Last updated: 2026-03-24
 
 ---
 
-## Release Blockers
-
-Items that must be complete before handing to testers.
-
-### Onboarding & Setup
+## Roadmap to 1.0
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | `.env.example` template | [x] | `examples/env.example` — all bootstrap vars documented |
-| 2 | `INSTALL.md` setup guide | [x] | `docs/sysop/INSTALL.md` — full walkthrough with troubleshooting |
-| 3 | First-run sysop account creation | [x] | User #1 auto-promotes to Sysop (document in INSTALL.md) |
-| 4 | Fix `npm start` script | [x] | Points to `gateway.js` now |
-| 5 | README overhaul | [x] | Full feature list, quick start, ports, running, docs links |
-
-### Security
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 6 | CSRF protection | [x] | Origin/Referer check middleware on all state-changing requests |
-| 7 | Startup DB/Redis validation | [x] | All processes fail fast with clear error message |
-
-### Missing Web Features
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 8 | Registration page | [x] | 6-step wizard with AJAX validation, gender field, auto-login |
-| 9 | Announcement / bulletin framework | [x] | DB-backed, admin CRUD, landing page display, pinning, scheduling |
-
-### Stability
-
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| 10 | Health check endpoint | [x] | `GET /health` — returns DB and Redis status, 503 if degraded |
-| 11 | Install/update script | [x] | `setup/install.sh` — interactive target selection, fresh install + update with merge prompts |
+| 1 | Password reset flow | [ ] | Token/link system (currently just sends a PM) |
+| 2 | User profile editing | [ ] | Change password, display preferences, address change |
+| 3 | Door server BBS registration | [ ] | Register with door game servers |
+| 4 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
 
 ---
 
-## Post-Release (Beta Improvements)
-
-Items that would improve the experience but aren't blocking the initial test release.
+## Post-Release (Beta+)
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 11 | Docker Compose setup | [ ] | Lower barrier to entry for testers |
-| 12 | Password reset flow | [ ] | Token/link system (currently just sends a PM) |
-| 13 | User profile/settings page | [~] | Basic profile view done, settings/edit not yet |
-| 14 | ZMODEM IcyTerm compatibility | [ ] | ZMODEM send/receive fails with IcyTerm; all other clients work |
-| 15 | Systemd unit files | [ ] | Alternative to PM2 for production |
-| 16 | Terminal reader pagination | [ ] | Lazy-load beyond 50-message batch |
-| 17 | Terminal address book | [ ] | Quick-select recent recipients |
-| 18 | Deployment guide (production) | [ ] | TLS, reverse proxy, MTA integration |
+| 5 | Docker Compose setup | [ ] | Lower barrier to entry for testers |
+| 6 | ZMODEM IcyTerm compatibility | [ ] | Send/receive fails with IcyTerm; all other clients work |
+| 7 | Systemd unit files | [ ] | Alternative to PM2 for production |
+| 8 | Terminal reader pagination | [ ] | Lazy-load beyond 50-message batch |
+| 9 | Terminal address book | [ ] | Quick-select recent recipients |
+| 10 | Deployment guide (production) | [ ] | TLS, reverse proxy, MTA integration |
 
 ---
 

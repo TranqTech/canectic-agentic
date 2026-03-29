@@ -26,6 +26,9 @@ block content
                     .text-end
                       a.button.btn.btn-sm.btn-info.me-2(href='/admin')
                         | Exit
+                      button#saveOrderBtn.btn.btn-sm.btn-warning.me-2(style='display:none' title='Save reordered sort positions')
+                        i.bi.bi-arrow-down-up
+                        |  Save Order
                       button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newAnnouncementModal')
                         | Add Announcement
               .card-body
@@ -39,6 +42,7 @@ block content
                   table#announcementTable.table.table-hover
                     thead
                       tr
+                        th(scope='col' style='width:30px')
                         th(scope='col') Title
                         th(scope='col') Author
                         th(scope='col') Status
@@ -57,6 +61,8 @@ block content
                           data-expire_at=(ann.expire_at ? new Date(ann.expire_at).toISOString().slice(0, 16) : '')
                           data-sort_order=ann.sort_order || 0
                         )
+                          td.drag-handle(style='cursor:grab; text-align:center; color:#888')
+                            i.bi.bi-grip-vertical
                           td= ann.title
                           td= ann.author_name || '—'
                           td
@@ -188,6 +194,7 @@ block content
     document.addEventListener('DOMContentLoaded', function() {
       // TinyMCE config shared by both editors
       var mceConfig = {
+        license_key: 'gpl',
         menubar: false,
         plugins: 'lists link autolink',
         toolbar: 'bold italic underline strikethrough | forecolor backcolor | bullist numlist | link | removeformat',
@@ -256,4 +263,102 @@ block content
           deleteModal.show();
         });
       });
+
+      // --- Drag and drop reorder ---
+      var tbody = document.querySelector('#announcementTable tbody');
+      var saveBtn = document.getElementById('saveOrderBtn');
+      var dragRow = null;
+      var orderChanged = false;
+
+      if (tbody) {
+        tbody.addEventListener('dragstart', function(e) {
+          var tr = e.target.closest('tr');
+          if (!tr) return;
+          dragRow = tr;
+          tr.style.opacity = '0.4';
+          e.dataTransfer.effectAllowed = 'move';
+        });
+
+        tbody.addEventListener('dragend', function(e) {
+          var tr = e.target.closest('tr');
+          if (tr) tr.style.opacity = '';
+          dragRow = null;
+          // Clear all drag-over highlights
+          tbody.querySelectorAll('tr').forEach(function(r) {
+            r.style.borderTop = '';
+            r.style.borderBottom = '';
+          });
+        });
+
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          var tr = e.target.closest('tr');
+          if (!tr || tr === dragRow) return;
+          // Highlight drop position
+          tbody.querySelectorAll('tr').forEach(function(r) {
+            r.style.borderTop = '';
+            r.style.borderBottom = '';
+          });
+          var rect = tr.getBoundingClientRect();
+          var mid = rect.top + rect.height / 2;
+          if (e.clientY < mid) {
+            tr.style.borderTop = '2px solid #f0ad4e';
+          } else {
+            tr.style.borderBottom = '2px solid #f0ad4e';
+          }
+        });
+
+        tbody.addEventListener('drop', function(e) {
+          e.preventDefault();
+          var tr = e.target.closest('tr');
+          if (!tr || !dragRow || tr === dragRow) return;
+          var rect = tr.getBoundingClientRect();
+          var mid = rect.top + rect.height / 2;
+          if (e.clientY < mid) {
+            tbody.insertBefore(dragRow, tr);
+          } else {
+            tbody.insertBefore(dragRow, tr.nextSibling);
+          }
+          orderChanged = true;
+          saveBtn.style.display = 'inline-block';
+          // Clear highlights
+          tbody.querySelectorAll('tr').forEach(function(r) {
+            r.style.borderTop = '';
+            r.style.borderBottom = '';
+          });
+        });
+
+        // Make rows draggable from the handle
+        tbody.querySelectorAll('tr').forEach(function(tr) {
+          tr.setAttribute('draggable', 'true');
+        });
+      }
+
+      // Save order button
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+          if (!orderChanged) return;
+          var rows = tbody.querySelectorAll('tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(r.dataset.id); });
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+          fetch('/admin/announcements/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function(resp) {
+            return resp.json();
+          }).then(function(data) {
+            if (data.status) {
+              saveBtn.style.display = 'none';
+              orderChanged = false;
+            }
+          }).finally(function() {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-arrow-down-up"></i> Save Order';
+          });
+        });
+      }
     });

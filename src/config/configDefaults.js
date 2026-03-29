@@ -54,6 +54,9 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'session_ttl',       defaultValue: '60',             type: 'number',  category: 'security',    description: 'Web session expiry in minutes (default 60 = 1 hour)' },
 	{ key: 'pwmin',             defaultValue: '12',             type: 'number',  category: 'security',    description: 'Minimum password length' },
 	{ key: 'minage',            defaultValue: '13',             type: 'number',  category: 'security',    description: 'Minimum registration age' },
+	{ key: 'verified_security', defaultValue: '60',             type: 'number',  category: 'security',    description: 'Security level granted on address verification (only applied if higher than current)' },
+	{ key: 'unverified_retention_days', defaultValue: '14',  type: 'number',  category: 'security',    description: 'Days to keep unverified accounts before deletion (0 = never delete)' },
+	{ key: 'username_change_cooldown', defaultValue: '90',  type: 'number',  category: 'security',    description: 'Days between username changes (0 = no limit)' },
 
 	// -----------------------------------------------------------------------
 	// Performance

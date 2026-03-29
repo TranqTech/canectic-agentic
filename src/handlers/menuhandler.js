@@ -5,6 +5,8 @@ import * as alogger from "../utils/alogger.js";
 import { userList } from "./menucommands/userlist.js";
 import { LastCallers } from "./lastcallers.js";
 import { AnnouncementHandler } from "./announcementhandler.js";
+import { mailVerify } from "./menucommands/mailVerify.js";
+import { passwordReset } from "./menucommands/passwordReset.js";
 import { WhosOnline } from "./whosonline.js";
 import { msgAreaSelector } from "./menucommands/msgAreaSelector.js";
 import { msgReader } from "./menucommands/msgReader.js";
@@ -96,6 +98,15 @@ class MenuHandler extends BaseHandler {
 		var callerSecurity = this.call.security || 0;
 		var callerPerms = this.call.permissionflags || [];
 		var callerRestrictions = this.call.restrictionflags || [];
+		// Ensure arrays (may be JSON strings from session/DB)
+		if (typeof callerPerms === 'string') {
+			try { callerPerms = JSON.parse(callerPerms); } catch (_) { callerPerms = []; }
+		}
+		if (typeof callerRestrictions === 'string') {
+			try { callerRestrictions = JSON.parse(callerRestrictions); } catch (_) { callerRestrictions = []; }
+		}
+		if (!Array.isArray(callerPerms)) callerPerms = [];
+		if (!Array.isArray(callerRestrictions)) callerRestrictions = [];
 
 		// Check minimum security level
 		if (entry.min_security !== undefined && entry.min_security !== null) {
@@ -649,6 +660,14 @@ class MenuHandler extends BaseHandler {
 				return;
 			case "checkEmail":
 				this._runSubModule(new pmCheck(this.call));
+				return;
+
+			case "verifyMail":
+				this._runSubModule(new mailVerify(this.call));
+				return;
+
+			case "passwordReset":
+				this._runSubModule(new passwordReset(this.call));
 				return;
 
 			case "fileGroupChange":

@@ -276,6 +276,16 @@ export async function enqueueMailerNodelistConnect(nodelistData, destinationAddr
 // =========================================================================
 
 /**
+ * User maintenance (mailtype reconciliation, etc.).
+ * Called by: scheduler (daily), admin.
+ */
+export async function enqueueUserMaintenance() {
+	return maintenanceQueue.add('user-maintenance', {}, {
+		jobId: 'user-maintenance',
+	});
+}
+
+/**
  * Regenerate body_html for message area messages.
  * Called by: admin panel, CLI, scheduler.
  */

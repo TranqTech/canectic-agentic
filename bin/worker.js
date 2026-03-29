@@ -367,6 +367,13 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'user-maintenance': {
+				var userMaint = await import("../src/models/useraccounts.js");
+				await userMaint.reconcileMailTypes();
+				await userMaint.purgeUnverifiedUsers();
+				break;
+			}
+
 			case 'scan-inbound': {
 				var fs = await import('fs');
 				var path = await import('path');

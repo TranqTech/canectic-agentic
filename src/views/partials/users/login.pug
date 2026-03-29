@@ -99,6 +99,8 @@ else
 									|No account?
 									br
 									a(href='/users/register') Register Now
+									br
+									a(href='/users/forgot') Forgot Password?
 								.col-5
 									br
 									.text-end
@@ -115,6 +117,8 @@ else
 					.card-header.text-white.bg-dark
 						.h3 User Login
 					.card-body
+						if successMessage
+							.alert.alert-success= successMessage
 						if _errors && _errors.length
 							ul.my-errors.error-wiggle
 								each error in _errors
@@ -154,6 +158,8 @@ else
 									|No account?
 									br
 									a(href='/users/register') Register Now
+									br
+									a(href='/users/forgot') Forgot Password?
 								.col-5
 									br
 									.text-end

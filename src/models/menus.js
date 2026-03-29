@@ -18,6 +18,12 @@ const VALID_DISPLAY_FILE_TYPES = ['', 'Screen', 'Header'];
 // "Lightbar" = arrow-key navigable highlight bar (future)
 const VALID_MENU_TYPES = ['Hotkey', 'Lightbar'];
 
+// Default entries added to every new menu.
+// Sysops can modify or delete these after creation.
+const DEFAULT_MENU_ENTRIES = [
+	{ hotkey: '?', command_name: 'redrawMenu', display: '', sort_order: 9990 },
+];
+
 // ANSI color map — value, label, hex color, and fg-* CSS class from styles.css.
 // Used by admin views for color select dropdowns with live preview.
 // Hex values match the fg-* classes in public/css/styles.css.
@@ -144,6 +150,11 @@ async function createMenu(data) {
 	if (insertResult.status) {
 		result.status = true;
 		result.menuId = insertResult.insertId;
+
+		// Add default entries to the new menu
+		for (var di = 0; di < DEFAULT_MENU_ENTRIES.length; di++) {
+			await createEntry(insertResult.insertId, DEFAULT_MENU_ENTRIES[di]);
+		}
 	} else {
 		result.errormessages.push('Database insert failed');
 	}
@@ -351,6 +362,8 @@ function getAvailableCommands() {
 		{ name: 'whosOnline',      label: "Who's Online",      needsArg: false },
 		{ name: 'email',           label: 'Private Messages',  needsArg: false },
 		{ name: 'checkEmail',      label: 'Check Email',       needsArg: false },
+		{ name: 'verifyMail',      label: 'Verify Address',    needsArg: false },
+		{ name: 'passwordReset',   label: 'Change Password',  needsArg: false },
 		{ name: 'testDownload',    label: 'Test Download',     needsArg: false },
 		{ name: 'fileAreaChange',  label: 'Change File Area',  needsArg: false },
 		{ name: 'fileGroupChange', label: 'Change File Group', needsArg: false },

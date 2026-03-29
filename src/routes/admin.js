@@ -53,7 +53,7 @@ var urlencodedParser = bodyParser.urlencoded({ limit: '250mb', extended: true })
 //variables and const
 const basedir        = process.cwd();
 const availablePermissions  = ["Sysop", "Mod", "Adult", "Admin", "Email", "Netmail"];
-const availableRestrictions = ["Underage", "Banned", "Email", "Netmail","Private Messages"];
+const availableRestrictions = ["Underage", "Unverified", "Banned", "Email", "Netmail", "Private Messages"];
 
 // Inject shared locals for all admin views
 router.use(async function(req, res, next) {
@@ -1814,6 +1814,11 @@ router.get('/users', async (req, res, next) => {
 	});
 });
 
+router.post('/users/maintenance', urlencodedParser, requireAdmin, async (req, res) => {
+	await jobs.enqueueUserMaintenance();
+	res.redirect('/admin/users');
+});
+
 router.get('/users/:uuid', async (req, res, next) => {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
@@ -1994,13 +1999,13 @@ router.post('/menus/:id/entries/:entryId/delete', urlencodedParser, requireAdmin
 	res.redirect('/admin/menus/' + menuId);
 });
 
-router.post('/menus/:id/entries/reorder', urlencodedParser, requireAdmin, async (req, res) => {
+router.post('/menus/:id/entries/reorder', express.json(), requireAdmin, async (req, res) => {
 	var menuId = parseInt(req.params.id);
-	var orderedIds = [];
-	try {
-		orderedIds = JSON.parse(req.body.order || '[]');
-	} catch (_) {}
-	if (orderedIds.length > 0) {
+	var orderedIds = req.body.ids || req.body.order || [];
+	if (typeof orderedIds === 'string') {
+		try { orderedIds = JSON.parse(orderedIds); } catch (_) { orderedIds = []; }
+	}
+	if (Array.isArray(orderedIds) && orderedIds.length > 0) {
 		await menus.reorderEntries(menuId, orderedIds);
 	}
 	if (req.headers.accept && req.headers.accept.includes('application/json')) {
@@ -2381,6 +2386,149 @@ router.get('/nodelist/:networkId/search.json', async (req, res) => {
 // -------------------------------------------------------
 // Announcements
 // -------------------------------------------------------
+// Events / Maintenance
+// -------------------------------------------------------
+
+router.get('/events', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	res.render('admin/events/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Jobs & Maintenance',
+		activelink: 'events',
+		currentuser: currentuser,
+		triggered: req.query.triggered || null
+	});
+});
+
+router.post('/events/trigger', express.json(), requireAdmin, async (req, res) => {
+	var job = req.body.job;
+	var triggered = null;
+
+	switch (job) {
+		// Toss jobs
+		case 'ftn:inbound':       await jobs.enqueueFtnInbound(); triggered = 'FTN Inbound'; break;
+		case 'ftn:outbound':      await jobs.enqueueFtnOutbound(); triggered = 'FTN Outbound'; break;
+		case 'qwk:pull-all':      await jobs.enqueueQwkPullAll(); triggered = 'QWK Pull All'; break;
+		case 'qwk:push-all':      await jobs.enqueueQwkPushAll(); triggered = 'QWK Push All'; break;
+		case 'nntp:pull-all':     await jobs.enqueueNntpPullAll(); triggered = 'NNTP Pull All'; break;
+		case 'nntp:push-all':     await jobs.enqueueNntpPushAll(); triggered = 'NNTP Push All'; break;
+		case 'tic:inbound':       await jobs.enqueueTicInbound(); triggered = 'TIC Inbound'; break;
+		case 'tic:outbound':      await jobs.enqueueTicOutbound(); triggered = 'TIC Outbound'; break;
+		case 'email:outbound':    await jobs.enqueueEmailOutbound(); triggered = 'Email Outbound'; break;
+		// Mailer jobs
+		case 'bso-scan':          await jobs.enqueueMailerBsoScan(); triggered = 'BSO Scan'; break;
+		// Maintenance jobs
+		case 'regen-html':        await jobs.enqueueRegenHtml(); triggered = 'Regen Message HTML'; break;
+		case 'regen-pm-html':     await jobs.enqueueRegenPmHtml(); triggered = 'Regen PM HTML'; break;
+		case 'regen-file-html':   await jobs.enqueueRegenFileDescHtml(); triggered = 'Regen File Desc HTML'; break;
+		case 'purge-pm-trash':    await jobs.enqueuePurgePmTrash(); triggered = 'Purge PM Trash'; break;
+		case 'recalc-areas':      await jobs.enqueueRecalcAreaCounts(); triggered = 'Recalc Area Counts'; break;
+		case 'recalc-files':      await jobs.enqueueRecalcFileCounts(); triggered = 'Recalc File Counts'; break;
+		case 'user-maintenance':  await jobs.enqueueUserMaintenance(); triggered = 'User Maintenance'; break;
+		default:
+			return res.json({ status: false, error: 'Unknown job' });
+	}
+
+	return res.json({ status: true, triggered: triggered });
+});
+
+// -------------------------------------------------------
+// Message Base Import
+// -------------------------------------------------------
+
+router.get('/import/msgbase', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var areaList         = await msgAreas.getAllAreas();
+	res.render('admin/import/msgbase', {
+		sufficientAccess: sufficientAccess,
+		title: 'Import Message Base',
+		activelink: 'import',
+		currentuser: currentuser,
+		areas: areaList,
+		result: null,
+		preview: null,
+	});
+});
+
+router.post('/import/msgbase/preview', multer({ dest: os.tmpdir() }).fields([
+	{ name: 'shd_file', maxCount: 1 },
+	{ name: 'sdt_file', maxCount: 1 },
+	{ name: 'sid_file', maxCount: 1 },
+]), requireAdmin, async (req, res) => {
+	var smbImport = await import('../maintenance/smbImport.js');
+	var areaList = await msgAreas.getAllAreas();
+
+	var shdFile = req.files['shd_file'] ? req.files['shd_file'][0] : null;
+	var sdtFile = req.files['sdt_file'] ? req.files['sdt_file'][0] : null;
+	var sidFile = req.files['sid_file'] ? req.files['sid_file'][0] : null;
+
+	if (!shdFile || !sdtFile) {
+		return res.render('admin/import/msgbase', {
+			sufficientAccess: true,
+			title: 'Import Message Base',
+			activelink: 'import',
+			currentuser: await getCurrentUser(req),
+			areas: areaList,
+			result: null,
+			preview: { error: 'Both .shd and .sdt files are required' },
+		});
+	}
+
+	var preview = smbImport.previewSMB(shdFile.path, sdtFile.path, sidFile ? sidFile.path : null);
+
+	res.render('admin/import/msgbase', {
+		sufficientAccess: true,
+		title: 'Import Message Base',
+		activelink: 'import',
+		currentuser: await getCurrentUser(req),
+		areas: areaList,
+		result: null,
+		preview: preview,
+		shdPath: shdFile.path,
+		sdtPath: sdtFile.path,
+		sidPath: sidFile ? sidFile.path : '',
+	});
+});
+
+router.post('/import/msgbase/run', urlencodedParser, requireAdmin, async (req, res) => {
+	var smbImport = await import('../maintenance/smbImport.js');
+	var areaList = await msgAreas.getAllAreas();
+
+	var shdPath = req.body.shd_path;
+	var sdtPath = req.body.sdt_path;
+	var sidPath = req.body.sid_path || null;
+	var areaShortcode = req.body.area_shortcode;
+
+	if (!shdPath || !sdtPath || !areaShortcode) {
+		return res.render('admin/import/msgbase', {
+			sufficientAccess: true,
+			title: 'Import Message Base',
+			activelink: 'import',
+			currentuser: await getCurrentUser(req),
+			areas: areaList,
+			result: { errors: ['Missing required fields'] },
+			preview: null,
+		});
+	}
+
+	var result = await smbImport.importSMB(shdPath, sdtPath, sidPath, areaShortcode);
+
+	res.render('admin/import/msgbase', {
+		sufficientAccess: true,
+		title: 'Import Message Base',
+		activelink: 'import',
+		currentuser: await getCurrentUser(req),
+		areas: areaList,
+		result: result,
+		preview: null,
+	});
+});
+
+// -------------------------------------------------------
+// Announcements
+// -------------------------------------------------------
 
 router.get('/announcements', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
@@ -2429,6 +2577,17 @@ router.post('/announcements/delete/:id', urlencodedParser, requireAdmin, async (
 	var announcementId = parseInt(req.params.id);
 	await announcements.deleteAnnouncement(announcementId);
 	res.redirect('/admin/announcements');
+});
+
+router.post('/announcements/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') {
+		try { ids = JSON.parse(ids); } catch (_) { ids = []; }
+	}
+	if (Array.isArray(ids) && ids.length > 0) {
+		await announcements.updateSortOrder(ids);
+	}
+	res.json({ status: true });
 });
 
 export { router };

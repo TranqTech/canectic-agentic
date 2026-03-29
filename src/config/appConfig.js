@@ -61,10 +61,10 @@ function buildMergedCache(dbRows) {
 		sources[key] = 'default';
 	}
 
-	// Phase 2: DB values overlay defaults
+	// Phase 2: DB values overlay defaults (skip null, undefined, and empty strings)
 	if (dbRows) {
 		for (var row of dbRows) {
-			if (row.key && row.value !== null && row.value !== undefined) {
+			if (row.key && row.value !== null && row.value !== undefined && row.value !== '') {
 				merged[row.key] = row.value;
 				sources[row.key] = 'db';
 			}

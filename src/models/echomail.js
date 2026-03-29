@@ -1219,7 +1219,8 @@ export {
 	getOutboundForConnection,
 	startNewThread,
 	replyToThread,
-	// Thread helpers for tossers
+	// Thread helpers for tossers and importers
+	threadMessage,
 	createThreadRow,
 	updateThreadStats,
 	rollbackThread

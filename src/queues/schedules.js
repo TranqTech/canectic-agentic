@@ -55,6 +55,17 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily user record maintenance
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('user-maintenance-daily', {
+			pattern: '0 5 * * *',   // 5:00 AM daily
+		}, {
+			name: 'user-maintenance',
+			data: {},
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// Maintenance: periodic inbound directory scan (backstop)
 		// -----------------------------------------------------------------
 		var inboundInterval = appConfig.getNumber('inbound_scan_interval', 300);

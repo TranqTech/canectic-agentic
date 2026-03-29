@@ -1,0 +1,45 @@
+extends ../layouts/user
+block content
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+			br
+			br
+
+		.row
+			- var colClass = ismobile ? 'col-12' : 'col-6 offset-3'
+			div(class=colClass)
+				.card
+					.card-header.text-white.bg-dark
+						.h3 Reset Password
+					.card-body
+						if error
+							.alert.alert-danger= error
+
+						p.text-muted Resetting password for #[strong= username]
+
+						form(action='/users/reset' method='POST')
+							input(type='hidden' name='token' value=token)
+							.mb-3
+								label.form-label(for='rp_password') New Password
+								input.form-control(
+									type='password'
+									id='rp_password'
+									name='password'
+									required
+									autofocus
+									autocomplete='new-password'
+								)
+								.form-text Minimum #{pwmin} characters
+							.mb-3
+								label.form-label(for='rp_confirm') Confirm New Password
+								input.form-control(
+									type='password'
+									id='rp_confirm'
+									name='password_confirm'
+									required
+									autocomplete='new-password'
+								)
+							.text-end
+								button.btn.btn-success.btn-lg(type='submit') Reset Password

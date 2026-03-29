@@ -1,0 +1,158 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-lg-6.offset-lg-3.col-md-8.offset-md-2.col-12
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin') Exit
+              .card-body
+                #triggerAlert.alert.d-none(role='alert')
+
+                ul.nav.nav-tabs.mb-3(role='tablist')
+                  li.nav-item(role='presentation')
+                    button.nav-link.active(data-bs-toggle='tab' data-bs-target='#tab-maintenance' type='button' role='tab')
+                      i.bi.bi-gear.me-1
+                      | Maintenance
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tab-tossing' type='button' role='tab')
+                      i.bi.bi-arrow-left-right.me-1
+                      | Tossing
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tab-mailer' type='button' role='tab')
+                      i.bi.bi-hdd-network.me-1
+                      | Mailer
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tab-users' type='button' role='tab')
+                      i.bi.bi-people.me-1
+                      | Users
+
+                .tab-content
+
+                  //- Maintenance
+                  #tab-maintenance.tab-pane.fade.show.active(role='tabpanel')
+                    .d-grid.gap-2.mx-auto(style='max-width:400px')
+                      button.btn.btn-secondary.trigger-btn(data-job='regen-html')
+                        i.bi.bi-code-slash.me-1
+                        | Regen Message HTML
+                      button.btn.btn-secondary.trigger-btn(data-job='regen-pm-html')
+                        i.bi.bi-code-slash.me-1
+                        | Regen PM HTML
+                      button.btn.btn-secondary.trigger-btn(data-job='regen-file-html')
+                        i.bi.bi-code-slash.me-1
+                        | Regen File Desc HTML
+                      button.btn.btn-secondary.trigger-btn(data-job='purge-pm-trash')
+                        i.bi.bi-trash.me-1
+                        | Purge PM Trash
+                      button.btn.btn-secondary.trigger-btn(data-job='recalc-areas')
+                        i.bi.bi-calculator.me-1
+                        | Recalc Area Counts
+                      button.btn.btn-secondary.trigger-btn(data-job='recalc-files')
+                        i.bi.bi-calculator.me-1
+                        | Recalc File Counts
+
+                  //- Message Tossing
+                  #tab-tossing.tab-pane.fade(role='tabpanel')
+                    .d-grid.gap-2.mx-auto(style='max-width:400px')
+                      button.btn.btn-primary.trigger-btn(data-job='ftn:inbound')
+                        i.bi.bi-box-arrow-in-down.me-1
+                        | FTN Inbound
+                      button.btn.btn-primary.trigger-btn(data-job='ftn:outbound')
+                        i.bi.bi-box-arrow-up.me-1
+                        | FTN Outbound
+                      button.btn.btn-primary.trigger-btn(data-job='qwk:pull-all')
+                        i.bi.bi-box-arrow-in-down.me-1
+                        | QWK Pull All
+                      button.btn.btn-primary.trigger-btn(data-job='qwk:push-all')
+                        i.bi.bi-box-arrow-up.me-1
+                        | QWK Push All
+                      button.btn.btn-primary.trigger-btn(data-job='nntp:pull-all')
+                        i.bi.bi-box-arrow-in-down.me-1
+                        | NNTP Pull All
+                      button.btn.btn-primary.trigger-btn(data-job='nntp:push-all')
+                        i.bi.bi-box-arrow-up.me-1
+                        | NNTP Push All
+                      button.btn.btn-primary.trigger-btn(data-job='tic:inbound')
+                        i.bi.bi-file-earmark-arrow-down.me-1
+                        | TIC Inbound
+                      button.btn.btn-primary.trigger-btn(data-job='tic:outbound')
+                        i.bi.bi-file-earmark-arrow-up.me-1
+                        | TIC Outbound
+                      button.btn.btn-primary.trigger-btn(data-job='email:outbound')
+                        i.bi.bi-envelope-arrow-up.me-1
+                        | Email Outbound
+
+                  //- Mailer
+                  #tab-mailer.tab-pane.fade(role='tabpanel')
+                    .d-grid.gap-2.mx-auto(style='max-width:400px')
+                      button.btn.btn-info.trigger-btn(data-job='bso-scan')
+                        i.bi.bi-search.me-1
+                        | BSO Outbound Scan
+
+                  //- Users
+                  #tab-users.tab-pane.fade(role='tabpanel')
+                    .d-grid.gap-2.mx-auto(style='max-width:400px')
+                      button.btn.btn-warning.trigger-btn(data-job='user-maintenance')
+                        i.bi.bi-wrench.me-1
+                        | User Maintenance
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var alertEl = document.getElementById('triggerAlert');
+
+      function showAlert(msg, type) {
+        alertEl.className = 'alert alert-' + type;
+        alertEl.textContent = msg;
+        setTimeout(function() {
+          alertEl.className = 'alert d-none';
+        }, 4000);
+      }
+
+      document.querySelectorAll('.trigger-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var job = this.dataset.job;
+          var origText = this.innerHTML;
+          this.disabled = true;
+          this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Queued...';
+
+          fetch('/admin/events/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job: job })
+          })
+          .then(function(resp) { return resp.json(); })
+          .then(function(data) {
+            if (data.status) {
+              showAlert('Queued: ' + data.triggered, 'success');
+            } else {
+              showAlert('Error: ' + (data.error || 'Unknown'), 'danger');
+            }
+          })
+          .catch(function(err) {
+            showAlert('Request failed: ' + err.message, 'danger');
+          })
+          .finally(function() {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+          });
+        });
+      });
+    });

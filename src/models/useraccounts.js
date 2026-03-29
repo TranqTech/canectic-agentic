@@ -132,9 +132,9 @@ async function createNewUser(newrecord) {
 	}
 	var recloc = newrecord.location ? newrecord.location.trim() : null;
 
-	// Mail address (email or netmail)
+	// Mail address (email or netmail) - auto-detect type from address format
 	var recmail = newrecord.mailaddress ? newrecord.mailaddress.trim().toLowerCase() : null;
-	var recmailtype = newrecord.mailtype || "email";
+	var recmailtype = newrecord.mailtype || detectMailType(recmail);
 
 	var timenow = new Date();
 	var assignuuid = await genUUID();
@@ -173,7 +173,8 @@ async function createNewUser(newrecord) {
 			file_group: null,
 			file_area: null,
 			created_at: timenow,
-			updated_at: null
+			updated_at: null,
+			restrictionflags: JSON.stringify(['Unverified'])
 		};
 
 		var dbres = await postgres.insertObject(rec, "users");
@@ -199,6 +200,16 @@ async function createNewUser(newrecord) {
 				await pointerMod.initPointersForUser(dbres.insertId);
 			} catch (e) {
 				alogger.writeAlog(3, "createNewUser: pointer init failed for user " + dbres.insertId + ": " + (e.message || e), "yellow");
+			}
+
+			// Send email/netmail verification code (non-blocking)
+			if (recmail) {
+				try {
+					var verifyMod = await import('./mailVerification.js');
+					await verifyMod.sendVerificationCode(dbres.insertId);
+				} catch (e) {
+					alogger.writeAlog(3, "createNewUser: verification send failed for user " + dbres.insertId + ": " + (e.message || e), "yellow");
+				}
 			}
 		} else {
 			resultobj.errormessages = resultobj.errormessages.concat(dbres.errormessages);
@@ -326,18 +337,24 @@ async function removeUserRestrictions(username, flagsToRemove) {
 async function makeSysop(username) {
 	var userobj = await getUserRecord(username);
 	if (!userobj) {
-		alogger.writeAlog(3, "makeSysop failed — no user found: " + username, "redbright");
+		alogger.writeAlog(3, "makeSysop failed - no user found: " + username, "redbright");
 		return false;
 	}
 
 	await updateUserSecurity(username, 255);
 	await addUserPermissions(username, ["Sysop"]);
 
-	// Clear all existing restriction flags
+	// Clear all existing restriction flags (including Unverified)
 	var existing = userobj.restrictionflags || [];
 	if (existing.length > 0) {
 		await removeUserRestrictions(username, existing);
 	}
+
+	// Mark as verified (sysop doesn't need to verify)
+	await postgres.write(
+		'UPDATE users SET mailverified = true, mailverified_at = NOW(), mailtoken = NULL, mailtoken_created = NULL, updated_at = NOW() WHERE UPPER(username) = UPPER($1)',
+		[username]
+	);
 
 	alogger.writeAlog(4, "User " + username + " granted Sysop", "greenbright");
 	return true;
@@ -485,9 +502,62 @@ async function saveUser(user) {
 
 function detectMailType(mailaddress) {
 	if (!mailaddress) return "email";
-	// FidoNet netmail format: zone:net/node or zone:net/node.point
+	var addr = mailaddress.trim();
+	// Strip any leading username@ or "User Name"@ prefix to get the network address
+	// Handles: user@1:134/101, "User Name"@1:134/101@fidonet, sysop@2:280/464
+	var ftnPart = addr;
+	var ftnMatch = addr.match(/^(?:"[^"]*"|[^@\s]+)?@?(\d+:\d+\/\d+(?:\.\d+)?(?:@\S+)?)$/);
+	if (ftnMatch) {
+		ftnPart = ftnMatch[1];
+	}
+	// FidoNet netmail format: zone:net/node[.point][@domain]
 	var fidoRegex = /^\d+:\d+\/\d+(\.\d+)?(@\S+)?$/;
-	return fidoRegex.test(mailaddress.trim()) ? "netmail" : "email";
+	return fidoRegex.test(ftnPart) ? "netmail" : "email";
+}
+
+// Re-detect mailtype for all users with a mail address.
+// Fixes stale types from before detectMailType was properly wired in.
+async function reconcileMailTypes() {
+	var users = await postgres.query(
+		"SELECT id, mailaddress, mailtype FROM users WHERE mailaddress IS NOT NULL AND mailaddress != ''"
+	);
+	var fixed = 0;
+	for (var user of (users || [])) {
+		var correctType = detectMailType(user.mailaddress);
+		if (correctType !== user.mailtype) {
+			await postgres.write(
+				'UPDATE users SET mailtype = $1, updated_at = NOW() WHERE id = $2',
+				[correctType, user.id]
+			);
+			fixed++;
+			alogger.writeAlog(3, 'Fixed mailtype for user ' + user.id + ': ' + user.mailtype + ' -> ' + correctType, 'cyan');
+		}
+	}
+	if (fixed > 0) {
+		alogger.writeAlog(2, 'reconcileMailTypes: fixed ' + fixed + ' user(s)', 'cyan');
+	}
+	return { fixed: fixed };
+}
+
+// Delete unverified accounts older than the configured retention period.
+// Skips sysops (they're auto-verified but guard against edge cases).
+async function purgeUnverifiedUsers() {
+	var days = appConfig.getNumber('unverified_retention_days', 14);
+	if (days <= 0) return { purged: 0 };
+
+	var rows = await postgres.query(
+		"DELETE FROM users WHERE mailverified = false AND created_at < NOW() - ($1 || ' days')::interval AND (permissionflags IS NULL OR NOT permissionflags @> '[\"Sysop\"]') RETURNING id, username",
+		[days.toString()]
+	);
+
+	var purged = rows ? rows.length : 0;
+	if (purged > 0) {
+		for (var row of rows) {
+			alogger.writeAlog(3, 'Purged unverified user: ' + row.username + ' (id: ' + row.id + ')', 'yellow');
+		}
+		alogger.writeAlog(2, 'purgeUnverifiedUsers: removed ' + purged + ' account(s) older than ' + days + ' days', 'cyan');
+	}
+	return { purged: purged };
 }
 
 // --- Admin user update ---
@@ -707,5 +777,8 @@ export {
 	getUserByUUID,
 	getUserByRealname,
 	getUsersByRealname,
-	getUsersByPermissionFlag
+	getUsersByPermissionFlag,
+	detectMailType,
+	reconcileMailTypes,
+	purgeUnverifiedUsers
 };

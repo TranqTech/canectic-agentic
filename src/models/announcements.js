@@ -206,9 +206,19 @@ async function getActiveAnnouncements(limit) {
 
 async function getAllAnnouncements() {
 	var rows = await postgres.query(
-		'SELECT * FROM announcements ORDER BY created_at DESC'
+		'SELECT * FROM announcements ORDER BY sort_order ASC, created_at DESC'
 	);
 	return rows || [];
+}
+
+async function updateSortOrder(orderedIds) {
+	if (!orderedIds || orderedIds.length === 0) return;
+	for (var i = 0; i < orderedIds.length; i++) {
+		await postgres.write(
+			'UPDATE announcements SET sort_order = $1, updated_at = NOW() WHERE id = $2',
+			[i, parseInt(orderedIds[i])]
+		);
+	}
 }
 
 async function getAnnouncementById(id) {
@@ -290,6 +300,7 @@ async function deleteAnnouncement(id) {
 export {
 	getActiveAnnouncements,
 	getAllAnnouncements,
+	updateSortOrder,
 	getAnnouncementById,
 	createAnnouncement,
 	updateAnnouncement,

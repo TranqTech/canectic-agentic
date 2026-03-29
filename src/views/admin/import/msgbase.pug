@@ -1,0 +1,125 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-lg-8.offset-lg-2.col-12
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin') Exit
+              .card-body
+
+                //- Import result
+                if result
+                  if result.status
+                    .alert.alert-success
+                      h5 Import Complete
+                      p Imported: #[strong= result.imported] | Duplicates: #[strong= result.duplicates] | Skipped: #[strong= result.skipped] | Total: #[strong= result.total]
+                    if result.errors && result.errors.length > 0
+                      .alert.alert-warning
+                        h6 Warnings:
+                        ul.mb-0
+                          each err in result.errors.slice(0, 20)
+                            li= err
+                          if result.errors.length > 20
+                            li.text-muted ... and #{result.errors.length - 20} more
+                  else
+                    .alert.alert-danger
+                      h5 Import Failed
+                      if result.errors && result.errors.length > 0
+                        ul.mb-0
+                          each err in result.errors
+                            li= err
+
+                //- Preview result
+                if preview
+                  if preview.error
+                    .alert.alert-danger= preview.error
+                  else if preview.status
+                    .alert.alert-info
+                      h5 Preview
+                      table.table.table-sm.table-dark.mb-3
+                        tbody
+                          tr
+                            td.text-muted Messages found
+                            td= preview.totalMsgs
+                          if preview.dateRange
+                            tr
+                              td.text-muted Date range
+                              td
+                                = new Date(preview.dateRange.first).toLocaleDateString()
+                                |  to
+                                = new Date(preview.dateRange.last).toLocaleDateString()
+                          tr
+                            td.text-muted First subject
+                            td= preview.firstSubject
+                          tr
+                            td.text-muted Last subject
+                            td= preview.lastSubject
+
+                    //- Import form (after preview)
+                    form(action='/admin/import/msgbase/run' method='POST')
+                      input(type='hidden' name='shd_path' value=shdPath)
+                      input(type='hidden' name='sdt_path' value=sdtPath)
+                      input(type='hidden' name='sid_path' value=sidPath)
+                      .row.mb-3
+                        .col-8
+                          label.form-label Target message area:
+                          select.form-select(name='area_shortcode' required)
+                            option(value='' disabled selected) -- Select area --
+                            each area in areas
+                              option(value=area.shortcode)= area.shortcode + ' - ' + area.name
+                        .col-4.d-flex.align-items-end
+                          button.btn.btn-success.btn-lg.w-100(type='submit')
+                            i.bi.bi-database-add.me-1
+                            | Import Messages
+
+                //- Upload form (initial)
+                if !preview || preview.error
+                  if !result || !result.status
+                    h5 Synchronet Message Base (SMB) Import
+                    p.text-muted Upload the .shd and .sdt files from a Synchronet message base. The .sid index file is optional but speeds up parsing.
+                    hr
+                    form(action='/admin/import/msgbase/preview' method='POST' enctype='multipart/form-data')
+                      .row.mb-3
+                        .col-6
+                          label.form-label
+                            | Header file (.shd)
+                            span.text-danger *
+                          input.form-control(type='file' name='shd_file' accept='.shd' required)
+                        .col-6
+                          label.form-label
+                            | Data file (.sdt)
+                            span.text-danger *
+                          input.form-control(type='file' name='sdt_file' accept='.sdt' required)
+                      .row.mb-3
+                        .col-6
+                          label.form-label Index file (.sid)
+                            span.text-muted.ms-1 optional
+                          input.form-control(type='file' name='sid_file' accept='.sid')
+                      .text-end
+                        button.btn.btn-primary(type='submit')
+                          i.bi.bi-search.me-1
+                          | Preview
+
+                    hr
+                    p.text-muted
+                      small
+                        | Future: JAM message base import (TODO)
