@@ -63,6 +63,7 @@ block content
                           data-usereal_local=(door.usereal_local ? 'true' : 'false')
                           data-usereal_doorsession=(door.usereal_doorsession ? 'true' : 'false')
                           data-pause_on_exit=(door.pause_on_exit ? 'true' : 'false')
+                          data-fixed_size=(door.fixed_size ? 'true' : 'false')
                           data-max_nodes=door.max_nodes
                           data-active=(door.active ? 'true' : 'false')
                           data-sort_order=door.sort_order
@@ -297,8 +298,16 @@ block content
                         option(value='true') Yes
                         option(value='false') No
                     .col-4
+                      label.form-label(data-bs-toggle='tooltip' title='Force 80x25 terminal size and center output on larger terminals. Use for doors that do not handle variable terminal sizes.')
+                        | Fixed 80x25
+                        i.bi.bi-info-circle.text-muted
+                      select.form-control.mb-2(name='fixed_size')
+                        option(value='false') No
+                        option(value='true') Yes
+                  .row
+                    .col-4
                       label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for local callers.')
-                        | Real Names (Local) 
+                        | Real Names (Local)
                         i.bi.bi-info-circle.text-muted
                       select.form-control.mb-2(name='usereal_local')
                         option(value='false') No
@@ -412,15 +421,23 @@ block content
                         option(value='true') Yes
                         option(value='false') No
                     .col-4
+                      label.form-label(data-bs-toggle='tooltip' title='Force 80x25 terminal size and center output on larger terminals.')
+                        | Fixed 80x25
+                        i.bi.bi-info-circle.text-muted
+                      select#ed_fixed_size.form-control.mb-2(name='fixed_size')
+                        option(value='false') No
+                        option(value='true') Yes
+                  .row
+                    .col-4
                       label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for local callers.')
-                        | Real Names (Local) 
+                        | Real Names (Local)
                         i.bi.bi-info-circle.text-muted
                       select#ed_usereal_local.form-control.mb-2(name='usereal_local')
                         option(value='false') No
                         option(value='true') Yes
                     .col-4
                       label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for door session callers.')
-                        | Real Names (Door) 
+                        | Real Names (Door)
                         i.bi.bi-info-circle.text-muted
                       select#ed_usereal_doorsession.form-control.mb-2(name='usereal_doorsession')
                         option(value='false') No
@@ -486,6 +503,7 @@ block content
           document.getElementById('ed_sort_order').value       = d.sort_order;
           document.getElementById('ed_active').value           = d.active;
           document.getElementById('ed_pause').value            = d.pause_on_exit;
+          document.getElementById('ed_fixed_size').value       = d.fixed_size;
           document.getElementById('ed_usereal_local').value    = d.usereal_local;
           document.getElementById('ed_usereal_doorsession').value = d.usereal_doorsession;
 

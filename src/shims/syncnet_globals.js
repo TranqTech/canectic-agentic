@@ -798,6 +798,14 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, doorArgs) {
 	 * console.yesno(prompt) — ask a yes/no question (default yes).
 	 * Lightbar selector: arrow keys toggle, Y/N direct-select, Enter confirms.
 	 * Synchronet convention: returns true for Yes, false for No.
+	 *
+	 * IMPORTANT: yesno() and noyes() have DIFFERENT return semantics.
+	 *   yesno() returns true = Yes, false = No
+	 *   noyes() returns true = No (default), false = Yes
+	 * This is NOT a typo. Synchronet doors rely on this asymmetry.
+	 * For example, druglord checks (noyes("Quit?") == false) to mean
+	 * the user confirmed (said Yes). Do not "fix" noyes() to match
+	 * yesno()'s return values — it will break every door that uses it.
 	 */
 	globalThis.console.yesno = function(prompt) {
 		if (prompt) {
@@ -814,8 +822,8 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, doorArgs) {
 	/**
 	 * console.noyes(prompt) — ask a yes/no question (default no).
 	 * Lightbar selector: arrow keys toggle, Y/N direct-select, Enter confirms.
-	 * Synchronet convention: returns true for Yes, false for No.
-	 * Same return semantics as yesno() — only the default differs.
+	 * Synchronet convention: returns false for Yes, true for No.
+	 * This is the inverse of yesno() — doors check (noyes() == false) to mean "user said yes".
 	 */
 	globalThis.console.noyes = function(prompt) {
 		if (prompt) {
@@ -825,8 +833,8 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, doorArgs) {
 			{ label: 'Yes', hotkey: 'Y' },
 			{ label: 'No',  hotkey: 'N' }
 		], 1);
-		if (result === -1) return false;
-		return result === 0;
+		if (result === -1) return true;
+		return result === 1; // true = No (default), false = Yes
 	};
 
 	// ---- Standalone yes/no globals ----
@@ -835,11 +843,12 @@ function installSyncnetGlobals(dk, doorDir, dbSubdir, parentPort, doorArgs) {
 
 	/**
 	 * deny(prompt) — standalone confirmation prompt, default No.
-	 * Synchronet's deny() = !console.noyes(). Returns true if user
+	 * Synchronet's deny() = console.noyes(). Returns true if user
 	 * denied (answered No), false if user confirmed (answered Yes).
+	 * Since noyes() now returns true=No, false=Yes, deny() is a direct pass-through.
 	 */
 	globalThis.deny = function(prompt) {
-		return !globalThis.console.noyes(prompt);
+		return globalThis.console.noyes(prompt);
 	};
 
 	/**

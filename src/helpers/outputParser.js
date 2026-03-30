@@ -58,7 +58,7 @@ class DoorOutputParser {
 		this.centerOutput = options.centerOutput !== undefined ? options.centerOutput : false;
 		this.debugLog = options.debugLog || false;
 		this._debugChunks = 0;
-		this._debugFile = options.debugFile || 'logs/outputparser-debug.log';
+		this._debugFile = options.debugFile || (process.cwd() + '/logs/outputparser-debug.log');
 
 		// Source dimensions (what the door thinks the screen is)
 		this.srcCols = options.srcCols || 80;
@@ -86,6 +86,7 @@ class DoorOutputParser {
 
 		// Output accumulator — we batch output for efficiency
 		this._outBuffer = "";
+		this._regionInitialized = false;
 
 		this.loggingId = "DoorOutputParser";
 
@@ -106,11 +107,27 @@ class DoorOutputParser {
 		}
 	}
 
+	// Emit DECSTBM scroll region + position cursor at top-left of centered area.
+	// Called on init and after every screen clear to (re)establish the viewport.
+	_emitScrollRegion() {
+		if (!this.centerOutput || this.offsetRow === 0) return '';
+		var top = this.offsetRow + 1;
+		var bottom = this.offsetRow + this.srcRows;
+		// Set scroll region
+		var seq = '\x1b[' + top + ';' + bottom + 'r';
+		// Position cursor at top-left of centered area
+		seq += '\x1b[' + top + ';' + (this.offsetCol + 1) + 'H';
+		return seq;
+	}
+
 	_debugWrite(msg) {
 		if (!this.debugLog) return;
 		try {
 			appendFileSync(this._debugFile, '[' + new Date().toISOString() + '] ' + msg + '\n');
-		} catch (_) {}
+		} catch (e) {
+			console.error('[OutputParser] Debug write failed: ' + e.message + ' path=' + this._debugFile);
+			this.debugLog = false; // stop trying
+		}
 	}
 
 	// Update terminal dimensions (e.g. on NAWS update)
@@ -167,6 +184,10 @@ class DoorOutputParser {
 	_processCSI(params, intermediates, finalByte) {
 		var paramStr = params;
 		var parts = paramStr.split(';').map(p => p === '' ? 0 : parseInt(p, 10));
+
+		if (this.debugLog && 'HfJKs'.includes(finalByte)) {
+			this._debugWrite('CSI ' + paramStr + finalByte + ' (cursor=' + this.cursorCol + ',' + this.cursorRow + ')');
+		}
 
 		switch (finalByte) {
 			case 'H': // CUP — Cursor Position
@@ -226,11 +247,11 @@ class DoorOutputParser {
 				if (this.centerOutput) {
 					var mode = parts[0] || 0;
 					if (mode === 2) {
-						// Clear entire screen — clear the real screen,
-						// then redraw border/frame if needed
-						this._outBuffer += "\x1b[2J";
-						// Reposition cursor
-						this._emitMoveCursor(this.cursorCol, this.cursorRow);
+						// Reset scroll region, clear, clear scrollback, re-establish region
+						this._outBuffer += "\x1b[r\x1b[2J\x1b[3J";
+						this.cursorCol = 1;
+						this.cursorRow = 1;
+						this._outBuffer += this._emitScrollRegion();
 					} else {
 						// Partial clears are trickier with centering.
 						// For now, pass through with offset position
@@ -289,8 +310,18 @@ class DoorOutputParser {
 				}
 				return;
 
+			case 'r': // DECSTBM — Set Scrolling Region
+				if (this.centerOutput && this.offsetRow > 0) {
+					// Door is trying to set/reset scroll region — intercept and
+					// re-establish our centered region instead
+					this._outBuffer += this._emitScrollRegion();
+				} else {
+					this._outBuffer += "\x1b[" + paramStr + finalByte;
+				}
+				return;
+
 			default:
-				// SGR (m), scrolling, and everything else — pass through as-is
+				// SGR (m), and everything else — pass through as-is
 				this._outBuffer += "\x1b[" + intermediates + paramStr + finalByte;
 				return;
 		}
@@ -387,17 +418,28 @@ class DoorOutputParser {
 						this._paramBuffer = "";
 						this._intermediates = "";
 					} else if (byte === 0x0C) {
-						// Form feed - clear screen and reset cursor
-						this._outBuffer += "\x1b[2J\x1b[3J";
+						// Form feed - clear, reset scroll region, home to centered area
+						this._outBuffer += "\x1b[r\x1b[2J\x1b[3J";
 						this.cursorCol = 1;
 						this.cursorRow = 1;
-						this._emitMoveCursor(this.cursorCol, this.cursorRow);
+						this._outBuffer += this._emitScrollRegion();
 					} else if (byte === 0x0D) {
+						// CR - move to offset column on current row
 						this.cursorCol = 1;
-						this._emitMoveCursor(this.cursorCol, this.cursorRow);
+						this._outBuffer += "\r";
+						if (this.offsetCol > 0) {
+							this._outBuffer += "\x1b[" + (this.offsetCol + 1) + "G";
+						}
 					} else if (byte === 0x0A) {
-						this.cursorRow = Math.min(this.srcRows, this.cursorRow + 1);
-						this._emitMoveCursor(this.cursorCol, this.cursorRow);
+						// LF - real linefeed, terminal scrolls within DECSTBM region
+						// Clamp row tracking to srcRows - DECSTBM handles the scroll,
+						// cursor stays at the bottom row of the region during scrolling
+						if (this.cursorRow < this.srcRows) this.cursorRow++;
+						this._outBuffer += "\n";
+						// Re-position to offset column after scroll
+						if (this.offsetCol > 0) {
+							this._outBuffer += "\x1b[" + (this.offsetCol + 1) + "G";
+						}
 					} else if (byte === 0x08) {
 						this.cursorCol = Math.max(1, this.cursorCol - 1);
 						this._emitMoveCursor(this.cursorCol, this.cursorRow);
@@ -417,7 +459,7 @@ class DoorOutputParser {
 						this.cursorCol++;
 						if (this.cursorCol > this.srcCols) {
 							this.cursorCol = 1;
-							this.cursorRow = Math.min(this.srcRows, this.cursorRow + 1);
+							if (this.cursorRow < this.srcRows) this.cursorRow++;
 							this._emitMoveCursor(this.cursorCol, this.cursorRow);
 						}
 					}
@@ -462,7 +504,13 @@ class DoorOutputParser {
 		}
 
 		if (this._outBuffer.length > 0) {
-			this.emitter.emit("data", this._outBuffer);
+			if (this.convertCP437) {
+				// UTF-8 output — emit as string (default UTF-8 encoding)
+				this.emitter.emit("data", this._outBuffer);
+			} else {
+				// Raw CP437 — emit as latin1 Buffer to preserve bytes 0x80-0xFF
+				this.emitter.emit("data", Buffer.from(this._outBuffer, 'latin1'));
+			}
 		}
 	}
 
@@ -471,22 +519,21 @@ class DoorOutputParser {
 		var buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
 		if (this.debugLog) {
 			this._debugChunks++;
-			// Log raw hex for first 50 chunks to capture the intro-to-UI transition
-			if (this._debugChunks <= 200) {
-				var hexStr = buf.toString('hex').replace(/(.{2})/g, '$1 ').trim();
-				// Also show readable version with escapes marked
-				var readable = '';
-				for (var di = 0; di < buf.length; di++) {
-					var b = buf[di];
-					if (b === 0x1B) readable += '<ESC>';
-					else if (b === 0x0D) readable += '<CR>';
-					else if (b === 0x0A) readable += '<LF>';
-					else if (b >= 0x20 && b <= 0x7E) readable += String.fromCharCode(b);
-					else readable += '<' + b.toString(16).padStart(2, '0') + '>';
+			for (var di = 0; di < buf.length; di++) {
+				if (buf[di] === 0x0C) {
+					this._debugWrite('*** FORM FEED at chunk #' + this._debugChunks + ' offset ' + di);
 				}
-				this._debugWrite('Chunk #' + this._debugChunks + ' (' + buf.length + ' bytes):\n  ' + readable.substring(0, 500));
 			}
 		}
+		// Initialize scroll region on first data through the centered parser
+		if (this.centerOutput && !this._regionInitialized && this.offsetRow > 0) {
+			this._regionInitialized = true;
+			var initSeq = this._emitScrollRegion();
+			if (initSeq) {
+				this.emitter.emit("data", initSeq);
+			}
+		}
+
 		if (this.centerOutput) {
 			this._processCentered(buf);
 		} else {
@@ -546,6 +593,10 @@ class DoorOutputParser {
 	}
 
 	destroy() {
+		// Reset scroll region to full screen before cleanup
+		if (this.centerOutput && this.offsetRow > 0) {
+			this.emitter.emit("data", "\x1b[r");
+		}
 		this.emitter.removeAllListeners();
 		this._outBuffer = "";
 	}

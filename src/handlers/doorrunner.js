@@ -250,7 +250,11 @@ class DoorRunner extends BaseHandler {
 	_setupOutputParser() {
 		var enc = (this.call.term_encoding || '').toLowerCase();
 		var needsUTF8 = (enc === 'utf8' || enc === 'utf-8');
-		var needsCenter = (this.call.term_width > 90) || (this.call.term_height > 30);
+		// DOS doors (Dosemu/DosemuPty) are always 80x25 - center on oversized terminals.
+		// NativeShell/Exec/Spawn handle their own sizing unless fixedSize is set.
+		var isDos = (this.launchType === 'Dosemu' || this.launchType === 'DosemuPty');
+		var forceFixed = this.doorConfig.fixedSize || false;
+		var needsCenter = (isDos || forceFixed) && ((this.call.term_width > 90) || (this.call.term_height > 30));
 
 		if (needsUTF8 || needsCenter) {
 			this._outputParser = new DoorOutputParser({

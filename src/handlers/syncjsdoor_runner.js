@@ -29,6 +29,7 @@ import * as path from 'path';
 
 import { BaseHandler } from "./basehandler.js";
 import { MainSide, MSG_OUTPUT, MSG_READY, MSG_EXIT, MSG_ERROR, MSG_DB_REQUEST } from "../comm/syncjsdoor_comm.js";
+import { DoorOutputParser } from "../helpers/outputParser.js";
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 
@@ -46,6 +47,9 @@ class SyncJSDoorRunner extends BaseHandler {
 		// Communication
 		this._comm = new MainSide();
 		this._worker = null;
+
+		// Output parser (CP437 conversion + centering for UTF8/oversize terminals)
+		this._outputParser = null;
 
 		// State
 		this._doorExited = false;
@@ -194,9 +198,40 @@ class SyncJSDoorRunner extends BaseHandler {
 
 		alogger.writeAlog(4, this.loggingId + "\n  Starting SyncJS door", "greenbright");
 
+		// Set up output parser for CP437 conversion and optional centering.
+		// SyncJS doors that handle their own sizing get conversion only.
+		// Doors with fixedSize flag get 80x25 reported and centering enabled.
+		var enc = (this.call.term_encoding || '').toLowerCase();
+		var needsUTF8 = (enc === 'utf8' || enc === 'utf-8');
+		var fixedSize = this.doorConfig.fixedSize || false;
+		var needsCenter = fixedSize && ((this.call.term_width > 90) || (this.call.term_height > 30));
+
+		if (needsUTF8 || needsCenter) {
+			this._outputParser = new DoorOutputParser({
+				convertCP437: needsUTF8,
+				centerOutput: needsCenter,
+				debugLog: true,
+				srcCols: 80,
+				srcRows: 25,
+				destCols: this.call.term_width || 80,
+				destRows: this.call.term_height || 25,
+			});
+			this._outputParser.emitter.on("data", (processed) => {
+				if (this.call) {
+					this.call.cmds.senddata(processed);
+				}
+			});
+		}
+
+		// Clear screen before door launch
+		this.call.cmds.clearscreen();
+		this.call.cmds.senddata("\x1b[H");
+
 		// Set up terminal info in the shared buffer
+		// When fixedSize is set, constrain columns to 80 but pass real row count
+		// so the door can use available vertical space for scrolling
 		this._comm.setTermInfo(
-			this.call.term_width || 80,
+			fixedSize ? 80 : (this.call.term_width || 80),
 			this.call.term_height || 24,
 			this.call.term_type !== "Dumb",
 			this.call.nodenum || 0
@@ -308,9 +343,14 @@ class SyncJSDoorRunner extends BaseHandler {
 
 		switch (msg.type) {
 			case MSG_OUTPUT:
-				// Raw terminal output — send directly to the user's terminal
+				// Terminal output — pipe through parser if active, else send direct
 				try {
-					this.call.cmds.senddata(Buffer.from(msg.data));
+					var outBuf = Buffer.from(msg.data);
+					if (this._outputParser) {
+						this._outputParser.process(outBuf);
+					} else {
+						this.call.cmds.senddata(outBuf);
+					}
 				} catch (err) {
 					alogger.writeAlog(4, this.loggingId + "\n  Output send failed: " + err.message, "yellow");
 				}
@@ -424,6 +464,11 @@ class SyncJSDoorRunner extends BaseHandler {
 
 	clearHandler() {
 		if (!this.active) return;
+
+		if (this._outputParser) {
+			this._outputParser.destroy();
+			this._outputParser = null;
+		}
 
 		this._disableRawMode();
 

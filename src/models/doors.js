@@ -106,6 +106,7 @@ async function createDoor(data) {
 		usereal_local: data.usereal_local === 'true' || data.usereal_local === true,
 		usereal_doorsession: data.usereal_doorsession === 'true' || data.usereal_doorsession === true,
 		pause_on_exit: data.pause_on_exit !== 'false' && data.pause_on_exit !== false,
+		fixed_size: data.fixed_size === 'true' || data.fixed_size === true,
 		max_nodes: parseInt(data.max_nodes) || 0,
 		active: data.active !== 'false' && data.active !== false,
 		sort_order: parseInt(data.sort_order) || 0,
@@ -172,6 +173,7 @@ async function updateDoor(id, data) {
 		usereal_local: data.usereal_local === 'true' || data.usereal_local === true,
 		usereal_doorsession: data.usereal_doorsession === 'true' || data.usereal_doorsession === true,
 		pause_on_exit: data.pause_on_exit !== 'false' && data.pause_on_exit !== false,
+		fixed_size: data.fixed_size === 'true' || data.fixed_size === true,
 		max_nodes: parseInt(data.max_nodes) || 0,
 		active: data.active !== 'false' && data.active !== false,
 		sort_order: parseInt(data.sort_order) || 0,
@@ -212,6 +214,7 @@ function normalizeDoorConfig(row) {
 		usereal_local: row.usereal_local || false,
 		usereal_doorsession: row.usereal_doorsession || false,
 		pauseOnExit: row.pause_on_exit !== undefined ? row.pause_on_exit : true,
+		fixedSize: row.fixed_size || false,
 		maxnodes: row.max_nodes || 0,
 		active: row.active !== undefined ? row.active : true,
 	};
