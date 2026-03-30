@@ -231,6 +231,10 @@ class WsManager{
 		this.pathMap.set(path, newpool); // register the route
 		return newpool;
 	}
+	// Register a custom handler for a path (must implement handleUpgrade)
+	registerHandler(path, handler) {
+		this.pathMap.set(path, handler);
+	}
 }
 
 export{WsManager, WsPool}

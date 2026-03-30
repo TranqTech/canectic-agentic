@@ -154,10 +154,11 @@ Last updated: 2026-03-28
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| 1 | Password reset flow | [ ] | Token/link system (currently just sends a PM) |
-| 2 | User profile editing | [ ] | Change password, display preferences, address change |
-| 3 | Door server BBS registration | [ ] | Register with door game servers |
-| 4 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
+| 1 | Password reset flow | [x] | Pre-login code-based + web token link + post-login change |
+| 2 | User profile editing | [x] | Username cooldown, name, location, gender, inline password change |
+| 3 | Door menus and collections | [ ] | Categories/groups, presentation (ANSI art per category), terminal door selector, web door browser with filtering |
+| 4 | Door server BBS registration | [ ] | Register with door game servers |
+| 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
 
 ---
 

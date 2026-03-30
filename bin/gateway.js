@@ -11,6 +11,7 @@ import { TelnetPool, TelnetServer } from "../src/servers/telnetserver.js"
 import { TerminalPool, TerminalServer } from "../src/servers/terminalserver.js"
 import { ImapServer } from "../src/servers/imapServer.js"
 import { SmtpServer } from "../src/servers/smtpServer.js"
+import { PresenceServer } from "../src/servers/presenceSocket.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
@@ -49,6 +50,7 @@ var servercount = 0
 var callservcount = 0
 var lastservercount = 0
 var wsManager
+var presenceServer
 var callManager
 var primaryNodeManager
 var socatManager
@@ -95,6 +97,7 @@ process.on('SIGINT', async () => {
 	if (mailerManager) mailerManager.stop();
 	if (eventSubscriber) eventSubscriber.shutdown();
 	if (tcpServer) tcpServer.stop();
+	if (presenceServer) presenceServer.shutdown();
 	alogger.shutdownLogBus();
 	await closeQueues();
 	socatManager.shutdown();
@@ -108,6 +111,7 @@ process.on('SIGTERM', async () => {
 	if (mailerManager) mailerManager.stop();
 	if (eventSubscriber) eventSubscriber.shutdown();
 	if (tcpServer) tcpServer.stop();
+	if (presenceServer) presenceServer.shutdown();
 	alogger.shutdownLogBus();
 	await closeQueues();
 	socatManager.shutdown();
@@ -173,6 +177,12 @@ async function startWebsockets(){
 			alogger.writeAlog(3, "  WS path " + wscfg.path + " has no matching call pool: " + wscfg.callpool, "yellowbright")
 		}
 	}
+
+	// Register presence WebSocket (heartbeat/online tracking, future IM)
+	presenceServer = new PresenceServer();
+	presenceServer.init(httpServer);
+	wsManager.registerHandler('/ws/presence', presenceServer);
+	alogger.writeAlog(2, "  Presence WebSocket registered on /ws/presence", "cyan");
 
 	servercount += 1
 	callservcount += 1

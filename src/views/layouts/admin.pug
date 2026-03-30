@@ -19,3 +19,28 @@ html
     include ../includes/admin-nav.pug
     div(style='padding-top: 70px')
       block content
+    if currentuser
+      script.
+        (function() {
+          var wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          var ws = null;
+          var reconnectDelay = 5000;
+          function connect() {
+            try {
+              ws = new WebSocket(wsProto + '//' + location.host + '/ws/presence');
+              ws.onopen = function() {
+                setInterval(function() {
+                  if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'heartbeat' }));
+                  }
+                }, 60000);
+              };
+              ws.onclose = function() {
+                setTimeout(connect, reconnectDelay);
+              };
+            } catch (_) {
+              setTimeout(connect, reconnectDelay);
+            }
+          }
+          connect();
+        })();
