@@ -760,6 +760,23 @@ class MenuHandler extends BaseHandler {
 		this.resetInactivityTimeouts();
 	}
 
+	async _loadAndDrawMenu() {
+		if (!this.active || !this.call) return;
+		try {
+			var config = await getMenu(this.menuName);
+			if (!this.active) return;
+			if (!config) {
+				this._navigateBack();
+				return;
+			}
+			this._applyConfig(config);
+			this._drawMenu();
+			this.setInactivityTimeouts();
+		} catch (err) {
+			this._handleError("_loadAndDrawMenu error", err);
+		}
+	}
+
 	// --- Menu navigation ---
 	// Root menus clear the history stack when landed on
 	_isRootMenu(menuName) {
@@ -818,12 +835,22 @@ class MenuHandler extends BaseHandler {
 
 		// Auto-resume door browser if returning from a door launched via the browser
 		if (this.call._doorBrowserState) {
+			var self = this;
 			var browser = new doorBrowser(this.call);
 			browser.emitter.on("LaunchDoor", (slug) => {
-				this._doModuleReturn();
-				this.call.launchDoor(slug, true);
+				self._doModuleReturn();
+				self.call.launchDoor(slug, true);
 			});
-			this._runSubModule(browser);
+			browser.emitter.on("ModuleReturn", () => {
+				self.currentModule = null;
+				self.running_module = false;
+				// Now load the menu config normally
+				self._loadAndDrawMenu();
+			});
+			this._clearAllTimeouts();
+			this.running_module = true;
+			this.currentModule = browser;
+			browser.startStage();
 			return;
 		}
 
