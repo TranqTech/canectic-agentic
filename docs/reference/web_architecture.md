@@ -651,14 +651,58 @@ Most operational config is now managed through `appConfig` (backed by the `confi
 
 ---
 
+## Web Activity Tracking and Presence
+
+### Activity Middleware (`src/middleware/webActivity.js`)
+
+Express middleware attached after CSRF protection, before route handlers. Tracks web engagement sessions for the caller log.
+
+**How it works:**
+- On every authenticated request (skips static assets and `/health`)
+- Reads `web_activity:<sessionid>` timestamp from Redis
+- If no previous activity, or gap exceeds `web_idle_threshold` (default 120 minutes): logs a new call record via `callers.logCall()` and updates user login stats
+- Updates the activity timestamp in Redis (expires with the session TTL)
+- Non-blocking: fires async without waiting, never delays the response
+
+**Config:** `web_idle_threshold` (network category, minutes, default 120)
+
+### Presence WebSocket (`src/servers/presenceSocket.js`)
+
+Lightweight WebSocket endpoint at `/ws/presence` for real-time online user tracking.
+
+**Architecture:**
+- Registered on the WsManager via `registerHandler('/ws/presence', presenceServer)` (no call pool, no terminal session)
+- Authenticates via session cookie parsed from the HTTP upgrade request headers
+- Client sends `{ type: "heartbeat" }` every 60 seconds
+- Server refreshes Redis presence on each heartbeat (`presence:web:<userId>` key with 120s TTL)
+- Dead connection pruning every 30 seconds (marks offline, terminates socket)
+- Clean shutdown marks all users offline and resets state
+
+**Redis keys:**
+- `presence:web:<userId>` - JSON with userId, username, lastSeen, source. TTL 120s.
+- `presence:web:online` - Redis SET of online user IDs. Pruned on read.
+
+**Client integration:**
+Both user and admin Pug layouts include an auto-connecting heartbeat script when `currentuser` is present. Reconnects with 5-second delay on disconnect.
+
+**API:**
+- `markOnline(userId, username)` - called by heartbeat handler
+- `markOffline(userId)` - called on disconnect and shutdown
+- `getOnlineUsers()` - returns array of online user objects with automatic pruning of expired entries
+
+**Future extension:** The presence channel is designed for user-to-user instant messaging. Messages would be published via Redis pub/sub and delivered to connected clients through the WebSocket. The `_onMessage` handler has a placeholder for the `'im'` message type. Message history would be stored in Redis lists with configurable retention.
+
+---
+
 ## Future Development
 
-- **Navigation polish** -- Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
-- **Rich text editor integration** -- TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
-- **Admin real-time dashboard** -- Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
-- **Rate limiting** -- No rate limiting on login attempts or API endpoints currently.
-- **CSRF protection** -- Not currently implemented. POST routes rely on session cookies + same-origin policy.
-- **Lightbar menu type** -- `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
+- **Navigation polish** - Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
+- **Rich text editor integration** - TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
+- **Admin real-time dashboard** - Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
+- **Rate limiting** - No rate limiting on login attempts or API endpoints currently.
+- **Lightbar menu type** - `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
+- **Door menus and collections** - Categories/groups for organizing doors, ANSI art per category, terminal door selector, web door browser with filtering.
+- **User-to-user instant messaging** - Via the existing presence WebSocket channel, Redis pub/sub for delivery, Redis lists for history.
 
 ### Recently Completed
 
