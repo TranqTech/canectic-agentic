@@ -52,7 +52,8 @@ Standard Express 4 setup with Pug view engine.
 | `/admin` | `adminRouter` (`src/routes/admin.js`) | Admin panel — all admin routes are prepended with `/admin` |
 | `/users` | `usersRouter` (`src/routes/users.js`) | Authentication (login/logout/register) |
 | `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply, AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
-| `/files` | `filesRouter` (`src/routes/files.js`) | File browsing — group/area/file listing, file detail, download, JSON pagination |
+| `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
+| `/doors` | `doorsRouter` (`src/routes/doors.js`) | Door listing and web door launcher |
 
 ### Error Handling
 
@@ -126,6 +127,77 @@ Client-side: step navigation via JS (no server round-trips), per-step validation
 Server-side POST validation: age verification, username (required, min 3 chars, availability via `checkUsernameAvailable`), password (required, min `pwmin`, confirmation match), first/last name required, birthdate (required, valid date, minimum age check). On validation failure, form data is passed back as `form` local for field repopulation.
 
 The `gender` column (`VARCHAR(16)`) was added to the `users` table schema. Values: `Male`, `Female`, `Other`, `Undisclosed`, or `null`.
+
+### Registration Wizard
+
+The registration page (`src/views/users/register.pug`) is a 6-step client-side wizard with AJAX validation:
+
+1. **Age Verification** -- Yes/No buttons; "No" disables proceeding
+2. **Account Details** -- Username (min 3 chars, AJAX availability check via `/users/check-username`), Password (min `pwmin` chars), Confirmation
+3. **Personal Info** -- First Name, Last Name, Gender (Male/Female/Other/Undisclosed)
+4. **Contact & Location** -- Location, Email/Netmail Address (AJAX check via `/users/check-email`)
+5. **Birthdate** -- Date input with minimum age validation
+6. **Review & Submit** -- Summary table, single POST to `/users/register`
+
+### User Profile (`/users/profile`)
+
+Authenticated users can view and edit their profile. Features:
+
+- **Username change** with cooldown enforcement (`username_change_cooldown` config setting). Displays days remaining if cooldown is active.
+- **Name fields** -- First name, last name editing
+- **Location** -- Editable text field
+- **Gender** -- Select dropdown (Male/Female/Other/Undisclosed)
+- **Inline password change** -- Current password, new password, confirmation fields. Validates current password server-side before allowing change.
+
+### Mail Verification
+
+Routes for email address verification:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/users/verify` | Verification status page, shows current email and verification state |
+| POST | `/users/verify/send` | Sends verification code to user's email address |
+| GET | `/users/verify/check` | Form for entering verification code |
+| POST | `/users/verify/check` | Validates verification code, upgrades security level on success |
+| POST | `/users/verify/change` | Change email address (resets verification status) |
+
+The `mailVerification` model manages verification tokens with expiry. On successful verification, users may receive a security level upgrade based on the `verified_security` config setting. The `Unverified` restriction flag is removed on verification.
+
+### Password Reset (Unauthenticated)
+
+Routes for forgotten password recovery:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/users/forgot` | Password reset request form (email input) |
+| POST | `/users/forgot` | Generates reset token, sends email with reset link |
+| GET | `/users/reset/:token` | Password reset form (validates token) |
+| POST | `/users/reset/:token` | Sets new password, invalidates token |
+
+The `passwordReset` model manages time-limited tokens. Tokens are single-use and expire after a configurable period.
+
+### AJAX Validation Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/users/check-username` | Returns `{ available: boolean }` for username availability |
+| GET | `/users/check-email` | Returns `{ available: boolean }` for email uniqueness |
+
+Used by the registration wizard for real-time field validation without full form submission.
+
+### Door Listing and Web Launcher
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/doors` | Lists available door games with descriptions, filtered by user access level |
+| GET | `/doors/play/:slug` | Web door launcher page with embedded xterm.js terminal |
+
+The web door launcher (`/doors/play/:slug`) provides browser-based door game access:
+
+- Generates a one-time authentication token for the WebSocket connection
+- Renders an xterm.js terminal instance that connects via WebSocket to the `WebDoor` call flow
+- The `WebDoorAuthHandler` validates the token on the server side
+- Supports full ANSI rendering through xterm.js with CP437 font support
 
 ### Shared Login Partial
 
@@ -581,18 +653,21 @@ Most operational config is now managed through `appConfig` (backed by the `confi
 
 ## Future Development
 
-- **File upload** — Phase 3 of the file area system. Upload button is present but disabled in the file area view.
-- **User profile page** — `/users/profile` linked in user nav but not yet implemented.
-- **Navigation polish** — Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
-- **Rich text editor integration** — TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
-- **Admin real-time dashboard** — Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
-- **WebSocket authentication** — Currently WebSocket connections are anonymous until the terminal login flow. Future: authenticate via session cookie on upgrade.
-- **Rate limiting** — No rate limiting on login attempts or API endpoints currently.
-- **CSRF protection** — Not currently implemented. POST routes rely on session cookies + same-origin policy.
-- **Lightbar menu type** — `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
+- **Navigation polish** -- Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
+- **Rich text editor integration** -- TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
+- **Admin real-time dashboard** -- Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
+- **Rate limiting** -- No rate limiting on login attempts or API endpoints currently.
+- **CSRF protection** -- Not currently implemented. POST routes rely on session cookies + same-origin policy.
+- **Lightbar menu type** -- `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
 
 ### Recently Completed
 
-- **Menu admin** — Full web CRUD for menus and menu entries. PostgreSQL-backed (`menus` + `menu_entries` tables), replaces hardcoded `defaultmenuarray`. Color picker selects with live preview using ANSI color map. Entry reordering, flag-based access control editing.
-- **Door admin** — Full web CRUD for door game configurations. PostgreSQL-backed (`doors` table), replaces hardcoded `testingarray`. Two-column modal layout, tooltip field descriptions, variable reference panel.
-- **Config variable substitution** — `configvars.js` engine for `%X` token replacement in door commands, directories, and arguments. 36 variables across 6 categories. Admin reference panel on the doors page.
+- **User profile page** -- `/users/profile` with username change (cooldown), name/location/gender editing, inline password change.
+- **Mail verification** -- Full verification flow with email codes, security level upgrade, `Unverified` restriction flag.
+- **Password reset** -- Token-based forgotten password recovery via email.
+- **Door listing and web launcher** -- `/doors` listing page, `/doors/play/:slug` with xterm.js and token-based WebSocket auth.
+- **File upload** -- Web and terminal upload with staging, hash, dupe check, FILE_ID.DIZ extraction.
+- **Registration wizard** -- 6-step wizard with AJAX validation, gender field.
+- **Menu admin** -- Full web CRUD for menus and menu entries. PostgreSQL-backed (`menus` + `menu_entries` tables). Color picker selects with live preview using ANSI color map.
+- **Door admin** -- Full web CRUD for door game configurations. PostgreSQL-backed (`doors` table). Two-column modal layout, tooltip field descriptions, variable reference panel.
+- **Config variable substitution** -- `configvars.js` engine for `%X` token replacement in door commands, directories, and arguments. 36 variables across 6 categories.

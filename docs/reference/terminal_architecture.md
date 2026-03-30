@@ -51,9 +51,10 @@ Shared singleton managing node number allocation and a registry of active sessio
 Declared as ordered arrays of stage names in `callFlows`. The reserved name `"goodbye"` triggers hangup.
 
 ```
-Standard:   negotiate → logon → last_callers → check_email → menu → goodbye
-Doorserver: door_auth → door_launch → goodbye
-Test:       negotiate → goodbye
+Standard:   negotiate -> logon -> last_callers -> announcements -> verify_mail -> check_email -> check_batch -> menu -> goodbye
+Doorserver: door_auth -> door_launch -> goodbye
+WebDoor:    webdoor_auth -> door_launch -> goodbye
+Test:       negotiate -> goodbye
 ```
 
 Flow entries can be strings or objects with a `stage` key and additional args that get applied to the call object. Handlers can override flow progression by emitting `NextStage` with a specific stage name, or advance linearly by emitting `ModuleReturn`.
@@ -73,7 +74,11 @@ Maps stage names to factory functions:
 | `door_launch` | `DoorLaunchHandler` | Routes to door target or door menu |
 | `last_callers` | `SubModuleAdapter(LastCallers)` | Recent caller display |
 | `whos_online` | `SubModuleAdapter(WhosOnline)` | Active node display |
+| `announcements` | `AnnouncementHandler` | Displays unread system announcements sequentially |
+| `verify_mail` | `SubModuleAdapter(mailVerifyCheck)` | Prompts unverified users to verify their email address |
 | `check_email` | `SubModuleAdapter(pmCheck)` | Unread PM prompt, optionally launches reader |
+| `check_batch` | `SubModuleAdapter(fileBatchCheck)` | Prompts to download pending file batch from previous session |
+| `webdoor_auth` | `WebDoorAuthHandler` | Token-based auth for browser door launcher sessions |
 
 ### TerminalNegotiator (`terminalnegotiator.js`)
 
@@ -225,6 +230,12 @@ Menu and entry data is managed via the admin web UI (`/admin/menus`). The schema
 | `newScan` | Sub-module (all areas) |
 | `newScanGroup` | Sub-module (current group) |
 | `testDownload` | Sub-module |
+| `passwordReset` | Sub-module (logged-in password change) |
+| `mailVerify` | Sub-module (request email verification) |
+| `fileGroupChange` | Sub-module |
+| `fileAreaChange` | Sub-module |
+| `listFiles` | Sub-module |
+| `fileBatchDownload` | Sub-module |
 
 **Sub-module management**: `_runSubModule()` pauses the menu, wires `ModuleReturn` and `HangupSignal`, starts the module. Menu handler owns inactivity timeouts even while a sub-module is active. On return, `_doModuleReturn()` cleans up and redraws.
 
@@ -313,6 +324,31 @@ User ↔ SerialPort (port1) ↔ socat pair ↔ dosemu COM5 (port2)
 **Exit handling**: `_onDoorExit()` resets raw mode, resets colors. If `pauseOnExit` is configured, shows "Press any key to continue..." and waits in raw mode for one keypress before signaling return. `signalReturn()` respects `doorConfig.returnStage` for custom post-door routing.
 
 **Cleanup**: `_killProcesses()` tears down all resources: serial port, PTY, child process, socat allocation, output parser, and raw mode state.
+
+**fixed_size flag**: Door configurations include a `fixed_size` boolean. When true, the door expects a fixed 80x25 terminal and the `DoorOutputParser` is used for CP437 conversion and DECSTBM centering on terminals larger than the door viewport.
+
+### AnnouncementHandler (`announcementhandler.js`)
+
+Displays unread system announcements to users during login. Placed in the call flow after `last_callers`. Queries `announcements.getUnreadForUser(userId)` and displays each announcement sequentially. Each announcement is marked as read after display. Users press any key to advance through announcements.
+
+### WebDoorAuthHandler (`webdoorauthhandler.js`)
+
+Handles token-based authentication for browser-based door game sessions. Used in the `WebDoor` call flow. Validates a one-time auth token passed during WebSocket connection, loads the associated user session, and sets up the call object with user data and door target. Proceeds to `door_launch` on success.
+
+### Registration Handler
+
+The terminal registration handler includes gender selection (Male/Female/Other/Undisclosed) as part of the new user creation flow, matching the web registration wizard.
+
+### Mail Verification (`mailVerify.js`, `mailVerifyCheck.js`)
+
+Two menu commands for email address verification:
+
+- **mailVerify** - Initiates verification by sending a verification code to the user's email address. Available as a menu command for users who want to verify or change their address.
+- **mailVerifyCheck** - Prompts for the verification code. Used in the call flow (after announcements) to prompt unverified users. On successful verification, the user's security level may be upgraded based on the `verified_security` config setting.
+
+### Password Reset (`passwordReset.js`)
+
+Menu command for logged-in password change. Prompts for current password, new password, and confirmation. Validates current password before allowing the change.
 
 ---
 

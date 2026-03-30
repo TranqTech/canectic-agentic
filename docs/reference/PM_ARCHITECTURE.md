@@ -223,6 +223,8 @@ Access to each transport is governed by a combination of permission flags and re
 | MESHTASTIC | "Netmail" | "Netmail" | Require permission |
 | EMAIL | "Email" | "Email" | Require permission |
 
+The `Unverified` restriction flag blocks all non-LOCAL transports. Users who have not verified their email address carry this flag, preventing them from sending network messages until verification is complete. Verification removes the flag (see `mailVerification` model and the `verify_mail` call flow stage).
+
 Rules:
 - Sysop bypasses permission requirements (but not restrictions)
 - Restriction flags always win — even Sysop is blocked if restricted
@@ -735,7 +737,7 @@ PM trash purge runs automatically via a BullMQ repeatable job (daily at 3:00 AM)
 
 13. **Shared module for call flow and menu**: `pmCheck` is a `BaseSubModule` that works both as a menu command (via `_runSubModule`) and as a call flow stage (via `SubModuleAdapter`). Same code path, no duplication.
 
-14. **Model-layer outbound toss trigger**: `queueMessage()` and `queueOutbound()` enqueue the appropriate outbound toss job (FTN → `enqueueFtnOutbound`, QWK → `enqueueQwkPushAll`) after a successful outbox insert for non-LOCAL transports. This ensures both web routes and terminal `pmEditor` trigger delivery without duplicating logic in each caller. Uses dynamic `await import('../queues/jobs.js')` with try/catch so the model remains testable without Redis — the trigger silently skips if queue infrastructure is unavailable.
+14. **Model-layer outbound toss trigger**: `queueMessage()` and `queueOutbound()` enqueue the appropriate outbound toss job (FTN -> `enqueueFtnOutbound`, QWK -> `enqueueQwkPushAll`, EMAIL -> `enqueueEmailOutbound`) after a successful outbox insert for non-LOCAL transports. This ensures both web routes and terminal `pmEditor` trigger delivery without duplicating logic in each caller. Uses dynamic `await import('../queues/jobs.js')` with try/catch so the model remains testable without Redis -- the trigger silently skips if queue infrastructure is unavailable.
 
 ---
 
@@ -755,6 +757,10 @@ PM trash purge runs automatically via a BullMQ repeatable job (daily at 3:00 AM)
 - **Meshtastic transport adapter**: LoRa mesh radio message delivery
 - **`netmail.js` retirement**: Old FTN-specific module can be dropped once all paths confirmed working through the unified PM system
 - **Old `netmail_in` / `netmail_out` tables**: Can be dropped or renamed to `_legacy` after migration verified
-- **Areafix/filefix routing**: Stub in `importFtnNetmail` — conference 0 messages addressed to automated processors (areafix, filefix) should be routed to handler modules instead of user inboxes
+- **Areafix/filefix routing**: Stub in `importFtnNetmail` -- conference 0 messages addressed to automated processors (areafix, filefix) should be routed to handler modules instead of user inboxes
 - **Terminal reader pagination**: Currently loads a single batch of 50 messages per folder. Lazy-loading of older/newer batches (like `msgReader`) for mailboxes exceeding the batch size
 - **Terminal address book**: Quick-select from recent recipients or known network addresses rather than typing addresses manually
+
+### Completed
+
+- **EMAIL transport adapter**: Internet email delivery via SMTP relay. Outbound triggered by `email:outbound` toss job, inbound via SMTP gateway. See `EMAIL_ARCHITECTURE.md` for full details.

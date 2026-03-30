@@ -2,7 +2,7 @@
 
 ## Overview
 
-The system runs as three independent OS processes sharing PostgreSQL and Redis. Each process can crash and restart without affecting the others. A BullMQ job queue (backed by the existing Redis instance) handles all inter-process communication.
+The system runs as four independent OS processes sharing PostgreSQL and Redis. Each process can crash and restart without affecting the others. A BullMQ job queue (backed by the existing Redis instance) handles all inter-process communication.
 
 For the shared message platform (schemas, read tracking, body_html pipeline, posting), see `message_architecture.md`.
 For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`.
@@ -29,6 +29,17 @@ For private messaging (unified PM, transport adapters), see `PM_ARCHITECTURE.md`
 │  Subscribes to events ─────────────┐
 └────────────────────────────┘  │    │
                                 │    │
+┌────────────────────────────┐  │    │
+│        Mail                │  │    │
+│   bin/mail.js              │  │    │
+│                            │  │    │
+│  IMAP4rev1 server          │  │    │
+│  SMTP submission server    │  │    │
+│                            │  │    │
+│  Subscribes to events ──────────────┤
+│  Publishes events ──────────────────┤
+└────────────────────────────┘  │    │
+                                │    │
          Redis (BullMQ)  ◄──────┤────┤
                                 │    │
 ┌────────────────────────────┐  │    │
@@ -52,7 +63,8 @@ For private messaging (unified PM, transport adapters), see `PM_ARCHITECTURE.md`
 │  FTN tosser                │       │
 │  QWK tosser                │       │
 │  NNTP tosser               │       │
-│  TIC processor (future)    │       │
+│  TIC processor             │       │
+│  Email tosser              │       │
 │  Maintenance tasks         │       │
 │                            │       │
 │  Consumes toss queue ◄─────────────┘
@@ -72,7 +84,17 @@ The critical user-facing process. Must be as stable as possible. Handles all inb
 
 **Queue role:** Producer only (enqueues jobs when user actions or admin commands require background processing) and event subscriber (receives notifications from workers for real-time UI updates).
 
-### Process 2 — Mailer (`bin/mailer.js`)
+### Process 2 -- Mail (`bin/mail.js`)
+
+IMAP4rev1 and SMTP submission servers for accessing private messages from standard mail clients. Isolated from the gateway to prevent mail client activity (long-lived IMAP IDLE connections, bulk SMTP submissions) from blocking terminal sessions or web requests.
+
+**Owns:** IMAP server, SMTP server, own pgpool and Redis connections.
+
+**Does not own:** User connections, web UI, tosser processing, mailer sessions, door games.
+
+**Queue role:** Event subscriber only. Subscribes to `PM_DELIVERED` and `PM_READ_CHANGED` events via Redis pub/sub for IMAP IDLE push notifications. Publishes `PM_READ_CHANGED` when IMAP clients change message read state, so the gateway can update web UI unread counts.
+
+### Process 3 -- Mailer (`bin/mailer.js`)
 
 Manages FTN mailer sessions — both inbound (listening for connections) and outbound (poll-based and triggered). Binds its own TCP port for binkp and its own HTTP port for WebSocket mailer connections.
 
@@ -82,7 +104,7 @@ Manages FTN mailer sessions — both inbound (listening for connections) and out
 
 **Queue role:** Consumer of `mailer` queue (poll triggers, outbound signals). Producer of `toss` queue jobs (when inbound files arrive). Event publisher (session status, transfer progress for future admin dashboard).
 
-### Process 3 — Worker (`bin/worker.js`)
+### Process 4 -- Worker (`bin/worker.js`)
 
 Stateless batch processor. Runs toss cycles, maintenance tasks, and future TIC processing. Can be stopped and restarted freely — BullMQ resumes incomplete jobs with retry.
 
@@ -98,14 +120,14 @@ Stateless batch processor. Runs toss cycles, maintenance tasks, and future TIC p
 
 ### What each process loads independently
 
-| Resource | Gateway | Mailer | Worker |
-|----------|---------|--------|--------|
-| pgpool (own connection pool) | ✓ | ✓ | ✓ |
-| Redis (own ioredis instance) | ✓ | ✓ | ✓ |
-| BullMQ connection | ✓ | ✓ | ✓ |
-| NodeManager (read-only config) | ✓ | ✓ | ✗ |
-| dotenv / env config | ✓ | ✓ | ✓ |
-| appConfig singleton (own instance) | ✓ | ✓ | ✓ |
+| Resource | Gateway | Mail | Mailer | Worker |
+|----------|---------|------|--------|--------|
+| pgpool (own connection pool) | Yes | Yes | Yes | Yes |
+| Redis (own ioredis instance) | Yes | Yes | Yes | Yes |
+| BullMQ connection | Yes | No | Yes | Yes |
+| NodeManager (read-only config) | Yes | No | Yes | No |
+| dotenv / env config | Yes | Yes | Yes | Yes |
+| appConfig singleton (own instance) | Yes | Yes | Yes | Yes |
 
 ### What is NOT shared across processes
 
@@ -114,6 +136,7 @@ Stateless batch processor. Runs toss cycles, maintenance tasks, and future TIC p
 | WsManager, WsPool, CallPool | Gateway only |
 | SocatManager | Gateway only |
 | Express app / routes | Gateway only |
+| IMAP server, SMTP server | Mail only |
 | MailerManager, sessions | Mailer only |
 | Tosser modules | Worker only |
 
@@ -145,6 +168,7 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `nntp:push` | Scheduler (repeatable), Admin | Worker | `{ connectionUUID }` | Post local messages to NNTP server |
 | `tic:inbound` | Mailer (after file receive), Admin, CLI | Worker | `{ connectionUUID?, sourceDir? }` | Process inbound .tic files and attached files |
 | `tic:outbound` | Upload handler (networked area), tic:inbound (forwarding), Admin, CLI | Worker | `{ connectionUUID? }` | Build TIC descriptors and stage outbound files |
+| `email:outbound` | PM model (_triggerOutboundToss), Admin | Worker | `{}` | Process pending EMAIL transport PMs via email tosser |
 
 ### `mailer` queue
 
@@ -169,6 +193,11 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `regen-file-desc-html` | Admin, CLI | Worker | `{ batchSize? }` | Regenerate long_desc_html for file entries |
 | `recalc-file-counts` | Admin | Worker | `{}` | Recalculate file_count/total_bytes for all file areas |
 | `scan-file-area` | Admin, CLI | Worker | `{ areaShortcode }` | Scan file area directory for untracked files |
+| `user-maintenance` | Scheduler (daily 5AM) | Worker | `{}` | Mailtype reconciliation, unverified user purge based on `unverified_retention_days` |
+| `file-maintenance` | Scheduler, Admin | Worker | `{}` | Duplicate cleanup (`cleanDuplicates`), missing file removal (`cleanMissingFiles`) |
+| `outbound-sweep` | Scheduler (configurable, default 120 min) | Worker | `{}` | All-protocol periodic outbound toss cycle |
+| `scan-inbound` | Scheduler (configurable, default 300s) | Worker | `{}` | Periodic scan of FTN inbound directory for unprocessed .pkt/.tic files |
+| `scan-nodelists` | Scheduler (daily 4AM) | Worker | `{}` | Auto-import nodelists from configured file areas |
 
 ### Concurrency and deduplication
 
@@ -815,7 +844,7 @@ await main();
 
 ## Embedded Mode
 
-For single-server deployments where running three processes is unnecessary overhead, `PROCESS_MODE=embedded` starts the mailer and worker processors inside the gateway process. This is the simple-setup path — one process, one `node bin/gateway.js`, no process manager needed.
+For single-server deployments where running four processes is unnecessary overhead, `PROCESS_MODE=embedded` starts the mailer and worker processors inside the gateway process. This is the simple-setup path — one process, one `node bin/gateway.js`, no process manager needed.
 
 ### `src/queues/embedded.js`
 
@@ -922,6 +951,37 @@ export async function registerSchedules() {
     }, {
         name: 'purge-pm-trash',
         data: { days: parseInt(process.env.pm_trash_retention_days) || 30 },
+    });
+
+    await maintenanceQueue.upsertJobScheduler('scan-nodelists-daily', {
+        pattern: '0 4 * * *',  // 4:00 AM daily
+    }, {
+        name: 'scan-nodelists',
+        data: {},
+    });
+
+    await maintenanceQueue.upsertJobScheduler('user-maintenance-daily', {
+        pattern: '0 5 * * *',  // 5:00 AM daily
+    }, {
+        name: 'user-maintenance',
+        data: {},
+    });
+
+    // --- Periodic scans ---
+    const scanInboundInterval = parseInt(appConfig.get('scan_inbound_interval')) || 300;
+    await maintenanceQueue.upsertJobScheduler('scan-inbound', {
+        every: scanInboundInterval * 1000,
+    }, {
+        name: 'scan-inbound',
+        data: {},
+    });
+
+    const outboundSweepMinutes = parseInt(appConfig.get('outbound_sweep_interval')) || 120;
+    await tossQueue.upsertJobScheduler('outbound-sweep', {
+        every: outboundSweepMinutes * 60 * 1000,
+    }, {
+        name: 'outbound-sweep',
+        data: {},
     });
 
     // --- Toss schedules (per active connection) ---

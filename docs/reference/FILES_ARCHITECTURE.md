@@ -670,12 +670,31 @@ File transfers use native JavaScript XMODEM and ZMODEM engines (`src/transfers/`
 
 ---
 
+## Maintenance
+
+### File Maintenance Worker Job
+
+The `file-maintenance` job on the `maintenance` BullMQ queue runs two cleanup functions:
+
+- **`cleanDuplicates()`** -- Scans for duplicate file entries within the same area (matching filename + CRC-32). Deactivates the older duplicate, keeping the most recent entry active.
+- **`cleanMissingFiles()`** -- Checks each active file entry's resolved disk path. If the file no longer exists on disk, the entry is deactivated. Logs each removal for audit.
+
+Both functions are also available for direct invocation from admin routes.
+
+### SMB Import
+
+Synchronet message base (SMB) import support for migrating from Synchronet BBS:
+
+- **`src/utils/smbParser.js`** -- Parser for Synchronet's SMB (Synchronet Message Base) binary format. Reads `.shd` (header) and `.sdt` (data) files, extracts message metadata and body text.
+- **`src/maintenance/smbImport.js`** -- Import orchestrator. Reads SMB files, converts messages to Canectic format, imports into target message areas with `formatBodyHtml()` for body_html generation.
+- **Admin UI** at `/admin/import/msgbase` -- Upload interface for SMB file sets, area selection, import progress display.
+
+---
+
 ## Future Development
 
 ### Planned/Possible Enhancements
 
-- **Global file search** — web route for cross-area search with access filtering
-- **Maintenance tasks** — `--regen-file-html` for regenerating `long_desc_html`, `--recalc-file-stats` for refreshing all area stats
-- **Additional archive formats** — RAR, 7z, ARJ, LHA support in `fileDescExtractor.js`
-- **File newscan** — terminal newscan integration for new file notifications (user_file_subscriptions infrastructure is in place)
-- **QWK/NNTP file support** — currently TIC-only for network distribution
+- **Additional archive formats** -- RAR, 7z, ARJ, LHA support in `fileDescExtractor.js`
+- **File newscan** -- terminal newscan integration for new file notifications (user_file_subscriptions infrastructure is in place)
+- **QWK/NNTP file support** -- currently TIC-only for network distribution
