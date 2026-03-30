@@ -1,0 +1,81 @@
+extends ../layouts/user
+block content
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+			br
+
+		.row
+			.col-lg-10.offset-lg-1.col-12
+				.d-flex.align-items-center.mb-4
+					a.btn.btn-outline-secondary.me-3(href='/doors')
+						i.bi.bi-arrow-left
+					if collection.icon_url
+						img.me-3(src=collection.icon_url style='width:48px; height:48px; object-fit:contain')
+					div
+						h2.mb-0= collection.name
+						if collection.description
+							p.text-muted.mb-0= collection.description
+
+				if !currentuser
+					.alert.alert-info You must be logged in to play door games.
+						a.ms-2(href='/users/login?redirect=/doors/collection/' + collection.slug) Log in
+
+				if doors && doors.length > 0
+					.row
+						each door in doors
+							.col-md-6.col-lg-4.mb-4
+								.card.h-100
+									.card-body
+										h5.card-title= door.name
+										if door.description
+											p.card-text.text-muted.small= door.description.substring(0, 120) + (door.description.length > 120 ? '...' : '')
+									.card-footer.d-flex.justify-content-between
+										if door.description && door.description.length > 0
+											button.btn.btn-outline-info.btn-sm(
+												type='button'
+												data-bs-toggle='modal'
+												data-bs-target='#doorInfoModal'
+												data-name=door.name
+												data-description=door.description || ''
+												data-launch=door.launch_type || ''
+											)
+												i.bi.bi-info-circle.me-1
+												| More Info
+										else
+											span
+										if currentuser
+											a.btn.btn-primary.btn-sm(href='/doors/play/' + door.slug)
+												i.bi.bi-play-fill.me-1
+												| Play
+										else
+											button.btn.btn-secondary.btn-sm(disabled) Login
+				else
+					.text-center.text-muted
+						h5 No doors in this collection
+						a(href='/doors') Back to Collections
+
+		//- Door Info Modal
+		#doorInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
+			.modal-dialog.modal-dialog-centered
+				.modal-content
+					.modal-header.bg-dark.text-white
+						h5.modal-title#doorInfoTitle
+						button.btn.btn-close.btn-close-white(data-bs-dismiss='modal')
+					.modal-body
+						p#doorInfoDesc
+						if currentuser
+							.text-end
+								a#doorInfoPlay.btn.btn-primary(href='#')
+									i.bi.bi-play-fill.me-1
+									| Play
+
+		script.
+			document.addEventListener('DOMContentLoaded', function() {
+				var infoModal = document.getElementById('doorInfoModal');
+				infoModal.addEventListener('show.bs.modal', function(event) {
+					var btn = event.relatedTarget;
+					document.getElementById('doorInfoTitle').textContent = btn.dataset.name;
+					document.getElementById('doorInfoDesc').textContent = btn.dataset.description;
+				});
+			});

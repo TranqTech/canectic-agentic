@@ -18,6 +18,7 @@ import * as netmail from '../models/netmail.js';
 import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
+import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as menus from '../models/menus.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -2015,6 +2016,84 @@ router.post('/menus/:id/entries/reorder', express.json(), requireAdmin, async (r
 	}
 });
 
+
+// -------------------------------------------------------
+// Door Collections
+// -------------------------------------------------------
+
+router.get('/doorCollections', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var collections      = await doorCollections.getAllCollections();
+	var counts           = await doorCollections.getCollectionCounts();
+	var allDoors         = await doors.getAllDoors();
+
+	res.render('admin/doorCollections/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Door Collections',
+		activelink: 'doorCollections',
+		currentuser: currentuser,
+		collections: collections,
+		doorCounts: counts,
+		allDoors: allDoors
+	});
+});
+
+router.post('/doorCollections/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await doorCollections.createCollection(req.body);
+	res.redirect('/admin/doorCollections');
+});
+
+router.post('/doorCollections/update/:id', urlencodedParser, requireAdmin, async (req, res) => {
+	await doorCollections.updateCollection(parseInt(req.params.id), req.body);
+	res.redirect('/admin/doorCollections');
+});
+
+router.post('/doorCollections/delete/:id', urlencodedParser, requireAdmin, async (req, res) => {
+	await doorCollections.deleteCollection(parseInt(req.params.id));
+	res.redirect('/admin/doorCollections');
+});
+
+router.get('/doorCollections/:id', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var collection       = await doorCollections.getCollectionById(parseInt(req.params.id));
+	var collectionDoors  = await doorCollections.getAllDoorsInCollection(parseInt(req.params.id));
+	var allDoors         = await doors.getAllDoors();
+
+	res.render('admin/doorCollections/view', {
+		sufficientAccess: sufficientAccess,
+		title: collection ? collection.name : 'Collection',
+		activelink: 'doorCollections',
+		currentuser: currentuser,
+		collection: collection,
+		collectionDoors: collectionDoors,
+		allDoors: allDoors
+	});
+});
+
+router.post('/doorCollections/:id/addDoor', urlencodedParser, requireAdmin, async (req, res) => {
+	var collectionId = parseInt(req.params.id);
+	var doorId = parseInt(req.body.door_id);
+	if (doorId) await doorCollections.addDoorToCollection(collectionId, doorId);
+	res.redirect('/admin/doorCollections/' + collectionId);
+});
+
+router.post('/doorCollections/:id/removeDoor/:doorId', urlencodedParser, requireAdmin, async (req, res) => {
+	var collectionId = parseInt(req.params.id);
+	var doorId = parseInt(req.params.doorId);
+	await doorCollections.removeDoorFromCollection(collectionId, doorId);
+	res.redirect('/admin/doorCollections/' + collectionId);
+});
+
+router.post('/doorCollections/:id/reorder', express.json(), requireAdmin, async (req, res) => {
+	var collectionId = parseInt(req.params.id);
+	var ids = req.body.ids || [];
+	if (Array.isArray(ids) && ids.length > 0) {
+		await doorCollections.updateEntrySortOrder(collectionId, ids);
+	}
+	res.json({ status: true });
+});
 
 // -------------------------------------------------------
 // Doors

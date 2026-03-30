@@ -364,6 +364,7 @@ function getAvailableCommands() {
 		{ name: 'checkEmail',      label: 'Check Email',       needsArg: false },
 		{ name: 'verifyMail',      label: 'Verify Address',    needsArg: false },
 		{ name: 'passwordReset',   label: 'Change Password',  needsArg: false },
+		{ name: 'doorBrowser',     label: 'Door Browser',     needsArg: false },
 		{ name: 'testDownload',    label: 'Test Download',     needsArg: false },
 		{ name: 'fileAreaChange',  label: 'Change File Area',  needsArg: false },
 		{ name: 'fileGroupChange', label: 'Change File Group', needsArg: false },

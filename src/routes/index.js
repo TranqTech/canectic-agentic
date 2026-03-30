@@ -21,6 +21,7 @@ import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 import * as announcements from '../models/announcements.js';
 import * as doors from '../models/doors.js';
+import * as doorCollections from '../models/doorCollections.js';
 import * as redis from '../middleware/db/redis.js';
 
 //setup
@@ -883,17 +884,49 @@ router.post('/messages/area/:shortcode/thread/:uuid/reply', urlencodedParser, as
 // Door Routes
 // -------------------------------------------------------
 
-// Door listing
+// Door collections listing
 router.get('/doors', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	res.locals.currentuser = currentuser;
 
-	var doorList = await doors.getAllDoors();
+	var collections = await doorCollections.getActiveCollections();
+	var counts = await doorCollections.getCollectionCounts();
+
+	// If no collections exist, fall back to a flat door list
+	if (collections.length === 0) {
+		var doorList = await doors.getAllDoors();
+		return res.render('doors/index', {
+			title: 'Door Games',
+			activelink: 'doors',
+			collections: [],
+			doors: doorList
+		});
+	}
 
 	res.render('doors/index', {
 		title: 'Door Games',
 		activelink: 'doors',
-		doors: doorList
+		collections: collections,
+		doorCounts: counts,
+		doors: []
+	});
+});
+
+// Doors in a collection
+router.get('/doors/collection/:slug', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.currentuser = currentuser;
+
+	var collection = await doorCollections.getCollectionBySlug(req.params.slug);
+	if (!collection) return res.redirect('/doors');
+
+	var collectionDoors = await doorCollections.getDoorsInCollection(collection.id);
+
+	res.render('doors/collection', {
+		title: collection.name,
+		activelink: 'doors',
+		collection: collection,
+		doors: collectionDoors
 	});
 });
 

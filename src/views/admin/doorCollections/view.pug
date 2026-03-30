@@ -1,0 +1,153 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                    if collection && collection.description
+                      small.text-muted= collection.description
+                  .col-4
+                    .text-end
+                      button#saveOrderBtn.btn.btn-sm.btn-warning.me-2(style='display:none')
+                        i.bi.bi-arrow-down-up
+                        |  Save Order
+                      a.button.btn.btn-sm.btn-info(href='/admin/doorCollections')
+                        | Back
+              .card-body
+                //- Add door form
+                .row.mb-3
+                  .col-8
+                    - var existingIds = (collectionDoors || []).map(function(d) { return d.id; })
+                    form.d-flex(action='/admin/doorCollections/' + collection.id + '/addDoor' method='POST')
+                      select.form-select.me-2(name='door_id')
+                        option(value='' disabled selected) -- Add a door --
+                        for door in allDoors
+                          if !existingIds.includes(door.id)
+                            option(value=door.id)= door.name + ' (' + door.slug + ')'
+                      button.btn.btn-success(type='submit')
+                        i.bi.bi-plus-lg.me-1
+                        | Add
+
+                if collectionDoors && collectionDoors.length > 0
+                  table#doorTable.table.table-hover.table-sm
+                    thead
+                      tr
+                        th(style='width:30px')
+                        th Name
+                        th Slug
+                        th Type
+                        th Status
+                        th(style='width:80px') Actions
+                    tbody#sortableDoors
+                      for door in collectionDoors
+                        tr(data-id=door.id)
+                          td.drag-handle(style='cursor:grab; text-align:center; color:#888')
+                            i.bi.bi-grip-vertical
+                          td= door.name
+                          td.text-muted= door.slug
+                          td
+                            span.badge.bg-primary= door.launch_type
+                          td
+                            if door.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-danger Inactive
+                          td
+                            form.d-inline(action='/admin/doorCollections/' + collection.id + '/removeDoor/' + door.id method='POST')
+                              button.btn.btn-xs.btn-outline-danger(type='submit' title='Remove from collection')
+                                i.bi.bi-x-lg
+                else
+                  center
+                    .h5.text-muted No doors in this collection
+                    p Add doors using the dropdown above.
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var collectionId = !{collection ? collection.id : 'null'};
+      var tbody = document.getElementById('sortableDoors');
+      var saveBtn = document.getElementById('saveOrderBtn');
+      var dragRow = null;
+      var orderChanged = false;
+
+      if (tbody) {
+        tbody.addEventListener('dragstart', function(e) {
+          var tr = e.target.closest('tr');
+          if (!tr) return;
+          dragRow = tr;
+          tr.style.opacity = '0.4';
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        tbody.addEventListener('dragend', function(e) {
+          var tr = e.target.closest('tr');
+          if (tr) tr.style.opacity = '';
+          dragRow = null;
+          tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; r.style.borderBottom = ''; });
+        });
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          var tr = e.target.closest('tr');
+          if (!tr || tr === dragRow) return;
+          tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; r.style.borderBottom = ''; });
+          var rect = tr.getBoundingClientRect();
+          if (e.clientY < rect.top + rect.height / 2) {
+            tr.style.borderTop = '2px solid #f0ad4e';
+          } else {
+            tr.style.borderBottom = '2px solid #f0ad4e';
+          }
+        });
+        tbody.addEventListener('drop', function(e) {
+          e.preventDefault();
+          var tr = e.target.closest('tr');
+          if (!tr || !dragRow || tr === dragRow) return;
+          var rect = tr.getBoundingClientRect();
+          if (e.clientY < rect.top + rect.height / 2) {
+            tbody.insertBefore(dragRow, tr);
+          } else {
+            tbody.insertBefore(dragRow, tr.nextSibling);
+          }
+          orderChanged = true;
+          saveBtn.style.display = 'inline-block';
+          tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; r.style.borderBottom = ''; });
+        });
+        tbody.querySelectorAll('tr').forEach(function(tr) { tr.setAttribute('draggable', 'true'); });
+      }
+
+      if (saveBtn && collectionId) {
+        saveBtn.addEventListener('click', function() {
+          if (!orderChanged) return;
+          var ids = [];
+          tbody.querySelectorAll('tr').forEach(function(r) { ids.push(parseInt(r.dataset.id)); });
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+          fetch('/admin/doorCollections/' + collectionId + '/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.status) { saveBtn.style.display = 'none'; orderChanged = false; }
+          }).finally(function() {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-arrow-down-up"></i> Save Order';
+          });
+        });
+      }
+    });

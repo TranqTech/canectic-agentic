@@ -6,14 +6,36 @@ block content
 			br
 
 		.row
-			.col-lg-8.offset-lg-2.col-12
+			.col-lg-10.offset-lg-1.col-12
 				h2.mb-4 Door Games
 
 				if !currentuser
 					.alert.alert-info You must be logged in to play door games.
 						a.ms-2(href='/users/login?redirect=/doors') Log in
 
-				if doors && doors.length > 0
+				//- Collection cards
+				if collections && collections.length > 0
+					.row
+						each col in collections
+							.col-md-4.col-sm-6.mb-4
+								.card.h-100
+									.card-body.d-flex.align-items-center
+										.me-3
+											if col.icon_url
+												img(src=col.icon_url style='width:64px; height:64px; object-fit:contain')
+											else
+												i.bi.bi-controller(style='font-size:3rem; color:#888')
+										div
+											h5.card-title.mb-1= col.name
+											if col.description
+												p.card-text.text-muted.small.mb-1= col.description
+											span.badge.bg-info= (doorCounts && doorCounts[col.id]) ? doorCounts[col.id] + ' games' : 'Empty'
+									.card-footer
+										a.btn.btn-primary.btn-sm.w-100(href='/doors/collection/' + col.slug)
+											| Browse Collection
+
+				//- Flat door list fallback (no collections configured)
+				else if doors && doors.length > 0
 					.row
 						each door in doors
 							.col-md-4.col-sm-6.mb-3
@@ -22,14 +44,14 @@ block content
 										h5.card-title= door.name
 										if door.description
 											p.card-text.text-muted.small= door.description
-									.card-footer
+									.card-footer.d-flex.justify-content-between
 										if currentuser
-											a.btn.btn-primary.btn-sm.w-100(href='/doors/play/' + door.slug)
+											a.btn.btn-primary.btn-sm(href='/doors/play/' + door.slug)
 												i.bi.bi-play-fill.me-1
 												| Play
 										else
-											button.btn.btn-secondary.btn-sm.w-100(disabled) Login to Play
+											button.btn.btn-secondary.btn-sm(disabled) Login to Play
 				else
 					.text-center.text-muted
-						h5 No door games configured
+						h5 No door games available
 						p Check back later!

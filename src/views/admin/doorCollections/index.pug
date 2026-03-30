@@ -1,0 +1,151 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info.me-2(href='/admin')
+                        | Exit
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newCollectionModal')
+                        | New Collection
+              .card-body
+                if collections && collections.length > 0
+                  table.table.table-hover
+                    thead
+                      tr
+                        th(style='width:60px') Icon
+                        th Name
+                        th Slug
+                        th Doors
+                        th Status
+                        th(style='width:140px') Actions
+                    tbody
+                      for col in collections
+                        tr
+                          td
+                            if col.icon_url
+                              img(src=col.icon_url style='max-height:32px; max-width:32px')
+                            else
+                              i.bi.bi-controller.text-muted(style='font-size:1.5rem')
+                          td
+                            a(href='/admin/doorCollections/' + col.id)= col.name
+                          td.text-muted= col.slug
+                          td
+                            span.badge.bg-info= doorCounts[col.id] || 0
+                          td
+                            if col.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-danger Inactive
+                          td
+                            a.btn.btn-xs.btn-outline-primary.me-1(href='/admin/doorCollections/' + col.id title='Manage')
+                              i.bi.bi-folder-symlink
+                            button.btn.btn-xs.btn-outline-warning.me-1.edit-col-btn(
+                              type='button' title='Edit'
+                              data-id=col.id
+                              data-name=col.name
+                              data-slug=col.slug
+                              data-description=col.description || ''
+                              data-icon_url=col.icon_url || ''
+                              data-sort_order=col.sort_order || 0
+                              data-active=(col.active ? 'true' : 'false')
+                            )
+                              i.bi.bi-pencil
+                            form.d-inline(action='/admin/doorCollections/delete/' + col.id method='POST')
+                              button.btn.btn-xs.btn-outline-danger(type='submit' title='Delete' onclick="return confirm('Delete this collection and all its entries?')")
+                                i.bi.bi-trash
+                else
+                  center
+                    .h4 No Door Collections
+                    p.text-muted Create collections to organize your door games.
+
+    //- New Collection Modal
+    #newCollectionModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title New Collection
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form(action='/admin/doorCollections/new' method='POST')
+              label.form-label Name:
+              input.form-control.mb-2(type='text' name='name' required placeholder='e.g. Action Games')
+              label.form-label Slug:
+              input.form-control.mb-2(type='text' name='slug' required placeholder='e.g. action-games')
+              label.form-label Description:
+              textarea.form-control.mb-2(name='description' rows='3')
+              label.form-label Icon URL (PNG/SVG):
+              input.form-control.mb-2(type='text' name='icon_url' placeholder='/images/doors/action.png')
+              .row
+                .col-6
+                  label.form-label Sort Order:
+                  input.form-control.mb-2(type='number' name='sort_order' value='0')
+                .col-6
+                  .form-check.mt-4
+                    input.form-check-input(type='checkbox' name='active' value='true' checked id='newActive')
+                    label.form-check-label(for='newActive') Active
+              .text-end
+                input.btn.btn-success(type='submit' value='Create Collection')
+
+    //- Edit Collection Modal
+    #editCollectionModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Edit Collection
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form#editColForm(method='POST')
+              label.form-label Name:
+              input#ec_name.form-control.mb-2(type='text' name='name' required)
+              label.form-label Description:
+              textarea#ec_description.form-control.mb-2(name='description' rows='3')
+              label.form-label Icon URL (PNG/SVG):
+              input#ec_icon_url.form-control.mb-2(type='text' name='icon_url')
+              .row
+                .col-6
+                  label.form-label Sort Order:
+                  input#ec_sort_order.form-control.mb-2(type='number' name='sort_order')
+                .col-6
+                  .form-check.mt-4
+                    input#ec_active.form-check-input(type='checkbox' name='active' value='true')
+                    label.form-check-label(for='ec_active') Active
+              .text-end
+                input.btn.btn-success(type='submit' value='Save Changes')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var editModal = new bootstrap.Modal(document.getElementById('editCollectionModal'));
+      document.querySelectorAll('.edit-col-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var d = this.dataset;
+          document.getElementById('editColForm').action = '/admin/doorCollections/update/' + d.id;
+          document.getElementById('ec_name').value = d.name;
+          document.getElementById('ec_description').value = d.description;
+          document.getElementById('ec_icon_url').value = d.icon_url;
+          document.getElementById('ec_sort_order').value = d.sort_order;
+          document.getElementById('ec_active').checked = d.active === 'true';
+          editModal.show();
+        });
+      });
+    });

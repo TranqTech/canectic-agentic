@@ -7,6 +7,7 @@ import { LastCallers } from "./lastcallers.js";
 import { AnnouncementHandler } from "./announcementhandler.js";
 import { mailVerify } from "./menucommands/mailVerify.js";
 import { passwordReset } from "./menucommands/passwordReset.js";
+import { doorBrowser } from "./menucommands/doorBrowser.js";
 import { WhosOnline } from "./whosonline.js";
 import { msgAreaSelector } from "./menucommands/msgAreaSelector.js";
 import { msgReader } from "./menucommands/msgReader.js";
@@ -669,6 +670,16 @@ class MenuHandler extends BaseHandler {
 			case "passwordReset":
 				this._runSubModule(new passwordReset(this.call));
 				return;
+
+			case "doorBrowser": {
+				var browser = new doorBrowser(this.call);
+				browser.emitter.on("LaunchDoor", (slug) => {
+					this._doModuleReturn();
+					this.call.launchDoor(slug, true);
+				});
+				this._runSubModule(browser);
+				return;
+			}
 
 			case "fileGroupChange":
 			case "fileAreaChange":
