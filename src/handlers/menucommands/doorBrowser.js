@@ -338,8 +338,13 @@ class doorBrowser extends BaseSubModule {
 		} else {
 			var door = this._doors[this._selectedIdx];
 			if (!door) return;
-			// Launch the door
+			// Save browse state on the call so we can resume after door exit
 			if (this.call) {
+				this.call._doorBrowserState = {
+					collectionSlug: this._currentCollection ? this._currentCollection.slug : null,
+					selectedIdx: this._selectedIdx,
+					scrollOffset: this._scrollOffset
+				};
 				this.call.doorTarget = door.slug;
 				this.finished = true;
 				this.emitter.emit("LaunchDoor", door.slug);
@@ -360,6 +365,10 @@ class doorBrowser extends BaseSubModule {
 		if (!this.call) return;
 		this._calcPos();
 
+		// Check for saved state from a previous door launch
+		var savedState = this.call._doorBrowserState || null;
+		this.call._doorBrowserState = null;
+
 		getActiveCollections()
 			.then(async (collections) => {
 				if (!this.active) return;
@@ -371,6 +380,17 @@ class doorBrowser extends BaseSubModule {
 					this._doors = (allDoorList || []).filter(function(d) { return d.active; });
 					this._state = STATE_DOORS;
 					this._currentCollection = { name: 'Door Games', description: '' };
+				} else if (savedState && savedState.collectionSlug) {
+					// Resume into the saved collection
+					var savedCol = this._collections.find(function(c) { return c.slug === savedState.collectionSlug; });
+					if (savedCol) {
+						this._currentCollection = savedCol;
+						this._doors = await getDoorsInCollection(savedCol.id);
+						this._state = STATE_DOORS;
+						this._selectedIdx = Math.min(savedState.selectedIdx || 0, this._doors.length - 1);
+						this._scrollOffset = savedState.scrollOffset || 0;
+						this._ensureVisible();
+					}
 				} else if (this._collections.length === 1) {
 					// Single collection - skip to doors directly
 					this._currentCollection = this._collections[0];

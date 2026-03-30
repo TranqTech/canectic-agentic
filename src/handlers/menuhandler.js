@@ -816,6 +816,17 @@ class MenuHandler extends BaseHandler {
 	async startStage() {
 		if (!this.call) return;
 
+		// Auto-resume door browser if returning from a door launched via the browser
+		if (this.call._doorBrowserState) {
+			var browser = new doorBrowser(this.call);
+			browser.emitter.on("LaunchDoor", (slug) => {
+				this._doModuleReturn();
+				this.call.launchDoor(slug, true);
+			});
+			this._runSubModule(browser);
+			return;
+		}
+
 		try {
 			// Load the menu config
 			var config = await getMenu(this.menuName);
