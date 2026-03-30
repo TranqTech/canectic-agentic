@@ -2426,6 +2426,7 @@ router.post('/events/trigger', express.json(), requireAdmin, async (req, res) =>
 		case 'recalc-areas':      await jobs.enqueueRecalcAreaCounts(); triggered = 'Recalc Area Counts'; break;
 		case 'recalc-files':      await jobs.enqueueRecalcFileCounts(); triggered = 'Recalc File Counts'; break;
 		case 'user-maintenance':  await jobs.enqueueUserMaintenance(); triggered = 'User Maintenance'; break;
+		case 'file-maintenance':  await jobs.enqueueFileMaintenance(); triggered = 'File Maintenance'; break;
 		default:
 			return res.json({ status: false, error: 'Unknown job' });
 	}

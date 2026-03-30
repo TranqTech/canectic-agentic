@@ -314,6 +314,88 @@ async function scanAreaDirectory(areaShortcode) {
 	return { found: found, added: added, skipped: skipped, errors: errors };
 }
 
+// --- File area maintenance ---
+
+// Remove duplicate file entries (same filename + area_id).
+// Keeps the entry with the lowest id (oldest), deletes the rest.
+async function cleanDuplicates() {
+	var dupes = await postgres.query(
+		"SELECT area_id, filename, COUNT(*) as cnt, MIN(id) as keep_id " +
+		"FROM file_entries GROUP BY area_id, filename HAVING COUNT(*) > 1"
+	);
+
+	var removed = 0;
+	for (var dupe of (dupes || [])) {
+		var extras = await postgres.query(
+			"SELECT id, uuid FROM file_entries WHERE area_id = $1 AND filename = $2 AND id != $3",
+			[dupe.area_id, dupe.filename, dupe.keep_id]
+		);
+		for (var extra of (extras || [])) {
+			await postgres.write("DELETE FROM file_distribution WHERE file_entry_id = $1", [extra.id]);
+			await postgres.write("DELETE FROM file_entries WHERE id = $1", [extra.id]);
+			removed++;
+		}
+	}
+
+	if (removed > 0) {
+		alogger.writeAlog(2, '[fileEntries] cleanDuplicates: removed ' + removed + ' duplicate(s)', 'cyan');
+	}
+	return { removed: removed };
+}
+
+// Remove entries where the physical file no longer exists on disk.
+// Checks all active entries across all areas.
+async function cleanMissingFiles() {
+	var { getAllAreas, resolveAreaPath } = await import('./fileAreas.js');
+	var { getGroupByShortcode } = await import('./fileGroups.js');
+	var fs = await import('fs');
+	var path = await import('path');
+
+	var areas = await getAllAreas();
+	var removed = 0;
+	var checked = 0;
+
+	// Cache group lookups
+	var groupCache = {};
+
+	for (var area of (areas || [])) {
+		var group = null;
+		if (area.group_shortcode) {
+			if (!groupCache[area.group_shortcode]) {
+				groupCache[area.group_shortcode] = await getGroupByShortcode(area.group_shortcode);
+			}
+			group = groupCache[area.group_shortcode];
+		}
+
+		var areaPath = resolveAreaPath(group, area);
+		if (!fs.existsSync(areaPath)) continue;
+
+		var entries = await postgres.query(
+			"SELECT id, uuid, filename, disk_path FROM file_entries WHERE area_id = $1 AND active = true",
+			[area.id]
+		);
+
+		for (var entry of (entries || [])) {
+			checked++;
+			var filePath = path.join(areaPath, entry.disk_path || entry.filename);
+			if (!fs.existsSync(filePath)) {
+				await postgres.write("DELETE FROM file_distribution WHERE file_entry_id = $1", [entry.id]);
+				await postgres.write("DELETE FROM file_entries WHERE id = $1", [entry.id]);
+				alogger.writeAlog(4, '[fileEntries] Removed missing file entry: ' + entry.filename + ' (area ' + area.shortcode + ')', 'yellow');
+				removed++;
+			}
+		}
+	}
+
+	if (removed > 0) {
+		alogger.writeAlog(2, '[fileEntries] cleanMissingFiles: removed ' + removed + ' orphan(s) of ' + checked + ' checked', 'cyan');
+		// Update stats for affected areas
+		var { recalculateFileCounts } = await import('./fileAreas.js');
+		await recalculateFileCounts();
+	}
+	return { checked: checked, removed: removed };
+}
+
 export {
 	addFileEntry,
 	getEntryByUUID,
@@ -330,5 +412,7 @@ export {
 	getNewFileCount,
 	getMaxIdForArea,
 	regenerateDescHtml,
-	scanAreaDirectory
+	scanAreaDirectory,
+	cleanDuplicates,
+	cleanMissingFiles
 };

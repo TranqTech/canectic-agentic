@@ -367,6 +367,13 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'file-maintenance': {
+				var fileMaint = await import("../src/models/fileEntries.js");
+				await fileMaint.cleanDuplicates();
+				await fileMaint.cleanMissingFiles();
+				break;
+			}
+
 			case 'user-maintenance': {
 				var userMaint = await import("../src/models/useraccounts.js");
 				await userMaint.reconcileMailTypes();

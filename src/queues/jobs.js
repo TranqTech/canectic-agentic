@@ -286,6 +286,16 @@ export async function enqueueUserMaintenance() {
 }
 
 /**
+ * File area maintenance (duplicate cleanup, missing file removal).
+ * Called by: scheduler (daily), admin.
+ */
+export async function enqueueFileMaintenance() {
+	return maintenanceQueue.add('file-maintenance', {}, {
+		jobId: 'file-maintenance',
+	});
+}
+
+/**
  * Regenerate body_html for message area messages.
  * Called by: admin panel, CLI, scheduler.
  */
