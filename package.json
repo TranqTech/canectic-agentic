@@ -1,7 +1,7 @@
 {
   "name": "canectic-bbs",
   "type": "module",
-  "version": "0.9.0-alpha.1",
+  "version": "0.9.1-alpha.1",
   "description": "Canectic BBS — Modern Bulletin Board System",
   "scripts": {
     "start": "node ./bin/gateway.js",
