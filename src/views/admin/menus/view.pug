@@ -46,13 +46,17 @@ block content
                         | Type: 
                         span.badge.bg-secondary= menu.menu_type || 'Hotkey'
                       h6
-                        | Display Entries: 
-                        if menu.display_entries
-                          span.badge.bg-success Yes
+                        | Display Entries:
+                        if menu.display_entries === 'auto'
+                          span.badge.bg-success Auto
+                        else if menu.display_entries === 'art'
+                          span.badge.bg-info Art Defined
                         else
-                          span.badge.bg-secondary No
+                          span.badge.bg-secondary Off
                       h6
-                        | Layout: #{menu.max_columns || 3} cols, gap #{menu.col_gap || 2}
+                        | Layout: #{menu.max_columns || 3} cols, gap #{menu.col_gap || 2}, #{menu.fill_order || 'columns'}-first
+                        if menu.center_vertical
+                          |  (centred)
                     .col-4
                       if menu.display_file
                         h6
@@ -65,7 +69,7 @@ block content
                         h6.text-muted No display file
                     .col-4
                       h6
-                        | Offsets: X=#{menu.entries_x_offset} Y=#{menu.entries_y_offset}
+                        | Margins: T=#{menu.margin_top} B=#{menu.margin_bottom} L=#{menu.margin_left} R=#{menu.margin_right}
                       h6 Colours:
                       .small
                         if menu.title_clr !== null && menu.title_clr !== undefined
@@ -243,6 +247,8 @@ block content
                   li.nav-item(role='presentation')
                     button.nav-link.active(data-bs-toggle='tab' data-bs-target='#emConfigPane' type='button' role='tab') Configuration
                   li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#emLayoutPane' type='button' role='tab') Layout
+                  li.nav-item(role='presentation')
                     button.nav-link(data-bs-toggle='tab' data-bs-target='#emColourPane' type='button' role='tab') Colours
                 .tab-content
                   #emConfigPane.tab-pane.fade.show.active(role='tabpanel')
@@ -253,21 +259,27 @@ block content
                         input.form-control(type='text' name='name' value=menu.name required pattern='[a-z0-9_-]+')
                         .form-text Lowercase letters, numbers, hyphens, and underscores only.
                         br
-                        label.form-label Display Title:
+                        label.form-label Display Title Text:
                         input.form-control(type='text' name='title' value=menu.title)
                     br
                     .row
                       .col-1
-                      .col-5
+                      .col-3
                         label.form-label Menu Type:
                         select.form-control(name='menu_type')
                           for mt in menuTypes
                             option(value=mt selected=(menu.menu_type === mt))= mt
-                      .col-5
+                      .col-3
+                        label.form-label Display Title:
+                        select.form-control(name='display_title')
+                          option(value='true' selected=(menu.display_title !== false)) Yes
+                          option(value='false' selected=(menu.display_title === false)) No
+                      .col-4
                         label.form-label Display Entries:
                         select.form-control(name='display_entries')
-                          option(value='true' selected=menu.display_entries) Yes
-                          option(value='false' selected=!menu.display_entries) No
+                          option(value='auto' selected=(menu.display_entries === 'auto')) Auto
+                          option(value='off' selected=(menu.display_entries === 'off')) Off
+                          option(value='art' selected=(menu.display_entries === 'art')) Art Defined
                     br
                     .row
                       .col-1
@@ -281,21 +293,42 @@ block content
                           option(value='' selected=(!menu.display_file_type || menu.display_file_type === '')) -- None --
                           option(value='Screen' selected=(menu.display_file_type === 'Screen')) Screen (full-screen art)
                           option(value='Header' selected=(menu.display_file_type === 'Header')) Header (header art)
-                    br
+
+                  #emLayoutPane.tab-pane.fade(role='tabpanel')
+                    h6 Entry Region Margins
+                    .form-text.mb-3 Rows/columns reserved around the entry display area. Margins are best-effort and will relax if needed to fit all entries.
                     .row
-                      .col-1
-                      .col-2
-                        label.form-label X Offset:
-                        input.form-control(type='number' name='entries_x_offset' value=menu.entries_x_offset min='0')
-                      .col-2
-                        label.form-label Y Offset:
-                        input.form-control(type='number' name='entries_y_offset' value=menu.entries_y_offset min='0')
-                      .col-2
-                        label.form-label Max Cols:
+                      .col-3
+                        label.form-label Top:
+                        input.form-control(type='number' name='margin_top' value=(menu.margin_top !== null && menu.margin_top !== undefined ? menu.margin_top : 3) min='0')
+                      .col-3
+                        label.form-label Bottom:
+                        input.form-control(type='number' name='margin_bottom' value=(menu.margin_bottom !== null && menu.margin_bottom !== undefined ? menu.margin_bottom : 3) min='0')
+                      .col-3
+                        label.form-label Left:
+                        input.form-control(type='number' name='margin_left' value=(menu.margin_left !== null && menu.margin_left !== undefined ? menu.margin_left : 2) min='0')
+                      .col-3
+                        label.form-label Right:
+                        input.form-control(type='number' name='margin_right' value=(menu.margin_right !== null && menu.margin_right !== undefined ? menu.margin_right : 2) min='0')
+                    hr
+                    h6 Column Layout
+                    .row
+                      .col-3
+                        label.form-label Max Columns:
                         input.form-control(type='number' name='max_columns' value=(menu.max_columns || 3) min='1' max='10')
-                      .col-2
+                      .col-3
                         label.form-label Col Gap:
                         input.form-control(type='number' name='col_gap' value=(menu.col_gap || 2) min='0')
+                      .col-3
+                        label.form-label Fill Order:
+                        select.form-control(name='fill_order')
+                          option(value='columns' selected=(menu.fill_order !== 'rows')) Columns
+                          option(value='rows' selected=(menu.fill_order === 'rows')) Rows
+                      .col-3
+                        label.form-label Centre Vertical:
+                        select.form-control(name='center_vertical')
+                          option(value='false' selected=!menu.center_vertical) No
+                          option(value='true' selected=menu.center_vertical) Yes
 
                   #emColourPane.tab-pane.fade(role='tabpanel')
                     .d-flex.justify-content-between.align-items-center.mb-3

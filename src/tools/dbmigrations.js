@@ -206,6 +206,61 @@ async function checkOrCreateTable(tablename, summary) {
 	}
 }
 
+// --- Targeted migrations ---
+
+async function migrateMenuLayout() {
+	try {
+		// Step 1: Migrate display_entries from BOOLEAN to VARCHAR(8)
+		var typeRows = await pgdb.query(
+			"SELECT data_type FROM information_schema.columns WHERE table_name = 'menus' AND column_name = 'display_entries'",
+			[]
+		);
+		if (typeRows.length > 0 && typeRows[0].data_type === 'boolean') {
+			console.log("  Migrating menus.display_entries from BOOLEAN to VARCHAR(8)...");
+			var err = await pgdb.write(
+				"ALTER TABLE menus ALTER COLUMN display_entries TYPE VARCHAR(8) USING CASE WHEN display_entries THEN 'auto' ELSE 'off' END"
+			);
+			if (err) {
+				console.log("  ERROR migrating display_entries type:", err.message);
+				return;
+			}
+			var err2 = await pgdb.write(
+				"ALTER TABLE menus ALTER COLUMN display_entries SET DEFAULT 'auto'"
+			);
+			if (err2) {
+				console.log("  ERROR setting display_entries default:", err2.message);
+				return;
+			}
+			console.log("  display_entries migrated to VARCHAR(8) (true->auto, false->off)");
+		}
+
+		// Step 2: Migrate offset values to margin values before columns are dropped
+		var offsetRows = await pgdb.query(
+			"SELECT data_type FROM information_schema.columns WHERE table_name = 'menus' AND column_name = 'entries_x_offset'",
+			[]
+		);
+		if (offsetRows.length > 0) {
+			var marginRows = await pgdb.query(
+				"SELECT data_type FROM information_schema.columns WHERE table_name = 'menus' AND column_name = 'margin_left'",
+				[]
+			);
+			if (marginRows.length > 0) {
+				console.log("  Migrating entries_x_offset/entries_y_offset to margin_left/margin_top...");
+				var err3 = await pgdb.write(
+					"UPDATE menus SET margin_left = COALESCE(entries_x_offset, 0) + 2, margin_top = COALESCE(entries_y_offset, 0) + 3 WHERE entries_x_offset IS NOT NULL AND entries_x_offset != 0 OR entries_y_offset IS NOT NULL AND entries_y_offset != 0"
+				);
+				if (err3) {
+					console.log("  ERROR migrating offset values:", err3.message);
+				} else {
+					console.log("  Offset values migrated to margins");
+				}
+			}
+		}
+	} catch (error) {
+		console.log("  ERROR in migrateMenuLayout:", error.message);
+	}
+}
+
 // --- Main ---
 
 async function setupTables() {
@@ -228,6 +283,10 @@ async function setupTables() {
 			if (ok) summary.tablesDropped.push(dtable);
 		}
 	}
+
+	// Targeted migrations (must run before column add/remove)
+	console.log("\n--- Targeted migrations ---");
+	await migrateMenuLayout();
 
 	// Check/create tables
 	var tableNames = getTableNames();

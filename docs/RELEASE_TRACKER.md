@@ -20,7 +20,7 @@ Last updated: 2026-03-31
 ### Terminal
 - [x] Terminal server (auto-detect TCP/Telnet, WebSocket)
 - [x] Terminal negotiation (NAWS, SGA, binary mode, sixel detection)
-- [x] Menu system (hotkey menus, PostgreSQL-backed, hotkey prefix display)
+- [x] Menu system (hotkey + lightbar modes, margin layout, auto columns, fill order, vertical centering)
 - [x] Menu entry drag-to-reorder in admin
 - [x] Default menu entries on new menu creation (redrawMenu)
 - [x] Message area selector (lightbar)
@@ -66,6 +66,9 @@ Last updated: 2026-03-31
 - [x] Web door launcher (xterm.js, fractional scaling, mobile-responsive, return to collection)
 - [x] Web activity tracking (session renewal, idle detection, presence)
 - [x] Who's online (web presence integration, activity labels)
+- [ ] Last callers page (web view of recent callers)
+- [ ] Who's online page (web view of terminal nodes + web presence)
+- [ ] Virtual call flow (web equivalent of the terminal login experience: last callers, who's online, announcements, mail check)
 
 ### Admin Panel
 - [x] Dashboard

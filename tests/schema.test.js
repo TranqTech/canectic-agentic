@@ -56,7 +56,7 @@ describe('db/schema: tablenames vs conf files', function() {
 	before(function() {
 		tableNames = readTableNames();
 		confFiles = fs.readdirSync(TABLECOLUMNS_DIR)
-			.filter(function(f) { return f.endsWith('.conf'); })
+			.filter(function(f) { return f.endsWith('.conf') && !f.includes('-remove'); })
 			.map(function(f) { return path.basename(f, '.conf'); });
 	});
 
@@ -80,7 +80,7 @@ describe('db/schema: individual .conf file structure', function() {
 
 	before(function() {
 		confFiles = fs.readdirSync(TABLECOLUMNS_DIR)
-			.filter(function(f) { return f.endsWith('.conf'); });
+			.filter(function(f) { return f.endsWith('.conf') && !f.includes('-remove'); });
 	});
 
 	it('every non-empty .conf file defines at least one column', function() {

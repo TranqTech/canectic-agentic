@@ -6,16 +6,23 @@ Menus are the primary navigation system for terminal users. Each menu defines a 
 
 ### Creating a Menu
 
-Click **Add New Menu** on the menu list page. The modal has two tabs:
+Click **Add New Menu** on the menu list page. The modal has three tabs:
 
 **Configuration tab:**
 - **Menu Identifier** -- Unique programmatic ID (lowercase letters, numbers, hyphens, underscores only). This is what other menus reference when loading this menu. Examples: `main`, `messages`, `doors`, `files`.
-- **Display Title** -- The title shown to users on the terminal. Can include spaces and mixed case.
-- **Menu Type** -- Currently "Hotkey" (single keypress dispatch). "Lightbar" (arrow-key navigation) is planned.
-- **Display Entries** -- Whether to render the entry list on screen.
+- **Display Title Text** -- The title shown to users on the terminal. Can include spaces and mixed case.
+- **Menu Type** -- "Hotkey" (single keypress dispatch) or "Lightbar" (arrow-key navigation with visual highlight bar). See the Lightbar Mode section below.
+- **Display Title** -- Yes/No. When No, the title text is not rendered at the top of the screen. Useful when ANSI art provides the title visually.
+- **Display Entries** -- Auto (entries flow in the margin-defined region), Off (art-only, no entries rendered), or Art Defined (entry positions from art codes, future).
 - **Display File** -- Optional ANSI art file shown as the menu background. Bare filename only (no path or extension). The art system resolves the full path based on terminal capabilities.
 - **Display File Type** -- Art subdirectory: "Screen" (full-screen art) or "Header" (header art).
-- **Layout controls** -- X/Y offset for entry positioning, max columns, column gap.
+
+**Layout tab:**
+- **Entry Region Margins** -- Top, Bottom, Left, Right. Defines the rectangular area where entries are rendered. Margins are best-effort: if entries don't fit, the system first tries adding columns, then expands the region.
+- **Max Columns** -- Maximum columns for entry layout (default 3). The system auto-calculates how many columns fit based on the region width and the longest entry text.
+- **Col Gap** -- Spacing between columns (default 2).
+- **Fill Order** -- "Columns" fills top-to-bottom per column (default, traditional BBS style). "Rows" fills left-to-right per row (spreads entries horizontally).
+- **Centre Vertical** -- When Yes, the entry block is vertically centred within the entry region.
 
 **Colours tab:**
 - Per-menu colour overrides. Leave as "Theme Default" to inherit from the active theme. See the [Theme Configuration](THEMES.md) guide for details on the colour cascade.
@@ -95,6 +102,26 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 The "Active Hotkeys" line at the bottom of each menu shows all available hotkeys sorted alphabetically. Its colour is controlled by the `menu_prompt_clr` theme property (or per-menu override). This is separate from:
 - `hotkey_clr` -- The colour of the hotkey letter within each entry line
 - `prompt_clr` -- The colour of the command input prompt
+
+## Lightbar Mode
+
+When Menu Type is set to "Lightbar", the menu displays a visual highlight bar on the currently selected entry instead of waiting for a hotkey press.
+
+**How it works:**
+- Arrow keys move the highlight between entries. Up/Down moves vertically, Left/Right moves between columns. The direction mapping adapts to the fill order setting.
+- Enter executes the highlighted entry's command.
+- Home/End jump to the first/last entry. PgUp/PgDn skip a full page.
+- The highlight bar wraps around at boundaries (moving past the last entry goes to the first).
+- Hotkeys still work for direct access even in lightbar mode.
+
+**Visual appearance:**
+- The selected entry is drawn with the lightbar theme colours: `lb_clr` (background), `lb_cmd_clr` (hotkey letter), `lb_opt_clr` (entry text).
+- The highlight bar extends one column before and after the entry text for clean visual padding.
+- The prompt area shows "Use arrows to navigate, Enter to select" instead of the hotkey list.
+
+**Dumb terminals:** Lightbar mode is not available on dumb terminals. They fall back to hotkey mode automatically.
+
+**Theme colours:** The Lightbar category in the theme editor controls the three lightbar colours. These can also be set per-menu via the Colours tab.
 
 ## Navigation
 

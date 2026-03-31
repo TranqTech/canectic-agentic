@@ -37,11 +37,15 @@ class MenuHandler extends BaseHandler {
 		this.title = "";
 		this.menu_entries = [];
 		this.visible_entries = [];
-		this.display_entries = false;
+		this.display_entries = 'off';
 		this.display_file = "";
 		this.display_file_type = "";
-		this.entries_x_offset = 0;
-		this.entries_y_offset = 0;
+		this.margin_top = 3;
+		this.margin_bottom = 3;
+		this.margin_left = 2;
+		this.margin_right = 2;
+		this.fill_order = 'columns';
+		this.center_vertical = false;
 		this.max_columns = 3;
 		this.col_gap = 2;
 
@@ -53,22 +57,27 @@ class MenuHandler extends BaseHandler {
 		this.currentPage = 0;
 		this.paged = false;
 
+		// Menu type
+		this.menu_type = 'Hotkey';
+
 		// Hotkeys
 		this.hotkey_arr = [];
 		this.hotkey_msg = "Active Hotkeys: ";
 
-		// Geometry
+		// Lightbar state
+		this.lb_index = 0;          // selected index within displayable entries
+		this.lb_displayable = [];   // cached displayable entries for lightbar
+
+		// Geometry (recalculated in _calcMenuPos from margins)
 		this.max_y = call.term_height;
-		this.menu_start_x = 3;
-		this.menu_start_y = 2;
-		this.prompt_x = this.menu_start_x;
-		this.prompt_y = this.menu_start_y + 2;
-		this.hotkey_x = this.menu_start_x;
-		this.hotkey_y = this.menu_start_y + 1;
-		this.input_x = this.menu_start_x;
-		this.input_y = this.prompt_y + 2;
-		this.error_x = this.menu_start_x;
-		this.error_y = this.menu_start_y + 3;
+		this.hotkey_x = 3;
+		this.hotkey_y = this.max_y - 2;
+		this.prompt_x = 3;
+		this.prompt_y = this.max_y - 1;
+		this.input_x = 3;
+		this.input_y = this.prompt_y;
+		this.error_x = 3;
+		this.error_y = this.hotkey_y;
 		this.haserror = false;
 		this.hasstatus = false;
 		this.haswarn = false;
@@ -86,6 +95,9 @@ class MenuHandler extends BaseHandler {
 		this.hotkey_clr = this.theme?.hotkey_clr || 13;
 		this.menu_prompt_clr = this.theme?.menu_prompt_clr || 11;
 		this.featured_clr = this.theme?.featured_clr || 10;
+		this.lb_clr = this.theme?.lb_clr || 12;
+		this.lb_cmd_clr = this.theme?.lb_cmd_clr || 11;
+		this.lb_opt_clr = this.theme?.lb_opt_clr || 15;
 		this.df_clr = this.theme?.df_clr || 7;
 
 		this.loggingId = "Menu:" + this.menuName + " (Node " + this.call.nodenum + ")";
@@ -148,11 +160,17 @@ class MenuHandler extends BaseHandler {
 		this.menuConfig = config;
 		this.title = config.title || this.menuName;
 		this.menu_entries = config.menu_entries || [];
-		this.display_entries = config.display_entries || false;
+		this.menu_type = config.menu_type || 'Hotkey';
+		this.display_title = config.display_title !== false;
+		this.display_entries = config.display_entries || 'auto';
 		this.display_file = config.display_file || "";
 		this.display_file_type = config.display_file_type || "";
-		this.entries_x_offset = config.entries_x_offset || 0;
-		this.entries_y_offset = config.entries_y_offset || 0;
+		this.margin_top = (config.margin_top !== null && config.margin_top !== undefined) ? config.margin_top : 3;
+		this.margin_bottom = (config.margin_bottom !== null && config.margin_bottom !== undefined) ? config.margin_bottom : 3;
+		this.margin_left = (config.margin_left !== null && config.margin_left !== undefined) ? config.margin_left : 2;
+		this.margin_right = (config.margin_right !== null && config.margin_right !== undefined) ? config.margin_right : 2;
+		this.fill_order = config.fill_order || 'columns';
+		this.center_vertical = config.center_vertical || false;
 		this.max_columns = config.max_columns || 3;
 		this.col_gap = config.col_gap || 2;
 		this.menu_prompt = this.title + " -> " + this.call.caller_username + ":";
@@ -187,10 +205,11 @@ class MenuHandler extends BaseHandler {
 	// --- Geometry ---
 	_calcMenuPos() {
 		if (this.dumb) return;
-		this.hotkey_x = this.menu_start_x;
+		// Prompt area always pins to screen bottom, independent of margins
+		this.hotkey_x = 3;
 		this.hotkey_y = this.max_y - 2;
-		this.prompt_x = this.menu_start_x;
-		this.prompt_y = this.hotkey_y + 1;
+		this.prompt_x = 3;
+		this.prompt_y = this.max_y - 1;
 		this.input_y = this.prompt_y;
 		this.input_x = this.prompt_x + this.menu_prompt.length + 1;
 		this.error_x = this.hotkey_x + this.hotkey_msg.length + 2;
@@ -199,18 +218,17 @@ class MenuHandler extends BaseHandler {
 		this._calcLayout();
 	}
 
-	// Calculate column count, column width, rows per page, and paginate entries
+	// Calculate column count, column width, rows per page, and paginate entries.
+	// Margins define a preferred entry region but are relaxed if entries don't fit.
 	_calcLayout() {
 		this.layout_pages = [];
 		this.currentPage = 0;
 		this.paged = false;
 
-		// Get displayable entries only (those with display text)
 		var displayable = this.visible_entries.filter(e => e.display);
 		if (displayable.length === 0) return;
 
 		if (this.dumb) {
-			// Dumb terminals get a single page of everything
 			this.layout_columns = 1;
 			this.layout_pages = [displayable];
 			return;
@@ -218,55 +236,95 @@ class MenuHandler extends BaseHandler {
 
 		var termWidth = this.call.term_width || 80;
 
-		// Available area for entries
-		// entries_y_offset shifts the start down (for header/display file space)
-		// Reserve: title (2 lines) + offset + 3 bottom lines (hotkey, prompt, status)
-		var entryStartY = this.menu_start_y + 2 + this.entries_y_offset;
-		var availRows = this.hotkey_y - entryStartY - 1;
+		// Start with margin-defined region
+		var entryStartY = this.margin_top + 1;
+		var entryEndY = this.max_y - this.margin_bottom;
+		// Hard limits: entries can't overlap prompt (row max_y-2) or go above row 2
+		var hardTopMin = 2;
+		var hardBottomMax = this.max_y - 3;  // leave room for hotkey + prompt rows
+		if (entryStartY < hardTopMin) entryStartY = hardTopMin;
+		if (entryEndY > hardBottomMax) entryEndY = hardBottomMax;
+		var availRows = entryEndY - entryStartY + 1;
 		if (availRows < 1) availRows = 1;
 
-		// Available width for entries (account for x offset and margins)
-		var entryStartX = this.menu_start_x + this.entries_x_offset;
-		var availWidth = termWidth - entryStartX - 1;
-		if (availWidth < 10) availWidth = 10;
+		var regionLeft = this.margin_left;
+		var regionRight = this.margin_right;
+		var regionWidth = termWidth - regionLeft - regionRight;
+		if (regionWidth < 10) regionWidth = 10;
 
-		// Find the widest display string (account for hotkey prefix "X " = 2 chars)
-		var hotkeyPrefix = (this.display_entries) ? 2 : 0;
+		// Find widest entry (with hotkey prefix if auto mode)
+		var hotkeyPrefix = (this.display_entries === 'auto') ? 2 : 0;
 		var maxDisplayLen = 0;
 		for (var i = 0; i < displayable.length; i++) {
 			var entryWidth = displayable[i].display.length;
 			if (hotkeyPrefix && displayable[i].hotkey && displayable[i].display) {
 				entryWidth += hotkeyPrefix;
 			}
-			if (entryWidth > maxDisplayLen) {
-				maxDisplayLen = entryWidth;
-			}
+			if (entryWidth > maxDisplayLen) maxDisplayLen = entryWidth;
 		}
 
-		// Determine how many columns we can fit without truncating any entry
-		// Each column needs maxDisplayLen width plus col_gap (except the last)
+		// Auto column calculation: fit as many as width allows
 		var colWidthWithGap = maxDisplayLen + this.col_gap;
-		var fitCols = Math.floor((availWidth + this.col_gap) / colWidthWithGap);
+		var fitCols = Math.floor((regionWidth + this.col_gap) / colWidthWithGap);
 		if (fitCols < 1) fitCols = 1;
 		if (fitCols > this.max_columns) fitCols = this.max_columns;
 
-		// Now determine how many columns we actually need
-		// Start with 1 column, increase only if entries don't fit in available rows
-		var neededCols = 1;
-		while (neededCols < fitCols) {
-			var rowsNeeded = Math.ceil(displayable.length / neededCols);
-			if (rowsNeeded <= availRows) break;
-			neededCols++;
+		// Step 1: Determine initial column count
+		// Row-first: use all available columns (spread horizontally)
+		// Column-first: use minimum columns needed (stack vertically)
+		var neededCols;
+		if (this.fill_order === 'rows') {
+			neededCols = Math.min(fitCols, displayable.length);
+		} else {
+			neededCols = Math.min(fitCols, Math.ceil(displayable.length / availRows));
 		}
+		if (neededCols < 1) neededCols = 1;
+		var entriesPerPage = availRows * neededCols;
+
+		// Step 2: If entries don't fit, try adding more columns within the margin region first
+		if (displayable.length > entriesPerPage && neededCols < fitCols) {
+			for (var tryCol = neededCols + 1; tryCol <= fitCols; tryCol++) {
+				if (availRows * tryCol >= displayable.length) {
+					neededCols = tryCol;
+					entriesPerPage = availRows * neededCols;
+					break;
+				}
+			}
+		}
+
+		// Step 3: If still doesn't fit, try expanding vertically toward hard limits
+		if (displayable.length > entriesPerPage) {
+			var expandedStartY = hardTopMin;
+			var expandedEndY = hardBottomMax;
+			var expandedRows = expandedEndY - expandedStartY + 1;
+
+			// Try fitting with current columns in expanded space first
+			if (expandedRows * neededCols >= displayable.length) {
+				// Current columns work, just need more rows
+				entryStartY = expandedStartY;
+				entryEndY = expandedEndY;
+				availRows = expandedRows;
+				entriesPerPage = availRows * neededCols;
+			} else {
+				// Need both more rows and more columns
+				var expandedCols = Math.min(fitCols, Math.ceil(displayable.length / expandedRows));
+				if (expandedCols < 1) expandedCols = 1;
+				entryStartY = expandedStartY;
+				entryEndY = expandedEndY;
+				availRows = expandedRows;
+				neededCols = expandedCols;
+				entriesPerPage = availRows * neededCols;
+			}
+		}
+
+		// Store computed region for _drawEntryPage
+		this._entryStartY = entryStartY;
+		this._entryEndY = entryEndY;
 
 		this.layout_columns = neededCols;
 		this.layout_col_width = maxDisplayLen;
-
-		// Rows per page with this column count
 		this.layout_rows_per_page = availRows;
-		var entriesPerPage = this.layout_rows_per_page * this.layout_columns;
 
-		// Build pages
 		if (displayable.length <= entriesPerPage) {
 			this.layout_pages = [displayable];
 		} else {
@@ -287,7 +345,7 @@ class MenuHandler extends BaseHandler {
 		// Draw display file if configured
 		if (this.display_file.length > 0) {
 			this.call.cmds.drawscreen(this.display_file, this.display_file_type, true);
-			if (!this.display_entries) {
+			if (this.display_entries === 'off') {
 				this._drawPromptArea();
 				return;
 			}
@@ -296,16 +354,27 @@ class MenuHandler extends BaseHandler {
 		}
 
 		// Title
-		var currY = this.menu_start_y;
-		var currX = this.menu_start_x;
 		this.call.cmds.resetcolors();
-		this.call.cmds.movecursor(currX, currY);
-		this.call.cmds.setfgcolor(this.title_clr);
-		this.call.cmds.senddata(this.title);
+		if (this.display_title) {
+			var titleY = Math.max(1, this.margin_top - 1);
+			var titleX = this.margin_left + 1;
+			this.call.cmds.movecursor(titleX, titleY);
+			this.call.cmds.setfgcolor(this.title_clr);
+			this.call.cmds.senddata(this.title);
+		}
 
 		this._drawEntryPage();
 		this.call.cmds.resetcolors();
 		this._drawPromptArea();
+
+		// Initialise lightbar highlight
+		if (this.menu_type === 'Lightbar' && !this.dumb) {
+			this.lb_displayable = this.visible_entries.filter(e => e.display);
+			this.lb_index = 0;
+			if (this.lb_displayable.length > 0) {
+				this._lbDrawEntry(this.lb_index, true);
+			}
+		}
 	}
 
 	_drawEntryPage() {
@@ -313,34 +382,49 @@ class MenuHandler extends BaseHandler {
 		var page = this.layout_pages[this.currentPage] || [];
 		if (page.length === 0) return;
 
-		var entryStartY = this.menu_start_y + 2 + this.entries_y_offset;
-		var entryStartX = this.menu_start_x + this.entries_x_offset;
+		// Entry region (computed by _calcLayout, may be relaxed from margins)
+		var entryStartY = this._entryStartY || (this.margin_top + 1);
+		var entryStartX = this.margin_left + 1;
+		var entryEndY = this._entryEndY || (this.max_y - this.margin_bottom);
 
-		// Clear the entry area (for redraws / page changes)
+		// Clear the entry region
 		if (!this.dumb) {
-			for (var clearY = entryStartY; clearY < this.hotkey_y - 1; clearY++) {
+			for (var clearY = entryStartY; clearY <= entryEndY; clearY++) {
 				this.call.cmds.movecursor(entryStartX, clearY);
 				this.call.cmds.cleartoeol();
 			}
 		}
 
-		// Lay entries out column-first: fill column 0 top-to-bottom, then column 1, etc.
 		var rowsThisPage = Math.ceil(page.length / this.layout_columns);
 
+		// Vertical centering offset
+		var vOffset = 0;
+		if (this.center_vertical) {
+			var regionHeight = entryEndY - entryStartY + 1;
+			var usableHeight = this.paged ? regionHeight - 1 : regionHeight;
+			vOffset = Math.floor((usableHeight - rowsThisPage) / 2);
+			if (vOffset < 0) vOffset = 0;
+		}
+
 		for (var i = 0; i < page.length; i++) {
-			var col = Math.floor(i / rowsThisPage);
-			var row = i % rowsThisPage;
+			var col, row;
+			if (this.fill_order === 'rows') {
+				col = i % this.layout_columns;
+				row = Math.floor(i / this.layout_columns);
+			} else {
+				col = Math.floor(i / rowsThisPage);
+				row = i % rowsThisPage;
+			}
 			var drawX = entryStartX + col * (this.layout_col_width + this.col_gap);
-			var drawY = entryStartY + row;
+			var drawY = entryStartY + vOffset + row;
 			var entry = page[i];
 
 			this.call.cmds.movecursor(drawX, drawY);
-			// Entry colors: explicit fg > featured_clr (if featured) > theme opt_clr
 			var defaultFg = entry.featured ? this.featured_clr : (this.theme?.opt_clr || 7);
 			var entryFg = entry.fg_clr !== undefined ? entry.fg_clr : defaultFg;
 			var entryBg = entry.bg_clr;
 
-			if (this.display_entries && entry.hotkey && entry.display) {
+			if (this.display_entries === 'auto' && entry.hotkey && entry.display) {
 				if (entryBg !== undefined) this.call.cmds.setbgcolor(entryBg);
 				this.call.cmds.setfgcolor(this.hotkey_clr);
 				this.call.cmds.senddata(entry.hotkey.toUpperCase());
@@ -354,14 +438,129 @@ class MenuHandler extends BaseHandler {
 			this.call.cmds.resetcolors();
 		}
 
-		// Page indicator if paged
+		// Page indicator at the bottom of the entry region
 		if (this.paged) {
-			var pageY = this.hotkey_y - 1;
+			var pageY = entryEndY;
 			this.call.cmds.movecursor(entryStartX, pageY);
 			this.call.cmds.setfgcolor(this.prompt_clr);
 			var pageMsg = "Page " + (this.currentPage + 1) + "/" + this.layout_pages.length + "  [PgUp/PgDn to navigate]";
 			this.call.cmds.senddata(pageMsg);
 			this.call.cmds.resetcolors();
+		}
+	}
+
+	// --- Lightbar helpers ---
+
+	// Get the screen position (x, y) for a displayable entry by its index within the current page
+	_lbEntryPos(pageIndex) {
+		var entryStartY = this._entryStartY || (this.margin_top + 1);
+		var entryStartX = this.margin_left + 1;
+		var rowsThisPage = Math.ceil((this.layout_pages[this.currentPage] || []).length / this.layout_columns);
+		var vOffset = 0;
+		if (this.center_vertical) {
+			var entryEndY = this._entryEndY || (this.max_y - this.margin_bottom);
+			var regionHeight = entryEndY - entryStartY + 1;
+			var usableHeight = this.paged ? regionHeight - 1 : regionHeight;
+			vOffset = Math.floor((usableHeight - rowsThisPage) / 2);
+			if (vOffset < 0) vOffset = 0;
+		}
+		var col, row;
+		if (this.fill_order === 'rows') {
+			col = pageIndex % this.layout_columns;
+			row = Math.floor(pageIndex / this.layout_columns);
+		} else {
+			col = Math.floor(pageIndex / rowsThisPage);
+			row = pageIndex % rowsThisPage;
+		}
+		return {
+			x: entryStartX + col * (this.layout_col_width + this.col_gap),
+			y: entryStartY + vOffset + row
+		};
+	}
+
+	// Draw a single entry at its position, either highlighted or normal
+	_lbDrawEntry(lbIdx, highlighted) {
+		var page = this.layout_pages[this.currentPage] || [];
+		// lbIdx is index into lb_displayable; find the page-local index
+		var entriesPerPage = this.layout_rows_per_page * this.layout_columns;
+		var pageStart = this.currentPage * entriesPerPage;
+		var pageIndex = lbIdx - pageStart;
+		if (pageIndex < 0 || pageIndex >= page.length) return;
+
+		var entry = page[pageIndex];
+		var pos = this._lbEntryPos(pageIndex);
+
+		var hasPrefix = (this.display_entries === 'auto' && entry.hotkey && entry.display);
+		var prefixLen = hasPrefix ? 2 : 0;
+
+		if (highlighted) {
+			// Highlighted: draw 1 col before and 1 col after for clean padding
+			this.call.cmds.movecursor(pos.x - 1, pos.y);
+			this.call.cmds.setbgcolor(this.lb_clr);
+			this.call.cmds.senddata(' '); // leading pad
+			if (hasPrefix) {
+				this.call.cmds.setfgcolor(this.lb_cmd_clr);
+				this.call.cmds.senddata(entry.hotkey.toUpperCase());
+				this.call.cmds.setfgcolor(this.lb_opt_clr);
+				this.call.cmds.senddata(' ');
+			} else {
+				this.call.cmds.setfgcolor(this.lb_opt_clr);
+			}
+			var padLen = this.layout_col_width - entry.display.length - prefixLen;
+			this.call.cmds.senddata(entry.display);
+			// Fill to column width + 1 trailing pad
+			this.call.cmds.senddata(' '.repeat((padLen > 0 ? padLen : 0) + 1));
+		} else {
+			// Normal: clear the padding columns and redraw entry
+			this.call.cmds.movecursor(pos.x - 1, pos.y);
+			this.call.cmds.senddata(' '); // clear leading pad
+			var defaultFg = entry.featured ? this.featured_clr : (this.theme?.opt_clr || 7);
+			var entryFg = entry.fg_clr !== undefined ? entry.fg_clr : defaultFg;
+			var entryBg = entry.bg_clr;
+			if (hasPrefix) {
+				if (entryBg !== undefined) this.call.cmds.setbgcolor(entryBg);
+				this.call.cmds.setfgcolor(this.hotkey_clr);
+				this.call.cmds.senddata(entry.hotkey.toUpperCase());
+				this.call.cmds.setfgcolor(entryFg);
+				this.call.cmds.senddata(' ');
+			} else {
+				if (entryBg !== undefined) this.call.cmds.setbgcolor(entryBg);
+				this.call.cmds.setfgcolor(entryFg);
+			}
+			var padLen = this.layout_col_width - entry.display.length - prefixLen;
+			this.call.cmds.senddata(entry.display);
+			this.call.cmds.resetcolors();
+			// Clear trailing pad area
+			this.call.cmds.senddata(' '.repeat((padLen > 0 ? padLen : 0) + 1));
+		}
+		this.call.cmds.resetcolors();
+		// Park cursor at the input prompt
+		this.call.cmds.movecursor(this.input_x, this.input_y);
+	}
+
+	// Move the lightbar selection by delta, handling wrapping and page changes
+	_lbMove(delta) {
+		if (this.lb_displayable.length === 0) return;
+		var oldIdx = this.lb_index;
+		var newIdx = oldIdx + delta;
+
+		// Wrap around
+		if (newIdx < 0) newIdx = this.lb_displayable.length - 1;
+		if (newIdx >= this.lb_displayable.length) newIdx = 0;
+
+		this.lb_index = newIdx;
+
+		// Check if we need a page change
+		var entriesPerPage = this.layout_rows_per_page * this.layout_columns;
+		var newPage = Math.floor(newIdx / entriesPerPage);
+		if (newPage !== this.currentPage) {
+			this.currentPage = newPage;
+			this._drawEntryPage();
+			this._lbDrawEntry(this.lb_index, true);
+		} else {
+			// Same page: just redraw old and new
+			this._lbDrawEntry(oldIdx, false);
+			this._lbDrawEntry(newIdx, true);
 		}
 	}
 
@@ -375,7 +574,7 @@ class MenuHandler extends BaseHandler {
 		for (var i = 0; i < page.length; i++) {
 			if (page[i].display) {
 				this.call.cmds.senddata("\r\n");
-				if (this.display_entries && page[i].hotkey) {
+				if (this.display_entries === 'auto' && page[i].hotkey) {
 					this.call.cmds.senddata(page[i].hotkey.toUpperCase() + " ");
 				}
 				this.call.cmds.senddata(page[i].display);
@@ -400,9 +599,20 @@ class MenuHandler extends BaseHandler {
 	_drawPromptArea() {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(this.hotkey_x, this.hotkey_y);
+		this.call.cmds.cleartoeol();
 		this.call.cmds.setfgcolor(this.menu_prompt_clr);
-		this.call.cmds.senddata(this.hotkey_msg);
+		if (this.menu_type === 'Lightbar' && !this.dumb) {
+			this.call.cmds.senddata("Use \x1b[1m\x18\x19\x1a\x1b\x1b[0m");
+			this.call.cmds.setfgcolor(this.menu_prompt_clr);
+			this.call.cmds.senddata(" to navigate, ");
+			this.call.cmds.senddata("\x1b[1mEnter\x1b[0m");
+			this.call.cmds.setfgcolor(this.menu_prompt_clr);
+			this.call.cmds.senddata(" to select");
+		} else {
+			this.call.cmds.senddata(this.hotkey_msg);
+		}
 		this.call.cmds.movecursor(this.prompt_x, this.prompt_y);
+		this.call.cmds.cleartoeol();
 		this.call.cmds.setfgcolor(this.prompt_clr);
 		this.call.cmds.senddata(this.menu_prompt);
 		this.call.cmds.setfgcolor(this.input_clr);
@@ -527,6 +737,62 @@ class MenuHandler extends BaseHandler {
 	}
 
 	onKey(key) {
+		if (this.menu_type === 'Lightbar' && !this.dumb) {
+			// Lightbar navigation
+			if (key === 'UpArrow') {
+				if (this.fill_order === 'rows') {
+					this._lbMove(-this.layout_columns);
+				} else {
+					this._lbMove(-1);
+				}
+				return;
+			}
+			if (key === 'DownArrow') {
+				if (this.fill_order === 'rows') {
+					this._lbMove(this.layout_columns);
+				} else {
+					this._lbMove(1);
+				}
+				return;
+			}
+			if (key === 'LeftArrow') {
+				if (this.fill_order === 'rows') {
+					this._lbMove(-1);
+				} else {
+					this._lbMove(-this.layout_rows_per_page);
+				}
+				return;
+			}
+			if (key === 'RightArrow') {
+				if (this.fill_order === 'rows') {
+					this._lbMove(1);
+				} else {
+					this._lbMove(this.layout_rows_per_page);
+				}
+				return;
+			}
+			if (key === 'Enter') {
+				if (this.lb_displayable.length > 0 && this.lb_displayable[this.lb_index]) {
+					this._doMenuCommand(this.lb_displayable[this.lb_index]);
+				}
+				return;
+			}
+			if (key === 'Home') { this._lbMove(-this.lb_index); return; }
+			if (key === 'End') { this._lbMove(this.lb_displayable.length - 1 - this.lb_index); return; }
+			if (key === 'PgDn') {
+				var perPage = this.layout_rows_per_page * this.layout_columns;
+				this._lbMove(perPage);
+				return;
+			}
+			if (key === 'PgUp') {
+				var perPage = this.layout_rows_per_page * this.layout_columns;
+				this._lbMove(-perPage);
+				return;
+			}
+			return;
+		}
+
+		// Hotkey mode: page navigation only
 		if (!this.paged) return;
 		if (key === "PgDn" || key === "DownArrow") {
 			if (this.currentPage < this.layout_pages.length - 1) {
@@ -545,9 +811,8 @@ class MenuHandler extends BaseHandler {
 	}
 
 	onChar(ch) {
+		// Hotkey dispatch works in both modes (quick access even in lightbar)
 		if (this.hotkey_arr.includes(ch.toUpperCase())) {
-			// Find from the FULL entry list so we can distinguish
-			// "not accessible" from "doesn't exist"
 			var matched_entry = this.menu_entries.find(obj => {
 				return obj.hotkey && obj.hotkey.toUpperCase() === ch.toUpperCase();
 			});

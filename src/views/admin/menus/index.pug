@@ -84,6 +84,8 @@ block content
                 li.nav-item(role='presentation')
                   button.nav-link.active(data-bs-toggle='tab' data-bs-target='#nmConfigPane' type='button' role='tab') Configuration
                 li.nav-item(role='presentation')
+                  button.nav-link(data-bs-toggle='tab' data-bs-target='#nmLayoutPane' type='button' role='tab') Layout
+                li.nav-item(role='presentation')
                   button.nav-link(data-bs-toggle='tab' data-bs-target='#nmColourPane' type='button' role='tab') Colours
               .tab-content
                 #nmConfigPane.tab-pane.fade.show.active(role='tabpanel')
@@ -94,23 +96,27 @@ block content
                       input#nm_name.form-control(type='text' name='name' required placeholder='e.g. main, messages, doors' pattern='[a-z0-9_-]+')
                       .form-text Lowercase letters, numbers, hyphens, and underscores only. Used to reference this menu from other menus and the call flow.
                       br
-                      label.form-label(for='nm_title') Display Title:
+                      label.form-label(for='nm_title') Display Title Text:
                       input#nm_title.form-control(type='text' name='title' placeholder='Title shown to users on the terminal')
                   br
                   .row
                     .col-1
-                    .col-5
+                    .col-3
                       label.form-label Menu Type:
                       select.form-control(name='menu_type')
                         for mt in menuTypes
                           option(value=mt selected=(mt === 'Hotkey'))= mt
-                      .form-text Hotkey = single keypress, Lightbar = arrow-key navigation (future)
-                    .col-5
+                    .col-3
+                      label.form-label Display Title:
+                      select.form-control(name='display_title')
+                        option(value='true' selected) Yes
+                        option(value='false') No
+                    .col-4
                       label.form-label Display Entries:
                       select.form-control(name='display_entries')
-                        option(value='true') Yes
-                        option(value='false') No
-                      .form-text Draw entry list over the display file
+                        option(value='auto' selected) Auto
+                        option(value='off') Off
+                        option(value='art') Art Defined
                   br
                   .row
                     .col-1
@@ -124,19 +130,42 @@ block content
                         option(value='') -- None --
                         option(value='Screen') Screen (full-screen art)
                         option(value='Header') Header (header art)
-                      .form-text Art subdirectory to search (screens/ or headers/).
-                  br
+
+                #nmLayoutPane.tab-pane.fade(role='tabpanel')
+                  h6 Entry Region Margins
+                  .form-text.mb-3 Rows/columns reserved around the entry display area. Margins are best-effort and will relax if needed to fit all entries.
                   .row
-                    .col-1
                     .col-3
-                      label.form-label X Offset:
-                      input.form-control(type='number' name='entries_x_offset' value='0' min='0')
+                      label.form-label Top:
+                      input.form-control(type='number' name='margin_top' value='3' min='0')
                     .col-3
-                      label.form-label Y Offset:
-                      input.form-control(type='number' name='entries_y_offset' value='0' min='0')
+                      label.form-label Bottom:
+                      input.form-control(type='number' name='margin_bottom' value='3' min='0')
+                    .col-3
+                      label.form-label Left:
+                      input.form-control(type='number' name='margin_left' value='2' min='0')
+                    .col-3
+                      label.form-label Right:
+                      input.form-control(type='number' name='margin_right' value='2' min='0')
+                  hr
+                  h6 Column Layout
+                  .row
                     .col-3
                       label.form-label Max Columns:
                       input.form-control(type='number' name='max_columns' value='3' min='1' max='10')
+                    .col-3
+                      label.form-label Col Gap:
+                      input.form-control(type='number' name='col_gap' value='2' min='0')
+                    .col-3
+                      label.form-label Fill Order:
+                      select.form-control(name='fill_order')
+                        option(value='columns' selected) Columns
+                        option(value='rows') Rows
+                    .col-3
+                      label.form-label Centre Vertical:
+                      select.form-control(name='center_vertical')
+                        option(value='false' selected) No
+                        option(value='true') Yes
 
                 #nmColourPane.tab-pane.fade(role='tabpanel')
                   .d-flex.justify-content-between.align-items-center.mb-3
