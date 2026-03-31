@@ -13,7 +13,6 @@
 import appConfig from "../config/appConfig.js";
 import * as postgres from "../middleware/db/postgres.js";
 import { getOnlineUsers } from "../middleware/webActivity.js";
-import { softwareVersion } from "./systeminfo.js";
 
 // --- Universal code definitions ---
 // Each resolver receives the call object and returns a string value.
@@ -42,7 +41,7 @@ var UNIVERSAL_CODES = {
 	MA: function(call) { return call?.msg_area_title || ''; },
 	FG: function(call) { return call?.file_group_title || ''; },
 	FA: function(call) { return call?.file_area_title || ''; },
-	VR: function() { return softwareVersion(); },
+	VR: function() { return appConfig.get('currentversion', '0.0.0'); },
 };
 
 // Async resolvers -- called once, values cached for the buffer

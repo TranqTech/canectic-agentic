@@ -1,24 +1,13 @@
 //imports
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import { DateTime } from "luxon";
 import appConfig from "../config/appConfig.js";
 
 //variables
 const vsoftwarename = "Canectic BBS"
-var vsystemver = "0.0.0";
-try {
-	var __filename = fileURLToPath(import.meta.url);
-	var __dirname = dirname(__filename);
-	var pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
-	vsystemver = pkg.version || vsystemver;
-} catch (_) {}
-const vsystemvermsg = vsoftwarename + " v" + vsystemver
 
 
 function versionMsg(){
-	return vsystemvermsg
+	return vsoftwarename + " v" + softwareVersion()
 }
 
 function softwareName(){
@@ -26,7 +15,7 @@ function softwareName(){
 }
 
 function softwareVersion(){
-	return vsystemver;
+	return appConfig.get('currentversion', '0.0.0');
 }
 
 function getSystemInfo(){
@@ -35,7 +24,7 @@ function getSystemInfo(){
 	var iobj = {}
 	iobj.longestline = 0
 	iobj.validlines = 0
-	iobj.systemver = vsystemvermsg
+	iobj.systemver = versionMsg()
 	// if (vsystemvermsg){
 	// 	iobj.validlines += 1
 	// }

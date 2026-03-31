@@ -9,6 +9,20 @@
  *   - Admin UI       (metadata for labels, grouping, input types)
  */
 
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Read version from package.json once at module load so the config system
+// caches it and consumers use appConfig.get('currentversion').
+var _pkgVersion = '0.0.0';
+try {
+	var _cfgFilename = fileURLToPath(import.meta.url);
+	var _cfgDirname = dirname(_cfgFilename);
+	var _pkg = JSON.parse(readFileSync(join(_cfgDirname, '../../package.json'), 'utf8'));
+	_pkgVersion = _pkg.version || _pkgVersion;
+} catch (_) {}
+
 var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// System
@@ -20,7 +34,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'bbsname',           defaultValue: 'BBS',            type: 'string',  category: 'system',      description: 'Short BBS name for drop files and Synchronet shims' },
 	{ key: 'system_name',       defaultValue: 'Canectic BBS',   type: 'string',  category: 'system',      description: 'System name for login handler title' },
 	{ key: 'boardphone',        defaultValue: 'N/A',            type: 'string',  category: 'system',      description: 'BBS phone number for QWK control.dat' },
-	{ key: 'currentversion',    defaultValue: '0.1a',           type: 'string',  category: 'system',      description: 'Software version for message tearlines' },
+	{ key: 'currentversion',    defaultValue: _pkgVersion,      type: 'string',  category: 'system',      description: 'Software version (auto-read from package.json, overridable)' },
 	{ key: 'DefaultUser',       defaultValue: 'John Doe',       type: 'string',  category: 'system',      description: 'Default poster name (legacy)' },
 	{ key: 'SYSOP_USERNAME',    defaultValue: '',                type: 'string',  category: 'system',      description: 'Sysop username for PM system' },
 
