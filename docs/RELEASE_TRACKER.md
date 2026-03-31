@@ -171,6 +171,7 @@ Last updated: 2026-03-31
 | 3 | Door menus and collections | [x] | Collections, terminal browser, web cards, TinyMCE descriptions, ANSI colour rendering |
 | 4 | Door server BBS registration | [ ] | Register with door game servers |
 | 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
+| 6 | Full nodespy implementation | [ ] | Sysop real-time node monitoring and interaction |
 
 ---
 

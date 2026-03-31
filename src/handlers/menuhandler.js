@@ -21,6 +21,7 @@ import { fileBrowser } from "./menucommands/fileBrowser.js";
 import { fileBatchDownload } from "./menucommands/fileBatchDownload.js";
 import { fileUpload } from "./menucommands/fileUpload.js";
 import { fileSearch } from "./menucommands/fileSearch.js";
+import { goodbye } from "./menucommands/goodbye.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -1045,6 +1046,10 @@ class MenuHandler extends BaseHandler {
 			case "logOff":
 				this.finished = true;
 				this.emitter.emit("HangupSignal");
+				return;
+
+			case "goodbye":
+				this._runSubModule(new goodbye(this.call));
 				return;
 
 			case "runXtrn":

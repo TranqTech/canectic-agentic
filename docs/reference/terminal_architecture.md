@@ -221,7 +221,8 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 
 | Command | Behavior |
 |---------|----------|
-| `logOff` | Emits `HangupSignal` |
+| `logOff` | Emits `HangupSignal` (immediate disconnect) |
+| `goodbye` | Sub-module: confirm logoff, offer batch download if files queued, then disconnect |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
 | `previousMenu` | Pops menu history |

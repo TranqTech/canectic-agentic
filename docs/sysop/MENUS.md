@@ -82,7 +82,8 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Last Callers | No | View recent caller list |
 | List Messages | No | List messages in current area |
 | Load Menu | Menu identifier | Navigate to another menu |
-| Log Off | No | End the session |
+| Log Off (Confirm) | No | Confirm logoff, prompt to download queued files |
+| Log Off (Fast) | No | End the session immediately |
 | New Scan (All) | No | Scan all areas for new messages |
 | New Scan (Group) | No | Scan current group for new messages |
 | Post Message | No | Compose a new message |
