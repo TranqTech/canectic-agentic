@@ -42,7 +42,6 @@ router.use(async function(req, res, next) {
 	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
 	res.locals.pmUnreadCount = 0;
 	if (req.cookies.sessionid) {
-		await sessionStore.sessionRenew(req.cookies.sessionid);
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
 			var pmUid = parseInt(pmSession.id);
@@ -963,12 +962,20 @@ router.get('/doors/play/:slug', async (req, res) => {
 	var wsHost = req.headers.host;
 	var wsUrl = wsProtocol + '://' + wsHost + '/ws/webdoor?token=' + token;
 
+	// Return URL: honour ?return= param, fall back to referer, then /doors
+	var returnUrl = req.query.return || req.headers.referer || '/doors';
+	// Ensure it's a local path (no open redirect)
+	if (!returnUrl.startsWith('/')) {
+		try { returnUrl = new URL(returnUrl).pathname; } catch (_) { returnUrl = '/doors'; }
+	}
+
 	res.render('doors/play', {
 		title: doorConfig.name || 'Door Game',
 		activelink: 'doors',
 		door: doorConfig,
 		wsUrl: wsUrl,
-		returnUrl: '/doors'
+		returnUrl: returnUrl,
+		ismobile: mobile({ ua: req.headers['user-agent'] })
 	});
 });
 

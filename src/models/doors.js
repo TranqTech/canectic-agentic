@@ -111,6 +111,9 @@ async function createDoor(data) {
 		active: data.active !== 'false' && data.active !== false,
 		sort_order: parseInt(data.sort_order) || 0,
 		description: (data.description || '').trim() || null,
+		long_desc: (data.long_desc || '').trim() || null,
+		long_desc_html: (data.long_desc_html || '').trim() || null,
+		icon_url: (data.icon_url || '').trim() || null,
 		created_at: new Date(),
 		updated_at: new Date()
 	};
@@ -178,6 +181,9 @@ async function updateDoor(id, data) {
 		active: data.active !== 'false' && data.active !== false,
 		sort_order: parseInt(data.sort_order) || 0,
 		description: (data.description || '').trim() || null,
+		long_desc: (data.long_desc || '').trim() || null,
+		long_desc_html: (data.long_desc_html || '').trim() || null,
+		icon_url: (data.icon_url || '').trim() || null,
 		updated_at: new Date()
 	};
 

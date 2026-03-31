@@ -27,11 +27,13 @@ import { WhosOnline } from "../handlers/whosonline.js";
 import { AnnouncementHandler } from "../handlers/announcementhandler.js";
 import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 import { fileBatchCheck } from "../handlers/menucommands/fileBatchCheck.js";
+import { whosOnlineCheck } from "../handlers/menucommands/whosOnlineCheck.js";
 import { mailVerifyCheck } from "../handlers/menucommands/mailVerifyCheck.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
 import {logCall, logCallDuration} from "../models/callers.js"
+import * as themes from "../models/themes.js"
 import appConfig from "../config/appConfig.js"
 
 //setup
@@ -54,6 +56,7 @@ const handlerRegistry = {
 	"whos_online":  (call) => new SubModuleAdapter(call, WhosOnline, "WhosOnline"),
 	"check_email":  (call) => new SubModuleAdapter(call, pmCheck, "PmCheck"),
 	"check_batch":  (call) => new SubModuleAdapter(call, fileBatchCheck, "FileBatchCheck"),
+	"check_online": (call) => new SubModuleAdapter(call, whosOnlineCheck, "WhosOnlineCheck"),
 	"announcements": (call) => new SubModuleAdapter(call, AnnouncementHandler, "Announcements"),
 	"verify_mail":   (call) => new SubModuleAdapter(call, mailVerifyCheck, "MailVerifyCheck"),
 	//"main_menu":    (call) => new MainMenuHandler(call),
@@ -70,6 +73,7 @@ const callFlows = {
 		"negotiate",
 		"logon",
 		"last_callers",
+		"check_online",
 		"announcements",
 		"verify_mail",
 		"check_email",
@@ -252,17 +256,27 @@ class IncomingCall{
 	loadConfigs(){
 		this.loadTheme();
 	}
-	loadTheme(){
-		console.log("Loading Theme")
-		var themename = appConfig.get('theme', 'canectic');
-		var tfwpath = configdir + "/themes/" + themename + ".json"
-		readFile(tfwpath, 'utf8', (error, data) => {
-			if(error){
-				console.log(error);
-				return;
-			}
-			this.theme = JSON.parse(data)
-		})
+	async loadTheme(){
+		var themeName = appConfig.get('theme', 'canectic');
+		var themeRow = await themes.getThemeBySlug(themeName);
+		if (!themeRow) {
+			// Fall back to default theme
+			themeRow = await themes.getDefaultTheme();
+		}
+		if (!themeRow) {
+			// Final fallback: load legacy JSON file if no DB themes exist yet
+			var tfwpath = configdir + "/themes/" + themeName + ".json";
+			readFile(tfwpath, 'utf8', (error, data) => {
+				if (error) {
+					alogger.writeAlog(1, 'Theme load failed: no DB theme and no JSON fallback', 'redbright');
+					this.theme = {};
+					return;
+				}
+				this.theme = JSON.parse(data);
+			});
+			return;
+		}
+		this.theme = themes.themeToConfig(themeRow);
 	}
 
 	// Writes to the output buffer for sysop nodespy
@@ -354,8 +368,8 @@ class IncomingCall{
 					this.file_batch = [];
 				}
 			}
-			// LoginOK advances through the flow (no explicit override)
-			this.logCallStart()
+			// LoginOK — await so call row exists before last_callers queries it
+			await this.logCallStart();
 			this._onHandlerComplete(null);
 		});
 
@@ -373,6 +387,9 @@ class IncomingCall{
 			if (this.nodeManager) {
 				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
 				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
+				if (this.web_originated) {
+					this.nodeManager.setNodeWebOriginated(this.nodenum, true);
+				}
 			}
 			this._onHandlerComplete(null);
 		});
@@ -402,7 +419,7 @@ class IncomingCall{
 			this._onHandlerComplete(null);
 		});
 
-		handler.emitter.on("RegistrationOK", () => {
+		handler.emitter.on("RegistrationOK", async () => {
 			var logmsg = this.loggingId + "\n  Registration successful for " + this.caller_username;
 			alogger.writeAlog(4, logmsg, "greenbright");
 			// Update node registry with the newly registered username
@@ -410,7 +427,7 @@ class IncomingCall{
 				this.nodeManager.setNodeUsername(this.nodenum, this.caller_username);
 				this.nodeManager.setNodeCallId(this.nodenum, this.uuid);
 			}
-			this.logCallStart();
+			await this.logCallStart();
 			this._onHandlerComplete(null);
 		});
 	}
@@ -598,18 +615,14 @@ class IncomingCall{
 		this.loadHandler(firstEntry.stage);
 	}
 
-	logCallStart(){
+	async logCallStart(){
 		if (this.user_record){
-			logCall(this.user_record, this.connection_type, this.callerId, this.caller_location)
-				.then(res =>{
-					if (res){
-						this.call_id = res;
-						return
-					}					
-				}).catch(err =>{
-					console.log(err)
-				})
-			
+			try {
+				var res = await logCall(this.user_record, this.connection_type, this.callerId, this.caller_location);
+				if (res) this.call_id = res;
+			} catch (err) {
+				console.log(err);
+			}
 		}
 	}
 

@@ -86,6 +86,11 @@ class nodeManager {
 		this.nodeRegistry[nodenum].connection_type = connectionType || "";
 	}
 
+	setNodeWebOriginated(nodenum, value) {
+		if (!this.nodeRegistry[nodenum]) return;
+		this.nodeRegistry[nodenum].web_originated = !!value;
+	}
+
 	getNodeInfo(nodenum) {
 		return this.nodeRegistry[nodenum] || null;
 	}

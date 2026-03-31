@@ -67,7 +67,7 @@ block content
                           data-max_nodes=door.max_nodes
                           data-active=(door.active ? 'true' : 'false')
                           data-sort_order=door.sort_order
-                          data-description=door.description || ''
+                          data-icon_url=door.icon_url || ''
                         )
                           td= door.name
                           td
@@ -80,7 +80,7 @@ block content
                             else if door.door_script
                               small.text-info= door.door_script
                             else
-                              | —
+                              | -
                           td.text-center
                             if door.max_nodes === 0
                               span.text-muted ∞
@@ -174,6 +174,11 @@ block content
                                 td.text-nowrap: code= v.token
                                 td.small= v.description
 
+    //- Hidden store for HTML fields per door (data attributes mangle HTML)
+    each door of (doorlist || [])
+      textarea.d-none(id='door_desc_' + door.id)= door.description || ''
+      textarea.d-none(id='door_html_' + door.id)= door.long_desc_html || ''
+
     //- Door Info Modal
     #doorInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
       .modal-dialog.modal-dialog-centered
@@ -216,115 +221,141 @@ block content
             h3.modal-title Add Door Game
             button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
           .modal-body
-            form(action='/admin/doors/new' method='POST')
-              .row
-                //- LEFT COLUMN — Identity + Executable
-                .col-6
-                  h5 Identity
-                  label.form-label Name:
-                  input.form-control.mb-2(type='text' name='name' required placeholder='e.g. Legend of the Red Dragon')
+            form#newDoorForm(action='/admin/doors/new' method='POST')
+              ul.nav.nav-tabs.mb-3(role='tablist')
+                li.nav-item(role='presentation')
+                  button.nav-link.active#newConfigTab(data-bs-toggle='tab' data-bs-target='#newConfigPane' type='button' role='tab' aria-selected='true') Configuration
+                li.nav-item(role='presentation')
+                  button.nav-link#newDescTab(data-bs-toggle='tab' data-bs-target='#newDescPane' type='button' role='tab' aria-selected='false') Description
+                li.nav-item(role='presentation')
+                  button.nav-link#newExtTab(data-bs-toggle='tab' data-bs-target='#newExtPane' type='button' role='tab' aria-selected='false') Extended Info
+                li.nav-item(role='presentation')
+                  button.nav-link#newMediaTab(data-bs-toggle='tab' data-bs-target='#newMediaPane' type='button' role='tab' aria-selected='false') Media
+              .tab-content
+                //- Tab 1: Configuration
+                #newConfigPane.tab-pane.fade.show.active(role='tabpanel')
                   .row
+                    //- LEFT COLUMN -- Identity + Executable
                     .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Lowercase letters, numbers, hyphens, underscores only. Used to launch the door from menus.')
-                        | Slug (unique ID) 
-                        i.bi.bi-info-circle.text-muted
-                      input.form-control.mb-2(type='text' name='slug' required placeholder='e.g. lord' pattern='[a-z0-9_-]+')
-                    .col-6
-                      label.form-label Launch Type:
-                      select.form-control.mb-2(name='launch_type')
-                        for lt in launchTypes
-                          option(value=lt)= lt
-                  label.form-label Description:
-                  input.form-control.mb-3(type='text' name='description' placeholder='Optional description')
+                      h5 Identity
+                      label.form-label Name:
+                      input.form-control.mb-2(type='text' name='name' required placeholder='e.g. Legend of the Red Dragon')
+                      .row
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Lowercase letters, numbers, hyphens, underscores only. Used to launch the door from menus.')
+                            | Slug (unique ID)
+                            i.bi.bi-info-circle.text-muted
+                          input.form-control.mb-2(type='text' name='slug' required placeholder='e.g. lord' pattern='[a-z0-9_-]+')
+                        .col-6
+                          label.form-label Launch Type:
+                          select.form-control.mb-2(name='launch_type')
+                            for lt in launchTypes
+                              option(value=lt)= lt
 
-                  h5 Executable
-                  label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables — see reference below.')
-                    | Door Directory 
-                    i.bi.bi-info-circle.text-muted
-                  input.form-control.mb-2(type='text' name='door_dir' placeholder='e.g. %!/lord')
-                  label.form-label(data-bs-toggle='tooltip' title='Shell command or batch file. Used by NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty. Supports %X variables.')
-                    | Command 
-                    i.bi.bi-info-circle.text-muted
-                  input.form-control.mb-2(type='text' name='cmd' placeholder='e.g. "c:\\bat\\lord.bat"')
-                  label.form-label(data-bs-toggle='tooltip' title='JavaScript door entry point. Used only by the SyncJSDoor launch type.')
-                    | JS Door Script 
-                    i.bi.bi-info-circle.text-muted
-                  input.form-control.mb-2(type='text' name='door_script' placeholder='e.g. lord.js')
-                  label.form-label(data-bs-toggle='tooltip' title='Space-separated arguments passed to the door process. Supports %X variables (e.g. %N for node number).')
-                    | Door Arguments 
-                    i.bi.bi-info-circle.text-muted
-                  input.form-control.mb-2(type='text' name='door_args' placeholder='e.g. -m RESET -n %N')
+                      h5 Executable
+                      label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables -- see reference below.')
+                        | Door Directory
+                        i.bi.bi-info-circle.text-muted
+                      input.form-control.mb-2(type='text' name='door_dir' placeholder='e.g. %!/lord')
+                      label.form-label(data-bs-toggle='tooltip' title='Shell command or batch file. Used by NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty. Supports %X variables.')
+                        | Command
+                        i.bi.bi-info-circle.text-muted
+                      input.form-control.mb-2(type='text' name='cmd' placeholder='e.g. "c:\\bat\\lord.bat"')
+                      label.form-label(data-bs-toggle='tooltip' title='JavaScript door entry point. Used only by the SyncJSDoor launch type.')
+                        | JS Door Script
+                        i.bi.bi-info-circle.text-muted
+                      input.form-control.mb-2(type='text' name='door_script' placeholder='e.g. lord.js')
+                      label.form-label(data-bs-toggle='tooltip' title='Space-separated arguments passed to the door process. Supports %X variables (e.g. %N for node number).')
+                        | Door Arguments
+                        i.bi.bi-info-circle.text-muted
+                      input.form-control.mb-2(type='text' name='door_args' placeholder='e.g. -m RESET -n %N')
 
-                //- RIGHT COLUMN — Dropfile + Options
-                .col-6
-                  h5 Dropfile
-                  .row
+                    //- RIGHT COLUMN -- Dropfile + Options
                     .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Format of the drop file generated for the door (e.g. DOOR.SYS, DORINFO). Leave as None if not needed.')
-                        | Dropfile Type 
-                        i.bi.bi-info-circle.text-muted
-                      select.form-control.mb-2(name='dropfile_type')
-                        option(value='') None
-                        for dt in dropfileTypes
-                          if dt
-                            option(value=dt)= dt
-                    .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Directory where the drop file is written. Supports %X variables.')
-                        | Dropfile Directory 
-                        i.bi.bi-info-circle.text-muted
-                      input.form-control.mb-2(type='text' name='dropfile_dir' placeholder='e.g. %M/doors/LOD')
+                      h5 Dropfile
+                      .row
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Format of the drop file generated for the door (e.g. DOOR.SYS, DORINFO). Leave as None if not needed.')
+                            | Dropfile Type
+                            i.bi.bi-info-circle.text-muted
+                          select.form-control.mb-2(name='dropfile_type')
+                            option(value='') None
+                            for dt in dropfileTypes
+                              if dt
+                                option(value=dt)= dt
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Directory where the drop file is written. Supports %X variables.')
+                            | Dropfile Directory
+                            i.bi.bi-info-circle.text-muted
+                          input.form-control.mb-2(type='text' name='dropfile_dir' placeholder='e.g. %M/doors/LOD')
 
-                  h5.mt-3 Options
-                  .row
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Maximum simultaneous users in this door. 0 = unlimited.')
-                        | Max Nodes 
-                        i.bi.bi-info-circle.text-muted
-                      input.form-control.mb-2(type='number' name='max_nodes' value='0' min='0')
-                    .col-4
-                      label.form-label Sort Order:
-                      input.form-control.mb-2(type='number' name='sort_order' value='0')
-                    .col-4
-                      label.form-label Active:
-                      select.form-control.mb-2(name='active')
-                        option(value='true') Yes
-                        option(value='false') No
-                  .row
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Show "Press any key to continue" after the door process exits.')
-                        | Pause on Exit 
-                        i.bi.bi-info-circle.text-muted
-                      select.form-control.mb-2(name='pause_on_exit')
-                        option(value='true') Yes
-                        option(value='false') No
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Force 80x25 terminal size and center output on larger terminals. Use for doors that do not handle variable terminal sizes.')
-                        | Fixed 80x25
-                        i.bi.bi-info-circle.text-muted
-                      select.form-control.mb-2(name='fixed_size')
-                        option(value='false') No
-                        option(value='true') Yes
-                  .row
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for local callers.')
-                        | Real Names (Local)
-                        i.bi.bi-info-circle.text-muted
-                      select.form-control.mb-2(name='usereal_local')
-                        option(value='false') No
-                        option(value='true') Yes
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for door session callers.')
-                        | Real Names (Door) 
-                        i.bi.bi-info-circle.text-muted
-                      select.form-control.mb-2(name='usereal_doorsession')
-                        option(value='false') No
-                        option(value='true') Yes
-                  .row
-                    .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Subdirectory under door directory used for door-specific database files (e.g. LORD player data).')
-                        | DB Subdir 
-                        i.bi.bi-info-circle.text-muted
-                      input.form-control.mb-2(type='text' name='db_subdir' placeholder='e.g. DB')
+                      h5.mt-3 Options
+                      .row
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Maximum simultaneous users in this door. 0 = unlimited.')
+                            | Max Nodes
+                            i.bi.bi-info-circle.text-muted
+                          input.form-control.mb-2(type='number' name='max_nodes' value='0' min='0')
+                        .col-4
+                          label.form-label Sort Order:
+                          input.form-control.mb-2(type='number' name='sort_order' value='0')
+                        .col-4
+                          label.form-label Active:
+                          select.form-control.mb-2(name='active')
+                            option(value='true') Yes
+                            option(value='false') No
+                      .row
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Show "Press any key to continue" after the door process exits.')
+                            | Pause on Exit
+                            i.bi.bi-info-circle.text-muted
+                          select.form-control.mb-2(name='pause_on_exit')
+                            option(value='true') Yes
+                            option(value='false') No
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Force 80x25 terminal size and center output on larger terminals. Use for doors that do not handle variable terminal sizes.')
+                            | Fixed 80x25
+                            i.bi.bi-info-circle.text-muted
+                          select.form-control.mb-2(name='fixed_size')
+                            option(value='false') No
+                            option(value='true') Yes
+                      .row
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for local callers.')
+                            | Real Names (Local)
+                            i.bi.bi-info-circle.text-muted
+                          select.form-control.mb-2(name='usereal_local')
+                            option(value='false') No
+                            option(value='true') Yes
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for door session callers.')
+                            | Real Names (Door)
+                            i.bi.bi-info-circle.text-muted
+                          select.form-control.mb-2(name='usereal_doorsession')
+                            option(value='false') No
+                            option(value='true') Yes
+                      .row
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Subdirectory under door directory used for door-specific database files (e.g. LORD player data).')
+                            | DB Subdir
+                            i.bi.bi-info-circle.text-muted
+                          input.form-control.mb-2(type='text' name='db_subdir' placeholder='e.g. DB')
+
+                //- Tab 2: Description
+                #newDescPane.tab-pane.fade(role='tabpanel')
+                  textarea#new_description(name='description')
+
+                //- Tab 3: Extended Info
+                #newExtPane.tab-pane.fade(role='tabpanel')
+                  textarea#new_long_desc_html(name='long_desc_html')
+
+                //- Tab 3: Media
+                #newMediaPane.tab-pane.fade(role='tabpanel')
+                  label.form-label Icon/Image URL:
+                  input#new_icon_url.form-control.mb-3(type='text' name='icon_url' placeholder='/images/doors/my-door.png')
+                  .text-center
+                    img#new_icon_preview.img-fluid(style='max-height:200px; display:none' alt='Preview')
+                    p#new_icon_placeholder.text-muted Enter an image URL above to see a preview.
 
               .row.mt-3
                 .col-12
@@ -340,114 +371,140 @@ block content
             button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
           .modal-body
             form#editDoorForm(method='POST')
-              .row
-                //- LEFT COLUMN — Identity + Executable
-                .col-6
-                  h5 Identity
-                  label.form-label Name:
-                  input#ed_name.form-control.mb-2(type='text' name='name' required)
+              ul.nav.nav-tabs.mb-3(role='tablist')
+                li.nav-item(role='presentation')
+                  button.nav-link.active#edConfigTab(data-bs-toggle='tab' data-bs-target='#edConfigPane' type='button' role='tab' aria-selected='true') Configuration
+                li.nav-item(role='presentation')
+                  button.nav-link#edDescTab(data-bs-toggle='tab' data-bs-target='#edDescPane' type='button' role='tab' aria-selected='false') Description
+                li.nav-item(role='presentation')
+                  button.nav-link#edExtTab(data-bs-toggle='tab' data-bs-target='#edExtPane' type='button' role='tab' aria-selected='false') Extended Info
+                li.nav-item(role='presentation')
+                  button.nav-link#edMediaTab(data-bs-toggle='tab' data-bs-target='#edMediaPane' type='button' role='tab' aria-selected='false') Media
+              .tab-content
+                //- Tab 1: Configuration
+                #edConfigPane.tab-pane.fade.show.active(role='tabpanel')
                   .row
+                    //- LEFT COLUMN -- Identity + Executable
                     .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Lowercase letters, numbers, hyphens, underscores only.')
-                        | Slug 
-                        i.bi.bi-info-circle.text-muted
-                      input#ed_slug.form-control.mb-2(type='text' name='slug' required pattern='[a-z0-9_-]+')
-                    .col-6
-                      label.form-label Launch Type:
-                      select#ed_launch_type.form-control.mb-2(name='launch_type')
-                        for lt in launchTypes
-                          option(value=lt)= lt
-                  label.form-label Description:
-                  input#ed_description.form-control.mb-3(type='text' name='description')
+                      h5 Identity
+                      label.form-label Name:
+                      input#ed_name.form-control.mb-2(type='text' name='name' required)
+                      .row
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Lowercase letters, numbers, hyphens, underscores only.')
+                            | Slug
+                            i.bi.bi-info-circle.text-muted
+                          input#ed_slug.form-control.mb-2(type='text' name='slug' required pattern='[a-z0-9_-]+')
+                        .col-6
+                          label.form-label Launch Type:
+                          select#ed_launch_type.form-control.mb-2(name='launch_type')
+                            for lt in launchTypes
+                              option(value=lt)= lt
 
-                  h5 Executable
-                  label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables.')
-                    | Door Directory 
-                    i.bi.bi-info-circle.text-muted
-                  input#ed_door_dir.form-control.mb-2(type='text' name='door_dir')
-                  label.form-label(data-bs-toggle='tooltip' title='Shell command or batch file. Used by NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty. Supports %X variables.')
-                    | Command 
-                    i.bi.bi-info-circle.text-muted
-                  input#ed_cmd.form-control.mb-2(type='text' name='cmd')
-                  label.form-label(data-bs-toggle='tooltip' title='JavaScript door entry point. Used only by the SyncJSDoor launch type.')
-                    | JS Door Script 
-                    i.bi.bi-info-circle.text-muted
-                  input#ed_door_script.form-control.mb-2(type='text' name='door_script')
-                  label.form-label(data-bs-toggle='tooltip' title='Space-separated arguments passed to the door process. Supports %X variables (e.g. %N for node number).')
-                    | Door Arguments 
-                    i.bi.bi-info-circle.text-muted
-                  input#ed_door_args.form-control.mb-2(type='text' name='door_args')
+                      h5 Executable
+                      label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables.')
+                        | Door Directory
+                        i.bi.bi-info-circle.text-muted
+                      input#ed_door_dir.form-control.mb-2(type='text' name='door_dir')
+                      label.form-label(data-bs-toggle='tooltip' title='Shell command or batch file. Used by NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty. Supports %X variables.')
+                        | Command
+                        i.bi.bi-info-circle.text-muted
+                      input#ed_cmd.form-control.mb-2(type='text' name='cmd')
+                      label.form-label(data-bs-toggle='tooltip' title='JavaScript door entry point. Used only by the SyncJSDoor launch type.')
+                        | JS Door Script
+                        i.bi.bi-info-circle.text-muted
+                      input#ed_door_script.form-control.mb-2(type='text' name='door_script')
+                      label.form-label(data-bs-toggle='tooltip' title='Space-separated arguments passed to the door process. Supports %X variables (e.g. %N for node number).')
+                        | Door Arguments
+                        i.bi.bi-info-circle.text-muted
+                      input#ed_door_args.form-control.mb-2(type='text' name='door_args')
 
-                //- RIGHT COLUMN — Dropfile + Options
-                .col-6
-                  h5 Dropfile
-                  .row
+                    //- RIGHT COLUMN -- Dropfile + Options
                     .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Format of the drop file generated for the door. Leave as None if not needed.')
-                        | Dropfile Type 
-                        i.bi.bi-info-circle.text-muted
-                      select#ed_dropfile_type.form-control.mb-2(name='dropfile_type')
-                        option(value='') None
-                        for dt in dropfileTypes
-                          if dt
-                            option(value=dt)= dt
-                    .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Directory where the drop file is written. Supports %X variables.')
-                        | Dropfile Directory 
-                        i.bi.bi-info-circle.text-muted
-                      input#ed_dropfile_dir.form-control.mb-2(type='text' name='dropfile_dir')
+                      h5 Dropfile
+                      .row
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Format of the drop file generated for the door. Leave as None if not needed.')
+                            | Dropfile Type
+                            i.bi.bi-info-circle.text-muted
+                          select#ed_dropfile_type.form-control.mb-2(name='dropfile_type')
+                            option(value='') None
+                            for dt in dropfileTypes
+                              if dt
+                                option(value=dt)= dt
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Directory where the drop file is written. Supports %X variables.')
+                            | Dropfile Directory
+                            i.bi.bi-info-circle.text-muted
+                          input#ed_dropfile_dir.form-control.mb-2(type='text' name='dropfile_dir')
 
-                  h5.mt-3 Options
-                  .row
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Maximum simultaneous users in this door. 0 = unlimited.')
-                        | Max Nodes 
-                        i.bi.bi-info-circle.text-muted
-                      input#ed_max_nodes.form-control.mb-2(type='number' name='max_nodes' min='0')
-                    .col-4
-                      label.form-label Sort Order:
-                      input#ed_sort_order.form-control.mb-2(type='number' name='sort_order')
-                    .col-4
-                      label.form-label Active:
-                      select#ed_active.form-control.mb-2(name='active')
-                        option(value='true') Yes
-                        option(value='false') No
-                  .row
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Show "Press any key to continue" after the door process exits.')
-                        | Pause on Exit 
-                        i.bi.bi-info-circle.text-muted
-                      select#ed_pause.form-control.mb-2(name='pause_on_exit')
-                        option(value='true') Yes
-                        option(value='false') No
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Force 80x25 terminal size and center output on larger terminals.')
-                        | Fixed 80x25
-                        i.bi.bi-info-circle.text-muted
-                      select#ed_fixed_size.form-control.mb-2(name='fixed_size')
-                        option(value='false') No
-                        option(value='true') Yes
-                  .row
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for local callers.')
-                        | Real Names (Local)
-                        i.bi.bi-info-circle.text-muted
-                      select#ed_usereal_local.form-control.mb-2(name='usereal_local')
-                        option(value='false') No
-                        option(value='true') Yes
-                    .col-4
-                      label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for door session callers.')
-                        | Real Names (Door)
-                        i.bi.bi-info-circle.text-muted
-                      select#ed_usereal_doorsession.form-control.mb-2(name='usereal_doorsession')
-                        option(value='false') No
-                        option(value='true') Yes
-                  .row
-                    .col-6
-                      label.form-label(data-bs-toggle='tooltip' title='Subdirectory under door directory used for door-specific database files.')
-                        | DB Subdir 
-                        i.bi.bi-info-circle.text-muted
-                      input#ed_db_subdir.form-control.mb-2(type='text' name='db_subdir')
+                      h5.mt-3 Options
+                      .row
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Maximum simultaneous users in this door. 0 = unlimited.')
+                            | Max Nodes
+                            i.bi.bi-info-circle.text-muted
+                          input#ed_max_nodes.form-control.mb-2(type='number' name='max_nodes' min='0')
+                        .col-4
+                          label.form-label Sort Order:
+                          input#ed_sort_order.form-control.mb-2(type='number' name='sort_order')
+                        .col-4
+                          label.form-label Active:
+                          select#ed_active.form-control.mb-2(name='active')
+                            option(value='true') Yes
+                            option(value='false') No
+                      .row
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Show "Press any key to continue" after the door process exits.')
+                            | Pause on Exit
+                            i.bi.bi-info-circle.text-muted
+                          select#ed_pause.form-control.mb-2(name='pause_on_exit')
+                            option(value='true') Yes
+                            option(value='false') No
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Force 80x25 terminal size and center output on larger terminals.')
+                            | Fixed 80x25
+                            i.bi.bi-info-circle.text-muted
+                          select#ed_fixed_size.form-control.mb-2(name='fixed_size')
+                            option(value='false') No
+                            option(value='true') Yes
+                      .row
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for local callers.')
+                            | Real Names (Local)
+                            i.bi.bi-info-circle.text-muted
+                          select#ed_usereal_local.form-control.mb-2(name='usereal_local')
+                            option(value='false') No
+                            option(value='true') Yes
+                        .col-4
+                          label.form-label(data-bs-toggle='tooltip' title='Use real name instead of alias in drop files for door session callers.')
+                            | Real Names (Door)
+                            i.bi.bi-info-circle.text-muted
+                          select#ed_usereal_doorsession.form-control.mb-2(name='usereal_doorsession')
+                            option(value='false') No
+                            option(value='true') Yes
+                      .row
+                        .col-6
+                          label.form-label(data-bs-toggle='tooltip' title='Subdirectory under door directory used for door-specific database files.')
+                            | DB Subdir
+                            i.bi.bi-info-circle.text-muted
+                          input#ed_db_subdir.form-control.mb-2(type='text' name='db_subdir')
+
+                //- Tab 2: Description
+                #edDescPane.tab-pane.fade(role='tabpanel')
+                  textarea#ed_description(name='description')
+
+                //- Tab 3: Extended Info
+                #edExtPane.tab-pane.fade(role='tabpanel')
+                  textarea#ed_long_desc_html(name='long_desc_html')
+
+                //- Tab 3: Media
+                #edMediaPane.tab-pane.fade(role='tabpanel')
+                  label.form-label Icon/Image URL:
+                  input#ed_icon_url.form-control.mb-3(type='text' name='icon_url' placeholder='/images/doors/my-door.png')
+                  .text-center
+                    img#ed_icon_preview.img-fluid(style='max-height:200px; display:none' alt='Preview')
+                    p#ed_icon_placeholder.text-muted Enter an image URL above to see a preview.
 
               .row.mt-3
                 .col-12
@@ -481,7 +538,115 @@ block content
       var editDoorModal   = new bootstrap.Modal(document.getElementById('editDoorModal'));
       var deleteDoorModal = new bootstrap.Modal(document.getElementById('deleteDoorModal'));
 
-      // Edit button
+      // ---- TinyMCE shared config ----
+      // ANSI 16-color palette — matches closestAnsiColor() in announcements.js
+      var ansiColorMap = [
+        '000000', 'Black',
+        'AA0000', 'Red',
+        '00AA00', 'Green',
+        'AA5500', 'Yellow (dark)',
+        '0000AA', 'Blue',
+        'AA00AA', 'Magenta',
+        '00AAAA', 'Cyan',
+        'AAAAAA', 'White (grey)',
+        '555555', 'Bright Black',
+        'FF5555', 'Bright Red',
+        '55FF55', 'Bright Green',
+        'FFFF55', 'Bright Yellow',
+        '5555FF', 'Bright Blue',
+        'FF55FF', 'Bright Magenta',
+        '55FFFF', 'Bright Cyan',
+        'FFFFFF', 'Bright White'
+      ];
+      var mceBase = {
+        license_key: 'gpl',
+        menubar: false,
+        plugins: 'lists link autolink',
+        toolbar: 'bold italic underline strikethrough | forecolor backcolor | bullist numlist | link | removeformat',
+        skin: 'oxide-dark',
+        content_css: 'dark',
+        color_map: ansiColorMap,
+        color_cols: 8,
+        custom_colors: false,
+        branding: false,
+        promotion: false,
+        setup: function(editor) {
+          editor.on('change', function() { editor.save(); });
+        }
+      };
+
+      // Lazy-init TinyMCE per tab (hidden tabs break TinyMCE rendering)
+      var mceInited = {};
+      function lazyMce(tabId, selector, height) {
+        document.getElementById(tabId).addEventListener('shown.bs.tab', function() {
+          if (!mceInited[selector]) {
+            tinymce.init(Object.assign({}, mceBase, { selector: selector, height: height }));
+            mceInited[selector] = true;
+          }
+        });
+      }
+      lazyMce('newDescTab', '#new_description', 300);
+      lazyMce('newExtTab',  '#new_long_desc_html', 400);
+      lazyMce('edDescTab',  '#ed_description', 300);
+      lazyMce('edExtTab',   '#ed_long_desc_html', 400);
+
+      // ---- Image preview helpers ----
+      function setupIconPreview(inputId, imgId, placeholderId) {
+        var input = document.getElementById(inputId);
+        var img   = document.getElementById(imgId);
+        var ph    = document.getElementById(placeholderId);
+        input.addEventListener('input', function() {
+          var url = input.value.trim();
+          if (url) {
+            img.src = url;
+            img.style.display = 'inline-block';
+            ph.style.display  = 'none';
+          } else {
+            img.style.display = 'none';
+            img.src = '';
+            ph.style.display  = 'block';
+          }
+        });
+        // Hide broken images gracefully
+        img.addEventListener('error', function() {
+          img.style.display = 'none';
+          ph.textContent    = 'Image could not be loaded.';
+          ph.style.display  = 'block';
+        });
+      }
+      setupIconPreview('new_icon_url', 'new_icon_preview', 'new_icon_placeholder');
+      setupIconPreview('ed_icon_url',  'ed_icon_preview',  'ed_icon_placeholder');
+
+      // ---- Form submit: sync TinyMCE before POST ----
+      document.getElementById('newDoorForm').addEventListener('submit', function() {
+        var ed1 = tinymce.get('new_description');
+        var ed2 = tinymce.get('new_long_desc_html');
+        if (ed1) ed1.save();
+        if (ed2) ed2.save();
+      });
+      document.getElementById('editDoorForm').addEventListener('submit', function() {
+        var ed1 = tinymce.get('ed_description');
+        var ed2 = tinymce.get('ed_long_desc_html');
+        if (ed1) ed1.save();
+        if (ed2) ed2.save();
+      });
+
+      // ---- Reset New Door modal tabs when closed ----
+      document.getElementById('newDoorModal').addEventListener('hidden.bs.modal', function() {
+        // Switch back to Configuration tab
+        var configTab = document.getElementById('newConfigTab');
+        var tab = bootstrap.Tab.getOrCreateInstance(configTab);
+        tab.show();
+      });
+
+      // ---- Reset Edit Door modal tabs when closed ----
+      document.getElementById('editDoorModal').addEventListener('hidden.bs.modal', function() {
+        var configTab = document.getElementById('edConfigTab');
+        var tab = bootstrap.Tab.getOrCreateInstance(configTab);
+        tab.show();
+      });
+
+      // ---- Edit button ----
       document.querySelectorAll('.edit-door-btn').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
           e.stopPropagation();
@@ -492,7 +657,6 @@ block content
           document.getElementById('ed_name').value             = d.name;
           document.getElementById('ed_slug').value             = d.slug;
           document.getElementById('ed_launch_type').value      = d.launch_type;
-          document.getElementById('ed_description').value      = d.description;
           document.getElementById('ed_cmd').value              = d.cmd;
           document.getElementById('ed_door_script').value      = d.door_script;
           document.getElementById('ed_door_dir').value         = d.door_dir;
@@ -512,11 +676,46 @@ block content
           try { args = JSON.parse(d.door_args || '[]'); } catch(_) {}
           document.getElementById('ed_door_args').value = Array.isArray(args) ? args.join(' ') : '';
 
+          // Description tab fields - load from hidden textareas (HTML breaks data attributes)
+          var descEl = document.getElementById('door_desc_' + d.id);
+          var descContent = descEl ? descEl.value : '';
+          var edDescEditor = tinymce.get('ed_description');
+          if (edDescEditor) {
+            edDescEditor.setContent(descContent);
+          } else {
+            document.getElementById('ed_description').value = descContent;
+          }
+
+          var hiddenEl = document.getElementById('door_html_' + d.id);
+          var htmlContent = hiddenEl ? hiddenEl.value : '';
+          var edEditor = tinymce.get('ed_long_desc_html');
+          if (edEditor) {
+            edEditor.setContent(htmlContent);
+          } else {
+            document.getElementById('ed_long_desc_html').value = htmlContent;
+          }
+
+          // Media tab fields
+          var iconUrl = d.icon_url || '';
+          document.getElementById('ed_icon_url').value = iconUrl;
+          var edImg = document.getElementById('ed_icon_preview');
+          var edPh  = document.getElementById('ed_icon_placeholder');
+          if (iconUrl) {
+            edImg.src = iconUrl;
+            edImg.style.display = 'inline-block';
+            edPh.style.display  = 'none';
+          } else {
+            edImg.style.display = 'none';
+            edImg.src = '';
+            edPh.textContent    = 'Enter an image URL above to see a preview.';
+            edPh.style.display  = 'block';
+          }
+
           editDoorModal.show();
         });
       });
 
-      // Delete button
+      // ---- Delete button ----
       document.querySelectorAll('.delete-door-btn').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
           e.stopPropagation();
@@ -529,7 +728,7 @@ block content
         });
       });
 
-      // Row click → info modal
+      // ---- Row click: info modal ----
       document.querySelectorAll('#doorTable tbody tr').forEach(function(row) {
         row.style.cursor = 'pointer';
         row.addEventListener('click', function() {
@@ -537,12 +736,13 @@ block content
           document.getElementById('doorInfoTitle').textContent = d.name;
           document.getElementById('diSlug').textContent        = d.slug;
           document.getElementById('diLaunchType').textContent  = d.launch_type;
-          document.getElementById('diCmd').textContent          = d.cmd || '—';
-          document.getElementById('diScript').textContent       = d.door_script || '—';
-          document.getElementById('diDir').textContent          = d.door_dir || '—';
-          document.getElementById('diDropfile').textContent     = d.dropfile_type ? d.dropfile_type + ' → ' + d.dropfile_dir : '—';
+          document.getElementById('diCmd').textContent          = d.cmd || '-';
+          document.getElementById('diScript').textContent       = d.door_script || '-';
+          document.getElementById('diDir').textContent          = d.door_dir || '-';
+          document.getElementById('diDropfile').textContent     = d.dropfile_type ? d.dropfile_type + ' > ' + d.dropfile_dir : '-';
           document.getElementById('diMaxNodes').textContent     = d.max_nodes === '0' ? 'Unlimited' : d.max_nodes;
-          document.getElementById('diDescription').textContent  = d.description || '—';
+          var descHidden = document.getElementById('door_desc_' + d.id);
+          document.getElementById('diDescription').innerHTML    = (descHidden && descHidden.value.trim()) ? descHidden.value : '-';
 
           var infoModal = new bootstrap.Modal(document.getElementById('doorInfoModal'));
           infoModal.show();

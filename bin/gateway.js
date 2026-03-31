@@ -24,6 +24,7 @@ import * as redis from "../src/middleware/db/redis.js";
 import * as userMsgPointers from '../src/models/userMsgPointers.js';
 import * as userAreaSubs from '../src/models/userAreaSubs.js';
 import * as userFilePointers from '../src/models/userFilePointers.js';
+import { seedDefaultTheme } from '../src/models/themes.js';
 
 // --- Queue infrastructure ---
 import { closeQueues } from "../src/queues/queues.js";
@@ -388,6 +389,7 @@ async function main(){
 	}
 
 	await appConfig.load()
+	await seedDefaultTheme()
 	await prerunMaint()
 	await startNodeManager()
 	await startSocatManager()

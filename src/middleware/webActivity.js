@@ -41,6 +41,9 @@ async function _trackActivity(req) {
 	var session = await sessionStore.sessionGet(sessionid);
 	if (!session || !session.id) return;
 
+	// Renew session TTL on every page view
+	await sessionStore.sessionRenew(sessionid);
+
 	var now = Date.now();
 	var thresholdMs = appConfig.getNumber('web_idle_threshold', 30) * 60 * 1000;
 
@@ -73,20 +76,48 @@ async function _trackActivity(req) {
 // ==========================================================================
 
 // Called by WebSocket heartbeat to mark a user as online.
+// Preserves any existing activity string set by setActivity().
 async function markOnline(userId, username) {
 	try {
 		var rc = await redis.getClient();
 		var userKey = PRESENCE_PREFIX + userId;
+
+		// Read existing entry to preserve activity field
+		var existing = null;
+		var raw = await rc.get(userKey);
+		if (raw) {
+			try { existing = JSON.parse(raw); } catch (_) {}
+		}
+
 		var data = JSON.stringify({
 			userId: userId,
 			username: username,
 			lastSeen: Date.now(),
-			source: 'web'
+			source: 'web',
+			activity: (existing && existing.activity) || null
 		});
 		await rc.set(userKey, data, { EX: PRESENCE_TTL });
 		await rc.sAdd(PRESENCE_SET, String(userId));
 	} catch (err) {
 		alogger.writeAlog(4, 'Presence markOnline error: ' + err.message, 'yellow');
+	}
+}
+
+// Set a specific activity string for a web user (e.g. "Reading Mail", "Browsing Files").
+// Activity clears automatically when the presence entry expires.
+async function setActivity(userId, activity) {
+	try {
+		var rc = await redis.getClient();
+		var userKey = PRESENCE_PREFIX + userId;
+		var raw = await rc.get(userKey);
+		if (!raw) return;
+		var entry = JSON.parse(raw);
+		entry.activity = activity || null;
+		entry.lastSeen = Date.now();
+		var ttl = await rc.ttl(userKey);
+		await rc.set(userKey, JSON.stringify(entry), { EX: ttl > 0 ? ttl : PRESENCE_TTL });
+	} catch (err) {
+		alogger.writeAlog(4, 'Presence setActivity error: ' + err.message, 'yellow');
 	}
 }
 
@@ -131,5 +162,6 @@ export {
 	activityMiddleware,
 	markOnline,
 	markOffline,
+	setActivity,
 	getOnlineUsers
 };

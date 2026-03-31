@@ -1,4 +1,6 @@
 import { BaseSubModule } from "./basesubmodule.js";
+import { getOnlineUsers } from "../middleware/webActivity.js";
+import { formatActivity } from "../utils/activityMap.js";
 
 const unameclr = 13;
 const nodeclr = 14;
@@ -50,59 +52,18 @@ class WhosOnline extends BaseSubModule {
 
 	// Build a human-readable activity string from status + detail
 	_formatActivity(entry) {
-		var status = entry.status || "";
-		var detail = entry.detail || "";
-
-		switch (status) {
-			case "connecting":
-			case "negotiate":
-				return "Connecting";
-
-			case "logon":
-			case "login":
-				return "Logging In";
-
-			case "door_auth":
-				return "Authenticating";
-
-			case "door_launch":
-				return "Launching Door";
-
-			case "menu":
-				if (detail) {
-					return "Browsing the " + detail + " Menu";
-				}
-				return "Browsing Menus";
-
-			case "door":
-				if (detail) {
-					// detail_display holds the friendly door name (not the slug)
-					var displayName = entry.detail_display || detail;
-					return "Playing " + displayName;
-				}
-				return "Playing a Door";
-
-			case "last_callers":
-				return "Viewing Last Callers";
-
-			case "whos_online":
-				return "Viewing Who's Online";
-
-			case "disconnecting":
-				return "Logging Off";
-
-			default:
-				return status || "Unknown";
-		}
+		if (entry.source === 'web') return entry.activity || 'Browsing Web';
+		return formatActivity(entry.status, entry.detail, entry.detail_display);
 	}
 
 	_formatConnection(entry) {
+		if (entry.source === 'web' || entry.web_originated) return 'Web';
 		var connType = entry.connection_type || "";
 		var labels = {
-			"Websock":    "WebSocket",
-			"Websocket":  "WebSocket",
-			"TCP":        "TCP",
-			"Telnet":     "Telnet",
+			"Websock":    "Terminal",
+			"Websocket":  "Terminal",
+			"TCP":        "Terminal",
+			"Telnet":     "Terminal",
 		};
 		return labels[connType] || connType || "Unknown";
 	}
@@ -151,7 +112,7 @@ class WhosOnline extends BaseSubModule {
 
 			this.call.cmds.movecursor(this.liststartx, currY);
 			this.call.cmds.setfgcolor(nodeclr);
-			this.call.cmds.senddata(entry.nodenum.toString());
+			this.call.cmds.senddata(entry.nodenum !== null ? entry.nodenum.toString() : '-');
 
 			this.call.cmds.movecursor(this.col2x, currY);
 			this.call.cmds.setfgcolor(unameclr);
@@ -195,7 +156,7 @@ class WhosOnline extends BaseSubModule {
 
 		for (var ul = this.currntidx; ul < this.nodelist.length; ul++) {
 			var entry = this.nodelist[ul];
-			var line = " " + entry.nodenum.toString();
+			var line = " " + (entry.nodenum !== null ? entry.nodenum.toString() : '-');
 			for (var i = line.length; i < this.col2x; i++) line += " ";
 			line += entry.username || "\u2014";
 			for (var i = line.length; i < this.col3x; i++) line += " ";
@@ -243,19 +204,51 @@ class WhosOnline extends BaseSubModule {
 		if (!this.call) return;
 		this._calcPos();
 
-		// Get active nodes from the node manager
+		// Get active terminal nodes from the node manager
 		if (this.call.nodeManager) {
 			this.nodelist = this.call.nodeManager.getActiveNodes();
-			// Sort by node number
 			this.nodelist.sort((a, b) => a.nodenum - b.nodenum);
 		}
 
-		if (this.nodelist.length === 0) {
-			this.call.cmds.senddata(this.dumb ? "\r\n  No nodes currently active.\r\n" : "");
-			this.listfinished = true;
-		}
+		// Merge web presence users (async)
+		getOnlineUsers()
+			.then(webUsers => {
+				if (!this.active) return;
 
-		this._showList();
+				// Collect usernames from web-originated node entries to dedup
+				var webNodeUsers = {};
+				for (var n = 0; n < this.nodelist.length; n++) {
+					if (this.nodelist[n].web_originated && this.nodelist[n].username) {
+						webNodeUsers[this.nodelist[n].username.toLowerCase()] = true;
+					}
+				}
+
+				// Append web users sorted alphabetically, skip those already on a web node
+				webUsers.sort((a, b) => (a.username || '').localeCompare(b.username || ''));
+				for (var w = 0; w < webUsers.length; w++) {
+					var wu = webUsers[w];
+					if (!wu.username) continue;
+					if (webNodeUsers[wu.username.toLowerCase()]) continue;
+					this.nodelist.push({
+						nodenum: null,
+						username: wu.username,
+						source: 'web',
+						activity: wu.activity || null,
+						connection_type: 'Web'
+					});
+				}
+
+				if (this.nodelist.length === 0) {
+					this.call.cmds.senddata(this.dumb ? "\r\n  Nobody currently online.\r\n" : "");
+					this.listfinished = true;
+				}
+
+				this._showList();
+			})
+			.catch(() => {
+				if (!this.active) return;
+				this._showList();
+			});
 	}
 }
 

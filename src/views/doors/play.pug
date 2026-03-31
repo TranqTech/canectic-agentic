@@ -17,12 +17,28 @@ html
         align-items: center;
         min-height: 100vh;
       }
+      @media (max-width: 768px) {
+        body {
+          align-items: flex-start;
+        }
+        #door-wrapper {
+          padding: 2px;
+        }
+        #door-card {
+          border-radius: 0;
+          border-left: none;
+          border-right: none;
+        }
+        #terminal-container {
+          padding: 0;
+        }
+      }
       #door-wrapper {
         display: flex;
         flex-direction: column;
         align-items: center;
         width: 100%;
-        max-width: 900px;
+        max-width: 1200px;
         padding: 10px;
       }
       #door-card {
@@ -77,25 +93,14 @@ html
         var returnUrl = '#{returnUrl}';
         var TARGET_COLS = 80;
         var TARGET_ROWS = 25;
+        var isMobile = !{ismobile ? 'true' : 'false'};
 
-        // Calculate optimal font size to fill available vertical space
-        // while maintaining exactly 80x25 cells
-        function calcFontSize() {
-          var availHeight = window.innerHeight - 60; // header + padding
-          var availWidth = document.getElementById('door-card').clientWidth - 20;
-          // xterm cell ratio is approximately 0.5 (width:height)
-          var fromHeight = Math.floor(availHeight / TARGET_ROWS);
-          var fromWidth = Math.floor(availWidth / (TARGET_COLS * 0.6));
-          return Math.max(10, Math.min(fromHeight, fromWidth));
-        }
-
-        var fontSize = calcFontSize();
-
+        // Create terminal at a base size, then scale to fill
         var term = new Terminal({
           cols: TARGET_COLS,
           rows: TARGET_ROWS,
           cursorBlink: true,
-          fontSize: fontSize,
+          fontSize: isMobile ? 8 : 16,
           fontFamily: '"Cascadia Code", "Fira Code", "Consolas", "Courier New", monospace',
           theme: {
             background: '#000000',
@@ -110,6 +115,46 @@ html
         var container = document.getElementById('terminal-container');
         term.open(container);
 
+        // Measure actual cell dimensions from the rendered terminal,
+        // then calculate the largest font size that fits 80x25 in the viewport.
+        // Uses fractional sizing for minimal wasted space.
+        function fitTerminal() {
+          var cellWidth = term._core._renderService.dimensions.css.cell.width;
+          var cellHeight = term._core._renderService.dimensions.css.cell.height;
+          if (!cellWidth || !cellHeight) return;
+
+          var currentSize = term.options.fontSize || 16;
+          var ratio = cellWidth / currentSize;
+          var vRatio = cellHeight / currentSize;
+
+          var headerHeight = isMobile ? 40 : 60;
+          var availHeight = window.innerHeight - headerHeight;
+          // On mobile, use window width directly with tighter margins
+          var widthPadding = isMobile ? 6 : 20;
+          var availWidth = isMobile
+            ? window.innerWidth - widthPadding
+            : document.getElementById('door-card').clientWidth - widthPadding;
+
+          var fromHeight = availHeight / (TARGET_ROWS * vRatio);
+          var fromWidth = availWidth / (TARGET_COLS * ratio);
+          // On mobile, width is always the constraint -- prioritize it
+          var optimal = isMobile ? fromWidth : Math.min(fromHeight, fromWidth);
+          // Round down on mobile to prevent overflow, round nearest on desktop
+          if (isMobile) {
+            optimal = Math.floor(optimal * 10) / 10;
+          } else {
+            optimal = Math.round(optimal * 10) / 10;
+          }
+          optimal = Math.max(6, optimal);
+
+          if (optimal !== currentSize) {
+            term.options.fontSize = optimal;
+          }
+        }
+
+        // Initial fit after render settles
+        setTimeout(fitTerminal, 50);
+
         var statusText = document.getElementById('statusText');
         var ws = null;
         var connected = false;
@@ -119,13 +164,11 @@ html
           statusText.className = className;
         }
 
-        // Resize font on window resize to keep 80x25 filling the space
+        // Refit on window resize
+        var resizeTimer = null;
         window.addEventListener('resize', function() {
-          var newSize = calcFontSize();
-          if (newSize !== fontSize) {
-            fontSize = newSize;
-            term.options.fontSize = fontSize;
-          }
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(fitTerminal, 100);
         });
 
         // Connect WebSocket

@@ -90,6 +90,23 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'users'
               span.visually-hidden  (current)
 
+        //- Menus & Themes
+        li.nav-item.dropdown
+          a.nav-link.dropdown-toggle(
+            data-bs-toggle='dropdown'
+            href='#'
+            role='button'
+            aria-haspopup='true'
+            aria-expanded='false'
+            class=(activenav === 'menus' || activenav === 'themes') ? 'active' : ''
+          )
+            | Menus
+            if activenav === 'menus' || activenav === 'themes'
+              span.visually-hidden  (current)
+          .dropdown-menu
+            a.dropdown-item(href='/admin/menus') Menu Editor
+            a.dropdown-item(href='/admin/themes') Themes
+
         //- Config
         li.nav-item
           a.nav-link(

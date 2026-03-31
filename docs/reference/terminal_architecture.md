@@ -51,7 +51,7 @@ Shared singleton managing node number allocation and a registry of active sessio
 Declared as ordered arrays of stage names in `callFlows`. The reserved name `"goodbye"` triggers hangup.
 
 ```
-Standard:   negotiate -> logon -> last_callers -> announcements -> verify_mail -> check_email -> check_batch -> menu -> goodbye
+Standard:   negotiate -> logon -> last_callers -> check_online -> announcements -> verify_mail -> check_email -> check_batch -> menu -> goodbye
 Doorserver: door_auth -> door_launch -> goodbye
 WebDoor:    webdoor_auth -> door_launch -> goodbye
 Test:       negotiate -> goodbye
@@ -74,6 +74,7 @@ Maps stage names to factory functions:
 | `door_launch` | `DoorLaunchHandler` | Routes to door target or door menu |
 | `last_callers` | `SubModuleAdapter(LastCallers)` | Recent caller display |
 | `whos_online` | `SubModuleAdapter(WhosOnline)` | Active node display |
+| `check_online` | `SubModuleAdapter(whosOnlineCheck)` | Shows who's online if other users are active |
 | `announcements` | `AnnouncementHandler` | Displays unread system announcements sequentially |
 | `verify_mail` | `SubModuleAdapter(mailVerifyCheck)` | Prompts unverified users to verify their email address |
 | `check_email` | `SubModuleAdapter(pmCheck)` | Unread PM prompt, optionally launches reader |
@@ -193,13 +194,13 @@ Extends `BaseHandler`. The main interactive hub after login.
 
 **Configuration** (loaded from PostgreSQL via `getMenu()` in `src/models/menus.js`):
 - `menu_type`: Input behavior — `Hotkey` (single-keypress dispatch, current handler behavior) or `Lightbar` (arrow-key navigable highlight bar, future). Stored in DB, persisted through admin UI, but the handler does not yet branch on it.
-- `menu_entries`: Array of entry objects with `hotkey`, `display`, `command_name`, `command_arg`, access control fields (`min_security`, `required_flags`, `prohibited_flags`), and display colors (`fg_clr`, `bg_clr`). Entry colors default to 7 (White) / 0 (Black) — they cannot be null because `setfgcolor(null)` renders as black (invisible on dark backgrounds).
+- `menu_entries`: Array of entry objects with `hotkey`, `display`, `command_name`, `command_arg`, `featured` (boolean), access control fields (`min_security`, `required_flags`, `prohibited_flags`), and display colors (`fg_clr`, `bg_clr`). Entry `fg_clr` and `bg_clr` are nullable. Colour cascade for foreground: explicit `fg_clr` > theme/menu `featured_clr` (when the entry has `featured = true`) > theme/menu `opt_clr`. When `bg_clr` is null, no background colour is set. Featured entries use `featured_clr` from the theme or menu override as their default foreground, making them visually distinct without requiring per-entry colour configuration.
 - `display_file` / `display_file_type`: Optional art file shown as menu background. `display_file` is a bare filename (no path or extension) — the art system resolves via `drawscreen()` → `_findArtFile()`, walking the terminal's format priority chain. `display_file_type` maps to a subdirectory: `"Screen"` → `screens/`, `"Header"` → `headers/`, `""` → `misc/`.
 - `display_entries`: Whether to render entry list over the display file.
 - Layout controls: `entries_x_offset`, `entries_y_offset`, `max_columns`, `col_gap`.
-- Theme color overrides: `title_clr`, `input_clr`, `prompt_clr`, `error_clr`, `hotkey_clr`. These are nullable — `getMenu()` strips null values (via `delete`) so they arrive as `undefined` in `_applyConfig()`, and the handler's `config.X !== undefined` check falls through to theme defaults.
+- Theme color overrides: `title_clr`, `input_clr`, `prompt_clr`, `error_clr`, `hotkey_clr`, `menu_prompt_clr`, `featured_clr`. These are nullable -- `getMenu()` strips null values (via `delete`) so they arrive as `undefined` in `_applyConfig()`, and the handler's `config.X !== undefined` check falls through to theme defaults. `menu_prompt_clr` controls the colour of the "Active Hotkeys:" prompt line. `featured_clr` is the default foreground for entries marked as featured.
 
-Menu and entry data is managed via the admin web UI (`/admin/menus`). The schemas are defined in `menus.conf` and `menu_entries.conf` for the DB migration system.
+Menu `name` is the programmatic identifier, enforced as slug-safe (`[a-z0-9_-]+`). The `title` field is the user-facing display label. Menu lookups (`getMenu()`, `menuExists()`) are case-insensitive. Menu and entry data is managed via the admin web UI (`/admin/menus`). The schemas are defined in `menus.conf` and `menu_entries.conf` for the DB migration system.
 
 **Access control**: `_isEntryAccessible()` checks caller's security level, permission flags (must have ALL required), and restriction flags (must have NONE of prohibited).
 
@@ -234,10 +235,75 @@ Menu and entry data is managed via the admin web UI (`/admin/menus`). The schema
 | `mailVerify` | Sub-module (request email verification) |
 | `fileGroupChange` | Sub-module |
 | `fileAreaChange` | Sub-module |
-| `listFiles` | Sub-module |
-| `fileBatchDownload` | Sub-module |
+| `fileBrowser` | Sub-module |
+| `downloadBatch` | Sub-module |
+| `fileSearch` | Sub-module |
+| `fileUpload` | Sub-module |
+| `doorBrowser` | Sub-module (door browser with collections) |
+| `announcements` | Sub-module |
+| `verifyMail` | Sub-module (request email verification) |
 
 **Sub-module management**: `_runSubModule()` pauses the menu, wires `ModuleReturn` and `HangupSignal`, starts the module. Menu handler owns inactivity timeouts even while a sub-module is active. On return, `_doModuleReturn()` cleans up and redraws.
+
+---
+
+## Theme System
+
+### Theme Model (`src/models/themes.js`)
+
+PostgreSQL-backed terminal colour theme management. Themes define the default colour palette for all terminal UI elements. Each theme is a named set of colour values (ANSI 0-15) organized into categories.
+
+**Schema** (`themes.conf`): `id`, `slug` (unique identifier), `name`, `description`, `is_default`, plus 37 colour/layout properties covering General, System, Menu, Lightbar, Input, Editor, Messages, and Layout categories.
+
+**Colour cascade** (highest to lowest priority):
+1. Per-entry explicit colour (fg_clr, bg_clr on menu_entries)
+2. Per-menu colour override (title_clr, prompt_clr, etc. on menus)
+3. Theme default (the active theme's colour values)
+4. Handler fallback (hardcoded values if theme is missing)
+
+**Loading**: `callmanager.loadTheme()` loads the theme by slug from the `theme` config key. Falls back to the default theme (is_default=true), then to the legacy JSON file in `config/themes/`. The theme object is stored on `call.theme` and passed to all handlers.
+
+**Seeding**: On first startup, `seedDefaultTheme()` imports the bundled `config/themes/canectic.json` into the database as the default theme.
+
+**Admin UI**: `/admin/themes` provides full CRUD with category-organized accordion colour editor, ANSI colour select dropdowns with live preview, theme duplication, and set-as-default. Accessible from the "Menus" dropdown in the admin nav.
+
+**Key properties** (by category):
+- **General**: title_clr, header_clr, box_border_clr, error_clr, warn_clr, progress_clr, df_clr, label_clr
+- **Menu**: prompt_clr, menu_prompt_clr, hotkey_clr, cmd_clr, opt_clr, featured_clr
+- **Input**: input_clr, field_clr, uname_clr, passwd_clr
+- **Messages**: msg_body_clr, msg_quote_clr, msg_tear_clr, msg_origin_clr, msg_tagline_clr
+- **Layout**: msg_x_margin, msg_y_margin
+
+---
+
+## Who's Online
+
+### WhosOnline (`whosonline.js`)
+
+SubModule displaying currently active users from two sources: terminal nodes (from nodeManager) and web presence (from Redis).
+
+**Data sources**:
+- Terminal nodes: `nodeManager.getActiveNodes()` sorted by node number
+- Web presence: `getOnlineUsers()` from `webActivity.js`, sorted alphabetically by username
+- Web door users (nodes with `web_originated` flag) are deduped against web presence entries to avoid double-listing
+
+**Display columns**: Node (number or `-` for web-only), Username, Activity, Connection (Terminal or Web)
+
+**Activity formatting**: Uses the central `formatActivity()` from `src/utils/activityMap.js`. Terminal entries resolve status + detail into human-readable labels. Web entries display the `activity` field from the presence payload, defaulting to "Browsing Web".
+
+### whosOnlineCheck (`menucommands/whosOnlineCheck.js`)
+
+Call flow wrapper that checks for other online activity before showing the Who's Online display. If no other terminal nodes or web users are active (excluding the current caller), skips silently. Otherwise delegates to WhosOnline.
+
+Used as the `check_online` call flow stage. The direct `whos_online` stage (no check) remains available as a menu command.
+
+### Activity Map (`src/utils/activityMap.js`)
+
+Central mapping of activity identifiers to display labels. Three components:
+
+- **ACTIVITY_LABELS**: Static map covering call flow stages, menu commands, and web activity codes
+- **ACTIVITY_FORMATTERS**: Dynamic formatters for activities with detail (menu name, door name)
+- **formatActivity(status, detail, detailDisplay)**: Resolves any activity identifier to a display string
 
 ---
 

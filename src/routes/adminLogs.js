@@ -34,7 +34,6 @@ router.use(async function(req, res, next) {
 	res.locals.currentPath  = '/adminlogs' + req.path;
 	res.locals.activelink   = 'logs';
 	if (req.cookies.sessionid) {
-		await sessionStore.sessionRenew(req.cookies.sessionid);
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
 			var pmUid = parseInt(pmSession.id);

@@ -26,7 +26,6 @@ router.use(async function(req, res, next) {
 	res.locals.DateTime    = DateTime;
 	res.locals.pmUnreadCount = 0;
 	if (req.cookies.sessionid) {
-		await sessionStore.sessionRenew(req.cookies.sessionid);
 		// Fetch unread count for nav badge
 		var session = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (session) {

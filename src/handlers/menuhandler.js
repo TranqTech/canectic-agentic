@@ -84,6 +84,8 @@ class MenuHandler extends BaseHandler {
 		this.prompt_clr = this.theme?.prompt_clr || 11;
 		this.error_clr = this.theme?.error_clr || 1;
 		this.hotkey_clr = this.theme?.hotkey_clr || 13;
+		this.menu_prompt_clr = this.theme?.menu_prompt_clr || 11;
+		this.featured_clr = this.theme?.featured_clr || 10;
 		this.df_clr = this.theme?.df_clr || 7;
 
 		this.loggingId = "Menu:" + this.menuName + " (Node " + this.call.nodenum + ")";
@@ -161,6 +163,8 @@ class MenuHandler extends BaseHandler {
 		if (config.prompt_clr !== undefined) this.prompt_clr = config.prompt_clr;
 		if (config.error_clr !== undefined) this.error_clr = config.error_clr;
 		if (config.hotkey_clr !== undefined) this.hotkey_clr = config.hotkey_clr;
+		if (config.menu_prompt_clr !== undefined) this.menu_prompt_clr = config.menu_prompt_clr;
+		if (config.featured_clr !== undefined) this.featured_clr = config.featured_clr;
 
 		this._filterEntries();
 		this._popHotkeys();
@@ -170,17 +174,14 @@ class MenuHandler extends BaseHandler {
 	// --- Hotkeys ---
 	_popHotkeys() {
 		this.hotkey_arr = [];
-		this.hotkey_msg = "Active Hotkeys: ";
 		for (var i = 0; i < this.visible_entries.length; i++) {
 			var hk = this.visible_entries[i].hotkey;
 			if (hk && !this.hotkey_arr.includes(hk.toUpperCase())) {
-				if (this.hotkey_arr.length > 0) {
-					this.hotkey_msg += ",";
-				}
 				this.hotkey_arr.push(hk.toUpperCase());
-				this.hotkey_msg += hk.toUpperCase();
 			}
 		}
+		this.hotkey_arr.sort();
+		this.hotkey_msg = "Active Hotkeys: " + this.hotkey_arr.join(",");
 	}
 
 	// --- Geometry ---
@@ -334,17 +335,20 @@ class MenuHandler extends BaseHandler {
 			var entry = page[i];
 
 			this.call.cmds.movecursor(drawX, drawY);
-			// Show hotkey prefix if display_entries is on, entry has display text and a hotkey
+			// Entry colors: explicit fg > featured_clr (if featured) > theme opt_clr
+			var defaultFg = entry.featured ? this.featured_clr : (this.theme?.opt_clr || 7);
+			var entryFg = entry.fg_clr !== undefined ? entry.fg_clr : defaultFg;
+			var entryBg = entry.bg_clr;
+
 			if (this.display_entries && entry.hotkey && entry.display) {
-				var hasBg = (entry.bg_clr !== undefined && entry.bg_clr !== 0);
-				if (hasBg) this.call.cmds.setbgcolor(entry.bg_clr);
+				if (entryBg !== undefined) this.call.cmds.setbgcolor(entryBg);
 				this.call.cmds.setfgcolor(this.hotkey_clr);
 				this.call.cmds.senddata(entry.hotkey.toUpperCase());
-				if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+				this.call.cmds.setfgcolor(entryFg);
 				this.call.cmds.senddata(' ');
 			} else {
-				if (entry.bg_clr !== undefined) this.call.cmds.setbgcolor(entry.bg_clr);
-				if (entry.fg_clr !== undefined) this.call.cmds.setfgcolor(entry.fg_clr);
+				if (entryBg !== undefined) this.call.cmds.setbgcolor(entryBg);
+				this.call.cmds.setfgcolor(entryFg);
 			}
 			this.call.cmds.senddata(entry.display);
 			this.call.cmds.resetcolors();
@@ -396,7 +400,7 @@ class MenuHandler extends BaseHandler {
 	_drawPromptArea() {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(this.hotkey_x, this.hotkey_y);
-		this.call.cmds.setfgcolor(this.hotkey_clr);
+		this.call.cmds.setfgcolor(this.menu_prompt_clr);
 		this.call.cmds.senddata(this.hotkey_msg);
 		this.call.cmds.movecursor(this.prompt_x, this.prompt_y);
 		this.call.cmds.setfgcolor(this.prompt_clr);
@@ -780,7 +784,7 @@ class MenuHandler extends BaseHandler {
 	// --- Menu navigation ---
 	// Root menus clear the history stack when landed on
 	_isRootMenu(menuName) {
-		return menuName === "Main";
+		return menuName.toLowerCase() === "main";
 	}
 
 	_navigateToMenu(targetMenu) {

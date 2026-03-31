@@ -43,6 +43,7 @@ Standard Express 4 setup with Pug view engine.
 2. `express.urlencoded({ extended: false })` — URL-encoded form bodies
 3. `cookieParser()` — Parses cookies (session ID lives here)
 4. `express.static('public')` — Serves static assets (CSS, JS, images) with dotfiles allowed
+5. `activityMiddleware` -- Session renewal, web engagement tracking, idle detection (fires before all route handlers)
 
 ### Route Mounting
 
@@ -81,7 +82,7 @@ A reverse lookup maps `session_index:{username}` → Set of session IDs. This en
 |---|---|---|
 | Create | `sessionStore(id, data, ttl)` | Sets hash + TTL, indexes by username |
 | Read | `sessionGet(id)` | Returns parsed session object or null |
-| Renew | `sessionRenew(id, ttl)` | Resets TTL — called on every request by route middleware |
+| Renew | `sessionRenew(id, ttl)` | Resets TTL -- called centrally by the activity middleware on every authenticated request |
 | Destroy | `sessionDestroy(id)` | Removes from Redis + username index |
 | Exists | `sessionExists(id)` | Boolean check |
 | List | `sessionList()` | Returns all session keys (admin use) |
@@ -216,10 +217,9 @@ Both login and register accept `Accept: application/json` requests. Error respon
 Each router (`index.js`, `admin.js`, `users.js`, `pm.js`) uses a consistent pattern:
 
 1. **Cookie parser** — `router.use(cookieParser())`
-2. **Shared locals injection** — A `router.use()` middleware that sets template variables available to all views in that router: `boardname`, `faviconlink`, `currentPath`, `activelink`, and (for index.js, users.js, files.js) `ismobile`
-3. **Session renewal** — The shared locals middleware also calls `sessionStore.sessionRenew()` on every request if a session cookie exists, keeping active sessions alive
-4. **Unread PM count** — `index.js`, `admin.js`, and `pm.js` all fetch `pmUnreadCount` via `privateMessages.getUnreadCount(userId)` in their shared middleware, making it available to nav templates for the mail badge
-5. **Flash messages** — `pm.js` loads flash messages via `flash.get(req)` into `res.locals.flash` for one-shot user feedback after redirects
+2. **Shared locals injection** -- A `router.use()` middleware that sets template variables available to all views in that router: `boardname`, `faviconlink`, `currentPath`, `activelink`, and (for index.js, users.js, files.js) `ismobile`
+3. **Unread PM count** -- `index.js`, `admin.js`, and `pm.js` all fetch `pmUnreadCount` via `privateMessages.getUnreadCount(userId)` in their shared middleware, making it available to nav templates for the mail badge
+4. **Flash messages** -- `pm.js` loads flash messages via `flash.get(req)` into `res.locals.flash` for one-shot user feedback after redirects
 
 ### getCurrentUser Pattern
 
@@ -289,6 +289,13 @@ For tables using DataTables (e.g., users, all-areas index), event delegation on 
 
 Two views: `index.pug` (menu list with create modal) and `view.pug` (menu detail with entries table, edit/delete modals, entry add/edit modals). Follows the standard modal-driven editing pattern.
 
+**Enhanced features:**
+- **Tabbed modals** -- Edit modals use Bootstrap nav tabs to separate Configuration and Colours into distinct panels
+- **Featured entry flag** -- Entries can be marked as featured, shown with a star indicator in the entries table
+- **Menu identifier validation** -- Slug-safe identifiers enforced on creation, case-insensitive lookup for menu resolution
+- **Dynamic command argument selects** -- Command-specific argument fields (door list, menu list) populated dynamically based on the selected command type
+- **"Reset All to Theme" button** -- On the Colours tab, resets all menu-level colour overrides to null so the handler falls through to theme defaults
+
 Menu-level color fields use `<select>` dropdowns with inline `style="color:<hex>"` on each option, rendered against a `.bg-dark` background. A `syncSelectColor()` JS function copies the selected option's color onto the `<select>` element itself on change and on page load (browsers don't natively show option inline styles on the closed select). A "Theme Default" option submits an empty value, which the model stores as `null`; `getMenu()` strips null color keys via `delete` so they arrive as `undefined` in `_applyConfig()` and the handler falls through to theme defaults.
 
 Entry-level `fg_clr`/`bg_clr` always have a value (default 7/0) — they're passed directly to `setfgcolor()` which renders `null` as black (ANSI color 0, invisible on dark backgrounds).
@@ -300,6 +307,16 @@ The `ANSI_COLORS` array in `menus.js` maps each of the 16 ANSI color values to a
 Single view: `index.pug` with table, info/edit/delete modals. Add and edit modals use a two-column layout (1100px wide): left column has identity and executable fields, right column has dropfile and options. All field descriptions are Bootstrap tooltips on `<label>` elements (small info icon) rather than `.form-text` blocks.
 
 A collapsible "Variable Reference" panel below the door table shows all `%X` substitution tokens organized by category (node/session, user, terminal, connection, door config, system directories, system info). Sourced from `configvars.getVariableList()`, which means adding a new variable to the engine automatically updates the admin reference.
+
+### Theme Admin Views (`views/admin/themes/`)
+
+Accessible from "Menus > Themes" in the admin nav.
+
+**Theme List** (`index.pug`): Table of all themes with name, slug, description, default badge. Actions: edit, set as default, duplicate, delete (blocked for default theme). New Theme modal for creation. Colour reference strip showing all 16 ANSI colours.
+
+**Theme Editor** (`view.pug`): Identity fields (name, slug, description) plus colour properties organized in a Bootstrap accordion by category (General, System, Menu, Lightbar, Input, Editor, Messages, Layout). Each colour property uses an ANSI colour select dropdown with `syncSelectColor()` live preview. First category auto-expands on load. Save button at top and bottom.
+
+**Set as Default**: POST action that clears the previous default, sets the new one, and updates the `theme` config key via configStore so the change takes effect for new terminal sessions.
 
 ### Config Admin Views (`views/admin/config/`)
 
@@ -679,16 +696,21 @@ Lightweight WebSocket endpoint at `/ws/presence` for real-time online user track
 - Clean shutdown marks all users offline and resets state
 
 **Redis keys:**
-- `presence:web:<userId>` - JSON with userId, username, lastSeen, source. TTL 120s.
+- `presence:web:<userId>` - JSON with `{ userId, username, lastSeen, source, activity }`. TTL 120s. The `activity` field holds a free-form string describing what the user is doing (e.g. "Reading Mail").
 - `presence:web:online` - Redis SET of online user IDs. Pruned on read.
 
 **Client integration:**
 Both user and admin Pug layouts include an auto-connecting heartbeat script when `currentuser` is present. Reconnects with 5-second delay on disconnect.
 
 **API:**
-- `markOnline(userId, username)` - called by heartbeat handler
+- `markOnline(userId, username)` - called by heartbeat handler. Preserves an existing `activity` field when refreshing the heartbeat so activity context survives across heartbeat cycles.
+- `setActivity(userId, activity)` - sets a specific activity string on an online user's presence entry (e.g. "Reading Mail"). Preserves remaining TTL. Activity clears when the presence key expires.
 - `markOffline(userId)` - called on disconnect and shutdown
 - `getOnlineUsers()` - returns array of online user objects with automatic pruning of expired entries
+
+**Session renewal:** The activity middleware now handles `sessionRenew()` centrally for all routes, replacing the per-router renewal calls that were previously scattered across index.js, admin.js, pm.js, files.js, and adminLogs.js.
+
+**Display labels:** `formatActivity()` from `src/utils/activityMap.js` is the central display label resolver. It maps internal activity keys to human-readable labels for the Who's Online display and other presence views.
 
 **Future extension:** The presence channel is designed for user-to-user instant messaging. Messages would be published via Redis pub/sub and delivered to connected clients through the WebSocket. The `_onMessage` handler has a placeholder for the `'im'` message type. Message history would be stored in Redis lists with configurable retention.
 
@@ -701,7 +723,6 @@ Both user and admin Pug layouts include an auto-connecting heartbeat script when
 - **Admin real-time dashboard** - Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
 - **Rate limiting** - No rate limiting on login attempts or API endpoints currently.
 - **Lightbar menu type** - `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
-- **Door menus and collections** - Categories/groups for organizing doors, ANSI art per category, terminal door selector, web door browser with filtering.
 - **User-to-user instant messaging** - Via the existing presence WebSocket channel, Redis pub/sub for delivery, Redis lists for history.
 
 ### Recently Completed
@@ -715,3 +736,9 @@ Both user and admin Pug layouts include an auto-connecting heartbeat script when
 - **Menu admin** -- Full web CRUD for menus and menu entries. PostgreSQL-backed (`menus` + `menu_entries` tables). Color picker selects with live preview using ANSI color map.
 - **Door admin** -- Full web CRUD for door game configurations. PostgreSQL-backed (`doors` table). Two-column modal layout, tooltip field descriptions, variable reference panel.
 - **Config variable substitution** -- `configvars.js` engine for `%X` token replacement in door commands, directories, and arguments. 36 variables across 6 categories.
+- **Theme system** -- PostgreSQL-backed terminal colour themes with admin CRUD, colour category accordion, seeding from legacy JSON.
+- **Who's Online** -- Terminal + web presence merged display, conditional call flow stage, activity map.
+- **Web activity tracking** -- Centralized session renewal, presence WebSocket with activity field, idle detection.
+- **Door collections** -- Many-to-many door categories with terminal browser and web card views.
+- **Menu enhancements** -- Tabbed admin modals, featured entries, menu_prompt_clr, nullable entry colours with theme fallback, slug-safe identifiers.
+- **ANSI colour palette** -- TinyMCE colour picker locked to 16 ANSI colours for terminal-safe rich text.

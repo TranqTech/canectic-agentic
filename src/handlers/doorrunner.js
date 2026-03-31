@@ -385,7 +385,7 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_launchDosemu() {
-		var doscmd = "dosemu -E " + this.doorCmd + " -t";
+		var doscmd = "dosemu -E " + this.doorCmd.replace(/\\/g, '\\\\') + " -t";
 		var logmsg = this.loggingId + "\n  Launching Dosemu: " + doscmd;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
@@ -467,7 +467,7 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_startPtyDosemu(port2) {
-		var doscmd = 'dosemu -I"serial { pseudo com 5 device ' + port2 + '}" -E ' + this.doorCmd + ' -t';
+		var doscmd = 'dosemu -I"serial { pseudo com 5 device ' + port2 + '}" -E ' + this.doorCmd.replace(/\\/g, '\\\\') + ' -t';
 		var logmsg = this.loggingId + "\n  Launching PTY Dosemu: " + doscmd;
 		alogger.writeAlog(5, logmsg, "greenbright");
 

@@ -4,10 +4,12 @@ import { getLastCallers } from "../models/callers.js";
 
 const unameclr = 13;
 const fcallclr = 6;
+const srcclr = 3;
 const lcallclr = 12;
 const ccntclr = 14;
 const headclr = 11;
 const msgclr = 10;
+const selfclr = 15;  // bright white for current caller highlight
 
 class LastCallers extends BaseSubModule {
 	constructor(call) {
@@ -23,9 +25,10 @@ class LastCallers extends BaseSubModule {
 		this.titlex = 2;
 		this.titley = 2;
 		this.liststartx = 3;
-		this.col2x = 27;
-		this.col3x = 53;
-		this.col4x = 73;
+		this.col2x = 24;    // Time
+		this.col3x = 37;    // Source
+		this.col4x = 50;    // Location
+		this.col5x = 73;    // Calls
 		this.liststarty = this.titley + 2;
 
 		// Dumb terminal header (built in _calcPos)
@@ -43,8 +46,10 @@ class LastCallers extends BaseSubModule {
 			for (var i = this.dumbline.length; i < this.col2x; i++) this.dumbline += " ";
 			this.dumbline += "Time";
 			for (var i = this.dumbline.length; i < this.col3x; i++) this.dumbline += " ";
-			this.dumbline += "Location";
+			this.dumbline += "Source";
 			for (var i = this.dumbline.length; i < this.col4x; i++) this.dumbline += " ";
+			this.dumbline += "Location";
+			for (var i = this.dumbline.length; i < this.col5x; i++) this.dumbline += " ";
 			this.dumbline += "Calls";
 			this.dumbhead = "-".repeat(79);
 		}
@@ -56,7 +61,15 @@ class LastCallers extends BaseSubModule {
 		if (ltob.hasSame(DateTime.local(), "day")) {
 			return ltob.toFormat("HH:mm");
 		}
-		return ltob.toFormat("MMMM dd");
+		return ltob.toFormat("MMM dd");
+	}
+
+	_formatSource(source) {
+		if (!source) return "";
+		var s = source.toLowerCase();
+		if (s === 'websocket' || s === 'terminal' || s === 'telnet' || s === 'tcp') return 'Terminal';
+		if (s === 'web') return 'Web';
+		return source.charAt(0).toUpperCase() + source.slice(1);
 	}
 
 	// --- Display ---
@@ -82,8 +95,10 @@ class LastCallers extends BaseSubModule {
 		this.call.cmds.movecursor(this.col2x, currY);
 		this.call.cmds.senddata("Time");
 		this.call.cmds.movecursor(this.col3x, currY);
+		this.call.cmds.senddata("Source");
+		this.call.cmds.movecursor(this.col4x, currY);
 		this.call.cmds.senddata("Location");
-		this.call.cmds.movecursor(this.col4x - 2, currY);
+		this.call.cmds.movecursor(this.col5x, currY);
 		this.call.cmds.senddata("Calls");
 		currY++;
 
@@ -92,30 +107,39 @@ class LastCallers extends BaseSubModule {
 		this.call.cmds.movecursor(this.col2x, currY);
 		this.call.cmds.senddata("--------");
 		this.call.cmds.movecursor(this.col3x, currY);
-		this.call.cmds.senddata("-------");
-		this.call.cmds.movecursor(this.col4x - 2, currY);
+		this.call.cmds.senddata("------");
+		this.call.cmds.movecursor(this.col4x, currY);
+		this.call.cmds.senddata("--------");
+		this.call.cmds.movecursor(this.col5x, currY);
 		this.call.cmds.senddata("-----");
 		currY++;
 
 		// Entries
 		for (var ul = this.currntidx; ul < this.callerlist.length; ul++) {
 			var entry = this.callerlist[ul];
+			var isSelf = entry.id === this.call.call_id;
 
 			this.call.cmds.movecursor(this.liststartx, currY);
-			this.call.cmds.setfgcolor(unameclr);
+			this.call.cmds.setfgcolor(isSelf ? selfclr : unameclr);
+			if (isSelf) this.call.cmds.senddata("\x1b[1m");
 			this.call.cmds.senddata(entry.username);
 
 			this.call.cmds.movecursor(this.col2x, currY);
-			this.call.cmds.setfgcolor(fcallclr);
+			this.call.cmds.setfgcolor(isSelf ? selfclr : fcallclr);
 			this.call.cmds.senddata(this._formatTime(entry.starttime));
 
-			this.call.cmds.movecursor(this.col3x + 2, currY);
-			this.call.cmds.setfgcolor(lcallclr);
-			this.call.cmds.senddata(entry.location || entry.source || "");
+			this.call.cmds.movecursor(this.col3x, currY);
+			this.call.cmds.setfgcolor(isSelf ? selfclr : srcclr);
+			this.call.cmds.senddata(this._formatSource(entry.source));
 
 			this.call.cmds.movecursor(this.col4x, currY);
-			this.call.cmds.setfgcolor(ccntclr);
+			this.call.cmds.setfgcolor(isSelf ? selfclr : lcallclr);
+			this.call.cmds.senddata(entry.location || "");
+
+			this.call.cmds.movecursor(this.col5x, currY);
+			this.call.cmds.setfgcolor(isSelf ? selfclr : ccntclr);
 			if (entry.logoncount) this.call.cmds.senddata(entry.logoncount.toString());
+			if (isSelf) this.call.cmds.resetcolors();
 
 			this.currntidx = ul;
 			currY++;
@@ -150,12 +174,16 @@ class LastCallers extends BaseSubModule {
 
 		for (var ul = this.currntidx; ul < this.callerlist.length; ul++) {
 			var entry = this.callerlist[ul];
-			var line = " " + entry.username;
+			var isSelf = entry.id === this.call.call_id;
+			var line = isSelf ? ">" : " ";
+			line += entry.username;
 			for (var i = line.length; i < this.col2x; i++) line += " ";
 			line += this._formatTime(entry.starttime);
 			for (var i = line.length; i < this.col3x; i++) line += " ";
-			line += entry.location || "Unknown";
+			line += this._formatSource(entry.source);
 			for (var i = line.length; i < this.col4x; i++) line += " ";
+			line += entry.location || "";
+			for (var i = line.length; i < this.col5x; i++) line += " ";
 			if (entry.logoncount) line += entry.logoncount.toString();
 
 			this.call.cmds.senddata("\r\n" + line);

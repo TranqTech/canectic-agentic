@@ -192,6 +192,25 @@ block content
 
   script.
     document.addEventListener('DOMContentLoaded', function() {
+      // ANSI 16-color palette — matches closestAnsiColor() in announcements.js
+      var ansiColorMap = [
+        '000000', 'Black',
+        'AA0000', 'Red',
+        '00AA00', 'Green',
+        'AA5500', 'Yellow (dark)',
+        '0000AA', 'Blue',
+        'AA00AA', 'Magenta',
+        '00AAAA', 'Cyan',
+        'AAAAAA', 'White (grey)',
+        '555555', 'Bright Black',
+        'FF5555', 'Bright Red',
+        '55FF55', 'Bright Green',
+        'FFFF55', 'Bright Yellow',
+        '5555FF', 'Bright Blue',
+        'FF55FF', 'Bright Magenta',
+        '55FFFF', 'Bright Cyan',
+        'FFFFFF', 'Bright White'
+      ];
       // TinyMCE config shared by both editors
       var mceConfig = {
         license_key: 'gpl',
@@ -200,6 +219,9 @@ block content
         toolbar: 'bold italic underline strikethrough | forecolor backcolor | bullist numlist | link | removeformat',
         skin: 'oxide-dark',
         content_css: 'dark',
+        color_map: ansiColorMap,
+        color_cols: 8,
+        custom_colors: false,
         height: 300,
         branding: false,
         promotion: false,

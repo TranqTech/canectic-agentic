@@ -1,6 +1,7 @@
 import { BaseSubModule } from "../basesubmodule.js";
 import { getActiveCollections, getDoorsInCollection, getCollectionCounts } from "../../models/doorCollections.js";
 import { getAllDoors } from "../../models/doors.js";
+import { htmlToTerminalText } from "../../models/announcements.js";
 
 var CLR_TITLE = 14;
 var CLR_BORDER = 4;
@@ -159,27 +160,61 @@ class doorBrowser extends BaseSubModule {
 		this.call.cmds.setfgcolor(CLR_DESC_LABEL);
 		this.call.cmds.senddata(item.name || '');
 
-		// Description (word-wrapped)
-		var desc = item.description || '(no description)';
-		var words = desc.split(' ');
-		var line = '';
+		// Description - use long_desc_html with ANSI colors if available, else description
+		var desc = '';
+		if (item.long_desc_html) {
+			desc = htmlToTerminalText(item.long_desc_html);
+		} else if (item.description) {
+			desc = htmlToTerminalText(item.description);
+		} else {
+			desc = '(no description)';
+		}
+
+		// Word-wrap (strip ANSI for width calculation, but send with ANSI)
+		var lines = desc.split(/\r?\n/);
 		var lineRow = startRow + 2;
 
 		this.call.cmds.setfgcolor(CLR_DESC);
-		for (var wi = 0; wi < words.length; wi++) {
-			if (line.length + words[wi].length + 1 > descWidth) {
-				this.call.cmds.movecursor(this._descLeft, lineRow);
-				this.call.cmds.senddata(line);
-				line = words[wi];
-				lineRow++;
+		for (var li = 0; li < lines.length; li++) {
+			var rawLine = lines[li];
+			var visibleLen = rawLine.replace(/\x1b\[[0-9;]*m/g, '').length;
+
+			if (visibleLen <= descWidth) {
 				if (lineRow >= startRow + this._listHeight - 2) break;
+				this.call.cmds.movecursor(this._descLeft, lineRow);
+				this.call.cmds.senddata(rawLine);
+				this.call.cmds.resetcolors();
+				this.call.cmds.setfgcolor(CLR_DESC);
+				lineRow++;
 			} else {
-				line += (line.length > 0 ? ' ' : '') + words[wi];
+				// Simple word wrap for lines with potential ANSI codes
+				var words = rawLine.split(' ');
+				var wrapLine = '';
+				var wrapVisible = 0;
+				for (var wi = 0; wi < words.length; wi++) {
+					var wordVisible = words[wi].replace(/\x1b\[[0-9;]*m/g, '').length;
+					if (wrapVisible + wordVisible + (wrapVisible > 0 ? 1 : 0) > descWidth && wrapVisible > 0) {
+						if (lineRow >= startRow + this._listHeight - 2) break;
+						this.call.cmds.movecursor(this._descLeft, lineRow);
+						this.call.cmds.senddata(wrapLine);
+						this.call.cmds.resetcolors();
+						this.call.cmds.setfgcolor(CLR_DESC);
+						lineRow++;
+						wrapLine = words[wi];
+						wrapVisible = wordVisible;
+					} else {
+						wrapLine += (wrapVisible > 0 ? ' ' : '') + words[wi];
+						wrapVisible += wordVisible + (wrapVisible > 0 ? 1 : 0);
+					}
+				}
+				if (wrapLine.length > 0 && lineRow < startRow + this._listHeight - 2) {
+					this.call.cmds.movecursor(this._descLeft, lineRow);
+					this.call.cmds.senddata(wrapLine);
+					this.call.cmds.resetcolors();
+					this.call.cmds.setfgcolor(CLR_DESC);
+					lineRow++;
+				}
 			}
-		}
-		if (line.length > 0 && lineRow < startRow + this._listHeight - 2) {
-			this.call.cmds.movecursor(this._descLeft, lineRow);
-			this.call.cmds.senddata(line);
 		}
 
 		// Door-specific info

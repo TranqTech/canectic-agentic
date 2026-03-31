@@ -63,7 +63,7 @@ const VARIABLE_DEFS = [
 	{ token: '%Z',  description: 'Text/art directory',                        resolve: () => appConfig.get('textdir', '') },
 	{ token: '%K',  description: 'Config directory (cwd/config)',             resolve: () => process.cwd() + '/config' },
 	{ token: '%J',  description: 'Data directory (cwd/data)',                 resolve: () => process.cwd() + '/data' },
-	{ token: '%M',  description: 'DOSemu drive C',                           resolve: () => appConfig.get('dosemu_drive_c') || (process.env.HOME || '~') + '/.dosemu/drive_c' },
+	{ token: '%M',  description: 'DOSemu drive C',                           resolve: () => appConfig.get('dosemu_drive_c') || process.env.HOME + '/.dosemu/drive_c' },
 
 	// --- System info ---
 	{ token: '%O',  description: 'Board name',                               resolve: () => appConfig.get('boardname', '') },
@@ -120,7 +120,7 @@ function substitute(template, call, doorConfig) {
 				matched = true;
 			}
 			if (!matched) {
-				// No match — pass through the %X literally
+				// No match -- pass through the %X literally
 				result += template[i];
 				i++;
 			}
@@ -129,6 +129,12 @@ function substitute(template, call, doorConfig) {
 			i++;
 		}
 	}
+
+	// Expand leading ~/ to HOME directory (Node fs does not shell-expand tilde)
+	if (result.startsWith('~/') && process.env.HOME) {
+		result = process.env.HOME + result.substring(1);
+	}
+
 	return result;
 }
 

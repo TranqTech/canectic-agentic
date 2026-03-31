@@ -38,7 +38,6 @@ router.use(async function(req, res, next) {
 	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
 	res.locals.pmUnreadCount = 0;
 	if (req.cookies.sessionid) {
-		await sessionStore.sessionRenew(req.cookies.sessionid);
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
 			var pmUid = parseInt(pmSession.id);

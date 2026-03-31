@@ -21,6 +21,7 @@ import * as doors from '../models/doors.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as menus from '../models/menus.js';
+import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as peerAreaSubscriptions from '../models/peerAreaSubscriptions.js';
 import * as networkAreas from '../models/networkAreas.js';
@@ -63,7 +64,6 @@ router.use(async function(req, res, next) {
 	res.locals.currentPath  = '/admin' + req.path;
 	res.locals.activelink   = '';
 	if (req.cookies.sessionid) {
-		await sessionStore.sessionRenew(req.cookies.sessionid);
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
 			var pmUid = parseInt(pmSession.id);
@@ -2156,6 +2156,112 @@ router.post('/doors/:id/delete', urlencodedParser, requireAdmin, async (req, res
 	var doorId = parseInt(req.params.id);
 	await doors.deleteDoor(doorId);
 	res.redirect('/admin/doors');
+});
+
+// -----------------------------------------------------------------------
+// Themes
+// -----------------------------------------------------------------------
+
+router.get('/themes', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var themeList = await themes.getAllThemes();
+	var ansiColors = menus.getAnsiColors();
+	var themeProperties = themes.getThemeProperties();
+	var propertyCategories = themes.getPropertyCategories();
+	res.render('admin/themes/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Themes',
+		activelink: 'themes',
+		currentuser: currentuser,
+		themeList: themeList,
+		ansiColors: ansiColors,
+		themeProperties: themeProperties,
+		propertyCategories: propertyCategories
+	});
+});
+
+router.get('/themes/:id', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var theme = await themes.getThemeById(parseInt(req.params.id));
+	if (!theme) return res.redirect('/admin/themes');
+	var ansiColors = menus.getAnsiColors();
+	var themeProperties = themes.getThemeProperties();
+	var propertyCategories = themes.getPropertyCategories();
+	res.render('admin/themes/view', {
+		sufficientAccess: sufficientAccess,
+		title: 'Edit Theme: ' + theme.name,
+		activelink: 'themes',
+		currentuser: currentuser,
+		theme: theme,
+		ansiColors: ansiColors,
+		themeProperties: themeProperties,
+		propertyCategories: propertyCategories
+	});
+});
+
+router.post('/themes/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await themes.createTheme(req.body);
+	if (result.status) {
+		res.redirect('/admin/themes/' + result.themeId);
+	} else {
+		var currentuser = await getCurrentUser(req);
+		var sufficientAccess = checkAdminAccess(currentuser);
+		var themeList = await themes.getAllThemes();
+		var ansiColors = menus.getAnsiColors();
+		var themeProperties = themes.getThemeProperties();
+		var propertyCategories = themes.getPropertyCategories();
+		res.render('admin/themes/index', {
+			sufficientAccess: sufficientAccess,
+			title: 'Themes',
+			activelink: 'themes',
+			currentuser: currentuser,
+			themeList: themeList,
+			ansiColors: ansiColors,
+			themeProperties: themeProperties,
+			propertyCategories: propertyCategories,
+			errormessages: result.errormessages
+		});
+	}
+});
+
+router.post('/themes/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var themeId = parseInt(req.params.id);
+	var result = await themes.updateTheme(themeId, req.body);
+	if (!result.status) {
+		alogger.writeAlog(3, "updateTheme failed for id " + themeId + ": " + result.errormessages.join(", "), "redbright");
+	}
+	res.redirect('/admin/themes/' + themeId);
+});
+
+router.post('/themes/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var themeId = parseInt(req.params.id);
+	var result = await themes.deleteTheme(themeId);
+	if (!result.status) {
+		alogger.writeAlog(3, "deleteTheme blocked: " + (result.errormessages || []).join(", "), "yellowbright");
+	}
+	res.redirect('/admin/themes');
+});
+
+router.post('/themes/:id/set-default', urlencodedParser, requireAdmin, async (req, res) => {
+	var themeId = parseInt(req.params.id);
+	await themes.setDefaultTheme(themeId);
+	// Update the config setting to match
+	await configStore.upsert('theme', (await themes.getThemeById(themeId)).slug);
+	res.redirect('/admin/themes');
+});
+
+router.post('/themes/:id/duplicate', urlencodedParser, requireAdmin, async (req, res) => {
+	var themeId = parseInt(req.params.id);
+	var newSlug = (req.body.slug || '').trim().toLowerCase();
+	var newName = (req.body.name || '').trim();
+	var result = await themes.duplicateTheme(themeId, newSlug, newName);
+	if (result.status) {
+		res.redirect('/admin/themes/' + result.themeId);
+	} else {
+		res.redirect('/admin/themes');
+	}
 });
 
 // -----------------------------------------------------------------------

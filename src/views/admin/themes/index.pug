@@ -1,0 +1,134 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info.me-2(href='/admin')
+                        | Exit
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newThemeModal')
+                        | New Theme
+              .card-body
+                if errormessages && errormessages.length > 0
+                  ul.text-danger
+                    for error of errormessages
+                      li.text-danger= error
+                  br
+
+                if themeList && themeList.length > 0
+                  table#themeTable.table.table-hover
+                    thead
+                      tr
+                        th(scope='col') Name
+                        th(scope='col') Slug
+                        th(scope='col') Description
+                        th(scope='col') Status
+                        th(scope='col' style='width:220px') Actions
+                    tbody
+                      for t in themeList
+                        tr
+                          td
+                            a(href='/admin/themes/' + t.id)= t.name
+                          td
+                            code= t.slug
+                          td.text-muted= t.description || '-'
+                          td
+                            if t.is_default
+                              span.badge.bg-success Default
+                          td
+                            a.btn.btn-xs.btn-outline-primary.me-1(href='/admin/themes/' + t.id title='Edit')
+                              i.bi.bi-pencil
+                            if !t.is_default
+                              form.d-inline(method='POST' action='/admin/themes/' + t.id + '/set-default')
+                                button.btn.btn-xs.btn-outline-success.me-1(type='submit' title='Set as Default')
+                                  i.bi.bi-check-circle
+                            button.btn.btn-xs.btn-outline-info.me-1.duplicate-btn(type='button' title='Duplicate' data-id=t.id data-name=t.name data-slug=t.slug)
+                              i.bi.bi-copy
+                            if !t.is_default
+                              form.d-inline(method='POST' action='/admin/themes/' + t.id + '/delete' onsubmit="return confirm('Delete this theme?')")
+                                button.btn.btn-xs.btn-outline-danger(type='submit' title='Delete')
+                                  i.bi.bi-trash
+                else
+                  center
+                    .h4 No Themes Configured
+                    p.text-muted Create your first theme to get started.
+
+            //- Color preview
+            .card.mt-3
+              .card-header.bg-darkblue.text-white
+                h5.mb-0 Colour Reference
+              .card-body
+                .row
+                  for clr in ansiColors
+                    .col-3.col-md-2.col-lg-1.mb-2.text-center
+                      .rounded.p-2(style='background:' + clr.hex + '; color:' + (clr.value < 8 ? '#fff' : '#000') + '; font-size:0.75rem')= clr.value + ': ' + clr.label
+
+      //- New Theme Modal
+      #newThemeModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title New Theme
+              button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+            .modal-body
+              form(action='/admin/themes/new' method='POST')
+                label.form-label Name:
+                input.form-control.mb-2(type='text' name='name' required placeholder='e.g. Classic Blue')
+                label.form-label Slug:
+                input.form-control.mb-2(type='text' name='slug' required placeholder='e.g. classic-blue' pattern='[a-z0-9_-]+')
+                label.form-label Description:
+                textarea.form-control.mb-3(name='description' rows='2' placeholder='Brief description of this theme')
+                .text-end
+                  input.btn.btn-success(type='submit' value='Create Theme')
+
+      //- Duplicate Theme Modal
+      #duplicateModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered
+          .modal-content
+            .modal-header.bg-dark.text-white
+              h3.modal-title Duplicate Theme
+              button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+            .modal-body
+              form#duplicateForm(method='POST')
+                label.form-label New Name:
+                input#dupName.form-control.mb-2(type='text' name='name' required)
+                label.form-label New Slug:
+                input#dupSlug.form-control.mb-2(type='text' name='slug' required pattern='[a-z0-9_-]+')
+                .text-end
+                  input.btn.btn-success(type='submit' value='Duplicate')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.duplicate-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var id = this.dataset.id;
+          var name = this.dataset.name;
+          var slug = this.dataset.slug;
+          document.getElementById('duplicateForm').action = '/admin/themes/' + id + '/duplicate';
+          document.getElementById('dupName').value = name + ' Copy';
+          document.getElementById('dupSlug').value = slug + '-copy';
+          var modal = new bootstrap.Modal(document.getElementById('duplicateModal'));
+          modal.show();
+        });
+      });
+    });

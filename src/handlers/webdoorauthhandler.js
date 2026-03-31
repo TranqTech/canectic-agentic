@@ -77,6 +77,7 @@ class WebDoorAuthHandler extends BaseHandler {
 			this.call.restrictionflags = user.restrictionflags || [];
 			this.call.doorTarget = launch.doorSlug;
 			this.call.doorsession = true;
+			this.call.web_originated = true;
 
 			// Terminal settings for web client
 			this.call.term_type = "xterm";

@@ -66,7 +66,7 @@ block content
                     .col-4
                       h6
                         | Offsets: X=#{menu.entries_x_offset} Y=#{menu.entries_y_offset}
-                      h6 Colors:
+                      h6 Colours:
                       .small
                         if menu.title_clr !== null && menu.title_clr !== undefined
                           - var tc = (ansiColors || []).find(c => c.value === menu.title_clr)
@@ -94,10 +94,22 @@ block content
                           |  
                         if menu.error_clr !== null && menu.error_clr !== undefined
                           - var ec = (ansiColors || []).find(c => c.value === menu.error_clr)
-                          | Error: 
+                          | Error:
                           if ec
                             span(style='color:' + ec.hex)= ec.label
-                        if menu.title_clr === null && menu.prompt_clr === null && menu.input_clr === null && menu.hotkey_clr === null && menu.error_clr === null
+                          |
+                        if menu.menu_prompt_clr !== null && menu.menu_prompt_clr !== undefined
+                          - var mpc = (ansiColors || []).find(c => c.value === menu.menu_prompt_clr)
+                          | Menu Prompt:
+                          if mpc
+                            span(style='color:' + mpc.hex)= mpc.label
+                          |
+                        if menu.featured_clr !== null && menu.featured_clr !== undefined
+                          - var fc = (ansiColors || []).find(c => c.value === menu.featured_clr)
+                          | Featured:
+                          if fc
+                            span(style='color:' + fc.hex)= fc.label
+                        if menu.title_clr === null && menu.prompt_clr === null && menu.input_clr === null && menu.hotkey_clr === null && menu.error_clr === null && menu.menu_prompt_clr === null && menu.featured_clr === null
                           span.text-muted (using theme defaults)
 
               //- Entries Card
@@ -137,8 +149,9 @@ block content
                             data-display=entry.display
                             data-command_name=entry.command_name
                             data-command_arg=entry.command_arg
-                            data-fg_clr=(entry.fg_clr !== null && entry.fg_clr !== undefined ? entry.fg_clr : '7')
-                            data-bg_clr=(entry.bg_clr !== null && entry.bg_clr !== undefined ? entry.bg_clr : '0')
+                            data-fg_clr=(entry.fg_clr !== null && entry.fg_clr !== undefined ? entry.fg_clr : '')
+                            data-bg_clr=(entry.bg_clr !== null && entry.bg_clr !== undefined ? entry.bg_clr : '')
+                            data-featured=(entry.featured ? 'true' : 'false')
                             data-min_security=(entry.min_security !== null && entry.min_security !== undefined ? entry.min_security : '')
                             data-required_flags=JSON.stringify(entry.required_flags || [])
                             data-prohibited_flags=JSON.stringify(entry.prohibited_flags || [])
@@ -150,6 +163,8 @@ block content
                               if entry.hotkey
                                 span.badge.bg-warning.text-dark= entry.hotkey
                             td
+                              if entry.featured
+                                i.bi.bi-star-fill.text-warning.me-1(title='Featured')
                               if entry.display
                                 = entry.display
                               else
@@ -167,17 +182,19 @@ block content
                               else
                                 | —
                             td.text-center
-                              - var fgMatch = (ansiColors || []).find(c => c.value === entry.fg_clr)
-                              if fgMatch
-                                span(style='color:' + fgMatch.hex + '; font-weight:bold')= fgMatch.label
+                              if entry.fg_clr !== null && entry.fg_clr !== undefined
+                                - var fgMatch = (ansiColors || []).find(c => c.value === entry.fg_clr)
+                                if fgMatch
+                                  span(style='color:' + fgMatch.hex + '; font-weight:bold')= fgMatch.label
                               else
-                                | —
+                                span.text-muted Theme
                             td.text-center
-                              - var bgMatch = (ansiColors || []).find(c => c.value === entry.bg_clr)
-                              if bgMatch
-                                span.px-2.rounded(style='background:' + bgMatch.hex + '; color:' + (entry.bg_clr > 6 ? '#000' : '#fff'))= bgMatch.label
+                              if entry.bg_clr !== null && entry.bg_clr !== undefined
+                                - var bgMatch = (ansiColors || []).find(c => c.value === entry.bg_clr)
+                                if bgMatch
+                                  span.px-2.rounded(style='background:' + bgMatch.hex + '; color:' + (entry.bg_clr > 6 ? '#000' : '#fff'))= bgMatch.label
                               else
-                                | —
+                                span.text-muted Theme
                             td
                               button.btn.btn-xs.btn-outline-warning.me-1.edit-entry-btn(type='button' title='Edit')
                                 i.bi.bi-pencil
@@ -222,96 +239,117 @@ block content
               button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
             .modal-body
               form(action='/admin/menus/' + menu.id + '/update' method='POST')
-                .row
-                  .col-1
-                  .col-10
-                    label.form-label Menu Name:
-                    input.form-control(type='text' name='name' value=menu.name required)
+                ul.nav.nav-tabs.mb-3(role='tablist')
+                  li.nav-item(role='presentation')
+                    button.nav-link.active(data-bs-toggle='tab' data-bs-target='#emConfigPane' type='button' role='tab') Configuration
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#emColourPane' type='button' role='tab') Colours
+                .tab-content
+                  #emConfigPane.tab-pane.fade.show.active(role='tabpanel')
+                    .row
+                      .col-1
+                      .col-10
+                        label.form-label Menu Identifier:
+                        input.form-control(type='text' name='name' value=menu.name required pattern='[a-z0-9_-]+')
+                        .form-text Lowercase letters, numbers, hyphens, and underscores only.
+                        br
+                        label.form-label Display Title:
+                        input.form-control(type='text' name='title' value=menu.title)
                     br
-                    label.form-label Display Title:
-                    input.form-control(type='text' name='title' value=menu.title)
-                .row
-                  .col-1
-                  .col-5
-                    label.form-label Menu Type:
-                    select.form-control(name='menu_type')
-                      for mt in menuTypes
-                        option(value=mt selected=(menu.menu_type === mt))= mt
-                .row
-                  .col-1
-                  .col-5
-                    label.form-label Display File Name:
-                    input.form-control(type='text' name='display_file' value=menu.display_file || '' placeholder='e.g. mainmenu')
-                    .form-text Art filename only — no path or extension.
-                  .col-5
-                    label.form-label Display File Type:
-                    select.form-control(name='display_file_type')
-                      option(value='' selected=(!menu.display_file_type || menu.display_file_type === '')) — None —
-                      option(value='Screen' selected=(menu.display_file_type === 'Screen')) Screen (full-screen art)
-                      option(value='Header' selected=(menu.display_file_type === 'Header')) Header (header art)
-                br
-                .row
-                  .col-1
-                  .col-2
-                    label.form-label Display Entries:
-                    select.form-control(name='display_entries')
-                      option(value='true' selected=menu.display_entries) Yes
-                      option(value='false' selected=!menu.display_entries) No
-                  .col-2
-                    label.form-label X Offset:
-                    input.form-control(type='number' name='entries_x_offset' value=menu.entries_x_offset min='0')
-                  .col-2
-                    label.form-label Y Offset:
-                    input.form-control(type='number' name='entries_y_offset' value=menu.entries_y_offset min='0')
-                  .col-2
-                    label.form-label Max Cols:
-                    input.form-control(type='number' name='max_columns' value=(menu.max_columns || 3) min='1' max='10')
-                  .col-2
-                    label.form-label Col Gap:
-                    input.form-control(type='number' name='col_gap' value=(menu.col_gap || 2) min='0')
-                br
-                h5 Menu Colors
-                .form-text.mb-2 Leave as "Theme Default" to inherit from the active terminal theme.
-                .row
-                  .col-1
-                  .col-5
-                    label.form-label Title Color:
-                    select.form-control.bg-dark.color-select(name='title_clr')
-                      option(value='' selected=(menu.title_clr === null || menu.title_clr === undefined)) — Theme Default —
-                      for clr in ansiColors
-                        option(value=clr.value selected=(menu.title_clr === clr.value) style='color:' + clr.hex)= clr.label
-                  .col-5
-                    label.form-label Prompt Color:
-                    select.form-control.bg-dark.color-select(name='prompt_clr')
-                      option(value='' selected=(menu.prompt_clr === null || menu.prompt_clr === undefined)) — Theme Default —
-                      for clr in ansiColors
-                        option(value=clr.value selected=(menu.prompt_clr === clr.value) style='color:' + clr.hex)= clr.label
-                .row
-                  .col-1
-                  .col-5
-                    label.form-label Input Color:
-                    select.form-control.bg-dark.color-select(name='input_clr')
-                      option(value='' selected=(menu.input_clr === null || menu.input_clr === undefined)) — Theme Default —
-                      for clr in ansiColors
-                        option(value=clr.value selected=(menu.input_clr === clr.value) style='color:' + clr.hex)= clr.label
-                  .col-5
-                    label.form-label Hotkey Color:
-                    select.form-control.bg-dark.color-select(name='hotkey_clr')
-                      option(value='' selected=(menu.hotkey_clr === null || menu.hotkey_clr === undefined)) — Theme Default —
-                      for clr in ansiColors
-                        option(value=clr.value selected=(menu.hotkey_clr === clr.value) style='color:' + clr.hex)= clr.label
-                .row
-                  .col-1
-                  .col-5
-                    label.form-label Error Color:
-                    select.form-control.bg-dark.color-select(name='error_clr')
-                      option(value='' selected=(menu.error_clr === null || menu.error_clr === undefined)) — Theme Default —
-                      for clr in ansiColors
-                        option(value=clr.value selected=(menu.error_clr === clr.value) style='color:' + clr.hex)= clr.label
-                br
-                .row
-                  .col-1
-                  .col-10
+                    .row
+                      .col-1
+                      .col-5
+                        label.form-label Menu Type:
+                        select.form-control(name='menu_type')
+                          for mt in menuTypes
+                            option(value=mt selected=(menu.menu_type === mt))= mt
+                      .col-5
+                        label.form-label Display Entries:
+                        select.form-control(name='display_entries')
+                          option(value='true' selected=menu.display_entries) Yes
+                          option(value='false' selected=!menu.display_entries) No
+                    br
+                    .row
+                      .col-1
+                      .col-5
+                        label.form-label Display File Name:
+                        input.form-control(type='text' name='display_file' value=menu.display_file || '' placeholder='e.g. mainmenu')
+                        .form-text Art filename only -- no path or extension.
+                      .col-5
+                        label.form-label Display File Type:
+                        select.form-control(name='display_file_type')
+                          option(value='' selected=(!menu.display_file_type || menu.display_file_type === '')) -- None --
+                          option(value='Screen' selected=(menu.display_file_type === 'Screen')) Screen (full-screen art)
+                          option(value='Header' selected=(menu.display_file_type === 'Header')) Header (header art)
+                    br
+                    .row
+                      .col-1
+                      .col-2
+                        label.form-label X Offset:
+                        input.form-control(type='number' name='entries_x_offset' value=menu.entries_x_offset min='0')
+                      .col-2
+                        label.form-label Y Offset:
+                        input.form-control(type='number' name='entries_y_offset' value=menu.entries_y_offset min='0')
+                      .col-2
+                        label.form-label Max Cols:
+                        input.form-control(type='number' name='max_columns' value=(menu.max_columns || 3) min='1' max='10')
+                      .col-2
+                        label.form-label Col Gap:
+                        input.form-control(type='number' name='col_gap' value=(menu.col_gap || 2) min='0')
+
+                  #emColourPane.tab-pane.fade(role='tabpanel')
+                    .d-flex.justify-content-between.align-items-center.mb-3
+                      .form-text Leave as "Theme Default" to inherit from the active terminal theme.
+                      button.btn.btn-sm.btn-outline-secondary.reset-colours-btn(type='button') Reset All to Theme
+                    .row
+                      .col-6
+                        label.form-label Title Colour:
+                        select.form-control.bg-dark.color-select(name='title_clr')
+                          option(value='' selected=(menu.title_clr === null || menu.title_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.title_clr === clr.value) style='color:' + clr.hex)= clr.label
+                      .col-6
+                        label.form-label Prompt Colour:
+                        select.form-control.bg-dark.color-select(name='prompt_clr')
+                          option(value='' selected=(menu.prompt_clr === null || menu.prompt_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.prompt_clr === clr.value) style='color:' + clr.hex)= clr.label
+                    .row.mt-2
+                      .col-6
+                        label.form-label Input Colour:
+                        select.form-control.bg-dark.color-select(name='input_clr')
+                          option(value='' selected=(menu.input_clr === null || menu.input_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.input_clr === clr.value) style='color:' + clr.hex)= clr.label
+                      .col-6
+                        label.form-label Hotkey Colour:
+                        select.form-control.bg-dark.color-select(name='hotkey_clr')
+                          option(value='' selected=(menu.hotkey_clr === null || menu.hotkey_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.hotkey_clr === clr.value) style='color:' + clr.hex)= clr.label
+                    .row.mt-2
+                      .col-6
+                        label.form-label Error Colour:
+                        select.form-control.bg-dark.color-select(name='error_clr')
+                          option(value='' selected=(menu.error_clr === null || menu.error_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.error_clr === clr.value) style='color:' + clr.hex)= clr.label
+                      .col-6
+                        label.form-label Menu Prompt Colour:
+                        select.form-control.bg-dark.color-select(name='menu_prompt_clr')
+                          option(value='' selected=(menu.menu_prompt_clr === null || menu.menu_prompt_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.menu_prompt_clr === clr.value) style='color:' + clr.hex)= clr.label
+                    .row.mt-2
+                      .col-6
+                        label.form-label Featured Colour:
+                        select.form-control.bg-dark.color-select(name='featured_clr')
+                          option(value='' selected=(menu.featured_clr === null || menu.featured_clr === undefined)) -- Theme Default --
+                          for clr in ansiColors
+                            option(value=clr.value selected=(menu.featured_clr === clr.value) style='color:' + clr.hex)= clr.label
+
+                .row.mt-3
+                  .col-12
                     .text-end
                       input.btn.btn-lg.btn-success(type='submit' value='Save Changes')
 
@@ -354,32 +392,39 @@ block content
                   .col-1
                   .col-5
                     label.form-label Command:
-                    select#ne_command.form-control(name='command_name')
+                    select#ne_command.form-control.cmd-select(name='command_name')
                       for cmd in availCommands
                         option(value=cmd.name)= cmd.label
-                  .col-5
-                    label.form-label Argument:
-                    input#ne_command_arg.form-control(type='text' name='command_arg' placeholder='Menu name, door slug, etc.')
-                    .form-text Required for Load Menu (menu name) and Run Door (door slug).
+                  .col-5.arg-wrapper(style='display:none')
+                    label.form-label.arg-label Argument:
+                    select.form-control.arg-select(name='command_arg')
+                      option(value='') -- Select --
                 br
                 .row
                   .col-1
-                  .col-3
+                  .col-2
                     label.form-label Sort Order:
                     input.form-control(type='number' name='sort_order' value='0')
-                  .col-3
+                  .col-2
                     label.form-label Min Security:
-                    input.form-control(type='number' name='min_security' min='0' max='255' placeholder='— any —')
+                    input.form-control(type='number' name='min_security' min='0' max='255' placeholder='any')
                   .col-2
-                    label.form-label FG Color:
+                    label.form-label Featured:
+                    select.form-control(name='featured')
+                      option(value='false' selected) No
+                      option(value='true') Yes
+                  .col-2
+                    label.form-label FG Colour:
                     select.form-control.bg-dark.color-select(name='fg_clr')
+                      option(value='' selected) Theme
                       for clr in ansiColors
-                        option(value=clr.value selected=(clr.value === 7) style='color:' + clr.hex)= clr.label
+                        option(value=clr.value style='color:' + clr.hex)= clr.label
                   .col-2
-                    label.form-label BG Color:
+                    label.form-label BG Colour:
                     select.form-control.bg-dark.color-select(name='bg_clr')
+                      option(value='' selected) Theme
                       for clr in ansiColors
-                        option(value=clr.value selected=(clr.value === 0) style='color:' + clr.hex)= clr.label
+                        option(value=clr.value style='color:' + clr.hex)= clr.label
                 br
                 .row
                   .col-1
@@ -424,29 +469,37 @@ block content
                   .col-1
                   .col-5
                     label.form-label Command:
-                    select#ee_command.form-control(name='command_name')
+                    select#ee_command.form-control.cmd-select(name='command_name')
                       for cmd in availCommands
                         option(value=cmd.name)= cmd.label
-                  .col-5
-                    label.form-label Argument:
-                    input#ee_command_arg.form-control(type='text' name='command_arg')
+                  .col-5.arg-wrapper(style='display:none')
+                    label.form-label.arg-label Argument:
+                    select#ee_arg.form-control.arg-select(name='command_arg')
+                      option(value='') -- Select --
                 br
                 .row
                   .col-1
-                  .col-3
+                  .col-2
                     label.form-label Sort Order:
                     input#ee_sort.form-control(type='number' name='sort_order' value='0')
-                  .col-3
-                    label.form-label Min Security:
-                    input#ee_security.form-control(type='number' name='min_security' min='0' max='255' placeholder='—')
                   .col-2
-                    label.form-label FG Color:
+                    label.form-label Min Security:
+                    input#ee_security.form-control(type='number' name='min_security' min='0' max='255' placeholder='any')
+                  .col-2
+                    label.form-label Featured:
+                    select#ee_featured.form-control(name='featured')
+                      option(value='false') No
+                      option(value='true') Yes
+                  .col-2
+                    label.form-label FG Colour:
                     select#ee_fg.form-control.bg-dark.color-select(name='fg_clr')
+                      option(value='') Theme
                       for clr in ansiColors
                         option(value=clr.value style='color:' + clr.hex)= clr.label
                   .col-2
-                    label.form-label BG Color:
+                    label.form-label BG Colour:
                     select#ee_bg.form-control.bg-dark.color-select(name='bg_clr')
+                      option(value='') Theme
                       for clr in ansiColors
                         option(value=clr.value style='color:' + clr.hex)= clr.label
                 br
@@ -473,16 +526,73 @@ block content
     document.addEventListener('DOMContentLoaded', function() {
       var menuId = !{menu ? menu.id : 'null'};
 
+      // --- Command argument data ---
+      var argData = {
+        loadMenu: !{JSON.stringify((allMenus || []).filter(function(m) { return m.name !== menu.name; }).map(function(m) { return { value: m.name, label: (m.title || m.name) + ' (' + m.name + ')' }; }))},
+        runXtrn: !{JSON.stringify((allDoors || []).map(function(d) { return { value: d.slug, label: d.name + ' (' + d.slug + ')' }; }))}
+      };
+
+      // Show/hide argument select and populate options based on selected command
+      function syncArgField(cmdSel) {
+        var wrapper = cmdSel.closest('.row').querySelector('.arg-wrapper');
+        var argSel = wrapper.querySelector('.arg-select');
+        var label = wrapper.querySelector('.arg-label');
+        var cmd = cmdSel.value;
+        var items = argData[cmd];
+
+        if (!items) {
+          wrapper.style.display = 'none';
+          argSel.value = '';
+          return;
+        }
+
+        // Set label
+        if (cmd === 'loadMenu') label.textContent = 'Menu:';
+        else if (cmd === 'runXtrn') label.textContent = 'Door:';
+        else label.textContent = 'Argument:';
+
+        // Populate options (preserve current value if possible)
+        var curVal = argSel.value;
+        argSel.innerHTML = '<option value="">-- Select --</option>';
+        for (var i = 0; i < items.length; i++) {
+          var opt = document.createElement('option');
+          opt.value = items[i].value;
+          opt.textContent = items[i].label;
+          if (items[i].value === curVal) opt.selected = true;
+          argSel.appendChild(opt);
+        }
+
+        wrapper.style.display = '';
+      }
+
+      // Bind command selects
+      document.querySelectorAll('.cmd-select').forEach(function(sel) {
+        syncArgField(sel);
+        sel.addEventListener('change', function() { syncArgField(this); });
+      });
+
       // --- Color select sync ---
       // Browsers don't show option inline styles in the closed select.
       // Copy the selected option's color onto the select element itself.
       function syncSelectColor(sel) {
         var opt = sel.options[sel.selectedIndex];
-        sel.style.color = opt && opt.style.color ? opt.style.color : '';
+        sel.style.color = opt && opt.style.color ? opt.style.color : 'var(--bs-secondary-color)';
       }
       document.querySelectorAll('.color-select').forEach(function(sel) {
         syncSelectColor(sel);
         sel.addEventListener('change', function() { syncSelectColor(this); });
+      });
+
+      // Reset all colour selects in the parent tab pane to Theme Default
+      document.querySelectorAll('.reset-colours-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var pane = this.closest('.tab-pane');
+          if (!pane) return;
+          pane.querySelectorAll('.color-select').forEach(function(sel) {
+            sel.value = '';
+            syncSelectColor(sel);
+          });
+        });
       });
 
       // --- Drag and drop reorder for entries ---
@@ -592,15 +702,19 @@ block content
           document.getElementById('editEntryForm').action = '/admin/menus/' + menuId + '/entries/' + d.id + '/update';
           document.getElementById('ee_hotkey').value      = d.hotkey || '';
           document.getElementById('ee_display').value     = d.display || '';
-          document.getElementById('ee_command').value     = d.command_name || '';
-          document.getElementById('ee_command_arg').value = d.command_arg || '';
+          var eeCmdSel = document.getElementById('ee_command');
+          eeCmdSel.value = d.command_name || '';
+          syncArgField(eeCmdSel);
+          var eeArgSel = document.getElementById('ee_arg');
+          if (eeArgSel) eeArgSel.value = d.command_arg || '';
           document.getElementById('ee_sort').value        = d.sort || '0';
           document.getElementById('ee_security').value    = d.min_security || '';
+          document.getElementById('ee_featured').value    = d.featured || 'false';
 
           var fgSel = document.getElementById('ee_fg');
           var bgSel = document.getElementById('ee_bg');
-          fgSel.value = d.fg_clr || '7';
-          bgSel.value = d.bg_clr || '0';
+          fgSel.value = d.fg_clr;
+          bgSel.value = d.bg_clr;
           syncSelectColor(fgSel);
           syncSelectColor(bgSel);
 

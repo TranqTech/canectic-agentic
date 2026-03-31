@@ -50,7 +50,7 @@ const ANSI_COLORS = [
 
 async function getMenu(name) {
 	var menu = await postgres.queryOne(
-		'SELECT * FROM menus WHERE name = $1',
+		'SELECT * FROM menus WHERE LOWER(name) = LOWER($1)',
 		[name]
 	);
 	if (!menu) return null;
@@ -77,11 +77,17 @@ async function getMenu(name) {
 	// Strip null color values so they arrive as undefined in _applyConfig().
 	// The handler checks `config.title_clr !== undefined` — if it sees null
 	// it overwrites the theme default, and setfgcolor(null) renders as black.
-	var colorKeys = ['title_clr', 'input_clr', 'prompt_clr', 'error_clr', 'hotkey_clr'];
+	var colorKeys = ['title_clr', 'input_clr', 'prompt_clr', 'error_clr', 'hotkey_clr', 'menu_prompt_clr', 'featured_clr'];
 	for (var k = 0; k < colorKeys.length; k++) {
 		if (menu[colorKeys[k]] === null) {
 			delete menu[colorKeys[k]];
 		}
+	}
+
+	// Same for entry-level colors: null means "use theme"
+	for (var e = 0; e < entries.length; e++) {
+		if (entries[e].fg_clr === null) delete entries[e].fg_clr;
+		if (entries[e].bg_clr === null) delete entries[e].bg_clr;
 	}
 
 	return menu;
@@ -89,7 +95,7 @@ async function getMenu(name) {
 
 async function menuExists(name) {
 	var row = await postgres.queryOne(
-		'SELECT id FROM menus WHERE name = $1',
+		'SELECT id FROM menus WHERE LOWER(name) = LOWER($1)',
 		[name]
 	);
 	return !!row;
@@ -113,9 +119,13 @@ async function getMenuById(id) {
 async function createMenu(data) {
 	var result = { status: false, errormessages: [], menuId: null };
 
-	var name = (data.name || '').trim();
+	var name = (data.name || '').trim().toLowerCase();
 	if (!name) {
-		result.errormessages.push('Menu name is required');
+		result.errormessages.push('Menu identifier is required');
+		return result;
+	}
+	if (!/^[a-z0-9_-]+$/.test(name)) {
+		result.errormessages.push('Menu identifier must contain only lowercase letters, numbers, hyphens, and underscores');
 		return result;
 	}
 
@@ -142,6 +152,8 @@ async function createMenu(data) {
 		prompt_clr: data.prompt_clr !== undefined && data.prompt_clr !== '' ? parseInt(data.prompt_clr) : null,
 		error_clr: data.error_clr !== undefined && data.error_clr !== '' ? parseInt(data.error_clr) : null,
 		hotkey_clr: data.hotkey_clr !== undefined && data.hotkey_clr !== '' ? parseInt(data.hotkey_clr) : null,
+		menu_prompt_clr: data.menu_prompt_clr !== undefined && data.menu_prompt_clr !== '' ? parseInt(data.menu_prompt_clr) : null,
+		featured_clr: data.featured_clr !== undefined && data.featured_clr !== '' ? parseInt(data.featured_clr) : null,
 		created_at: new Date(),
 		updated_at: new Date()
 	};
@@ -179,15 +191,21 @@ async function updateMenu(id, data) {
 		prompt_clr: data.prompt_clr !== undefined && data.prompt_clr !== '' ? parseInt(data.prompt_clr) : null,
 		error_clr: data.error_clr !== undefined && data.error_clr !== '' ? parseInt(data.error_clr) : null,
 		hotkey_clr: data.hotkey_clr !== undefined && data.hotkey_clr !== '' ? parseInt(data.hotkey_clr) : null,
+		menu_prompt_clr: data.menu_prompt_clr !== undefined && data.menu_prompt_clr !== '' ? parseInt(data.menu_prompt_clr) : null,
+		featured_clr: data.featured_clr !== undefined && data.featured_clr !== '' ? parseInt(data.featured_clr) : null,
 		updated_at: new Date()
 	};
 
-	// Allow name change only if new name is unique
+	// Allow name change only if new name is unique and slug-safe
 	if (data.name) {
-		var trimmed = data.name.trim();
+		var trimmed = data.name.trim().toLowerCase();
+		if (!/^[a-z0-9_-]+$/.test(trimmed)) {
+			result.errormessages.push('Menu identifier must contain only lowercase letters, numbers, hyphens, and underscores');
+			return result;
+		}
 		var existing = await postgres.queryOne('SELECT id FROM menus WHERE name = $1 AND id != $2', [trimmed, id]);
 		if (existing) {
-			result.errormessages.push('A menu with that name already exists');
+			result.errormessages.push('A menu with that identifier already exists');
 			return result;
 		}
 		obj.name = trimmed;
@@ -268,8 +286,9 @@ async function createEntry(menuId, data) {
 		display: (data.display || '').trim(),
 		command_name: (data.command_name || '').trim(),
 		command_arg: (data.command_arg || '').trim(),
-		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : 7,
-		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : 0,
+		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : null,
+		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : null,
+		featured: data.featured === 'true' || data.featured === true,
 		min_security: data.min_security !== undefined && data.min_security !== '' ? parseInt(data.min_security) : null,
 		required_flags: JSON.stringify(requiredFlags),
 		prohibited_flags: JSON.stringify(prohibitedFlags),
@@ -310,8 +329,9 @@ async function updateEntry(entryId, data) {
 		display: (data.display || '').trim(),
 		command_name: (data.command_name || '').trim(),
 		command_arg: (data.command_arg || '').trim(),
-		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : 7,
-		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : 0,
+		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : null,
+		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : null,
+		featured: data.featured === 'true' || data.featured === true,
 		min_security: data.min_security !== undefined && data.min_security !== '' ? parseInt(data.min_security) : null,
 		required_flags: JSON.stringify(requiredFlags),
 		prohibited_flags: JSON.stringify(prohibitedFlags),
@@ -372,7 +392,7 @@ function getAvailableCommands() {
 		{ name: 'downloadBatch',   label: 'Download Batch',    needsArg: false },
 		{ name: 'fileUpload',      label: 'Upload File',       needsArg: false },
 		{ name: 'fileSearch',      label: 'File Search',       needsArg: false },
-	];
+	].sort(function(a, b) { return a.label.localeCompare(b.label); });
 }
 
 function getValidDisplayFileTypes() {

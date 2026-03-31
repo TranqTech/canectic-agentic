@@ -26,56 +26,78 @@ block content
 						each door in doors
 							.col-md-6.col-lg-4.mb-4
 								.card.h-100
+									if door.icon_url
+										.card-img-top.text-center.p-3(style='background:#1a1a2e')
+											img(src=door.icon_url style='max-height:120px; max-width:100%; object-fit:contain')
 									.card-body
 										h5.card-title= door.name
 										if door.description
-											p.card-text.text-muted.small= door.description.substring(0, 120) + (door.description.length > 120 ? '...' : '')
-									.card-footer.d-flex.justify-content-between
-										if door.description && door.description.length > 0
-											button.btn.btn-outline-info.btn-sm(
-												type='button'
-												data-bs-toggle='modal'
-												data-bs-target='#doorInfoModal'
-												data-name=door.name
-												data-description=door.description || ''
-												data-launch=door.launch_type || ''
-											)
+											p.card-text.text-muted.small!= door.description
+									.card-footer.d-flex.justify-content-between.align-items-center
+										if door.long_desc_html || door.description
+											button.btn.btn-outline-info.btn-sm.door-info-btn(type='button' data-bs-toggle='modal' data-bs-target='#doorInfoModal' data-name=door.name data-slug=door.slug data-door-id=door.id)
 												i.bi.bi-info-circle.me-1
 												| More Info
 										else
 											span
 										if currentuser
-											a.btn.btn-primary.btn-sm(href='/doors/play/' + door.slug)
+											a.btn.btn-primary.btn-sm(href='/doors/play/' + door.slug + '?return=/doors/collection/' + collection.slug)
 												i.bi.bi-play-fill.me-1
 												| Play
 										else
-											button.btn.btn-secondary.btn-sm(disabled) Login
+											button.btn.btn-secondary.btn-sm(disabled) Login to Play
 				else
 					.text-center.text-muted
 						h5 No doors in this collection
 						a(href='/doors') Back to Collections
 
+		//- Hidden HTML storage per door (data attributes mangle HTML)
+		each door in (doors || [])
+			textarea.d-none(id='door_desc_' + door.id)= door.description || ''
+			textarea.d-none(id='door_longdesc_' + door.id)= door.long_desc_html || ''
+
 		//- Door Info Modal
 		#doorInfoModal.modal.fade(tabindex='-1' aria-hidden='true')
-			.modal-dialog.modal-dialog-centered
+			.modal-dialog.modal-dialog-centered.modal-lg
 				.modal-content
 					.modal-header.bg-dark.text-white
 						h5.modal-title#doorInfoTitle
 						button.btn.btn-close.btn-close-white(data-bs-dismiss='modal')
 					.modal-body
-						p#doorInfoDesc
 						if currentuser
-							.text-end
-								a#doorInfoPlay.btn.btn-primary(href='#')
+							.text-end.mb-3
+								a#doorInfoPlay.btn.btn-primary.btn-lg(href='#')
 									i.bi.bi-play-fill.me-1
 									| Play
+						#doorInfoContent
 
 		script.
 			document.addEventListener('DOMContentLoaded', function() {
 				var infoModal = document.getElementById('doorInfoModal');
 				infoModal.addEventListener('show.bs.modal', function(event) {
 					var btn = event.relatedTarget;
-					document.getElementById('doorInfoTitle').textContent = btn.dataset.name;
-					document.getElementById('doorInfoDesc').textContent = btn.dataset.description;
+					if (!btn) return;
+					var name = btn.dataset.name || '';
+					var slug = btn.dataset.slug || '';
+					var doorId = btn.dataset.doorId || '';
+
+					document.getElementById('doorInfoTitle').textContent = name;
+
+					// Use long_desc_html if available, else short description (both HTML)
+					var longDescEl = document.getElementById('door_longdesc_' + doorId);
+					var descEl = document.getElementById('door_desc_' + doorId);
+					var contentEl = document.getElementById('doorInfoContent');
+					if (longDescEl && longDescEl.value.trim()) {
+						contentEl.innerHTML = longDescEl.value;
+					} else if (descEl && descEl.value.trim()) {
+						contentEl.innerHTML = descEl.value;
+					} else {
+						contentEl.textContent = 'No description available.';
+					}
+
+					var playBtn = document.getElementById('doorInfoPlay');
+					if (playBtn && slug) {
+						playBtn.href = '/doors/play/' + slug + '?return=' + encodeURIComponent(window.location.pathname);
+					}
 				});
 			});

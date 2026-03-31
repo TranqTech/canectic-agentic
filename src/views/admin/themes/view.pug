@@ -1,0 +1,95 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            form(action='/admin/themes/' + theme.id + '/update' method='POST')
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                      if theme.is_default
+                        span.badge.bg-success.ms-2 Default Theme
+                    .col-4
+                      .text-end
+                        a.btn.btn-sm.btn-info.me-2(href='/admin/themes')
+                          | Back
+                        input.btn.btn-sm.btn-success(type='submit' value='Save')
+                .card-body
+                  //- Identity
+                  .row.mb-3
+                    .col-md-4
+                      label.form-label Name:
+                      input.form-control(type='text' name='name' value=theme.name required)
+                    .col-md-4
+                      label.form-label Slug:
+                      input.form-control(type='text' name='slug' value=theme.slug required pattern='[a-z0-9_-]+')
+                    .col-md-4
+                      label.form-label Description:
+                      input.form-control(type='text' name='description' value=theme.description || '')
+
+                  hr
+
+                  //- Color categories as accordion
+                  .accordion#themeAccordion
+                    each cat in propertyCategories
+                      - var catId = 'cat_' + cat.replace(/\s+/g, '_')
+                      - var catProps = themeProperties.filter(function(p) { return p.category === cat; })
+                      .accordion-item
+                        h2.accordion-header
+                          button.accordion-button.collapsed(type='button' data-bs-toggle='collapse' data-bs-target='#' + catId)= cat
+                        .accordion-collapse.collapse(id=catId data-bs-parent='#themeAccordion')
+                          .accordion-body
+                            .row
+                              each prop in catProps
+                                - var isMargin = prop.key === 'msg_x_margin' || prop.key === 'msg_y_margin'
+                                .col-md-4.col-lg-3.mb-3
+                                  label.form-label.small= prop.label
+                                  if isMargin
+                                    input.form-control(type='number' name=prop.key value=theme[prop.key] || 0 min='0')
+                                  else
+                                    select.form-control.bg-dark.color-select(name=prop.key)
+                                      for clr in ansiColors
+                                        if clr.value === theme[prop.key]
+                                          option(value=clr.value style='color:' + clr.hex selected)= clr.label
+                                        else
+                                          option(value=clr.value style='color:' + clr.hex)= clr.label
+
+              //- Bottom save button
+              .text-end.mt-3
+                input.btn.btn-lg.btn-success(type='submit' value='Save Theme')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      // Sync color-select text color with selected option
+      function syncSelectColor(sel) {
+        var opt = sel.options[sel.selectedIndex];
+        sel.style.color = opt && opt.style.color ? opt.style.color : 'var(--bs-secondary-color)';
+      }
+      document.querySelectorAll('.color-select').forEach(function(sel) {
+        syncSelectColor(sel);
+        sel.addEventListener('change', function() { syncSelectColor(this); });
+      });
+
+      // Open first accordion by default
+      var first = document.querySelector('#themeAccordion .accordion-collapse');
+      if (first) {
+        first.classList.add('show');
+        first.previousElementSibling.querySelector('.accordion-button').classList.remove('collapsed');
+      }
+    });

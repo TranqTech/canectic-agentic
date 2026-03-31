@@ -80,98 +80,117 @@ block content
             button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
           .modal-body
             form(action='/admin/menus/new' method='POST')
-              .row
-                .col-1
-                .col-10
-                  label.form-label(for='nm_name') Menu Name (unique identifier):
-                  input#nm_name.form-control(type='text' name='name' required placeholder='e.g. Main, Messages, Doors')
+              ul.nav.nav-tabs.mb-3(role='tablist')
+                li.nav-item(role='presentation')
+                  button.nav-link.active(data-bs-toggle='tab' data-bs-target='#nmConfigPane' type='button' role='tab') Configuration
+                li.nav-item(role='presentation')
+                  button.nav-link(data-bs-toggle='tab' data-bs-target='#nmColourPane' type='button' role='tab') Colours
+              .tab-content
+                #nmConfigPane.tab-pane.fade.show.active(role='tabpanel')
+                  .row
+                    .col-1
+                    .col-10
+                      label.form-label(for='nm_name') Menu Identifier:
+                      input#nm_name.form-control(type='text' name='name' required placeholder='e.g. main, messages, doors' pattern='[a-z0-9_-]+')
+                      .form-text Lowercase letters, numbers, hyphens, and underscores only. Used to reference this menu from other menus and the call flow.
+                      br
+                      label.form-label(for='nm_title') Display Title:
+                      input#nm_title.form-control(type='text' name='title' placeholder='Title shown to users on the terminal')
                   br
-                  label.form-label(for='nm_title') Display Title:
-                  input#nm_title.form-control(type='text' name='title' placeholder='Title shown to users')
-              br
-              .row
-                .col-1
-                .col-5
-                  label.form-label Menu Type:
-                  select.form-control(name='menu_type')
-                    for mt in menuTypes
-                      option(value=mt selected=(mt === 'Hotkey'))= mt
-                  .form-text Hotkey = single keypress, Lightbar = arrow-key navigation (future)
-              br
-              .row
-                .col-1
-                .col-5
-                  label.form-label Display File Name:
-                  input.form-control(type='text' name='display_file' placeholder='e.g. mainmenu')
-                  .form-text Art filename only — no path or extension. The terminal art system resolves the full path and format automatically.
-                .col-5
-                  label.form-label Display File Type:
-                  select.form-control(name='display_file_type')
-                    option(value='') — None —
-                    option(value='Screen') Screen (full-screen art)
-                    option(value='Header') Header (header art)
-                  .form-text Determines which art subdirectory to search (screens/ or headers/).
-              br
-              .row
-                .col-1
-                .col-3
-                  label.form-label Display Entries:
-                  select.form-control(name='display_entries')
-                    option(value='true') Yes
-                    option(value='false') No
-                  .form-text Draw entry list over the display file
-                .col-2
-                  label.form-label X Offset:
-                  input.form-control(type='number' name='entries_x_offset' value='0' min='0')
-                .col-2
-                  label.form-label Y Offset:
-                  input.form-control(type='number' name='entries_y_offset' value='0' min='0')
-                .col-2
-                  label.form-label Max Columns:
-                  input.form-control(type='number' name='max_columns' value='3' min='1' max='10')
-              br
-              h5 Menu Colors
-              .form-text.mb-2 Leave as "Theme Default" to inherit from the active terminal theme.
-              .row
-                .col-1
-                .col-5
-                  label.form-label Title Color:
-                  select.form-control.bg-dark.color-select(name='title_clr')
-                    option(value='') — Theme Default —
-                    for clr in ansiColors
-                      option(value=clr.value style='color:' + clr.hex)= clr.label
-                .col-5
-                  label.form-label Prompt Color:
-                  select.form-control.bg-dark.color-select(name='prompt_clr')
-                    option(value='') — Theme Default —
-                    for clr in ansiColors
-                      option(value=clr.value style='color:' + clr.hex)= clr.label
-              .row
-                .col-1
-                .col-5
-                  label.form-label Input Color:
-                  select.form-control.bg-dark.color-select(name='input_clr')
-                    option(value='') — Theme Default —
-                    for clr in ansiColors
-                      option(value=clr.value style='color:' + clr.hex)= clr.label
-                .col-5
-                  label.form-label Hotkey Color:
-                  select.form-control.bg-dark.color-select(name='hotkey_clr')
-                    option(value='') — Theme Default —
-                    for clr in ansiColors
-                      option(value=clr.value style='color:' + clr.hex)= clr.label
-              .row
-                .col-1
-                .col-5
-                  label.form-label Error Color:
-                  select.form-control.bg-dark.color-select(name='error_clr')
-                    option(value='') — Theme Default —
-                    for clr in ansiColors
-                      option(value=clr.value style='color:' + clr.hex)= clr.label
-              br
-              .row
-                .col-1
-                .col-10
+                  .row
+                    .col-1
+                    .col-5
+                      label.form-label Menu Type:
+                      select.form-control(name='menu_type')
+                        for mt in menuTypes
+                          option(value=mt selected=(mt === 'Hotkey'))= mt
+                      .form-text Hotkey = single keypress, Lightbar = arrow-key navigation (future)
+                    .col-5
+                      label.form-label Display Entries:
+                      select.form-control(name='display_entries')
+                        option(value='true') Yes
+                        option(value='false') No
+                      .form-text Draw entry list over the display file
+                  br
+                  .row
+                    .col-1
+                    .col-5
+                      label.form-label Display File Name:
+                      input.form-control(type='text' name='display_file' placeholder='e.g. mainmenu')
+                      .form-text Art filename only -- no path or extension.
+                    .col-5
+                      label.form-label Display File Type:
+                      select.form-control(name='display_file_type')
+                        option(value='') -- None --
+                        option(value='Screen') Screen (full-screen art)
+                        option(value='Header') Header (header art)
+                      .form-text Art subdirectory to search (screens/ or headers/).
+                  br
+                  .row
+                    .col-1
+                    .col-3
+                      label.form-label X Offset:
+                      input.form-control(type='number' name='entries_x_offset' value='0' min='0')
+                    .col-3
+                      label.form-label Y Offset:
+                      input.form-control(type='number' name='entries_y_offset' value='0' min='0')
+                    .col-3
+                      label.form-label Max Columns:
+                      input.form-control(type='number' name='max_columns' value='3' min='1' max='10')
+
+                #nmColourPane.tab-pane.fade(role='tabpanel')
+                  .d-flex.justify-content-between.align-items-center.mb-3
+                    .form-text Leave as "Theme Default" to inherit from the active terminal theme.
+                    button.btn.btn-sm.btn-outline-secondary.reset-colours-btn(type='button') Reset All to Theme
+                  .row
+                    .col-6
+                      label.form-label Title Colour:
+                      select.form-control.bg-dark.color-select(name='title_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+                    .col-6
+                      label.form-label Prompt Colour:
+                      select.form-control.bg-dark.color-select(name='prompt_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+                  .row.mt-2
+                    .col-6
+                      label.form-label Input Colour:
+                      select.form-control.bg-dark.color-select(name='input_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+                    .col-6
+                      label.form-label Hotkey Colour:
+                      select.form-control.bg-dark.color-select(name='hotkey_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+                  .row.mt-2
+                    .col-6
+                      label.form-label Error Colour:
+                      select.form-control.bg-dark.color-select(name='error_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+                    .col-6
+                      label.form-label Menu Prompt Colour:
+                      select.form-control.bg-dark.color-select(name='menu_prompt_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+                  .row.mt-2
+                    .col-6
+                      label.form-label Featured Colour:
+                      select.form-control.bg-dark.color-select(name='featured_clr')
+                        option(value='') -- Theme Default --
+                        for clr in ansiColors
+                          option(value=clr.value style='color:' + clr.hex)= clr.label
+
+              .row.mt-3
+                .col-12
                   .text-end
                     input.btn.btn-lg.btn-success(type='submit' value='Create Menu')
 
@@ -190,10 +209,22 @@ block content
       // Sync color-select text color with selected option
       function syncSelectColor(sel) {
         var opt = sel.options[sel.selectedIndex];
-        sel.style.color = opt && opt.style.color ? opt.style.color : '';
+        sel.style.color = opt && opt.style.color ? opt.style.color : 'var(--bs-secondary-color)';
       }
       document.querySelectorAll('.color-select').forEach(function(sel) {
         syncSelectColor(sel);
         sel.addEventListener('change', function() { syncSelectColor(this); });
+      });
+
+      // Reset all colour selects in the parent tab pane to Theme Default
+      document.querySelectorAll('.reset-colours-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var pane = this.closest('.tab-pane');
+          if (!pane) return;
+          pane.querySelectorAll('.color-select').forEach(function(sel) {
+            sel.value = '';
+            syncSelectColor(sel);
+          });
+        });
       });
     });

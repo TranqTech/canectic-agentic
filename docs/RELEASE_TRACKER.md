@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-03-28
+Last updated: 2026-03-31
 
 ---
 
@@ -35,13 +35,15 @@ Last updated: 2026-03-28
 - [x] Private mail reader (inbox/sent/trash, compose, reply)
 - [x] Private mail editor (LOCAL + FTN/QWK/EMAIL transports)
 - [x] Unread mail check (call flow stage + menu command)
-- [x] Last callers display
+- [x] Last callers display (source column, current caller highlight)
+- [x] Who's online (terminal nodes + web presence, conditional call flow stage)
 - [x] User list
 - [x] Door game support (NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty)
+- [x] Door browser (collection navigation, description panel, ANSI colour rendering)
 - [x] Announcement viewer (scrolling viewport, arrow navigation, call flow + menu command)
 - [x] Mail verification handler (call flow + menu command, send/enter/change address)
 - [x] Registration with gender selection (hotkey selector)
-- [~] Password reset handler (sends message, token/link flow not implemented)
+- [x] Password reset handler (pre-login token + post-login change)
 - [~] ZMODEM (works with most clients, known issue with IcyTerm both directions)
 
 ### Web
@@ -59,7 +61,11 @@ Last updated: 2026-03-28
 - [x] Bootstrap 5 Darkly theme, responsive layout
 - [x] DataTables for sortable/searchable lists
 - [x] TinyMCE rich text editor
-- [ ] User profile editing (change password, display preferences)
+- [x] User profile editing (username cooldown, name, location, gender, inline password change)
+- [x] Door listing with collections (card layout, play + more info buttons)
+- [x] Web door launcher (xterm.js, fractional scaling, mobile-responsive, return to collection)
+- [x] Web activity tracking (session renewal, idle detection, presence)
+- [x] Who's online (web presence integration, activity labels)
 
 ### Admin Panel
 - [x] Dashboard
@@ -69,8 +75,10 @@ Last updated: 2026-03-28
 - [x] File groups CRUD
 - [x] File areas CRUD (scan, move, delete files)
 - [x] Users CRUD (edit, password reset, flags, Unverified restriction)
-- [x] Menus CRUD (hotkey entries, ANSI color picker, drag-to-reorder)
-- [x] Doors CRUD (launch types, variable substitution)
+- [x] Menus CRUD (tabbed modals, featured entries, colour cascade, dynamic arg selects, slug-safe IDs)
+- [x] Doors CRUD (tabbed modals, TinyMCE descriptions, icon/media, launch types, variable substitution)
+- [x] Door collections CRUD (create, reorder, assign doors)
+- [x] Themes CRUD (colour categories, accordion editor, duplicate, set default, seed from JSON)
 - [x] Peer connections (FTN/QWK/NNTP, enable/disable, poll settings)
 - [x] Nodelists (import, browse, search, flag glossary)
 - [x] Admin log viewer (WebSocket push, live tail)
@@ -156,7 +164,7 @@ Last updated: 2026-03-28
 |---|------|--------|-------|
 | 1 | Password reset flow | [x] | Pre-login code-based + web token link + post-login change |
 | 2 | User profile editing | [x] | Username cooldown, name, location, gender, inline password change |
-| 3 | Door menus and collections | [ ] | Categories/groups, presentation (ANSI art per category), terminal door selector, web door browser with filtering |
+| 3 | Door menus and collections | [x] | Collections, terminal browser, web cards, TinyMCE descriptions, ANSI colour rendering |
 | 4 | Door server BBS registration | [ ] | Register with door game servers |
 | 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
 
