@@ -133,37 +133,128 @@ class BaseCommands {
 		return formats;
 	}
 
-	// Find the first existing art file across the format fallback chain
+	// Parse a size tag from a filename: "menuname-80x25" -> { cols: 80, rows: 25 }
+	_parseArtSize(name, baseLen) {
+		var suffix = name.substring(baseLen);
+		if (!suffix.startsWith('-')) return null;
+		var match = suffix.match(/^-(\d+)x(\d+)$/);
+		if (!match) return null;
+		return { cols: parseInt(match[1]), rows: parseInt(match[2]) };
+	}
+
+	// Find the best art file using size-aware discovery.
+	// Walk order: exact size > column match > default, within each format tier.
+	// Size fit takes priority over format capability (a column-mismatched sixel
+	// is worse than a properly sized ANSI).
 	_findArtFile(subdir, filename) {
 		var formats = this._getArtFormats();
+		var termCols = this.call?.term_width || 80;
+		var termRows = this.call?.term_height || 25;
+		var colTolerance = 5;
 
+		// Phase 1: Try size-tagged variants across all formats (size fit > format)
+		// For each format, look for: exact match, then column match
+		for (var fmt of formats) {
+			var artdir = appConfig.get('textdir', '') + "/" + fmt.dir + "/" + subdir;
+			if (!existsSync(artdir)) continue;
+
+			// Exact size match
+			var exactFile = artdir + "/" + filename + "-" + termCols + "x" + termRows + fmt.ext;
+			if (existsSync(exactFile)) return exactFile;
+		}
+
+		// Phase 2: Column match across all formats
+		for (var fmt of formats) {
+			var artdir = appConfig.get('textdir', '') + "/" + fmt.dir + "/" + subdir;
+			if (!existsSync(artdir)) continue;
+
+			var files;
+			try { files = readdirSync(artdir); } catch (_) { continue; }
+
+			// Find all size-tagged variants for this filename and format
+			var candidates = [];
+			for (var f of files) {
+				if (!f.endsWith(fmt.ext)) continue;
+				var stem = f.substring(0, f.length - fmt.ext.length);
+				if (!stem.startsWith(filename + '-')) continue;
+				var size = this._parseArtSize(stem, filename.length);
+				if (!size) continue;
+
+				// Column must be within tolerance and not exceed terminal width
+				var colDiff = termCols - size.cols;
+				if (colDiff < 0 || colDiff > colTolerance) continue;
+
+				candidates.push({ file: artdir + "/" + f, cols: size.cols, rows: size.rows });
+			}
+
+			if (candidates.length > 0) {
+				// Among column matches, pick the best row fit:
+				// largest rows that doesn't exceed terminal height
+				var fitting = candidates.filter(function(c) { return c.rows <= termRows; });
+				if (fitting.length > 0) {
+					fitting.sort(function(a, b) { return b.rows - a.rows; });
+					return fitting[0].file;
+				}
+				// All exceed terminal height -- pick the smallest (least overflow)
+				candidates.sort(function(a, b) { return a.rows - b.rows; });
+				return candidates[0].file;
+			}
+		}
+
+		// Phase 3: Default (no size tag) across all formats
 		for (var fmt of formats) {
 			var artdir = appConfig.get('textdir', '') + "/" + fmt.dir + "/" + subdir;
 			if (!existsSync(artdir)) continue;
 
 			var artfile = artdir + "/" + filename + fmt.ext;
-			if (existsSync(artfile)) {
-				return artfile;
-			}
+			if (existsSync(artfile)) return artfile;
 		}
+
 		return null;
 	}
 
-	// Find a random art file from the first format directory that has files
+	// Find a random art file from the first format directory that has files.
+	// Prefers size-matched files when available.
 	_findRandomArtFile(subdir) {
 		var formats = this._getArtFormats();
+		var termCols = this.call?.term_width || 80;
+		var termRows = this.call?.term_height || 25;
+		var colTolerance = 5;
 
 		for (var fmt of formats) {
 			var artdir = appConfig.get('textdir', '') + "/" + fmt.dir + "/" + subdir;
 			if (!existsSync(artdir)) continue;
 
-			var filearray = readdirSync(artdir);
-			if (filearray.length < 1) continue;
+			var filearray;
+			try { filearray = readdirSync(artdir); } catch (_) { continue; }
+			var matching = filearray.filter(function(f) { return f.endsWith(fmt.ext); });
+			if (matching.length < 1) continue;
 
-			var artfilename = filearray[Math.floor(Math.random() * filearray.length)];
-			if (artfilename) {
-				return artdir + "/" + artfilename;
+			// Prefer size-matched files
+			var sizeMatched = [];
+			var untagged = [];
+			for (var f of matching) {
+				var stem = f.substring(0, f.length - fmt.ext.length);
+				var dashIdx = stem.lastIndexOf('-');
+				if (dashIdx > 0) {
+					var sizeStr = stem.substring(dashIdx + 1);
+					var sizeMatch = sizeStr.match(/^(\d+)x(\d+)$/);
+					if (sizeMatch) {
+						var cols = parseInt(sizeMatch[1]);
+						var rows = parseInt(sizeMatch[2]);
+						var colDiff = termCols - cols;
+						if (colDiff >= 0 && colDiff <= colTolerance && rows <= termRows) {
+							sizeMatched.push(f);
+						}
+						continue;
+					}
+				}
+				untagged.push(f);
 			}
+
+			var pool = sizeMatched.length > 0 ? sizeMatched : untagged.length > 0 ? untagged : matching;
+			var pick = pool[Math.floor(Math.random() * pool.length)];
+			if (pick) return artdir + "/" + pick;
 		}
 		return null;
 	}
