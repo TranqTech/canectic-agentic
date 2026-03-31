@@ -249,31 +249,93 @@ This module is independent of the menu system -- any handler that renders art ca
 
 ---
 
-## 8. Implementation Phases
+## 8. Sixel Art Handling
 
-### Phase 1: Margin Layout
-- Add margin fields to schema and admin UI
-- Replace offset-based positioning with margin-based region calculation
-- Auto column sizing based on region width
-- Fill order toggle
-- Vertical centering
-- Migrate existing menus (offsets to margins)
+### 8.1 The Sixel Challenge
 
-### Phase 2: Universal Art Codes
+Sixel art is pixel-based and renders at a fixed resolution. It cannot contain embedded @ codes (it is binary pixel data). On oversized terminals, sixel art designed for 80x25 renders in the top-left and leaves the rest empty. Column-mismatched sixel (e.g. 80-col art on a 132-col terminal) looks significantly worse than a properly sized ANSI fallback.
+
+SyncTERM (the primary sixel terminal) treats sixel as a background canvas that text can overlay, which makes sixel+text menu rendering viable.
+
+### 8.2 Size-Tagged Art Files
+
+Art files can include a target terminal size in the filename: `mainmenu-80x25.six`, `mainmenu-132x50.ans`. The size represents the target terminal dimensions the art was designed for, not the exact pixel dimensions of the art itself. This allows headers and partial-height art to be tagged appropriately (e.g. a header designed for 80x25 terminals that only occupies 10 rows).
+
+### 8.3 Art File Walk Order
+
+The art discovery system selects the best available art file for the current terminal. The walk order prioritizes size fit over format capability, because a column-mismatched sixel is worse than a properly sized ANSI.
+
+Given a terminal at WxH columns/rows:
+
+```
+1. Exact size sixel       filename-WxH.six
+2. Column match sixel     filename-Cx*.six where C is within column tolerance of W
+                          (among column matches, pick largest rows <= H)
+3. Exact size ANSI        filename-WxH.ans (or .ut8 for UTF-8 terminals)
+4. Column match ANSI      filename-Cx*.ans where C is within column tolerance of W
+                          (among column matches, pick largest rows <= H)
+5. Default ANSI           filename.ans (or .ut8)
+6. Default ASCII          filename.asc
+```
+
+**Column tolerance**: a variant is a column match if its column count is within 5 columns of the terminal width AND does not exceed the terminal width. So on an 84-column terminal, 80-col art matches. On a 132-column terminal, 80-col art does not.
+
+**Row selection within column matches**: among files that pass the column filter, pick the one with the largest row count that does not exceed the terminal height. This gives the best visual fill without overflow. If no variant fits within the terminal height, pick the smallest available (least overflow).
+
+**Default files** (no size tag) are treated as 80x25 targets for the purpose of matching. They always serve as a fallback after sized variants are exhausted.
+
+**Scope**: This size-aware walk order applies to ALL art file discovery via `_findArtFile()`, not just menus. Login screens, logoff screens, headers, and any other art rendered via `drawscreen()` benefit from the same logic. Sysops can create size variants for any art file in the system.
+
+### 8.4 Sixel Positioning Overlay
+
+Since sixel files cannot contain @ codes, positioning for art-defined mode uses a companion ANSI overlay:
+
+- `mainmenu-80x25.six` -- the visual sixel art
+- `mainmenu-80x25.ans` -- the positioning overlay (same target size)
+
+The overlay ANSI file contains @ codes placed at the intended entry/UI positions. It is never rendered to the terminal. The art code processor scans it to build the slot map, then the sixel art renders as the visual background, and entries are drawn at the mapped positions.
+
+This design is elegant because:
+- The same `.ans` file works as both the art-defined mode file on ANSI terminals (where it IS the visual art with codes) and as the positioning template for sixel terminals
+- Sysops can design the overlay in the same ANSI editor they use for the sixel art, placing @ codes visually
+- No JSON hand-editing required for positioning
+
+**Workflow for sixel menu art:**
+1. Design the sixel art at target size (e.g. 80x25)
+2. In the same editor (or a copy), create an ANSI version with @ codes at the entry positions
+3. Save both as `menuname-80x25.six` and `menuname-80x25.ans`
+4. Set the menu to `display_entries = 'art'`
+5. The system picks the sixel for capable terminals (using the ANSI for positioning), and falls back to the ANSI for non-sixel terminals
+
+---
+
+## 9. Implementation Phases
+
+### Phase 1: Margin Layout [COMPLETE]
+- Margin-based entry regions replacing offset positioning
+- Auto column sizing, fill order toggle, vertical centering
+- Lightbar menu mode with arrow-key navigation
+- display_title toggle, display_entries 3-state enum
+- DB migration for boolean-to-enum and offset-to-margin conversion
+
+### Phase 2: Universal Art Codes + Size-Tagged Art Discovery
 - Art code scanner/replacer in `artCodes.js`
 - Wire into `drawscreen()` / `drawfile()` pipeline
 - Implement universal codes (@BN@, @UN@, @DT@, etc.)
+- Size-tagged filename parsing in `_findArtFile()`
+- Column-tolerance matching with row-fit tiebreaker
 - Works for all art files, not just menus
 
-### Phase 3: Art Defined Menu Mode
+### Phase 3: Art Defined Menu Mode + Sixel Overlay
 - Menu entry codes (@Enn@, @Fnn@) with slot mapping
-- Prompt/hotkey/error position codes (@HK@, @PR@, @ER@)
+- Prompt/hotkey/error/title position codes (@HK@, @PR@, @ER@, @MT@)
 - display_entries='art' mode in menu handler
+- Sixel companion overlay loading (`.six` + `.ans` pairing)
 - Admin UI for art defined mode
 
 ---
 
-## 9. Backward Compatibility
+## 10. Backward Compatibility
 
 - Menus with no art file and `display_entries='auto'` behave identically to current `true` with default margins matching current anchor points
 - Menus with `display_entries='off'` behave identically to current `false`
