@@ -318,15 +318,15 @@ This design is elegant because:
 - display_title toggle, display_entries 3-state enum
 - DB migration for boolean-to-enum and offset-to-margin conversion
 
-### Phase 2: Universal Art Codes + Size-Tagged Art Discovery
+### Phase 2: Universal Art Codes + Size-Tagged Art Discovery [COMPLETE]
 - Art code scanner/replacer in `artCodes.js`
-- Wire into `drawscreen()` / `drawfile()` pipeline
+- Wire into `drawscreen()` / `drawfile()` pipeline via `drawfileWithCodes()` / `drawscreenWithCodes()`
 - Implement universal codes (@BN@, @UN@, @DT@, etc.)
 - Size-tagged filename parsing in `_findArtFile()`
 - Column-tolerance matching with row-fit tiebreaker
 - Works for all art files, not just menus
 
-### Phase 3: Art Defined Menu Mode + Sixel Overlay
+### Phase 3: Art Defined Menu Mode + Sixel Overlay [COMPLETE]
 - Menu entry codes (@Enn@, @Fnn@) with slot mapping
 - Prompt/hotkey/error/title position codes (@HK@, @PR@, @ER@, @MT@)
 - display_entries='art' mode in menu handler

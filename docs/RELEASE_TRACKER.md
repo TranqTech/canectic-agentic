@@ -20,7 +20,8 @@ Last updated: 2026-03-31
 ### Terminal
 - [x] Terminal server (auto-detect TCP/Telnet, WebSocket)
 - [x] Terminal negotiation (NAWS, SGA, binary mode, sixel detection)
-- [x] Menu system (hotkey + lightbar modes, margin layout, auto columns, fill order, vertical centering)
+- [x] Menu system (hotkey + lightbar modes, margin layout, auto columns, fill order, vertical centering, art-defined mode)
+- [x] Art code system (universal @ codes in all art files, menu entry/UI positioning codes)
 - [x] Menu entry drag-to-reorder in admin
 - [x] Default menu entries on new menu creation (redrawMenu)
 - [x] Message area selector (lightbar)

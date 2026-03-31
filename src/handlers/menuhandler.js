@@ -57,6 +57,9 @@ class MenuHandler extends BaseHandler {
 		this.currentPage = 0;
 		this.paged = false;
 
+		// Art-defined mode slot map (populated by drawfileWithCodes)
+		this.artSlotMap = null;
+
 		// Menu type
 		this.menu_type = 'Hotkey';
 
@@ -336,15 +339,24 @@ class MenuHandler extends BaseHandler {
 	}
 
 	// --- Drawing ---
-	_drawMenu() {
+	async _drawMenu() {
 		if (this.dumb) {
 			this._drawMenuDumb();
 			return;
 		}
 
+		// Art-defined mode
+		if (this.display_entries === 'art' && this.display_file.length > 0) {
+			await this._drawMenuArtDefined();
+			return;
+		}
+
 		// Draw display file if configured
 		if (this.display_file.length > 0) {
-			this.call.cmds.drawscreen(this.display_file, this.display_file_type, true);
+			await this.call.cmds.drawscreenWithCodes(
+				this.display_file, this.display_file_type,
+				{ doscreenclear: true }
+			);
 			if (this.display_entries === 'off') {
 				this._drawPromptArea();
 				return;
@@ -375,6 +387,203 @@ class MenuHandler extends BaseHandler {
 				this._lbDrawEntry(this.lb_index, true);
 			}
 		}
+	}
+
+	// --- Art-defined mode rendering ---
+	async _drawMenuArtDefined() {
+		this.artSlotMap = null;
+
+		// Determine if the selected art file is sixel
+		var subdir;
+		switch (this.display_file_type) {
+			case "Screen":  subdir = "screens"; break;
+			case "Header":  subdir = "headers"; break;
+			default:        subdir = "misc"; break;
+		}
+		var artfile = this.call.cmds._findArtFile(subdir, this.display_file);
+		if (!artfile) {
+			// Fallback to auto mode
+			this.call.cmds.clearscreen();
+			this._drawEntryPage();
+			this._drawPromptArea();
+			return;
+		}
+
+		var isSixelArt = artfile.endsWith('.six');
+
+		if (isSixelArt) {
+			// Sixel art: render sixel visually, scan companion .ans for slot positions
+			var overlayPath = this.call.cmds.findSixelOverlay(artfile);
+			if (overlayPath) {
+				this.artSlotMap = this.call.cmds.scanOverlaySlotMap(overlayPath);
+			}
+			// Render the sixel art (with universal code processing -- though sixel has none)
+			this.call.cmds.drawfile(artfile, true);
+		} else {
+			// ANSI/ASCII art: process for both universal and menu codes
+			var result = await this.call.cmds.drawfileWithCodes(artfile, {
+				doscreenclear: true,
+				menuMode: true
+			});
+			this.artSlotMap = result.slotMap;
+		}
+
+		if (!this.artSlotMap) {
+			// No slot map found -- fall back to auto layout
+			this._drawEntryPage();
+			this._drawPromptArea();
+			return;
+		}
+
+		// Apply UI position overrides from slot map
+		if (this.artSlotMap.title) {
+			// Title position from art -- row is 0-based in slotMap, terminal is 1-based
+			var tpos = this.artSlotMap.title;
+			if (this.display_title) {
+				this.call.cmds.movecursor(tpos.col + 1, tpos.row + 1);
+				this.call.cmds.setfgcolor(this.title_clr);
+				var titleText = this.title;
+				if (titleText.length > tpos.width) titleText = titleText.substring(0, tpos.width);
+				this.call.cmds.senddata(titleText);
+			}
+		} else if (this.display_title) {
+			// Default title position
+			var titleY = Math.max(1, this.margin_top - 1);
+			var titleX = this.margin_left + 1;
+			this.call.cmds.movecursor(titleX, titleY);
+			this.call.cmds.setfgcolor(this.title_clr);
+			this.call.cmds.senddata(this.title);
+		}
+
+		// Draw entries at slot positions
+		this._drawArtEntries();
+
+		// Apply prompt/hotkey/error positions
+		if (this.artSlotMap.hotkeys) {
+			this.hotkey_x = this.artSlotMap.hotkeys.col + 1;
+			this.hotkey_y = this.artSlotMap.hotkeys.row + 1;
+		}
+		if (this.artSlotMap.prompt) {
+			this.prompt_x = this.artSlotMap.prompt.col + 1;
+			this.prompt_y = this.artSlotMap.prompt.row + 1;
+			this.input_y = this.prompt_y;
+			this.input_x = this.prompt_x + this.menu_prompt.length + 1;
+		}
+		if (this.artSlotMap.error) {
+			this.error_x = this.artSlotMap.error.col + 1;
+			this.error_y = this.artSlotMap.error.row + 1;
+		} else {
+			this.error_x = this.hotkey_x + this.hotkey_msg.length + 2;
+			this.error_y = this.hotkey_y;
+		}
+
+		this.call.cmds.resetcolors();
+		this._drawPromptArea();
+	}
+
+	// Draw entries into art-defined slot positions
+	_drawArtEntries() {
+		if (!this.artSlotMap) return;
+
+		var displayable = this.visible_entries.filter(e => e.display);
+		if (displayable.length === 0) return;
+
+		// Separate featured and non-featured entries
+		var featuredEntries = displayable.filter(e => e.featured);
+		var regularEntries = displayable.filter(e => !e.featured);
+
+		// Sort slot maps by slot number
+		var fSlots = this.artSlotMap.featured.slice().sort(function(a, b) { return a.slot - b.slot; });
+		var eSlots = this.artSlotMap.entries.slice().sort(function(a, b) { return a.slot - b.slot; });
+
+		// Assign featured entries to F slots; overflow spills to E slots
+		var featuredOverflow = [];
+		for (var fi = 0; fi < featuredEntries.length; fi++) {
+			if (fi < fSlots.length) {
+				this._drawArtSlotEntry(featuredEntries[fi], fSlots[fi]);
+			} else {
+				featuredOverflow.push(featuredEntries[fi]);
+			}
+		}
+		// Blank unused F slots
+		for (var fj = featuredEntries.length; fj < fSlots.length; fj++) {
+			this._blankArtSlot(fSlots[fj]);
+		}
+
+		// Merge overflow featured entries with regular entries by sort_order
+		var merged = [];
+		var ri = 0;
+		var oi = 0;
+		while (ri < regularEntries.length || oi < featuredOverflow.length) {
+			if (oi < featuredOverflow.length && (ri >= regularEntries.length ||
+				(featuredOverflow[oi].sort_order || 0) <= (regularEntries[ri].sort_order || 0))) {
+				merged.push(featuredOverflow[oi]);
+				oi++;
+			} else if (ri < regularEntries.length) {
+				merged.push(regularEntries[ri]);
+				ri++;
+			}
+		}
+
+		// Assign merged entries to E slots
+		for (var ei = 0; ei < eSlots.length; ei++) {
+			if (ei < merged.length) {
+				this._drawArtSlotEntry(merged[ei], eSlots[ei]);
+			} else {
+				this._blankArtSlot(eSlots[ei]);
+			}
+		}
+	}
+
+	// Draw a single entry at an art-defined slot position
+	_drawArtSlotEntry(entry, slot) {
+		// Terminal coordinates are 1-based; slotMap is 0-based
+		this.call.cmds.movecursor(slot.col + 1, slot.row + 1);
+
+		var defaultFg = entry.featured ? this.featured_clr : (this.theme?.opt_clr || 7);
+		var entryFg = entry.fg_clr !== undefined ? entry.fg_clr : defaultFg;
+		var entryBg = entry.bg_clr;
+
+		if (entryBg !== undefined) this.call.cmds.setbgcolor(entryBg);
+		this.call.cmds.setfgcolor(entryFg);
+
+		// Build entry text: hotkey prefix + display
+		var text = '';
+		if (entry.hotkey && entry.display) {
+			this.call.cmds.setfgcolor(this.hotkey_clr);
+			text += entry.hotkey.toUpperCase() + ' ';
+		}
+
+		// Remaining width for the display text
+		var prefixLen = text.length;
+		var displayText = entry.display || '';
+		var availWidth = slot.width - prefixLen;
+
+		if (displayText.length > availWidth) {
+			displayText = displayText.substring(0, availWidth);
+		}
+
+		// Send hotkey prefix
+		if (prefixLen > 0) {
+			this.call.cmds.senddata(text);
+			this.call.cmds.setfgcolor(entryFg);
+		}
+
+		this.call.cmds.senddata(displayText);
+
+		// Pad remaining width
+		var padLen = availWidth - displayText.length;
+		if (padLen > 0) {
+			this.call.cmds.senddata(' '.repeat(padLen));
+		}
+
+		this.call.cmds.resetcolors();
+	}
+
+	// Blank an unused art slot
+	_blankArtSlot(slot) {
+		this.call.cmds.movecursor(slot.col + 1, slot.row + 1);
+		this.call.cmds.senddata(' '.repeat(slot.width));
 	}
 
 	_drawEntryPage() {
@@ -869,7 +1078,7 @@ class MenuHandler extends BaseHandler {
 
 			case "redrawMenu":
 				if (!this.dumb) this.call.cmds.clearscreen();
-				this._drawMenu();
+				await this._drawMenu();
 				return;
 
 			// --- Simple commands: run as sub-modules ---
@@ -1023,9 +1232,9 @@ class MenuHandler extends BaseHandler {
 		this._restartMenu();
 	}
 
-	_restartMenu() {
+	async _restartMenu() {
 		if (!this.active || !this.call) return;
-		this._drawMenu();
+		await this._drawMenu();
 		this.resetInactivityTimeouts();
 	}
 
@@ -1039,7 +1248,7 @@ class MenuHandler extends BaseHandler {
 				return;
 			}
 			this._applyConfig(config);
-			this._drawMenu();
+			await this._drawMenu();
 			this.setInactivityTimeouts();
 		} catch (err) {
 			this._handleError("_loadAndDrawMenu error", err);
@@ -1140,7 +1349,7 @@ class MenuHandler extends BaseHandler {
 			}
 
 			this._applyConfig(config);
-			this._drawMenu();
+			await this._drawMenu();
 			this.setInactivityTimeouts();
 		} catch (err) {
 			this._handleError("startStage error", err);

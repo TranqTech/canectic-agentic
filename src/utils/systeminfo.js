@@ -1,10 +1,19 @@
 //imports
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { DateTime } from "luxon";
 import appConfig from "../config/appConfig.js";
 
 //variables
-const vsoftwarename = "Canectic BBS Door Server"
-const vsystemver = "0.02a"
+const vsoftwarename = "Canectic BBS"
+var vsystemver = "0.0.0";
+try {
+	var __filename = fileURLToPath(import.meta.url);
+	var __dirname = dirname(__filename);
+	var pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
+	vsystemver = pkg.version || vsystemver;
+} catch (_) {}
 const vsystemvermsg = vsoftwarename + " v" + vsystemver
 
 

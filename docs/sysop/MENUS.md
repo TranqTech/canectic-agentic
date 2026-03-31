@@ -13,7 +13,7 @@ Click **Add New Menu** on the menu list page. The modal has three tabs:
 - **Display Title Text** -- The title shown to users on the terminal. Can include spaces and mixed case.
 - **Menu Type** -- "Hotkey" (single keypress dispatch) or "Lightbar" (arrow-key navigation with visual highlight bar). See the Lightbar Mode section below.
 - **Display Title** -- Yes/No. When No, the title text is not rendered at the top of the screen. Useful when ANSI art provides the title visually.
-- **Display Entries** -- Auto (entries flow in the margin-defined region), Off (art-only, no entries rendered), or Art Defined (entry positions from art codes, future).
+- **Display Entries** -- Auto (entries flow in the margin-defined region), Off (art-only, no entries rendered), or Art Defined (entry positions from `@` codes embedded in the art file).
 - **Display File** -- Optional ANSI art file shown as the menu background. Bare filename only (no path or extension). The art system resolves the full path based on terminal capabilities.
 - **Display File Type** -- Art subdirectory: "Screen" (full-screen art) or "Header" (header art).
 
@@ -147,6 +147,91 @@ negotiate -> logon -> last_callers -> check_online -> announcements -> verify_ma
 ```
 
 The `menu` stage loads the menu specified by `call.currentMenu` (defaults to `main`). When the menu handler's `exitStage` command is invoked, the flow advances to `goodbye` and the session ends.
+
+## Art Codes
+
+Art files (ANSI, UTF-8, ASCII) support `@` codes that are replaced with dynamic values at render time. These work in **all** art files system-wide, not just menus -- login screens, logoff screens, headers, and any other art rendered via `drawscreen()`.
+
+### Universal Codes
+
+| Code | Description | Example |
+|------|-------------|---------|
+| `@BN@` | Board name | `appConfig boardname` |
+| `@SN@` | System name | `appConfig system_name` |
+| `@UN@` | Current username | Logged-in user |
+| `@RN@` | Real name | User's full name |
+| `@ND@` | Node number | Terminal node |
+| `@DT@` | Current date | `MM/DD/YYYY` |
+| `@TM@` | Current time | `HH:MM` |
+| `@MG@` | Message group | Current group name |
+| `@MA@` | Message area | Current area name |
+| `@FG@` | File group | Current file group name |
+| `@FA@` | File area | Current file area name |
+| `@VR@` | Software version | e.g. `0.9.1-alpha.1` |
+| `@ON@` | Users online | Terminal + web count |
+| `@TC@` | Total calls | All-time call count |
+| `@TU@` | Total users | Registered user count |
+
+Without a width specifier, the code uses its own character width (4 characters for `@XX@`). Long values are truncated, short values are right-padded with spaces.
+
+**Width specifier:** Add a number to reserve more space. `@BN20@` reserves 20 characters for the board name. `@UN15@` reserves 15 characters for the username.
+
+### Performance
+
+Art files with no `@` characters are rendered without any processing overhead (fast path). The system only scans files that contain at least one `@` byte.
+
+## Art-Defined Mode
+
+When **Display Entries** is set to **Art Defined**, menu entries are positioned by codes embedded in the art file instead of flowing into a computed region.
+
+### Menu Entry Codes
+
+These codes are only processed in art files when the menu uses Art Defined mode:
+
+| Code | Description |
+|------|-------------|
+| `@E01@`..`@E99@` | Entry slot. Filled with the Nth visible non-featured entry. |
+| `@F01@`..`@F99@` | Featured entry slot. Filled with the Nth visible featured entry. |
+| `@MT@` | Menu title position (replaces default title drawing) |
+| `@HK@` | Hotkey list position (replaces bottom-of-screen hotkey bar) |
+| `@PR@` | Prompt position (replaces bottom-of-screen prompt) |
+| `@ER@` | Error/status message position |
+
+**Width specifier:** `@E0120@` = entry slot 1, 20 characters wide. Without a width specifier, entry slots default to 20 characters, UI codes default to 40 characters.
+
+### How Entry Slots Work
+
+- `@E01@` gets the 1st visible non-featured entry, `@E02@` the 2nd, and so on.
+- `@F01@` gets the 1st visible featured entry, `@F02@` the 2nd, and so on.
+- If there are more featured entries than `@Fnn@` slots, the overflow spills into `@Enn@` slots alongside regular entries, maintaining sort order. Featured entries are never dropped.
+- Unused slots (more slots than entries) are blanked with spaces.
+- Entry colour (explicit fg/bg, or theme featured_clr/opt_clr) is applied within the slot.
+
+### UI Element Positioning
+
+- If `@MT@` appears, the title renders at that position instead of the default top-left.
+- If `@HK@` appears, the hotkey list renders there instead of the bottom of the screen.
+- If `@PR@` appears, the command prompt and input cursor render there.
+- If `@ER@` appears, error and status messages render there.
+- If none appear, all UI elements pin to their default positions.
+
+### Sixel Art Menus
+
+Sixel art is pixel data and cannot contain `@` codes. For art-defined mode with sixel, create a companion ANSI file:
+
+1. Design the sixel art at target size (e.g. 80x25)
+2. Create an ANSI version with `@` codes placed at the entry positions
+3. Save both as `menuname-80x25.six` and `menuname-80x25.ans`
+4. Set the menu to Display Entries = Art Defined
+
+The system renders the sixel visually for capable terminals and reads the companion `.ans` for positioning. For non-sixel terminals, the `.ans` file serves as both the visual art and the code source.
+
+### Art-Defined Tips
+
+- Design the ANSI art first, placing `@` codes where entries should appear.
+- Use the width specifier to match the visual space in your art (e.g. `@E0125@` for a 25-character entry area).
+- The hotkey prefix (letter + space) is included in the entry text, so account for 2 extra characters.
+- Test with both sixel and ANSI terminals to verify positioning.
 
 ## Tips
 

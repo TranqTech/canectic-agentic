@@ -2,6 +2,7 @@
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import appConfig from "../config/appConfig.js";
+import { processArtCodes, scanSlotMap } from "../utils/artCodes.js";
 const escape_intermed = new RegExp("[!\"#$%&'()*+,-./]")
 const escape_terminator1 = new RegExp("[A-Za-z]")
 const escape_terminator2 = new RegExp("[@\\[\\]^_`\\{\\}\\|~]")
@@ -107,6 +108,120 @@ class BaseCommands {
 		} catch (err) {
 			console.log(err);
 			return false;
+		}
+	}
+
+	// Async art rendering with @ code processing.
+	// Returns: { rendered: boolean, slotMap: object|null }
+	// options.menuMode: if true, extract menu slot positions
+	// options.doscreenclear: clear screen before drawing
+	async drawfileWithCodes(artfile, options) {
+		options = options || {};
+		try {
+			var rawbuffer = readFileSync(artfile);
+			var isSixel = false;
+			var sendbuffer;
+
+			if (rawbuffer[0] === 0x1b && rawbuffer[1] === 0x50) {
+				isSixel = true;
+			} else if (rawbuffer[0] === 0x90) {
+				isSixel = true;
+			}
+
+			if (isSixel) {
+				sendbuffer = rawbuffer;
+			} else {
+				var eofIndex = rawbuffer.indexOf(0x1a);
+				sendbuffer = (eofIndex !== -1) ? rawbuffer.subarray(0, eofIndex) : rawbuffer;
+			}
+
+			if (sendbuffer.length === 0) {
+				return { rendered: false, slotMap: null };
+			}
+
+			var slotMap = null;
+
+			if (!isSixel) {
+				// Convert buffer to string for @ code processing
+				var artString = sendbuffer.toString('binary');
+
+				// Fast path: skip processing if no @ found
+				if (artString.indexOf('@') !== -1) {
+					var result = await processArtCodes(artString, this.call, {
+						menuMode: options.menuMode || false
+					});
+					artString = result.processed;
+					slotMap = result.slotMap;
+				}
+
+				// Convert back to buffer (binary encoding preserves CP437 bytes)
+				sendbuffer = Buffer.from(artString, 'binary');
+			}
+
+			if (options.doscreenclear) {
+				this.clearscreen();
+			}
+			this.senddata(sendbuffer);
+
+			if (isSixel) {
+				this._send(Buffer.from("\x1b\\"));
+				this._send(Buffer.from("\r\n"));
+			}
+
+			this.resetcolors();
+			return { rendered: true, slotMap: slotMap };
+		} catch (err) {
+			console.log(err);
+			return { rendered: false, slotMap: null };
+		}
+	}
+
+	// Async drawscreen with @ code processing
+	async drawscreenWithCodes(filename, type, options) {
+		options = options || {};
+		var subdir;
+		switch (type) {
+			case "Screen":  subdir = "screens"; break;
+			case "Header":  subdir = "headers"; break;
+			default:        subdir = "misc"; break;
+		}
+
+		var artfile = this._findArtFile(subdir, filename);
+		if (!artfile) {
+			console.log("No art file found for", filename, "in", subdir);
+			return { rendered: false, slotMap: null };
+		}
+
+		return await this.drawfileWithCodes(artfile, options);
+	}
+
+	// For sixel art-defined menus: find the companion .ans overlay for slot mapping.
+	// Given a sixel art path, look for matching .ans in the ans/ directory tree.
+	findSixelOverlay(sixelPath) {
+		// sixelPath: .../sixel/screens/mainmenu-80x25.six
+		// overlay:   .../ans/screens/mainmenu-80x25.ans
+		var replaced = sixelPath.replace(/\/sixel\//g, '/ans/').replace(/\.six$/, '.ans');
+		if (existsSync(replaced)) return replaced;
+
+		// Also try without size tag if exact match not found
+		var match = replaced.match(/^(.+)-\d+x\d+(\.ans)$/);
+		if (match && existsSync(match[1] + match[2])) {
+			return match[1] + match[2];
+		}
+		return null;
+	}
+
+	// Load and scan an .ans overlay for slot positions (sixel companion)
+	scanOverlaySlotMap(overlayPath) {
+		try {
+			var rawbuffer = readFileSync(overlayPath);
+			var eofIndex = rawbuffer.indexOf(0x1a);
+			var content = (eofIndex !== -1) ? rawbuffer.subarray(0, eofIndex) : rawbuffer;
+			var artString = content.toString('binary');
+			return scanSlotMap(artString);
+		} catch (err) {
+			console.log("Overlay scan error:", err.message);
+			return null;
 		}
 	}
 
