@@ -84,6 +84,7 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Load Menu | Menu identifier | Navigate to another menu |
 | Log Off (Confirm) | No | Confirm logoff, prompt to download queued files |
 | Log Off (Fast) | No | End the session immediately |
+| Node Spy | No | Sysop node spy (view active nodes, watch live output) |
 | New Scan (All) | No | Scan all areas for new messages |
 | New Scan (Group) | No | Scan current group for new messages |
 | Post Message | No | Compose a new message |

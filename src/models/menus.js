@@ -377,6 +377,7 @@ function getAvailableCommands() {
 		{ name: 'previousMenu',    label: 'Previous Menu',     needsArg: false },
 		{ name: 'logOff',          label: 'Log Off (Fast)',     needsArg: false },
 		{ name: 'goodbye',         label: 'Log Off (Confirm)',  needsArg: false },
+		{ name: 'nodeSpy',         label: 'Node Spy',          needsArg: false },
 		{ name: 'exitStage',       label: 'Exit Stage',        needsArg: false },
 		{ name: 'redrawMenu',      label: 'Redraw Menu',       needsArg: false },
 		{ name: 'runXtrn',         label: 'Run Door Game',     needsArg: true,  argLabel: 'Door Slug' },

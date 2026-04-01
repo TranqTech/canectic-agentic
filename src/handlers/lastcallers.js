@@ -9,7 +9,7 @@ const lcallclr = 12;
 const ccntclr = 14;
 const headclr = 11;
 const msgclr = 10;
-const selfclr = 15;  // bright white for current caller highlight
+const selfclr = 11;  // bright yellow for current caller highlight
 
 class LastCallers extends BaseSubModule {
 	constructor(call) {

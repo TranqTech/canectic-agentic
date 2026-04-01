@@ -7,15 +7,30 @@ import * as postgres from '../middleware/db/postgres.js';
 // Valid launch types — keep in sync with doorrunner.js LAUNCH_TYPES
 const VALID_LAUNCH_TYPES = [
 	'NativeShell',
-	'ExecNative',
-	'SpawnNative',
+	'NativeCommand',
 	'Dosemu',
 	'DosemuPty',
 	'SyncJSDoor',
 ];
 
+// Legacy DB values that map to current types
+const LEGACY_LAUNCH_TYPES = {
+	'ExecNative':  'NativeCommand',
+	'SpawnNative': 'NativeCommand',
+};
+
+// Display labels for admin UI dropdowns
+const LAUNCH_TYPE_LABELS = {
+	'NativeShell':    'Native (PTY)',
+	'NativeCommand':  'Native Commands',
+	'Dosemu':         'Dosemu (Console Only)',
+	'DosemuPty':      'Dosemu (Full)',
+	'SyncJSDoor':     'SyncJS Door',
+};
+
 const VALID_DROPFILE_TYPES = [
 	'doorsys',
+	'door32',
 	'dorinfo',
 	'chain',
 	'callinfo',
@@ -40,6 +55,14 @@ async function getAllDoors() {
 	var doors = await postgres.query(
 		'SELECT * FROM doors ORDER BY sort_order ASC, name ASC'
 	);
+	// Normalize legacy launch types
+	if (doors) {
+		for (var i = 0; i < doors.length; i++) {
+			if (LEGACY_LAUNCH_TYPES[doors[i].launch_type]) {
+				doors[i].launch_type = LEGACY_LAUNCH_TYPES[doors[i].launch_type];
+			}
+		}
+	}
 	return doors || [];
 }
 
@@ -67,6 +90,7 @@ async function createDoor(data) {
 	}
 
 	var launchType = (data.launch_type || 'NativeShell').trim();
+	launchType = LEGACY_LAUNCH_TYPES[launchType] || launchType;
 	if (!VALID_LAUNCH_TYPES.includes(launchType)) {
 		result.errormessages.push('Invalid launch type: ' + launchType);
 		return result;
@@ -132,6 +156,7 @@ async function updateDoor(id, data) {
 	var result = { status: false, errormessages: [] };
 
 	var launchType = (data.launch_type || '').trim();
+	launchType = LEGACY_LAUNCH_TYPES[launchType] || launchType;
 	if (launchType && !VALID_LAUNCH_TYPES.includes(launchType)) {
 		result.errormessages.push('Invalid launch type: ' + launchType);
 		return result;
@@ -213,7 +238,7 @@ function normalizeDoorConfig(row) {
 		doorScript: row.door_script || undefined,
 		doorDir: row.door_dir || undefined,
 		doorArgs: row.door_args || undefined,
-		launchType: row.launch_type || 'NativeShell',
+		launchType: LEGACY_LAUNCH_TYPES[row.launch_type] || row.launch_type || 'NativeShell',
 		dropfileType: row.dropfile_type || undefined,
 		dropfileDir: row.dropfile_dir || undefined,
 		dbSubdir: row.db_subdir || undefined,
@@ -237,8 +262,25 @@ function getValidLaunchTypes() {
 	return VALID_LAUNCH_TYPES;
 }
 
+function getLaunchTypeLabels() {
+	return LAUNCH_TYPE_LABELS;
+}
+
+const DROPFILE_TYPE_LABELS = {
+	'doorsys':  'DOOR.SYS',
+	'door32':   'DOOR32.SYS',
+	'dorinfo':  'DORINFO.DEF',
+	'chain':    'CHAIN.TXT',
+	'callinfo': 'CALLINFO.BBS',
+	'pcboard':  'PCBOARD.SYS',
+};
+
 function getValidDropfileTypes() {
 	return VALID_DROPFILE_TYPES;
+}
+
+function getDropfileTypeLabels() {
+	return DROPFILE_TYPE_LABELS;
 }
 
 export {
@@ -249,5 +291,7 @@ export {
 	updateDoor,
 	deleteDoor,
 	getValidLaunchTypes,
-	getValidDropfileTypes
+	getLaunchTypeLabels,
+	getValidDropfileTypes,
+	getDropfileTypeLabels
 };

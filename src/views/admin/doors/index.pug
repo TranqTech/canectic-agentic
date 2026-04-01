@@ -73,7 +73,7 @@ block content
                           td
                             code= door.slug
                           td
-                            span.badge.bg-primary= door.launch_type
+                            span.badge.bg-primary= launchTypeLabels[door.launch_type] || door.launch_type
                           td
                             if door.cmd
                               small= door.cmd
@@ -250,7 +250,7 @@ block content
                           label.form-label Launch Type:
                           select.form-control.mb-2(name='launch_type')
                             for lt in launchTypes
-                              option(value=lt)= lt
+                              option(value=lt)= launchTypeLabels[lt] || lt
 
                       h5 Executable
                       label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables -- see reference below.')
@@ -282,7 +282,7 @@ block content
                             option(value='') None
                             for dt in dropfileTypes
                               if dt
-                                option(value=dt)= dt
+                                option(value=dt)= dropfileTypeLabels[dt] || dt
                         .col-6
                           label.form-label(data-bs-toggle='tooltip' title='Directory where the drop file is written. Supports %X variables.')
                             | Dropfile Directory
@@ -399,7 +399,7 @@ block content
                           label.form-label Launch Type:
                           select#ed_launch_type.form-control.mb-2(name='launch_type')
                             for lt in launchTypes
-                              option(value=lt)= lt
+                              option(value=lt)= launchTypeLabels[lt] || lt
 
                       h5 Executable
                       label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables.')
@@ -431,7 +431,7 @@ block content
                             option(value='') None
                             for dt in dropfileTypes
                               if dt
-                                option(value=dt)= dt
+                                option(value=dt)= dropfileTypeLabels[dt] || dt
                         .col-6
                           label.form-label(data-bs-toggle='tooltip' title='Directory where the drop file is written. Supports %X variables.')
                             | Dropfile Directory

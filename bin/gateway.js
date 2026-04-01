@@ -32,6 +32,7 @@ import * as jobs from "../src/queues/jobs.js";
 import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
 import { registerLogWebSocket } from "../src/routes/adminLogs.js";
+import { registerNodeSpyWebSocket } from "../src/servers/nodespySocket.js";
 import appConfig from "../src/config/appConfig.js";
 
 dotenv.config();
@@ -133,6 +134,8 @@ async function startNodeManager(){
 	primaryNodeManager = new nodeManager
 	alogger.writeAlog(1, "Starting NodeManager", "yellowbright", true)
 	primaryNodeManager.listUsedNodes()
+	// Expose to Express routes (for who's online, nodespy, etc.)
+	webserver.locals.nodeManager = primaryNodeManager;
 }
 
 async function startWebServer(){
@@ -160,6 +163,8 @@ async function startCallPools(){
 	}
 
 	callManager.listPools()
+	// Expose to Express routes (for nodespy, etc.)
+	webserver.locals.callManager = callManager;
 }
 
 async function startWebsockets(){
@@ -398,6 +403,7 @@ async function main(){
 	if (runwssrv){
 		await startWebsockets()
 		await registerLogWebSocket(wsManager);
+		await registerNodeSpyWebSocket(wsManager, callManager);
 	}
 	// Unified terminal server (auto-detects TCP vs Telnet)
 	await startTerminalServer()

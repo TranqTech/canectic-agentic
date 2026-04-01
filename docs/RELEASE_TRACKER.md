@@ -67,8 +67,8 @@ Last updated: 2026-03-31
 - [x] Web door launcher (xterm.js, fractional scaling, mobile-responsive, return to collection)
 - [x] Web activity tracking (session renewal, idle detection, presence)
 - [x] Who's online (web presence integration, activity labels)
-- [ ] Last callers page (web view of recent callers)
-- [ ] Who's online page (web view of terminal nodes + web presence)
+- [x] Last callers page (web view of recent callers, reusable partial)
+- [x] Who's online page (web view of terminal nodes + web presence, reusable partial)
 - [ ] Virtual call flow (web equivalent of the terminal login experience: last callers, who's online, announcements, mail check)
 
 ### Admin Panel
@@ -171,7 +171,10 @@ Last updated: 2026-03-31
 | 3 | Door menus and collections | [x] | Collections, terminal browser, web cards, TinyMCE descriptions, ANSI colour rendering |
 | 4 | Door server BBS registration | [ ] | Register with door game servers |
 | 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
-| 6 | Full nodespy implementation | [ ] | Sysop real-time node monitoring and interaction |
+| 6 | Full nodespy implementation | [x] | Web dashboard + live snoop + terminal command |
+| 7 | Sysop chat | [ ] | Page, break-in, split-screen chat from NodeSpy (web + terminal) |
+| 8 | User QWK/REP packet handling | [ ] | User-facing QWK packet download and REP packet upload for offline message reading |
+| 9 | Wall / Oneliners | [ ] | Public graffiti wall, terminal + web display, call flow integration |
 
 ---
 
@@ -207,5 +210,6 @@ Last updated: 2026-03-31
 | `LOGGING_SYSTEM.md` | [x] |
 | `CONFIG_SYSTEM_DESIGN.md` | [x] |
 | `EMSI_WAZOO_DESIGN.md` | [x] |
+| `NODESPY_DESIGN.md` | [x] |
 | `INSTALL.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |

@@ -1,0 +1,388 @@
+doctype html
+html
+  head
+    title= title + ' - ' + (boardname || 'BBS')
+    link(rel='stylesheet', href='/css/darkly/bootstrap.css')
+    link(rel='stylesheet', href='/css/xterm.css')
+    link(rel='stylesheet', href='/css/bootstrap-icons.css')
+    meta(charset='utf-8')
+    meta(name='viewport' content='width=device-width, initial-scale=1')
+    style.
+      body {
+        margin: 0;
+        padding: 0;
+        background: #111;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+      @media (max-width: 768px) {
+        body {
+          align-items: flex-start;
+        }
+        #spy-wrapper {
+          padding: 2px;
+        }
+        #spy-card {
+          border-radius: 0;
+          border-left: none;
+          border-right: none;
+        }
+        #terminal-container {
+          padding: 0;
+        }
+      }
+      #spy-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        max-width: 1200px;
+        padding: 10px;
+      }
+      #spy-card {
+        background: #000;
+        border: 1px solid #444;
+        border-radius: 6px;
+        overflow: hidden;
+        width: 100%;
+      }
+      #spy-header {
+        background: #222;
+        border-bottom: 1px solid #444;
+        padding: 6px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+      }
+      #spy-header .spy-title { color: #aaa; }
+      #spy-header .spy-node { color: #00ffff; }
+      #spy-header .spy-user { color: #ff00ff; }
+      #spy-header .status-connected { color: #5cb85c; }
+      #spy-header .status-disconnected { color: #d9534f; }
+      #spy-header .status-text { color: #888; }
+      #spy-header .badge-readonly {
+        background: #6f42c1;
+        color: #fff;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+      }
+      #spy-header .badge-chatting {
+        background: #d9534f;
+        color: #fff;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+      }
+      #spy-header .badge-queued {
+        background: #f0ad4e;
+        color: #000;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+        animation: pulse-queued 1.5s ease-in-out infinite;
+      }
+      @keyframes pulse-queued {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+      #terminal-container {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        background: #000;
+        padding: 4px 0;
+      }
+      #terminal-container .xterm {
+        height: auto !important;
+      }
+      #terminal-container .xterm-viewport {
+        overflow: hidden !important;
+      }
+      #chat-bar {
+        background: #1a1a2e;
+        border-top: 1px solid #444;
+        padding: 6px 12px;
+        display: none;
+        align-items: center;
+        gap: 8px;
+      }
+      #chat-bar .chat-peek {
+        font-size: 11px;
+        color: #666;
+        min-height: 16px;
+        flex-shrink: 0;
+      }
+      #chat-bar .chat-peek .peek-text { color: #aaa; }
+      #chat-bar input {
+        flex: 1;
+        background: #222;
+        border: 1px solid #555;
+        color: #eee;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 13px;
+        font-family: monospace;
+      }
+      #chat-bar input:focus { outline: none; border-color: #888; }
+      #chat-bar button {
+        font-size: 12px;
+        padding: 3px 10px;
+      }
+  body
+    #spy-wrapper
+      #spy-card
+        #spy-header
+          span.spy-title
+            i.bi.bi-eye.me-1
+            | Node Spy &mdash;
+            span.spy-node  Node #{nodenum}
+            |  &mdash;
+            span.spy-user= username
+            span#modeBadge.badge-readonly Read-Only
+          span
+            span#statusText.status-text Connecting...
+            button#chatBtn.btn.btn-outline-warning.btn-sm.ms-2(style='font-size:11px; padding:1px 8px; display:none;')
+              i.bi.bi-chat-dots.me-1
+              | Chat
+            button#endChatBtn.btn.btn-outline-danger.btn-sm.ms-2(style='font-size:11px; padding:1px 8px; display:none;')
+              i.bi.bi-x-circle.me-1
+              | End Chat
+            a#exitBtn.btn.btn-outline-secondary.btn-sm.ms-2(href=returnUrl style='font-size:11px; padding:1px 8px;') Exit
+        #terminal-container
+        #chat-bar
+          span.chat-peek
+            span#peekLabel
+            span#peekText.peek-text
+          input#chatInput(type='text' placeholder='Type a message...' maxlength='500' autocomplete='off')
+          button#sendBtn.btn.btn-sm.btn-primary Send
+
+    script(src='/js/xterm/xterm.js')
+    script(src='/js/xterm/addon-fit.js')
+    script.
+      (function() {
+        var wsUrl = '#{wsUrl}';
+        var returnUrl = '#{returnUrl}';
+        var TARGET_COLS = !{termWidth};
+        var TARGET_ROWS = !{termHeight};
+        var isMobile = !{ismobile ? 'true' : 'false'};
+
+        var term = new Terminal({
+          cols: TARGET_COLS,
+          rows: TARGET_ROWS,
+          cursorBlink: false,
+          disableStdin: true,
+          fontSize: isMobile ? 8 : 16,
+          fontFamily: '"Cascadia Code", "Fira Code", "Consolas", "Courier New", monospace',
+          theme: {
+            background: '#000000',
+            foreground: '#aaaaaa',
+            black: '#000000',
+            brightBlack: '#555555'
+          },
+          scrollback: 100,
+          convertEol: false
+        });
+
+        var container = document.getElementById('terminal-container');
+        term.open(container);
+
+        function fitTerminal() {
+          var cellWidth = term._core._renderService.dimensions.css.cell.width;
+          var cellHeight = term._core._renderService.dimensions.css.cell.height;
+          if (!cellWidth || !cellHeight) return;
+
+          var currentSize = term.options.fontSize || 16;
+          var ratio = cellWidth / currentSize;
+          var vRatio = cellHeight / currentSize;
+
+          var headerHeight = isMobile ? 40 : 60;
+          var availHeight = window.innerHeight - headerHeight;
+          var widthPadding = isMobile ? 6 : 20;
+          var availWidth = isMobile
+            ? window.innerWidth - widthPadding
+            : document.getElementById('spy-card').clientWidth - widthPadding;
+
+          var fromHeight = availHeight / (TARGET_ROWS * vRatio);
+          var fromWidth = availWidth / (TARGET_COLS * ratio);
+          var optimal = isMobile ? fromWidth : Math.min(fromHeight, fromWidth);
+          if (isMobile) {
+            optimal = Math.floor(optimal * 10) / 10;
+          } else {
+            optimal = Math.round(optimal * 10) / 10;
+          }
+          optimal = Math.max(6, optimal);
+
+          if (optimal !== currentSize) {
+            term.options.fontSize = optimal;
+          }
+        }
+
+        setTimeout(fitTerminal, 50);
+
+        // --- Elements ---
+        var statusText = document.getElementById('statusText');
+        var modeBadge = document.getElementById('modeBadge');
+        var chatBtn = document.getElementById('chatBtn');
+        var endChatBtn = document.getElementById('endChatBtn');
+        var chatBar = document.getElementById('chat-bar');
+        var chatInput = document.getElementById('chatInput');
+        var sendBtn = document.getElementById('sendBtn');
+        var peekLabel = document.getElementById('peekLabel');
+        var peekText = document.getElementById('peekText');
+
+        var ws = null;
+        var connected = false;
+        var chatMode = false;
+
+        function setStatus(text, className) {
+          statusText.textContent = text;
+          statusText.className = className;
+        }
+
+        function setMode(mode) {
+          if (mode === 'watching') {
+            chatMode = false;
+            modeBadge.textContent = 'Read-Only';
+            modeBadge.className = 'badge-readonly';
+            chatBtn.style.display = '';
+            endChatBtn.style.display = 'none';
+            chatBar.style.display = 'none';
+            chatInput.value = '';
+            peekText.textContent = '';
+            peekLabel.textContent = '';
+          } else if (mode === 'chatting') {
+            chatMode = true;
+            modeBadge.textContent = 'Chatting';
+            modeBadge.className = 'badge-chatting';
+            chatBtn.style.display = 'none';
+            endChatBtn.style.display = '';
+            chatBar.style.display = 'flex';
+            chatInput.focus();
+          } else if (mode === 'queued') {
+            modeBadge.textContent = 'Chat Queued';
+            modeBadge.className = 'badge-queued';
+            chatBtn.style.display = 'none';
+            endChatBtn.style.display = 'none';
+          }
+        }
+
+        var resizeTimer = null;
+        window.addEventListener('resize', function() {
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(fitTerminal, 100);
+        });
+
+        try {
+          ws = new WebSocket(wsUrl);
+          ws.binaryType = 'arraybuffer';
+        } catch (e) {
+          setStatus('Connection failed', 'status-disconnected');
+          return;
+        }
+
+        ws.onopen = function() {
+          connected = true;
+          setStatus('Watching', 'status-connected');
+          chatBtn.style.display = '';
+        };
+
+        ws.onmessage = function(event) {
+          if (event.data instanceof ArrayBuffer) {
+            // Binary: terminal output
+            term.write(new Uint8Array(event.data));
+          } else {
+            // Text: JSON control message
+            var msg;
+            try { msg = JSON.parse(event.data); } catch (_) {
+              // Might be plain text, write to terminal
+              term.write(event.data);
+              return;
+            }
+            handleServerMessage(msg);
+          }
+        };
+
+        function handleServerMessage(msg) {
+          if (msg.type === 'chat_started') {
+            setMode('chatting');
+            setStatus('Chatting', 'status-connected');
+          } else if (msg.type === 'chat_ended') {
+            setMode('watching');
+            setStatus('Watching', 'status-connected');
+          } else if (msg.type === 'chat_queued') {
+            setMode('queued');
+            setStatus('Queued', 'status-connected');
+          } else if (msg.type === 'chat_msg') {
+            // Messages appear on the target's terminal via the ring buffer,
+            // which is piped to xterm.js. No need to echo here.
+          } else if (msg.type === 'chat_typing') {
+            peekLabel.textContent = 'typing: ';
+            peekText.textContent = msg.text || '';
+            if (!msg.text) peekLabel.textContent = '';
+          }
+        }
+
+        ws.onclose = function(event) {
+          connected = false;
+          chatBtn.style.display = 'none';
+          endChatBtn.style.display = 'none';
+          chatBar.style.display = 'none';
+          if (event.code === 4004) {
+            setStatus('Node not active', 'status-disconnected');
+            term.write('\r\n\r\n[Node is not active - redirecting...]');
+          } else {
+            setStatus('Disconnected', 'status-disconnected');
+            term.write('\r\n\r\n[Session ended - redirecting...]');
+          }
+          setTimeout(function() {
+            window.location.href = returnUrl;
+          }, 2000);
+        };
+
+        ws.onerror = function() {
+          setStatus('Connection error', 'status-disconnected');
+        };
+
+        // --- Chat controls ---
+        function sendChatMessage() {
+          var text = chatInput.value.trim();
+          if (!text || !connected || !chatMode) return;
+          ws.send(JSON.stringify({ type: 'chat_input', text: text }));
+          chatInput.value = '';
+          chatInput.focus();
+        }
+
+        chatBtn.addEventListener('click', function() {
+          if (connected) {
+            ws.send(JSON.stringify({ type: 'chat_start' }));
+          }
+        });
+
+        endChatBtn.addEventListener('click', function() {
+          if (connected) {
+            ws.send(JSON.stringify({ type: 'chat_end' }));
+          }
+        });
+
+        sendBtn.addEventListener('click', sendChatMessage);
+
+        chatInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            sendChatMessage();
+          }
+        });
+
+        document.getElementById('exitBtn').addEventListener('click', function(e) {
+          if (connected && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
+        });
+      })();

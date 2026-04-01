@@ -23,6 +23,9 @@ import * as announcements from '../models/announcements.js';
 import * as doors from '../models/doors.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as redis from '../middleware/db/redis.js';
+import { getLastCallers } from '../models/callers.js';
+import { getOnlineUsers } from '../middleware/webActivity.js';
+import { formatActivity } from '../utils/activityMap.js';
 
 //setup
 router.use(cookieParser());
@@ -976,6 +979,96 @@ router.get('/doors/play/:slug', async (req, res) => {
 		wsUrl: wsUrl,
 		returnUrl: returnUrl,
 		ismobile: mobile({ ua: req.headers['user-agent'] })
+	});
+});
+
+// -------------------------------------------------------
+// Last Callers
+// -------------------------------------------------------
+
+router.get('/lastcallers', async (req, res) => {
+	var callers = await getLastCallers(12);
+	// Reverse to ascending chronological order (oldest first, like terminal)
+	callers.reverse();
+	var currentuser = await getCurrentUser(req);
+
+	// Find the current user's most recent web call to highlight
+	var currentCallId = null;
+	if (currentuser?.username) {
+		var uname = currentuser.username.toLowerCase();
+		for (var i = callers.length - 1; i >= 0; i--) {
+			if (callers[i].username && callers[i].username.toLowerCase() === uname
+				&& callers[i].source && callers[i].source.toLowerCase() === 'web') {
+				currentCallId = callers[i].id;
+				break;
+			}
+		}
+	}
+
+	res.render('public/lastcallers', {
+		title: 'Last Callers',
+		activelink: '',
+		currentuser: currentuser,
+		callers: callers,
+		currentCallId: currentCallId
+	});
+});
+
+// -------------------------------------------------------
+// Who's Online
+// -------------------------------------------------------
+
+router.get('/whosonline', async (req, res) => {
+	// Terminal nodes from the gateway's nodeManager
+	var nodeManager = req.app.locals.nodeManager;
+	var terminalNodes = [];
+	if (nodeManager) {
+		terminalNodes = nodeManager.getActiveNodes();
+		terminalNodes.sort(function(a, b) { return a.nodenum - b.nodenum; });
+	}
+
+	// Web presence users
+	var webUsers = [];
+	try { webUsers = await getOnlineUsers(); } catch (_) {}
+
+	// Build unified list, deduplicating web users already on terminal nodes
+	var onlineUsers = [];
+	var webNodeUsers = {};
+
+	for (var node of terminalNodes) {
+		if (node.web_originated && node.username) {
+			webNodeUsers[node.username.toLowerCase()] = true;
+		}
+		var connType = node.connection_type || '';
+		var connLabel = (connType === 'Websock' || connType === 'Websocket' || connType === 'TCP' || connType === 'Telnet')
+			? 'Terminal' : (connType || 'Unknown');
+		if (node.web_originated) connLabel = 'Web';
+
+		onlineUsers.push({
+			nodenum: node.nodenum,
+			username: node.username || '',
+			activity: formatActivity(node.status, node.detail, node.detail_display),
+			connection: connLabel
+		});
+	}
+
+	webUsers.sort(function(a, b) { return (a.username || '').localeCompare(b.username || ''); });
+	for (var wu of webUsers) {
+		if (!wu.username) continue;
+		if (webNodeUsers[wu.username.toLowerCase()]) continue;
+		onlineUsers.push({
+			nodenum: null,
+			username: wu.username,
+			activity: wu.activity || 'Browsing Web',
+			connection: 'Web'
+		});
+	}
+
+	res.render('public/whosonline', {
+		title: "Who's Online",
+		activelink: '',
+		currentuser: getCurrentUser(req),
+		onlineUsers: onlineUsers
 	});
 });
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { spawn, exec } from "child_process";
+import { exec } from "child_process";
 import { SerialPort } from 'serialport';
 import * as pty from "node-pty";
 import { existsSync } from 'node:fs';
@@ -17,11 +17,10 @@ dotenv.config();
 
 // Launch strategies
 const LAUNCH_TYPES = {
-	NATIVE_SHELL: "NativeShell",
-	EXEC_NATIVE:  "ExecNative",
-	SPAWN_NATIVE: "SpawnNative",
-	DOSEMU:       "Dosemu",
-	DOSEMU_PTY:   "DosemuPty",
+	NATIVE_SHELL:   "NativeShell",
+	NATIVE_COMMAND: "NativeCommand",
+	DOSEMU:         "Dosemu",
+	DOSEMU_PTY:     "DosemuPty",
 };
 
 class DoorRunner extends BaseHandler {
@@ -37,6 +36,9 @@ class DoorRunner extends BaseHandler {
 		this.doorConfig = doorConfig || {};
 		this.launchType = doorConfig.launchType || LAUNCH_TYPES.NATIVE_SHELL;
 		this.doorCmd = substitute(doorConfig.cmd || "", call, doorConfig);
+		this.doorDir = doorConfig.doorDir
+			? substitute(doorConfig.doorDir, call, doorConfig)
+			: appConfig.get('doordir', '') || process.cwd();
 		this.dropfileType = doorConfig.dropfileType || null;
 		this.dropfileDir = doorConfig.dropfileDir
 			? substitute(doorConfig.dropfileDir, call, doorConfig)
@@ -225,17 +227,15 @@ class DoorRunner extends BaseHandler {
 			case LAUNCH_TYPES.NATIVE_SHELL:
 				this._launchNativeShell();
 				break;
-			case LAUNCH_TYPES.EXEC_NATIVE:
-				this._launchExecNative();
-				break;
-			case LAUNCH_TYPES.SPAWN_NATIVE:
-				this._launchSpawnNative();
+			case LAUNCH_TYPES.NATIVE_COMMAND:
+			case "ExecNative":    // legacy DB values
+			case "SpawnNative":
+				this._launchNativeCommand();
 				break;
 			case LAUNCH_TYPES.DOSEMU:
 				this._launchDosemu();
 				break;
 			case LAUNCH_TYPES.DOSEMU_PTY:
-				console.log("Type Found")
 				this._launchDosemuPty();
 				break;
 			default:
@@ -286,8 +286,8 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_launchNativeShell() {
-		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
-		var logmsg = this.loggingId + "\n  Launching NativeShell: " + runCmd;
+		var runCmd = this.doorCmd;
+		var logmsg = this.loggingId + "\n  Launching NativeShell: " + runCmd + "\n  cwd: " + this.doorDir;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
 		this._setupOutputParser();
@@ -297,7 +297,7 @@ class DoorRunner extends BaseHandler {
 				name: 'xterm-color',
 				cols: this.call.term_width || 80,
 				rows: this.call.term_height || 25,
-				cwd: process.env.PWD,
+				cwd: this.doorDir,
 				env: process.env
 			});
 			this._outputSocket = this._ptySocket;
@@ -315,9 +315,9 @@ class DoorRunner extends BaseHandler {
 		}
 	}
 
-	_launchExecNative() {
-		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
-		var logmsg = this.loggingId + "\n  Launching ExecNative: " + runCmd;
+	_launchNativeCommand() {
+		var runCmd = this.doorCmd;
+		var logmsg = this.loggingId + "\n  Launching NativeCommand: " + runCmd + "\n  cwd: " + this.doorDir;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
 		this._setupOutputParser();
@@ -326,7 +326,7 @@ class DoorRunner extends BaseHandler {
 			this._child = exec(runCmd, {
 				shell: true,
 				stdio: 'pipe',
-				encoding: 'utf-8',
+				cwd: this.doorDir,
 				env: { ...process.env, FORCE_COLOR: '1' }
 			});
 			this._outputSocket = this._child.stdin;
@@ -345,42 +345,7 @@ class DoorRunner extends BaseHandler {
 			});
 			this._enableRawMode();
 		} catch (err) {
-			this._handleError("ExecNative launch failed", err);
-		}
-	}
-
-	_launchSpawnNative() {
-		var runCmd = appConfig.get('doordir', '') + "/" + this.doorCmd;
-		var logmsg = this.loggingId + "\n  Launching SpawnNative: " + runCmd;
-		alogger.writeAlog(4, logmsg, "greenbright");
-
-		this._setupOutputParser();
-
-		try {
-			this.call.cmds.clearscreen();
-			this._child = spawn(runCmd, {
-				shell: true,
-				stdio: 'pipe',
-				encoding: 'utf-8',
-				env: { ...process.env, FORCE_COLOR: '1' }
-			});
-			this._outputSocket = this._child.stdin;
-
-			this._child.stdout.on('data', (chunk) => {
-				this._sendDoorOutput(chunk);
-			});
-
-			this._child.stderr.on('data', (data) => {
-				var logmsg = this.loggingId + "\n  stderr: " + data;
-				alogger.writeAlog(4, logmsg, "yellow");
-			});
-
-			this._child.on('close', (code) => {
-				this._onDoorExit(code);
-			});
-			this._enableRawMode();
-		} catch (err) {
-			this._handleError("SpawnNative launch failed", err);
+			this._handleError("NativeCommand launch failed", err);
 		}
 	}
 

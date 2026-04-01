@@ -1,0 +1,71 @@
+//- Last Callers card partial
+//- Expects: callers (array of call records), currentUsername (string|null)
+//- Colours match the terminal lastcallers.js handler
+
+.card
+  .card-header.bg-primary.text-white
+    h5.mb-0
+      i.bi.bi-clock-history.me-2
+      span.fg-brightgreen Last Callers
+  .card-body.p-0
+    if callers && callers.length > 0
+      .table-responsive
+        table.table.table-sm.mb-0
+          thead
+            tr
+              th: span.fg-brightyellow Username
+              th: span.fg-brightyellow Time
+              th: span.fg-brightyellow Source
+              th: span.fg-brightyellow Location
+              th: span.fg-brightyellow Calls
+          tbody
+            each caller in callers
+              - var isSelf = currentCallId && caller.id === currentCallId
+              tr
+                td
+                  if isSelf
+                    strong.fg-brightyellow= caller.username
+                  else
+                    strong.fg-brightmagenta= caller.username
+                td
+                  - var d = caller.starttime ? new Date(caller.starttime) : null
+                  if d
+                    - var now = new Date()
+                    - var isToday = d.toDateString() === now.toDateString()
+                    if isSelf
+                      if isToday
+                        span.fg-brightyellow= d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+                      else
+                        span.fg-brightyellow= d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                    else
+                      if isToday
+                        span.fg-cyan= d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+                      else
+                        span.fg-cyan= d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                  else
+                    | -
+                td
+                  - var src = (caller.source || '').toLowerCase()
+                  if src === 'websocket' || src === 'terminal' || src === 'telnet' || src === 'tcp'
+                    span.badge.bg-info
+                      i.bi.bi-terminal.me-1
+                      | Terminal
+                  else if src === 'web'
+                    span.badge.bg-success
+                      i.bi.bi-globe.me-1
+                      | Web
+                  else
+                    span.badge.bg-secondary= caller.source || 'Unknown'
+                td
+                  if isSelf
+                    span.fg-brightyellow= caller.location || '-'
+                  else
+                    span.fg-brightblue= caller.location || '-'
+                td
+                  if isSelf
+                    span.fg-brightyellow= caller.logoncount || 0
+                  else
+                    span.fg-brightcyan= caller.logoncount || 0
+    else
+      .text-center.text-muted.py-4
+        | No recent callers

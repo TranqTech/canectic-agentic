@@ -272,6 +272,9 @@ Two-layer admin check:
 | Nodelist Clear | `POST /admin/nodelists/clear/:networkId` | Deletes all nodelist data for a network via `ftnNodelist.clearNetwork()`. Confirmation modal in UI. |
 | Nodelist Browser | `GET /admin/nodelist/:networkId` | Browse imported nodelist for a specific FTN network. DataTables listing with row-click detail modal. |
 | Nodelist Search | `GET /admin/nodelist/:networkId/search.json` | JSON endpoint for AJAX search/filter. Params: `q` (search term), `filter` (active/added/removed/all), `limit`. |
+| Node Spy | `GET /admin/nodespy` | Dashboard: card grid of active terminal nodes with auto-updating AJAX poll. |
+| Node Spy Status | `GET /admin/nodespy/status.json` | JSON endpoint for dashboard AJAX polling (node list with activity, duration, terminal size). |
+| Node Spy Watch | `GET /admin/nodespy/:nodenum` | Live snoop viewer: xterm.js terminal matched to target node dimensions, one-time Redis token auth for WebSocket. |
 
 ### Modal-Driven Editing Pattern
 
@@ -530,6 +533,7 @@ Configured in `bin/gateway.js` as an array of `{ name, path, callpool }` objects
 | `/ws/doorserver` | Doorserver | Doorserver | Door game server connections |
 | `/ws/legacy` | Legacy | PrimaryBBS | Legacy connector clients (DosBox/vmodem); pool created with `{ legacy: true }` |
 | `/` | Catchall | PrimaryBBS | Default path for clients that don't specify |
+| `/ws/nodespy` | NodeSpy | (raw WSS) | Sysop live snoop — token-auth, one-time use, read-only mirror of target node output |
 
 In **embedded mode**, an additional pool is registered for the mailer:
 
@@ -731,6 +735,9 @@ Both user and admin Pug layouts include an auto-connecting heartbeat script when
 - **Mail verification** -- Full verification flow with email codes, security level upgrade, `Unverified` restriction flag.
 - **Password reset** -- Token-based forgotten password recovery via email.
 - **Door listing and web launcher** -- `/doors` listing page, `/doors/play/:slug` with xterm.js and token-based WebSocket auth.
+- **Last callers** -- `/lastcallers` public page with reusable `partials/lastCallers.pug` card. Shows username, time, source badge, location, call count.
+- **Node Spy** -- `/admin/nodespy` dashboard with auto-updating cards, `/admin/nodespy/:nodenum` live snoop with xterm.js and token-auth WebSocket (`/ws/nodespy`). See `NODESPY_DESIGN.md`.
+- **Who's online** -- `/whosonline` public page with reusable `partials/whosOnline.pug` card. Merges terminal nodes (via `req.app.locals.nodeManager`) with web presence users, deduplicates web-originated terminal sessions. Both partials designed for embedding in virtual call flow and dashboard.
 - **File upload** -- Web and terminal upload with staging, hash, dupe check, FILE_ID.DIZ extraction.
 - **Registration wizard** -- 6-step wizard with AJAX validation, gender field.
 - **Menu admin** -- Full web CRUD for menus and menu entries. PostgreSQL-backed (`menus` + `menu_entries` tables). Color picker selects with live preview using ANSI color map.

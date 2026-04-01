@@ -64,6 +64,7 @@ class OutputRingBuffer {
 	}
 
 	destroy() {
+		this.emitter.emit("end");
 		this.emitter.removeAllListeners();
 		this.lines = [];
 		this.currentLine = Buffer.alloc(0);

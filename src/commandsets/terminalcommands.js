@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import appConfig from "../config/appConfig.js";
 import { processArtCodes, scanSlotMap } from "../utils/artCodes.js";
+import { cp437ToUtf8 } from "../utils/codepageConversions.js";
 const escape_intermed = new RegExp("[!\"#$%&'()*+,-./]")
 const escape_terminator1 = new RegExp("[A-Za-z]")
 const escape_terminator2 = new RegExp("[@\\[\\]^_`\\{\\}\\|~]")
@@ -20,6 +21,17 @@ class BaseCommands {
 	// Subclasses override this — the only difference between TCP and Websocket
 	_send(data) {
 		throw new Error("Subclass must implement _send");
+	}
+
+	// Write to the OutputRingBuffer as UTF-8.
+	// CP437 sessions convert on the fly; UTF-8 sessions pass through.
+	_writeRingBuffer(buf) {
+		if (!this.call) return;
+		if (this._isUTF8()) {
+			this.call.writeOutputBuffer(buf);
+		} else {
+			this.call.writeOutputBuffer(Buffer.from(cp437ToUtf8(buf), 'utf8'));
+		}
 	}
 
 	// --- Core output ---
@@ -542,6 +554,22 @@ class BaseCommands {
 		this._send("\x1b[H");
 	}
 
+	setscrollregion(top, bottom) {
+		this._send("\x1b[" + top + ";" + bottom + "r");
+	}
+
+	resetscrollregion() {
+		this._send("\x1b[r");
+	}
+
+	savecursor() {
+		this._send("\x1b7");
+	}
+
+	restorecursor() {
+		this._send("\x1b8");
+	}
+
 	clearline(lineint) {
 		if (lineint !== undefined) {
 			this._send("\x1b[" + lineint + "K");
@@ -565,7 +593,9 @@ class tcpCommands extends BaseCommands {
 	}
 
 	_send(data) {
-		this.socket.write(Buffer.from(data));
+		var buf = Buffer.from(data);
+		this.socket.write(buf);
+		this._writeRingBuffer(buf);
 	}
 }
 
@@ -576,7 +606,9 @@ class websockCommands extends BaseCommands {
 	}
 
 	_send(data) {
-		this.socket.send(Buffer.from(data));
+		var buf = Buffer.from(data);
+		this.socket.send(buf);
+		this._writeRingBuffer(buf);
 	}
 }
 
@@ -587,15 +619,18 @@ class telnetCommands extends BaseCommands {
 	}
 
 	_send(data) {
+		var buf = Buffer.from(data);
+		// Feed the ring buffer with UTF-8 converted data
+		this._writeRingBuffer(buf);
+
 		// In raw TCP mode (downgraded), send without escaping
 		if (this.call && this.call.connection && this.call.connection.telnetParser &&
 			this.call.connection.telnetParser._disabled) {
-			this.socket.write(Buffer.from(data));
+			this.socket.write(buf);
 			return;
 		}
 		// Escape 0xFF bytes as 0xFF 0xFF to prevent IAC interpretation.
 		// Fast path: skip escaping if no 0xFF present.
-		var buf = Buffer.from(data);
 		var hasFF = false;
 		for (var i = 0; i < buf.length; i++) {
 			if (buf[i] === 0xFF) { hasFF = true; break; }

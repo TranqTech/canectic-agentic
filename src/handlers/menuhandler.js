@@ -22,6 +22,7 @@ import { fileBatchDownload } from "./menucommands/fileBatchDownload.js";
 import { fileUpload } from "./menucommands/fileUpload.js";
 import { fileSearch } from "./menucommands/fileSearch.js";
 import { goodbye } from "./menucommands/goodbye.js";
+import { nodeSpy } from "./menucommands/nodeSpy.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -1050,6 +1051,10 @@ class MenuHandler extends BaseHandler {
 
 			case "goodbye":
 				this._runSubModule(new goodbye(this.call));
+				return;
+
+			case "nodeSpy":
+				this._runSubModule(new nodeSpy(this.call));
 				return;
 
 			case "runXtrn":

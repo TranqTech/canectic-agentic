@@ -43,6 +43,8 @@ import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
 import * as flash from '../middleware/db/flash.js';
+import { formatActivity } from '../utils/activityMap.js';
+import * as redis from '../middleware/db/redis.js';
 import multer from 'multer';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -2068,7 +2070,8 @@ router.get('/doorCollections/:id', async (req, res) => {
 		currentuser: currentuser,
 		collection: collection,
 		collectionDoors: collectionDoors,
-		allDoors: allDoors
+		allDoors: allDoors,
+		launchTypeLabels: doors.getLaunchTypeLabels()
 	});
 });
 
@@ -2103,9 +2106,11 @@ router.get('/doors', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var doorlist         = await doors.getAllDoors();
-	var launchTypes      = doors.getValidLaunchTypes();
-	var dropfileTypes    = doors.getValidDropfileTypes();
-	var configVars       = getVariableList();
+	var launchTypes        = doors.getValidLaunchTypes();
+	var launchTypeLabels   = doors.getLaunchTypeLabels();
+	var dropfileTypes      = doors.getValidDropfileTypes();
+	var dropfileTypeLabels = doors.getDropfileTypeLabels();
+	var configVars         = getVariableList();
 	res.render('admin/doors/index', {
 		sufficientAccess: sufficientAccess,
 		title: 'Door Games',
@@ -2113,7 +2118,9 @@ router.get('/doors', async (req, res) => {
 		currentuser: currentuser,
 		doorlist: doorlist,
 		launchTypes: launchTypes,
+		launchTypeLabels: launchTypeLabels,
 		dropfileTypes: dropfileTypes,
+		dropfileTypeLabels: dropfileTypeLabels,
 		configVars: configVars
 	});
 });
@@ -2126,9 +2133,11 @@ router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 		var currentuser      = await getCurrentUser(req);
 		var sufficientAccess = checkAdminAccess(currentuser);
 		var doorlist         = await doors.getAllDoors();
-		var launchTypes      = doors.getValidLaunchTypes();
-		var dropfileTypes    = doors.getValidDropfileTypes();
-		var configVars       = getVariableList();
+		var launchTypes        = doors.getValidLaunchTypes();
+		var launchTypeLabels   = doors.getLaunchTypeLabels();
+		var dropfileTypes      = doors.getValidDropfileTypes();
+		var dropfileTypeLabels = doors.getDropfileTypeLabels();
+		var configVars         = getVariableList();
 		res.render('admin/doors/index', {
 			sufficientAccess: sufficientAccess,
 			title: 'Door Games',
@@ -2136,7 +2145,9 @@ router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 			currentuser: currentuser,
 			doorlist: doorlist,
 			launchTypes: launchTypes,
+			launchTypeLabels: launchTypeLabels,
 			dropfileTypes: dropfileTypes,
+			dropfileTypeLabels: dropfileTypeLabels,
 			configVars: configVars,
 			errormessages: result.errormessages
 		});
@@ -2774,6 +2785,127 @@ router.post('/announcements/reorder', express.json(), requireAdmin, async (req, 
 		await announcements.updateSortOrder(ids);
 	}
 	res.json({ status: true });
+});
+
+// -------------------------------------------------------
+// NodeSpy
+// -------------------------------------------------------
+
+function _formatDuration(sinceMs) {
+	if (!sinceMs) return '-';
+	var secs = Math.floor((Date.now() - sinceMs) / 1000);
+	if (secs < 60) return secs + 's';
+	var mins = Math.floor(secs / 60);
+	if (mins < 60) return mins + 'm';
+	var hrs = Math.floor(mins / 60);
+	return hrs + 'h ' + (mins % 60) + 'm';
+}
+
+function _connectionLabel(node) {
+	if (node.web_originated) return 'Web';
+	var ct = node.connection_type || '';
+	if (ct === 'Websock' || ct === 'Websocket' || ct === 'TCP' || ct === 'Telnet') return 'Terminal';
+	return ct || 'Unknown';
+}
+
+router.get('/nodespy', async (req, res) => {
+	var nodeManager = req.app.locals.nodeManager;
+	var callManager = req.app.locals.callManager;
+	var nodes = [];
+
+	if (nodeManager) {
+		var active = nodeManager.getActiveNodes();
+		active.sort(function(a, b) { return a.nodenum - b.nodenum; });
+
+		for (var n of active) {
+			var call = callManager ? callManager.getCallByNode(n.nodenum) : null;
+			nodes.push({
+				nodenum: n.nodenum,
+				username: n.username || '',
+				activityLabel: formatActivity(n.status, n.detail, n.detail_display),
+				connectionLabel: _connectionLabel(n),
+				termWidth: call ? (call.term_width || 80) : 80,
+				termHeight: call ? (call.term_height || 25) : 25,
+				duration: _formatDuration(n.since)
+			});
+		}
+	}
+
+	res.render('admin/nodespy/index', {
+		title: 'Node Spy',
+		activelink: 'nodespy',
+		currentuser: await getCurrentUser(req),
+		nodes: nodes
+	});
+});
+
+// JSON endpoint for dashboard auto-refresh
+router.get('/nodespy/status.json', async (req, res) => {
+	var nodeManager = req.app.locals.nodeManager;
+	var callManager = req.app.locals.callManager;
+	var nodes = [];
+
+	if (nodeManager) {
+		var active = nodeManager.getActiveNodes();
+		active.sort(function(a, b) { return a.nodenum - b.nodenum; });
+
+		for (var n of active) {
+			var call = callManager ? callManager.getCallByNode(n.nodenum) : null;
+			nodes.push({
+				nodenum: n.nodenum,
+				username: n.username || '',
+				activityLabel: formatActivity(n.status, n.detail, n.detail_display),
+				connectionLabel: _connectionLabel(n),
+				termWidth: call ? (call.term_width || 80) : 80,
+				termHeight: call ? (call.term_height || 25) : 25,
+				duration: _formatDuration(n.since)
+			});
+		}
+	}
+
+	res.json({ nodes: nodes });
+});
+
+router.get('/nodespy/:nodenum', async (req, res) => {
+	var nodenum = parseInt(req.params.nodenum);
+	if (isNaN(nodenum) || nodenum < 1) {
+		return res.redirect('/admin/nodespy');
+	}
+
+	var callManager = req.app.locals.callManager;
+	var call = callManager ? callManager.getCallByNode(nodenum) : null;
+	if (!call) {
+		return res.redirect('/admin/nodespy');
+	}
+
+	// Generate one-time Redis token
+	var token = uuidv4().replace(/-/g, '');
+	var tokenData = JSON.stringify({
+		nodenum: nodenum,
+		sessionId: req.cookies.sessionid,
+		termWidth: call.term_width || 80,
+		termHeight: call.term_height || 25,
+		created: Date.now()
+	});
+
+	var rc = await redis.getClient();
+	await rc.set('nodespy:' + token, tokenData, { EX: 60 });
+
+	// Build WebSocket URL
+	var wsProto = (req.headers['x-forwarded-proto'] === 'https' || req.protocol === 'https') ? 'wss:' : 'ws:';
+	var wsUrl = wsProto + '//' + req.headers.host + '/ws/nodespy?token=' + token;
+
+	res.render('admin/nodespy/watch', {
+		title: 'Node Spy - Node ' + nodenum + ' (' + (call.caller_username || 'Unknown') + ')',
+		boardname: appConfig.get('boardname', 'BBS'),
+		nodenum: nodenum,
+		username: call.caller_username || 'Unknown',
+		termWidth: call.term_width || 80,
+		termHeight: call.term_height || 25,
+		wsUrl: wsUrl,
+		returnUrl: '/admin/nodespy',
+		ismobile: mobile({ ua: req.headers['user-agent'] })
+	});
 });
 
 export { router };

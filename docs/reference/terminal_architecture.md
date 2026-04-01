@@ -223,6 +223,7 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 |---------|----------|
 | `logOff` | Emits `HangupSignal` (immediate disconnect) |
 | `goodbye` | Sub-module: confirm logoff, offer batch download if files queued, then disconnect |
+| `nodeSpy` | Sub-module: list active nodes, enter number to watch live terminal output (ESC exits) |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
 | `previousMenu` | Pops menu history |
@@ -317,6 +318,28 @@ Central mapping of activity identifiers to display labels. Three components:
 
 ---
 
+## Node Spy
+
+### nodeSpy (`menucommands/nodeSpy.js`)
+
+Sysop-only sub-module for live node monitoring. Lists active terminal nodes and allows real-time snooping of their terminal output. See `NODESPY_DESIGN.md` for the full system design including web interface.
+
+**States**: `list` -> `watching` -> `message` -> `list` (or return)
+
+**List state**: Displays active nodes (excluding self) in a columnar table matching the Who's Online layout. Sysop types a node number + Enter to watch. ESC exits to menu. Dumb terminal fallback included.
+
+**Watching state**: Clears screen, sends OutputRingBuffer catch-up history, subscribes to live `"data"` events. All target output forwarded to sysop's terminal in real-time. ESC exits watching. Target disconnect detected via `"end"` event, returns to list after keypress.
+
+**Encoding**: Ring buffer always stores UTF-8. For CP437 sysop terminals, output is converted via `utf8ToCp437()` before sending. UTF-8 terminals receive raw passthrough.
+
+**Access**: Sysop-only via menu entry access control (min_security + Sysop flag). Wire `nodeSpy` command to a menu entry in the admin panel.
+
+**CallManager access**: `this.call.callPool.callManager.getCallByNode(nodenum)` -- back-reference set during pool creation.
+
+**Cleanup**: `clearHandler()` removes all listeners from the target's outputBuffer to prevent leaks.
+
+---
+
 ## Door System
 
 ### Door Configuration (`src/models/doors.js`)
@@ -372,13 +395,18 @@ Extends `BaseHandler`. Manages the full lifecycle of launching an external door 
 
 **Launch types**:
 
-| Type | Method | I/O | Use Case |
-|------|--------|-----|----------|
-| `NativeShell` | `node-pty` spawn | PTY | Native Linux doors (default) |
-| `ExecNative` | `child_process.exec` | stdin/stdout pipe | Native with shell interpretation |
-| `SpawnNative` | `child_process.spawn` | stdin/stdout pipe | Native without shell features |
-| `Dosemu` | `exec("dosemu ...")` | stdin/stdout pipe | DOS doors via dosemu (simple) |
-| `DosemuPty` | socat + SerialPort + exec | Virtual serial pair | DOS doors with COM port emulation |
+| Type | Admin Label | Method | I/O | Use Case |
+|------|-------------|--------|-----|----------|
+| `NativeShell` | Native (PTY) | `node-pty` spawn | PTY | Interactive native doors that need a terminal (curses, ncurses) |
+| `NativeCommand` | Native Commands | `child_process.exec` | stdin/stdout pipe | Simple native commands, scripts, non-interactive tools |
+| `Dosemu` | Dosemu (Console Only) | `exec("dosemu ...")` | stdin/stdout pipe | DOS sysop utilities, non-interactive tools |
+| `DosemuPty` | Dosemu (Full) | socat + SerialPort + exec | Virtual serial pair | DOS door games (recommended for all interactive DOS doors) |
+
+Legacy DB values `ExecNative` and `SpawnNative` are mapped to `NativeCommand` at read time.
+
+**Working directory**: All native launch types (`NativeShell`, `NativeCommand`) set `cwd` to the door's configured directory (`doorDir` with `%X` substitution). Falls back to the global `doordir` config, then `process.cwd()`. The command field (`cmd`) is resolved relative to this directory by the shell/PTY.
+
+**Dropfile types**: `DOOR.SYS`, `DOOR32.SYS`, `DORINFO.DEF`, `CHAIN.TXT`, `CALLINFO.BBS`, `PCBOARD.SYS`. Created by `dropfile_handler.js` before door launch. Written to the configured `dropfileDir` (or `doorDir` if not set). Supports `usereal_local` / `usereal_doorsession` flags for real name vs handle.
 
 **Raw mode**: Temporarily hijacks `call.rawmode` and `call.rawtarget` to bypass the input parser. Saves/restores previous state cleanly for nesting.
 

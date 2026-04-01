@@ -64,7 +64,7 @@ block content
                           td= door.name
                           td.text-muted= door.slug
                           td
-                            span.badge.bg-primary= door.launch_type
+                            span.badge.bg-primary= launchTypeLabels[door.launch_type] || door.launch_type
                           td
                             if door.active
                               span.badge.bg-success Active

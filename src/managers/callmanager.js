@@ -9,6 +9,7 @@ import {appendFileSync, existsSync, mkdirSync, readdir, readdirSync, readFile} f
 import * as alogger from "../utils/alogger.js"
 import * as systeminfo from "../utils/systeminfo.js"
 import {ansiInputParser, tcpCommands, websockCommands, telnetCommands} from "../commandsets/terminalcommands.js"
+import { cp437ToUtf8 } from "../utils/codepageConversions.js"
 
 //handler modules
 import {LoginHandler} from "../handlers/loginhandler.js"
@@ -123,6 +124,7 @@ class IncomingCall{
 		this.socatManager = callpool.socatManager
 		this.outputBuffer = new OutputRingBuffer(2000);
 		this.overrideBuffer = false
+		this.pendingChat = null   // { sysopCall, callback } -- set by NodeSpy when chat is queued
 		this.currentMenu = "Main"
 		this.menuHistory = []
 		this.menuHistoryMax = 20
@@ -286,17 +288,32 @@ class IncomingCall{
 		}
 	}
 
-	// Alternative method for dosemu children or other subprocesses
+	// Alternative method for dosemu children or other subprocesses.
+	// Converts CP437 high bytes to UTF-8 so the ring buffer is always UTF-8.
 	writeOverrideBuffer(data) {
-		if (this.overrideBuffer) {
-			this.outputBuffer.write(data);
+		if (!this.overrideBuffer) return;
+		var buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+		var enc = this.term_encoding || 'CP437';
+		if (enc === 'UTF8' || enc === 'utf-8' || enc === 'utf8') {
+			this.outputBuffer.write(buf);
+			return;
 		}
+		this.outputBuffer.write(Buffer.from(cp437ToUtf8(buf), 'utf8'));
 	}
 
 	// --- Node status ---
 	updateNodeStatus(status, detail, detailDisplay) {
 		if (this.nodeManager) {
 			this.nodeManager.updateNode(this.nodenum, status, detail, detailDisplay);
+		}
+		// If a sysop chat is queued and the user has reached a menu, fire it
+		if (status === 'menu' && this.pendingChat) {
+			var pending = this.pendingChat;
+			this.pendingChat = null;
+			// Defer to next tick so the menu finishes drawing first
+			setTimeout(() => {
+				if (pending.callback) pending.callback();
+			}, 500);
 		}
 	}
 
@@ -556,6 +573,9 @@ class IncomingCall{
 			this.currentHandler = null;
 		}
 		this.logCallEnd()
+		if (this.outputBuffer) {
+			this.outputBuffer.destroy();
+		}
 		this.connection = null
 		this.callPool.removeCall(this)
 	}
@@ -791,6 +811,7 @@ class CallManager{
 	createNewPool(name, connectsto, connectedpool){
 		var newpool = new CallPool(name, connectsto, connectedpool);
 		newpool.setNodeManager(this.nodeManager)
+		newpool.callManager = this;
 		this.pools.push(newpool)
 		return newpool;
 	}
@@ -807,7 +828,22 @@ class CallManager{
 		alogger.writeAlog(2, poollist, "yellowbright")
 	}
 	getPool(name){
+		for (var i = 0; i < this.pools.length; i++) {
+			if (this.pools[i].name === name) return this.pools[i];
+		}
+		return null;
+	}
 
+	// Find an active call by node number across all pools
+	getCallByNode(nodenum) {
+		for (var i = 0; i < this.pools.length; i++) {
+			var pool = this.pools[i];
+			for (var j = 0; j < pool.connectedcalls.length; j++) {
+				var call = pool.connectedcalls[j];
+				if (call && call.nodenum === nodenum) return call;
+			}
+		}
+		return null;
 	}
 }
 

@@ -119,6 +119,17 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'config'
               span.visually-hidden  (current)
 
+        //- Node Spy
+        li.nav-item
+          a.nav-link(
+            href='/admin/nodespy'
+            class=activenav === 'nodespy' ? 'active' : ''
+          )
+            i.bi.bi-eye.me-1
+            | Nodes
+            if activenav === 'nodespy'
+              span.visually-hidden  (current)
+
         //- System Logs
         li.nav-item
           a.nav-link(

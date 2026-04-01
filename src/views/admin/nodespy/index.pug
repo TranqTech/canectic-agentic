@@ -1,0 +1,114 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-eye.me-2
+          span.fg-brightgreen Node Spy
+
+        #nodeGrid
+          //- Initial server-rendered content
+          if nodes && nodes.length > 0
+            .row
+              each node in nodes
+                .col-md-4.col-sm-6.mb-4
+                  .card.h-100
+                    .card-header.bg-primary.d-flex.justify-content-between.align-items-center
+                      span
+                        span.fg-brightcyan Node #{node.nodenum}
+                        |  &mdash;
+                        span.fg-brightmagenta= node.username || 'Unknown'
+                      span.badge.bg-info= node.connectionLabel
+                    .card-body
+                      .mb-2
+                        small.fg-brightyellow Activity
+                        br
+                        span.fg-cyan= node.activityLabel
+                      .mb-2
+                        small.fg-brightyellow Terminal
+                        br
+                        span.fg-brightblue #{node.termWidth}x#{node.termHeight}
+                      .mb-2
+                        small.fg-brightyellow Duration
+                        br
+                        span.fg-brightblue= node.duration
+                    .card-footer.text-center
+                      a.btn.btn-success.btn-sm(href='/admin/nodespy/' + node.nodenum)
+                        i.bi.bi-eye.me-1
+                        | Watch
+          else
+            .text-center.py-5#emptyState
+              i.bi.bi-display(style='font-size: 3rem; color: #555')
+              h5.text-muted.mt-3 No active terminal nodes
+              p.text-muted Nodes will appear here when users connect via terminal.
+
+    script.
+      (function() {
+        var POLL_INTERVAL = 4000;
+
+        function escapeHtml(str) {
+          var div = document.createElement('div');
+          div.textContent = str;
+          return div.innerHTML;
+        }
+
+        function buildCard(node) {
+          return '<div class="col-md-4 col-sm-6 mb-4">' +
+            '<div class="card h-100">' +
+              '<div class="card-header bg-primary d-flex justify-content-between align-items-center">' +
+                '<span>' +
+                  '<span class="fg-brightcyan">Node ' + node.nodenum + '</span>' +
+                  ' &mdash; ' +
+                  '<span class="fg-brightmagenta">' + escapeHtml(node.username || 'Unknown') + '</span>' +
+                '</span>' +
+                '<span class="badge bg-info">' + escapeHtml(node.connectionLabel) + '</span>' +
+              '</div>' +
+              '<div class="card-body">' +
+                '<div class="mb-2"><small class="fg-brightyellow">Activity</small><br>' +
+                  '<span class="fg-cyan">' + escapeHtml(node.activityLabel) + '</span></div>' +
+                '<div class="mb-2"><small class="fg-brightyellow">Terminal</small><br>' +
+                  '<span class="fg-brightblue">' + node.termWidth + 'x' + node.termHeight + '</span></div>' +
+                '<div class="mb-2"><small class="fg-brightyellow">Duration</small><br>' +
+                  '<span class="fg-brightblue">' + escapeHtml(node.duration) + '</span></div>' +
+              '</div>' +
+              '<div class="card-footer text-center">' +
+                '<a class="btn btn-success btn-sm" href="/admin/nodespy/' + node.nodenum + '">' +
+                  '<i class="bi bi-eye me-1"></i>Watch</a>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }
+
+        function buildEmpty() {
+          return '<div class="text-center py-5" id="emptyState">' +
+            '<i class="bi bi-display" style="font-size: 3rem; color: #555"></i>' +
+            '<h5 class="text-muted mt-3">No active terminal nodes</h5>' +
+            '<p class="text-muted">Nodes will appear here when users connect via terminal.</p>' +
+          '</div>';
+        }
+
+        function refresh() {
+          fetch('/admin/nodespy/status.json')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              var grid = document.getElementById('nodeGrid');
+              if (!grid) return;
+              if (data.nodes && data.nodes.length > 0) {
+                var html = '<div class="row">';
+                for (var i = 0; i < data.nodes.length; i++) {
+                  html += buildCard(data.nodes[i]);
+                }
+                html += '</div>';
+                grid.innerHTML = html;
+              } else {
+                grid.innerHTML = buildEmpty();
+              }
+            })
+            .catch(function() {});
+        }
+
+        setInterval(refresh, POLL_INTERVAL);
+      })();
