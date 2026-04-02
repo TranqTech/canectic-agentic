@@ -181,6 +181,7 @@ Last updated: 2026-03-31
 | 13 | Wall maintenance | [ ] | Auto-purge old wall messages (keep last N or older than X days) |
 | 14 | Voting / polls | [ ] | Classic BBS voting booths |
 | 15 | User-to-user telegrams | [ ] | Send one-line message to another online user |
+| 16 | Sysop chat for web users | [ ] | Break-in chat with users browsing the web UI (presence-based, not terminal) |
 
 ---
 
