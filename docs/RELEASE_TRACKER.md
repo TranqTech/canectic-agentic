@@ -172,9 +172,15 @@ Last updated: 2026-03-31
 | 4 | Door server BBS registration | [ ] | Register with door game servers |
 | 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
 | 6 | Full nodespy implementation | [x] | Web dashboard + live snoop + terminal command |
-| 7 | Sysop chat | [ ] | Page, break-in, split-screen chat from NodeSpy (web + terminal) |
+| 7 | Sysop chat | [x] | Break-in, split-screen DECSTBM chat from NodeSpy (web + terminal), chat queue |
 | 8 | User QWK/REP packet handling | [ ] | User-facing QWK packet download and REP packet upload for offline message reading |
 | 9 | Wall / Oneliners | [x] | Public graffiti wall, terminal + web display, call flow integration |
+| 10 | Text file/bulletin viewer | [ ] | Menu command to display ANSI/text files (rules, help, info screens) |
+| 11 | System statistics | [ ] | Total users, calls, messages, files, uptime -- terminal display + web card |
+| 12 | New file scan | [ ] | Notify users of new files since last login (call flow stage or menu command) |
+| 13 | Wall maintenance | [ ] | Auto-purge old wall messages (keep last N or older than X days) |
+| 14 | Voting / polls | [ ] | Classic BBS voting booths |
+| 15 | User-to-user telegrams | [ ] | Send one-line message to another online user |
 
 ---
 
