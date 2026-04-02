@@ -17,15 +17,23 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'dashboard'
               span.visually-hidden  (current)
 
-        //- Announcements
-        li.nav-item
-          a.nav-link(
-            href='/admin/announcements'
-            class=activenav === 'announcements' ? 'active' : ''
+        //- Announcements & Wall
+        li.nav-item.dropdown
+          a.nav-link.dropdown-toggle(
+            data-bs-toggle='dropdown'
+            href='#'
+            role='button'
+            aria-haspopup='true'
+            aria-expanded='false'
+            class=(activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins') ? 'active' : ''
           )
-            | Announcements
-            if activenav === 'announcements'
+            | Content
+            if activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins'
               span.visually-hidden  (current)
+          .dropdown-menu
+            a.dropdown-item(href='/admin/announcements') Announcements
+            a.dropdown-item(href='/admin/bulletins') Bulletins
+            a.dropdown-item(href='/admin/wall') Wall Messages
 
         //- Messages
         li.nav-item.dropdown

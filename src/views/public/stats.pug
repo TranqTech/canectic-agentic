@@ -1,0 +1,52 @@
+extends ../layouts/user
+block content
+  .container-fluid.main-wrapper
+    if !ismobile
+      br
+      br
+
+    .row
+      .col-lg-8.offset-lg-2.col-12
+        h2.mb-4 System Information
+
+        .card.mb-4
+          .card-header.bg-primary
+            i.bi.bi-info-circle.me-2
+            | Board Information
+          .card-body
+            .row
+              .col-md-6
+                dl.row.mb-0
+                  dt.col-sm-5.fg-brightyellow Board Name
+                  dd.col-sm-7.fg-brightcyan= stats.boardName
+                  dt.col-sm-5.fg-brightyellow Sysop
+                  dd.col-sm-7.fg-brightcyan= stats.sysopName
+                  dt.col-sm-5.fg-brightyellow Location
+                  dd.col-sm-7.fg-brightcyan= stats.boardLocation
+              .col-md-6
+                dl.row.mb-0
+                  dt.col-sm-5.fg-brightyellow Version
+                  dd.col-sm-7.fg-brightcyan= stats.systemVersion
+
+        .card.mb-4
+          .card-header.bg-primary
+            i.bi.bi-bar-chart.me-2
+            | Statistics
+          .card-body
+            .row
+              .col-md-6
+                dl.row.mb-0
+                  dt.col-sm-5.fg-brightyellow Users
+                  dd.col-sm-7.fg-brightcyan= stats.totalUsers.toLocaleString()
+                  dt.col-sm-5.fg-brightyellow Total Calls
+                  dd.col-sm-7.fg-brightcyan= stats.totalCalls.toLocaleString()
+                  dt.col-sm-5.fg-brightyellow Networks
+                  dd.col-sm-7.fg-brightcyan= stats.totalNetworks.toLocaleString()
+              .col-md-6
+                dl.row.mb-0
+                  dt.col-sm-5.fg-brightyellow Message Areas
+                  dd.col-sm-7.fg-brightcyan= stats.totalAreas.toLocaleString()
+                  dt.col-sm-5.fg-brightyellow Files
+                  dd.col-sm-7.fg-brightcyan= stats.totalFiles.toLocaleString()
+                  dt.col-sm-5.fg-brightyellow File Storage
+                  dd.col-sm-7.fg-brightcyan= formatFileSize(stats.totalFileSize)

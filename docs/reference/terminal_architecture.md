@@ -225,6 +225,9 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `goodbye` | Sub-module: confirm logoff, offer batch download if files queued, then disconnect |
 | `nodeSpy` | Sub-module: list active nodes, enter number to watch live terminal output (ESC exits) |
 | `wall` | Sub-module: display recent oneliners, prompt to post. Also a call flow stage after announcements |
+| `sysInfo` | Sub-module: system information display (board info + aggregate stats). Also available as call flow stage `sysinfo` |
+| `bulletins` | Sub-module: numbered bulletin selection menu, displays art file or body_text. Also available as call flow stage |
+| `fileNewscan` | Sub-module: scans subscribed file areas for new files since last pointer, displays summary |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
 | `previousMenu` | Pops menu history |

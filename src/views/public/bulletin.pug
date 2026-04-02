@@ -1,0 +1,21 @@
+extends ../layouts/user
+block content
+  .container-fluid.main-wrapper
+    if !ismobile
+      br
+      br
+
+    .row
+      .col-lg-8.offset-lg-2.col-12
+        .d-flex.justify-content-between.align-items-center.mb-4
+          h2= bulletin.title
+          a.btn.btn-outline-secondary.btn-sm(href='/bulletins')
+            i.bi.bi-arrow-left.me-1
+            | Back
+
+        .card.mb-4
+          .card-body(style=themeTextColour ? 'color: ' + themeTextColour : '')
+            if bulletin.body_html
+              != bulletin.body_html
+            else
+              p.text-muted No web content for this bulletin.

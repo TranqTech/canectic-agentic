@@ -68,6 +68,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'wall_post_security',     defaultValue: '60',    type: 'number',  category: 'wall',  description: 'Minimum security level to post on the wall (0 = anyone, 60 = verified users)' },
 	{ key: 'wall_post_required_flags', defaultValue: '',    type: 'string',  category: 'wall',  description: 'Required permission flags to post (comma-separated, user must have ALL)' },
 	{ key: 'wall_post_restricted_flags', defaultValue: 'Unverified',  type: 'string',  category: 'wall',  description: 'Restriction flags that block posting (comma-separated, user must have NONE)' },
+	{ key: 'wall_max_messages',  defaultValue: '60',    type: 'number',  category: 'wall',  description: 'Maximum wall messages to keep (oldest are purged automatically, 0 = no limit)' },
 
 	// -----------------------------------------------------------------------
 	// Security

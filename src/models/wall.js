@@ -36,6 +36,24 @@ async function getCount() {
 	return row ? parseInt(row.count) : 0;
 }
 
+async function purgeOldMessages() {
+	var maxMessages = appConfig.getNumber('wall_max_messages', 60);
+	if (maxMessages <= 0) return 0;
+
+	var result = await postgres.write(
+		'DELETE FROM wall_messages WHERE id NOT IN (SELECT id FROM wall_messages ORDER BY created_at DESC LIMIT $1)',
+		[maxMessages]
+	);
+	return result?.rowCount || 0;
+}
+
+async function getAllMessages() {
+	var rows = await postgres.query(
+		'SELECT * FROM wall_messages ORDER BY created_at DESC'
+	);
+	return rows || [];
+}
+
 // Check if a user is allowed to post on the wall.
 // user: { security, permissionflags, restrictionflags } or similar
 function canPost(user) {
@@ -68,8 +86,10 @@ function canPost(user) {
 
 export {
 	getRecentMessages,
+	getAllMessages,
 	addMessage,
 	deleteMessage,
+	purgeOldMessages,
 	getCount,
 	canPost
 };

@@ -27,7 +27,9 @@ import { getLastCallers } from '../models/callers.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import { formatActivity } from '../utils/activityMap.js';
 import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
-import { getRecentMessages as getWallMessages, addMessage as addWallMessage, canPost as canPostWall } from '../models/wall.js';
+import { getRecentMessages as getWallMessages, addMessage as addWallMessage, canPost as canPostWall, purgeOldMessages as purgeWall } from '../models/wall.js';
+import { getStats, formatFileSize } from '../models/systemStats.js';
+import { getActiveBulletins, getBulletinByUuid } from '../models/bulletins.js';
 
 //setup
 router.use(cookieParser());
@@ -1086,6 +1088,59 @@ router.get('/whosonline', async (req, res) => {
 });
 
 // -------------------------------------------------------
+// Bulletins
+// -------------------------------------------------------
+
+router.get('/bulletins', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.currentuser = currentuser;
+	var bulletinList = await getActiveBulletins();
+
+	res.render('public/bulletins', {
+		title: 'Bulletins',
+		activelink: '',
+		currentuser: currentuser,
+		bulletins: bulletinList
+	});
+});
+
+router.get('/bulletins/:uuid', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.currentuser = currentuser;
+	var bulletin = await getBulletinByUuid(req.params.uuid);
+	if (!bulletin || !bulletin.active) return res.redirect('/bulletins');
+
+	var theme = await getDefaultTheme();
+	var themeTextColour = resolveWebColour(theme, 'announcements');
+
+	res.render('public/bulletin', {
+		title: bulletin.title,
+		activelink: '',
+		currentuser: currentuser,
+		bulletin: bulletin,
+		themeTextColour: themeTextColour
+	});
+});
+
+// -------------------------------------------------------
+// System Stats
+// -------------------------------------------------------
+
+router.get('/stats', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.currentuser = currentuser;
+	var stats = await getStats();
+
+	res.render('public/stats', {
+		title: 'System Information',
+		activelink: '',
+		currentuser: currentuser,
+		stats: stats,
+		formatFileSize: formatFileSize
+	});
+});
+
+// -------------------------------------------------------
 // The Wall
 // -------------------------------------------------------
 
@@ -1111,6 +1166,7 @@ router.post('/wall', urlencodedParser, async (req, res) => {
 	var message = (req.body.message || '').trim();
 	if (message.length > 0) {
 		await addWallMessage(currentuser.id, currentuser.username, message);
+		await purgeWall();
 	}
 
 	res.redirect('/wall');

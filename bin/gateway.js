@@ -24,6 +24,7 @@ import * as redis from "../src/middleware/db/redis.js";
 import * as userMsgPointers from '../src/models/userMsgPointers.js';
 import * as userAreaSubs from '../src/models/userAreaSubs.js';
 import * as userFilePointers from '../src/models/userFilePointers.js';
+import * as userFileSubs from '../src/models/userFileSubs.js';
 import { seedDefaultTheme } from '../src/models/themes.js';
 
 // --- Queue infrastructure ---
@@ -124,6 +125,7 @@ async function prerunMaint(){
 	await userMsgPointers.ensureConstraintsAndIndexes();
 	await userAreaSubs.ensureConstraintsAndIndexes();
 	await userFilePointers.ensureConstraintsAndIndexes();
+	await userFileSubs.ensureConstraintsAndIndexes();
 }
 
 async function startSocatManager(){

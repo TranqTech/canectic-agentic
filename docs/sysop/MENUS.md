@@ -86,6 +86,9 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Log Off (Fast) | No | End the session immediately |
 | Node Spy | No | Sysop node spy (view active nodes, watch live output) |
 | The Wall | No | View and post one-liner messages (graffiti wall) |
+| System Info | No | System information panel (board info, user/call/file stats) |
+| Bulletins | No | Bulletin selection menu (rules, help, info -- managed in admin Content) |
+| New File Scan | No | Scan subscribed file areas for new files since last visit |
 | New Scan (All) | No | Scan all areas for new messages |
 | New Scan (Group) | No | Scan current group for new messages |
 | Post Message | No | Compose a new message |

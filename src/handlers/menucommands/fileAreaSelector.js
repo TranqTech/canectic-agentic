@@ -3,6 +3,7 @@ import { updateUserFileGroup, updateUserFileArea } from "../../models/useraccoun
 import { getActiveGroups } from "../../models/fileGroups.js";
 import { getAreasInGroup } from "../../models/fileAreas.js";
 import * as userFilePointers from "../../models/userFilePointers.js";
+import * as userFileSubs from "../../models/userFileSubs.js";
 import * as alogger from "../../utils/alogger.js";
 
 // Row types in the flattened list
@@ -69,6 +70,9 @@ class fileAreaSelector extends BaseSubModule {
 		// Lightbar state
 		this.cursorIdx = 0;
 		this.scrollOffset = 0;
+
+		// Subscriptions
+		this._subMap = {};
 
 		// Search
 		this.searchMode = false;
@@ -187,10 +191,19 @@ class fileAreaSelector extends BaseSubModule {
 					description: area.description || "",
 					fileCount: area.file_count || 0,
 					newCount: newCount,
-					areaId: area.id
+					areaId: area.id,
+					newscan_default: area.newscan_default !== false
 				});
 				this.areaCount++;
 			}
+		}
+
+		// Load subscription map
+		if (this._userId) {
+			var areasForSubs = this.allRows
+				.filter(r => r.type === ROW_AREA)
+				.map(r => ({ shortcode: r.shortcode, newscan_default: r.newscan_default }));
+			this._subMap = await userFileSubs.getSubscriptionMap(this._userId, areasForSubs);
 		}
 
 		return this.areaCount > 0;
@@ -392,11 +405,15 @@ class fileAreaSelector extends BaseSubModule {
 		var isCurrent = (this.call.file_area &&
 			row.shortcode.toUpperCase() === this.call.file_area.toUpperCase());
 
+		var isSubscribed = this._subMap[row.shortcode] !== false;
+
 		if (isHighlighted) {
 			this.call.cmds.setfgcolor(this.highlight_fg);
 			this.call.cmds.setbgcolor(this.highlight_bg);
 		} else if (isCurrent) {
 			this.call.cmds.setfgcolor(this.current_clr);
+		} else if (!isSubscribed) {
+			this.call.cmds.setfgcolor(8); // dark grey for unsubscribed
 		} else {
 			this.call.cmds.setfgcolor(this.area_clr);
 		}
@@ -467,6 +484,17 @@ class fileAreaSelector extends BaseSubModule {
 		}
 	}
 
+	async _toggleSubscription() {
+		if (!this._userId) return;
+		var row = this.filteredRows[this.cursorIdx];
+		if (!row || row.type !== ROW_AREA) return;
+
+		var newState = await userFileSubs.toggleSubscription(this._userId, row.shortcode);
+		this._subMap[row.shortcode] = newState;
+		this._redrawRow(this.cursorIdx);
+		this._drawStatusLine();
+	}
+
 	_drawStatusLine() {
 		if (this.dumb) return;
 		this.call.cmds.movecursor(this.listStartCol, this.statusRow);
@@ -481,6 +509,8 @@ class fileAreaSelector extends BaseSubModule {
 			this._navKey("Esc", "Cancel Search");
 		} else {
 			this._navKey("Enter", "Select");
+			this.call.cmds.senddata("  ");
+			this._navKey("T", "Sub");
 			this.call.cmds.senddata("  ");
 			this._navKey("S", "Search");
 			this.call.cmds.senddata("  ");
@@ -715,6 +745,10 @@ class fileAreaSelector extends BaseSubModule {
 		}
 		if (lower === "s") {
 			this._enterSearch();
+			return;
+		}
+		if (lower === "t") {
+			this._toggleSubscription();
 			return;
 		}
 	}

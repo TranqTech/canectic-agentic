@@ -4,7 +4,7 @@
 // Used as both a call flow stage (via SubModuleAdapter) and a menu command.
 
 import { BaseSubModule } from "../basesubmodule.js";
-import { getRecentMessages, addMessage, canPost } from "../../models/wall.js";
+import { getRecentMessages, addMessage, canPost, purgeOldMessages } from "../../models/wall.js";
 import appConfig from "../../config/appConfig.js";
 
 const TITLE_CLR = 10;     // bright green
@@ -198,6 +198,7 @@ class WallHandler extends BaseSubModule {
 
 		if (text.length > 0) {
 			await addMessage(userId, username, text);
+			await purgeOldMessages();
 		}
 
 		this.signalReturn();

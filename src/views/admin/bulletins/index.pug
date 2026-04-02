@@ -1,0 +1,195 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        .d-flex.justify-content-between.align-items-center.mb-4
+          h2
+            i.bi.bi-journal-text.me-2
+            | Bulletins
+          button.btn.btn-success(data-bs-toggle='modal' data-bs-target='#newBulletinModal')
+            i.bi.bi-plus-circle.me-1
+            | Add Bulletin
+
+        if errormessages && errormessages.length > 0
+          .alert.alert-danger
+            each err in errormessages
+              p.mb-0= err
+
+        if bulletins && bulletins.length > 0
+          .table-responsive
+            table.table.table-sm.table-hover#bulletinTable
+              thead
+                tr
+                  th(style='width: 30px')
+                  th Title
+                  th Art File
+                  th Active
+                  th(style='width: 120px')
+              tbody
+                each b in bulletins
+                  tr(data-id=b.id data-title=b.title data-art_file=b.art_file || '' data-active=b.active data-sort_order=b.sort_order)
+                    td.text-center
+                      i.bi.bi-grip-vertical
+                    td= b.title
+                    td.text-muted
+                      if b.art_file
+                        code.small= b.art_file
+                      else
+                        | -
+                    td
+                      if b.active
+                        span.badge.bg-success Active
+                      else
+                        span.badge.bg-danger Inactive
+                    td.text-end
+                      button.btn.btn-outline-info.btn-sm.me-1.edit-btn(type='button' data-bs-toggle='modal' data-bs-target='#editBulletinModal' data-id=b.id)
+                        i.bi.bi-pencil
+                      form(method='POST' action='/admin/bulletins/delete/' + b.id style='display:inline')
+                        button.btn.btn-outline-danger.btn-sm(type='submit' onclick='return confirm("Delete this bulletin?")')
+                          i.bi.bi-trash
+        else
+          .text-center.text-muted.py-5
+            i.bi.bi-journal-text(style='font-size: 3rem; color: #555')
+            h5.mt-3 No bulletins yet
+            p Click "Add Bulletin" to create one.
+
+    //- New Bulletin Modal
+    #newBulletinModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          form(method='POST' action='/admin/bulletins/new')
+            .modal-header
+              h5.modal-title Add Bulletin
+              button.btn-close(data-bs-dismiss='modal')
+            .modal-body
+              .mb-3
+                label.form-label Title
+                input.form-control(type='text' name='title' required)
+              .mb-3
+                label.form-label Art File
+                  small.text-muted.ms-2 (optional path relative to text dir, displayed on terminal)
+                input.form-control(type='text' name='art_file' placeholder='e.g. bulletins/rules')
+              .mb-3
+                label.form-label Web Content
+                  small.text-muted.ms-2 (optional HTML for web display, uses TinyMCE)
+                textarea.form-control#new_body_html(name='body_html' rows='6')
+              .row
+                .col-6
+                  label.form-label Sort Order
+                  input.form-control(type='number' name='sort_order' value='0')
+                .col-6
+                  label.form-label Active
+                  select.form-control(name='active')
+                    option(value='true' selected) Yes
+                    option(value='false') No
+            .modal-footer
+              button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Create
+
+    //- Edit Bulletin Modal
+    #editBulletinModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          form#editForm(method='POST' action='')
+            .modal-header
+              h5.modal-title Edit Bulletin
+              button.btn-close(data-bs-dismiss='modal')
+            .modal-body
+              .mb-3
+                label.form-label Title
+                input#ed_title.form-control(type='text' name='title' required)
+              .mb-3
+                label.form-label Art File
+                  small.text-muted.ms-2 (optional path relative to text dir, displayed on terminal)
+                input#ed_art_file.form-control(type='text' name='art_file')
+              .mb-3
+                label.form-label Web Content
+                textarea.form-control#ed_body_html(name='body_html' rows='6')
+              .row
+                .col-6
+                  label.form-label Sort Order
+                  input#ed_sort_order.form-control(type='number' name='sort_order')
+                .col-6
+                  label.form-label Active
+                  select#ed_active.form-control(name='active')
+                    option(value='true') Yes
+                    option(value='false') No
+            .modal-footer
+              button.btn.btn-secondary(data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      // Populate edit modal from row data
+      document.getElementById('editBulletinModal').addEventListener('show.bs.modal', function(event) {
+        var btn = event.relatedTarget;
+        if (!btn) return;
+        var row = btn.closest('tr');
+        if (!row) return;
+        var d = row.dataset;
+
+        document.getElementById('editForm').action = '/admin/bulletins/' + d.id + '/update';
+        document.getElementById('ed_title').value = d.title || '';
+        document.getElementById('ed_art_file').value = d.art_file || '';
+        document.getElementById('ed_sort_order').value = d.sort_order || '0';
+        document.getElementById('ed_active').value = d.active === 'true' ? 'true' : 'false';
+
+        // Body HTML is stored in a hidden textarea per row to avoid data-attribute mangling
+        var bodyEl = document.getElementById('bulletin_body_' + d.id);
+        var edBody = document.getElementById('ed_body_html');
+        edBody.value = bodyEl ? bodyEl.value : '';
+
+        // Sync TinyMCE if initialised
+        if (typeof tinymce !== 'undefined') {
+          var editor = tinymce.get('ed_body_html');
+          if (editor) editor.setContent(edBody.value);
+        }
+      });
+
+    //- Hidden body_html storage per bulletin
+    each b in (bulletins || [])
+      textarea.d-none(id='bulletin_body_' + b.id)= b.body_html || ''
+
+    script(src='/js/tinymce/tinymce.min.js')
+    script.
+      var ansiColorMap = [
+        '010101', 'Theme Default',
+        'AA0000', 'Red',
+        '00AA00', 'Green',
+        'AA5500', 'Yellow (dark)',
+        '0000AA', 'Blue',
+        'AA00AA', 'Magenta',
+        '00AAAA', 'Cyan',
+        'AAAAAA', 'White (grey)',
+        '000000', 'Black',
+        'FF5555', 'Bright Red',
+        '55FF55', 'Bright Green',
+        'FFFF55', 'Bright Yellow',
+        '5555FF', 'Bright Blue',
+        'FF55FF', 'Bright Magenta',
+        '55FFFF', 'Bright Cyan',
+        'FFFFFF', 'Bright White',
+        '555555', 'Bright Black'
+      ];
+      var mceBase = {
+        license_key: 'gpl',
+        menubar: false,
+        plugins: 'lists link autolink',
+        toolbar: 'bold italic underline strikethrough | forecolor backcolor | bullist numlist | link | removeformat',
+        skin: 'oxide-dark',
+        content_css: 'dark',
+        content_style: 'span[style*="color: #010101"], span[style*="color: rgb(1, 1, 1)"] { color: inherit !important; }',
+        color_map: ansiColorMap,
+        color_cols: 9,
+        custom_colors: false,
+        branding: false,
+        promotion: false,
+        setup: function(editor) {
+          editor.on('change', function() { editor.save(); });
+        }
+      };
+      // Init TinyMCE on both editors
+      tinymce.init(Object.assign({}, mceBase, { selector: '#new_body_html', height: 250 }));
+      tinymce.init(Object.assign({}, mceBase, { selector: '#ed_body_html', height: 250 }));

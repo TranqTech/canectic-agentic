@@ -24,6 +24,9 @@ import { fileSearch } from "./menucommands/fileSearch.js";
 import { goodbye } from "./menucommands/goodbye.js";
 import { nodeSpy } from "./menucommands/nodeSpy.js";
 import { WallHandler } from "./menucommands/wallHandler.js";
+import { SysInfo } from "./menucommands/sysInfo.js";
+import { BulletinViewer } from "./menucommands/bulletinViewer.js";
+import { FileNewscan } from "./menucommands/fileNewscan.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -1060,6 +1063,18 @@ class MenuHandler extends BaseHandler {
 
 			case "wall":
 				this._runSubModule(new WallHandler(this.call));
+				return;
+
+			case "sysInfo":
+				this._runSubModule(new SysInfo(this.call));
+				return;
+
+			case "bulletins":
+				this._runSubModule(new BulletinViewer(this.call));
+				return;
+
+			case "fileNewscan":
+				this._runSubModule(new FileNewscan(this.call));
 				return;
 
 			case "runXtrn":

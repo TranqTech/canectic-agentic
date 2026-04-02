@@ -20,6 +20,8 @@ import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
+import * as wall from '../models/wall.js';
+import * as bulletins from '../models/bulletins.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -2796,6 +2798,87 @@ router.post('/announcements/reorder', express.json(), requireAdmin, async (req, 
 		await announcements.updateSortOrder(ids);
 	}
 	res.json({ status: true });
+});
+
+// -------------------------------------------------------
+// Bulletins
+// -------------------------------------------------------
+
+router.get('/bulletins', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var bulletinList = await bulletins.getAllBulletins();
+
+	res.render('admin/bulletins/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Bulletins',
+		activelink: 'bulletins',
+		currentuser: currentuser,
+		bulletins: bulletinList
+	});
+});
+
+router.post('/bulletins/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await bulletins.createBulletin(req.body);
+	if (result.status) {
+		res.redirect('/admin/bulletins');
+	} else {
+		var currentuser = await getCurrentUser(req);
+		var sufficientAccess = checkAdminAccess(currentuser);
+		var bulletinList = await bulletins.getAllBulletins();
+		res.render('admin/bulletins/index', {
+			sufficientAccess: sufficientAccess,
+			title: 'Bulletins',
+			activelink: 'bulletins',
+			currentuser: currentuser,
+			bulletins: bulletinList,
+			errormessages: result.errormessages
+		});
+	}
+});
+
+router.post('/bulletins/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await bulletins.updateBulletin(parseInt(req.params.id), req.body);
+	res.redirect('/admin/bulletins');
+});
+
+router.post('/bulletins/delete/:id', urlencodedParser, requireAdmin, async (req, res) => {
+	await bulletins.deleteBulletin(parseInt(req.params.id));
+	res.redirect('/admin/bulletins');
+});
+
+router.post('/bulletins/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') {
+		try { ids = JSON.parse(ids); } catch (_) { ids = []; }
+	}
+	if (Array.isArray(ids) && ids.length > 0) {
+		await bulletins.updateSortOrder(ids);
+	}
+	res.json({ status: true });
+});
+
+// -------------------------------------------------------
+// Wall
+// -------------------------------------------------------
+
+router.get('/wall', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var messages = await wall.getAllMessages();
+
+	res.render('admin/wall', {
+		sufficientAccess: sufficientAccess,
+		title: 'Wall Messages',
+		activelink: 'wall',
+		currentuser: currentuser,
+		messages: messages
+	});
+});
+
+router.post('/wall/delete/:uuid', urlencodedParser, requireAdmin, async (req, res) => {
+	await wall.deleteMessage(req.params.uuid);
+	res.redirect('/admin/wall');
 });
 
 // -------------------------------------------------------

@@ -175,10 +175,10 @@ Last updated: 2026-03-31
 | 7 | Sysop chat | [x] | Break-in, split-screen DECSTBM chat from NodeSpy (web + terminal), chat queue |
 | 8 | User QWK/REP packet handling | [ ] | User-facing QWK packet download and REP packet upload for offline message reading |
 | 9 | Wall / Oneliners | [x] | Public graffiti wall, terminal + web display, call flow integration |
-| 10 | Text file/bulletin viewer | [ ] | Menu command to display ANSI/text files (rules, help, info screens) |
-| 11 | System statistics | [ ] | Total users, calls, messages, files, uptime -- terminal display + web card |
-| 12 | New file scan | [ ] | Notify users of new files since last login (call flow stage or menu command) |
-| 13 | Wall maintenance | [ ] | Auto-purge old wall messages (keep last N or older than X days) |
+| 10 | Bulletin system | [x] | DB-backed bulletins with admin CRUD, terminal selection menu + art file display, web list/view pages |
+| 11 | System statistics | [x] | Terminal sysInfo command + call flow stage, web /stats page |
+| 12 | New file scan | [x] | File area subscriptions (T key toggle in selector), new file scan command |
+| 13 | Wall maintenance | [x] | Auto-purge (wall_max_messages config, default 60), admin delete at /admin/wall |
 | 14 | Voting / polls | [ ] | Classic BBS voting booths |
 | 15 | User-to-user telegrams | [ ] | Send one-line message to another online user |
 | 16 | Sysop chat for web users | [ ] | Break-in chat with users browsing the web UI (presence-based, not terminal) |

@@ -1,0 +1,23 @@
+extends ../layouts/user
+block content
+  .container-fluid.main-wrapper
+    if !ismobile
+      br
+      br
+
+    .row
+      .col-lg-8.offset-lg-2.col-12
+        h2.mb-4 Bulletins
+
+        if bulletins && bulletins.length > 0
+          .list-group.mb-4
+            each b in bulletins
+              a.list-group-item.list-group-item-action.d-flex.justify-content-between.align-items-center(href='/bulletins/' + b.uuid)
+                span
+                  i.bi.bi-journal-text.me-2.fg-brightcyan
+                  span.fg-brightyellow= b.title
+                i.bi.bi-chevron-right.text-muted
+        else
+          .text-center.text-muted.py-5
+            i.bi.bi-journal-text(style='font-size: 3rem; color: #555')
+            h5.mt-3 No bulletins available
