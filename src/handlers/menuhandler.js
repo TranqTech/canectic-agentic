@@ -23,6 +23,7 @@ import { fileUpload } from "./menucommands/fileUpload.js";
 import { fileSearch } from "./menucommands/fileSearch.js";
 import { goodbye } from "./menucommands/goodbye.js";
 import { nodeSpy } from "./menucommands/nodeSpy.js";
+import { WallHandler } from "./menucommands/wallHandler.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -1055,6 +1056,10 @@ class MenuHandler extends BaseHandler {
 
 			case "nodeSpy":
 				this._runSubModule(new nodeSpy(this.call));
+				return;
+
+			case "wall":
+				this._runSubModule(new WallHandler(this.call));
 				return;
 
 			case "runXtrn":

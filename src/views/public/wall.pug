@@ -1,0 +1,28 @@
+extends ../layouts/user
+block content
+  .container-fluid.main-wrapper
+    if !ismobile
+      br
+      br
+
+    .row
+      .col-lg-8.offset-lg-2.col-12
+        h2.mb-4 The Wall
+
+        include ../partials/wall
+
+        if canPost
+          .card.mb-4
+            .card-header.bg-secondary
+              i.bi.bi-pencil-square.me-2
+              | Leave a Message
+            .card-body
+              form(method='POST' action='/wall')
+                .input-group
+                  input.form-control(type='text' name='message' placeholder='Write on the wall...' maxlength='160' required autocomplete='off')
+                  button.btn.btn-primary(type='submit')
+                    i.bi.bi-send.me-1
+                    | Post
+        else if !currentuser
+          .text-center.text-muted
+            | Log in to leave a message on the wall.

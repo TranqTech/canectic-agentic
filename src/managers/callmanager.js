@@ -26,6 +26,7 @@ import { SubModuleAdapter } from "../handlers/submoduleadapter.js";
 import { LastCallers } from "../handlers/lastcallers.js";
 import { WhosOnline } from "../handlers/whosonline.js";
 import { AnnouncementHandler } from "../handlers/announcementhandler.js";
+import { WallHandler } from "../handlers/menucommands/wallHandler.js";
 import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 import { fileBatchCheck } from "../handlers/menucommands/fileBatchCheck.js";
 import { whosOnlineCheck } from "../handlers/menucommands/whosOnlineCheck.js";
@@ -59,6 +60,7 @@ const handlerRegistry = {
 	"check_batch":  (call) => new SubModuleAdapter(call, fileBatchCheck, "FileBatchCheck"),
 	"check_online": (call) => new SubModuleAdapter(call, whosOnlineCheck, "WhosOnlineCheck"),
 	"announcements": (call) => new SubModuleAdapter(call, AnnouncementHandler, "Announcements"),
+	"wall":          (call) => new SubModuleAdapter(call, WallHandler, "Wall"),
 	"verify_mail":   (call) => new SubModuleAdapter(call, mailVerifyCheck, "MailVerifyCheck"),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
@@ -76,6 +78,7 @@ const callFlows = {
 		"last_callers",
 		"check_online",
 		"announcements",
+		"wall",
 		"verify_mail",
 		"check_email",
 		"check_batch",

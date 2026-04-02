@@ -61,8 +61,19 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'theme',             defaultValue: 'canectic',       type: 'string',  category: 'display',     description: 'Terminal color theme name' },
 
 	// -----------------------------------------------------------------------
+	// Wall
+	// -----------------------------------------------------------------------
+	{ key: 'wall_display_count',     defaultValue: '15',    type: 'number',  category: 'wall',  description: 'Number of wall messages to display' },
+	{ key: 'wall_max_length',        defaultValue: '78',    type: 'number',  category: 'wall',  description: 'Maximum message length in characters' },
+	{ key: 'wall_post_security',     defaultValue: '60',    type: 'number',  category: 'wall',  description: 'Minimum security level to post on the wall (0 = anyone, 60 = verified users)' },
+	{ key: 'wall_post_required_flags', defaultValue: '',    type: 'string',  category: 'wall',  description: 'Required permission flags to post (comma-separated, user must have ALL)' },
+	{ key: 'wall_post_restricted_flags', defaultValue: 'Unverified',  type: 'string',  category: 'wall',  description: 'Restriction flags that block posting (comma-separated, user must have NONE)' },
+
+	// -----------------------------------------------------------------------
 	// Security
 	// -----------------------------------------------------------------------
+	{ key: 'custom_permission_flags',  defaultValue: '', type: 'string', category: 'security', description: 'Additional permission flags (comma-separated). Added to the built-in set: Sysop, Mod, Adult, Admin, Email, Netmail.' },
+	{ key: 'custom_restriction_flags', defaultValue: '', type: 'string', category: 'security', description: 'Additional restriction flags (comma-separated). Added to the built-in set: Underage, Unverified, Banned, Email, Netmail, Private Messages.' },
 	{ key: 'adminsecurity',     defaultValue: '200',            type: 'number',  category: 'security',    description: 'Minimum security level for admin access' },
 	{ key: 'defaultsecurity',   defaultValue: '50',             type: 'number',  category: 'security',    description: 'Security level for new user accounts' },
 	{ key: 'session_ttl',       defaultValue: '60',             type: 'number',  category: 'security',    description: 'Web session expiry in minutes (default 60 = 1 hour)' },

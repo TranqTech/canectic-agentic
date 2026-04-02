@@ -174,7 +174,7 @@ Last updated: 2026-03-31
 | 6 | Full nodespy implementation | [x] | Web dashboard + live snoop + terminal command |
 | 7 | Sysop chat | [ ] | Page, break-in, split-screen chat from NodeSpy (web + terminal) |
 | 8 | User QWK/REP packet handling | [ ] | User-facing QWK packet download and REP packet upload for offline message reading |
-| 9 | Wall / Oneliners | [ ] | Public graffiti wall, terminal + web display, call flow integration |
+| 9 | Wall / Oneliners | [x] | Public graffiti wall, terminal + web display, call flow integration |
 
 ---
 

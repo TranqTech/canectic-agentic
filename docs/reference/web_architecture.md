@@ -792,6 +792,8 @@ Three layers ensure the sentinel renders correctly on the web:
 - **Theme colour bridge** -- TinyMCE colour picker includes a "Theme Default" option (sentinel `#010101`). Web routes resolve theme properties to hex colours via `resolveWebColour()` and set them on content containers. Sentinel spans use CSS `inherit` to cascade the theme colour. See Theme Colour Bridge section below.
 - **Node Spy** -- `/admin/nodespy` dashboard with auto-updating cards, `/admin/nodespy/:nodenum` live snoop with xterm.js and token-auth WebSocket (`/ws/nodespy`). See `NODESPY_DESIGN.md`.
 - **Who's online** -- `/whosonline` public page with reusable `partials/whosOnline.pug` card. Merges terminal nodes (via `req.app.locals.nodeManager`) with web presence users, deduplicates web-originated terminal sessions. Both partials designed for embedding in virtual call flow and dashboard.
+- **The Wall** -- `/wall` public page with `partials/wall.pug` card and post form. `GET` shows recent messages (30), `POST` adds a message. Access controlled by `wall_post_security`, `wall_post_required_flags`, `wall_post_restricted_flags` config. Wall partial also embedded on the home page.
+- **Custom flags** -- `custom_permission_flags` / `custom_restriction_flags` config keys allow sysops to add flags beyond the built-in set. Built-in flags (Sysop, Mod, etc.) are hardcoded and always present.
 - **File upload** -- Web and terminal upload with staging, hash, dupe check, FILE_ID.DIZ extraction.
 - **Registration wizard** -- 6-step wizard with AJAX validation, gender field.
 - **Menu admin** -- Full web CRUD for menus and menu entries. PostgreSQL-backed (`menus` + `menu_entries` tables). Color picker selects with live preview using ANSI color map.

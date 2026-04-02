@@ -51,7 +51,7 @@ Shared singleton managing node number allocation and a registry of active sessio
 Declared as ordered arrays of stage names in `callFlows`. The reserved name `"goodbye"` triggers hangup.
 
 ```
-Standard:   negotiate -> logon -> last_callers -> check_online -> announcements -> verify_mail -> check_email -> check_batch -> menu -> goodbye
+Standard:   negotiate -> logon -> last_callers -> check_online -> announcements -> wall -> verify_mail -> check_email -> check_batch -> menu -> goodbye
 Doorserver: door_auth -> door_launch -> goodbye
 WebDoor:    webdoor_auth -> door_launch -> goodbye
 Test:       negotiate -> goodbye
@@ -205,7 +205,7 @@ Extends `BaseHandler`. The main interactive hub after login.
 
 Menu `name` is the programmatic identifier, enforced as slug-safe (`[a-z0-9_-]+`). The `title` field is the user-facing display label. Menu lookups (`getMenu()`, `menuExists()`) are case-insensitive. Menu and entry data is managed via the admin web UI (`/admin/menus`). The schemas are defined in `menus.conf` and `menu_entries.conf` for the DB migration system.
 
-**Access control**: `_isEntryAccessible()` checks caller's security level, permission flags (must have ALL required), and restriction flags (must have NONE of prohibited).
+**Access control**: `_isEntryAccessible()` checks caller's security level, permission flags (must have ALL required), and restriction flags (must have NONE of prohibited). Built-in flags are hardcoded; sysops add custom flags via `custom_permission_flags` / `custom_restriction_flags` config keys (appear in all admin flag dropdowns).
 
 **Layout engine**: `_calcLayout()` computes the entry region from margins, auto-calculates column count based on region width and longest entry, determines fill order (column-first or row-first), and paginates entries. Row-first mode uses all available columns; column-first uses the minimum needed. When entries overflow the margin region, the engine tries adding columns first, then expands the region. `center_vertical` offsets the entry block to the vertical centre of the region. Dumb terminals get a single-column linear listing with pause-on-overflow.
 
@@ -224,6 +224,7 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `logOff` | Emits `HangupSignal` (immediate disconnect) |
 | `goodbye` | Sub-module: confirm logoff, offer batch download if files queued, then disconnect |
 | `nodeSpy` | Sub-module: list active nodes, enter number to watch live terminal output (ESC exits) |
+| `wall` | Sub-module: display recent oneliners, prompt to post. Also a call flow stage after announcements |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
 | `previousMenu` | Pops menu history |

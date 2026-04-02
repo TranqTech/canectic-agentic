@@ -27,6 +27,7 @@ import { getLastCallers } from '../models/callers.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import { formatActivity } from '../utils/activityMap.js';
 import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
+import { getRecentMessages as getWallMessages, addMessage as addWallMessage, canPost as canPostWall } from '../models/wall.js';
 
 //setup
 router.use(cookieParser());
@@ -145,9 +146,10 @@ router.get('/', async function(req, res, next) {
   var currentuser = await getCurrentUser(req);
   res.locals.currentuser = currentuser;
   var activeAnnouncements = await announcements.getActiveAnnouncements(10);
+  var wallMessages = await getWallMessages(15);
   var theme = await getDefaultTheme();
   var themeTextColour = resolveWebColour(theme, 'announcements');
-  res.render('public/index', { title: appConfig.get('boardname'), announcements: activeAnnouncements, themeTextColour: themeTextColour });
+  res.render('public/index', { title: appConfig.get('boardname'), announcements: activeAnnouncements, wallMessages: wallMessages, themeTextColour: themeTextColour });
 });
 
 // -------------------------------------------------------
@@ -1081,6 +1083,37 @@ router.get('/whosonline', async (req, res) => {
 		currentuser: getCurrentUser(req),
 		onlineUsers: onlineUsers
 	});
+});
+
+// -------------------------------------------------------
+// The Wall
+// -------------------------------------------------------
+
+router.get('/wall', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.currentuser = currentuser;
+	var wallMessages = await getWallMessages(30);
+	var canPost = currentuser ? canPostWall(currentuser) : false;
+
+	res.render('public/wall', {
+		title: 'The Wall',
+		activelink: '',
+		currentuser: currentuser,
+		wallMessages: wallMessages,
+		canPost: canPost
+	});
+});
+
+router.post('/wall', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser || !canPostWall(currentuser)) return res.redirect('/wall');
+
+	var message = (req.body.message || '').trim();
+	if (message.length > 0) {
+		await addWallMessage(currentuser.id, currentuser.username, message);
+	}
+
+	res.redirect('/wall');
 });
 
 export{router}

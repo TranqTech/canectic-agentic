@@ -1,0 +1,13 @@
+.card.mb-4
+  .card-header.bg-primary
+    i.bi.bi-chat-square-text.me-2
+    | The Wall
+  .card-body
+    if wallMessages && wallMessages.length > 0
+      each msg in wallMessages
+        .mb-1
+          span.fg-brightcyan= msg.username
+          span.text-muted= ': '
+          span= msg.message
+    else
+      p.text-muted No messages yet.

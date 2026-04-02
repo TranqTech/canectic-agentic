@@ -56,8 +56,19 @@ var urlencodedParser = bodyParser.urlencoded({ limit: '250mb', extended: true })
 
 //variables and const
 const basedir        = process.cwd();
-const availablePermissions  = ["Sysop", "Mod", "Adult", "Admin", "Email", "Netmail"];
-const availableRestrictions = ["Underage", "Unverified", "Banned", "Email", "Netmail", "Private Messages"];
+const BUILTIN_PERMISSIONS  = ["Sysop", "Mod", "Adult", "Admin", "Email", "Netmail"];
+const BUILTIN_RESTRICTIONS = ["Underage", "Unverified", "Banned", "Email", "Netmail", "Private Messages"];
+
+function getAvailablePermissions() {
+	var custom = appConfig.get('custom_permission_flags', '')
+		.split(',').map(f => f.trim()).filter(Boolean);
+	return BUILTIN_PERMISSIONS.concat(custom.filter(f => !BUILTIN_PERMISSIONS.includes(f)));
+}
+function getAvailableRestrictions() {
+	var custom = appConfig.get('custom_restriction_flags', '')
+		.split(',').map(f => f.trim()).filter(Boolean);
+	return BUILTIN_RESTRICTIONS.concat(custom.filter(f => !BUILTIN_RESTRICTIONS.includes(f)));
+}
 
 // Inject shared locals for all admin views
 router.use(async function(req, res, next) {
@@ -137,8 +148,8 @@ router.get('/msgGroups', async (req, res, next) => {
 		activelink: 'msgGroups',
 		currentuser: currentuser,
 		grouplist: grouplist,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions()
 	});
 });
 
@@ -234,8 +245,8 @@ router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) =>
 			activelink: 'msgGroups',
 			currentuser: currentuser,
 			errors: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions()
 		});
 	}
 });
@@ -266,8 +277,8 @@ router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asyn
 			activelink: 'msgGroups',
 			currentuser: currentuser,
 			errors: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions()
 		});
 	}
 });
@@ -309,8 +320,8 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 			arealist: arealist,
 			networklist: networklist,
 			errormessages: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions,
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions(),
 			DateTime: DateTime
 		});
 	}
@@ -348,8 +359,8 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 			arealist: arealist,
 			networklist: networklist,
 			errormessages: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions,
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions(),
 			DateTime: DateTime
 		});
 	}
@@ -399,8 +410,8 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 		msgGroup: msgGroup,
 		arealist: arealist,
 		networklist: networklist,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
 	});
 });
@@ -432,8 +443,8 @@ router.get('/msgAreas', async (req, res, next) => {
 		grouplist: grouplist,
 		allAreas: allAreas || [],
 		networklist: networklist,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
 	});
 });
@@ -1322,8 +1333,8 @@ router.get('/fileGroups', async (req, res, next) => {
 		activelink: 'fileGroups',
 		currentuser: currentuser,
 		grouplist: grouplist,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions()
 	});
 });
 
@@ -1345,8 +1356,8 @@ router.post('/fileGroup/new', urlencodedParser, requireAdmin, async (req, res) =
 			activelink: 'fileGroups',
 			currentuser: currentuser,
 			errors: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions()
 		});
 	}
 });
@@ -1377,8 +1388,8 @@ router.post('/fileGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asy
 			activelink: 'fileGroups',
 			currentuser: currentuser,
 			errors: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions()
 		});
 	}
 });
@@ -1407,8 +1418,8 @@ router.post('/fileGroup/:shortcode/update', urlencodedParser, requireAdmin, asyn
 			fileGroup: fileGroup,
 			arealist: arealist,
 			errormessages: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions,
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions(),
 			DateTime: DateTime
 		});
 	}
@@ -1433,8 +1444,8 @@ router.post('/fileGroup/:shortcode/delete', urlencodedParser, requireAdmin, asyn
 			fileGroup: fileGroup,
 			arealist: arealist,
 			errormessages: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions,
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions(),
 			DateTime: DateTime
 		});
 	}
@@ -1474,8 +1485,8 @@ router.get('/fileGroup/:shortcode', async (req, res, next) => {
 		currentuser: currentuser,
 		fileGroup: fileGroup,
 		arealist: arealist,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
 	});
 });
@@ -1497,8 +1508,8 @@ router.get('/fileAreas', async (req, res, next) => {
 		currentuser: currentuser,
 		grouplist: grouplist,
 		allAreas: allAreas || [],
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
 	});
 });
@@ -1523,8 +1534,8 @@ router.post('/fileArea/:shortcode/update', urlencodedParser, requireAdmin, async
 			grouplist: grouplist,
 			allAreas: allAreas || [],
 			errormessages: result.errormessages,
-			availablePermissions: availablePermissions,
-			availableRestrictions: availableRestrictions,
+			availablePermissions: getAvailablePermissions(),
+			availableRestrictions: getAvailableRestrictions(),
 			DateTime: DateTime
 		});
 	}
@@ -1811,8 +1822,8 @@ router.get('/users', async (req, res, next) => {
 		activelink: 'users',
 		currentuser: currentuser,
 		userlist: userlist,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
 	});
 });
@@ -1838,8 +1849,8 @@ router.get('/users/:uuid', async (req, res, next) => {
 		currentuser: currentuser,
 		userlist: await userAccounts.getUserList(),
 		openuser: user,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
 	});
 });
@@ -1926,8 +1937,8 @@ router.get('/menus/:id', async (req, res) => {
 		ansiColors: ansiColors,
 		allMenus: allMenus,
 		allDoors: allDoors,
-		availablePermissions: availablePermissions,
-		availableRestrictions: availableRestrictions
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions()
 	});
 });
 
