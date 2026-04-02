@@ -18,7 +18,7 @@ block content
                 if ann.pinned
                   span.badge.bg-warning.me-2 Pinned
                 = ann.title
-              .card-body
+              .card-body(style=themeTextColour ? 'color: ' + themeTextColour : '')
                 if ann.body_html
                   != ann.body_html
                 else if ann.body_text

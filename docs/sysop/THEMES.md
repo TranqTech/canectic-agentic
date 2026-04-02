@@ -27,6 +27,7 @@ The theme editor organizes colour properties into categories via accordion panel
 | Lightbar | Lightbar, Lightbar Command, Lightbar Option | Arrow-key navigation (future) |
 | Input | Input, Field, Username, Password (and their labels) | Login and input prompts |
 | Editor | Editor Prompt | Message editor |
+| Content | Door Description, Announcement Body | Rich text content defaults (terminal + web) |
 | Messages | Body, Quoted Text, Tearline, Origin, Tagline | Message reader colours |
 | Layout | Message X/Y Margins | Message display positioning |
 
@@ -77,6 +78,19 @@ The `menu_prompt_clr` theme property controls the "Active Hotkeys:" line display
 | 5 | Magenta | 13 | Bright Magenta |
 | 6 | Cyan | 14 | Bright Cyan |
 | 7 | White (Grey) | 15 | Bright White |
+
+## Theme Default Colour in Rich Text
+
+When editing door descriptions or announcements in the admin panel, the TinyMCE colour picker includes a **Theme Default** option as the first colour in the palette.
+
+Selecting "Theme Default" means the text will use the theme's configured colour for that content type, rather than being locked to a specific colour. This works on both the terminal and the web:
+
+- **Terminal**: Text renders in the terminal's current default colour (set by the theme)
+- **Web**: Text inherits the colour from the Content theme properties (`Door Description` or `Announcement Body`)
+
+Use "Theme Default" for body text that should follow the theme. Use explicit colours (Red, Cyan, Bright Yellow, etc.) for text that should always be that colour regardless of theme.
+
+**Tip**: If you want a door description to show as cyan on both terminal and web, set the `Door Description` theme property to 6 (Cyan) and use "Theme Default" for the body text. Highlighted words can use explicit colours like Bright Yellow.
 
 ## Default Theme
 

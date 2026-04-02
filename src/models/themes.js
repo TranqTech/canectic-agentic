@@ -51,6 +51,10 @@ var THEME_PROPERTIES = [
 	// Editor
 	{ key: 'editor_prompt_clr',  label: 'Editor Prompt',        category: 'Editor' },
 
+	// Content (door descriptions, announcements, etc.)
+	{ key: 'door_desc_clr',     label: 'Door Description',     category: 'Content' },
+	{ key: 'announcement_clr',  label: 'Announcement Body',    category: 'Content' },
+
 	// Messages
 	{ key: 'msg_clr',            label: 'Message',              category: 'Messages' },
 	{ key: 'msg_body_clr',       label: 'Message Body',         category: 'Messages' },
@@ -71,6 +75,46 @@ var COLOR_KEYS = THEME_PROPERTIES.filter(function(p) {
 
 // All property keys (includes margins)
 var ALL_PROPERTY_KEYS = THEME_PROPERTIES.map(function(p) { return p.key; });
+
+// ANSI index (0-15) to hex colour
+var ANSI_TO_HEX = [
+	'#000000', '#AA0000', '#00AA00', '#AA5500',
+	'#0000AA', '#AA00AA', '#00AAAA', '#AAAAAA',
+	'#555555', '#FF5555', '#55FF55', '#FFFF55',
+	'#5555FF', '#FF55FF', '#55FFFF', '#FFFFFF',
+];
+
+// Web colour context map: maps page contexts to theme property keys.
+// Routes pass a context name; this resolves to the theme property that
+// controls the default text colour for that context.
+var WEB_COLOUR_CONTEXTS = {
+	'announcements': 'announcement_clr',
+	'doors':         'door_desc_clr',
+	'messages':      'msg_body_clr',
+	'pm':            'msg_body_clr',
+};
+
+// Fallback ANSI values for web colour contexts when the theme
+// property is missing (e.g. theme predates the column being added)
+var WEB_COLOUR_DEFAULTS = {
+	'announcements': 6,   // cyan -- matches terminal AnnouncementHandler BODY_CLR
+	'doors':         6,   // cyan -- matches terminal doorBrowser CLR_DESC
+	'messages':      11,  // bright yellow
+	'pm':            11,
+};
+
+// Returns a hex colour string for the given context from the default theme.
+// Caller passes the theme object (from getDefaultTheme()) and a context name.
+function resolveWebColour(theme, context) {
+	var key = WEB_COLOUR_CONTEXTS[context];
+	if (!key) return null;
+	var ansiIdx = theme ? parseInt(theme[key]) : NaN;
+	if (isNaN(ansiIdx) || ansiIdx < 0 || ansiIdx > 15) {
+		ansiIdx = WEB_COLOUR_DEFAULTS[context];
+		if (ansiIdx === undefined) return null;
+	}
+	return ANSI_TO_HEX[ansiIdx];
+}
 
 // --- Theme CRUD ---
 
@@ -308,5 +352,6 @@ export {
 	getThemeProperties,
 	seedDefaultTheme,
 	getColorKeys,
-	getPropertyCategories
+	getPropertyCategories,
+	resolveWebColour
 };

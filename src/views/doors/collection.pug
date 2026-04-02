@@ -32,7 +32,7 @@ block content
 									.card-body
 										h5.card-title= door.name
 										if door.description
-											p.card-text.text-muted.small!= door.description
+											.card-text.small(style=themeTextColour ? 'color: ' + themeTextColour : '')!= door.description
 									.card-footer.d-flex.justify-content-between.align-items-center
 										if door.long_desc_html || door.description
 											button.btn.btn-outline-info.btn-sm.door-info-btn(type='button' data-bs-toggle='modal' data-bs-target='#doorInfoModal' data-name=door.name data-slug=door.slug data-door-id=door.id)
@@ -69,7 +69,7 @@ block content
 								a#doorInfoPlay.btn.btn-primary.btn-lg(href='#')
 									i.bi.bi-play-fill.me-1
 									| Play
-						#doorInfoContent
+						#doorInfoContent(style=themeTextColour ? 'color: ' + themeTextColour : '')
 
 		script.
 			document.addEventListener('DOMContentLoaded', function() {

@@ -68,8 +68,13 @@ var ANSI_RESET = '\x1b[0m';
 
 // --- HTML to terminal text with ANSI color codes ---
 // Converts TinyMCE HTML to plain text with ANSI escape sequences for colors.
-function htmlToTerminalText(html) {
+// Optional baseAnsi (0-15): the colour to restore after a </span> close.
+// If not provided, uses ANSI_RESET (terminal default).
+function htmlToTerminalText(html, baseAnsi) {
 	if (!html || typeof html !== 'string') return '';
+	var baseCode = (baseAnsi !== undefined && baseAnsi !== null)
+		? ansiColorCode(baseAnsi)
+		: ANSI_RESET;
 
 	var result = '';
 	var i = 0;
@@ -85,7 +90,7 @@ function htmlToTerminalText(html) {
 			if (tagLower.startsWith('/')) {
 				var closingTag = tagLower.substring(1).trim().split(/\s/)[0];
 				if (closingTag === 'span') {
-					result += ANSI_RESET;
+					result += baseCode;
 				} else if (closingTag === 'p' || closingTag === 'div') {
 					result += '\r\n';
 				} else if (closingTag === 'li') {
@@ -125,8 +130,13 @@ function htmlToTerminalText(html) {
 					if (colorMatch) {
 						var rgb = parseColor(colorMatch[1]);
 						if (rgb) {
-							var ansi = closestAnsiColor(rgb);
-							result += ansiColorCode(ansi);
+							// Sentinel #010101 = "Theme Default" -- reset to base colour
+							if (rgb[0] <= 1 && rgb[1] <= 1 && rgb[2] <= 1 && (rgb[0] + rgb[1] + rgb[2]) > 0) {
+								result += baseCode;
+							} else {
+								var ansi = closestAnsiColor(rgb);
+								result += ansiColorCode(ansi);
+							}
 						}
 					}
 					var bgMatch = styleMatch[1].match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);

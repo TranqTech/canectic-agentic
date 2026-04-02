@@ -26,6 +26,7 @@ import * as redis from '../middleware/db/redis.js';
 import { getLastCallers } from '../models/callers.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import { formatActivity } from '../utils/activityMap.js';
+import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
 
 //setup
 router.use(cookieParser());
@@ -144,7 +145,9 @@ router.get('/', async function(req, res, next) {
   var currentuser = await getCurrentUser(req);
   res.locals.currentuser = currentuser;
   var activeAnnouncements = await announcements.getActiveAnnouncements(10);
-  res.render('public/index', { title: appConfig.get('boardname'), announcements: activeAnnouncements });
+  var theme = await getDefaultTheme();
+  var themeTextColour = resolveWebColour(theme, 'announcements');
+  res.render('public/index', { title: appConfig.get('boardname'), announcements: activeAnnouncements, themeTextColour: themeTextColour });
 });
 
 // -------------------------------------------------------
@@ -894,6 +897,9 @@ router.get('/doors', async (req, res) => {
 	var collections = await doorCollections.getActiveCollections();
 	var counts = await doorCollections.getCollectionCounts();
 
+	var theme = await getDefaultTheme();
+	var themeTextColour = resolveWebColour(theme, 'doors');
+
 	// If no collections exist, fall back to a flat door list
 	if (collections.length === 0) {
 		var doorList = await doors.getAllDoors();
@@ -901,7 +907,8 @@ router.get('/doors', async (req, res) => {
 			title: 'Door Games',
 			activelink: 'doors',
 			collections: [],
-			doors: doorList
+			doors: doorList,
+			themeTextColour: themeTextColour
 		});
 	}
 
@@ -910,7 +917,8 @@ router.get('/doors', async (req, res) => {
 		activelink: 'doors',
 		collections: collections,
 		doorCounts: counts,
-		doors: []
+		doors: [],
+		themeTextColour: themeTextColour
 	});
 });
 
@@ -923,12 +931,15 @@ router.get('/doors/collection/:slug', async (req, res) => {
 	if (!collection) return res.redirect('/doors');
 
 	var collectionDoors = await doorCollections.getDoorsInCollection(collection.id);
+	var theme = await getDefaultTheme();
+	var themeTextColour = resolveWebColour(theme, 'doors');
 
 	res.render('doors/collection', {
 		title: collection.name,
 		activelink: 'doors',
 		collection: collection,
-		doors: collectionDoors
+		doors: collectionDoors,
+		themeTextColour: themeTextColour
 	});
 });
 

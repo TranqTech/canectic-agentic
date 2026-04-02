@@ -1,3 +1,9 @@
+/* Theme Default sentinel: #010101 in TinyMCE HTML means "use theme colour" */
+span[style*="color: #010101"],
+span[style*="color: rgb(1, 1, 1)"] {
+  color: inherit !important;
+}
+
 .main-wrapper {
   height: 100vh;
   -ms-overflow-style: none;  /* IE and Edge */

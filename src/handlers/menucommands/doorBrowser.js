@@ -16,6 +16,23 @@ var CLR_NAV_LABEL = 7;
 var STATE_COLLECTIONS = 'collections';
 var STATE_DOORS = 'doors';
 
+function _doorTypeLabel(launchType) {
+	switch (launchType) {
+		case 'Dosemu':
+		case 'DosemuPty':
+			return 'DOS';
+		case 'NativeShell':
+		case 'NativeCommand':
+		case 'ExecNative':
+		case 'SpawnNative':
+			return 'Native';
+		case 'SyncJSDoor':
+			return 'Synchronet JS';
+		default:
+			return launchType;
+	}
+}
+
 class doorBrowser extends BaseSubModule {
 	constructor(call) {
 		super(call, "DoorBrowser");
@@ -163,9 +180,9 @@ class doorBrowser extends BaseSubModule {
 		// Description - use long_desc_html with ANSI colors if available, else description
 		var desc = '';
 		if (item.long_desc_html) {
-			desc = htmlToTerminalText(item.long_desc_html);
+			desc = htmlToTerminalText(item.long_desc_html, CLR_DESC);
 		} else if (item.description) {
-			desc = htmlToTerminalText(item.description);
+			desc = htmlToTerminalText(item.description, CLR_DESC);
 		} else {
 			desc = '(no description)';
 		}
@@ -220,11 +237,12 @@ class doorBrowser extends BaseSubModule {
 		// Door-specific info
 		if (this._state === STATE_DOORS && item.launch_type) {
 			var infoRow = startRow + this._listHeight - 2;
+			var typeLabel = _doorTypeLabel(item.launch_type);
 			this.call.cmds.movecursor(this._descLeft, infoRow);
 			this.call.cmds.setfgcolor(CLR_DESC_LABEL);
 			this.call.cmds.senddata('Type: ');
 			this.call.cmds.setfgcolor(CLR_DESC);
-			this.call.cmds.senddata(item.launch_type);
+			this.call.cmds.senddata(typeLabel);
 		}
 
 		this.call.cmds.resetcolors();

@@ -720,6 +720,58 @@ Both user and admin Pug layouts include an auto-connecting heartbeat script when
 
 ---
 
+## Theme Colour Bridge
+
+Bridges the terminal theme colour system to the web UI, allowing TinyMCE-authored HTML content (door descriptions, announcements) to use theme-adaptive colours on both terminal and web.
+
+### Problem
+
+TinyMCE stores colours as inline `style="color: #RRGGBB"`. White text (`#FFFFFF`) is ambiguous -- it could be an explicit colour choice or just the default. The terminal converter (`htmlToTerminalText()`) can't distinguish "use theme colour" from "use bright white", leading to inconsistent rendering.
+
+### Solution: Sentinel Colour
+
+A "Theme Default" option in the TinyMCE colour picker uses the sentinel value `#010101` (near-black, visually indistinguishable from black but detectable in code).
+
+**TinyMCE configuration** (doors + announcements admin views):
+- `color_map` includes `'010101', 'Theme Default'` as the first entry
+- `content_style` overrides `#010101` to `inherit` inside the editor preview
+- `custom_colors: false` prevents arbitrary colours outside the ANSI 16 palette
+
+### Terminal Pipeline
+
+`htmlToTerminalText()` in `announcements.js` detects the sentinel (rgb where all channels are 0 or 1 but sum > 0) and emits `ANSI_RESET` instead of a colour code. The text renders in the terminal's current default colour, which is set by the handler from the theme.
+
+### Web Pipeline
+
+Three layers ensure the sentinel renders correctly on the web:
+
+1. **Global CSS** (`public/css/styles.css`): `span[style*="color: #010101"] { color: inherit !important; }` -- sentinel spans inherit their container's colour.
+2. **Container colour**: Routes load the default theme via `getDefaultTheme()` and resolve a hex colour for the page context via `resolveWebColour(theme, context)`. The hex colour is set as an inline `style="color: ..."` on the content container element.
+3. **TinyMCE preview**: `content_style` in the editor config applies the same `inherit` rule inside the iframe.
+
+### Context Mapping (`themes.js`)
+
+`WEB_COLOUR_CONTEXTS` maps page context names to theme property keys:
+
+| Context | Theme Property | Default ANSI | Used By |
+|---------|---------------|-------------|---------|
+| `doors` | `door_desc_clr` | 6 (cyan) | `/doors`, `/doors/collection/:slug` |
+| `announcements` | `announcement_clr` | 6 (cyan) | `/` (home page) |
+| `messages` | `msg_body_clr` | 11 (bright yellow) | Message views (stub) |
+| `pm` | `msg_body_clr` | 11 (bright yellow) | PM views (stub) |
+
+`resolveWebColour(theme, context)` returns a hex string (e.g. `#00AAAA`). Falls back to `WEB_COLOUR_DEFAULTS` if the theme property is missing (e.g. theme predates the column).
+
+### Adding New Contexts
+
+1. Add a theme property to `THEME_PROPERTIES` in `themes.js`
+2. Add the column to `db/schema/tablecolumns/themes.conf`
+3. Add seed value to `config/themes/canectic.json`
+4. Add entry in `WEB_COLOUR_CONTEXTS` and `WEB_COLOUR_DEFAULTS`
+5. Pass `themeTextColour` from the route, set on the content container
+
+---
+
 ## Future Development
 
 - **Navigation polish** - Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
@@ -736,6 +788,8 @@ Both user and admin Pug layouts include an auto-connecting heartbeat script when
 - **Password reset** -- Token-based forgotten password recovery via email.
 - **Door listing and web launcher** -- `/doors` listing page, `/doors/play/:slug` with xterm.js and token-based WebSocket auth.
 - **Last callers** -- `/lastcallers` public page with reusable `partials/lastCallers.pug` card. Shows username, time, source badge, location, call count.
+- **Node Spy** -- `/admin/nodespy` dashboard with auto-updating cards, `/admin/nodespy/:nodenum` live snoop with xterm.js and token-based WebSocket auth. See `NODESPY_DESIGN.md`.
+- **Theme colour bridge** -- TinyMCE colour picker includes a "Theme Default" option (sentinel `#010101`). Web routes resolve theme properties to hex colours via `resolveWebColour()` and set them on content containers. Sentinel spans use CSS `inherit` to cascade the theme colour. See Theme Colour Bridge section below.
 - **Node Spy** -- `/admin/nodespy` dashboard with auto-updating cards, `/admin/nodespy/:nodenum` live snoop with xterm.js and token-auth WebSocket (`/ws/nodespy`). See `NODESPY_DESIGN.md`.
 - **Who's online** -- `/whosonline` public page with reusable `partials/whosOnline.pug` card. Merges terminal nodes (via `req.app.locals.nodeManager`) with web presence users, deduplicates web-originated terminal sessions. Both partials designed for embedding in virtual call flow and dashboard.
 - **File upload** -- Web and terminal upload with staging, hash, dupe check, FILE_ID.DIZ extraction.

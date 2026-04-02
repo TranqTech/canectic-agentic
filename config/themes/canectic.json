@@ -32,6 +32,8 @@
 	"uname_label_clr": 10,
 	"ver_clr": 4,
 	"warn_clr": 2,
+	"door_desc_clr": 6,
+	"announcement_clr": 6,
 	"msg_body_clr": 11,
 	"msg_quote_clr": 14,
 	"msg_tear_clr": 15,

@@ -282,8 +282,11 @@ PostgreSQL-backed terminal colour theme management. Themes define the default co
 - **General**: title_clr, header_clr, box_border_clr, error_clr, warn_clr, progress_clr, df_clr, label_clr
 - **Menu**: prompt_clr, menu_prompt_clr, hotkey_clr, cmd_clr, opt_clr, featured_clr
 - **Input**: input_clr, field_clr, uname_clr, passwd_clr
+- **Content**: door_desc_clr, announcement_clr (used by both terminal handlers and web theme colour bridge)
 - **Messages**: msg_body_clr, msg_quote_clr, msg_tear_clr, msg_origin_clr, msg_tagline_clr
 - **Layout**: msg_x_margin, msg_y_margin
+
+**Web theme colour bridge**: `resolveWebColour(theme, context)` maps page contexts (`'doors'`, `'announcements'`, `'messages'`, `'pm'`) to theme properties and returns a hex colour string. Used by web routes to set the default text colour on HTML content containers, allowing the TinyMCE "Theme Default" sentinel (`#010101`) to inherit the terminal theme's colour on the web side. See web_architecture.md for the full pipeline.
 
 ---
 
