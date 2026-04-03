@@ -1989,6 +1989,57 @@ router.post('/menus/:id/delete', urlencodedParser, requireAdmin, async (req, res
 	res.redirect('/admin/menus');
 });
 
+router.post('/menus/:id/duplicate', urlencodedParser, requireAdmin, async (req, res) => {
+	var sourceId = parseInt(req.params.id);
+	var newName = (req.body.new_name || '').trim();
+	var result = await menus.duplicateMenu(sourceId, newName);
+	if (result.status && result.menuId) {
+		res.redirect('/admin/menus/' + result.menuId);
+	} else {
+		res.redirect('/admin/menus/' + sourceId);
+	}
+});
+
+router.get('/menus/:id/export.json', requireAdmin, async (req, res) => {
+	var menuId = parseInt(req.params.id);
+	var data = await menus.exportMenuToJson(menuId);
+	if (!data) return res.status(404).json({ error: 'Menu not found' });
+	res.setHeader('Content-Disposition', 'attachment; filename="menu-' + data.menu.name + '.json"');
+	res.json(data);
+});
+
+router.post('/menus/import', multer({ dest: os.tmpdir() }).single('menu_file'), requireAdmin, async (req, res) => {
+	var menuList = await menus.getAllMenus();
+
+	if (!req.file) {
+		return res.redirect('/admin/menus');
+	}
+
+	var fs = await import('fs');
+	var raw;
+	try {
+		raw = fs.readFileSync(req.file.path, 'utf8');
+		fs.unlinkSync(req.file.path);
+	} catch (err) {
+		return res.redirect('/admin/menus');
+	}
+
+	var data;
+	try {
+		data = JSON.parse(raw);
+	} catch (_) {
+		return res.redirect('/admin/menus');
+	}
+
+	var overrideName = (req.body.import_name || '').trim() || null;
+	var result = await menus.importMenuFromJson(data, overrideName);
+	if (result.status && result.menuId) {
+		res.redirect('/admin/menus/' + result.menuId);
+	} else {
+		res.redirect('/admin/menus');
+	}
+});
+
 // --- Menu Entry routes ---
 
 router.post('/menus/:id/entries/new', urlencodedParser, requireAdmin, async (req, res) => {

@@ -258,7 +258,7 @@ Two-layer admin check:
 | Netmail | `GET/POST /admin/netmail/*` | Netmail browser and viewer |
 | Tosser | `POST /admin/tosser/*` | Enqueues toss jobs on the BullMQ queue (replaces direct tosser calls) |
 | Users | `GET /admin/users`, `POST /admin/users/:uuid/*` | User list, edit, password reset |
-| Menus | `GET /admin/menus`, `GET /admin/menus/:id`, `POST /admin/menus/*` | Menu CRUD — list, view with entries, create/update/delete. Entry CRUD and reorder within a menu. |
+| Menus | `GET /admin/menus`, `GET /admin/menus/:id`, `POST /admin/menus/*` | Menu CRUD — list, view with entries, create/update/delete. Entry CRUD and reorder within a menu. Duplicate (`POST /:id/duplicate`), export (`GET /:id/export.json`), import (`POST /menus/import` multipart). |
 | Doors | `GET /admin/doors`, `POST /admin/doors/*` | Door game CRUD — list, create/update/delete. Variable reference panel with %X tokens. |
 | Group Defaults | `GET /admin/msgGroup/:shortcode/defaults` | JSON endpoint — returns group security/flag defaults for new area modal auto-populate |
 | File Groups | `GET /admin/fileGroups`, `GET/POST /admin/fileGroup/:shortcode/*` | File group CRUD, area counts, base_dir management |

@@ -105,6 +105,21 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Verify Address | No | Request email/netmail verification |
 | Who's Online | No | View currently connected users |
 
+## Duplicating a Menu
+
+From a menu's detail page, click **Duplicate**. Enter a new menu identifier (lowercase, numbers, hyphens, underscores only). The new menu is an exact copy of the original -- all settings, layout, colours, and entries are duplicated. The title gets "(copy)" appended. Edit the copy to customize it.
+
+## Export and Import
+
+**Export**: From a menu's detail page, click **Export JSON** to download the menu and all its entries as a `.json` file. The file contains the menu configuration and every entry (hotkeys, commands, colours, flags, sort order). Database IDs are stripped so the file is portable between systems.
+
+**Import**: From the menu list page, click **Import**. Upload a previously exported `.json` file. Optionally provide a new menu identifier if the name in the file already exists. The menu and all entries are created exactly as exported.
+
+This is useful for:
+- Backing up menu configurations before making changes
+- Sharing menu layouts between Canectic BBS installations
+- Creating starter menu templates
+
 ## Active Hotkeys
 
 The "Active Hotkeys" line at the bottom of each menu shows all available hotkeys sorted alphabetically. Its colour is controlled by the `menu_prompt_clr` theme property (or per-menu override). This is separate from:

@@ -423,6 +423,157 @@ function getAnsiColors() {
 	return ANSI_COLORS;
 }
 
+// ---------------------------------------------------------------------------
+// Duplicate
+// ---------------------------------------------------------------------------
+
+async function duplicateMenu(sourceId, newName) {
+	var result = { status: false, errormessages: [], menuId: null };
+
+	var source = await getMenuById(sourceId);
+	if (!source) {
+		result.errormessages.push('Source menu not found');
+		return result;
+	}
+
+	var name = (newName || '').trim().toLowerCase();
+	if (!name) {
+		result.errormessages.push('New menu name is required');
+		return result;
+	}
+	if (!/^[a-z0-9_-]+$/.test(name)) {
+		result.errormessages.push('Menu identifier must contain only lowercase letters, numbers, hyphens, and underscores');
+		return result;
+	}
+
+	var existing = await postgres.queryOne('SELECT id FROM menus WHERE name = $1', [name]);
+	if (existing) {
+		result.errormessages.push('A menu with that name already exists');
+		return result;
+	}
+
+	// Copy menu record (excluding id, name)
+	var skip = new Set(['id', 'name', 'created_at', 'updated_at']);
+	var obj = { name: name, created_at: new Date(), updated_at: new Date() };
+	for (var key of Object.keys(source)) {
+		if (!skip.has(key) && source[key] !== undefined) {
+			obj[key] = source[key];
+		}
+	}
+	obj.title = obj.title + ' (copy)';
+
+	var insertResult = await postgres.insertObject(obj, 'menus');
+	if (!insertResult.status) {
+		result.errormessages.push('Failed to create menu copy');
+		return result;
+	}
+
+	var newMenuId = insertResult.insertId;
+
+	// Copy all entries
+	var entries = await getEntriesForMenu(sourceId);
+	for (var entry of entries) {
+		var entryObj = {
+			menu_id: newMenuId,
+			sort_order: entry.sort_order,
+			hotkey: entry.hotkey,
+			display: entry.display,
+			command_name: entry.command_name,
+			command_arg: entry.command_arg,
+			fg_clr: entry.fg_clr,
+			bg_clr: entry.bg_clr,
+			featured: entry.featured,
+			min_security: entry.min_security,
+			required_flags: JSON.stringify(entry.required_flags || []),
+			prohibited_flags: JSON.stringify(entry.prohibited_flags || []),
+			created_at: new Date(),
+			updated_at: new Date()
+		};
+		await postgres.insertObject(entryObj, 'menu_entries');
+	}
+
+	result.status = true;
+	result.menuId = newMenuId;
+	alogger.writeAlog(5, 'Menu duplicated: ' + source.name + ' -> ' + name + ' (' + entries.length + ' entries)', 'greenbright');
+	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Export / Import (JSON)
+// ---------------------------------------------------------------------------
+
+async function exportMenuToJson(menuId) {
+	var menu = await getMenuById(menuId);
+	if (!menu) return null;
+
+	var entries = await getEntriesForMenu(menuId);
+
+	// Strip DB-specific fields
+	var skip = new Set(['id', 'created_at', 'updated_at', 'created_by_uuid', 'created_by_name']);
+	var menuData = {};
+	for (var key of Object.keys(menu)) {
+		if (!skip.has(key)) menuData[key] = menu[key];
+	}
+
+	var entryData = [];
+	var entrySkip = new Set(['id', 'menu_id', 'created_at', 'updated_at']);
+	for (var entry of entries) {
+		var ed = {};
+		for (var ek of Object.keys(entry)) {
+			if (!entrySkip.has(ek)) ed[ek] = entry[ek];
+		}
+		entryData.push(ed);
+	}
+
+	return {
+		_format: 'canectic-menu-v1',
+		menu: menuData,
+		entries: entryData
+	};
+}
+
+async function importMenuFromJson(data, overrideName) {
+	var result = { status: false, errormessages: [], menuId: null };
+
+	if (!data || !data.menu) {
+		result.errormessages.push('Invalid menu JSON: missing menu object');
+		return result;
+	}
+
+	var menuData = Object.assign({}, data.menu);
+	if (overrideName) {
+		menuData.name = overrideName.trim().toLowerCase();
+	}
+
+	// Create the menu via the standard path (validates name, checks uniqueness)
+	var createResult = await createMenu(menuData);
+	if (!createResult.status) {
+		result.errormessages = createResult.errormessages;
+		return result;
+	}
+
+	var newMenuId = createResult.menuId;
+
+	// Delete the default entries that createMenu added (we'll import our own)
+	var defaultEntries = await getEntriesForMenu(newMenuId);
+	for (var de of defaultEntries) {
+		await deleteEntry(de.id);
+	}
+
+	// Import entries
+	var entries = data.entries || [];
+	for (var i = 0; i < entries.length; i++) {
+		var entry = entries[i];
+		entry.sort_order = entry.sort_order || ((i + 1) * 10);
+		await createEntry(newMenuId, entry);
+	}
+
+	result.status = true;
+	result.menuId = newMenuId;
+	alogger.writeAlog(5, 'Menu imported: ' + menuData.name + ' (' + entries.length + ' entries)', 'greenbright');
+	return result;
+}
+
 export {
 	getMenu,
 	menuExists,
@@ -431,6 +582,9 @@ export {
 	createMenu,
 	updateMenu,
 	deleteMenu,
+	duplicateMenu,
+	exportMenuToJson,
+	importMenuFromJson,
 	getEntriesForMenu,
 	getEntryById,
 	createEntry,

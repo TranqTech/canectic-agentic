@@ -26,8 +26,11 @@ block content
                     .text-end
                       a.button.btn.btn-sm.btn-info.me-2(href='/admin')
                         | Exit
-                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newMenuModal')
+                      button.btn.btn-sm.btn-success.me-2(data-bs-toggle='modal' data-bs-target='#newMenuModal')
                         | Add Menu
+                      button.btn.btn-sm.btn-outline-primary(data-bs-toggle='modal' data-bs-target='#importMenuModal')
+                        i.bi.bi-upload.me-1
+                        | Import
               .card-body
                 if errormessages && errormessages.length > 0
                   ul.text-danger
@@ -222,6 +225,28 @@ block content
                 .col-12
                   .text-end
                     input.btn.btn-lg.btn-success(type='submit' value='Create Menu')
+
+  //- Import Menu Modal
+  #importMenuModal.modal.fade(tabindex='-1' aria-hidden='true')
+    .modal-dialog.modal-dialog-centered
+      .modal-content
+        .modal-header.bg-dark.text-white
+          h3.modal-title Import Menu
+          button.btn.btn-close.btn-close-white(data-bs-dismiss='modal')
+        form(action='/admin/menus/import' method='POST' enctype='multipart/form-data')
+          .modal-body
+            .mb-3
+              label.form-label Menu JSON file:
+              input.form-control(type='file' name='menu_file' accept='.json' required)
+            .mb-3
+              label.form-label Override menu name (optional):
+              input.form-control(type='text' name='import_name' placeholder='Leave blank to use name from file')
+              .form-text If the name in the file already exists, provide a new name here.
+          .modal-footer
+            button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+            button.btn.btn-primary(type='submit')
+              i.bi.bi-upload.me-1
+              | Import
 
   script.
     document.addEventListener('DOMContentLoaded', function() {

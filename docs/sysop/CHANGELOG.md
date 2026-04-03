@@ -2,6 +2,12 @@
 
 ## Pending Release (since v0.9.1-alpha.1)
 
+### Menu Management
+- Duplicate menu: copies all settings, layout, colours, and entries to a new menu identifier
+- Export to JSON: download a menu and all entries as a portable `.json` file (DB IDs stripped)
+- Import from JSON: upload a previously exported file to create a menu, with optional name override
+- Buttons on menu list page (Import) and individual menu page (Duplicate, Export JSON)
+
 ### News Files
 - Admin-configurable news/score files at Content > News Files
 - Displays ANSI/ASCII art files from door games, scores, or BBS news in the call flow
