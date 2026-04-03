@@ -2,6 +2,9 @@
 import express from 'express';
 const router = express.Router();
 // ..stuff below
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { DateTime } from "luxon";
 import bodyParser from 'body-parser'
 import cookieParser from 'cookie-parser';
@@ -17,6 +20,7 @@ import * as msgGroups from '../models/msgGroups.js';
 import * as msgAreas from '../models/msgAreas.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as userMsgPointers from '../models/userMsgPointers.js';
+import * as userAreaSubs from '../models/userAreaSubs.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 import * as announcements from '../models/announcements.js';
@@ -28,6 +32,9 @@ import { getOnlineUsers } from '../middleware/webActivity.js';
 import { formatActivity } from '../utils/activityMap.js';
 import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
 import { getRecentMessages as getWallMessages, addMessage as addWallMessage, canPost as canPostWall, purgeOldMessages as purgeWall } from '../models/wall.js';
+import multer from 'multer';
+import * as flash from '../middleware/db/flash.js';
+import { buildQwkForUser, importRepForUser, getQwkBbsId, cleanupQwkPacket } from '../models/qwkUser.js';
 import { getStats, formatFileSize } from '../models/systemStats.js';
 import { getActiveBulletins, getBulletinByUuid } from '../models/bulletins.js';
 
@@ -48,12 +55,16 @@ router.use(async function(req, res, next) {
 	res.locals.DateTime    = DateTime;
 	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
 	res.locals.pmUnreadCount = 0;
+	res.locals.callflowPending = false;
 	if (req.cookies.sessionid) {
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
 			var pmUid = parseInt(pmSession.id);
 			if (pmUid && pmUid > 0) {
 				res.locals.pmUnreadCount = await privateMessages.getUnreadCount(pmUid);
+			}
+			if (pmSession.callflow_pending === 'true') {
+				res.locals.callflowPending = true;
 			}
 		}
 	}
@@ -93,55 +104,8 @@ function resolvePostName(sessionUser, msgArea) {
 	return sessionUser.username || 'Unknown';
 }
 
-// Helper: parse JSONB flags from DB — may be a JSON string, array, or null.
-function parseFlags(val) {
-	if (!val) return [];
-	if (Array.isArray(val)) return val;
-	if (typeof val === 'string') {
-		try { var p = JSON.parse(val); return Array.isArray(p) ? p : []; }
-		catch (_) { return []; }
-	}
-	return [];
-}
-
-// Helper: check if user has sufficient access to read an area.
-// Checks security level, required permission flags, and restriction flags.
-function checkAreaReadAccess(sessionUser, msgArea) {
-	if (!msgArea) return false;
-	var userSecurity = parseInt(sessionUser.security) || 0;
-	if (msgArea.read_security && userSecurity < msgArea.read_security) return false;
-
-	var userPerms  = parseFlags(sessionUser.permissionflags);
-	var userRestrs = parseFlags(sessionUser.restrictionflags);
-	var reqFlags   = parseFlags(msgArea.read_perm_flags);
-	var restFlags  = parseFlags(msgArea.read_rest_flags);
-
-	// Must have ALL required permission flags
-	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
-	// Must have NONE of the restriction flags
-	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
-
-	return true;
-}
-
-// Helper: check if user has sufficient access to post in an area.
-function checkAreaPostAccess(sessionUser, msgArea) {
-	if (!msgArea) return false;
-	var userSecurity = parseInt(sessionUser.security) || 0;
-	if (msgArea.post_security && userSecurity < msgArea.post_security) return false;
-
-	var userPerms  = parseFlags(sessionUser.permissionflags);
-	var userRestrs = parseFlags(sessionUser.restrictionflags);
-	var reqFlags   = parseFlags(msgArea.post_perm_flags);
-	var restFlags  = parseFlags(msgArea.post_rest_flags);
-
-	// Must have ALL required permission flags
-	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
-	// Must have NONE of the restriction flags
-	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
-
-	return true;
-}
+// Access check helpers — shared with qwkUser.js and other consumers
+import { parseFlags, checkAreaReadAccess, checkAreaPostAccess } from '../utils/areaAccess.js';
 
 /* GET home page. */
 router.get('/', async function(req, res, next) {
@@ -1073,6 +1037,7 @@ router.get('/whosonline', async (req, res) => {
 		if (webNodeUsers[wu.username.toLowerCase()]) continue;
 		onlineUsers.push({
 			nodenum: null,
+			userId: wu.userId || null,
 			username: wu.username,
 			activity: wu.activity || 'Browsing Web',
 			connection: 'Web'
@@ -1170,6 +1135,119 @@ router.post('/wall', urlencodedParser, async (req, res) => {
 	}
 
 	res.redirect('/wall');
+});
+
+// ---------------------------------------------------------------------------
+// QWK offline mail
+// ---------------------------------------------------------------------------
+
+var repUpload = multer({
+	dest: path.join(os.tmpdir(), 'canectic-rep-uploads'),
+	limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+// QWK transfer page
+router.get('/qwk', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+
+	if (!currentuser) return res.redirect('/');
+	if (!appConfig.getBoolean('qwk_enabled', true)) {
+		await flash.setOne(req, 'danger', 'QWK transfers are disabled');
+		return res.redirect('/messages');
+	}
+
+	// Get subscribed area count and estimated new message count
+	var allAreas = await msgAreas.getAllAreas();
+	var activeAreas = allAreas.filter(function(a) { return a.active; });
+	var areasWithDefaults = activeAreas.map(function(a) {
+		return { shortcode: a.shortcode, newscan_default: a.newscan_default };
+	});
+	var subscribedShortcodes = await userAreaSubs.getSubscribedAreas(currentuser.id, areasWithDefaults);
+	var newSummary = await userMsgPointers.getNewscanSummary(currentuser.id, subscribedShortcodes);
+	var totalNew = 0;
+	for (var ns of newSummary) totalNew += ns.unread_count;
+
+	var unreadPMs = await privateMessages.getUnreadCount(currentuser.id);
+
+	res.render('qwk/index', {
+		title: 'QWK Mail Transfer',
+		activelink: 'messages',
+		currentuser: currentuser,
+		bbsId: getQwkBbsId(),
+		subscribedCount: subscribedShortcodes.length,
+		newMessageCount: totalNew,
+		unreadPMCount: unreadPMs,
+		flash: await flash.get(req)
+	});
+});
+
+// Download QWK packet
+router.get('/qwk/download', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/');
+	if (!appConfig.getBoolean('qwk_enabled', true)) {
+		await flash.setOne(req, 'danger', 'QWK downloads are disabled');
+		return res.redirect('/qwk');
+	}
+
+	var result = await buildQwkForUser(currentuser.id);
+
+	if (!result.status) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+		return res.redirect('/qwk');
+	}
+
+	if (!result.qwkPath) {
+		await flash.setOne(req, 'info', 'No new messages for QWK download');
+		return res.redirect('/qwk');
+	}
+
+	var filename = getQwkBbsId() + '.qwk';
+	res.download(result.qwkPath, filename, function(err) {
+		cleanupQwkPacket(result.qwkPath);
+		if (err && !res.headersSent) {
+			res.redirect('/qwk');
+		}
+	});
+});
+
+// Upload REP packet
+router.post('/qwk/upload', repUpload.single('repfile'), async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/');
+	if (!appConfig.getBoolean('qwk_enabled', true)) {
+		await flash.setOne(req, 'danger', 'QWK uploads are disabled');
+		return res.redirect('/qwk');
+	}
+
+	if (!req.file) {
+		await flash.setOne(req, 'danger', 'No file uploaded');
+		return res.redirect('/qwk');
+	}
+
+	// Validate extension
+	var ext = path.extname(req.file.originalname).toLowerCase();
+	if (ext !== '.rep') {
+		fs.unlink(req.file.path, function() {});
+		await flash.setOne(req, 'danger', 'File must be a .rep packet');
+		return res.redirect('/qwk');
+	}
+
+	var result = await importRepForUser(currentuser.id, req.file.path);
+
+	// Clean up uploaded file
+	fs.unlink(req.file.path, function() {});
+
+	if (result.totalPosted > 0) {
+		await flash.setOne(req, 'success', 'Posted ' + result.totalPosted + ' message(s)' +
+			(result.totalErrors > 0 ? ', ' + result.totalErrors + ' error(s)' : ''));
+	} else if (result.totalErrors > 0) {
+		await flash.setOne(req, 'danger', result.totalErrors + ' error(s): ' + result.details.join('; '));
+	} else {
+		await flash.setOne(req, 'info', 'REP packet processed (no messages to post)');
+	}
+
+	res.redirect('/qwk');
 });
 
 export{router}

@@ -25,6 +25,7 @@ import * as userMsgPointers from '../src/models/userMsgPointers.js';
 import * as userAreaSubs from '../src/models/userAreaSubs.js';
 import * as userFilePointers from '../src/models/userFilePointers.js';
 import * as userFileSubs from '../src/models/userFileSubs.js';
+import { ensureQwkConfNumbers } from '../src/models/msgAreas.js';
 import { seedDefaultTheme } from '../src/models/themes.js';
 
 // --- Queue infrastructure ---
@@ -126,6 +127,16 @@ async function prerunMaint(){
 	await userAreaSubs.ensureConstraintsAndIndexes();
 	await userFilePointers.ensureConstraintsAndIndexes();
 	await userFileSubs.ensureConstraintsAndIndexes();
+	await ensureQwkConfNumbers();
+
+	// Ensure news files table exists
+	var newsFiles = await import("../src/models/newsFiles.js");
+	await newsFiles.ensureTable();
+
+	// Ensure call flow column exists on users table
+	try {
+		await pgpool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_callflow_at TIMESTAMP");
+	} catch (_) {}
 }
 
 async function startSocatManager(){

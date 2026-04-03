@@ -5,34 +5,48 @@ block content
     .row
       .col-12
         br
-        br
     .row
-      .col-1
-      .col-10
+      .col-2
+      .col-8
         h1.mb-4= title
 
-        if announcements && announcements.length > 0
-          each ann in announcements
-            .card.mb-3
-              .card-header.bg-darkblue.text-white
-                if ann.pinned
-                  span.badge.bg-warning.me-2 Pinned
-                = ann.title
-              .card-body(style=themeTextColour ? 'color: ' + themeTextColour : '')
-                if ann.body_html
-                  != ann.body_html
-                else if ann.body_text
-                  p= ann.body_text
-              .card-footer.text-muted
-                small
-                  | Posted by #{ann.author_name || 'System'}
-                  if ann.created_at
-                    |  on #{new Date(ann.created_at).toLocaleDateString()}
-        else
-          .card
-            .card-header.bg-darkblue.text-white
-              | Welcome
-            .card-body
-              p Welcome to #{title}. There are no announcements at this time.
+        ul.nav.nav-tabs.mb-3(role='tablist')
+          li.nav-item(role='presentation')
+            button.nav-link.active#ann-tab(data-bs-toggle='tab' data-bs-target='#ann-pane' type='button' role='tab' aria-controls='ann-pane' aria-selected='true')
+              i.bi.bi-megaphone.me-1
+              | Announcements
+          if currentuser
+            li.nav-item(role='presentation')
+              button.nav-link#wall-tab(data-bs-toggle='tab' data-bs-target='#wall-pane' type='button' role='tab' aria-controls='wall-pane' aria-selected='false')
+                i.bi.bi-chat-square-text.me-1
+                | The Wall
 
-        include ../partials/wall
+        .tab-content
+          #ann-pane.tab-pane.fade.show.active(role='tabpanel' aria-labelledby='ann-tab')
+            if announcements && announcements.length > 0
+              each ann in announcements
+                .card.mb-3
+                  .card-header.bg-darkblue.text-white
+                    if ann.pinned
+                      span.badge.bg-warning.me-2 Pinned
+                    = ann.title
+                  .card-body.bg-black(style=themeTextColour ? 'color: ' + themeTextColour : '')
+                    if ann.body_html
+                      != ann.body_html
+                    else if ann.body_text
+                      p= ann.body_text
+                  .card-footer.text-muted
+                    small
+                      | Posted by #{ann.author_name || 'System'}
+                      if ann.created_at
+                        |  on #{new Date(ann.created_at).toLocaleDateString()}
+            else
+              .card
+                .card-header.bg-darkblue.text-white
+                  | Welcome
+                .card-body
+                  p Welcome to #{title}. There are no announcements at this time.
+
+          if currentuser
+            #wall-pane.tab-pane.fade(role='tabpanel' aria-labelledby='wall-tab')
+              include ../partials/wall

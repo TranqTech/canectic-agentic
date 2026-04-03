@@ -87,6 +87,9 @@ These are the values the admin might want to change without restarting processes
 | `connectTO` | Old handlers only | number | `60000` | terminal (legacy) |
 | `allow_netmail_relay` | `ftnNetmailAdapter.js` | boolean | `false` | network |
 | `PacketPwd` | `ftnTosser.js` | string | `""` | network |
+| `qwk_enabled` | `qwkUser.js`, `index.js` | boolean | `true` | qwk |
+| `qwk_bbsid` | `qwkUser.js` | string | `""` | qwk |
+| `qwk_max_msgs_per_area` | `qwkUser.js` | number | `500` | qwk |
 
 #### PATHS — Can Go Either Way
 
@@ -708,7 +711,7 @@ These are the most-duplicated values (boardname appears in 11 files). Immediate 
 **Phase 2: Models and tossers**
 1. Migrate `echomail.js`, `messages.js` (boardname, DefaultAddress, currentversion)
 2. Migrate `ftnTosser.js` (paths)
-3. Migrate `qwkPacketBuilder.js`, `qwkTosser.js` (boardname, sysopname, etc.)
+3. Migrate `qwkPacketBuilder.js`, `qwkTosser.js` (boardname, sysopname, etc.) — `qwkUser.js` already uses `appConfig`
 4. Migrate `privateMessages.js`, `jobs.js`, `schedules.js` (pm_trash_retention_days)
 5. Migrate `useraccounts.js` (defaultsecurity)
 

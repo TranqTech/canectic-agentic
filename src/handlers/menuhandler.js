@@ -26,6 +26,8 @@ import { nodeSpy } from "./menucommands/nodeSpy.js";
 import { WallHandler } from "./menucommands/wallHandler.js";
 import { SysInfo } from "./menucommands/sysInfo.js";
 import { BulletinViewer } from "./menucommands/bulletinViewer.js";
+import { QwkTransfer } from "./menucommands/qwkTransfer.js";
+import { NewsViewer } from "./menucommands/newsViewer.js";
 import { FileNewscan } from "./menucommands/fileNewscan.js";
 
 // Models
@@ -1075,6 +1077,14 @@ class MenuHandler extends BaseHandler {
 
 			case "fileNewscan":
 				this._runSubModule(new FileNewscan(this.call));
+				return;
+
+			case "qwkTransfer":
+				this._runSubModule(new QwkTransfer(this.call));
+				return;
+
+			case "newsViewer":
+				this._runSubModule(new NewsViewer(this.call));
 				return;
 
 			case "runXtrn":

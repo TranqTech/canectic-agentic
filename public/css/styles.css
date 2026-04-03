@@ -1,3 +1,6 @@
+/* Base font size bump -- slightly larger than Bootstrap default (1rem / 16px) */
+body { font-size: 1.2rem; }
+
 /* Theme Default sentinel: #010101 in TinyMCE HTML means "use theme colour" */
 span[style*="color: #010101"],
 span[style*="color: rgb(1, 1, 1)"] {

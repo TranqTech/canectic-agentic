@@ -55,6 +55,7 @@ Standard Express 4 setup with Pug view engine.
 | `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply, AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
 | `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
 | `/doors` | `doorsRouter` (`src/routes/doors.js`) | Door listing and web door launcher |
+| `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion |
 
 ### Error Handling
 
@@ -272,9 +273,12 @@ Two-layer admin check:
 | Nodelist Clear | `POST /admin/nodelists/clear/:networkId` | Deletes all nodelist data for a network via `ftnNodelist.clearNetwork()`. Confirmation modal in UI. |
 | Nodelist Browser | `GET /admin/nodelist/:networkId` | Browse imported nodelist for a specific FTN network. DataTables listing with row-click detail modal. |
 | Nodelist Search | `GET /admin/nodelist/:networkId/search.json` | JSON endpoint for AJAX search/filter. Params: `q` (search term), `filter` (active/added/removed/all), `limit`. |
-| Node Spy | `GET /admin/nodespy` | Dashboard: card grid of active terminal nodes with auto-updating AJAX poll. |
-| Node Spy Status | `GET /admin/nodespy/status.json` | JSON endpoint for dashboard AJAX polling (node list with activity, duration, terminal size). |
+| Node Spy | `GET /admin/nodespy` | Dashboard: card grid of active terminal nodes + web presence users with auto-updating AJAX poll. |
+| Node Spy Status | `GET /admin/nodespy/status.json` | JSON endpoint for dashboard AJAX polling (terminal nodes + web users with activity, duration). |
 | Node Spy Watch | `GET /admin/nodespy/:nodenum` | Live snoop viewer: xterm.js terminal matched to target node dimensions, one-time Redis token auth for WebSocket. |
+| Import areas.bbs | `GET /admin/import/areasbbs` | Upload areas.bbs file, select group + network, preview with per-area action/allow/enable controls. |
+| Import areas.bbs Preview | `POST /admin/import/areasbbs/preview` | Parse uploaded file, diff against existing network mappings, return preview table with unmapped group areas for manual mapping. |
+| Import areas.bbs Run | `POST /admin/import/areasbbs/run` | Execute import: create new areas or map existing ones, sync peer subscriptions with per-area allow/enable flags. |
 
 ### Modal-Driven Editing Pattern
 
@@ -793,6 +797,9 @@ Three layers ensure the sentinel renders correctly on the web:
 - **Node Spy** -- `/admin/nodespy` dashboard with auto-updating cards, `/admin/nodespy/:nodenum` live snoop with xterm.js and token-auth WebSocket (`/ws/nodespy`). See `NODESPY_DESIGN.md`.
 - **Who's online** -- `/whosonline` public page with reusable `partials/whosOnline.pug` card. Merges terminal nodes (via `req.app.locals.nodeManager`) with web presence users, deduplicates web-originated terminal sessions. Both partials designed for embedding in virtual call flow and dashboard.
 - **The Wall** -- `/wall` public page with `partials/wall.pug` card and post form. `GET` shows recent messages (30), `POST` adds a message. Access controlled by `wall_post_security`, `wall_post_required_flags`, `wall_post_restricted_flags` config. Wall partial also embedded on the home page.
+- **QWK Offline Mail** -- `/qwk` transfer page with download button and REP upload form. `/qwk/download` builds a `.qwk` packet of new messages from subscribed areas plus unread PMs, streams as file download. `/qwk/upload` accepts `.rep` multipart upload and posts replies. Uses `qwkUser.js` model with `qwkPacketBuilder.js` low-level functions. Controlled by `qwk_enabled` config. See `QWK_USER_DESIGN.md`.
+- **Web Call Flow** -- `/callflow` guided login experience. AJAX-driven single page that walks users through what's new: announcements (new since last visit), last callers, who's online, wall (with inline post), new message summary, new file summary. Auto-triggered on login redirect, prompted via "Welcome back" bar on idle session resume. Stages with no data auto-skip. Keyboard navigable (Enter to advance, Escape to skip). `users.last_callflow_at` column tracks recency. Config: `callflow_enabled`, `callflow_on_resume`. See `WEB_CALLFLOW_DESIGN.md`.
+- **Web Sysop Chat** -- Sysop-to-web-user real-time chat via PresenceSocket (`/ws/presence`). Sysop initiates from NodeSpy dashboard (web user cards with Chat button). Chat sessions persisted in Redis (`chat:{id}`, `chat:{id}:msgs`, `chat:user:{userId}`) for page navigation survival. Floating overlay widget (`partials/chatOverlay.pug`) in both user and admin layouts, with minimise/restore, typing indicators, unread badge. `chat_restore` message replays history on page navigation. Controlled by `web_chat_enabled` config. See `WEB_CHAT_DESIGN.md`.
 - **Custom flags** -- `custom_permission_flags` / `custom_restriction_flags` config keys allow sysops to add flags beyond the built-in set. Built-in flags (Sysop, Mod, etc.) are hardcoded and always present.
 - **File upload** -- Web and terminal upload with staging, hash, dupe check, FILE_ID.DIZ extraction.
 - **Registration wizard** -- 6-step wizard with AJAX validation, gender field.

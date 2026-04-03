@@ -22,6 +22,7 @@ import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as wall from '../models/wall.js';
 import * as bulletins from '../models/bulletins.js';
+import * as newsFiles from '../models/newsFiles.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -46,6 +47,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
 import * as flash from '../middleware/db/flash.js';
 import { formatActivity } from '../utils/activityMap.js';
+import { getOnlineUsers } from '../middleware/webActivity.js';
 import * as redis from '../middleware/db/redis.js';
 import multer from 'multer';
 import * as fs from 'fs';
@@ -2737,6 +2739,279 @@ router.post('/import/msgbase/run', urlencodedParser, requireAdmin, async (req, r
 });
 
 // -------------------------------------------------------
+// areas.bbs Import
+// -------------------------------------------------------
+
+router.get('/import/areasbbs', requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var groups           = await msgGroups.getAllGroups();
+	var networks         = await msgNetworks.getActiveNetworks();
+
+	res.render('admin/import/areasbbs', {
+		sufficientAccess: sufficientAccess,
+		title: 'Import areas.bbs',
+		activelink: 'import',
+		currentuser: currentuser,
+		groups: groups,
+		networks: networks,
+		preview: null,
+		result: null
+	});
+});
+
+router.post('/import/areasbbs/preview', multer({ dest: os.tmpdir() }).single('areasbbs_file'), requireAdmin, async (req, res) => {
+	var { parseAreasBbs } = await import('../utils/areasBbsParser.js');
+	var groups   = await msgGroups.getAllGroups();
+	var networks = await msgNetworks.getActiveNetworks();
+	var currentuser = await getCurrentUser(req);
+
+	var groupShortcode = (req.body.group_shortcode || '').trim();
+	var networkId      = parseInt(req.body.network_id) || 0;
+
+	if (!req.file || !groupShortcode || !networkId) {
+		return res.render('admin/import/areasbbs', {
+			sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+			currentuser: currentuser, groups: groups, networks: networks, result: null,
+			preview: { error: 'File, group, and network are all required.' }
+		});
+	}
+
+	// Read and parse the file
+	var fs = await import('fs');
+	var fileText = fs.readFileSync(req.file.path, 'utf8');
+	fs.unlinkSync(req.file.path);
+
+	var parsed = parseAreasBbs(fileText);
+	if (parsed.length === 0) {
+		return res.render('admin/import/areasbbs', {
+			sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+			currentuser: currentuser, groups: groups, networks: networks, result: null,
+			preview: { error: 'No areas found in file.' }
+		});
+	}
+
+	var group = await msgGroups.getGroupByShortcode(groupShortcode);
+	if (!group) {
+		return res.render('admin/import/areasbbs', {
+			sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+			currentuser: currentuser, groups: groups, networks: networks, result: null,
+			preview: { error: 'Group not found: ' + groupShortcode }
+		});
+	}
+
+	// Check which areatags already exist on this network
+	var existingNetAreas = await networkAreas.getAreasByNetwork(networkId);
+	var existingTags = new Set();
+	var mappedAreaIds = new Set();
+	if (existingNetAreas) {
+		for (var na of existingNetAreas) {
+			existingTags.add((na.areatag || '').toUpperCase());
+			if (na.area_id) mappedAreaIds.add(na.area_id);
+		}
+	}
+
+	// Get areas in this group that are NOT already mapped to this network
+	var groupAreas = await msgAreas.getListByGroupShortcode(groupShortcode);
+	var unmappedAreas = [];
+	if (groupAreas) {
+		for (var ga of groupAreas) {
+			if (!mappedAreaIds.has(ga.id)) {
+				unmappedAreas.push({ id: ga.id, shortcode: ga.shortcode, name: ga.name });
+			}
+		}
+	}
+
+	// Build preview list
+	var items = [];
+	for (var entry of parsed) {
+		var tag = entry.areatag.toUpperCase();
+		var exists = existingTags.has(tag);
+		items.push({
+			areatag: entry.areatag,
+			description: entry.description,
+			exists: exists,
+			willCreate: !exists
+		});
+	}
+
+	var newCount = items.filter(function(i) { return i.willCreate; }).length;
+	var skipCount = items.filter(function(i) { return i.exists; }).length;
+
+	res.render('admin/import/areasbbs', {
+		sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+		currentuser: currentuser, groups: groups, networks: networks, result: null,
+		preview: {
+			items: items,
+			newCount: newCount,
+			skipCount: skipCount,
+			groupShortcode: groupShortcode,
+			groupName: group.name,
+			networkId: networkId,
+			networkName: (networks.find(function(n) { return n.id === networkId; }) || {}).name || '',
+			unmappedAreas: unmappedAreas
+		}
+	});
+});
+
+router.post('/import/areasbbs/run', urlencodedParser, requireAdmin, async (req, res) => {
+	var groups   = await msgGroups.getAllGroups();
+	var networks = await msgNetworks.getActiveNetworks();
+	var currentuser = await getCurrentUser(req);
+
+	var groupShortcode = (req.body.group_shortcode || '').trim();
+	var networkId      = parseInt(req.body.network_id) || 0;
+	var areatags       = req.body.areatags; // array or string from hidden inputs
+	var descriptions   = req.body.descriptions;
+
+	if (!groupShortcode || !networkId || !areatags) {
+		return res.render('admin/import/areasbbs', {
+			sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+			currentuser: currentuser, groups: groups, networks: networks, preview: null,
+			result: { errors: ['Missing required fields.'] }
+		});
+	}
+
+	// Normalize to arrays
+	if (!Array.isArray(areatags)) areatags = [areatags];
+	if (!Array.isArray(descriptions)) descriptions = descriptions ? [descriptions] : [];
+
+	var group = await msgGroups.getGroupByShortcode(groupShortcode);
+	if (!group) {
+		return res.render('admin/import/areasbbs', {
+			sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+			currentuser: currentuser, groups: groups, networks: networks, preview: null,
+			result: { errors: ['Group not found.'] }
+		});
+	}
+
+	// Build per-area flags from form checkboxes.
+	// The form has selected_N, allow_N, enable_N for each row.
+	// Only areatags with non-disabled hidden inputs arrive here (JS disables unchecked rows).
+	// Map the sequential areatags array to the per-row checkbox values.
+	var allowFlags = {};
+	var enableFlags = {};
+	for (var key of Object.keys(req.body)) {
+		if (key.startsWith('allow_')) allowFlags[key] = true;
+		if (key.startsWith('enable_')) enableFlags[key] = true;
+	}
+
+	var created = [];
+	var errors = [];
+
+	for (var i = 0; i < areatags.length; i++) {
+		var areatag = areatags[i].trim();
+		if (!areatag) continue;
+
+		var desc = (descriptions[i] || areatag).trim();
+		var doAllow  = !!allowFlags['allow_' + i];
+		var doEnable = !!enableFlags['enable_' + i];
+		var action   = (req.body['action_' + i] || 'create').trim();
+
+		// Action: map_<areaId> = map an existing area to this network
+		if (action.startsWith('map_')) {
+			var mapAreaId = parseInt(action.substring(4));
+			if (!mapAreaId) {
+				errors.push(areatag + ': invalid area ID for mapping');
+				continue;
+			}
+
+			// Check not already mapped
+			var existingMapping = await networkAreas.getNetworkArea(networkId, mapAreaId);
+			if (existingMapping) {
+				continue; // already mapped, skip silently
+			}
+
+			var mapResult = await networkAreas.addAreaToNetwork(networkId, mapAreaId, areatag, {
+				createdByUUID: currentuser.uuid || '',
+				createdByName: currentuser.username || ''
+			});
+			if (mapResult.status) {
+				await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, mapAreaId, {
+					allowAll: doAllow,
+					enableAll: doEnable
+				});
+				// Look up the area to get its shortcode for display
+				var areaRow = await postgres.queryOne('SELECT shortcode FROM message_areas WHERE id = $1', [mapAreaId]);
+				created.push({ areatag: areatag, shortcode: areaRow ? areaRow.shortcode : String(mapAreaId), action: 'mapped' });
+			} else {
+				errors.push(areatag + ': ' + mapResult.errormessages.join(', '));
+			}
+			continue;
+		}
+
+		// Action: create = create new area
+		// Generate shortcode from areatag: uppercase, replace non-alphanumeric with _
+		var shortcode = areatag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64);
+
+		// Check for shortcode collision -- if it exists and is already mapped, skip
+		var existingArea = await msgAreas.getAreaByShortcode(shortcode);
+		if (existingArea) {
+			var existingNetMapping = await networkAreas.getNetworkArea(networkId, existingArea.id);
+			if (existingNetMapping) continue;
+
+			// Shortcode exists but not on this network -- add the mapping
+			var scMapResult = await networkAreas.addAreaToNetwork(networkId, existingArea.id, areatag, {
+				createdByUUID: currentuser.uuid || '',
+				createdByName: currentuser.username || ''
+			});
+			if (scMapResult.status) {
+				await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, existingArea.id, {
+					allowAll: doAllow,
+					enableAll: doEnable
+				});
+				created.push({ areatag: areatag, shortcode: shortcode, action: 'mapped (shortcode existed)' });
+			} else {
+				errors.push(areatag + ': ' + scMapResult.errormessages.join(', '));
+			}
+			continue;
+		}
+
+		// Create new area inheriting group permissions
+		var formObj = {
+			groupshortcode: groupShortcode,
+			name: desc || areatag,
+			description: desc || areatag,
+			shortcode: shortcode,
+			readsecurity: group.read_security || 0,
+			postsecurity: group.post_security || 0,
+			minage: group.min_age || 0,
+			maxage: group.max_age || 255,
+			read_perm_flags: group.read_perm_flags || '[]',
+			read_rest_flags: group.read_rest_flags || '[]',
+			post_perm_flags: group.post_perm_flags || '[]',
+			post_rest_flags: group.post_rest_flags || '[]',
+			network_id: networkId,
+			areatag: areatag,
+			createdByUUID: currentuser.uuid || '',
+			createdByName: currentuser.username || ''
+		};
+
+		var areaResult = await msgAreas.newArea(formObj);
+		if (areaResult.status) {
+			if (doAllow || doEnable) {
+				var newArea = await msgAreas.getAreaByShortcode(shortcode);
+				if (newArea) {
+					await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, newArea.id, {
+						allowAll: doAllow,
+						enableAll: doEnable
+					});
+				}
+			}
+			created.push({ areatag: areatag, shortcode: shortcode, action: 'created' });
+		} else {
+			errors.push(areatag + ': ' + areaResult.errormessages.join(', '));
+		}
+	}
+
+	res.render('admin/import/areasbbs', {
+		sufficientAccess: true, title: 'Import areas.bbs', activelink: 'import',
+		currentuser: currentuser, groups: groups, networks: networks, preview: null,
+		result: { created: created, errors: errors }
+	});
+});
+
+// -------------------------------------------------------
 // Announcements
 // -------------------------------------------------------
 
@@ -2859,6 +3134,51 @@ router.post('/bulletins/reorder', express.json(), requireAdmin, async (req, res)
 });
 
 // -------------------------------------------------------
+// News Files
+// -------------------------------------------------------
+
+router.get('/newsfiles', requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var fileList         = await newsFiles.getAllNewsFiles();
+	res.render('admin/newsfiles/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'News Files',
+		activelink: 'newsfiles',
+		currentuser: currentuser,
+		newsfiles: fileList
+	});
+});
+
+router.post('/newsfiles/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await newsFiles.createNewsFile(req.body);
+	res.redirect('/admin/newsfiles');
+});
+
+router.post('/newsfiles/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	await newsFiles.updateNewsFile(id, req.body);
+	res.redirect('/admin/newsfiles');
+});
+
+router.post('/newsfiles/delete/:id', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	await newsFiles.deleteNewsFile(id);
+	res.redirect('/admin/newsfiles');
+});
+
+router.post('/newsfiles/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') {
+		try { ids = JSON.parse(ids); } catch (_) { ids = []; }
+	}
+	if (Array.isArray(ids) && ids.length > 0) {
+		await newsFiles.updateSortOrder(ids);
+	}
+	res.json({ status: true });
+});
+
+// -------------------------------------------------------
 // Wall
 // -------------------------------------------------------
 
@@ -2957,7 +3277,22 @@ router.get('/nodespy/status.json', async (req, res) => {
 		}
 	}
 
-	res.json({ nodes: nodes });
+	// Get web presence users (exclude any that are also terminal nodes)
+	var terminalUsernames = new Set(nodes.map(function(n) { return (n.username || '').toLowerCase(); }));
+	var onlineWeb = await getOnlineUsers();
+	var webUsers = [];
+	for (var wu of onlineWeb) {
+		if (terminalUsernames.has((wu.username || '').toLowerCase())) continue;
+		webUsers.push({
+			userId: wu.userId,
+			username: wu.username || '',
+			activityLabel: formatActivity(wu.activity || 'web_browsing'),
+			source: 'web',
+			duration: _formatDuration(wu.lastSeen)
+		});
+	}
+
+	res.json({ nodes: nodes, webUsers: webUsers });
 });
 
 router.get('/nodespy/:nodenum', async (req, res) => {

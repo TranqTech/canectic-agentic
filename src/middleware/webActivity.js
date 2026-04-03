@@ -61,6 +61,11 @@ async function _trackActivity(req) {
 				await callers.logCall(user, 'Web', clientIp, user.location || '');
 				userAccounts.updateUserCalls(user);
 				alogger.writeAlog(5, 'Web activity resumed for ' + session.username + ' (new call logged)', 'cyan');
+
+				// Flag session for call flow prompt on idle resume
+				if (lastActivity && appConfig.getBoolean('callflow_on_resume', true)) {
+					await sessionStore.sessionUpdate(sessionid, { callflow_pending: 'true' });
+				}
 			}
 		} catch (err) {
 			alogger.writeAlog(4, 'Web activity tracking error: ' + err.message, 'yellow');

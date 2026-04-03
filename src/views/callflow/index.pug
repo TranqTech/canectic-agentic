@@ -1,0 +1,171 @@
+extends ../layouts/user
+
+block content
+  .container.mt-4
+    .row.justify-content-center
+      .col-lg-9.col-md-11.col-12
+
+        //- Progress indicator
+        #cf-progress.text-center.mb-3
+          h5.text-muted#cf-progress-text Loading...
+
+        //- Stage container
+        #cf-stage-container
+
+        //- Navigation buttons
+        #cf-nav.text-center.mt-3.mb-5.pb-4(style='display:none')
+          button#cf-continue.btn.btn-primary.me-3
+            | Continue
+            i.bi.bi-arrow-right.ms-2
+          a#cf-skip.text-muted(href='#' style='font-size:0.85rem') Skip All
+
+  script.
+    (function() {
+      var stages = [];
+      var currentIdx = -1;
+      var returnUrl = '#{currentuser && currentuser.callflow_return_url || "/"}';
+
+      function init() {
+        fetch('/callflow/stages.json')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            stages = data.stages || [];
+            if (stages.length === 0) {
+              complete();
+              return;
+            }
+            document.getElementById('cf-nav').style.display = '';
+            nextStage();
+          })
+          .catch(function() {
+            complete();
+          });
+      }
+
+      function nextStage() {
+        currentIdx++;
+        if (currentIdx >= stages.length) {
+          complete();
+          return;
+        }
+
+        var stage = stages[currentIdx];
+        updateProgress();
+
+        fetch('/callflow/stage/' + stage.name)
+          .then(function(r) { return r.text(); })
+          .then(function(html) {
+            var container = document.getElementById('cf-stage-container');
+            container.style.opacity = '0';
+            setTimeout(function() {
+              container.innerHTML = html;
+              container.style.opacity = '1';
+              wireStageEvents();
+            }, 150);
+          })
+          .catch(function() {
+            nextStage();
+          });
+      }
+
+      function updateProgress() {
+        var text = '';
+        if (stages.length > 0 && currentIdx >= 0) {
+          var stage = stages[currentIdx];
+          text = stage.label + ' (Stage ' + (currentIdx + 1) + ' of ' + stages.length + ')';
+        }
+        document.getElementById('cf-progress-text').textContent = text;
+      }
+
+      function wireStageEvents() {
+        // Wall post form
+        var wallForm = document.getElementById('cf-wall-form');
+        if (wallForm) {
+          wallForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var input = document.getElementById('cf-wall-input');
+            var text = (input ? input.value : '').trim();
+            if (!text) return;
+            fetch('/callflow/wall', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: 'message=' + encodeURIComponent(text)
+            }).then(function() {
+              wallForm.style.display = 'none';
+              var hr = wallForm.previousElementSibling;
+              if (hr && hr.tagName === 'HR') hr.style.display = 'none';
+            });
+          });
+        }
+      }
+
+      function complete() {
+        fetch('/callflow/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'return_url=' + encodeURIComponent(returnUrl)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          window.location.href = data.redirect || '/';
+        })
+        .catch(function() {
+          window.location.href = returnUrl || '/';
+        });
+      }
+
+      // Button handlers
+      document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('cf-continue').addEventListener('click', nextStage);
+        document.getElementById('cf-skip').addEventListener('click', function(e) {
+          e.preventDefault();
+          complete();
+        });
+
+        // Keyboard: Enter/Space = continue, S/Escape = skip
+        document.addEventListener('keydown', function(e) {
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            nextStage();
+          }
+          if (e.key === 'Escape' || e.key === 's' || e.key === 'S') {
+            e.preventDefault();
+            complete();
+          }
+        });
+
+        init();
+      });
+    })();
+
+  style.
+    #cf-stage-container {
+      transition: opacity 0.15s ease-in-out;
+      min-height: 200px;
+    }
+    .cf-stage-card {
+      background: #2b3035;
+      border: 1px solid #495057;
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .cf-stage-title {
+      color: #00bc8c;
+      font-weight: 600;
+      font-size: 1.1rem;
+      margin-bottom: 15px;
+      border-bottom: 1px solid #495057;
+      padding-bottom: 8px;
+    }
+    .cf-table { width: 100%; }
+    .cf-table td { padding: 3px 8px; color: #dee2e6; }
+    .cf-table .cf-label { color: #6c757d; width: 80px; }
+    .cf-newscan-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px solid #3a3f44;
+    }
+    .cf-newscan-item:last-child { border-bottom: none; }
+    .cf-newscan-count { color: #00bc8c; font-weight: 600; }

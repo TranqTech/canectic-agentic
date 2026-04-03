@@ -1,0 +1,24 @@
+if items && items.length > 0
+  each item in items
+    .card.mb-3
+      .card-header.bg-primary
+        i.bi.bi-newspaper.me-2
+        = item.title
+        if item.description
+          small.text-muted.ms-2= item.description
+      .card-body.bg-black.p-0
+        .newsfile-content(
+          style='font-family: "Consolas", "Courier New", monospace; font-size: 14px; line-height: 1.2; padding: 8px; overflow-x: auto; white-space: pre;' + (item.center ? ' text-align: center;' : '')
+        )
+          if item.center
+            .d-inline-block(style='text-align: left; max-width: ' + item.sourceWidth + 'ch;')
+              != item.html
+          else
+            != item.html
+else
+  .card.mb-3
+    .card-header.bg-primary
+      i.bi.bi-newspaper.me-2
+      | News
+    .card-body
+      p.text-muted No news files available.

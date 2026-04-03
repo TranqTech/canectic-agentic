@@ -61,6 +61,7 @@ block content
                           data-bs-active=(area.active ? 'true' : 'false')
                           data-bs-threadmode=area.thread_mode || 'standard'
                           data-bs-postas=area.post_as || 'username'
+                          data-bs-qwkconfnumber=area.qwk_conf_number || ''
                           data-bs-msgcount=area.msg_count || 0
                           data-bs-lastfrom=area.last_from || ''
                           data-bs-lastmessage=area.last_message || ''
@@ -244,6 +245,9 @@ block content
                       select(id='ea_post_as' name='post_as' class='form-control' tabindex='9')
                         option(value='username') Username
                         option(value='realname') Real Name
+                      br
+                      label(for='ea_qwk_conf_number') QWK Conference #:
+                      input(type='number' id='ea_qwk_conf_number' name='qwk_conf_number' class='form-control' min=1 tabindex='10')
                   .row
                     .col-1
                     .col-5
@@ -605,6 +609,7 @@ block content
         document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
         document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
         document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
+        document.getElementById('ea_qwk_conf_number').value = d.bsQwkconfnumber || '';
 
         renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
         renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');

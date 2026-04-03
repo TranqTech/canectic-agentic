@@ -1,0 +1,40 @@
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-people-fill.me-2
+    | Who's Online
+    if onlineUsers && onlineUsers.length > 0
+      span.badge.bg-info.ms-2= onlineUsers.length
+  .card-body.p-0
+    if onlineUsers && onlineUsers.length > 0
+      .table-responsive
+        table.table.table-sm.mb-0
+          thead
+            tr
+              th: span.fg-brightyellow Node
+              th: span.fg-brightyellow Username
+              th: span.fg-brightyellow Activity
+              th: span.fg-brightyellow Connection
+          tbody
+            each entry in onlineUsers
+              tr
+                td
+                  if entry.nodenum
+                    span.fg-brightcyan= entry.nodenum
+                  else
+                    span.text-muted -
+                td: strong.fg-brightmagenta= entry.username || 'Unknown'
+                td: span.fg-cyan= entry.activity || 'Idle'
+                td
+                  if entry.connection === 'Web'
+                    span.badge.bg-success
+                      i.bi.bi-globe.me-1
+                      | Web
+                  else if entry.connection === 'Terminal'
+                    span.badge.bg-info
+                      i.bi.bi-terminal.me-1
+                      | Terminal
+                  else
+                    span.badge.bg-secondary= entry.connection || 'Unknown'
+    else
+      .p-3
+        p.fg-brightgreen Nobody currently online.

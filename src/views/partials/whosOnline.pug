@@ -42,6 +42,14 @@
                       | Terminal
                   else
                     span.badge.bg-secondary= entry.connection || 'Unknown'
+                td.text-end
+                  if currentuser && entry.userId && entry.connection === 'Web' && entry.username !== currentuser.username
+                    button.btn.btn-outline-info.btn-sm(
+                      type='button'
+                      onclick='window._webChat && window._webChat.telegram(' + entry.userId + ')'
+                      title='Send message to ' + entry.username
+                    )
+                      i.bi.bi-chat-dots
     else
       .text-center.text-muted.py-4
         span.fg-brightgreen Nobody currently online

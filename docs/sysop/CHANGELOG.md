@@ -1,5 +1,186 @@
 # Canectic BBS - Changelog
 
+## Pending Release (since v0.9.1-alpha.1)
+
+### News Files
+- Admin-configurable news/score files at Content > News Files
+- Displays ANSI/ASCII art files from door games, scores, or BBS news in the call flow
+- Terminal: `newsViewer` menu command displays files in sequence with any-key advance, ESC to skip
+- Web: rendered as HTML via `formatBodyHtml` in monospace cards with black background
+- Optional centering for oversized terminals (configurable source width per file, default 80)
+- Drag-to-reorder, active/inactive toggle, add/edit/delete modals
+- Integrates into both web and terminal call flows as a "News" stage
+
+### Web Call Flow
+- Guided login experience at /callflow mirroring the terminal call flow
+- Stages: new announcements, last callers, who's online, wall (with inline post), new message summary, new file summary
+- Auto-triggered on web login, prompted on idle session resume with "Welcome back" bar
+- AJAX-driven single page with smooth stage transitions, no full page reloads
+- Stages with no data auto-skip (e.g. no new announcements = stage skipped)
+- Keyboard navigable: Enter/Space to advance, S/Escape to skip all
+- New message and file summaries link directly to the relevant areas
+- `users.last_callflow_at` column tracks "new since last visit" for announcement filtering
+- Config keys: `callflow_enabled`, `callflow_on_resume`
+
+### Theme System
+- PostgreSQL-backed terminal colour themes with admin CRUD at /admin/themes
+- Colour category accordion editor (General, Menu, Content, Messages, Files, Terminal)
+- Cascade: per-entry colour > per-menu override > theme default > handler fallback
+- Duplicate theme, set default, reset to theme defaults per menu
+- Seeded from `config/themes/canectic.json` on first run
+- TinyMCE "Theme Default" colour bridge: `#010101` sentinel maps to theme content colour via CSS
+- Web colour bridge: `resolveWebColour(theme, context)` maps page contexts to theme properties for web content containers
+- Themes button added to admin dashboard
+
+### Menu System Overhaul
+- Margin-based entry regions with configurable top/bottom/left/right margins
+- Auto-column sizing: system calculates how many columns fit based on region width and entry text
+- Max columns setting, column gap, fill order toggle (columns vs rows)
+- Vertical centering within the entry region
+- Lightbar mode: arrow-key highlight bar navigation with Home/End/PgUp/PgDn
+- Featured entries rendered in a separate colour
+- Art-defined entry positioning mode via `@Enn@`/`@Fnn@` codes in ANSI art
+
+### Art Code System
+- `@XX@` codes embedded in ANSI/ASCII art files, replaced inline at render time
+- Universal codes: `@BN@` board name, `@UN@` username, `@DT@` date/time, `@ND@` node, etc.
+- Width specifier: `@BN20@` for wider fields (pad/truncate to width)
+- Menu codes: `@Enn@`/`@Fnn@` entry slot positioning, `@MT@`/`@HK@`/`@PR@`/`@ER@` UI positions
+- Async pipeline for DB-backed codes (`@TC@` total calls, `@TU@` total users, `@ON@` online count)
+- Fast path skips processing when no `@` byte found
+- `drawfileWithCodes()` / `drawscreenWithCodes()` async rendering entry points
+
+### Size-Aware Art Discovery
+- Art file walk order: exact size match (`filename-WxH.ext`) > column match (within 5 cols, best row fit) > default (`filename.ext`)
+- Size fit beats format capability (sixel > utf8 > ansi > ascii)
+- Applies to all art rendering system-wide (menus, headers, screens)
+- Sixel companion overlay: `.six` + `.ans` pairing for art-defined menus on sixel terminals
+
+### Door Collections
+- Many-to-many category grouping for door games
+- Admin CRUD at /admin/doorCollections with drag-to-reorder
+- Terminal door browser with collection navigation and description panel
+- Web door listing with collection cards and play/info buttons
+- Door browser auto-resume: returns to collection after door exit
+
+### Door Runner Consolidation
+- Five launch types: NativeShell (PTY), NativeCommand (piped stdio), Dosemu (console), DosemuPty (full), SyncJS
+- Legacy ExecNative/SpawnNative/SyncJS types mapped to the consolidated set
+- All launch types support output parser (CP437 conversion + DECSTBM centering)
+
+### NodeSpy System
+- Web dashboard at /admin/nodespy with auto-updating card grid (4-second AJAX poll)
+- Live terminal snoop via xterm.js with OutputRingBuffer catch-up history
+- Sysop-to-terminal chat: split-screen DECSTBM on target, web chat bar for sysop
+- Chat queue: if user not at menu, chat fires automatically when they return
+- One-time Redis token authentication for WebSocket connections
+- Terminal `nodeSpy` menu command: node list, live watch, chat initiate
+
+### Sysop Chat
+- Break-in chat from NodeSpy (both web dashboard and terminal command)
+- SplitScreenChat engine: DECSTBM scroll region, conversation history, input line, peek line
+- Target input hijacked via `call.rawmode` during active chat
+- 5 beeps on chat start, ESC to exit (sysop only)
+- Chat queue indicator on both web (pulsing badge) and terminal (bold status badge)
+
+### Web Sysop Chat
+- Sysop can initiate real-time chat with web-browsing users from NodeSpy dashboard
+- NodeSpy dashboard now shows web presence users alongside terminal nodes
+- Chat routed through PresenceSocket (`/ws/presence`) with Redis-backed session persistence
+- Floating chat overlay widget on all pages (both user and admin layouts)
+- Chat survives page navigation via `chat_restore` with full message history from Redis
+- Minimise to badge with unread count, typing indicators, notification sounds
+- Config keys: `web_chat_enabled`, `web_chat_sound`
+
+### User-to-User Telegrams
+- Any authenticated web user can send a real-time message to another online web user
+- "Message" button on Who's Online page next to web users
+- Same chat overlay and PresenceSocket infrastructure as sysop chat
+- Two chat modes: `sysop` (admin-only, target can only minimise) and `telegram` (any user, both can close)
+
+### Wall / Oneliners
+- Terminal wall handler: display recent messages, post prompt, call flow stage + menu command
+- Web wall at /wall with post form, also embedded on home page
+- Access control: `wall_post_security`, `wall_post_required_flags`, `wall_post_restricted_flags`
+- Auto-purge: oldest messages removed when count exceeds `wall_max_messages` (default 60)
+- Admin management at /admin/wall with delete capability
+- Config keys: `wall_display_count`, `wall_max_length`, `wall_max_messages`
+
+### Bulletin System
+- DB-backed bulletins with admin CRUD at /admin/bulletins (Content menu)
+- TinyMCE editor for bulletin content, drag-to-reorder, active/inactive toggle
+- Terminal `bulletinViewer` menu command: numbered selection, art file display with scrolling
+- Web bulletin listing at /bulletins with detail view
+- Art file association: bulletins can reference ANSI art files for terminal display
+
+### System Statistics
+- Terminal `sysInfo` menu command + call flow stage (SubModuleAdapter)
+- Web /stats page with system info card
+- Aggregated statistics: total users, total calls, total messages, total files, online count
+- `formatFileSize()` utility for human-readable file sizes
+
+### File Subscriptions and Newscan
+- User file area subscriptions: T key toggle in file area selector (mirrors message area pattern)
+- `user_file_subscriptions` table with user override > area `newscan_default` resolution
+- `fileNewscan` terminal menu command: scan subscribed areas for new files since last visit
+- File area selector shows new file counts per area
+
+### Custom Permission and Restriction Flags
+- Sysops can define custom flags beyond the built-in set (Sysop, Mod, Adult, etc.)
+- Config keys: `custom_permission_flags`, `custom_restriction_flags` (comma-separated)
+- Custom flags appear in all flag selectors: area access, menu entries, wall posting
+- Built-in flags always present, custom flags appended
+
+### User QWK/REP Packet Handling
+- Personal QWK packet download: subscribed message areas + unread PMs, uses existing scan pointers
+- REP packet upload: replies posted to message areas via standard posting path, PM replies delivered
+- Web interface at /qwk with download button and upload form
+- Terminal menu command `qwkTransfer` with D/U/Q hotkey menu and ZMODEM/XMODEM protocol selection
+- Conference numbers via `message_areas.qwk_conf_number` column (defaults to area ID, sysop-editable)
+- Config keys: `qwk_enabled`, `qwk_bbsid`, `qwk_max_msgs_per_area`
+
+### areas.bbs Import
+- Admin tool at Messages > Import areas.bbs for batch-creating message areas from FTN hub area lists
+- Upload areas.bbs file, select target message group and network
+- Preview with per-area controls: include/exclude, action (Create New or map existing unmapped area), allow peers, enable peers
+- Bulk controls: Select All, Deselect All, Toggle All Allow, Toggle All Enable
+- New areas inherit group security level and permission/restriction flags
+
+### Who's Online and Activity Tracking
+- Web activity middleware: session renewal, Redis presence with `setActivity()` for page-specific labels
+- PresenceSocket (`/ws/presence`): lightweight WebSocket for heartbeats, presence tracking, chat
+- Activity map: central display label resolution for both terminal and web activities
+- Who's Online page: merged terminal nodes + web presence, deduplication, activity labels
+- Who's Online partial reusable for home page and call flow embedding
+- Last Callers page with source badge (Web/Terminal), reusable partial
+
+### Goodbye Handler
+- Confirm logoff prompt with batch download check
+- If user has tagged files in batch, prompts to download before disconnecting
+- Protocol selection (XMODEM/ZMODEM) for batch download on exit
+
+### Web Activity Tracking
+- Centralized session renewal in `webActivity.js` middleware
+- Redis presence with `setActivity()` for page-specific activity labels
+- `getOnlineUsers()` API merging terminal and web sources
+- Configurable idle threshold for new call record logging
+
+### File Area Maintenance
+- Duplicate file cleanup (hash-based detection)
+- Missing file removal (DB entries for files no longer on disk)
+
+### Testing
+- 471 new unit tests (1,649 total, up from 1,178)
+- New test coverage: areaAccess, activityMap, wall, bulletins, announcements, systemStats, artCodes, qwkUser
+- Bulletin `updateById` argument order bugfix found and fixed via testing
+
+### Infrastructure
+- Version read from `package.json` via config system (not per-call file reads)
+- Shared access check utility (`src/utils/areaAccess.js`) extracted from route code
+- `areasBbsParser.js` utility for areas.bbs file parsing
+- Web presence `userSockets` reverse index for targeted WebSocket message delivery
+- Redis-backed chat sessions with TTL safety net and automatic reconnect restore
+
 ## v0.9.1-alpha.1 (2026-03-29)
 
 ### Web Door Launcher

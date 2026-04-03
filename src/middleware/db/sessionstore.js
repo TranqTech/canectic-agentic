@@ -127,6 +127,12 @@ async function sessionUpdateUser(username, fields) {
 	return updated;
 }
 
+// Update specific fields on a session by session ID.
+async function sessionUpdate(sessionid, fields) {
+	if (!sessionid || !fields) return false;
+	return await hSet(SESSION_PREFIX + sessionid, fields);
+}
+
 export {
 	sessionStore,
 	sessionGet,
@@ -134,5 +140,6 @@ export {
 	sessionExists,
 	sessionRenew,
 	sessionList,
+	sessionUpdate,
 	sessionUpdateUser
 };

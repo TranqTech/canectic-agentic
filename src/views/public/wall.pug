@@ -12,17 +12,44 @@ block content
         include ../partials/wall
 
         if canPost
-          .card.mb-4
+          #wall-post-card.card.mb-4
             .card-header.bg-secondary
               i.bi.bi-pencil-square.me-2
               | Leave a Message
             .card-body
-              form(method='POST' action='/wall')
+              form#wall-post-form(method='POST' action='/wall')
                 .input-group
                   input.form-control(type='text' name='message' placeholder='Write on the wall...' maxlength='160' required autocomplete='off')
                   button.btn.btn-primary(type='submit')
                     i.bi.bi-send.me-1
                     | Post
+          script.
+            (function() {
+              var card = document.getElementById('wall-post-card');
+              // Hide if user already posted this session
+              if (sessionStorage.getItem('wall_posted')) {
+                card.style.display = 'none';
+                return;
+              }
+              document.getElementById('wall-post-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                var input = this.querySelector('input[name="message"]');
+                var text = (input ? input.value : '').trim();
+                if (!text) return;
+                var btn = this.querySelector('button[type="submit"]');
+                if (btn) btn.disabled = true;
+                fetch('/wall', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: 'message=' + encodeURIComponent(text),
+                  redirect: 'follow'
+                }).then(function() {
+                  sessionStorage.setItem('wall_posted', '1');
+                  card.style.display = 'none';
+                  location.reload();
+                });
+              });
+            })();
         else if !currentuser
           .text-center.text-muted
             | Log in to leave a message on the wall.

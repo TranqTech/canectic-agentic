@@ -127,10 +127,19 @@ router.post('/login', urlencodedParser, async (req, res) => {
 
 	alogger.writeAlog(5, 'Web login: ' + username, 'greenbright');
 
-	if (isAjax) {
-		return res.json({ status: true, redirect: redirectTo });
+	// Route through call flow on fresh login (if enabled)
+	var callflowEnabled = appConfig.getBoolean('callflow_enabled', true);
+	var finalRedirect = redirectTo;
+	if (callflowEnabled && redirectTo === '/') {
+		// Store the original destination so call flow can redirect after completion
+		await sessionStore.sessionUpdate(sessionid, { callflow_return_url: redirectTo });
+		finalRedirect = '/callflow';
 	}
-	return res.redirect(redirectTo);
+
+	if (isAjax) {
+		return res.json({ status: true, redirect: finalRedirect });
+	}
+	return res.redirect(finalRedirect);
 });
 
 /* -----------------------------------------------

@@ -1,0 +1,19 @@
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-chat-square-text.me-2
+    | The Wall
+  .card-body
+    if messages && messages.length > 0
+      each msg in messages
+        .mb-1
+          span(class=msg.username === currentUsername ? 'fg-brightyellow' : 'fg-brightcyan')= msg.username || 'Anonymous'
+          span.text-muted= ': '
+          span= msg.message
+    else
+      p.text-muted The wall is empty. Be the first to leave a message!
+
+    if canPost
+      hr
+      form#cf-wall-form.d-flex.gap-2
+        input#cf-wall-input.form-control.form-control-sm(type='text' placeholder='Leave a message...' maxlength='160' autocomplete='off')
+        button.btn.btn-sm.btn-outline-success(type='submit') Post

@@ -20,11 +20,14 @@ html
     div(style='padding-top: 70px')
       block content
     if currentuser
+      include ../partials/chatOverlay
       script.
         (function() {
           var wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
           var ws = null;
           var reconnectDelay = 5000;
+          var chatState = { chatId: null, minimised: false, unread: 0, role: null, mode: null };
+
           function connect() {
             try {
               ws = new WebSocket(wsProto + '//' + location.host + '/ws/presence');
@@ -35,6 +38,9 @@ html
                   }
                 }, 60000);
               };
+              ws.onmessage = function(ev) {
+                try { var msg = JSON.parse(ev.data); handlePresenceMsg(msg); } catch(_) {}
+              };
               ws.onclose = function() {
                 setTimeout(connect, reconnectDelay);
               };
@@ -42,5 +48,184 @@ html
               setTimeout(connect, reconnectDelay);
             }
           }
+
+          function handlePresenceMsg(msg) {
+            if (msg.type === 'chat_start') {
+              chatState.chatId = msg.chatId;
+              chatState.unread = 0;
+              chatState.mode = msg.mode || 'sysop';
+              chatState.role = msg.targetName ? 'initiator' : 'target';
+              var peer = msg.peerName || msg.targetName || 'Chat';
+              document.getElementById('web-chat-title').textContent = 'Chat - ' + peer;
+              document.getElementById('web-chat-messages').innerHTML = '';
+              updateCloseButton();
+              addSystemMsg(peer + ' started a chat');
+              showOverlay();
+              playNotify();
+            }
+            if (msg.type === 'chat_restore') {
+              chatState.chatId = msg.chatId;
+              chatState.unread = 0;
+              chatState.mode = msg.mode || 'sysop';
+              chatState.role = msg.role || 'target';
+              var peer = msg.peerName || 'Chat';
+              document.getElementById('web-chat-title').textContent = 'Chat - ' + peer;
+              var box = document.getElementById('web-chat-messages');
+              box.innerHTML = '';
+              updateCloseButton();
+              for (var i = 0; i < msg.messages.length; i++) {
+                addChatMsg(msg.messages[i].from, msg.messages[i].name, msg.messages[i].text);
+              }
+              showOverlay();
+            }
+            if (msg.type === 'chat_msg' && msg.chatId === chatState.chatId) {
+              addChatMsg(msg.from, msg.name, msg.text);
+              if (chatState.minimised) {
+                chatState.unread++;
+                updateBadge();
+              }
+              playNotify();
+            }
+            if (msg.type === 'chat_typing' && msg.chatId === chatState.chatId) {
+              var el = document.getElementById('web-chat-typing');
+              if (msg.text) { el.textContent = 'typing...'; }
+              else { el.textContent = ''; }
+            }
+            if (msg.type === 'chat_end' && msg.chatId === chatState.chatId) {
+              addSystemMsg(msg.reason || 'Chat ended');
+              chatState.chatId = null;
+              setTimeout(hideOverlay, 3000);
+            }
+            if (msg.type === 'chat_error') {
+              if (chatState.chatId) {
+                addSystemMsg('Error: ' + (msg.error || 'unknown'));
+              } else {
+                alert('Chat: ' + (msg.error || 'unknown error'));
+              }
+            }
+          }
+
+          function addChatMsg(from, name, text) {
+            var box = document.getElementById('web-chat-messages');
+            var div = document.createElement('div');
+            div.className = 'web-chat-msg web-chat-msg-' + from;
+            div.innerHTML = '<span class="web-chat-msg-name">[' + esc(name) + ']</span> ' + esc(text);
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+          }
+
+          function addSystemMsg(text) {
+            var box = document.getElementById('web-chat-messages');
+            var div = document.createElement('div');
+            div.className = 'web-chat-msg-system';
+            div.textContent = text;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+          }
+
+          function updateCloseButton() {
+            var btn = document.getElementById('web-chat-close');
+            if (!btn) return;
+            // Telegram: both parties can close. Sysop chat: only initiator (sysop) can close.
+            var canClose = (chatState.mode === 'telegram') || (chatState.role === 'initiator');
+            btn.style.display = canClose ? '' : 'none';
+          }
+
+          function showOverlay() {
+            document.getElementById('web-chat-overlay').classList.remove('web-chat-hidden');
+            document.getElementById('web-chat-badge').classList.add('web-chat-hidden');
+            chatState.minimised = false;
+            chatState.unread = 0;
+          }
+
+          function hideOverlay() {
+            document.getElementById('web-chat-overlay').classList.add('web-chat-hidden');
+            document.getElementById('web-chat-badge').classList.add('web-chat-hidden');
+          }
+
+          function minimiseOverlay() {
+            document.getElementById('web-chat-overlay').classList.add('web-chat-hidden');
+            document.getElementById('web-chat-badge').classList.remove('web-chat-hidden');
+            chatState.minimised = true;
+            updateBadge();
+          }
+
+          function updateBadge() {
+            var el = document.getElementById('web-chat-badge-count');
+            if (chatState.unread > 0) {
+              el.textContent = chatState.unread;
+              el.style.display = 'flex';
+            } else {
+              el.style.display = 'none';
+            }
+          }
+
+          function sendChat(text) {
+            if (!text || !chatState.chatId || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'chat_msg', chatId: chatState.chatId, text: text }));
+            addChatMsg('self', 'You', text);
+          }
+
+          function endChat() {
+            if (!chatState.chatId || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'chat_end', chatId: chatState.chatId }));
+          }
+
+          var typingTimer = null;
+          function sendTyping(text) {
+            if (!chatState.chatId || !ws || ws.readyState !== WebSocket.OPEN) return;
+            clearTimeout(typingTimer);
+            ws.send(JSON.stringify({ type: 'chat_typing', chatId: chatState.chatId, text: text }));
+            typingTimer = setTimeout(function() {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'chat_typing', chatId: chatState.chatId, text: '' }));
+              }
+            }, 3000);
+          }
+
+          function playNotify() {
+            try { var a = new Audio('/sounds/chat-notify.mp3'); a.volume = 0.3; a.play().catch(function(){}); } catch(_) {}
+          }
+
+          function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+          // Wire up UI events after DOM ready
+          document.addEventListener('DOMContentLoaded', function() {
+            var input = document.getElementById('web-chat-input');
+            if (!input) return;
+
+            document.getElementById('web-chat-send').addEventListener('click', function() {
+              var text = input.value.trim();
+              if (text) { sendChat(text); input.value = ''; }
+            });
+
+            input.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter') {
+                var text = input.value.trim();
+                if (text) { sendChat(text); input.value = ''; }
+              }
+            });
+
+            input.addEventListener('input', function() {
+              sendTyping(input.value);
+            });
+
+            document.getElementById('web-chat-minimise').addEventListener('click', minimiseOverlay);
+            document.getElementById('web-chat-close').addEventListener('click', endChat);
+            document.getElementById('web-chat-badge').addEventListener('click', showOverlay);
+          });
+
+          // Expose for chat initiation from other page scripts
+          window._webChat = {
+            initiate: function(targetUserId, mode) {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'chat_initiate', targetUserId: targetUserId, mode: mode || 'sysop' }));
+              }
+            },
+            telegram: function(targetUserId) {
+              this.initiate(targetUserId, 'telegram');
+            }
+          };
+
           connect();
         })();

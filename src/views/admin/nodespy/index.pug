@@ -82,11 +82,34 @@ block content
           '</div>';
         }
 
+        function buildWebCard(user) {
+          return '<div class="col-md-4 col-sm-6 mb-4">' +
+            '<div class="card h-100">' +
+              '<div class="card-header bg-secondary d-flex justify-content-between align-items-center">' +
+                '<span>' +
+                  '<span class="fg-brightcyan">' + escapeHtml(user.username || 'Unknown') + '</span>' +
+                '</span>' +
+                '<span class="badge bg-warning text-dark">Web</span>' +
+              '</div>' +
+              '<div class="card-body">' +
+                '<div class="mb-2"><small class="fg-brightyellow">Activity</small><br>' +
+                  '<span class="fg-cyan">' + escapeHtml(user.activityLabel) + '</span></div>' +
+                '<div class="mb-2"><small class="fg-brightyellow">Duration</small><br>' +
+                  '<span class="fg-brightblue">' + escapeHtml(user.duration) + '</span></div>' +
+              '</div>' +
+              '<div class="card-footer text-center">' +
+                '<button class="btn btn-info btn-sm" onclick="window._webChat && window._webChat.initiate(' + user.userId + ')">' +
+                  '<i class="bi bi-chat-dots me-1"></i>Chat</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }
+
         function buildEmpty() {
           return '<div class="text-center py-5" id="emptyState">' +
             '<i class="bi bi-display" style="font-size: 3rem; color: #555"></i>' +
-            '<h5 class="text-muted mt-3">No active terminal nodes</h5>' +
-            '<p class="text-muted">Nodes will appear here when users connect via terminal.</p>' +
+            '<h5 class="text-muted mt-3">No active nodes or web users</h5>' +
+            '<p class="text-muted">Nodes and web users will appear here when they connect.</p>' +
           '</div>';
         }
 
@@ -96,10 +119,20 @@ block content
             .then(function(data) {
               var grid = document.getElementById('nodeGrid');
               if (!grid) return;
-              if (data.nodes && data.nodes.length > 0) {
+              var hasNodes = data.nodes && data.nodes.length > 0;
+              var hasWeb = data.webUsers && data.webUsers.length > 0;
+
+              if (hasNodes || hasWeb) {
                 var html = '<div class="row">';
-                for (var i = 0; i < data.nodes.length; i++) {
-                  html += buildCard(data.nodes[i]);
+                if (hasNodes) {
+                  for (var i = 0; i < data.nodes.length; i++) {
+                    html += buildCard(data.nodes[i]);
+                  }
+                }
+                if (hasWeb) {
+                  for (var j = 0; j < data.webUsers.length; j++) {
+                    html += buildWebCard(data.webUsers[j]);
+                  }
                 }
                 html += '</div>';
                 grid.innerHTML = html;

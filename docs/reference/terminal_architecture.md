@@ -1229,7 +1229,7 @@ The `readMessages` wrapper should detect `call.term_type` and route to line read
 - Inter-node messaging / chat
 - Node-spy (sysop) live terminal mirroring (infrastructure exists via `OutputRingBuffer`)
 - Thread preferences (subscribe/ignore/mute) — schema designed, not yet implemented
-- User QWK download/upload from terminal menu
+- ~~User QWK download/upload from terminal menu~~ — **Done**. `qwkTransfer` menu command with D/U/Q hotkey menu, ZMODEM/XMODEM protocol selection.
 - Web newscan route/view using `getNewscanSummary()` with `userAreaSubs` filtering
 - Flat-mode reply thread UUID resolution (currently null for some messages)
 - Terminal PM reader pagination for mailboxes exceeding batch size
@@ -1359,6 +1359,34 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 
 ---
 
+## QWK Mail Transfer (`handlers/menucommands/qwkTransfer.js`)
+
+Terminal menu command for offline QWK packet download and REP upload. Menu command type: `qwkTransfer`.
+
+**State machine:** `MENU → BUILDING → PROTOCOL → TRANSFERRING → RESULT` (download) or `MENU → PROTOCOL → UPLOADING → RESULT` (upload)
+
+**MENU state:** D/U/Q hotkey menu. ESC returns to parent menu.
+
+**Download flow:**
+1. Calls `buildQwkForUser(userId)` — gathers new messages from subscribed areas + unread PMs, assembles `.qwk` packet, advances scan pointers
+2. Displays summary (message count, area count)
+3. Protocol prompt: X for XMODEM, Z or Enter for ZMODEM (default)
+4. Sends packet via `NativeZmodemProtocol`/`NativeXmodemProtocol`
+5. Cleans up temp files regardless of transfer outcome
+
+**Upload flow:**
+1. Protocol prompt (same as download)
+2. Receives file to temp directory via protocol `.receive()`
+3. Finds `.rep` file in received files (XMODEM single-file fallback if no `.rep` extension)
+4. Calls `importRepForUser(userId, repPath)` — parses messages, posts to areas via `echomail`, delivers PMs
+5. Displays result summary (posted count, errors)
+
+**Dumb terminal fallback:** All prompts and results use plain `\r\n` text output.
+
+**Transfer pause:** `_transferring` flag blocks input handling during active file transfers (same pattern as `fileBrowser.js`).
+
+---
+
 ## File Index
 
 | File | Location | Purpose |
@@ -1380,6 +1408,7 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 | `pmReader.js` | handlers/menucommands | Terminal private mail reader — inbox/sent/trash folders, message view, compose/reply launch |
 | `pmEditor.js` | handlers/menucommands | Terminal PM editor — From/To/Addr/Subject fields, transport cycling, LOCAL+network save, quote system |
 | `pmCheck.js` | handlers/menucommands | Unread mail check prompt — also works as call flow stage via SubModuleAdapter |
+| `qwkTransfer.js` | handlers/menucommands | QWK packet download and REP upload — D/U/Q menu, ZMODEM/XMODEM protocol selection |
 | `fileAreaSelector.js` | handlers/menucommands | File group/area selector with lightbar, search, new file counts (Phase 5) |
 | `fileBatchCheck.js` | handlers/menucommands | Login flow batch check — prompts to download pending batch on login, with protocol selection and hangup-after-transfer option |
 | `fileBrowser.js` | handlers/menucommands | File listing browser — file list, detail view, XMODEM/ZMODEM download (single + batch) via native engines, batch tagging (Phase 5) |
@@ -1400,6 +1429,8 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 | `fileEntries.js` | models | File entry CRUD, search, dupe checking, download counts |
 | `userFilePointers.js` | models | Per-user per-area file scan pointers |
 | `echomail.js` | models | FTN echomail import/export, threading. Shared thread helpers: `createThreadRow`, `updateThreadStats`, `rollbackThread` |
+| `qwkUser.js` | models | User QWK packet generation (`buildQwkForUser`) and REP import (`importRepForUser`) |
+| `areaAccess.js` | utils | Shared area read/write access checks (`checkAreaReadAccess`, `checkAreaPostAccess`) |
 | `terminalText.js` | utils | VirtualTerminal, `formatTerminalText`, `formatBodyHtml` (consolidated single source for all tossers) |
 | `configvars.js` | utils | Runtime %X variable substitution for door commands, directories, and arguments. Single-pass O(n) engine, 36 tokens. |
 | **Schemas** | | |

@@ -79,7 +79,7 @@ async function updateBulletin(id, data) {
 		return result;
 	}
 
-	await postgres.updateById(updates, 'bulletins', id);
+	await postgres.updateById(id, updates, 'bulletins');
 	result.status = true;
 	return result;
 }

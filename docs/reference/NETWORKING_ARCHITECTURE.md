@@ -133,6 +133,22 @@ Rows are pre-created by `syncConnectionToNetwork()` when a connection is establi
 
 **Entire area deleted** → same cleanup runs per-network before the area record is removed.
 
+### areas.bbs Bulk Import
+
+Admin tool at `/admin/import/areasbbs` for batch-creating message areas from a standard areas.bbs file (one areatag + description per line, comments with `;` or `#`).
+
+**Flow:**
+1. Upload areas.bbs, select target message group and network
+2. Parser (`src/utils/areasBbsParser.js`) extracts areatag/description pairs
+3. Preview table shows each areatag with status (new vs already mapped) and per-area controls:
+   - **Action dropdown**: "Create New Area" or select an existing unmapped area from the group to map to this areatag
+   - **Allow** checkbox (default: checked) -- allow for all network peers via `syncNetworkAreaToConnections()`
+   - **Enable** checkbox (default: unchecked) -- enable for all network peers
+   - Import checkbox to include/exclude individual areas
+4. Execute: for each selected areatag, either creates a new area (inheriting group security/flags) with `msgAreas.newArea()` (which handles network mapping and initial subscription sync) or maps an existing area via `networkAreas.addAreaToNetwork()`. Per-area allow/enable flags are applied via `syncNetworkAreaToConnections()`.
+
+New areas inherit: `read_security`, `post_security`, `min_age`, `max_age`, `read_perm_flags`, `read_rest_flags`, `post_perm_flags`, `post_rest_flags` from the target group. Shortcodes are derived from the areatag (uppercased, non-alphanumeric replaced with `_`).
+
 ### connection_data JSONB structure (FTN)
 
 ```json
@@ -706,12 +722,36 @@ _Networking-specific decisions. For message platform decisions (read tracking, b
 
 ---
 
+## User QWK Packets
+
+Separate from the network-level QWK tosser, the user QWK system (`src/models/qwkUser.js`) generates personal `.qwk` packets for individual users and imports `.rep` reply packets. Full design in `QWK_USER_DESIGN.md`.
+
+### How it relates to the network QWK system
+
+- **Reuses the same low-level functions**: `buildControlDat()`, `buildMessagesDat()`, `buildHeadersDatText()`, `assembleQwkPacket()` from `qwkPacketBuilder.js` and `parseMessagesDAT()`, `parseHeadersDat()`, `applyHeadersDat()`, `unzipQwkPacket()` from `qwkClasses.js`.
+- **Different conference numbering**: Network QWK uses areatags from `network_areas` as conference numbers. User QWK uses `message_areas.qwk_conf_number` — a system-wide column that defaults to the area's database `id`, sysop-editable. These are independent; a sysop may choose to align them manually.
+- **Different pointer system**: Network QWK tracks HWM via `peer_area_subscriptions.msg_idx`. User QWK uses the same `user_msg_pointers.scan_pointer` as web and terminal newscan.
+- **Different posting path**: Network QWK imports via the tosser (`importQwkMessage()`). User REP imports via the standard posting path (`echomail.startNewThread()`/`replyToThread()`), which enforces access control, user attribution, and body_html generation.
+- **No NETFLAGS.DAT**: User packets don't participate in message routing.
+- **Conference 0 = PMs**: Unread PMs are included in the download; conference 0 replies in REP are delivered as new PMs.
+
+### Access paths
+
+- **Web**: `/qwk` (transfer page), `/qwk/download` (packet download), `/qwk/upload` (REP upload)
+- **Terminal**: `qwkTransfer` menu command — D/U/Q hotkey menu, ZMODEM/XMODEM protocol selection
+
+### Config keys
+
+- `qwk_enabled` (boolean, default true) — enable/disable user QWK transfers
+- `qwk_bbsid` (string) — QWK BBS ID for packet filenames (max 8 chars, falls back to boardname)
+- `qwk_max_msgs_per_area` (number, default 500) — per-area message cap in user packets
+
+---
+
 ## Future Development Areas
 
 _Networking-specific items. For message platform items (web newscan, rich editor, thread preferences, etc.), see `message_architecture.md`._
 
-- **User QWK downloads**: Use low-level `buildControlDat()`, `buildMessagesDat()`, `buildHeadersDatText()`, and `assembleQwkPacket()` with user-specific conference lists and scan pointers from `userMsgPointers`.
-- **HTTP QWK endpoint**: REST API for packet download/upload (similar to Synchronet's `qwk.ssjs`).
 - **HEADERS.DAT on inbound FTN**: The parser infrastructure exists — could be extended to generate HEADERS.DAT-equivalent metadata from FTN kludge lines.
 - **HWM split for hub mode**: Return HWM data from `buildQwkForNode()` without advancing, let the caller confirm delivery before advancing.
 - **Voting/polls**: VOTING.DAT support in QWK packets (Synchronet generates empty VOTING.DAT).
@@ -723,7 +763,7 @@ _Networking-specific items. For message platform items (web newscan, rich editor
 
 See `message_architecture.md` for the full two-tier pointer system, schemas, read-state resolution, pointer advancement, unread queries, view loading strategy, and progress bar implementation.
 
-**QWK Packet Integration**: User QWK downloads use the area scan pointer as the starting point for message gathering — same role as `msg_idx` on `peer_area_subscriptions` for node connections. After a successful QWK download, advance the area scan pointer to the highest message ID included in the packet. REP upload uses the standard `replyToThread`/`startNewThread` posting path.
+**QWK Packet Integration**: User QWK downloads use the area scan pointer as the starting point for message gathering — same role as `msg_idx` on `peer_area_subscriptions` for node connections. After a successful QWK download, `buildQwkForUser()` advances the area scan pointer to the highest message ID included in the packet. REP upload uses the standard `replyToThread`/`startNewThread` posting path via `importRepForUser()`. See the "User QWK Packets" section above and `QWK_USER_DESIGN.md`.
 
 ---
 

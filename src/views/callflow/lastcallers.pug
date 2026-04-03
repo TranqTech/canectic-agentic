@@ -1,0 +1,28 @@
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-person-lines-fill.me-2
+    | Last Callers
+  .card-body.p-0
+    if callers && callers.length > 0
+      .table-responsive
+        table.table.table-sm.mb-0
+          thead
+            tr
+              th: span.fg-brightyellow Username
+              th: span.fg-brightyellow Time
+              th: span.fg-brightyellow Source
+              th: span.fg-brightyellow Location
+          tbody
+            each c in callers
+              tr
+                td: strong.fg-brightmagenta= c.username || 'Unknown'
+                td: span.fg-cyan= c.call_time ? new Date(c.call_time).toLocaleString() : ''
+                td
+                  if c.source === 'Web'
+                    span.badge.bg-success Web
+                  else
+                    span.badge.bg-info= c.source || 'Terminal'
+                td: span.fg-cyan= c.location || ''
+    else
+      .p-3
+        p.text-muted No recent callers.

@@ -25,7 +25,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             role='button'
             aria-haspopup='true'
             aria-expanded='false'
-            class=(activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins') ? 'active' : ''
+            class=(activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins' || activenav === 'newsfiles') ? 'active' : ''
           )
             | Content
             if activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins'
@@ -33,6 +33,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
           .dropdown-menu
             a.dropdown-item(href='/admin/announcements') Announcements
             a.dropdown-item(href='/admin/bulletins') Bulletins
+            a.dropdown-item(href='/admin/newsfiles') News Files
             a.dropdown-item(href='/admin/wall') Wall Messages
 
         //- Messages
@@ -43,7 +44,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             role='button'
             aria-haspopup='true'
             aria-expanded='false'
-            class=(activenav === 'msgGroups' || activenav === 'msgAreas') ? 'active' : ''
+            class=(activenav === 'msgGroups' || activenav === 'msgAreas' || activenav === 'import') ? 'active' : ''
           )
             | Messages
             if activenav === 'msgGroups' || activenav === 'msgAreas'
@@ -54,6 +55,9 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             .dropdown-divider
             a.dropdown-item(href='/admin/networks') Networks
             a.dropdown-item(href='/admin/nodelists') Nodelists
+            .dropdown-divider
+            a.dropdown-item(href='/admin/import/areasbbs') Import areas.bbs
+            a.dropdown-item(href='/admin/import/msgbase') Import Message Base
 
         //- Doors
         li.nav-item.dropdown

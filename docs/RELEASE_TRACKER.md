@@ -45,6 +45,7 @@ Last updated: 2026-03-31
 - [x] Mail verification handler (call flow + menu command, send/enter/change address)
 - [x] Registration with gender selection (hotkey selector)
 - [x] Password reset handler (pre-login token + post-login change)
+- [x] News file viewer (ANSI/ASCII art display with centering, menu command + call flow)
 - [~] ZMODEM (works with most clients, known issue with IcyTerm both directions)
 
 ### Web
@@ -69,7 +70,7 @@ Last updated: 2026-03-31
 - [x] Who's online (web presence integration, activity labels)
 - [x] Last callers page (web view of recent callers, reusable partial)
 - [x] Who's online page (web view of terminal nodes + web presence, reusable partial)
-- [ ] Virtual call flow (web equivalent of the terminal login experience: last callers, who's online, announcements, mail check)
+- [x] Virtual call flow (web equivalent of the terminal login experience: announcements, last callers, who's online, wall, message newscan, file newscan)
 
 ### Admin Panel
 - [x] Dashboard
@@ -90,6 +91,7 @@ Last updated: 2026-03-31
 - [x] Announcements CRUD (TinyMCE editor, drag-to-reorder, pinning, scheduling)
 - [x] Jobs & Maintenance page (manual trigger for all worker jobs by category)
 - [x] SMB message base import (upload .shd/.sdt/.sid, preview, import to area)
+- [x] areas.bbs import (upload, preview with per-area controls, create/map areas, sync peer subscriptions)
 - [ ] JAM message base import
 
 ### Message Networking
@@ -153,12 +155,13 @@ Last updated: 2026-03-31
 - [x] .env.example template (examples/env.example)
 
 ### Testing
-- [x] 1,178 tests passing (mocha)
+- [x] 1,649 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
 - [x] Config and access control tests
 - [x] Email transport tests
+- [x] New feature tests (areaAccess, activityMap, wall, bulletins, announcements, systemStats, artCodes, qwkUser)
 
 ---
 
@@ -173,15 +176,19 @@ Last updated: 2026-03-31
 | 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
 | 6 | Full nodespy implementation | [x] | Web dashboard + live snoop + terminal command |
 | 7 | Sysop chat | [x] | Break-in, split-screen DECSTBM chat from NodeSpy (web + terminal), chat queue |
-| 8 | User QWK/REP packet handling | [ ] | User-facing QWK packet download and REP packet upload for offline message reading |
+| 8 | User QWK/REP packet handling | [x] | User-facing QWK packet download and REP packet upload for offline message reading |
 | 9 | Wall / Oneliners | [x] | Public graffiti wall, terminal + web display, call flow integration |
 | 10 | Bulletin system | [x] | DB-backed bulletins with admin CRUD, terminal selection menu + art file display, web list/view pages |
 | 11 | System statistics | [x] | Terminal sysInfo command + call flow stage, web /stats page |
 | 12 | New file scan | [x] | File area subscriptions (T key toggle in selector), new file scan command |
 | 13 | Wall maintenance | [x] | Auto-purge (wall_max_messages config, default 60), admin delete at /admin/wall |
 | 14 | Voting / polls | [ ] | Classic BBS voting booths |
-| 15 | User-to-user telegrams | [ ] | Send one-line message to another online user |
-| 16 | Sysop chat for web users | [ ] | Break-in chat with users browsing the web UI (presence-based, not terminal) |
+| 15 | User-to-user telegrams | [x] | Send one-line message to another online user |
+| 16 | Sysop chat for web users | [x] | Break-in chat with users browsing the web UI (presence-based, not terminal) |
+| 17 | areas.bbs import | [x] | Parse areas.bbs from FTN hub, batch-create message areas + network mappings + peer subscriptions |
+| 18 | Web art integration | [ ] | ANSI art rendering on web pages (login splash, headers, randomised art pools) |
+| 19 | Top 10 lists | [ ] | Top posters, top downloaders, most active users (week/month). Web page + terminal command |
+| 20 | Birthday messages | [ ] | "Happy birthday" in call flow when users have birthdays today (birthdate column exists) |
 
 ---
 
@@ -218,5 +225,11 @@ Last updated: 2026-03-31
 | `CONFIG_SYSTEM_DESIGN.md` | [x] |
 | `EMSI_WAZOO_DESIGN.md` | [x] |
 | `NODESPY_DESIGN.md` | [x] |
+| `SYSOP_CHAT_DESIGN.md` | [x] |
+| `WALL_DESIGN.md` | [x] |
+| `MENU_LAYOUT_DESIGN.md` | [x] |
+| `QWK_USER_DESIGN.md` | [x] |
+| `WEB_CHAT_DESIGN.md` | [x] |
+| `WEB_CALLFLOW_DESIGN.md` | [x] |
 | `INSTALL.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |

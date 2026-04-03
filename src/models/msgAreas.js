@@ -152,6 +152,16 @@ async function newArea(formObj) {
 
 	var areaId = dbres.insertId;
 
+	// Set qwk_conf_number = area id (default; sysop can override later)
+	try {
+		await postgres.write(
+			"UPDATE message_areas SET qwk_conf_number = $1 WHERE id = $1",
+			[areaId]
+		);
+	} catch (e) {
+		alogger.writeAlog(3, "newArea: qwk_conf_number assignment failed for " + shorty + ": " + (e.message || e), "yellow");
+	}
+
 	// Area record written — now create backing tables
 	var tableResult = await createTablesForArea(shorty.toLowerCase());
 	if (!tableResult.status) {
@@ -375,6 +385,14 @@ async function updateArea(shortcode, formObj) {
 		}
 	}
 
+	// QWK conference number
+	if (formObj.qwk_conf_number !== undefined) {
+		var confNum = parseInt(formObj.qwk_conf_number);
+		if (!isNaN(confNum) && confNum > 0) {
+			updateObj.qwk_conf_number = confNum;
+		}
+	}
+
 	// Flag columns — always update if present in form (even if empty array)
 	if (formObj.read_perm_flags !== undefined) updateObj.read_perm_flags = normalizeFlags(formObj.read_perm_flags);
 	if (formObj.read_rest_flags !== undefined) updateObj.read_rest_flags = normalizeFlags(formObj.read_rest_flags);
@@ -530,17 +548,55 @@ async function recalculateAreaCounts() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// QWK conference number management
+// ---------------------------------------------------------------------------
+
+// Ensure the qwk_conf_number column exists and backfill any NULL values.
+// Called at startup from gateway/worker init.
+async function ensureQwkConfNumbers() {
+	// Add column if missing
+	await postgres.write(
+		"ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS qwk_conf_number INTEGER"
+	);
+
+	// Add unique constraint if missing
+	await postgres.write(
+		`DO $$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'message_areas_qwk_conf_number_key')
+			THEN ALTER TABLE message_areas ADD CONSTRAINT message_areas_qwk_conf_number_key UNIQUE (qwk_conf_number);
+			END IF;
+		END $$`
+	);
+
+	// Backfill: set qwk_conf_number = id for any areas that don't have one
+	await postgres.write(
+		"UPDATE message_areas SET qwk_conf_number = id WHERE qwk_conf_number IS NULL"
+	);
+}
+
+// Look up an area by its QWK conference number.
+async function getAreaByConfNumber(confNumber) {
+	var row = await postgres.queryOne(
+		"SELECT * FROM message_areas WHERE qwk_conf_number = $1",
+		[confNumber]
+	);
+	return row || null;
+}
+
 export {
 	newArea,
 	updateArea,
 	removeArea,
 	getAreaByShortcode,
 	getAreaByAreatag,
+	getAreaByConfNumber,
 	getAllAreas,
 	getListByGroupShortcode,
 	createMsgTables,
 	createTablesForArea,
 	GetShortcodeList,
 	updateAreaStats,
-	recalculateAreaCounts
+	recalculateAreaCounts,
+	ensureQwkConfNumbers
 };

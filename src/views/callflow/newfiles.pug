@@ -1,0 +1,20 @@
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-file-earmark-arrow-down.me-2
+    | New Files
+  .card-body
+    if items && items.length > 0
+      p.fg-cyan New files in #{items.length} area(s):
+      .table-responsive
+        table.table.table-sm.mb-0
+          thead
+            tr
+              th: span.fg-brightyellow Area
+              th.text-end: span.fg-brightyellow New
+          tbody
+            each item in items
+              tr
+                td: span.fg-brightcyan= item.name
+                td.text-end: span.fg-brightgreen= item.count
+    else
+      p.text-muted No new files.

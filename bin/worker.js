@@ -465,6 +465,10 @@ async function main() {
 	await userAreaSubs.ensureConstraintsAndIndexes();
 	await userFilePointers.ensureConstraintsAndIndexes();
 
+	// Ensure QWK conference numbers are populated on message areas
+	var msgAreasInit = await import("../src/models/msgAreas.js");
+	await msgAreasInit.ensureQwkConfNumbers();
+
 	// Ensure FTN nodelist table exists for import jobs and router lookups
 	var ftnNodelist = await import("../src/models/ftnNodelist.js");
 	await ftnNodelist.ensureTable();

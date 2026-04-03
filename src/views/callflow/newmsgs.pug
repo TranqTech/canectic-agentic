@@ -1,0 +1,22 @@
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-envelope-open.me-2
+    | New Messages
+  .card-body
+    if items && items.length > 0
+      p.fg-cyan You have new messages in #{items.length} area(s):
+      .table-responsive
+        table.table.table-sm.mb-0
+          thead
+            tr
+              th: span.fg-brightyellow Area
+              th: span.fg-brightyellow Group
+              th.text-end: span.fg-brightyellow New
+          tbody
+            each item in items
+              tr
+                td: span.fg-brightcyan= item.name
+                td: span.fg-cyan= item.group || ''
+                td.text-end: span.fg-brightgreen= item.unread
+    else
+      p.text-muted No new messages.

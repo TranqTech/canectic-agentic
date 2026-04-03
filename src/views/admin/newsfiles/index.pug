@@ -1,0 +1,200 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-newspaper.me-2
+          | News Files
+
+        button.btn.btn-success.mb-3(data-bs-toggle='modal' data-bs-target='#addModal')
+          i.bi.bi-plus-circle.me-1
+          | Add News File
+
+        if newsfiles && newsfiles.length > 0
+          table.table.table-hover#newsTable
+            thead
+              tr
+                th(style='width:30px')
+                th Title
+                th File Path
+                th Width
+                th Centre
+                th Active
+                th(style='width:120px') Actions
+            tbody#newsBody
+              each nf in newsfiles
+                tr(data-id=nf.id)
+                  td.grip(style='cursor:grab')
+                    i.bi.bi-grip-vertical
+                  td= nf.title
+                  td: code= nf.file_path
+                  td= nf.source_width || 80
+                  td
+                    if nf.center
+                      span.badge.bg-success Yes
+                    else
+                      span.badge.bg-secondary No
+                  td
+                    if nf.active
+                      span.badge.bg-success Active
+                    else
+                      span.badge.bg-danger Inactive
+                  td
+                    button.btn.btn-sm.btn-primary.me-1(
+                      data-bs-toggle='modal'
+                      data-bs-target='#editModal'
+                      data-id=nf.id
+                      data-title=nf.title
+                      data-filepath=nf.file_path
+                      data-description=nf.description || ''
+                      data-center=(nf.center ? 'true' : 'false')
+                      data-sourcewidth=nf.source_width || 80
+                      data-active=(nf.active ? 'true' : 'false')
+                    )
+                      i.bi.bi-pencil
+                    form(method='POST' action='/admin/newsfiles/delete/' + nf.id style='display:inline')
+                      button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this news file?")')
+                        i.bi.bi-trash
+
+          button.btn.btn-sm.btn-outline-primary.mt-2#saveOrder
+            i.bi.bi-sort-numeric-down.me-1
+            | Save Order
+        else
+          .text-center.py-5.text-muted
+            i.bi.bi-newspaper(style='font-size:3rem; color:#555')
+            h5.mt-3 No news files configured
+            p Add ANSI/ASCII art files from door games, scores, or BBS news.
+
+    //- Add Modal
+    .modal.fade#addModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add News File
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/newsfiles/new')
+            .modal-body
+              .mb-3
+                label.form-label Title
+                input.form-control(name='title' required)
+              .mb-3
+                label.form-label File Path
+                input.form-control(name='file_path' required placeholder='e.g. /path/to/lord/scores.ans or txtfiles/news/daily.ans')
+                .form-text Full or relative path to the ANSI/ASCII art file on disk.
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' placeholder='Optional description')
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Source Width
+                    input.form-control(type='number' name='source_width' value='80' min='40' max='255')
+                    .form-text Width the art was designed for (used for centering).
+                .col-6
+                  .mb-3.pt-4
+                    .form-check
+                      input.form-check-input(type='checkbox' name='center' id='addCenter')
+                      label.form-check-label(for='addCenter') Centre on wide terminals
+              .form-check.mb-3
+                input.form-check-input(type='checkbox' name='active' id='addActive' checked)
+                label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Modal
+    .modal.fade#editModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit News File
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Title
+                input.form-control(name='title' id='editTitle' required)
+              .mb-3
+                label.form-label File Path
+                input.form-control(name='file_path' id='editFilePath' required)
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='editDescription')
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Source Width
+                    input.form-control(type='number' name='source_width' id='editSourceWidth' min='40' max='255')
+                .col-6
+                  .mb-3.pt-4
+                    .form-check
+                      input.form-check-input(type='checkbox' name='center' id='editCenter')
+                      label.form-check-label(for='editCenter') Centre on wide terminals
+              .form-check.mb-3
+                input.form-check-input(type='checkbox' name='active' id='editActive')
+                label.form-check-label(for='editActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      // Populate edit modal
+      var editModal = document.getElementById('editModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(event) {
+          var btn = event.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editForm').action = '/admin/newsfiles/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('editTitle').value = btn.getAttribute('data-title') || '';
+          document.getElementById('editFilePath').value = btn.getAttribute('data-filepath') || '';
+          document.getElementById('editDescription').value = btn.getAttribute('data-description') || '';
+          document.getElementById('editSourceWidth').value = btn.getAttribute('data-sourcewidth') || '80';
+          document.getElementById('editCenter').checked = btn.getAttribute('data-center') === 'true';
+          document.getElementById('editActive').checked = btn.getAttribute('data-active') === 'true';
+        });
+      }
+
+      // Drag-to-reorder
+      var tbody = document.getElementById('newsBody');
+      if (tbody) {
+        var dragRow = null;
+        tbody.addEventListener('dragstart', function(e) {
+          dragRow = e.target.closest('tr');
+          if (dragRow) e.dataTransfer.effectAllowed = 'move';
+        });
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          var target = e.target.closest('tr');
+          if (target && target !== dragRow) {
+            var rect = target.getBoundingClientRect();
+            var mid = rect.top + rect.height / 2;
+            if (e.clientY < mid) {
+              tbody.insertBefore(dragRow, target);
+            } else {
+              tbody.insertBefore(dragRow, target.nextSibling);
+            }
+          }
+        });
+        // Make rows draggable via grip
+        tbody.querySelectorAll('tr').forEach(function(row) {
+          row.draggable = true;
+        });
+      }
+
+      // Save order
+      var saveBtn = document.getElementById('saveOrder');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+          var rows = document.querySelectorAll('#newsBody tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(r.getAttribute('data-id')); });
+          fetch('/admin/newsfiles/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function() { location.reload(); });
+        });
+      }

@@ -89,6 +89,8 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | System Info | No | System information panel (board info, user/call/file stats) |
 | Bulletins | No | Bulletin selection menu (rules, help, info -- managed in admin Content) |
 | New File Scan | No | Scan subscribed file areas for new files since last visit |
+| News Viewer | No | Display configured news/score files (ANSI/ASCII art) in sequence |
+| QWK Transfer | No | QWK offline mail — download QWK packet and upload REP replies |
 | New Scan (All) | No | Scan all areas for new messages |
 | New Scan (Group) | No | Scan current group for new messages |
 | Post Message | No | Compose a new message |

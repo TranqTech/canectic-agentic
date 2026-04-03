@@ -581,4 +581,4 @@ node src/tools/maintenance.js --regen-html --batch 50
 - **Tosser sanitization integration**: Wire `sanitizeMessageFields()` into all three tosser inbound paths
 - **Message body word-wrapping on post**: Enforce 80 columns before DB save for FTN/QWK compatibility
 - **Flat-mode reply thread UUID resolution**: Currently null for some messages — needs `getThreadByDbId()` lookup
-- **QWK packet integration**: User downloads use area scan pointer as starting point, same role as `msg_idx` on peer subscriptions
+- ~~**QWK packet integration**~~ — **Done**. `qwkUser.js` generates personal `.qwk` packets using `userMsgPointers` scan pointers and imports `.rep` replies via `echomail.startNewThread()`/`replyToThread()`. Conference numbers via `message_areas.qwk_conf_number` (defaults to area `id`). See `QWK_USER_DESIGN.md`.

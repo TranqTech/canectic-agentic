@@ -1,0 +1,21 @@
+if announcements && announcements.length > 0
+  each ann in announcements
+    .card.mb-3
+      .card-header.bg-darkblue.text-white
+        if ann.pinned
+          span.badge.bg-warning.me-2 Pinned
+        if ann._isNew
+          span.badge.bg-success.me-2 New
+        = ann.title
+      .card-body(style='background: #000;' + (themeTextColour ? ' color: ' + themeTextColour : ''))
+        if ann.body_html
+          != ann.body_html
+        else if ann.body_text
+          p= ann.body_text
+      .card-footer.text-muted
+        small
+          | Posted by #{ann.author_name || 'System'}
+          if ann.created_at
+            |  on #{new Date(ann.created_at).toLocaleDateString()}
+else
+  p.text-muted No new announcements.

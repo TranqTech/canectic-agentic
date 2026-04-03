@@ -1,0 +1,175 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-file-earmark-text.me-2
+          | Import areas.bbs
+
+        if preview && preview.error
+          .alert.alert-danger= preview.error
+
+        if result
+          if result.errors && result.errors.length > 0
+            .alert.alert-warning
+              h6 Errors:
+              ul.mb-0
+                each err in result.errors
+                  li= err
+          if result.created && result.created.length > 0
+            .alert.alert-success
+              h6 #{result.created.length} area(s) processed:
+              ul.mb-0
+                each item in result.created
+                  li
+                    strong= item.areatag
+                    |  (#{item.shortcode}) --
+                    span.ms-1= item.action
+          else if !result.errors || result.errors.length === 0
+            .alert.alert-info No new areas to create.
+
+        if preview && preview.items
+          //- Preview results with per-area controls
+          .card.mb-4
+            .card-header.bg-primary
+              h5.mb-0 Preview: #{preview.newCount} new, #{preview.skipCount} already mapped
+              small.text-light Group: #{preview.groupName} | Network: #{preview.networkName}
+            .card-body
+              form(method='POST' action='/admin/import/areasbbs/run')
+                input(type='hidden' name='group_shortcode' value=preview.groupShortcode)
+                input(type='hidden' name='network_id' value=preview.networkId)
+
+                .mb-3
+                  .form-check.form-check-inline
+                    button.btn.btn-sm.btn-outline-success.me-2(type='button' id='selectAll') Select All New
+                  .form-check.form-check-inline
+                    button.btn.btn-sm.btn-outline-secondary.me-2(type='button' id='selectNone') Deselect All
+                  .form-check.form-check-inline
+                    button.btn.btn-sm.btn-outline-info.me-2(type='button' id='toggleAllAllow') Toggle All Allow
+                  .form-check.form-check-inline
+                    button.btn.btn-sm.btn-outline-warning(type='button' id='toggleAllEnable') Toggle All Enable
+
+                .table-responsive
+                  table.table.table-sm.table-hover
+                    thead
+                      tr
+                        th(style='width:40px') Import
+                        th Areatag
+                        th Description
+                        th Action
+                        th(style='width:80px') Allow
+                        th(style='width:80px') Enable
+                        th(style='width:100px') Status
+                    tbody
+                      -var newIdx = 0
+                      each item in preview.items
+                        tr(class=item.exists ? 'text-muted' : '')
+                          td
+                            if item.willCreate
+                              input.form-check-input.area-check(type='checkbox' data-idx=newIdx checked)
+                            else
+                              | -
+                          td
+                            if item.willCreate
+                              input.area-tag(type='hidden' name='areatags' value=item.areatag data-idx=newIdx)
+                              input.area-desc(type='hidden' name='descriptions' value=item.description data-idx=newIdx)
+                            span= item.areatag
+                          td= item.description || '-'
+                          td
+                            if item.willCreate
+                              select.form-select.form-select-sm.action-select(name='action_' + newIdx)
+                                option(value='create' selected) Create New Area
+                                if preview.unmappedAreas && preview.unmappedAreas.length > 0
+                                  optgroup(label='Map Existing Area')
+                                    each ua in preview.unmappedAreas
+                                      option(value='map_' + ua.id)= ua.name + ' (' + ua.shortcode + ')'
+                            else
+                              | -
+                          td
+                            if item.willCreate
+                              input.form-check-input.allow-check(type='checkbox' name='allow_' + newIdx value='1' checked)
+                            else
+                              | -
+                          td
+                            if item.willCreate
+                              input.form-check-input.enable-check(type='checkbox' name='enable_' + newIdx value='1')
+                            else
+                              | -
+                          td
+                            if item.exists
+                              span.badge.bg-secondary Already mapped
+                            else
+                              span.badge.bg-success New
+                        if item.willCreate
+                          -newIdx++
+
+                .mt-3
+                  button.btn.btn-primary(type='submit' id='runImport')
+                    i.bi.bi-download.me-1
+                    | Import Selected Areas
+
+              script.
+                document.getElementById('selectAll').addEventListener('click', function() {
+                  document.querySelectorAll('.area-check').forEach(function(cb) { cb.checked = true; });
+                });
+                document.getElementById('selectNone').addEventListener('click', function() {
+                  document.querySelectorAll('.area-check').forEach(function(cb) { cb.checked = false; });
+                });
+                document.getElementById('toggleAllAllow').addEventListener('click', function() {
+                  var cbs = document.querySelectorAll('.allow-check');
+                  var allChecked = Array.from(cbs).every(function(cb) { return cb.checked; });
+                  cbs.forEach(function(cb) { cb.checked = !allChecked; });
+                });
+                document.getElementById('toggleAllEnable').addEventListener('click', function() {
+                  var cbs = document.querySelectorAll('.enable-check');
+                  var allChecked = Array.from(cbs).every(function(cb) { return cb.checked; });
+                  cbs.forEach(function(cb) { cb.checked = !allChecked; });
+                });
+                // Only submit areatags/descriptions for checked rows
+                document.getElementById('runImport').closest('form').addEventListener('submit', function(e) {
+                  document.querySelectorAll('.area-check').forEach(function(cb) {
+                    if (!cb.checked) {
+                      var idx = cb.getAttribute('data-idx');
+                      // Disable the hidden areatag/description inputs for this row
+                      document.querySelectorAll('.area-tag[data-idx="' + idx + '"], .area-desc[data-idx="' + idx + '"]').forEach(function(h) {
+                        h.disabled = true;
+                      });
+                      // Also disable the allow/enable checkboxes
+                      document.querySelectorAll('input[name="allow_' + idx + '"], input[name="enable_' + idx + '"]').forEach(function(h) {
+                        h.disabled = true;
+                      });
+                    }
+                  });
+                });
+
+        else
+          //- Upload form
+          .card
+            .card-header.bg-primary
+              h5.mb-0 Upload areas.bbs
+            .card-body
+              form(method='POST' action='/admin/import/areasbbs/preview' enctype='multipart/form-data')
+                .mb-3
+                  label.form-label(for='areasbbs_file') areas.bbs file:
+                  input.form-control(type='file' id='areasbbs_file' name='areasbbs_file' required accept='.bbs,.txt')
+                .row
+                  .col-md-6
+                    .mb-3
+                      label.form-label(for='group_shortcode') Target Message Group:
+                      select.form-select(id='group_shortcode' name='group_shortcode' required)
+                        option(value='') -- Select Group --
+                        each grp in groups
+                          option(value=grp.shortcode)= grp.name + ' (' + grp.shortcode + ')'
+                  .col-md-6
+                    .mb-3
+                      label.form-label(for='network_id') Network:
+                      select.form-select(id='network_id' name='network_id' required)
+                        option(value='') -- Select Network --
+                        each net in networks
+                          option(value=net.id)= net.name + ' (' + net.network_type + ')'
+                button.btn.btn-primary(type='submit')
+                  i.bi.bi-search.me-1
+                  | Preview

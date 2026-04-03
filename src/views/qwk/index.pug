@@ -1,0 +1,55 @@
+extends ../layouts/user
+
+block content
+  .container.mt-4
+    if !currentuser
+      .alert.alert-warning Please log in to access QWK mail transfer.
+    else
+      h3 QWK Mail Transfer
+      include ../partials/flash
+
+      .row.mt-3
+        .col-md-6
+          .card.mb-3
+            .card-header
+              h5.mb-0 Download QWK Packet
+            .card-body
+              p Download a packet of new messages for offline reading.
+              table.table.table-sm.mb-3
+                tbody
+                  tr
+                    td BBS ID
+                    td: strong= bbsId
+                  tr
+                    td Subscribed Areas
+                    td= subscribedCount
+                  tr
+                    td New Messages
+                    td
+                      if newMessageCount > 0
+                        span.badge.bg-success= newMessageCount
+                      else
+                        span.text-muted 0
+                  tr
+                    td Unread PMs
+                    td
+                      if unreadPMCount > 0
+                        span.badge.bg-info= unreadPMCount
+                      else
+                        span.text-muted 0
+              if newMessageCount > 0 || unreadPMCount > 0
+                a.btn.btn-primary(href='/qwk/download') Download QWK Packet
+              else
+                a.btn.btn-secondary.disabled(href='#') No New Messages
+
+        .col-md-6
+          .card.mb-3
+            .card-header
+              h5.mb-0 Upload REP Packet
+            .card-body
+              p Upload a reply packet from your QWK reader to post messages.
+              form(method='POST' action='/qwk/upload' enctype='multipart/form-data')
+                .mb-3
+                  label.form-label(for='repfile') Select .rep file:
+                  input.form-control(type='file' id='repfile' name='repfile' accept='.rep' required)
+                button.btn.btn-success(type='submit') Upload REP Packet

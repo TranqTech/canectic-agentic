@@ -184,6 +184,25 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'email_max_outbound_batch',  defaultValue: '50',             type: 'number',  category: 'email',       description: 'Maximum emails per outbound toss cycle' },
 	{ key: 'email_inbound_port',        defaultValue: '0',              type: 'number',  category: 'email',       description: 'Trusted inbound SMTP port for gateway injection (e.g. 1026, 0 = disabled, requires restart)', restart: true },
 	{ key: 'email_trusted_hosts',       defaultValue: '127.0.0.1',     type: 'string',  category: 'email',       description: 'Comma-separated IPs allowed to inject inbound email without auth' },
+
+	// -----------------------------------------------------------------------
+	// QWK (user offline mail)
+	// -----------------------------------------------------------------------
+	{ key: 'qwk_enabled',              defaultValue: 'true',           type: 'boolean', category: 'qwk',         description: 'Enable user QWK packet download and REP upload' },
+	{ key: 'qwk_bbsid',                defaultValue: '',               type: 'string',  category: 'qwk',         description: 'QWK BBS ID (max 8 chars, uppercase). Falls back to first 8 chars of boardname.' },
+	{ key: 'qwk_max_msgs_per_area',    defaultValue: '500',            type: 'number',  category: 'qwk',         description: 'Maximum messages per area in a user QWK packet' },
+
+	// -----------------------------------------------------------------------
+	// Chat (sysop-to-web-user and future user-to-user)
+	// -----------------------------------------------------------------------
+	{ key: 'web_chat_enabled',         defaultValue: 'true',           type: 'boolean', category: 'chat',        description: 'Enable sysop-to-web-user chat via presence WebSocket' },
+	{ key: 'web_chat_sound',           defaultValue: 'true',           type: 'boolean', category: 'chat',        description: 'Play notification sound on chat events (web UI)' },
+
+	// -----------------------------------------------------------------------
+	// Call Flow (web login experience)
+	// -----------------------------------------------------------------------
+	{ key: 'callflow_enabled',         defaultValue: 'true',           type: 'boolean', category: 'callflow',    description: 'Enable guided call flow on web login (announcements, callers, wall, newscan)' },
+	{ key: 'callflow_on_resume',       defaultValue: 'true',           type: 'boolean', category: 'callflow',    description: 'Prompt call flow when web session resumes after idle' },
 ];
 
 // ---------------------------------------------------------------------------
