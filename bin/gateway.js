@@ -133,6 +133,10 @@ async function prerunMaint(){
 	var newsFiles = await import("../src/models/newsFiles.js");
 	await newsFiles.ensureTable();
 
+	// Ensure PM attachments table and columns
+	var pmAttachments = await import("../src/models/pmAttachments.js");
+	await pmAttachments.ensureTable();
+
 	// Ensure seasonal art table, seed defaults, create directories, prime cache
 	var seasonalArt = await import("../src/models/seasonalArt.js");
 	await seasonalArt.ensureTable();

@@ -13,9 +13,10 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import { checkUserPass } from '../models/useraccounts.js';
 import {
-	renderRfc2822, renderEnvelope, formatDate2822, getMailboxMessages,
+	renderRfc2822, renderEnvelope, renderBodyStructure, formatDate2822, getMailboxMessages,
 	getFullMessage, getMailboxStatus, trashUid, trashUidToSource
 } from '../models/imapAdapter.js';
+import { getAttachments } from '../models/pmAttachments.js';
 import appConfig from '../config/appConfig.js';
 import { createEventPublisher, createEventSubscriber, EVENTS } from '../queues/events.js';
 
@@ -422,7 +423,8 @@ class ImapSession {
 				var fullRow = await getFullMessage(this.userId, table, row.id);
 				if (fullRow) {
 					fullRow._source = table;
-					var rfc2822 = renderRfc2822(fullRow, this.mailDomain);
+					var msgAttachments = fullRow.has_attachments ? await getAttachments(fullRow.uuid) : [];
+					var rfc2822 = renderRfc2822(fullRow, this.mailDomain, msgAttachments);
 					var headerEnd = rfc2822.indexOf('\r\n\r\n');
 					var headerSection = headerEnd >= 0 ? rfc2822.substring(0, headerEnd + 2) : rfc2822;
 					var bodySection = headerEnd >= 0 ? rfc2822.substring(headerEnd + 4) : '';
@@ -471,7 +473,18 @@ class ImapSession {
 			}
 
 			if (wantBodyStructure) {
-				parts.push('BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" 0 0)');
+				// Load full message + attachments for dynamic BODYSTRUCTURE
+				if (!fullRow) {
+					var bsTable = (this.selectedMailbox === 'Sent') ? 'sent' :
+						(row._source === 'sent') ? 'sent' : 'inbox';
+					fullRow = await getFullMessage(this.userId, bsTable, row.id);
+				}
+				if (fullRow) {
+					var bsAtts = fullRow.has_attachments ? await getAttachments(fullRow.uuid) : [];
+					parts.push('BODYSTRUCTURE ' + renderBodyStructure(fullRow, bsAtts));
+				} else {
+					parts.push('BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" 0 0)');
+				}
 			}
 
 			this._send('* ' + seqNum + ' FETCH (' + parts.join(' ') + ')');

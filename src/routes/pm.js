@@ -6,12 +6,23 @@ import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 
 //internals
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import multer from 'multer';
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as privateMessages from '../models/privateMessages.js';
+import * as pmAttachments from '../models/pmAttachments.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as flash from '../middleware/db/flash.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
+import * as postgres from '../middleware/db/postgres.js';
+
+var pmUpload = multer({
+	dest: path.join(os.tmpdir(), 'canectic-pm-uploads'),
+	limits: { fileSize: 10 * 1024 * 1024 } // 10MB default, actual limit checked in model
+});
 
 //setup
 router.use(cookieParser());
@@ -222,12 +233,42 @@ router.get('/inbox/:uuid', async (req, res) => {
 	// Determine if user can reply via this transport
 	var allowedTransports = privateMessages.getAllowedTransports(currentuser);
 
+	// Load attachments
+	var attachments = await pmAttachments.getAttachments(req.params.uuid);
+
 	res.render('pm/read', {
 		title: message.subject || 'Message',
 		currentuser: currentuser,
 		message: message,
+		attachments: attachments,
 		allowedTransports: allowedTransports
 	});
+});
+
+// GET /pm/attachment/:id — download an attachment
+router.get('/attachment/:id', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/users/login');
+
+	var att = await pmAttachments.getAttachmentById(parseInt(req.params.id));
+	if (!att) return res.status(404).send('Attachment not found');
+
+	// Verify the user owns the message this attachment belongs to
+	var userId = await resolveUserId(currentuser);
+	var ownsInbox = await postgres.queryOne(
+		'SELECT id FROM pm_inbox WHERE uuid = $1 AND user_id = $2',
+		[att.message_uuid, userId]
+	);
+	var ownsSent = await postgres.queryOne(
+		'SELECT id FROM pm_outbox WHERE uuid = $1 AND user_id = $2',
+		[att.message_uuid, userId]
+	);
+	if (!ownsInbox && !ownsSent) return res.status(403).send('Access denied');
+
+	// Check file exists
+	if (!fs.existsSync(att.storage_path)) return res.status(404).send('File not found');
+
+	res.download(att.storage_path, att.filename);
 });
 
 // GET /pm/sent/:uuid — view single sent message
@@ -256,7 +297,7 @@ router.get('/sent/:uuid', async (req, res) => {
 // -------------------------------------------------------
 
 // POST /pm/compose/local — send a local user-to-user message
-router.post('/compose/local', urlencodedParser, async (req, res) => {
+router.post('/compose/local', pmUpload.array('attachments', 5), async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 
@@ -321,7 +362,22 @@ router.post('/compose/local', urlencodedParser, async (req, res) => {
 	if (!result.status) {
 		alogger.writeAlog(3, "Local PM send failed: " + result.errormessages.join(', '), "redbright");
 		await flash.set(req, result.errormessages.map(function(e) { return { type: 'danger', text: e }; }));
+		// Clean up uploaded files on failure
+		if (req.files) req.files.forEach(function(f) { try { fs.unlinkSync(f.path); } catch(_) {} });
 		return res.redirect('/pm/inbox');
+	}
+
+	// Store attachments
+	if (req.files && req.files.length > 0 && result.outboxUuid) {
+		var attIds = await pmAttachments.storeUploadedFiles(result.outboxUuid, 'outbox', req.files);
+		if (attIds.length > 0) {
+			await postgres.write('UPDATE pm_outbox SET has_attachments = true WHERE uuid = $1', [result.outboxUuid]);
+			// For LOCAL delivery, copy attachment refs to inbox
+			if (result.deliveryResult && result.deliveryResult.uuid) {
+				await pmAttachments.copyAttachmentsToInbox(result.outboxUuid, result.deliveryResult.uuid);
+				await postgres.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.deliveryResult.uuid]);
+			}
+		}
 	}
 
 	await flash.setOne(req, 'success', 'Message sent to ' + resolution.username);
@@ -329,7 +385,7 @@ router.post('/compose/local', urlencodedParser, async (req, res) => {
 });
 
 // POST /pm/compose/network — send a network message (FTN, QWK, etc.)
-router.post('/compose/network', urlencodedParser, async (req, res) => {
+router.post('/compose/network', pmUpload.array('attachments', 5), async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 
@@ -426,7 +482,16 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 	if (!result.status) {
 		alogger.writeAlog(3, "Network PM send failed: " + result.errormessages.join(', '), "redbright");
 		await flash.set(req, result.errormessages.map(function(e) { return { type: 'danger', text: e }; }));
+		if (req.files) req.files.forEach(function(f) { try { fs.unlinkSync(f.path); } catch(_) {} });
 		return res.redirect('/pm/inbox');
+	}
+
+	// Store attachments
+	if (req.files && req.files.length > 0 && result.outboxUuid) {
+		var attIds = await pmAttachments.storeUploadedFiles(result.outboxUuid, 'outbox', req.files);
+		if (attIds.length > 0) {
+			await postgres.write('UPDATE pm_outbox SET has_attachments = true WHERE uuid = $1', [result.outboxUuid]);
+		}
 	}
 
 	await flash.setOne(req, 'success', transportType + ' message queued for ' + toUser + ' at ' + toAddress);
@@ -434,7 +499,7 @@ router.post('/compose/network', urlencodedParser, async (req, res) => {
 });
 
 // POST /pm/reply/:uuid — reply to an inbox message
-router.post('/reply/:uuid', urlencodedParser, async (req, res) => {
+router.post('/reply/:uuid', pmUpload.array('attachments', 5), async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 
@@ -524,7 +589,20 @@ router.post('/reply/:uuid', urlencodedParser, async (req, res) => {
 	if (!result.status) {
 		alogger.writeAlog(3, "PM reply failed: " + result.errormessages.join(', '), "redbright");
 		await flash.set(req, result.errormessages.map(function(e) { return { type: 'danger', text: e }; }));
+		if (req.files) req.files.forEach(function(f) { try { fs.unlinkSync(f.path); } catch(_) {} });
 		return res.redirect('/pm/inbox/' + req.params.uuid);
+	}
+
+	// Store attachments
+	if (req.files && req.files.length > 0 && result.outboxUuid) {
+		var attIds = await pmAttachments.storeUploadedFiles(result.outboxUuid, 'outbox', req.files);
+		if (attIds.length > 0) {
+			await postgres.write('UPDATE pm_outbox SET has_attachments = true WHERE uuid = $1', [result.outboxUuid]);
+			if (result.deliveryResult && result.deliveryResult.uuid) {
+				await pmAttachments.copyAttachmentsToInbox(result.outboxUuid, result.deliveryResult.uuid);
+				await postgres.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.deliveryResult.uuid]);
+			}
+		}
 	}
 
 	await flash.setOne(req, 'success', 'Reply sent to ' + original.from_user);

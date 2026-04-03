@@ -111,6 +111,7 @@ block content
               .modal-header.bg-dark.text-white
                 h3.modal-title#userViewTitle
                 .ms-auto.d-flex.gap-2
+                  button.btn.btn-sm.btn-outline-danger#userKillSessionsBtn(title='End all active sessions for this user') Kill Sessions
                   button.btn.btn-sm.btn-secondary#userResetPassBtn Reset Password
                   button.btn.btn-sm.btn-warning#userEditBtn Edit
                   button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
@@ -541,6 +542,20 @@ block content
 
           userViewModal.hide();
           userEditModal.show();
+        });
+
+        // Kill sessions button
+        document.getElementById('userKillSessionsBtn').addEventListener('click', function() {
+          if (!currentUUID) return;
+          var row = document.querySelector('.userrow[data-uuid="' + currentUUID + '"]');
+          if (!row) return;
+          var username = row.dataset.username;
+          if (!confirm('Kill all active sessions for ' + username + '?')) return;
+          fetch('/admin/users/' + currentUUID + '/kill-sessions', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              alert(data.message || 'Sessions killed');
+            });
         });
 
         // Reset password button — open reset modal

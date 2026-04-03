@@ -78,6 +78,19 @@ block content
                 else
                   .text-muted (empty message)
 
+            //- Attachments
+            if attachments && attachments.length > 0
+              .card-body.border-top.border-secondary.pt-2.pb-2
+                small.text-muted
+                  i.bi.bi-paperclip.me-1
+                  | Attachments (#{attachments.length})
+                .mt-1
+                  each att in attachments
+                    a.btn.btn-sm.btn-outline-info.me-1.mb-1(href='/pm/attachment/' + att.id title=att.filename)
+                      i.bi.bi-download.me-1
+                      = att.filename
+                      small.text-muted.ms-1 (#{Math.round(att.file_size / 1024)} KB)
+
             //- Actions footer
             .card-footer.bg-dark
               .d-flex.justify-content-between

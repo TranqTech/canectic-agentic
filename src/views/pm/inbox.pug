@@ -258,7 +258,7 @@ block content
                 i.bi.bi-reply
                 |  Reply
             .modal-body.bg-dark
-              form#replyForm(action='/pm/reply/' method='POST')
+              form#replyForm(action='/pm/reply/' method='POST' enctype='multipart/form-data')
                 .px-3
                   label.text-white(for='r_to') To:
                   input#r_to.form-control.bg-black.fg-green(
@@ -284,8 +284,12 @@ block content
                     style='width: 100%; font-size: 12px;'
                   )
                   br
+                  label.text-white Attachments:
+                  input.form-control.form-control-sm.bg-black(type='file' name='attachments' multiple tabindex='4')
+                  .form-text.text-muted Max 5 files, 10 MB each
+                  br
                   .text-end
-                    input.btn.btn-lg.btn-success(type='submit' value='Send Reply' tabindex='4')
+                    input.btn.btn-lg.btn-success(type='submit' value='Send Reply' tabindex='5')
 
     //- Compose Local Modal
     if currentuser && allowedTransports && allowedTransports.includes('LOCAL')
@@ -302,7 +306,7 @@ block content
                 i.bi.bi-pencil-square
                 |  Local Message
             .modal-body.bg-dark
-              form(action='/pm/compose/local' method='POST')
+              form(action='/pm/compose/local' method='POST' enctype='multipart/form-data')
                 .px-3
                   label.text-white(for='local_from') From:
                   select#local_from.form-control.bg-black.fg-cyan(name='from_user' tabindex='1')
@@ -327,8 +331,12 @@ block content
                     style='width: 100%; font-size: 12px;'
                   )
                   br
+                  label.text-white Attachments:
+                  input.form-control.form-control-sm.bg-black(type='file' name='attachments' multiple tabindex='5')
+                  .form-text.text-muted Max 5 files, 10 MB each
+                  br
                   .text-end
-                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='5')
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='6')
 
     //- Compose Network Modal
     if currentuser && allowedTransports && (allowedTransports.includes('FTN') || allowedTransports.includes('QWK') || allowedTransports.includes('EMAIL'))
@@ -345,7 +353,7 @@ block content
                 i.bi.bi-globe
                 |  Network Message
             .modal-body.bg-dark
-              form(action='/pm/compose/network' method='POST')
+              form(action='/pm/compose/network' method='POST' enctype='multipart/form-data')
                 .px-3
                   label.text-white(for='net_from') From:
                   select#net_from.form-control.bg-black.fg-cyan(name='from_user' tabindex='1')
@@ -385,8 +393,12 @@ block content
                     style='width: 100%; font-size: 12px;'
                   )
                   br
+                  label.text-white Attachments:
+                  input.form-control.form-control-sm.bg-black(type='file' name='attachments' multiple tabindex='7')
+                  .form-text.text-muted Max 5 files, 10 MB each
+                  br
                   .text-end
-                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='7')
+                    input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='8')
 
   script.
     document.addEventListener('DOMContentLoaded', function() {

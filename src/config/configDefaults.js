@@ -77,7 +77,8 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'custom_restriction_flags', defaultValue: '', type: 'string', category: 'security', description: 'Additional restriction flags (comma-separated). Added to the built-in set: Underage, Unverified, Banned, Email, Netmail, Private Messages.' },
 	{ key: 'adminsecurity',     defaultValue: '200',            type: 'number',  category: 'security',    description: 'Minimum security level for admin access' },
 	{ key: 'defaultsecurity',   defaultValue: '50',             type: 'number',  category: 'security',    description: 'Security level for new user accounts' },
-	{ key: 'session_ttl',       defaultValue: '60',             type: 'number',  category: 'security',    description: 'Web session expiry in minutes (default 60 = 1 hour)' },
+	{ key: 'session_ttl',       defaultValue: '720',            type: 'number',  category: 'security',    description: 'Web session expiry in minutes (default 720 = 12 hours)' },
+	{ key: 'remember_me_days',  defaultValue: '14',             type: 'number',  category: 'security',    description: 'Days to keep session alive when "Remember Me" is checked on login (default 14)' },
 	{ key: 'pwmin',             defaultValue: '12',             type: 'number',  category: 'security',    description: 'Minimum password length' },
 	{ key: 'minage',            defaultValue: '13',             type: 'number',  category: 'security',    description: 'Minimum registration age' },
 	{ key: 'verified_security', defaultValue: '60',             type: 'number',  category: 'security',    description: 'Security level granted on address verification (only applied if higher than current)' },
@@ -203,6 +204,13 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	{ key: 'callflow_enabled',         defaultValue: 'true',           type: 'boolean', category: 'callflow',    description: 'Enable guided call flow on web login (announcements, callers, wall, newscan)' },
 	{ key: 'callflow_on_resume',       defaultValue: 'true',           type: 'boolean', category: 'callflow',    description: 'Prompt call flow when web session resumes after idle' },
+
+	// -----------------------------------------------------------------------
+	// PM Attachments
+	// -----------------------------------------------------------------------
+	{ key: 'pm_attachment_dir',        defaultValue: 'files/pm_attachments', type: 'string',  category: 'paths',    description: 'Storage directory for PM file attachments' },
+	{ key: 'pm_max_attachment_size',   defaultValue: '10485760',             type: 'number',  category: 'security', description: 'Maximum PM attachment size in bytes (default 10MB)' },
+	{ key: 'pm_max_attachments',       defaultValue: '5',                    type: 'number',  category: 'security', description: 'Maximum number of attachments per PM' },
 ];
 
 // ---------------------------------------------------------------------------

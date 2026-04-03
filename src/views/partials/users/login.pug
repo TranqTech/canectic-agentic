@@ -3,6 +3,7 @@
 -var _errors     = loginErrors    || errors     || []
 -var _mainerror  = loginMainerror || mainerror  || null
 -var _isGuard    = _mode === 'guard'
+-var _remDays    = rememberDays || 30
 
 if ismobile
 	//- Mobile: no card, stacked fields
@@ -32,9 +33,12 @@ if ismobile
 			type="password"
 			id="lp_password"
 			name="password"
-			class="form-control mb-3"
+			class="form-control mb-2"
 			required
 		)
+		.form-check.mb-3
+			input.form-check-input(type='checkbox' name='remember_me' id='lp_remember_m')
+			label.form-check-label(for='lp_remember_m') Remember Me (#{_remDays} Days)
 		.d-flex.justify-content-between.align-items-center
 			a(href='/users/register') Register Now
 			input(
@@ -91,18 +95,22 @@ else
 										class="form-control"
 										required
 									)
+							.row
+								.col-1
+								.col-10
+									.form-check.mt-2
+										input.form-check-input(type='checkbox' name='remember_me' id='lp_remember_g')
+										label.form-check-label(for='lp_remember_g') Remember Me (#{_remDays} Days)
 							br
 							.row
 								.col-1
 								.col-5
-									br
 									|No account?
 									br
 									a(href='/users/register') Register Now
 									br
 									a(href='/users/forgot') Forgot Password?
 								.col-5
-									br
 									.text-end
 										input(
 											type="submit"
@@ -150,18 +158,22 @@ else
 										class="form-control"
 										required
 									)
+							.row
+								.col-1
+								.col-10
+									.form-check.mt-2
+										input.form-check-input(type='checkbox' name='remember_me' id='lp_remember_d')
+										label.form-check-label(for='lp_remember_d') Remember Me (#{_remDays} Days)
 							br
 							.row
 								.col-1
 								.col-5
-									br
 									|No account?
 									br
 									a(href='/users/register') Register Now
 									br
 									a(href='/users/forgot') Forgot Password?
 								.col-5
-									br
 									.text-end
 										input(
 											type="submit"

@@ -93,6 +93,25 @@ async function tossOutbound() {
 			mailOptions.html = pm.body_html;
 		}
 
+		// Include attachments if present
+		if (pm.has_attachments && pm.uuid) {
+			try {
+				var pmAtt = await import('../../models/pmAttachments.js');
+				var atts = await pmAtt.getAttachments(pm.uuid);
+				if (atts.length > 0) {
+					mailOptions.attachments = atts.map(function(att) {
+						return {
+							filename: att.filename,
+							path: att.storage_path,
+							contentType: att.mime_type || 'application/octet-stream'
+						};
+					});
+				}
+			} catch (attErr) {
+				alogger.writeAlog(3, '[EmailTosser] Attachment load error for PM ' + pm.id + ': ' + attErr.message, 'yellow');
+			}
+		}
+
 		try {
 			await transporter.sendMail(mailOptions);
 			await privateMessages.markSent(pm.id, 'EmailTosser');

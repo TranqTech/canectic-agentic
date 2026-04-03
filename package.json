@@ -3,6 +3,9 @@
   "type": "module",
   "version": "0.9.1-alpha.1",
   "description": "Canectic BBS — Modern Bulletin Board System",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node ./bin/gateway.js",
     "test": "mocha"

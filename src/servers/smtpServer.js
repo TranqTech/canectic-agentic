@@ -12,6 +12,7 @@ import * as net from 'net';
 import * as alogger from '../utils/alogger.js';
 import { checkUserPass, getUserRecord } from '../models/useraccounts.js';
 import { resolveRecipient, queueMessage, deliverMessage } from '../models/privateMessages.js';
+import { storeAttachments } from '../models/pmAttachments.js';
 import appConfig from '../config/appConfig.js';
 
 // ---------------------------------------------------------------------------
@@ -331,6 +332,22 @@ class SmtpSession {
 				alogger.writeAlog(3, 'SMTP delivery failed to ' + rcpt.address +
 					': ' + result.errormessages.join(', '), 'yellow');
 			} else {
+				// Store attachments on outbox message
+				if (parsed.attachments && parsed.attachments.length > 0 && result.outboxUuid) {
+					var attIds = await storeAttachments(result.outboxUuid, 'outbox', parsed.attachments);
+					if (attIds.length > 0) {
+						try {
+							var pg = await import('../middleware/db/postgres.js');
+							await pg.write('UPDATE pm_outbox SET has_attachments = true WHERE uuid = $1', [result.outboxUuid]);
+							// For LOCAL delivery, copy attachments to inbox
+							if (result.deliveryResult && result.deliveryResult.uuid) {
+								var pmAtt = await import('../models/pmAttachments.js');
+								await pmAtt.copyAttachmentsToInbox(result.outboxUuid, result.deliveryResult.uuid);
+								await pg.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.deliveryResult.uuid]);
+							}
+						} catch (_) {}
+					}
+				}
 				alogger.writeAlog(4, 'SMTP delivered to ' + rcpt.address +
 					' from ' + this.username, 'green');
 			}
@@ -370,8 +387,21 @@ class SmtpSession {
 				alogger.writeAlog(3, 'SMTP inbound delivery failed to ' + rcpt.address +
 					': ' + (result.errormessages || []).join(', '), 'yellow');
 			} else {
+				// Store attachments if present
+				if (parsed.attachments && parsed.attachments.length > 0 && result.uuid) {
+					var attIds = await storeAttachments(result.uuid, 'inbox', parsed.attachments);
+					if (attIds.length > 0) {
+						// Mark message as having attachments
+						try {
+							var pg = await import('../middleware/db/postgres.js');
+							await pg.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.uuid]);
+						} catch (_) {}
+					}
+				}
 				alogger.writeAlog(3, 'SMTP inbound delivered to ' + rcpt.address +
-					' from ' + senderAddress, 'green');
+					' from ' + senderAddress +
+					(parsed.attachments.length > 0 ? ' (' + parsed.attachments.length + ' attachment(s))' : ''),
+					'green');
 			}
 		}
 	}
@@ -542,7 +572,7 @@ class SmtpSession {
 	// --- Minimal RFC 2822 parser ---
 
 	_parseMessage(raw) {
-		var result = { subject: '', bodyPlain: '', bodyHtml: '', headers: {} };
+		var result = { subject: '', bodyPlain: '', bodyHtml: '', headers: {}, attachments: [] };
 
 		// Split headers from body at first blank line
 		var blankIdx = raw.indexOf('\r\n\r\n');
@@ -574,25 +604,7 @@ class SmtpSession {
 		// Extract body — check for MIME multipart
 		var contentType = result.headers['content-type'] || '';
 		if (contentType.includes('multipart/')) {
-			var boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i);
-			if (boundaryMatch) {
-				var boundary = boundaryMatch[1];
-				var parts = bodySection.split('--' + boundary);
-				for (var part of parts) {
-					if (part.startsWith('--')) continue; // End marker
-					var partBlank = part.indexOf('\r\n\r\n');
-					if (partBlank === -1) partBlank = part.indexOf('\n\n');
-					if (partBlank >= 0) {
-						var partHeaders = part.substring(0, partBlank).toLowerCase();
-						var partBody = part.substring(partBlank).replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, '');
-						if (partHeaders.includes('text/plain')) {
-							result.bodyPlain = partBody;
-						} else if (partHeaders.includes('text/html')) {
-							result.bodyHtml = partBody;
-						}
-					}
-				}
-			}
+			this._parseMultipart(bodySection, contentType, result);
 		} else {
 			// Simple body
 			if (contentType.includes('text/html')) {
@@ -608,6 +620,107 @@ class SmtpSession {
 		}
 
 		return result;
+	}
+
+	_parseMultipart(body, contentType, result) {
+		var boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/i);
+		if (!boundaryMatch) return;
+
+		var boundary = boundaryMatch[1];
+		var parts = body.split('--' + boundary);
+
+		for (var part of parts) {
+			if (part.startsWith('--') || !part.trim()) continue;
+
+			var partBlank = part.indexOf('\r\n\r\n');
+			if (partBlank === -1) partBlank = part.indexOf('\n\n');
+			if (partBlank < 0) continue;
+
+			var partHeaderStr = part.substring(0, partBlank);
+			var partBody = part.substring(partBlank).replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, '');
+
+			// Parse part headers (unfold continuations)
+			var partHeaders = {};
+			var unfolded = partHeaderStr.replace(/\r\n\s+/g, ' ').replace(/\n\s+/g, ' ');
+			var phLines = unfolded.split(/\r?\n/);
+			for (var phl of phLines) {
+				var ci = phl.indexOf(':');
+				if (ci > 0) {
+					partHeaders[phl.substring(0, ci).trim().toLowerCase()] = phl.substring(ci + 1).trim();
+				}
+			}
+
+			var partCt = (partHeaders['content-type'] || '').toLowerCase();
+			var partDisp = (partHeaders['content-disposition'] || '').toLowerCase();
+			var partEncoding = (partHeaders['content-transfer-encoding'] || '').toLowerCase().trim();
+
+			// Recurse into nested multipart (e.g. multipart/alternative inside multipart/mixed)
+			if (partCt.includes('multipart/')) {
+				this._parseMultipart(partBody, partHeaders['content-type'] || partCt, result);
+				continue;
+			}
+
+			// Text parts
+			if (partCt.includes('text/plain') && !partDisp.includes('attachment')) {
+				result.bodyPlain = this._decodePart(partBody, partEncoding);
+				continue;
+			}
+			if (partCt.includes('text/html') && !partDisp.includes('attachment')) {
+				result.bodyHtml = this._decodePart(partBody, partEncoding);
+				continue;
+			}
+
+			// Attachment part (anything else, or anything with Content-Disposition: attachment)
+			var filename = this._extractFilename(partHeaders['content-disposition'] || '', partHeaders['content-type'] || '');
+			if (!filename) filename = 'attachment';
+
+			var mimeType = partCt.split(';')[0].trim() || 'application/octet-stream';
+
+			var data;
+			if (partEncoding === 'base64') {
+				data = Buffer.from(partBody.replace(/\s/g, ''), 'base64');
+			} else if (partEncoding === 'quoted-printable') {
+				data = Buffer.from(this._decodeQP(partBody));
+			} else {
+				data = Buffer.from(partBody, 'binary');
+			}
+
+			result.attachments.push({
+				filename: filename,
+				mimeType: mimeType,
+				data: data
+			});
+		}
+	}
+
+	_decodePart(body, encoding) {
+		if (encoding === 'base64') {
+			return Buffer.from(body.replace(/\s/g, ''), 'base64').toString('utf8');
+		}
+		if (encoding === 'quoted-printable') {
+			return this._decodeQP(body);
+		}
+		return body;
+	}
+
+	_decodeQP(str) {
+		return str
+			.replace(/=\r?\n/g, '') // soft line breaks
+			.replace(/=([0-9A-Fa-f]{2})/g, function(_, hex) {
+				return String.fromCharCode(parseInt(hex, 16));
+			});
+	}
+
+	_extractFilename(disposition, contentType) {
+		// Try Content-Disposition: attachment; filename="file.pdf"
+		var match = disposition.match(/filename\*?="?([^";\r\n]+)"?/i);
+		if (match) return match[1].trim();
+
+		// Try Content-Type: application/pdf; name="file.pdf"
+		match = contentType.match(/name="?([^";\r\n]+)"?/i);
+		if (match) return match[1].trim();
+
+		return null;
 	}
 }
 

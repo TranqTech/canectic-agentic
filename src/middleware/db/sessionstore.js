@@ -9,9 +9,11 @@ const SESSION_INDEX_PREFIX = "session_index:";
 
 async function sessionStore(sessionId, data, ttl) {
 	var sessionKey = SESSION_PREFIX + sessionId;
+	var sessionTtl = ttl || appConfig.getNumber('session_ttl', 2880) * 60;
+	data._session_ttl = String(sessionTtl);
 	var ok = await hSet(sessionKey, data);
 	if (ok) {
-		await expire(sessionKey, ttl || appConfig.getNumber('session_ttl', 60) * 60);
+		await expire(sessionKey, sessionTtl);
 		// Index this session by username for reverse lookup
 		if (data.username) {
 			await _addSessionIndex(data.username, sessionId);
@@ -56,7 +58,14 @@ async function sessionExists(sessionId) {
 }
 
 async function sessionRenew(sessionId, ttl) {
-	return await expire(SESSION_PREFIX + sessionId, ttl || appConfig.getNumber('session_ttl', 60) * 60);
+	if (!ttl) {
+		// Read the stored TTL from the session itself (set at login)
+		var stored = await hGetAll(SESSION_PREFIX + sessionId);
+		if (stored && stored._session_ttl) {
+			ttl = parseInt(stored._session_ttl);
+		}
+	}
+	return await expire(SESSION_PREFIX + sessionId, ttl || appConfig.getNumber('session_ttl', 2880) * 60);
 }
 
 async function sessionList() {
@@ -133,6 +142,29 @@ async function sessionUpdate(sessionid, fields) {
 	return await hSet(SESSION_PREFIX + sessionid, fields);
 }
 
+// Destroy all sessions for a user except optionally the current one.
+async function destroyAllForUser(username, exceptSessionId) {
+	var sessionIds = await _getSessionsByUsername(username);
+	var destroyed = 0;
+	for (var sid of sessionIds) {
+		if (exceptSessionId && sid === exceptSessionId) continue;
+		await del(SESSION_PREFIX + sid);
+		destroyed++;
+	}
+	// Rebuild the index with only the kept session
+	if (exceptSessionId) {
+		var rc = await getClient();
+		var indexKey = SESSION_INDEX_PREFIX + username.toLowerCase();
+		await rc.del(indexKey);
+		await rc.sAdd(indexKey, exceptSessionId);
+	} else {
+		var rc = await getClient();
+		await rc.del(SESSION_INDEX_PREFIX + username.toLowerCase());
+	}
+	alogger.writeAlog(5, "Destroyed " + destroyed + " session(s) for " + username + (exceptSessionId ? " (kept current)" : ""), "cyan");
+	return destroyed;
+}
+
 export {
 	sessionStore,
 	sessionGet,
@@ -141,5 +173,6 @@ export {
 	sessionRenew,
 	sessionList,
 	sessionUpdate,
-	sessionUpdateUser
+	sessionUpdateUser,
+	destroyAllForUser
 };

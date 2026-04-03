@@ -6,6 +6,7 @@
 // - Envelope generation for FETCH responses
 // - Mailbox queries for SELECT/STATUS
 
+import * as fs from 'fs';
 import * as postgres from '../middleware/db/postgres.js';
 
 // --- RFC 2822 rendering ---
@@ -85,7 +86,7 @@ function networkDisplayName(username, networkAddress, transportType) {
 	return name + ' (' + networkAddress + ')';
 }
 
-function renderRfc2822(pmRow, mailDomain) {
+function renderRfc2822(pmRow, mailDomain, attachments) {
 	var fromAddr = networkEmailAddress(pmRow.from_user, pmRow.from_address, pmRow.transport_type, mailDomain);
 	var toAddr = networkEmailAddress(pmRow.to_user, pmRow.to_address, pmRow.transport_type, mailDomain);
 	var fromName = networkDisplayName(pmRow.from_user, pmRow.from_address, pmRow.transport_type);
@@ -100,6 +101,7 @@ function renderRfc2822(pmRow, mailDomain) {
 
 	var plainBody = pmRow.utf8 || pmRow.body_text || '';
 	var htmlBody = pmRow.body_html || '';
+	var hasAttachments = attachments && attachments.length > 0;
 
 	var headers = [];
 	headers.push('From: ' + from);
@@ -117,7 +119,51 @@ function renderRfc2822(pmRow, mailDomain) {
 	}
 
 	var body;
-	if (htmlBody && plainBody) {
+
+	if (hasAttachments) {
+		// multipart/mixed: text content + attachments
+		var mixedBoundary = 'canectic-mixed-' + (pmRow.id || Date.now());
+		headers.push('Content-Type: multipart/mixed; boundary="' + mixedBoundary + '"');
+
+		var parts = [];
+
+		// Text part (multipart/alternative if we have both plain + html)
+		if (htmlBody && plainBody) {
+			var altBoundary = 'canectic-alt-' + (pmRow.id || Date.now());
+			parts.push('--' + mixedBoundary + '\r\n' +
+				'Content-Type: multipart/alternative; boundary="' + altBoundary + '"\r\n\r\n' +
+				'--' + altBoundary + '\r\n' +
+				'Content-Type: text/plain; charset=utf-8\r\n' +
+				'Content-Transfer-Encoding: 8bit\r\n\r\n' +
+				plainBody + '\r\n' +
+				'--' + altBoundary + '\r\n' +
+				'Content-Type: text/html; charset=utf-8\r\n' +
+				'Content-Transfer-Encoding: 8bit\r\n\r\n' +
+				htmlBody + '\r\n' +
+				'--' + altBoundary + '--');
+		} else {
+			parts.push('--' + mixedBoundary + '\r\n' +
+				'Content-Type: text/plain; charset=utf-8\r\n' +
+				'Content-Transfer-Encoding: 8bit\r\n\r\n' +
+				plainBody);
+		}
+
+		// Attachment parts
+		for (var att of attachments) {
+			var attData = '';
+			if (fs && att.storage_path) {
+				try { attData = fs.readFileSync(att.storage_path).toString('base64'); } catch (_) { continue; }
+			}
+			var safeFilename = (att.filename || 'attachment').replace(/"/g, '\\"');
+			parts.push('--' + mixedBoundary + '\r\n' +
+				'Content-Type: ' + (att.mime_type || 'application/octet-stream') + '; name="' + safeFilename + '"\r\n' +
+				'Content-Disposition: attachment; filename="' + safeFilename + '"\r\n' +
+				'Content-Transfer-Encoding: base64\r\n\r\n' +
+				_wrapBase64(attData));
+		}
+
+		body = parts.join('\r\n') + '\r\n--' + mixedBoundary + '--\r\n';
+	} else if (htmlBody && plainBody) {
 		var boundary = 'canectic-pm-' + (pmRow.id || Date.now());
 		headers.push('Content-Type: multipart/alternative; boundary="' + boundary + '"');
 		body = '--' + boundary + '\r\n' +
@@ -136,6 +182,15 @@ function renderRfc2822(pmRow, mailDomain) {
 	}
 
 	return headers.join('\r\n') + '\r\n\r\n' + body;
+}
+
+// Wrap base64 string at 76 characters per line (RFC 2045)
+function _wrapBase64(str) {
+	var lines = [];
+	for (var i = 0; i < str.length; i += 76) {
+		lines.push(str.substring(i, i + 76));
+	}
+	return lines.join('\r\n');
 }
 
 // --- Envelope generation (for FETCH ENVELOPE) ---
@@ -249,9 +304,55 @@ function trashUidToSource(uid) {
 	return (uid % 2 === 1) ? { table: 'sent', id: (uid - 1) / 2 } : { table: 'inbox', id: uid / 2 };
 }
 
+// Build IMAP BODYSTRUCTURE response for a message.
+// Returns the parenthesised BODYSTRUCTURE string.
+function renderBodyStructure(pmRow, attachments) {
+	var plainBody = pmRow.utf8 || pmRow.body_text || '';
+	var htmlBody = pmRow.body_html || '';
+	var hasAttachments = attachments && attachments.length > 0;
+
+	var plainSize = Buffer.byteLength(plainBody, 'utf8');
+	var plainLines = plainBody.split('\n').length;
+
+	if (hasAttachments) {
+		// multipart/mixed
+		var parts = [];
+
+		if (htmlBody && plainBody) {
+			var htmlSize = Buffer.byteLength(htmlBody, 'utf8');
+			var htmlLines = htmlBody.split('\n').length;
+			// multipart/alternative with text + html
+			parts.push('(("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" ' + plainSize + ' ' + plainLines + ')' +
+				'("TEXT" "HTML" ("CHARSET" "utf-8") NIL NIL "8BIT" ' + htmlSize + ' ' + htmlLines + ') "ALTERNATIVE")');
+		} else {
+			parts.push('("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" ' + plainSize + ' ' + plainLines + ')');
+		}
+
+		for (var att of attachments) {
+			var mimeType = (att.mime_type || 'application/octet-stream').split('/');
+			var major = (mimeType[0] || 'APPLICATION').toUpperCase();
+			var minor = (mimeType[1] || 'OCTET-STREAM').toUpperCase();
+			var safeName = (att.filename || 'attachment').replace(/"/g, '\\"');
+			parts.push('("' + major + '" "' + minor + '" ("NAME" "' + safeName + '") NIL NIL "BASE64" ' + (att.file_size || 0) + ')');
+		}
+
+		return '(' + parts.join('') + ' "MIXED")';
+	}
+
+	if (htmlBody && plainBody) {
+		var htmlSize = Buffer.byteLength(htmlBody, 'utf8');
+		var htmlLines = htmlBody.split('\n').length;
+		return '(("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" ' + plainSize + ' ' + plainLines + ')' +
+			'("TEXT" "HTML" ("CHARSET" "utf-8") NIL NIL "8BIT" ' + htmlSize + ' ' + htmlLines + ') "ALTERNATIVE")';
+	}
+
+	return '("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" ' + plainSize + ' ' + plainLines + ')';
+}
+
 export {
 	renderRfc2822,
 	renderEnvelope,
+	renderBodyStructure,
 	formatDate2822,
 	encodeAddress,
 	getMailboxMessages,

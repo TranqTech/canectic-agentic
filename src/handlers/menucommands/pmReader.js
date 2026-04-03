@@ -333,6 +333,11 @@ class pmReader extends BaseSubModule {
 				}
 			}
 		}
+		// Attachment indicator for fullscreen view
+		if (msg.has_attachments) {
+			this._bodyLines.push({ text: '', type: 'normal', colorPrefix: '' });
+			this._bodyLines.push({ text: '[Attachments available -- use web or IMAP to download]', type: 'normal', colorPrefix: '\x1b[1;36m' });
+		}
 		this._bodyScroll = 0;
 	}
 
@@ -1215,6 +1220,13 @@ class pmReader extends BaseSubModule {
 		var lines = bodyText.split("\n");
 		for (var i = 0; i < lines.length; i++) {
 			this.call.cmds.senddata("  " + lines[i] + "\r\n");
+		}
+		// Attachment indicator
+		if (msg.has_attachments) {
+			this.call.cmds.senddata("\r\n");
+			this.call.cmds.setfgcolor(14);
+			this.call.cmds.senddata("  [Attachments available -- use web or IMAP to download]\r\n");
+			this.call.cmds.resetcolors();
 		}
 		this.call.cmds.senddata("\r\n  [R] Reply  [D] Delete  [Q] Back to list\r\n  > ");
 	}

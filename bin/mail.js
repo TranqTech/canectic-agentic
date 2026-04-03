@@ -98,6 +98,10 @@ async function main() {
 		process.exit(0);
 	}
 
+	// Ensure PM attachments schema
+	var pmAttachments = await import("../src/models/pmAttachments.js");
+	await pmAttachments.ensureTable();
+
 	var started = 0;
 
 	// IMAP server

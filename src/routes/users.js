@@ -28,10 +28,10 @@ router.use(function(req, res, next) {
 });
 
 // Helper: set session cookie
-function setSessionCookie(res, sessionid) {
+function setSessionCookie(res, sessionid, maxAge) {
 	res.cookie('sessionid', sessionid, {
 		httpOnly: true,
-		maxAge:   cookieMaxAge,
+		maxAge:   maxAge || cookieMaxAge,
 		domain:   appConfig.get('sitetld') || undefined,
 		sameSite: 'lax'
 	});
@@ -65,7 +65,8 @@ router.get('/login', async (req, res) => {
 		title:    'Login',
 		redirect: redirect,
 		errors:   null,
-		successMessage: successMsg
+		successMessage: successMsg,
+		rememberDays: appConfig.getNumber('remember_me_days', 30)
 	});
 });
 
@@ -91,7 +92,8 @@ router.post('/login', urlencodedParser, async (req, res) => {
 		return res.render('users/login', {
 			title:    'Login',
 			redirect: redirectTo,
-			errors:   messages
+			errors:   messages,
+			rememberDays: appConfig.getNumber('remember_me_days', 30)
 		});
 	};
 
@@ -111,19 +113,32 @@ router.post('/login', urlencodedParser, async (req, res) => {
 
 	var sessionid   = uuidv4();
 	var sessionData = userAccounts.buildSessionData(userobj);
-	var ok = await sessionStore.sessionStore(sessionid, sessionData);
+	var rememberMe  = req.body.remember_me === 'on' || req.body.remember_me === 'true';
+	var sessionTtl  = rememberMe
+		? appConfig.getNumber('remember_me_days', 30) * 86400
+		: appConfig.getNumber('session_ttl', 2880) * 60;
+
+	var ok = await sessionStore.sessionStore(sessionid, sessionData, sessionTtl);
 
 	if (!ok) {
 		alogger.writeAlog(3, 'Session creation failed for: ' + username, 'redbright');
 		return fail(['Login failed — please try again']);
 	}
 
-	setSessionCookie(res, sessionid);
+	// Set cookie maxAge to match session TTL so the browser keeps it
+	setSessionCookie(res, sessionid, rememberMe ? sessionTtl * 1000 : undefined);
 
 	// Log the call and update user login stats (same as terminal login)
 	var clientIp = req.ip || req.connection.remoteAddress || '';
 	userAccounts.updateUserCalls(userobj);
 	callers.logCall(userobj, 'Web', clientIp, userobj.location || '');
+
+	// Set web activity timestamp so webActivity middleware doesn't double-log
+	try {
+		var redis = await import('../middleware/db/redis.js');
+		var rc = await redis.getClient();
+		await rc.set('web_activity:' + sessionid, String(Date.now()), { EX: appConfig.getNumber('session_ttl', 60) * 60 });
+	} catch (_) {}
 
 	alogger.writeAlog(5, 'Web login: ' + username, 'greenbright');
 
@@ -620,6 +635,26 @@ router.post('/profile/password', urlencodedParser, async (req, res) => {
 	}
 
 	return res.redirect('/users/profile?message=' + encodeURIComponent('Password changed successfully'));
+});
+
+/* -----------------------------------------------
+   POST /users/profile/logout-all
+   Destroys all sessions except the current one.
+----------------------------------------------- */
+router.post('/profile/logout-all', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session) return res.redirect('/users/login');
+
+	var password = req.body.password || '';
+	var authResult = await userAccounts.checkUserPass(session.username, password);
+	if (!authResult.isvalid) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('Incorrect password'));
+	}
+
+	var count = await sessionStore.destroyAllForUser(session.username, sessionid);
+	return res.redirect('/users/profile?message=' + encodeURIComponent('Logged out ' + count + ' other session(s)'));
 });
 
 /* -----------------------------------------------

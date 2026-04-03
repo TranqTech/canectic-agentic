@@ -306,6 +306,7 @@ async function deliverMessage(messageObj) {
   if (result.status) {
     retObj.status = true;
     retObj.insertId = result.insertId;
+    retObj.uuid = insertObj.uuid;
   } else {
     retObj.errormessages = result.errormessages;
     alogger.writeAlog(2, "PM delivery failed: " + result.errormessages.join(', '), "redbright");
@@ -467,7 +468,28 @@ async function restoreSentMessage(userId, uuid) {
 // Maintenance: hard-delete messages older than retention period from both tables
 async function purgeDeleted(retentionDays) {
   var days = retentionDays || appConfig.getNumber('pm_trash_retention_days', 30);
-  var cutoff = "$1::interval";
+
+  // Get UUIDs of messages to purge (for attachment cleanup)
+  var inboxUuids = await postgres.query(
+    "SELECT uuid FROM pm_inbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval",
+    [days.toString()]
+  );
+  var outboxUuids = await postgres.query(
+    "SELECT uuid FROM pm_outbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval",
+    [days.toString()]
+  );
+
+  // Clean up attachments before deleting messages
+  var pmAtt = null;
+  try { pmAtt = await import('./pmAttachments.js'); } catch (_) {}
+  if (pmAtt) {
+    for (var row of (inboxUuids || [])) {
+      await pmAtt.deleteAttachments(row.uuid);
+    }
+    for (var row of (outboxUuids || [])) {
+      await pmAtt.deleteAttachments(row.uuid);
+    }
+  }
 
   var inboxResult = await postgres.query(
     "DELETE FROM pm_inbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval RETURNING id",
@@ -568,6 +590,7 @@ async function queueMessage(messageObj, userSession) {
   }
 
   retObj.outboxId = outboxResult.insertId;
+  retObj.outboxUuid = outboxUuid;
 
   // For non-LOCAL transports, signal the worker to toss outbound.
   // This triggers the next toss cycle immediately rather than waiting

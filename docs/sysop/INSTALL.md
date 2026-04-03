@@ -27,7 +27,7 @@ sudo apt install dosemu2
 
 ### Node.js
 
-Node.js 18 or later is required. The project uses ES modules and the `--experimental-vm-modules` flag for Synchronet JS door shims.
+Node.js 18 or later is required (Node 20+ recommended). The project uses ES modules, Express 5, and the `--experimental-vm-modules` flag for Synchronet JS door shims.
 
 ```bash
 # Using nvm (recommended)
