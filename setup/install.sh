@@ -201,6 +201,16 @@ do_install() {
     # Create logs subdirectory
     mkdir -p "$TARGET_DIR/logs/production"
 
+    # Create standard art directories (terminal formats + web art)
+    local ART_FORMATS=(ans asc utf8 sixel rip webart)
+    local ART_TYPES=(screens headers logon login logoff goodbye register welcome misc random)
+    for fmt in "${ART_FORMATS[@]}"; do
+        for atype in "${ART_TYPES[@]}"; do
+            mkdir -p "$TARGET_DIR/txtfiles/$fmt/$atype"
+        done
+    done
+    info "Created art directory structure in txtfiles/"
+
     # Copy .env.example as .env if no .env exists
     if [[ ! -f "$TARGET_DIR/.env" ]]; then
         if [[ -f "$SOURCE_DIR/examples/env.example" ]]; then

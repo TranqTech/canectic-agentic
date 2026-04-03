@@ -2,6 +2,19 @@
 
 ## Pending Release (since v0.9.1-alpha.1)
 
+### Web Art and Seasonal Art
+- Web art system: images served from `txtfiles/webart/{arttype}/` (PNG, JPG, SVG, GIF, WebP)
+- Random image selection per page load for call flow welcome splash
+- Seasonal/holiday art overrides: admin-configurable date ranges at Content > Seasonal Art
+- When today's date matches an active season, art from `{arttype}/{season}/` is used before default pool
+- Works for both terminal (ANSI/ASCII) and web (image) art
+- Seeded defaults: Christmas (Dec 15 - Jan 2), Halloween (Oct 25-31), New Year (Jan 1-3)
+- Auto-creates directories across all art formats when a new season is added
+- Prompts whether to delete directories when a season is removed
+- "Welcome" art type added to terminal (drawrandomscreen, drawscreen, menu display file types)
+- Call flow welcome stage shows random web art + BBS name + greeting before data stages
+- Install script creates all standard art directories on fresh install
+
 ### Menu Management
 - Duplicate menu: copies all settings, layout, colours, and entries to a new menu identifier
 - Export to JSON: download a menu and all entries as a portable `.json` file (DB IDs stripped)

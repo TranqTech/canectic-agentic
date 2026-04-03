@@ -133,6 +133,12 @@ async function prerunMaint(){
 	var newsFiles = await import("../src/models/newsFiles.js");
 	await newsFiles.ensureTable();
 
+	// Ensure seasonal art table, seed defaults, create directories, prime cache
+	var seasonalArt = await import("../src/models/seasonalArt.js");
+	await seasonalArt.ensureTable();
+	seasonalArt.ensureArtDirectories();
+	await seasonalArt.refreshSeasonCache();
+
 	// Ensure call flow column exists on users table
 	try {
 		await pgpool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_callflow_at TIMESTAMP");

@@ -2,6 +2,7 @@
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import appConfig from "../config/appConfig.js";
+import { getCurrentSeasonSubdirSync } from "../models/seasonalArt.js";
 import { processArtCodes, scanSlotMap } from "../utils/artCodes.js";
 import { cp437ToUtf8 } from "../utils/codepageConversions.js";
 const escape_intermed = new RegExp("[!\"#$%&'()*+,-./]")
@@ -195,6 +196,7 @@ class BaseCommands {
 		switch (type) {
 			case "Screen":  subdir = "screens"; break;
 			case "Header":  subdir = "headers"; break;
+			case "Welcome": subdir = "welcome"; break;
 			default:        subdir = "misc"; break;
 		}
 
@@ -391,6 +393,7 @@ class BaseCommands {
 		switch (type) {
 			case "Screen":  subdir = "screens"; break;
 			case "Header":  subdir = "headers"; break;
+			case "Welcome": subdir = "welcome"; break;
 			default:        subdir = "misc"; break;
 		}
 
@@ -411,10 +414,19 @@ class BaseCommands {
 			case "Logoff":       subdir = "logoff"; break;
 			case "Goodbye":      subdir = "goodbye"; break;
 			case "Registration": subdir = "register"; break;
+			case "Welcome":      subdir = "welcome"; break;
 			default:             subdir = "random"; break;
 		}
 
-		var artfile = this._findRandomArtFile(subdir);
+		// Try seasonal art first, then fall back to default
+		var artfile = null;
+		var season = getCurrentSeasonSubdirSync();
+		if (season) {
+			artfile = this._findRandomArtFile(subdir + '/' + season);
+		}
+		if (!artfile) {
+			artfile = this._findRandomArtFile(subdir);
+		}
 		if (!artfile) {
 			console.log("No random art files found in", subdir);
 			return;

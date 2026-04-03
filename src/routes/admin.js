@@ -23,6 +23,7 @@ import * as announcements from '../models/announcements.js';
 import * as wall from '../models/wall.js';
 import * as bulletins from '../models/bulletins.js';
 import * as newsFiles from '../models/newsFiles.js';
+import * as seasonalArt from '../models/seasonalArt.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -3227,6 +3228,44 @@ router.post('/newsfiles/reorder', express.json(), requireAdmin, async (req, res)
 		await newsFiles.updateSortOrder(ids);
 	}
 	res.json({ status: true });
+});
+
+// -------------------------------------------------------
+// Seasonal Art
+// -------------------------------------------------------
+
+router.get('/seasonal-art', requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var seasons          = await seasonalArt.getAllSeasons();
+	res.render('admin/seasonalArt/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Seasonal Art',
+		activelink: 'seasonalart',
+		currentuser: currentuser,
+		seasons: seasons
+	});
+});
+
+router.post('/seasonal-art/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await seasonalArt.createSeason(req.body);
+	await seasonalArt.refreshSeasonCache();
+	res.redirect('/admin/seasonal-art');
+});
+
+router.post('/seasonal-art/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	await seasonalArt.updateSeason(id, req.body);
+	await seasonalArt.refreshSeasonCache();
+	res.redirect('/admin/seasonal-art');
+});
+
+router.post('/seasonal-art/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var deleteDirs = req.body.delete_dirs === 'true';
+	await seasonalArt.deleteSeason(id, deleteDirs);
+	await seasonalArt.refreshSeasonCache();
+	res.redirect('/admin/seasonal-art');
 });
 
 // -------------------------------------------------------

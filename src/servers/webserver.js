@@ -17,6 +17,7 @@ import { router as callflowRouter } from '../routes/callflow.js';
 import { pgpool } from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
 import { activityMiddleware } from '../middleware/webActivity.js';
+import appConfig from '../config/appConfig.js';
 
 const node_env = process.env.NODE_ENV || "development"
 var webserver = express();
@@ -32,6 +33,9 @@ webserver.use(express.json());
 webserver.use(express.urlencoded({ extended: false }));
 webserver.use(cookieParser());
 webserver.use(express.static( path.join(path.dirname("./"), 'public'), { dotfiles: 'allow' }));
+
+// Serve web art images from txtfiles/webart/ at /webart/
+webserver.use('/webart', express.static(path.join(process.cwd(), appConfig.get('textdir', 'txtfiles'), 'webart')));
 
 // --- CSRF protection: Origin/Referer check on state-changing requests ---
 webserver.use(function(req, res, next) {

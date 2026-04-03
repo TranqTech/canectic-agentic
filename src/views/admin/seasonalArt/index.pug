@@ -1,0 +1,189 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-calendar-heart.me-2
+          | Seasonal Art
+
+        p.text-muted When today's date falls within an active season, art files from the seasonal subdirectory are used instead of the default pool. Works for both terminal and web art.
+
+        button.btn.btn-success.mb-3(data-bs-toggle='modal' data-bs-target='#addModal')
+          i.bi.bi-plus-circle.me-1
+          | Add Season
+
+        if seasons && seasons.length > 0
+          table.table.table-hover
+            thead
+              tr
+                th Name
+                th Directory
+                th Date Range
+                th Active
+                th(style='width:140px') Actions
+            tbody
+              each s in seasons
+                tr
+                  td= s.name
+                  td: code= s.subdir
+                  td
+                    | #{s.start_day}/#{s.start_month} — #{s.end_day}/#{s.end_month}
+                    if s.start_month > s.end_month
+                      small.text-muted.ms-1 (wraps year)
+                  td
+                    if s.active
+                      span.badge.bg-success Active
+                    else
+                      span.badge.bg-secondary Inactive
+                  td
+                    button.btn.btn-sm.btn-primary.me-1(
+                      data-bs-toggle='modal'
+                      data-bs-target='#editModal'
+                      data-id=s.id
+                      data-name=s.name
+                      data-subdir=s.subdir
+                      data-startmonth=s.start_month
+                      data-startday=s.start_day
+                      data-endmonth=s.end_month
+                      data-endday=s.end_day
+                      data-active=(s.active ? 'true' : 'false')
+                    )
+                      i.bi.bi-pencil
+                    button.btn.btn-sm.btn-danger(
+                      data-bs-toggle='modal'
+                      data-bs-target='#deleteModal'
+                      data-id=s.id
+                      data-name=s.name
+                      data-subdir=s.subdir
+                    )
+                      i.bi.bi-trash
+        else
+          .text-center.py-5.text-muted
+            i.bi.bi-calendar-heart(style='font-size:3rem; color:#555')
+            h5.mt-3 No seasonal art configured
+            p Add seasons to show holiday-themed art on login and throughout the BBS.
+
+    //- Add Modal
+    .modal.fade#addModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Season
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/seasonal-art/new')
+            .modal-body
+              .mb-3
+                label.form-label Name
+                input.form-control(name='name' required placeholder='e.g. Christmas')
+              .mb-3
+                label.form-label Directory Name
+                input.form-control(name='subdir' required placeholder='e.g. christmas' pattern='[a-z0-9_-]+')
+                .form-text Lowercase letters, numbers, hyphens, underscores. Directories are created automatically.
+              .row
+                .col-6
+                  label.form-label Start Date
+                  .row
+                    .col-6
+                      input.form-control(type='number' name='start_month' min='1' max='12' required placeholder='Month')
+                    .col-6
+                      input.form-control(type='number' name='start_day' min='1' max='31' required placeholder='Day')
+                .col-6
+                  label.form-label End Date
+                  .row
+                    .col-6
+                      input.form-control(type='number' name='end_month' min='1' max='12' required placeholder='Month')
+                    .col-6
+                      input.form-control(type='number' name='end_day' min='1' max='31' required placeholder='Day')
+              .form-check.mt-3
+                input.form-check-input(type='checkbox' name='active' id='addActive' checked)
+                label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Modal
+    .modal.fade#editModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Season
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Name
+                input.form-control(name='name' id='editName' required)
+              .mb-3
+                label.form-label Directory
+                input.form-control.text-muted(id='editSubdir' disabled)
+                .form-text Directory name cannot be changed after creation.
+              .row
+                .col-6
+                  label.form-label Start Date
+                  .row
+                    .col-6
+                      input.form-control(type='number' name='start_month' id='editStartMonth' min='1' max='12' required)
+                    .col-6
+                      input.form-control(type='number' name='start_day' id='editStartDay' min='1' max='31' required)
+                .col-6
+                  label.form-label End Date
+                  .row
+                    .col-6
+                      input.form-control(type='number' name='end_month' id='editEndMonth' min='1' max='12' required)
+                    .col-6
+                      input.form-control(type='number' name='end_day' id='editEndDay' min='1' max='31' required)
+              .form-check.mt-3
+                input.form-check-input(type='checkbox' name='active' id='editActive')
+                label.form-check-label(for='editActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    //- Delete Modal
+    .modal.fade#deleteModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header.bg-danger.text-white
+            h5.modal-title Delete Season
+            button.btn-close.btn-close-white(type='button' data-bs-dismiss='modal')
+          form#deleteForm(method='POST')
+            .modal-body
+              p Are you sure you want to delete #[strong#deleteName]?
+              .form-check
+                input.form-check-input(type='checkbox' name='delete_dirs' id='deleteDirs' value='true')
+                label.form-check-label(for='deleteDirs') Also delete empty seasonal art directories
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-danger(type='submit') Delete
+
+    script.
+      // Edit modal population
+      var editModal = document.getElementById('editModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(event) {
+          var btn = event.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editForm').action = '/admin/seasonal-art/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('editName').value = btn.getAttribute('data-name') || '';
+          document.getElementById('editSubdir').value = btn.getAttribute('data-subdir') || '';
+          document.getElementById('editStartMonth').value = btn.getAttribute('data-startmonth') || '';
+          document.getElementById('editStartDay').value = btn.getAttribute('data-startday') || '';
+          document.getElementById('editEndMonth').value = btn.getAttribute('data-endmonth') || '';
+          document.getElementById('editEndDay').value = btn.getAttribute('data-endday') || '';
+          document.getElementById('editActive').checked = btn.getAttribute('data-active') === 'true';
+        });
+      }
+
+      // Delete modal population
+      var deleteModal = document.getElementById('deleteModal');
+      if (deleteModal) {
+        deleteModal.addEventListener('show.bs.modal', function(event) {
+          var btn = event.relatedTarget;
+          if (!btn) return;
+          document.getElementById('deleteForm').action = '/admin/seasonal-art/' + btn.getAttribute('data-id') + '/delete';
+          document.getElementById('deleteName').textContent = btn.getAttribute('data-name') || '';
+        });
+      }

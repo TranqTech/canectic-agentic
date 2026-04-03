@@ -11,7 +11,7 @@ import * as postgres from '../middleware/db/postgres.js';
 //   ""       → textdir/<format>/misc/<filename>.<ext>     (default/misc)
 // The filename has no path or extension — the art system resolves those
 // by walking the terminal's format priority chain (rip→sixel→utf8→ansi→ascii).
-const VALID_DISPLAY_FILE_TYPES = ['', 'Screen', 'Header'];
+const VALID_DISPLAY_FILE_TYPES = ['', 'Screen', 'Header', 'Welcome'];
 
 // Valid menu types — determines input behavior.
 // "Hotkey" = single-keypress dispatch (current handler behavior)

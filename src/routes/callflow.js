@@ -27,6 +27,7 @@ import { formatActivity } from '../utils/activityMap.js';
 import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
 import * as newsFilesModel from '../models/newsFiles.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
+import { getRandomWebArt } from '../utils/webArt.js';
 import appConfig from '../config/appConfig.js';
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,9 @@ router.get('/stages.json', async (req, res) => {
 	var userId = parseInt(currentuser.id);
 	var lastCf = await getLastCallflowAt(userId);
 	var stages = [];
+
+	// 0. Welcome (always shown)
+	stages.push({ name: 'welcome', label: 'Welcome' });
 
 	// 1. Announcements: new since last call flow + any pinned (always relevant)
 	var allAnnouncements = await announcements.getActiveAnnouncements(20);
@@ -156,6 +160,20 @@ router.get('/stages.json', async (req, res) => {
 // ---------------------------------------------------------------------------
 // Stage partials
 // ---------------------------------------------------------------------------
+
+router.get('/stage/welcome', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var username = currentuser ? currentuser.username : 'Guest';
+	var boardname = appConfig.get('boardname', 'Canectic BBS');
+	var artPath = await getRandomWebArt('welcome');
+
+	res.render('callflow/welcome', {
+		layout: false,
+		username: username,
+		boardname: boardname,
+		artUrl: artPath ? '/' + artPath : null
+	});
+});
 
 router.get('/stage/announcements', async (req, res) => {
 	var currentuser = await getCurrentUser(req);

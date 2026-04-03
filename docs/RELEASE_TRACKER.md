@@ -186,7 +186,7 @@ Last updated: 2026-03-31
 | 15 | User-to-user telegrams | [x] | Send one-line message to another online user |
 | 16 | Sysop chat for web users | [x] | Break-in chat with users browsing the web UI (presence-based, not terminal) |
 | 17 | areas.bbs import | [x] | Parse areas.bbs from FTN hub, batch-create message areas + network mappings + peer subscriptions |
-| 18 | Web art integration | [ ] | ANSI art rendering on web pages (login splash, headers, randomised art pools) |
+| 18 | Web art + seasonal art | [x] | Web art from txtfiles/webart/, random selection, seasonal overrides with admin CRUD, call flow welcome splash |
 | 19 | Top 10 lists | [ ] | Top posters, top downloaders, most active users (week/month). Web page + terminal command |
 | 20 | Birthday messages | [ ] | "Happy birthday" in call flow when users have birthdays today (birthdate column exists) |
 
