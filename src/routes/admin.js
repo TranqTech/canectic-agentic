@@ -1880,6 +1880,16 @@ router.post('/users/:uuid/resetpassword', urlencodedParser, requireAdmin, async 
 	res.redirect('/admin/users');
 });
 
+router.post('/users/:uuid/kill-sessions', requireAdmin, async (req, res) => {
+	var uuid = req.params.uuid.toLowerCase().trim();
+	var user = await userAccounts.getUserByUUID(uuid);
+	if (!user) return res.json({ status: false, message: 'User not found' });
+
+	var count = await sessionStore.destroyAllForUser(user.username);
+	alogger.writeAlog(2, 'Admin killed ' + count + ' session(s) for ' + user.username, 'cyanbright');
+	res.json({ status: true, message: 'Killed ' + count + ' session(s) for ' + user.username });
+});
+
 // -------------------------------------------------------
 // Menu & Door Admin Routes
 // -------------------------------------------------------
