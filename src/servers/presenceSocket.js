@@ -210,11 +210,16 @@ class PresenceServer {
 	_pruneDeadConnections() {
 		for (var [ws, client] of this.clients) {
 			if (!client.alive) {
-				ws.terminate();
-				// _onClose will handle cleanup via the close event
+				// Allow 2 missed cycles before terminating (handles Chromium background throttling)
+				if (client._missedChecks >= 2) {
+					ws.terminate();
+					continue;
+				}
+				client._missedChecks = (client._missedChecks || 0) + 1;
 				continue;
 			}
 			client.alive = false;
+			client._missedChecks = 0;
 		}
 	}
 

@@ -302,5 +302,13 @@ html
             }
           };
 
+          // Reconnect when background tab returns to foreground
+          document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+              reconnectAttempts = 0;
+              connect();
+            }
+          });
+
           connect();
         })();
