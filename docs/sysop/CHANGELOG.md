@@ -13,10 +13,11 @@
 - Config keys: `notifications_enabled`, `notifications_retention_days`
 
 ### Call Flow Improvements
-- Time-based triggers: sessions idle 2+ hours show prominent banner (blue bar with stars icon, large button, dismiss); 24+ hours force redirects all pages to callflow
-- `last_callflow_at` cached on session (not queried from DB every request)
-- Callflow completion updates all sessions for user via `sessionUpdateUser()`
-- `getLastCallflowAt()` helper on useraccounts model
+- Login always routes through callflow regardless of redirect target; original destination preserved and restored after completion
+- Time-based triggers: 2+ hours shows prominent banner and redirects home page; 24+ hours force-redirects all pages
+- Prominent "Welcome back" banner: blue bar with stars icon, large "See What's New" button, dismiss button
+- `last_callflow_at` cached on session (loaded from DB once per session, not every request)
+- Callflow completion updates all sessions for user via `sessionUpdateUser()` (multi-tab/device safe)
 
 ### WebSocket Background Tab Fixes
 - Background tabs no longer attempt WebSocket reconnect (deferred to visibilitychange event)

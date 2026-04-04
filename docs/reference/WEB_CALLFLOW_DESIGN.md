@@ -4,15 +4,30 @@ A guided login experience for web users, mirroring the terminal call flow. Walks
 
 ## Entry Modes
 
-### 1. Fresh login (automatic)
+### 1. Fresh login (always)
 
-After successful web login (`/users/login` POST), redirect to `/callflow` instead of the home page. The call flow runs the full sequence automatically.
+After successful web login, ALWAYS redirect to `/callflow` regardless of the original redirect target. The intended destination is stored as `callflow_return_url` on the session. After callflow completion, the user is redirected to their original destination (e.g. `/pm/inbox` if they clicked a PM link before logging in, or `/` for a direct login).
 
-### 2. Return after idle (prompted)
+### 2. Time-based triggers
 
-When `webActivity.js` detects a session resumption that triggered a new call record (idle threshold exceeded), set a flag on the session: `session.callflow_pending = true`. On the next page load, the layout template detects this flag and shows a prompt: "Welcome back! See what's new?" Yes redirects to `/callflow`, No clears the flag and continues to the requested page.
+`last_callflow_at` is cached on the session (loaded from DB once, updated on all user sessions on completion via `sessionUpdateUser()`).
 
-The prompt should be a toast or small bar at the top of the page, not a modal that blocks content. Dismissable, non-intrusive.
+| Condition | Behaviour |
+|-----------|-----------|
+| < 2 hours since last callflow | Normal browsing, no intervention |
+| 2-24 hours | Prominent banner ("Welcome back! There's new activity") with "See What's New" button + Dismiss. Home page (`/`) auto-redirects to callflow. |
+| 24+ hours | Force redirect to `/callflow` on ALL pages (except login, callflow itself, static assets) |
+| Never done callflow | Force redirect |
+
+The original page the user was trying to reach is stored as `callflow_return_url` so they land there after completion.
+
+### 3. Idle resume (session flag)
+
+When `webActivity.js` detects a session resumption that triggered a new call record (idle threshold exceeded), it sets `callflow_pending = true` on the session. This also triggers the banner on next page load.
+
+### Banner design
+
+Prominent blue bar with stars icon, large "See What's New" button, and separate "Dismiss" button. Not a dismissable Bootstrap alert -- a styled section with clear call-to-action. Dismiss hides the bar and calls `/callflow/complete` to clear the pending state.
 
 ## Flow Sequence
 
