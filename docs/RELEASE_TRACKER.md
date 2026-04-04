@@ -210,7 +210,7 @@ Last updated: 2026-04-02
 | 27 | areas.bbs/files.bbs export | [x] | Generate areas.bbs/files.bbs from network mappings. Admin download per network. %AREAS command in AreaFix/FileFix. |
 | 28 | Tossed packet retention | [x] | `ftn_keep_tossed_days` config (default 7, 0 = immediate delete, 999 = keep forever). Daily `purge-tossed` maintenance job. |
 | 29 | Notification system | [x] | Centralised notifications model, bell icon in nav bars, `/notifications` page, terminal reader, real-time push via PresenceSocket, sysop + user producers, daily purge. |
-| 30 | Multi-address binkp sessions | [ ] | Handle remote advertising multiple AKAs mapping to local peer connections. Batch outbound for shared remotes. Verify no cross-connection data leakage. Determine which local addresses to advertise when answering (all AKAs vs filtered by caller). |
+| 30 | Multi-address binkp sessions | [x] | Password-filtered grouping of multiple peer connections per session. Per-connection outbound isolation. All FTN addresses advertised (defaults first). Session dedup across grouped connections. |
 
 ---
 
