@@ -1246,3 +1246,21 @@ Option 2 (reverse proxy routing) with Redis shared state is the most production-
 The terminal process would own all WebSocket endpoints and the in-memory state (node registry, ring buffers, chat). The web process would read state from Redis (presence, online users) and enqueue actions via BullMQ. This is essentially the same separation the mail process already demonstrates.
 
 The trigger for building this would be observable event loop latency on the gateway under web load -- measurable via `process.hrtime()` or the `perf_hooks` module. Until then, the single gateway is simpler and sufficient.
+
+### Design guideline: split-friendly by default
+
+New features that share state between web views and terminal sessions should use Redis rather than in-memory data structures. This avoids deepening the in-memory coupling that makes the split harder.
+
+**Already split-friendly (Redis-backed):**
+- Web presence and activity tracking (`webActivity.js`)
+- Chat sessions and message history (`presenceSocket.js`)
+- Session management (`sessionstore.js`)
+- Configuration (`appConfig.js` via PostgreSQL + Redis pub/sub invalidation)
+- Job queues and schedules (BullMQ/Redis)
+
+**Would need migration for split:**
+- `NodeManager` node registry (in-memory Map)
+- `OutputRingBuffer` per call (in-memory, used by NodeSpy snoop)
+- `CallManager`/`CallPool` (in-memory session tracking)
+
+The node registry and call tracking are tightly coupled to real-time terminal I/O and benefit from in-memory speed. Moving them to Redis would add latency to every terminal frame. The likely approach is that the terminal process keeps these in-memory and exposes a lightweight API (Redis pub/sub or HTTP) for the web process to query. The web process doesn't need frame-level access -- it just needs presence info and node status, which can be published at lower frequency.
