@@ -56,6 +56,7 @@ Standard Express 4 setup with Pug view engine.
 | `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
 | `/doors` | `doorsRouter` (`src/routes/doors.js`) | Door listing and web door launcher |
 | `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion |
+| `/notifications` | `notificationsRouter` (`src/routes/notifications.js`) | Notification history with pagination, mark-read, bell dropdown data |
 
 ### Error Handling
 
@@ -479,11 +480,11 @@ Both layouts share identical asset loading: Bootstrap 5 (Darkly theme), Bootstra
 
 ### Navigation
 
-**Admin nav** (`admin-nav.pug`): Brand links to `/`. Dashboard as a top-level nav item (`activelink === 'dashboard'`). Dropdown menus for Messages (Groups, Areas, Networks), Doors, Files. Direct link for Users. Right side: Mail link (envelope icon + "Mail" + unread badge from `pmUnreadCount`) + user dropdown with Logout, or Login link. Active state driven by `activelink` local variable.
+**Admin nav** (`admin-nav.pug`): Brand links to `/`. Dashboard as a top-level nav item (`activelink === 'dashboard'`). Dropdown menus for Messages (Groups, Areas, Networks), Doors, Files. Direct link for Users. Right side: Notification bell (bell icon + unread count badge + dropdown with 10 recent items) + Mail link (envelope icon + "Mail" + unread badge from `pmUnreadCount`) + user dropdown with Logout, or Login link. Active state driven by `activelink` local variable.
 
-**User nav** (`user-nav.pug`): Brand links to `/`. Direct links for Messages, Files, Doors. Right side: Dashboard link (gear icon, only shown when `currentuser.isSysop` is true) + Mail link (envelope icon + "Mail" + unread badge) + user dropdown with Profile + Logout, or Login link. Active state driven by `activelink` local variable.
+**User nav** (`user-nav.pug`): Brand links to `/`. Direct links for Messages, Files, Doors. Right side: Dashboard link (gear icon, only shown when `currentuser.isSysop` is true) + Notification bell (bell icon + unread count badge + dropdown) + Mail link (envelope icon + "Mail" + unread badge) + user dropdown with Profile + Logout, or Login link. Active state driven by `activelink` local variable.
 
-Both navs display `boardname` (from `process.env.boardname`) as the brand text. The Mail unread badge uses `pmUnreadCount` fetched in each router's shared middleware.
+Both navs display `boardname` (from `process.env.boardname`) as the brand text. The Mail unread badge uses `pmUnreadCount` fetched in each router's shared middleware. The notification bell uses `notificationUnreadCount` fetched by shared middleware; the dropdown loads the 10 most recent notifications via AJAX. Real-time push of new notifications via PresenceSocket updates the badge count without page reload.
 
 ### Template Conventions
 
@@ -494,6 +495,7 @@ Both navs display `boardname` (from `process.env.boardname`) as the brand text. 
 - **`DateTime`** — Luxon DateTime class injected as a template local by `index.js` middleware. Used for date formatting in views.
 - **`boardname` / `faviconlink`** — From environment variables, injected by shared middleware.
 - **`pmUnreadCount`** — Unread PM count for the current user, fetched by shared middleware in `index.js`, `admin.js`, and `pm.js`. Used by nav includes for the mail badge.
+- **`notificationUnreadCount`** — Unread notification count for the current user, fetched by shared middleware. Used by nav includes for the notification bell badge.
 - **`currentuser.isSysop`** — Boolean derived from `permissionflags` at session creation (`buildSessionData`). Used by `user-nav.pug` to conditionally show the admin Dashboard link.
 
 ### Mobile Detection
@@ -813,7 +815,8 @@ Three layers ensure the sentinel renders correctly on the web:
 - **Who's online** -- `/whosonline` public page with reusable `partials/whosOnline.pug` card. Merges terminal nodes (via `req.app.locals.nodeManager`) with web presence users, deduplicates web-originated terminal sessions. Both partials designed for embedding in virtual call flow and dashboard.
 - **The Wall** -- `/wall` public page with `partials/wall.pug` card and post form. `GET` shows recent messages (30), `POST` adds a message. Access controlled by `wall_post_security`, `wall_post_required_flags`, `wall_post_restricted_flags` config. Wall partial also embedded on the home page.
 - **QWK Offline Mail** -- `/qwk` transfer page with download button and REP upload form. `/qwk/download` builds a `.qwk` packet of new messages from subscribed areas plus unread PMs, streams as file download. `/qwk/upload` accepts `.rep` multipart upload and posts replies. Uses `qwkUser.js` model with `qwkPacketBuilder.js` low-level functions. Controlled by `qwk_enabled` config. See `QWK_USER_DESIGN.md`.
-- **Web Call Flow** -- `/callflow` guided login experience. AJAX-driven single page that walks users through what's new: announcements (new since last visit), last callers, who's online, wall (with inline post), new message summary, new file summary. Auto-triggered on login redirect, prompted via "Welcome back" bar on idle session resume. Stages with no data auto-skip. Keyboard navigable (Enter to advance, Escape to skip). `users.last_callflow_at` column tracks recency. Config: `callflow_enabled`, `callflow_on_resume`. See `WEB_CALLFLOW_DESIGN.md`.
+- **Web Call Flow** -- `/callflow` guided login experience. AJAX-driven single page that walks users through what's new: announcements (new since last visit), last callers, who's online, wall (with inline post), new message summary, new file summary. Auto-triggered on login redirect, prompted via "Welcome back" bar on idle session resume. Time-based triggers: sessions idle 2+ hours show a prominent banner with stars icon and large button; sessions idle 24+ hours force redirect to callflow on all page loads. `last_callflow_at` cached on session (not queried from DB per request); callflow completion updates all sessions for user via `sessionUpdateUser()`. Stages with no data auto-skip. Keyboard navigable (Enter to advance, Escape to skip). `users.last_callflow_at` column tracks recency. Config: `callflow_enabled`, `callflow_on_resume`. See `WEB_CALLFLOW_DESIGN.md`.
+- **Notifications** -- Bell icon in both nav bars with unread count badge and dropdown showing 10 recent items. `/notifications` full history page with pagination. Centralised `notifications` model with user-targeted and sysop-broadcast notification types. Real-time push via PresenceSocket (count sent on connect, new notifications pushed as they arrive). Notification producers: `tic_error` (bad TIC), `pm_undeliverable`, `areafix_request`, `filefix_request`, `user_registered` (sysop); `pm_received` (user). Daily purge job for old read notifications. Config: `notifications_enabled`, `notifications_retention_days`.
 - **Web Sysop Chat** -- Sysop-to-web-user real-time chat via PresenceSocket (`/ws/presence`). Sysop initiates from NodeSpy dashboard (web user cards with Chat button). Chat sessions persisted in Redis (`chat:{id}`, `chat:{id}:msgs`, `chat:user:{userId}`) for page navigation survival. Floating overlay widget (`partials/chatOverlay.pug`) in both user and admin layouts, with minimise/restore, typing indicators, unread badge. `chat_restore` message replays history on page navigation. Controlled by `web_chat_enabled` config. See `WEB_CHAT_DESIGN.md`.
 - **Custom flags** -- `custom_permission_flags` / `custom_restriction_flags` config keys allow sysops to add flags beyond the built-in set. Built-in flags (Sysop, Mod, etc.) are hardcoded and always present.
 - **File upload** -- Web and terminal upload with staging, hash, dupe check, FILE_ID.DIZ extraction.

@@ -228,6 +228,7 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `sysInfo` | Sub-module: system information display (board info + aggregate stats). Also available as call flow stage `sysinfo` |
 | `bulletins` | Sub-module: numbered bulletin selection menu, displays art file or body_text. Also available as call flow stage |
 | `fileNewscan` | Sub-module: scans subscribed file areas for new files since last pointer, displays summary |
+| `notifications` | Sub-module: lightbar notification list with detail view, mark all read |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
 | `previousMenu` | Pops menu history |
@@ -256,6 +257,7 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `fileUpload` | Sub-module |
 | `doorBrowser` | Sub-module (door browser with collections) |
 | `announcements` | Sub-module |
+| `notifications` | Sub-module (notification reader: lightbar list, detail, mark all read) |
 | `verifyMail` | Sub-module (request email verification) |
 
 **Sub-module management**: `_runSubModule()` pauses the menu, wires `ModuleReturn` and `HangupSignal`, starts the module. Menu handler owns inactivity timeouts even while a sub-module is active. On return, `_doModuleReturn()` cleans up and redraws.
@@ -1412,6 +1414,7 @@ Terminal menu command for offline QWK packet download and REP upload. Menu comma
 | `qwkTransfer.js` | handlers/menucommands | QWK packet download and REP upload — D/U/Q menu, ZMODEM/XMODEM protocol selection |
 | `fileAreaSelector.js` | handlers/menucommands | File group/area selector with lightbar, search, new file counts (Phase 5) |
 | `fileBatchCheck.js` | handlers/menucommands | Login flow batch check — prompts to download pending batch on login, with protocol selection and hangup-after-transfer option |
+| `notificationReader.js` | handlers/menucommands | Notification reader — lightbar list, detail view, mark all read |
 | `fileBrowser.js` | handlers/menucommands | File listing browser — file list, detail view, XMODEM/ZMODEM download (single + batch) via native engines, batch tagging (Phase 5) |
 | `termMsgFormat.js` | utils | Terminal message formatting — CP437 conversion, pipe/Ctrl-A→ANSI, semantic line coloring, paragraph reflow (`reflowText`/`reflowParagraphs`), ANSI art detection (`detectAnsiArt`), ANSI-aware word wrapping (`wordWrapLineAnsi`) |
 | `userAreaSubs.js` | models | Per-user newscan subscription overrides — resolution cascade, T key toggle in area selector |

@@ -2,6 +2,27 @@
 
 ## Pending Release (since v0.9.1-alpha.1)
 
+### Notification System
+- Centralised notification model (`notifications` table) with user-targeted and sysop-broadcast types
+- Bell icon in both admin and user nav bars with unread count badge and dropdown (10 recent items)
+- `/notifications` full history page with pagination
+- Real-time push via PresenceSocket: unread count on connect, new notifications pushed instantly
+- Terminal `notificationReader` menu command: lightbar list, detail view, mark all read
+- Notification producers wired: sysop receives `tic_error`, `pm_undeliverable`, `areafix_request`, `filefix_request`, `user_registered`; users receive `pm_received`
+- Daily purge job for old read notifications
+- Config keys: `notifications_enabled`, `notifications_retention_days`
+
+### Call Flow Improvements
+- Time-based triggers: sessions idle 2+ hours show prominent banner (blue bar with stars icon, large button, dismiss); 24+ hours force redirects all pages to callflow
+- `last_callflow_at` cached on session (not queried from DB every request)
+- Callflow completion updates all sessions for user via `sessionUpdateUser()`
+- `getLastCallflowAt()` helper on useraccounts model
+
+### WebSocket Background Tab Fixes
+- Background tabs no longer attempt WebSocket reconnect (deferred to visibilitychange event)
+- Server prune tolerance increased to 5 missed cycles for better background tab survival
+- Session expired redirect deferred for background tabs until they become visible
+
 ### PM File Attachments
 - File attachments on private messages across all transport types
 - `pm_attachments` table linked by `message_uuid`, `has_attachments` boolean on pm_inbox/pm_outbox

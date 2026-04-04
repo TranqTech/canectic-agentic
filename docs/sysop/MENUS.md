@@ -90,6 +90,7 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Bulletins | No | Bulletin selection menu (rules, help, info -- managed in admin Content) |
 | New File Scan | No | Scan subscribed file areas for new files since last visit |
 | News Viewer | No | Display configured news/score files (ANSI/ASCII art) in sequence |
+| Notifications | No | View notifications (lightbar list, detail view, mark all read) |
 | QWK Transfer | No | QWK offline mail — download QWK packet and upload REP replies |
 | New Scan (All) | No | Scan all areas for new messages |
 | New Scan (Group) | No | Scan current group for new messages |
