@@ -137,6 +137,10 @@ async function prerunMaint(){
 	var pmAttachments = await import("../src/models/pmAttachments.js");
 	await pmAttachments.ensureTable();
 
+	// Ensure FREQ magic table
+	var freqMod = await import("../src/models/freq.js");
+	await freqMod.ensureTable();
+
 	// Ensure seasonal art table, seed defaults, create directories, prime cache
 	var seasonalArt = await import("../src/models/seasonalArt.js");
 	await seasonalArt.ensureTable();

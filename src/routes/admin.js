@@ -24,6 +24,7 @@ import * as wall from '../models/wall.js';
 import * as bulletins from '../models/bulletins.js';
 import * as newsFiles from '../models/newsFiles.js';
 import * as seasonalArt from '../models/seasonalArt.js';
+import * as freqModel from '../models/freq.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -3287,6 +3288,95 @@ router.post('/newsfiles/reorder', express.json(), requireAdmin, async (req, res)
 		await newsFiles.updateSortOrder(ids);
 	}
 	res.json({ status: true });
+});
+
+// -------------------------------------------------------
+// FREQ (File Requests)
+// -------------------------------------------------------
+
+router.get('/freq', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var magicAliases = await freqModel.getAllMagic();
+
+	// Get FTN connections for the request form
+	var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
+	var connections = [];
+	if (ftnConns) {
+		for (var c of ftnConns) {
+			var cd = c.connection_data;
+			if (typeof cd === 'string') { try { cd = JSON.parse(cd); } catch (_) { cd = {}; } }
+			connections.push({ id: c.id, peer_name: c.peer_name, connection_data: cd });
+		}
+	}
+
+	// Filebox listing
+	var fileboxDir = appConfig.get('freq_filebox_dir', 'ftn/filebox');
+	var fileboxFiles = [];
+	try {
+		var fsList = (await import('fs')).default || await import('fs');
+		if (fsList.existsSync(fileboxDir)) {
+			var names = fsList.readdirSync(fileboxDir);
+			for (var fname of names) {
+				var fpath = fileboxDir + '/' + fname;
+				var stat = fsList.statSync(fpath);
+				if (stat.isFile() && !fname.startsWith('_')) {
+					fileboxFiles.push({ name: fname, size: Math.round(stat.size / 1024) + ' KB' });
+				}
+			}
+		}
+	} catch (_) {}
+
+	res.render('admin/freq/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'File Requests (FREQ)',
+		activelink: 'freq',
+		currentuser: currentuser,
+		magicAliases: magicAliases,
+		connections: connections,
+		fileboxDir: fileboxDir,
+		fileboxFiles: fileboxFiles
+	});
+});
+
+router.post('/freq/magic/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await freqModel.createMagic(req.body);
+	res.redirect('/admin/freq');
+});
+
+router.post('/freq/magic/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await freqModel.updateMagic(parseInt(req.params.id), req.body);
+	res.redirect('/admin/freq');
+});
+
+router.post('/freq/magic/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await freqModel.deleteMagic(parseInt(req.params.id));
+	res.redirect('/admin/freq');
+});
+
+router.post('/freq/request', urlencodedParser, requireAdmin, async (req, res) => {
+	var connectionId = parseInt(req.body.connection_id);
+	var filenames = (req.body.filenames || '').split(/\r?\n/).map(function(f) { return f.trim(); }).filter(Boolean);
+
+	if (connectionId && filenames.length > 0) {
+		var conn = await peerConnections.getConnectionById(connectionId);
+		if (conn) {
+			var cd = conn.connection_data;
+			if (typeof cd === 'string') { try { cd = JSON.parse(cd); } catch (_) { cd = {}; } }
+			var addr = cd.address || '';
+			if (addr) {
+				var parts = addr.split(':');
+				var netNode = parts[1] ? parts[1].split('/') : [];
+				var destNet = parseInt(netNode[0]) || 0;
+				var destNode = parseInt(netNode[1]) || 0;
+				if (destNet && destNode) {
+					freqModel.createReqFile(destNet, destNode, filenames);
+				}
+			}
+		}
+	}
+
+	res.redirect('/admin/freq');
 });
 
 // -------------------------------------------------------

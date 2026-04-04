@@ -88,6 +88,10 @@ async function main() {
 		process.exit(0);
 	}
 
+	// Ensure FREQ magic table exists
+	var freqMod = await import("../src/models/freq.js");
+	await freqMod.ensureTable();
+
 	var queueConfig = getQueueConfig();
 	alogger.writeAlog(2, `[Mailer] Redis: ${queueConfig.host}:${queueConfig.port} db=${queueConfig.db}`, "cyan");
 

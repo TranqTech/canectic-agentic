@@ -328,6 +328,11 @@ class SessionController extends EventEmitter {
 			this.filesReceived++;
 			this.bytesReceived += info.size;
 			alogger.writeClog(5, 'Session ' + this.uuid + ': received ' + info.name + ' (' + info.size + ' bytes)', 'mailer', 'green');
+
+			// FREQ: if we received a .req file, process it
+			if (info.name && info.name.toLowerCase().endsWith('.req') && info.path) {
+				this._processFreqRequest(info.path);
+			}
 		});
 		this.transfer.on('allSent', () => {
 			this.protocol.sendEOB();
@@ -491,6 +496,13 @@ class SessionController extends EventEmitter {
 				this.transfer.queueFile(pktPath, { deleteAfterSend: true });
 			}
 		}
+
+		// Look for FREQ .req files (file requests to send to remote)
+		var reqPath = path.join(outDir, desthex + '.req');
+		if (fs.existsSync(reqPath)) {
+			this.transfer.queueFile(reqPath, { deleteAfterSend: true });
+			alogger.writeClog(5, 'Session ' + this.uuid + ': queued FREQ request ' + path.basename(reqPath), 'mailer', 'cyan');
+		}
 	}
 
 	_processFlowFile(floPath) {
@@ -526,6 +538,51 @@ class SessionController extends EventEmitter {
 			}
 		} catch (err) {
 			alogger.writeClog(3, 'Session ' + this.uuid + ': error reading flow file ' + floPath + ': ' + err.message, 'mailer', 'redbright');
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// FREQ processing
+	// -----------------------------------------------------------------------
+
+	async _processFreqRequest(reqFilePath) {
+		try {
+			var freqMod = await import('../models/freq.js');
+			var appCfg = (await import('../config/appConfig.js')).default;
+
+			if (!appCfg.getBoolean('freq_enabled', true)) {
+				alogger.writeClog(3, 'Session ' + this.uuid + ': FREQ disabled, ignoring .req', 'mailer', 'yellow');
+				return;
+			}
+
+			var connectionId = this.peerConnection ? this.peerConnection.id : null;
+			var results = await freqMod.resolveRequest(reqFilePath, connectionId);
+
+			var foundCount = 0;
+			var missCount = 0;
+
+			for (var r of results) {
+				if (r.found) {
+					this.transfer.queueFile(r.filePath, { deleteAfterSend: false });
+					foundCount++;
+					alogger.writeClog(5, 'Session ' + this.uuid + ': FREQ serving ' + r.filename + ' (' + r.source + ')', 'mailer', 'green');
+				} else {
+					missCount++;
+					alogger.writeClog(5, 'Session ' + this.uuid + ': FREQ not found: ' + r.filename + (r.reason ? ' (' + r.reason + ')' : ''), 'mailer', 'yellow');
+				}
+			}
+
+			alogger.writeClog(3, 'Session ' + this.uuid + ': FREQ processed — ' + foundCount + ' found, ' + missCount + ' not found', 'mailer', foundCount > 0 ? 'greenbright' : 'yellow');
+
+			// Delete the .req file from inbound (it's been processed)
+			try { fs.unlinkSync(reqFilePath); } catch (_) {}
+
+			// If we queued new files, restart sending (in case EOB was already sent)
+			if (foundCount > 0) {
+				this.transfer.startSending();
+			}
+		} catch (err) {
+			alogger.writeClog(3, 'Session ' + this.uuid + ': FREQ processing error: ' + err.message, 'mailer', 'redbright');
 		}
 	}
 

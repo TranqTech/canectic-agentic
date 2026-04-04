@@ -1,0 +1,178 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-file-earmark-arrow-down.me-2
+          | File Requests (FREQ)
+
+        //- Magic Aliases
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Magic Aliases
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addMagicModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Alias
+          .card-body
+            if magicAliases && magicAliases.length > 0
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Name
+                    th Type
+                    th Path / Description
+                    th Active
+                    th(style='width:100px')
+                tbody
+                  each m in magicAliases
+                    tr
+                      td: strong= m.name
+                      td: span.badge(class=m.magic_type === 'filelist' ? 'bg-info' : m.magic_type === 'nodelist' ? 'bg-warning text-dark' : 'bg-secondary')= m.magic_type
+                      td
+                        if m.file_path
+                          code= m.file_path
+                        if m.description
+                          small.text-muted.ms-1= m.description
+                      td
+                        if m.active
+                          span.badge.bg-success Active
+                        else
+                          span.badge.bg-danger Inactive
+                      td
+                        button.btn.btn-sm.btn-primary.me-1(
+                          data-bs-toggle='modal' data-bs-target='#editMagicModal'
+                          data-id=m.id data-name=m.name data-filepath=m.file_path || ''
+                          data-magictype=m.magic_type data-description=m.description || ''
+                          data-active=(m.active ? 'true' : 'false')
+                        )
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/freq/magic/' + m.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete?")')
+                            i.bi.bi-trash
+            else
+              p.text-muted No magic aliases configured.
+
+        //- Create File Request
+        .card.mb-4
+          .card-header.bg-secondary
+            h5.mb-0 Create File Request
+          .card-body
+            form(method='POST' action='/admin/freq/request')
+              .row
+                .col-md-6
+                  .mb-3
+                    label.form-label Destination Peer Connection
+                    select.form-select(name='connection_id' required)
+                      option(value='') -- Select --
+                      each conn in connections
+                        option(value=conn.id)= conn.peer_name + ' (' + (conn.connection_data && conn.connection_data.address || '') + ')'
+                .col-md-6
+                  .mb-3
+                    label.form-label Filenames (one per line)
+                    textarea.form-control(name='filenames' rows='4' required placeholder='FILES\nNODELIST\nmyfile.zip')
+              button.btn.btn-primary(type='submit')
+                i.bi.bi-send.me-1
+                | Create .req File
+
+        //- Filebox
+        .card.mb-4
+          .card-header.bg-dark
+            h5.mb-0
+              | Filebox Directory
+              small.text-muted.ms-2= fileboxDir
+          .card-body
+            if fileboxFiles && fileboxFiles.length > 0
+              table.table.table-sm.mb-0
+                thead
+                  tr
+                    th Filename
+                    th Size
+                tbody
+                  each f in fileboxFiles
+                    tr
+                      td= f.name
+                      td= f.size
+            else
+              p.text-muted No files in filebox. Drop files in #[code= fileboxDir] to make them available via FREQ.
+
+    //- Add Magic Modal
+    .modal.fade#addMagicModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Magic Alias
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/freq/magic/new')
+            .modal-body
+              .mb-3
+                label.form-label Name (requested filename)
+                input.form-control(name='name' required placeholder='e.g. FILES')
+              .mb-3
+                label.form-label Type
+                select.form-select(name='magic_type')
+                  option(value='file') File (static path)
+                  option(value='filelist') File Listing (auto-generated)
+                  option(value='nodelist') Nodelist (latest)
+              .mb-3
+                label.form-label File Path
+                input.form-control(name='file_path' placeholder='Required for type "file"')
+                .form-text Leave blank for filelist/nodelist types (auto-resolved).
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addActive' checked)
+                label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Magic Modal
+    .modal.fade#editMagicModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Magic Alias
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editMagicForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Name
+                input.form-control(name='name' id='emName' required)
+              .mb-3
+                label.form-label Type
+                select.form-select(name='magic_type' id='emType')
+                  option(value='file') File (static path)
+                  option(value='filelist') File Listing (auto-generated)
+                  option(value='nodelist') Nodelist (latest)
+              .mb-3
+                label.form-label File Path
+                input.form-control(name='file_path' id='emPath')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='emDesc')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='emActive')
+                label.form-check-label(for='emActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      var editModal = document.getElementById('editMagicModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editMagicForm').action = '/admin/freq/magic/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('emName').value = btn.getAttribute('data-name') || '';
+          document.getElementById('emType').value = btn.getAttribute('data-magictype') || 'file';
+          document.getElementById('emPath').value = btn.getAttribute('data-filepath') || '';
+          document.getElementById('emDesc').value = btn.getAttribute('data-description') || '';
+          document.getElementById('emActive').checked = btn.getAttribute('data-active') === 'true';
+        });
+      }

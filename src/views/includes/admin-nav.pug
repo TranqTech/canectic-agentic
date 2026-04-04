@@ -45,7 +45,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             role='button'
             aria-haspopup='true'
             aria-expanded='false'
-            class=(activenav === 'msgGroups' || activenav === 'msgAreas' || activenav === 'import') ? 'active' : ''
+            class=(activenav === 'msgGroups' || activenav === 'msgAreas' || activenav === 'import' || activenav === 'freq') ? 'active' : ''
           )
             | Messages
             if activenav === 'msgGroups' || activenav === 'msgAreas'
@@ -56,6 +56,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             .dropdown-divider
             a.dropdown-item(href='/admin/networks') Networks
             a.dropdown-item(href='/admin/nodelists') Nodelists
+            a.dropdown-item(href='/admin/freq') File Requests (FREQ)
             .dropdown-divider
             a.dropdown-item(href='/admin/import/areasbbs') Import areas.bbs
             a.dropdown-item(href='/admin/import/msgbase') Import Message Base

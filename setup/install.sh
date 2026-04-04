@@ -211,6 +211,10 @@ do_install() {
     done
     info "Created art directory structure in txtfiles/"
 
+    # Create FTN subdirectories
+    mkdir -p "$TARGET_DIR/ftn/in" "$TARGET_DIR/ftn/out" "$TARGET_DIR/ftn/tossed" "$TARGET_DIR/ftn/bad" "$TARGET_DIR/ftn/tmp" "$TARGET_DIR/ftn/filebox"
+    info "Created FTN directory structure"
+
     # Copy .env.example as .env if no .env exists
     if [[ ! -f "$TARGET_DIR/.env" ]]; then
         if [[ -f "$SOURCE_DIR/examples/env.example" ]]; then
