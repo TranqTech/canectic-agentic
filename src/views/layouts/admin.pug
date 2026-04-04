@@ -314,9 +314,20 @@ html
             }
           };
 
-          // Reconnect when background tab returns to foreground
+          // Pause heartbeat when tab hidden, resume/reconnect when visible
           document.addEventListener('visibilitychange', function() {
-            if (document.hidden) return;
+            if (document.hidden) {
+              if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+              return;
+            }
+            if (ws && ws.readyState === WebSocket.OPEN && !heartbeatTimer) {
+              heartbeatTimer = setInterval(function() {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'heartbeat' }));
+                }
+              }, 60000);
+              ws.send(JSON.stringify({ type: 'heartbeat' }));
+            }
             if (window._sessionExpired) {
               window.location.href = '/users/login';
               return;
