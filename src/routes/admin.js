@@ -3073,6 +3073,55 @@ router.post('/import/areasbbs/run', urlencodedParser, requireAdmin, async (req, 
 	});
 });
 
+// areas.bbs export (download)
+router.get('/export/areasbbs/:networkId', requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var areas = await networkAreas.getAreasByNetwork(networkId);
+	if (!areas || areas.length === 0) {
+		return res.status(404).send('No areas on this network');
+	}
+
+	var network = await msgNetworks.getNetworkById(networkId);
+	var networkName = network ? network.name : 'network-' + networkId;
+
+	var { generateAreasBbs } = await import('../utils/areasBbsParser.js');
+	var areaList = areas.map(function(a) {
+		return { areatag: a.areatag, description: a.area_name || a.shortcode || '' };
+	});
+
+	var bbsName = appConfig.get('boardname', 'Canectic BBS');
+	var text = generateAreasBbs(areaList, bbsName + ' -- ' + networkName);
+
+	res.setHeader('Content-Type', 'text/plain');
+	res.setHeader('Content-Disposition', 'attachment; filename="areas-' + networkName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '.bbs"');
+	res.send(text);
+});
+
+// files.bbs export (download) -- file network areas
+router.get('/export/filesbbs/:networkId', requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var fileNetAreas = await import('../models/fileNetworkAreas.js');
+	var areas = await fileNetAreas.getMappingsForNetwork(networkId);
+	if (!areas || areas.length === 0) {
+		return res.status(404).send('No file areas on this network');
+	}
+
+	var network = await msgNetworks.getNetworkById(networkId);
+	var networkName = network ? network.name : 'network-' + networkId;
+
+	var { generateAreasBbs } = await import('../utils/areasBbsParser.js');
+	var areaList = areas.map(function(a) {
+		return { areatag: a.areatag, description: a.area_name || a.shortcode || '' };
+	});
+
+	var bbsName = appConfig.get('boardname', 'Canectic BBS');
+	var text = generateAreasBbs(areaList, bbsName + ' -- ' + networkName + ' (files)');
+
+	res.setHeader('Content-Type', 'text/plain');
+	res.setHeader('Content-Disposition', 'attachment; filename="files-' + networkName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '.bbs"');
+	res.send(text);
+});
+
 // -------------------------------------------------------
 // Announcements
 // -------------------------------------------------------

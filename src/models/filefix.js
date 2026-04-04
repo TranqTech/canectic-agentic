@@ -169,6 +169,7 @@ async function _executeCommand(cmd, conn, networkId) {
 				case 'QUERY':  return await _cmdQuery(conn, networkId);
 				case 'HELP':   return _cmdHelp();
 				case 'PAUSE':  return await _cmdPause(conn);
+				case 'AREAS':  return await _cmdAreas(conn, networkId);
 				case 'RESUME': return await _cmdResume(conn);
 				default:       return ['*** Unknown command: %' + cmd.name];
 			}
@@ -302,12 +303,29 @@ function _cmdHelp() {
 		'  AREATAG         Subscribe (same as +AREATAG)',
 		'  %LIST           List all available file areas (* = subscribed)',
 		'  %QUERY          List your currently subscribed file areas',
+		'  %AREAS          Get areas.bbs format listing (for import)',
 		'  %HELP           This help text',
 		'  %PAUSE          Disable all file area subscriptions',
 		'  %RESUME         Re-enable all file area subscriptions',
 		'',
 		'Powered by Canectic BBS'
 	];
+}
+
+async function _cmdAreas(conn, networkId) {
+	var areas = await fileNetworkAreas.getMappingsForNetwork(networkId);
+	if (!areas || areas.length === 0) return ['  No file areas available.'];
+
+	var lines = ['; files.bbs -- ' + appConfig.get('boardname', 'Canectic BBS')];
+	lines.push('; Generated ' + new Date().toISOString().split('T')[0]);
+	lines.push(';');
+	for (var a of areas) {
+		var tag = a.areatag || '';
+		var name = a.area_name || a.shortcode || '';
+		if (tag) lines.push(tag + ' ' + name);
+	}
+
+	return lines;
 }
 
 async function _cmdPause(conn) {

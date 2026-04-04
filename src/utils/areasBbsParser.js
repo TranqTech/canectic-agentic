@@ -47,4 +47,29 @@ function parseAreasBbs(text) {
 	return areas;
 }
 
-export { parseAreasBbs };
+// Generate areas.bbs text from an array of { areatag, description }.
+// Optionally prepend a header comment with the BBS name and date.
+function generateAreasBbs(areas, headerComment) {
+	var lines = [];
+
+	if (headerComment) {
+		lines.push('; ' + headerComment);
+		lines.push('; Generated ' + new Date().toISOString().split('T')[0]);
+		lines.push(';');
+	}
+
+	for (var i = 0; i < areas.length; i++) {
+		var tag = areas[i].areatag || '';
+		var desc = areas[i].description || '';
+		if (!tag) continue;
+		if (desc) {
+			lines.push(tag + ' ' + desc);
+		} else {
+			lines.push(tag);
+		}
+	}
+
+	return lines.join('\r\n') + '\r\n';
+}
+
+export { parseAreasBbs, generateAreasBbs };

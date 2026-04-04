@@ -207,7 +207,7 @@ Last updated: 2026-03-31
 | 24 | AreaFix | [x] | Automated echomail area management via netmail commands (+subscribe, -unsubscribe, %LIST, %QUERY, %HELP, %PAUSE, %RESUME). Password auth, auto-response netmail. |
 | 25 | FileFix | [x] | Automated TIC file area management via netmail commands (+subscribe, -unsubscribe, %LIST, %QUERY, %HELP, %PAUSE, %RESUME). Parallel to AreaFix. |
 | 26 | FREQ (File Request) | [ ] | Inbound .req file handling during binkp sessions. Serve requested files from file areas or a magic filebox. |
-| 27 | areas.bbs export | [ ] | Generate areas.bbs from network area mappings for downstream nodes. Admin download per network. |
+| 27 | areas.bbs/files.bbs export | [x] | Generate areas.bbs/files.bbs from network mappings. Admin download per network. %AREAS command in AreaFix/FileFix. |
 
 ---
 

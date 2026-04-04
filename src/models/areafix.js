@@ -190,6 +190,8 @@ async function _executeCommand(cmd, conn, networkId) {
 					return await _cmdQuery(conn, networkId);
 				case 'HELP':
 					return _cmdHelp();
+				case 'AREAS':
+					return await _cmdAreas(conn, networkId);
 				case 'PAUSE':
 					return await _cmdPause(conn);
 				case 'RESUME':
@@ -336,12 +338,30 @@ function _cmdHelp() {
 		'  AREATAG         Subscribe (same as +AREATAG)',
 		'  %LIST           List all available areas (* = subscribed)',
 		'  %QUERY          List your currently subscribed areas',
+		'  %AREAS          Get areas.bbs format listing (for import)',
 		'  %HELP           This help text',
 		'  %PAUSE          Disable all area subscriptions',
 		'  %RESUME         Re-enable all area subscriptions',
 		'',
 		'Powered by Canectic BBS'
 	];
+}
+
+// %AREAS -- output in areas.bbs format (AREATAG description, one per line)
+async function _cmdAreas(conn, networkId) {
+	var areas = await networkAreas.getAreasByNetwork(networkId);
+	if (!areas || areas.length === 0) return ['  No areas available.'];
+
+	var lines = ['; areas.bbs -- ' + appConfig.get('boardname', 'Canectic BBS')];
+	lines.push('; Generated ' + new Date().toISOString().split('T')[0]);
+	lines.push(';');
+	for (var a of areas) {
+		var tag = a.areatag || '';
+		var name = a.area_name || a.shortcode || '';
+		if (tag) lines.push(tag + ' ' + name);
+	}
+
+	return lines;
 }
 
 // %PAUSE -- disable all subscriptions (keep rows, set enabled=false)
