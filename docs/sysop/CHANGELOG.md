@@ -21,6 +21,8 @@
 - Session TTL default 12 hours (`session_ttl` config key), stored per-session for correct renewal
 - Log Out All Other Sessions on user profile (password protected)
 - Admin Kill Sessions button on user management page
+- Session expiry detection: PresenceSocket heartbeat validates session, expired sessions redirect to login
+- WebSocket reconnect with exponential backoff (5s to 60s max) on both user and admin layouts
 - Node >= 18.0.0 engine requirement added to package.json
 
 ### Web Art and Seasonal Art
@@ -50,6 +52,10 @@
 - Optional centering for oversized terminals (configurable source width per file, default 80)
 - Drag-to-reorder, active/inactive toggle, add/edit/delete modals
 - Integrates into both web and terminal call flows as a "News" stage
+
+### Home Page
+- Tabbed layout with Announcements and Wall tabs
+- Font size bump to 1.2rem site-wide for improved readability
 
 ### Web Call Flow
 - Guided login experience at /callflow mirroring the terminal call flow
@@ -144,6 +150,8 @@
 - Access control: `wall_post_security`, `wall_post_required_flags`, `wall_post_restricted_flags`
 - Auto-purge: oldest messages removed when count exceeds `wall_max_messages` (default 60)
 - Admin management at /admin/wall with delete capability
+- One-post-per-session soft limit (web form hidden after posting, terminal skips prompt)
+- Terminal colour highlight for own posts
 - Config keys: `wall_display_count`, `wall_max_length`, `wall_max_messages`
 
 ### Bulletin System
@@ -222,6 +230,15 @@
 - Auto-generates response netmail queued as outbound packet
 - Processor routing in `ftnNetmailAdapter.js`: 'areafix'/'areamgr' and 'filefix'/'filemgr'/'tic'
 
+### FREQ (File Request)
+- Three-layer file resolver: magic aliases > filebox directory > file entries database
+- Inbound: binkp session detects `.req` files, resolves and queues files for sending back
+- Outbound: admin UI at Messages > File Requests to create `.req` for any FTN peer
+- Magic alias CRUD with file/filelist/nodelist types (seeded with FILES=filelist)
+- Auto-generated BBS-wide file listing (magic type `filelist`, written to filebox as `_FILES.LST`)
+- Filebox browser showing current files in `ftn/filebox`
+- Config keys: `freq_enabled`, `freq_filebox_dir`, `freq_max_files` (default 10)
+
 ### areas.bbs / files.bbs Export
 - `generateAreasBbs()` utility for generating areas.bbs/files.bbs from network mappings
 - Admin download routes: `/admin/export/areasbbs/:networkId`, `/admin/export/filesbbs/:networkId`
@@ -233,6 +250,19 @@
 - 0 = delete immediately after tossing, 999 = keep forever
 - Daily maintenance job `purge-tossed` at 2 AM removes expired packets
 - Tosser reads config at runtime instead of using hardcoded constants
+
+### Admin Panel
+- Scan Nodelists and Purge Tossed Packets buttons added to Jobs & Maintenance page
+
+### Bugfixes
+- Fixed DataTables column mismatch on nodelist view (missing Connects Via column in AJAX rebuild)
+- Fixed bulletin `updateById` argument order (arguments were reversed)
+- Fixed duplicate web call logging (activity timestamp now set on login)
+- Fixed stale web sessions causing reconnect loops (session expiry detection added)
+
+### Documentation
+- Door server design doc captured (design for multi-BBS door game sharing, not yet built)
+- Process separation architecture note in `PROCESS_ARCHITECTURE.md` (future web/terminal split guidance)
 
 ### Infrastructure
 - Version read from `package.json` via config system (not per-call file reads)
