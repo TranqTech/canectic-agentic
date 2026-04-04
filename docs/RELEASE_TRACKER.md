@@ -167,7 +167,7 @@ Last updated: 2026-04-02
 - [x] .env.example template (examples/env.example)
 
 ### Testing
-- [x] 1,649 tests passing (mocha)
+- [x] 1,948 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
