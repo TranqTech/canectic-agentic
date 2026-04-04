@@ -358,6 +358,34 @@ When a remote system presents FTN addresses during handshake:
 3. Validate `session_password` from `connection_data` against the presented password
 4. If no match found and the system allows "unlisted" connections (future config), create a temporary session with restricted privileges
 
+### Multi-Address Session Grouping
+
+Many FTN systems operate multiple addresses (AKAs) and advertise all of them in M_ADR during the binkp handshake. A single binkp session can now handle outbound mail for all matched connections, avoiding the need for separate sessions per address.
+
+**How it works:**
+
+After authentication succeeds against the primary connection, the session scans for additional `peer_connections` whose `connection_data.address` matches one of the remote's other M_ADR addresses. An additional connection is only grouped into the session if:
+
+1. Its `session_password` is non-empty (unauthenticated connections never get a free ride)
+2. Its `session_password` exactly matches the password that was used to authenticate the primary connection
+
+This password-filtered grouping is a security constraint: a malicious remote cannot claim arbitrary extra addresses in M_ADR to receive mail for connections it has not authenticated against. Only connections sharing the same session password are trusted to be operated by the same remote system.
+
+The grouped connections are stored in `this.peerConnections[]` (an array that always contains at least the primary connection). This array is used by:
+
+- **`_buildOutboundList()`** -- iterates all grouped connections independently, scanning BSO outbound directories for each connection's address. No cross-contamination between connections' outbound queues.
+- **Manager `_hasSessionForAddress()`** -- checks all grouped connections when deduplicating, so an inbound session already handling `1:123/1` and `1:123/2` prevents a separate outbound poll to either address.
+
+The grouping works for both roles:
+- **Answerer**: grouping happens in `_onPasswordReceived()` immediately after password validation
+- **Caller**: grouping happens in `_onAuthenticated()` after the remote confirms auth and presents its addresses
+
+Single-address sessions are fully backward compatible -- `peerConnections` is an array of one.
+
+### Local Address Advertisement
+
+`_getLocalAddresses()` sends ALL active FTN addresses across all configured networks in the M_ADR frame. Addresses are sorted with defaults first (`is_default = true`) so the remote sees the primary address for each network before alternates. This allows remote systems to discover all our AKAs and perform their own multi-address grouping.
+
 ### File List Management
 
 **Outbound files** for a peer are determined by:
@@ -427,7 +455,7 @@ BSO filename format: `NNNNNNNN.ext` where first 4 hex chars = net, last 4 = node
 
 ### Connection Deduplication
 
-Before initiating an outbound call, check the active session pool. If a session to the same peer (by FTN address) already exists (inbound or outbound), skip the outbound call — the existing session will handle the file exchange.
+Before initiating an outbound call, check the active session pool. If a session to the same peer (by FTN address) already exists (inbound or outbound), skip the outbound call -- the existing session will handle the file exchange. For multi-address sessions, `_hasSessionForAddress()` checks both the session's `peerAddresses` array and all `peerConnections[].connection_data.address` entries, so a session already handling multiple AKAs correctly blocks duplicate outbound polls to any of those addresses.
 
 ### Server Listeners
 

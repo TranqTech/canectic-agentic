@@ -276,6 +276,14 @@
 ### Admin Panel
 - Scan Nodelists and Purge Tossed Packets buttons added to Jobs & Maintenance page
 
+### Multi-Address Binkp Sessions
+- Binkp sessions now handle multiple peer connections when the remote advertises multiple AKAs in M_ADR
+- Password-filtered grouping: additional connections only included if their session_password matches the authenticated password and is non-empty
+- Outbound file list built independently for each grouped connection (no cross-contamination)
+- All active FTN addresses advertised in M_ADR with defaults first
+- Session deduplication checks all grouped connections to prevent duplicate outbound polls
+- Backward compatible: single-address sessions work identically
+
 ### Bugfixes
 - Fixed DataTables column mismatch on nodelist view (missing Connects Via column in AJAX rebuild)
 - Fixed bulletin `updateById` argument order (arguments were reversed)

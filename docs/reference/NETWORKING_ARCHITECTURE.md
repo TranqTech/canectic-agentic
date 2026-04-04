@@ -268,6 +268,8 @@ Netmail: netmail.getPendingNetmail()
   → netmail.markMessageSent()
 ```
 
+**Multi-address binkp sessions:** When a remote system advertises multiple AKAs in M_ADR, a single binkp session handles outbound mail for all matched peer connections. Additional connections are grouped only if their `session_password` matches the authenticated password and is non-empty (password-filtered grouping). The session's `_buildOutboundList()` iterates all grouped connections independently. See `MAILER_ARCHITECTURE.md` for details.
+
 ### QWK Client Mode (we connect to a remote hub)
 
 **Pull (inbound):**
