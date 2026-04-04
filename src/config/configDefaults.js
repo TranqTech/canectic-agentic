@@ -208,6 +208,7 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// PM Attachments
 	// -----------------------------------------------------------------------
+	{ key: 'ftn_keep_tossed_days',     defaultValue: '7',                    type: 'number',  category: 'maintenance', description: 'Days to keep tossed FTN packets (0 = delete immediately, 999 = keep forever)' },
 	{ key: 'pm_attachment_dir',        defaultValue: 'files/pm_attachments', type: 'string',  category: 'paths',    description: 'Storage directory for PM file attachments' },
 	{ key: 'pm_max_attachment_size',   defaultValue: '10485760',             type: 'number',  category: 'security', description: 'Maximum PM attachment size in bytes (default 10MB)' },
 	{ key: 'pm_max_attachments',       defaultValue: '5',                    type: 'number',  category: 'security', description: 'Maximum number of attachments per PM' },

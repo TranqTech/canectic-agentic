@@ -330,6 +330,32 @@ function createMaintenanceProcessor() {
 				await privateMessages.purgeDeleted(job.data.days);
 				break;
 
+			case 'purge-tossed': {
+				var tossedDir = appConfig.get('ftntossed', 'ftn/tossed');
+				var keepDays = job.data.days || 7;
+				try {
+					var fsPurge = await import('fs');
+					var pathPurge = await import('path');
+					var cutoff = Date.now() - (keepDays * 86400000);
+					var files = fsPurge.readdirSync(tossedDir);
+					var purged = 0;
+					for (var f of files) {
+						var fp = pathPurge.join(tossedDir, f);
+						var stat = fsPurge.statSync(fp);
+						if (stat.isFile() && stat.mtimeMs < cutoff) {
+							fsPurge.unlinkSync(fp);
+							purged++;
+						}
+					}
+					if (purged > 0) {
+						alogger.writeAlog(2, 'Purged ' + purged + ' tossed packet(s) older than ' + keepDays + ' days', 'cyan');
+					}
+				} catch (tossErr) {
+					alogger.writeAlog(3, 'Tossed packet purge error: ' + tossErr.message, 'yellow');
+				}
+				break;
+			}
+
 			case 'recalc-area-counts': {
 				await msgAreas.recalculateAreaCounts();
 				break;

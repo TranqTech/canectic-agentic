@@ -24,8 +24,10 @@ import appConfig from "../../config/appConfig.js"
 const TosserName = "Canectic Tosser v0.1"
 const SystemTZUTC = "-0600"
 const defaultZone = 1
-const removeProcessed = false
-const moveProcessed = true
+// Tossed packet handling: determined by ftn_keep_tossed_days config.
+// 0 = delete immediately, 999 = keep forever (move to tossed dir), 1+ = move and purge later.
+function _shouldRemove() { return appConfig.getNumber('ftn_keep_tossed_days', 7) === 0; }
+function _shouldMove() { return appConfig.getNumber('ftn_keep_tossed_days', 7) > 0; }
 const netmailkeys = ["SourceZone", "DestinationZone", "SourceNode", "SourceNet", "DestinationNode", "DestinationNet", "Subject", "FromUser", "ToUser", "DateTime", "BodyText", "Id", "OriginLine"]
 //set max msg count per pkt
 //typically this has been a size constraint, but should be less of an issue with modern systems.
@@ -564,9 +566,9 @@ async function TossInboundFile(pktfilepath, movepktpath){
 	}
 	//remove pkt file if success
 	if (returnObj.pktsuccesscount >= targetsuccess){
-		if (removeProcessed){
+		if (_shouldRemove()){
 			await fs.promises.rm(pktfilepath)
-		}else if (moveProcessed){
+		}else if (_shouldMove()){
 			console.log("Moving Completed Pkt...")
 			await fs.promises.rename(pktfilepath, movepktpath)
 		}
@@ -656,9 +658,9 @@ async function OldTossInbound(inboundDir){
 		}
 		//remove pkt file if success
 		if (pktsuccesscount >= targetsuccess){
-			if (removeProcessed){
+			if (_shouldRemove()){
 				await fs.promises.rm(pktfilepath)
-			}else if (moveProcessed){
+			}else if (_shouldMove()){
 				console.log("Moving Completed Pkts...")
 				await fs.promises.rename(pktfilepath, movepktpath)
 			}

@@ -44,6 +44,20 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily tossed packet purge
+		// -----------------------------------------------------------------
+		var keepDays = appConfig.getNumber('ftn_keep_tossed_days', 7);
+		if (keepDays > 0 && keepDays < 999) {
+			await maintenanceQueue.upsertJobScheduler('purge-tossed-daily', {
+				pattern: '0 2 * * *',   // 2:00 AM daily
+			}, {
+				name: 'purge-tossed',
+				data: { days: keepDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily nodelist auto-import scan
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('scan-nodelists-daily', {
