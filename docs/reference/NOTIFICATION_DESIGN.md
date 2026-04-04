@@ -198,6 +198,37 @@ Daily purge job (add to schedules.js):
 - Delete read notifications older than `notifications_retention_days`
 - Keep unread notifications indefinitely (until explicitly read or manually purged)
 
+## Terminal: Notification Reader
+
+Menu command `notifications` (`BaseSubModule` in `handlers/menucommands/notificationReader.js`).
+
+### Display
+
+Lightbar list of recent notifications (newest first), similar to the PM reader pattern:
+- Unread items highlighted (bright colour)
+- Read items dimmed
+- Columns: severity indicator, title, age (e.g. "2h ago", "3d ago")
+- Sysop sees both personal and sysop broadcast notifications
+
+### Controls
+
+- **Up/Down**: navigate list
+- **Enter**: view notification detail (title, full body, link info)
+- **R**: mark selected as read
+- **A**: mark all as read
+- **D**: delete selected
+- **ESC/Q**: exit
+
+### Call flow integration
+
+Optional call flow stage: if the user has unread notifications, show a summary before or after the PM check stage. "You have N unread notification(s). View now? [Y/n]"
+
+This mirrors the terminal `check_email` pattern -- a brief prompt that can be added to the call flow or used as a standalone menu command.
+
+### Sysop terminal priority
+
+For sysop notifications with severity `danger`, the terminal could display an immediate alert when the sysop returns to a menu -- similar to how `pendingChat` fires when returning to menu. A `pendingNotification` flag on the call object would trigger a brief "!! ALERT: Bad TIC file: filename.tic -- press any key !!" before the menu redraws.
+
 ## Implementation Order
 
 1. Schema + model (create, query, mark read, counts)
@@ -206,8 +237,10 @@ Daily purge job (add to schedules.js):
 4. Sysop producers (tic_error, pm_undeliverable, mailer errors -- highest value)
 5. User producers (pm_received)
 6. /notifications page with full history
-7. Remaining producers (wired incrementally)
-8. Maintenance purge job
+7. Terminal notification reader (menu command + call flow stage)
+8. Terminal sysop alert on danger severity
+9. Remaining producers (wired incrementally)
+10. Maintenance purge job
 
 ## Design Decisions
 
