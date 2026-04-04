@@ -22,9 +22,14 @@ When a remote sends `M_ADR 1:123/456 21:100/100`, update `_matchPeer()` to find 
 - All matches stored as `this.peerConnections` (array)
 - `this.peerConnection` remains as shorthand for `this.peerConnections[0]` (backward compat)
 
-**Password validation:**
+**Password validation and group filtering:**
 - Password checked against the primary connection's `session_password` (unchanged)
-- If connections on different networks have different passwords, the primary match determines which password is expected. This is standard binkp behaviour -- one password per session.
+- After primary authentication succeeds, additional connections are ONLY added if:
+  a. Their `session_password` matches the authenticated password (same sysop, same credential)
+  b. They have a `session_password` configured (empty password = not authorized for sessions)
+- Connections with a different password are excluded from the group even if the remote claims that address
+- This prevents a malicious remote from advertising an extra address in M_ADR to receive outbound mail for a connection it hasn't authenticated against
+- Same filtering applies for both inbound and outbound session grouping
 
 ### 2. Outbound: build file lists for all matched connections
 
@@ -52,13 +57,22 @@ This handles:
 
 **Implementation in `_onAuthenticated()`:**
 ```javascript
-// After primary connection matched, scan for additional connections
-// matching the remote's other advertised addresses
+// After primary connection matched and password validated,
+// scan for additional connections matching the remote's other addresses.
+// ONLY include connections whose session_password matches the authenticated password.
+var authedPassword = this.peerConnection.connection_data.session_password;
+
 for (var addr of info.addresses) {
-    // Skip the primary (already matched)
     if (addr matches this.peerConnection) continue;
     var additional = findConnectionByAddress(addr);
-    if (additional) this.peerConnections.push(additional);
+    if (!additional) continue;
+
+    var addCd = additional.connection_data || {};
+    // Security: only group if password matches and is non-empty
+    if (!addCd.session_password) continue;
+    if (addCd.session_password !== authedPassword) continue;
+
+    this.peerConnections.push(additional);
 }
 ```
 
@@ -77,7 +91,9 @@ Rationale:
 
 **Changes to `_getLocalAddresses()`:**
 - For inbound (answerer): return all active FTN system addresses across all networks
-- For outbound (caller): return addresses for the primary connection's network (unchanged, or expand to all)
+- For outbound (caller): return addresses for all networks (allows remote to send us mail for any of our addresses)
+- **Default addresses first**: each network's default address (`is_default = true`) is listed before non-default addresses. This ensures the primary identity for each network appears first in M_ADR, which is what most mailers use for display and routing decisions.
+- Ordering: default addresses (sorted by network), then non-default addresses (sorted by network)
 
 ### 5. Data leakage prevention
 
@@ -113,4 +129,4 @@ All changes are additive. Single-address sessions work identically:
 
 - **Peer connection schema**: one address per connection record. Multiple addresses on a remote are handled by matching multiple connection records, not by adding array fields.
 - **Manager polling**: polls are per-connection, not per-remote-host. If two connections share a host, they're polled independently. The session discovery handles merging at runtime.
-- **Password model**: one password per session (validated against primary connection). Different passwords per connection on the same remote are not supported -- this is a binkp protocol limitation.
+- **Password model**: one password per binkp session (validated against primary connection). Additional connections are only grouped if their password matches the authenticated password. Connections with different passwords are handled in separate sessions -- this is both a binkp protocol limitation and a deliberate security choice.
