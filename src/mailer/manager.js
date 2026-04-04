@@ -424,8 +424,15 @@ class MailerManager extends EventEmitter {
 			if (session.peerAddresses.some(a => a.split('@')[0].toLowerCase() === bareAddr)) {
 				return true;
 			}
-			// Also check the target connection for outbound sessions
-			if (session.peerConnection) {
+			// Check all grouped connections (multi-address sessions)
+			if (session.peerConnections && session.peerConnections.length > 0) {
+				for (var conn of session.peerConnections) {
+					var cd = conn.connection_data || {};
+					if (cd.address && cd.address.split('@')[0].toLowerCase() === bareAddr) {
+						return true;
+					}
+				}
+			} else if (session.peerConnection) {
 				var cd = session.peerConnection.connection_data || {};
 				if (cd.address && cd.address.split('@')[0].toLowerCase() === bareAddr) {
 					return true;

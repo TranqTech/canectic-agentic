@@ -31,9 +31,10 @@ class SessionController extends EventEmitter {
 		this.options   = options || {};
 
 		// Peer info (populated during handshake)
-		this.peerConnection = null;   // DB record from peer_connections
-		this.peerAddresses  = [];     // FTN addresses presented by remote
-		this.peerName       = '';     // System name from M_NUL
+		this.peerConnection  = null;  // Primary DB record from peer_connections
+		this.peerConnections = [];    // All matched + password-verified connections
+		this.peerAddresses   = [];    // FTN addresses presented by remote
+		this.peerName        = '';    // System name from M_NUL
 
 		// Protocol and transfer
 		this.protocol     = null;
@@ -106,6 +107,7 @@ class SessionController extends EventEmitter {
 				return;
 			}
 			this.peerConnection = conn;
+			this.peerConnections = [conn];
 			var cd = conn.connection_data || {};
 			protocolOpts.sessionPassword = cd.session_password || '';
 		}
@@ -262,6 +264,7 @@ class SessionController extends EventEmitter {
 		}
 
 		this.peerConnection = matched;
+		this.peerConnections = [matched];
 		var cd = matched.connection_data || {};
 		var expectedPassword = cd.session_password || '';
 
@@ -286,6 +289,30 @@ class SessionController extends EventEmitter {
 			return;
 		}
 
+		// Discover additional connections matching remote's other addresses.
+		// Only group if their session_password matches the authenticated password
+		// and is non-empty (security: no free ride on unverified addresses).
+		if (info.addresses.length > 1 && expectedPassword) {
+			var allConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
+			var primaryAddr = (cd.address || '').toLowerCase();
+
+			for (var extraAddr of info.addresses) {
+				var bareAddr = extraAddr.split('@')[0].toLowerCase();
+				if (bareAddr === primaryAddr) continue;
+
+				for (var extraConn of (allConns || [])) {
+					var extraCd = extraConn.connection_data || {};
+					if (!extraCd.address || extraCd.address.toLowerCase() !== bareAddr) continue;
+					if (!extraCd.session_password) continue;
+					if (extraCd.session_password !== expectedPassword) continue;
+					// Password matches -- safe to group
+					this.peerConnections.push(extraConn);
+					alogger.writeClog(5, 'Session ' + this.uuid + ': grouped additional connection for ' + bareAddr, 'mailer', 'cyan');
+					break;
+				}
+			}
+		}
+
 		// Success
 		this.protocol.confirmAuth();
 	}
@@ -299,9 +326,39 @@ class SessionController extends EventEmitter {
 		this.peerAddresses = info.addresses || [];
 		this.peerName      = (info.options && info.options.systemName) || '';
 
+		// For caller sessions: discover additional connections matching remote's addresses
+		if (this.role === 'caller' && this.peerConnection && this.peerAddresses.length > 1) {
+			if (!this.peerConnections.length) {
+				this.peerConnections = [this.peerConnection];
+			}
+			var callerCd = this.peerConnection.connection_data || {};
+			var callerPassword = callerCd.session_password || '';
+			var callerPrimaryAddr = (callerCd.address || '').toLowerCase();
+
+			if (callerPassword) {
+				var allConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
+				for (var rAddr of this.peerAddresses) {
+					var bareAddr = rAddr.split('@')[0].toLowerCase();
+					if (bareAddr === callerPrimaryAddr) continue;
+
+					for (var extraConn of (allConns || [])) {
+						var extraCd = extraConn.connection_data || {};
+						if (!extraCd.address || extraCd.address.toLowerCase() !== bareAddr) continue;
+						if (!extraCd.session_password || extraCd.session_password !== callerPassword) continue;
+						// Already in list?
+						if (this.peerConnections.some(function(c) { return c.id === extraConn.id; })) continue;
+						this.peerConnections.push(extraConn);
+						alogger.writeClog(5, 'Session ' + this.uuid + ': grouped additional connection for ' + bareAddr + ' (caller)', 'mailer', 'cyan');
+						break;
+					}
+				}
+			}
+		}
+
 		alogger.writeClog(5,
 			'Session ' + this.uuid + ': authenticated (' + this.protocolType + ') with ' +
 			this.peerAddresses.join(', ') +
+			(this.peerConnections.length > 1 ? ' [' + this.peerConnections.length + ' connections]' : '') +
 			(this.peerName ? ' (' + this.peerName + ')' : ''),
 			'mailer', 'greenbright'
 		);
@@ -461,47 +518,52 @@ class SessionController extends EventEmitter {
 	}
 
 	async _buildOutboundList() {
-		if (!this.peerConnection) return;
+		var connections = this.peerConnections.length > 0 ? this.peerConnections : (this.peerConnection ? [this.peerConnection] : []);
+		if (connections.length === 0) return;
 
-		var cd = this.peerConnection.connection_data || {};
-		var peerAddr = cd.address || '';
-		if (!peerAddr) return;
+		for (var conn of connections) {
+			var cd = conn.connection_data || {};
+			var peerAddr = cd.address || '';
+			if (!peerAddr) continue;
 
-		// Parse peer address to generate the BSO hex filename stem
-		var addrParts = this._parseAddress(peerAddr);
-		if (!addrParts) return;
+			var addrParts = this._parseAddress(peerAddr);
+			if (!addrParts) continue;
 
-		var outDir  = this._getOutboundDirForZone(addrParts.zone);
-		var netHex  = addrParts.net.toString(16).padStart(4, '0');
-		var nodeHex = addrParts.node.toString(16).padStart(4, '0');
-		var desthex = netHex + nodeHex;
+			var outDir  = this._getOutboundDirForZone(addrParts.zone);
+			var netHex  = addrParts.net.toString(16).padStart(4, '0');
+			var nodeHex = addrParts.node.toString(16).padStart(4, '0');
+			var desthex = netHex + nodeHex;
 
-		if (!fs.existsSync(outDir)) return;
+			if (!fs.existsSync(outDir)) continue;
 
-		// Look for flow files (.flo, .clo, .dlo, .hlo, .ilo)
-		var floExtensions = ['.flo', '.clo', '.dlo', '.hlo', '.ilo'];
-		for (var ext of floExtensions) {
-			var floPath = path.join(outDir, desthex + ext);
-			if (fs.existsSync(floPath)) {
-				this._processFlowFile(floPath);
+			// Look for flow files (.flo, .clo, .dlo, .hlo, .ilo)
+			var floExtensions = ['.flo', '.clo', '.dlo', '.hlo', '.ilo'];
+			for (var ext of floExtensions) {
+				var floPath = path.join(outDir, desthex + ext);
+				if (fs.existsSync(floPath)) {
+					this._processFlowFile(floPath);
+				}
+			}
+
+			// Direct BSO-style packet files (.out, .cut, .hut)
+			var pktExtensions = ['.out', '.cut', '.hut'];
+			for (var pktExt of pktExtensions) {
+				var pktPath = path.join(outDir, desthex + pktExt);
+				if (fs.existsSync(pktPath)) {
+					this.transfer.queueFile(pktPath, { deleteAfterSend: true });
+				}
+			}
+
+			// FREQ .req files
+			var reqPath = path.join(outDir, desthex + '.req');
+			if (fs.existsSync(reqPath)) {
+				this.transfer.queueFile(reqPath, { deleteAfterSend: true });
+				alogger.writeClog(5, 'Session ' + this.uuid + ': queued FREQ request ' + path.basename(reqPath) + ' for ' + peerAddr, 'mailer', 'cyan');
 			}
 		}
 
-		// Also look for direct BSO-style packet files (.out, .cut, .hut)
-		// These are deleted after successful send.
-		var pktExtensions = ['.out', '.cut', '.hut'];
-		for (var pktExt of pktExtensions) {
-			var pktPath = path.join(outDir, desthex + pktExt);
-			if (fs.existsSync(pktPath)) {
-				this.transfer.queueFile(pktPath, { deleteAfterSend: true });
-			}
-		}
-
-		// Look for FREQ .req files (file requests to send to remote)
-		var reqPath = path.join(outDir, desthex + '.req');
-		if (fs.existsSync(reqPath)) {
-			this.transfer.queueFile(reqPath, { deleteAfterSend: true });
-			alogger.writeClog(5, 'Session ' + this.uuid + ': queued FREQ request ' + path.basename(reqPath), 'mailer', 'cyan');
+		if (connections.length > 1) {
+			alogger.writeClog(5, 'Session ' + this.uuid + ': built outbound list for ' + connections.length + ' connection(s)', 'mailer', 'cyan');
 		}
 	}
 
@@ -687,20 +749,19 @@ class SessionController extends EventEmitter {
 
 	async _getLocalAddresses() {
 		try {
-			var addresses = [];
-			// If the session has a specific connection, use its network's addresses
-			if (this.peerConnection) {
-				var netAddrs = await systemAddresses.getAddressesByNetwork(this.peerConnection.network_id);
-				addresses = netAddrs.map(a => a.domain ? a.address + '@' + a.domain : a.address);
-			}
-			// Fallback: get all active FTN addresses
-			if (addresses.length === 0) {
-				var allAddrs = await systemAddresses.getActiveAddresses();
-				addresses = allAddrs
-					.filter(a => a.address_zone && a.address_net && a.address_node) // FTN only
-					.map(a => a.domain ? a.address + '@' + a.domain : a.address);
-			}
-			return addresses;
+			// Advertise all active FTN addresses across all networks.
+			// Default addresses first (is_default = true per network), then non-defaults.
+			var allAddrs = await systemAddresses.getActiveAddresses();
+			var ftnAddrs = allAddrs.filter(a => a.address_zone && a.address_net && a.address_node);
+
+			// Sort: defaults first, then by network
+			ftnAddrs.sort(function(a, b) {
+				if (a.is_default && !b.is_default) return -1;
+				if (!a.is_default && b.is_default) return 1;
+				return (a.network_id || 0) - (b.network_id || 0);
+			});
+
+			return ftnAddrs.map(a => a.domain ? a.address + '@' + a.domain : a.address);
 		} catch (err) {
 			alogger.writeClog(3, 'Session: failed to load local addresses: ' + err.message, 'mailer', 'redbright');
 			return [];
