@@ -732,6 +732,13 @@ block content
             var flags = n.flags || '';
             var flagsTrunc = flags.length > 30 ? flags.substring(0, 30) + '...' : flags;
 
+            // Build connection type badges
+            var ctypes = n.connection_types || [];
+            var ctBadges = '';
+            for (var ci = 0; ci < ctypes.length; ci++) {
+              ctBadges += '<span class="badge bg-info me-1 mb-1">' + ctypes[ci] + '</span>';
+            }
+
             var rowNode = table.row.add([
               '<code>' + addr + '</code>',
               n.system_name || '',
@@ -739,6 +746,7 @@ block content
               n.location || '',
               n.hostname ? '<small>' + n.hostname + '</small>' : '',
               n.binkp_port ? '<small>' + n.binkp_port + '</small>' : '',
+              ctBadges,
               flags ? '<small class="text-muted">' + flagsTrunc + '</small>' : '',
               statusBadge
             ]).node();
