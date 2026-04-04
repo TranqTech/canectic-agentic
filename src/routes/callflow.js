@@ -76,6 +76,10 @@ router.get('/', async (req, res) => {
 		return res.redirect(returnUrl);
 	}
 
+	// Suppress the banner on the callflow page itself
+	res.locals.callflowPending = false;
+	res.locals.callflowForce = false;
+
 	res.render('callflow/index', {
 		title: 'Welcome',
 		activelink: '',
