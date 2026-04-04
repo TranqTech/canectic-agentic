@@ -1,0 +1,35 @@
+//- Notification bell icon with dropdown.
+//- Included in both user and admin nav bars.
+
+li.nav-item.dropdown
+  a.nav-link.position-relative(href='#' role='button' data-bs-toggle='dropdown' aria-expanded='false' data-bs-auto-close='outside' id='notif-bell')
+    i.bi.bi-bell
+    span#notif-badge.badge.bg-danger.position-absolute.top-0.start-100.translate-middle.rounded-pill(style='display:none; font-size:0.65rem')
+
+  ul.dropdown-menu.dropdown-menu-end#notif-dropdown(style='width:360px; max-height:400px; overflow-y:auto')
+    li
+      .d-flex.justify-content-between.align-items-center.px-3.py-2.border-bottom
+        strong Notifications
+        button.btn.btn-link.btn-sm.text-muted#notif-mark-all(type='button' style='font-size:0.75rem; text-decoration:none') Mark All Read
+    li#notif-list
+      .text-center.text-muted.py-3.px-3(style='font-size:0.85rem') No notifications
+    li.border-top
+      a.dropdown-item.text-center.py-2(href='/notifications' style='font-size:0.85rem') View All
+
+style.
+  #notif-dropdown .notif-item {
+    padding: 8px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+  }
+  #notif-dropdown .notif-item:hover { background: rgba(255,255,255,0.05); }
+  #notif-dropdown .notif-item.notif-unread { background: rgba(55,90,127,0.15); }
+  #notif-dropdown .notif-item .notif-title { font-weight: 600; }
+  #notif-dropdown .notif-item .notif-body { color: #adb5bd; font-size: 0.8rem; }
+  #notif-dropdown .notif-item .notif-time { color: #6c757d; font-size: 0.7rem; }
+  .notif-severity-danger .notif-title { color: #e74c3c; }
+  .notif-severity-warning .notif-title { color: #f39c12; }
+  .notif-severity-success .notif-title { color: #00bc8c; }
+  .notif-severity-info .notif-title { color: #3498db; }

@@ -118,6 +118,15 @@ html
                 alert('Chat: ' + (msg.error || 'unknown error'));
               }
             }
+            // Notifications
+            if (msg.type === 'notification_count') {
+              updateNotifBadge(msg.count);
+            }
+            if (msg.type === 'notification') {
+              addNotifToDropdown(msg);
+              notifUnread++;
+              updateNotifBadge(notifUnread);
+            }
           }
 
           function addChatMsg(from, name, text) {
@@ -228,6 +237,57 @@ html
             document.getElementById('web-chat-minimise').addEventListener('click', minimiseOverlay);
             document.getElementById('web-chat-close').addEventListener('click', endChat);
             document.getElementById('web-chat-badge').addEventListener('click', showOverlay);
+          });
+
+          // --- Notification helpers ---
+          var notifUnread = 0;
+
+          function updateNotifBadge(count) {
+            notifUnread = count;
+            var badge = document.getElementById('notif-badge');
+            if (!badge) return;
+            if (count > 0) {
+              badge.textContent = count > 99 ? '99+' : count;
+              badge.style.display = '';
+            } else {
+              badge.style.display = 'none';
+            }
+          }
+
+          function addNotifToDropdown(msg) {
+            var list = document.getElementById('notif-list');
+            if (!list) return;
+            var placeholder = list.querySelector('.text-muted');
+            if (placeholder) list.innerHTML = '';
+
+            var div = document.createElement('div');
+            div.className = 'notif-item notif-unread notif-severity-' + (msg.severity || 'info');
+            div.setAttribute('data-id', msg.id);
+            div.innerHTML = '<div class="notif-title"><i class="bi bi-' + esc(msg.icon || 'info-circle') + ' me-1"></i>' + esc(msg.title) + '</div>' +
+              (msg.body ? '<div class="notif-body">' + esc(msg.body).substring(0, 80) + '</div>' : '') +
+              '<div class="notif-time">Just now</div>';
+            div.addEventListener('click', function() {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'notification_read', id: msg.id }));
+              }
+              div.classList.remove('notif-unread');
+              if (msg.link) window.location.href = msg.link;
+            });
+            list.insertBefore(div, list.firstChild);
+            while (list.children.length > 10) list.removeChild(list.lastChild);
+          }
+
+          document.addEventListener('DOMContentLoaded', function() {
+            var markAllBtn = document.getElementById('notif-mark-all');
+            if (markAllBtn) {
+              markAllBtn.addEventListener('click', function() {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'notification_read_all' }));
+                }
+                document.querySelectorAll('.notif-unread').forEach(function(el) { el.classList.remove('notif-unread'); });
+                updateNotifBadge(0);
+              });
+            }
           });
 
           // Expose for chat initiation from other page scripts

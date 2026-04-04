@@ -164,6 +164,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
               |  Mail
               if pmUnreadCount && pmUnreadCount > 0
                 span.badge.bg-info.ms-1= pmUnreadCount
+          include ../partials/notificationBell
           li.nav-item.dropdown
             a.nav-link.dropdown-toggle(
               data-bs-toggle='dropdown'

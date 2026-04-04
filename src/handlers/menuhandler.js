@@ -28,6 +28,7 @@ import { SysInfo } from "./menucommands/sysInfo.js";
 import { BulletinViewer } from "./menucommands/bulletinViewer.js";
 import { QwkTransfer } from "./menucommands/qwkTransfer.js";
 import { NewsViewer } from "./menucommands/newsViewer.js";
+import { NotificationReader } from "./menucommands/notificationReader.js";
 import { FileNewscan } from "./menucommands/fileNewscan.js";
 
 // Models
@@ -1085,6 +1086,10 @@ class MenuHandler extends BaseHandler {
 
 			case "newsViewer":
 				this._runSubModule(new NewsViewer(this.call));
+				return;
+
+			case "notifications":
+				this._runSubModule(new NotificationReader(this.call));
 				return;
 
 			case "runXtrn":

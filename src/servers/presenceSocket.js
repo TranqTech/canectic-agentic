@@ -77,11 +77,20 @@ class PresenceServer {
 		var userId = parseInt(session.id);
 		var username = session.username || 'Unknown';
 
+		// Check sysop status for notification routing
+		var isSysop = false;
+		var perms = Array.isArray(session.permissionflags) ? session.permissionflags : [];
+		var security = parseInt(session.security) || 0;
+		if (security >= appConfig.getNumber('adminsecurity', 200) && perms.includes('Sysop')) {
+			isSysop = true;
+		}
+
 		this.clients.set(ws, {
 			userId: userId,
 			username: username,
 			alive: true,
-			sessionid: sessionid
+			sessionid: sessionid,
+			_isSysop: isSysop
 		});
 
 		// Add to reverse index
@@ -109,6 +118,9 @@ class PresenceServer {
 
 		// Send initial state
 		ws.send(JSON.stringify({ type: 'connected', username: username }));
+
+		// Send unread notification count
+		this._sendNotificationCount(ws, userId, isSysop);
 
 		// Check for active chat session to restore
 		this._restoreChat(ws, userId);
@@ -157,6 +169,14 @@ class PresenceServer {
 
 				case 'chat_end':
 					await this._handleChatEnd(ws, client, msg);
+					break;
+
+				case 'notification_read':
+					await this._handleNotificationRead(ws, client, msg);
+					break;
+
+				case 'notification_read_all':
+					await this._handleNotificationReadAll(ws, client);
 					break;
 			}
 		} catch (err) {
@@ -461,6 +481,36 @@ class PresenceServer {
 		} catch (err) {
 			alogger.writeAlog(3, 'Chat teardown error: ' + err.message, 'redbright');
 		}
+	}
+
+	// -----------------------------------------------------------------------
+	// -----------------------------------------------------------------------
+	// Notifications
+	// -----------------------------------------------------------------------
+
+	async _sendNotificationCount(ws, userId, isSysop) {
+		try {
+			var notifMod = await import('../models/notifications.js');
+			var count = await notifMod.getUnreadCount(userId, isSysop);
+			this._sendJson(ws, { type: 'notification_count', count: count });
+		} catch (_) {}
+	}
+
+	async _handleNotificationRead(ws, client, msg) {
+		try {
+			var notifMod = await import('../models/notifications.js');
+			await notifMod.markRead(parseInt(msg.id), client.userId);
+			// Send updated count
+			await this._sendNotificationCount(ws, client.userId, client._isSysop);
+		} catch (_) {}
+	}
+
+	async _handleNotificationReadAll(ws, client) {
+		try {
+			var notifMod = await import('../models/notifications.js');
+			await notifMod.markAllRead(client.userId, client._isSysop);
+			this._sendJson(ws, { type: 'notification_count', count: 0 });
+		} catch (_) {}
 	}
 
 	// -----------------------------------------------------------------------

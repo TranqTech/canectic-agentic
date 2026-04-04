@@ -200,6 +200,12 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'web_chat_sound',           defaultValue: 'true',           type: 'boolean', category: 'chat',        description: 'Play notification sound on chat events (web UI)' },
 
 	// -----------------------------------------------------------------------
+	// Notifications
+	// -----------------------------------------------------------------------
+	{ key: 'notifications_enabled',          defaultValue: 'true',  type: 'boolean', category: 'system',      description: 'Enable the notification system' },
+	{ key: 'notifications_retention_days',   defaultValue: '30',    type: 'number',  category: 'maintenance', description: 'Days to keep read notifications before purge (0 = never purge)' },
+
+	// -----------------------------------------------------------------------
 	// Call Flow (web login experience)
 	// -----------------------------------------------------------------------
 	{ key: 'callflow_enabled',         defaultValue: 'true',           type: 'boolean', category: 'callflow',    description: 'Enable guided call flow on web login (announcements, callers, wall, newscan)' },

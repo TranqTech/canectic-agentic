@@ -73,6 +73,16 @@ async function handleRequest(ftnMessage) {
 	}
 
 	alogger.writeAlog(2, 'AreaFix: processed ' + commands.length + ' command(s) for ' + fromAddress, 'greenbright');
+
+	try {
+		var notif = await import('./notifications.js');
+		await notif.createSysop('areafix_request',
+			'AreaFix request from ' + fromAddress,
+			commands.length + ' command(s) from ' + (ftnMessage.FromUser || 'unknown'),
+			{ severity: 'info', icon: 'diagram-3' }
+		);
+	} catch (_) {}
+
 	result.status = true;
 	return result;
 }

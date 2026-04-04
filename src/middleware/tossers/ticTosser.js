@@ -869,6 +869,12 @@ async function moveToBad(filePath, filename, badDir) {
 	} catch (err) {
 		alogger.writeAlog(3, '[TIC] Could not move ' + filename + ' to bad: ' + err.message, 'yellow');
 	}
+	try {
+		var notif = await import('../../models/notifications.js');
+		await notif.createSysop('tic_error', 'Bad TIC file: ' + filename, 'Moved to ' + badDir, {
+			severity: 'danger', icon: 'exclamation-triangle'
+		});
+	} catch (_) {}
 }
 
 /**

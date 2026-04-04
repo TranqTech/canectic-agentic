@@ -1,0 +1,50 @@
+extends ../layouts/user
+
+block content
+  .container.mt-4
+    if !currentuser
+      .alert.alert-warning Please log in to view notifications.
+    else
+      .d-flex.justify-content-between.align-items-center.mb-3
+        h3
+          i.bi.bi-bell.me-2
+          | Notifications
+          if unreadCount > 0
+            span.badge.bg-danger.ms-2= unreadCount
+        if notifications && notifications.length > 0
+          form(method='POST' action='/notifications/read-all' style='display:inline')
+            button.btn.btn-sm.btn-outline-secondary(type='submit')
+              i.bi.bi-check-all.me-1
+              | Mark All Read
+
+      if notifications && notifications.length > 0
+        each n in notifications
+          .card.mb-2(class=n.read ? '' : 'border-primary')
+            .card-body.py-2.px-3
+              .d-flex.justify-content-between.align-items-start
+                div
+                  span(class='text-' + (n.severity === 'danger' ? 'danger' : n.severity === 'warning' ? 'warning' : n.severity === 'success' ? 'success' : 'info'))
+                    i(class='bi bi-' + (n.icon || 'info-circle'))
+                    strong.ms-1= n.title
+                  if !n.read
+                    span.badge.bg-primary.ms-2 New
+                  if n.body
+                    p.mb-0.mt-1.text-muted(style='font-size:0.9rem')= n.body
+                .text-end
+                  small.text-muted= n.created_at ? new Date(n.created_at).toLocaleString() : ''
+                  if n.link
+                    a.btn.btn-sm.btn-outline-info.ms-2(href=n.link)
+                      i.bi.bi-arrow-right
+                  if !n.read
+                    form.d-inline(method='POST' action='/notifications/read/' + n.id)
+                      button.btn.btn-sm.btn-outline-secondary.ms-1(type='submit' title='Mark read')
+                        i.bi.bi-check
+
+        if page > 1
+          a.btn.btn-sm.btn-outline-secondary.me-2(href='/notifications?page=' + (page - 1)) Previous
+        a.btn.btn-sm.btn-outline-secondary(href='/notifications?page=' + (page + 1)) Next
+      else
+        .text-center.py-5.text-muted
+          i.bi.bi-bell-slash(style='font-size:3rem; color:#555')
+          h5.mt-3 No notifications
+          p.text-muted Notifications will appear here when events occur.

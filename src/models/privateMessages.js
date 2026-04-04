@@ -307,6 +307,16 @@ async function deliverMessage(messageObj) {
     retObj.status = true;
     retObj.insertId = result.insertId;
     retObj.uuid = insertObj.uuid;
+
+    // Notify recipient
+    try {
+      var notif = await import('./notifications.js');
+      await notif.create(messageObj.user_id, 'pm_received',
+        'New PM from ' + (messageObj.from_user || 'Unknown'),
+        messageObj.subject || '(no subject)',
+        { link: '/pm/inbox', icon: 'envelope', severity: 'info' }
+      );
+    } catch (_) {}
   } else {
     retObj.errormessages = result.errormessages;
     alogger.writeAlog(2, "PM delivery failed: " + result.errormessages.join(', '), "redbright");
@@ -802,6 +812,17 @@ async function insertUndeliverable(messageObj, reason) {
   if (!result.status) {
     alogger.writeAlog(2, "Failed to insert undeliverable PM: " + result.errormessages.join(', '), "redbright");
   }
+
+  // Notify sysop
+  try {
+    var notif = await import('./notifications.js');
+    await notif.createSysop('pm_undeliverable',
+      'Undeliverable PM to "' + (messageObj.to_user || 'unknown') + '"',
+      'From: ' + (messageObj.from_user || 'unknown') + ', Subject: ' + (messageObj.subject || '(none)') + ', Reason: ' + (reason || 'unknown'),
+      { severity: 'warning', icon: 'envelope-x', link: '/pm/undeliverable' }
+    );
+  } catch (_) {}
+
   return result;
 }
 

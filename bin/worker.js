@@ -330,6 +330,12 @@ function createMaintenanceProcessor() {
 				await privateMessages.purgeDeleted(job.data.days);
 				break;
 
+			case 'purge-notifications': {
+				var notifMod = await import("../src/models/notifications.js");
+				await notifMod.purgeOld(job.data.days);
+				break;
+			}
+
 			case 'purge-tossed': {
 				var tossedDir = appConfig.get('ftntossed', 'ftn/tossed');
 				var keepDays = job.data.days || 7;

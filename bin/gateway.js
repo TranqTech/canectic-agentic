@@ -137,6 +137,10 @@ async function prerunMaint(){
 	var pmAttachments = await import("../src/models/pmAttachments.js");
 	await pmAttachments.ensureTable();
 
+	// Ensure notifications table
+	var notifMod = await import("../src/models/notifications.js");
+	await notifMod.ensureTable();
+
 	// Ensure FREQ magic table
 	var freqMod = await import("../src/models/freq.js");
 	await freqMod.ensureTable();
@@ -211,11 +215,15 @@ async function startWebsockets(){
 		}
 	}
 
-	// Register presence WebSocket (heartbeat/online tracking, future IM)
+	// Register presence WebSocket (heartbeat/online tracking, chat, notifications)
 	presenceServer = new PresenceServer();
 	presenceServer.init(httpServer);
 	wsManager.registerHandler('/ws/presence', presenceServer);
 	alogger.writeAlog(2, "  Presence WebSocket registered on /ws/presence", "cyan");
+
+	// Connect notification system to PresenceServer for real-time push
+	var notifConnect = await import("../src/models/notifications.js");
+	notifConnect.setPresenceServer(presenceServer);
 
 	servercount += 1
 	callservcount += 1

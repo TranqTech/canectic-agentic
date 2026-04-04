@@ -1250,4 +1250,48 @@ router.post('/qwk/upload', repUpload.single('repfile'), async (req, res) => {
 	res.redirect('/qwk');
 });
 
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+import * as notifications from '../models/notifications.js';
+
+router.get('/notifications', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/users/login');
+
+	var userId = parseInt(currentuser.id);
+	var isSysop = !!(currentuser.permissionflags && currentuser.permissionflags.includes && currentuser.permissionflags.includes('Sysop'));
+	var page = parseInt(req.query.page) || 1;
+	var limit = 50;
+	var offset = (page - 1) * limit;
+
+	var notifList = await notifications.getAll(userId, isSysop, limit, offset);
+	var unreadCount = await notifications.getUnreadCount(userId, isSysop);
+
+	res.render('notifications/index', {
+		title: 'Notifications',
+		activelink: '',
+		currentuser: currentuser,
+		notifications: notifList,
+		unreadCount: unreadCount,
+		page: page
+	});
+});
+
+router.post('/notifications/read/:id', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/users/login');
+	await notifications.markRead(parseInt(req.params.id), parseInt(currentuser.id));
+	res.redirect('/notifications');
+});
+
+router.post('/notifications/read-all', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/users/login');
+	var isSysop = !!(currentuser.permissionflags && currentuser.permissionflags.includes && currentuser.permissionflags.includes('Sysop'));
+	await notifications.markAllRead(parseInt(currentuser.id), isSysop);
+	res.redirect('/notifications');
+});
+
 export{router}

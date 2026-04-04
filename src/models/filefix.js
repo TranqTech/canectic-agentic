@@ -64,6 +64,16 @@ async function handleRequest(ftnMessage) {
 	}
 
 	alogger.writeAlog(2, 'FileFix: processed ' + commands.length + ' command(s) for ' + fromAddress, 'greenbright');
+
+	try {
+		var notif = await import('./notifications.js');
+		await notif.createSysop('filefix_request',
+			'FileFix request from ' + fromAddress,
+			commands.length + ' command(s) from ' + (ftnMessage.FromUser || 'unknown'),
+			{ severity: 'info', icon: 'file-earmark-arrow-down' }
+		);
+	} catch (_) {}
+
 	result.status = true;
 	return result;
 }

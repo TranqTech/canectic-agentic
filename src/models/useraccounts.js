@@ -202,6 +202,16 @@ async function createNewUser(newrecord) {
 				alogger.writeAlog(3, "createNewUser: pointer init failed for user " + dbres.insertId + ": " + (e.message || e), "yellow");
 			}
 
+			// Notify sysop of new registration
+			try {
+				var notif = await import('./notifications.js');
+				await notif.createSysop('user_registered',
+					'New user registered: ' + rec.username,
+					'Location: ' + (rec.location || 'N/A'),
+					{ severity: 'info', icon: 'person-plus', link: '/admin/users' }
+				);
+			} catch (_) {}
+
 			// Send email/netmail verification code (non-blocking)
 			if (recmail) {
 				try {

@@ -44,6 +44,20 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily notification purge
+		// -----------------------------------------------------------------
+		var notifRetention = appConfig.getNumber('notifications_retention_days', 30);
+		if (notifRetention > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-notifications-daily', {
+				pattern: '0 2 30 * * *',   // 2:30 AM daily
+			}, {
+				name: 'purge-notifications',
+				data: { days: notifRetention },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily tossed packet purge
 		// -----------------------------------------------------------------
 		var keepDays = appConfig.getNumber('ftn_keep_tossed_days', 7);
