@@ -210,8 +210,9 @@ class PresenceServer {
 	_pruneDeadConnections() {
 		for (var [ws, client] of this.clients) {
 			if (!client.alive) {
-				// Allow 2 missed cycles before terminating (handles Chromium background throttling)
-				if (client._missedChecks >= 2) {
+				// Allow 5 missed cycles (~2.5 min) before terminating.
+				// Keeps presence stable across tab switches and brief backgrounding.
+				if (client._missedChecks >= 5) {
 					ws.terminate();
 					continue;
 				}

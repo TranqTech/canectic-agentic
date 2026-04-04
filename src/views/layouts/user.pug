@@ -327,22 +327,9 @@ html
             }
           };
 
-          // Pause heartbeat when tab hidden, resume/reconnect when visible
+          // Reconnect when background tab returns to foreground (if socket died)
           document.addEventListener('visibilitychange', function() {
-            if (document.hidden) {
-              if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-              return;
-            }
-            // Tab visible again: restart heartbeat if connected, or reconnect
-            if (ws && ws.readyState === WebSocket.OPEN && !heartbeatTimer) {
-              heartbeatTimer = setInterval(function() {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ type: 'heartbeat' }));
-                }
-              }, 60000);
-              // Send an immediate heartbeat to refresh alive status
-              ws.send(JSON.stringify({ type: 'heartbeat' }));
-            }
+            if (document.hidden) return;
             if (window._sessionExpired) {
               window.location.href = '/users/login';
               return;
