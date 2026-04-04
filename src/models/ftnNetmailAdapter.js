@@ -72,6 +72,16 @@ async function importFtnNetmail(ftnMessage) {
       } catch (afErr) {
         alogger.writeAlog(3, "AreaFix handler error: " + afErr.message, "redbright");
       }
+    } else if (retObj.processor === 'filefix' || retObj.processor === 'filemgr' || retObj.processor === 'tic') {
+      try {
+        var filefix = await import('./filefix.js');
+        var ffResult = await filefix.handleRequest(ftnMessage);
+        if (ffResult.responseLines && ffResult.responseLines.length > 0) {
+          retObj.responseMessage = filefix.buildResponse(ftnMessage, ffResult.responseLines, 'FileFix');
+        }
+      } catch (ffErr) {
+        alogger.writeAlog(3, "FileFix handler error: " + ffErr.message, "redbright");
+      }
     }
 
     return retObj;
