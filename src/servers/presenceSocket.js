@@ -131,10 +131,17 @@ class PresenceServer {
 
 		try {
 			switch (msg.type) {
-				case 'heartbeat':
+				case 'heartbeat': {
+					// Validate session still exists (catches mid-session expiry)
+					var hbSession = await sessionStore.sessionGet(client.sessionid);
+					if (!hbSession || !hbSession.id) {
+						ws.close(4001, 'Session expired');
+						return;
+					}
 					markOnline(client.userId, client.username);
 					ws.send(JSON.stringify({ type: 'heartbeat_ack' }));
 					break;
+				}
 
 				case 'chat_initiate':
 					await this._handleChatInitiate(ws, client, msg);

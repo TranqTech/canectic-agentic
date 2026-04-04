@@ -39,11 +39,17 @@ html
           var reconnectDelay = 5000;
           var chatState = { chatId: null, minimised: false, unread: 0, role: null, mode: null };
 
+          var reconnectAttempts = 0;
+          var maxReconnectDelay = 60000;
+          var heartbeatTimer = null;
+
           function connect() {
             try {
               ws = new WebSocket(wsProto + '//' + location.host + '/ws/presence');
               ws.onopen = function() {
-                setInterval(function() {
+                reconnectAttempts = 0;
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                heartbeatTimer = setInterval(function() {
                   if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'heartbeat' }));
                   }
@@ -52,11 +58,22 @@ html
               ws.onmessage = function(ev) {
                 try { var msg = JSON.parse(ev.data); handlePresenceMsg(msg); } catch(_) {}
               };
-              ws.onclose = function() {
-                setTimeout(connect, reconnectDelay);
+              ws.onclose = function(ev) {
+                if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+                // 4001 = session expired or invalid -- redirect to login
+                if (ev.code === 4001) {
+                  window.location.href = '/users/login';
+                  return;
+                }
+                // Exponential backoff: 5s, 10s, 20s, 40s... max 60s
+                reconnectAttempts++;
+                var delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
+                setTimeout(connect, delay);
               };
             } catch (_) {
-              setTimeout(connect, reconnectDelay);
+              reconnectAttempts++;
+              var delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
+              setTimeout(connect, delay);
             }
           }
 
