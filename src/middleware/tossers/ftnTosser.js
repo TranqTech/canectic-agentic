@@ -525,6 +525,18 @@ async function TossInboundFile(pktfilepath, movepktpath){
 					returnObj.pktimportcount ++
 				}
 				returnObj.pktsuccesscount ++
+
+				// If a processor generated a response message, queue it for outbound
+				if (result.responseMessage) {
+					try {
+						var respPkt = WritePkts([result.responseMessage])
+						if (respPkt && respPkt.pktcount > 0) {
+							alogger.writeClog(3, 'Queued processor response netmail to ' + result.responseMessage.Destination, 'tosser', 'cyan', false, false)
+						}
+					} catch (respErr) {
+						alogger.writeClog(3, 'Failed to queue processor response: ' + respErr.message, 'tosser', 'redbright', false, false)
+					}
+				}
 			}else{
 				//
 			}
@@ -605,6 +617,18 @@ async function OldTossInbound(inboundDir){
 						pktimportcount ++
 					}
 					pktsuccesscount ++
+
+					// Queue processor response if generated
+					if (result.responseMessage) {
+						try {
+							var respPkt = WritePkts([result.responseMessage])
+							if (respPkt && respPkt.pktcount > 0) {
+								alogger.writeClog(3, 'Queued processor response netmail to ' + result.responseMessage.Destination, 'tosser', 'cyan', false, false)
+							}
+						} catch (respErr) {
+							alogger.writeClog(3, 'Failed to queue processor response: ' + respErr.message, 'tosser', 'redbright', false, false)
+						}
+					}
 				}else{
 					//
 				}

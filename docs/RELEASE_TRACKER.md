@@ -204,7 +204,7 @@ Last updated: 2026-03-31
 | 21 | FTN netmail file attach | [x] | Inbound: recognize file-attach flag, link received files to netmail PM. Outbound: place attachment in BSO for binkp delivery. |
 | 22 | PM file attachments | [x] | Full attachment system across all transports (LOCAL, EMAIL, FTN, Web, IMAP, terminal indicator). pm_attachments table, disk storage, config limits. |
 | 23 | Session management | [x] | Remember Me, configurable session TTL, Log Out All Other Sessions, admin kill sessions |
-| 24 | AreaFix | [ ] | Automated echomail area management via netmail commands (subscribe, unsubscribe, list, query). Processor routing exists in ftnNetmailAdapter. |
+| 24 | AreaFix | [x] | Automated echomail area management via netmail commands (+subscribe, -unsubscribe, %LIST, %QUERY, %HELP, %PAUSE, %RESUME). Password auth, auto-response netmail. |
 | 25 | FileFix | [ ] | Automated TIC file area management via netmail commands (subscribe, unsubscribe, list). Parallel to AreaFix for file distribution. |
 | 26 | FREQ (File Request) | [ ] | Inbound .req file handling during binkp sessions. Serve requested files from file areas or a magic filebox. |
 | 27 | areas.bbs export | [ ] | Generate areas.bbs from network area mappings for downstream nodes. Admin download per network. |

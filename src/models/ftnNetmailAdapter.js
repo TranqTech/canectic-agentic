@@ -60,8 +60,20 @@ async function importFtnNetmail(ftnMessage) {
     retObj.status = true;
     retObj.processor = ftnMessage.ToUser.trim().toLowerCase();
     alogger.writeAlog(1, "FTN netmail routed to processor: " + retObj.processor, "cyan");
-    // TODO: route to actual processor handler. For now, log and return.
-    // Future: areafix.handleRequest(ftnMessage), etc.
+
+    // Route to the appropriate processor handler
+    if (retObj.processor === 'areafix' || retObj.processor === 'areamgr') {
+      try {
+        var areafix = await import('./areafix.js');
+        var afResult = await areafix.handleRequest(ftnMessage);
+        if (afResult.responseLines && afResult.responseLines.length > 0) {
+          retObj.responseMessage = areafix.buildResponse(ftnMessage, afResult.responseLines, 'AreaFix');
+        }
+      } catch (afErr) {
+        alogger.writeAlog(3, "AreaFix handler error: " + afErr.message, "redbright");
+      }
+    }
+
     return retObj;
   }
 
