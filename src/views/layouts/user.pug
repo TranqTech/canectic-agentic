@@ -62,7 +62,6 @@ html
                 if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
                 // 4001 = session expired or invalid
                 if (ev.code === 4001) {
-                  // If tab is visible, redirect immediately. If background, defer to visibilitychange.
                   if (!document.hidden) {
                     window.location.href = '/users/login';
                   } else {
@@ -70,12 +69,20 @@ html
                   }
                   return;
                 }
-                // Exponential backoff: 5s, 10s, 20s, 40s... max 60s
+                // Only reconnect if tab is visible. Background tabs defer to visibilitychange.
+                if (document.hidden) {
+                  window._needsReconnect = true;
+                  return;
+                }
                 reconnectAttempts++;
                 var delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
                 setTimeout(connect, delay);
               };
             } catch (_) {
+              if (document.hidden) {
+                window._needsReconnect = true;
+                return;
+              }
               reconnectAttempts++;
               var delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
               setTimeout(connect, delay);
@@ -327,7 +334,8 @@ html
               window.location.href = '/users/login';
               return;
             }
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
+            if (window._needsReconnect || !ws || ws.readyState !== WebSocket.OPEN) {
+              window._needsReconnect = false;
               reconnectAttempts = 0;
               connect();
             }

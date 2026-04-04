@@ -57,11 +57,19 @@ html
                   }
                   return;
                 }
+                if (document.hidden) {
+                  window._needsReconnect = true;
+                  return;
+                }
                 reconnectAttempts++;
                 var delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
                 setTimeout(connect, delay);
               };
             } catch (_) {
+              if (document.hidden) {
+                window._needsReconnect = true;
+                return;
+              }
               reconnectAttempts++;
               var delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
               setTimeout(connect, delay);
@@ -313,7 +321,8 @@ html
               window.location.href = '/users/login';
               return;
             }
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
+            if (window._needsReconnect || !ws || ws.readyState !== WebSocket.OPEN) {
+              window._needsReconnect = false;
               reconnectAttempts = 0;
               connect();
             }
