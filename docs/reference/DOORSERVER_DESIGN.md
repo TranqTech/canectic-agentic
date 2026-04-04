@@ -187,7 +187,7 @@ External sysop manages their BBS registration: update BBS name, location, change
 
 ## Considerations
 
-- **Node allocation**: doorserver sessions need node numbers. Could share the main pool or have a separate range. Separate range prevents doorserver load from blocking local users.
+- **Node allocation**: doorserver sessions use the same node pool as local sessions (single gateway process, shared event loop). No separate range needed. Door-level `max_users` and BBS-level `max_concurrent` handle capacity.
 - **Caller logging**: doorserver sessions should log as a distinct source type (like "Doorserver") in the callers table.
 - **Who's Online**: doorserver sessions should show with a "Doorserver" badge and the remote BBS name.
 - **Capacity planning**: a popular door could have many remote BBSes launching it simultaneously. The door-level `max_users` setting already handles this, but sysops need visibility.
