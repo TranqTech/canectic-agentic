@@ -391,3 +391,17 @@ export async function enqueueNodelistImport(opts = {}) {
 		jobId: `import-nodelist--${opts.networkId || 'unknown'}--${Date.now()}`,
 	});
 }
+
+export async function enqueueScanNodelists() {
+	return maintenanceQueue.add('scan-nodelists', {}, {
+		jobId: 'scan-nodelists-manual',
+	});
+}
+
+export async function enqueuePurgeTossed(days) {
+	return maintenanceQueue.add('purge-tossed', {
+		days: days || appConfig.getNumber('ftn_keep_tossed_days', 7),
+	}, {
+		jobId: 'purge-tossed-manual',
+	});
+}
