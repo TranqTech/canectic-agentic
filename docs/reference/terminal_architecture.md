@@ -1254,6 +1254,7 @@ Key differences from `msgReader`:
 - **Cursor positioning**: Starts on first unread message, or last message if all read
 - **Smart date column** (9 chars): Today → `15:45    `, Yesterday → `Yesterday`, Older → `Mar 18'25`
 - **Compose/Reply**: Spawns `pmEditor` with transport and address context
+- **Attachment indicator**: Messages with `has_attachments=true` display `"[Attachments available -- use web or IMAP to download]"` below the message body. Terminal users cannot download attachments directly.
 
 ### PM Editor (`handlers/menucommands/pmEditor.js`)
 

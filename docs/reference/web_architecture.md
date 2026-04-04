@@ -52,7 +52,7 @@ Standard Express 4 setup with Pug view engine.
 | `/` | `indexRouter` (`src/routes/index.js`) | Public landing page + message browsing/posting |
 | `/admin` | `adminRouter` (`src/routes/admin.js`) | Admin panel — all admin routes are prepended with `/admin` |
 | `/users` | `usersRouter` (`src/routes/users.js`) | Authentication (login/logout/register) |
-| `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply, AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
+| `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply with multer file attachments, attachment download (`/pm/attachment/:id` with ownership check), AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
 | `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
 | `/doors` | `doorsRouter` (`src/routes/doors.js`) | Door listing and web door launcher |
 | `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion |
@@ -88,10 +88,23 @@ A reverse lookup maps `session_index:{username}` → Set of session IDs. This en
 | Exists | `sessionExists(id)` | Boolean check |
 | List | `sessionList()` | Returns all session keys (admin use) |
 | Bulk update | `sessionUpdateUser(username, fields)` | Updates fields on all sessions for a username |
+| Kill all | `sessionDestroyAllForUser(username, exceptId)` | Destroys all sessions for a user except the current one (Log Out All Other Sessions) |
+
+### Session TTL
+
+Default session TTL is 12 hours (`session_ttl` config key, in seconds). The TTL is stored per-session in the Redis hash so that `sessionRenew()` uses the correct value for each session rather than a global default. Remember Me sessions use a longer TTL based on `remember_me_days` (default 14 days).
 
 ### Cookie
 
-Session ID is stored in a `sessionid` HTTP-only cookie. Max age 7 days. Domain set from `process.env.sitetld`. SameSite `lax`.
+Session ID is stored in a `sessionid` HTTP-only cookie. Max age matches the session TTL (12 hours default, or Remember Me duration). Domain set from `process.env.sitetld`. SameSite `lax`.
+
+### Remember Me
+
+The login form includes a "Remember Me" checkbox. When checked, the session is created with a TTL of `remember_me_days` (default 14) converted to seconds, and the cookie max age is extended to match. The per-session TTL storage ensures correct renewal regardless of the Remember Me setting.
+
+### Log Out All Other Sessions
+
+Available on the user profile page. Requires password confirmation. Calls `sessionDestroyAllForUser(username, currentSessionId)` to remove all sessions except the current one from Redis. Admin users can also kill all sessions for any user via the admin user management panel.
 
 ---
 

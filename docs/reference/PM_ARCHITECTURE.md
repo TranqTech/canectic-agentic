@@ -19,7 +19,8 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | File | Location | Purpose |
 |------|----------|---------|
 | `privateMessages.js` | `src/models/` | Unified PM model. Transport access control, recipient resolution, inbox/outbox/trash CRUD, delivery pipeline, dupe checking, undeliverable queue, sysop notifications, soft delete with trash purge. On non-LOCAL `queueMessage()` and `queueOutbound()`, triggers outbound toss via BullMQ job queue (FTN → `enqueueFtnOutbound`, QWK → `enqueueQwkPushAll`, EMAIL → `enqueueEmailOutbound`). Dynamic import of queue module — gracefully skips if queue infrastructure is unavailable. |
-| `ftnNetmailAdapter.js` | `src/models/` | FTN↔PM bridge. Converts between FTN Message objects and PM objects. Handles inbound routing (local delivery, relay, automated processors). |
+| `pmAttachments.js` | `src/models/` | PM file attachment model. CRUD for `pm_attachments` table, disk storage management (`{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`), attachment linking by `message_uuid`, ownership verification for downloads. |
+| `ftnNetmailAdapter.js` | `src/models/` | FTN↔PM bridge. Converts between FTN Message objects and PM objects. Handles inbound routing (local delivery, relay, automated processors). Parses file-attach flag (0x0010) on inbound netmail and links attached files. |
 | `flash.js` | `src/middleware/db/` | Session-scoped flash messages via Redis. Used by PM routes for user feedback on compose/reply/delete/restore actions. Generic — usable by any route. |
 
 ### Routes
@@ -157,6 +158,24 @@ Sysop review queue for messages that could not be delivered automatically.
 | `action_taken` | TEXT | 'delivered', 'deleted', 'returned' |
 | `delivered_to` | INTEGER | FK to users — if manually delivered |
 | `created_at` | TIMESTAMP | |
+
+### pm_attachments
+
+File attachments linked to private messages. One row per attached file.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | BIGSERIAL | Primary key |
+| `message_uuid` | UUID | FK to pm_inbox/pm_outbox uuid |
+| `filename` | TEXT | Original filename |
+| `disk_path` | TEXT | Relative path under `pm_attachment_dir` |
+| `size` | BIGINT | File size in bytes |
+| `mime_type` | TEXT | MIME content type |
+| `created_at` | TIMESTAMP | Row creation time |
+
+Both `pm_inbox` and `pm_outbox` include a `has_attachments` boolean column (DEFAULT false) for fast filtering without joining the attachments table.
+
+Attachment files are stored at `{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`, where `pm_attachment_dir` is configured via appConfig (default `data/pm_attachments`). The `YYYY-MM` prefix provides natural archiving and prevents any single directory from growing too large.
 
 ---
 
@@ -706,6 +725,53 @@ Enqueues each task as a separate job on the BullMQ maintenance queue. The worker
 ### Queue-Based Scheduling
 
 PM trash purge runs automatically via a BullMQ repeatable job (daily at 3:00 AM). body_html regeneration and trash purge can also be triggered from the admin panel via the `maintenance` queue. The CLI tools remain available for manual runs and cron compatibility. See `PROCESS_ARCHITECTURE.md` for queue job definitions and scheduling.
+
+---
+
+## Attachments
+
+Private messages support file attachments across all transport types. Attachments are stored on disk and tracked in the `pm_attachments` table, linked to messages by `message_uuid`. The `has_attachments` boolean on `pm_inbox`/`pm_outbox` enables fast filtering without joining.
+
+### Configuration
+
+| Key | Default | Category | Description |
+|-----|---------|----------|-------------|
+| `pm_attachment_dir` | `data/pm_attachments` | pm | Base directory for attachment storage |
+| `pm_max_attachment_size` | `10485760` (10MB) | pm | Maximum size per attachment in bytes |
+| `pm_max_attachments` | `5` | pm | Maximum attachments per message |
+
+### Storage Layout
+
+```
+{pm_attachment_dir}/
+  2026-04/
+    {message-uuid}/
+      document.pdf
+      image.jpg
+  2026-03/
+    {message-uuid}/
+      report.txt
+```
+
+The `YYYY-MM` prefix provides natural archiving and prevents any single directory from growing too large.
+
+### Transport Coverage
+
+**LOCAL**: Attachment files are stored once on disk. Both the inbox and outbox rows reference the same files via `message_uuid`, so LOCAL messages share a single copy.
+
+**EMAIL inbound**: The SMTP inbound handler (`smtpServer.js`) extracts MIME attachments from multipart messages. Recursive nested multipart structures are traversed. Base64 and quoted-printable content-transfer-encodings are decoded. Extracted files are saved to disk and linked to the delivered PM.
+
+**EMAIL outbound**: Attachments are passed through to nodemailer as attachment objects in `emailTosser.js`. The relay handles MIME encoding for delivery.
+
+**FTN inbound**: The FTN tosser parses the file-attach flag (attribute word bit 0x0010) from type-2 packet netmail headers. When set, files delivered during the binkp session are linked to the netmail PM from the `ftn/in` directory.
+
+**FTN outbound**: When a PM with attachments is tossed outbound, the file-attach flag (0x0010) is set on the FTN message attribute word. Attachment file paths are written as entries in the BSO `.flo` flow file for binkp delivery alongside the `.pkt`.
+
+**Web**: The compose and reply forms use multer for multipart file upload. Uploaded files are validated against `pm_max_attachment_size` and `pm_max_attachments` limits. The download route (`GET /pm/attachment/:id`) verifies ownership (sender or recipient) before serving the file.
+
+**IMAP**: The IMAP adapter renders messages with attachments as `multipart/mixed` in the BODYSTRUCTURE response. Full RFC 2822 message rendering includes base64-encoded attachment MIME parts, so mail clients can download attachments natively.
+
+**Terminal**: The PM reader displays an indicator line when a message has attachments: `"[Attachments available -- use web or IMAP to download]"`. Terminal users cannot download attachments directly due to the interactive transfer protocol constraints.
 
 ---
 

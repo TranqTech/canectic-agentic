@@ -2,6 +2,27 @@
 
 ## Pending Release (since v0.9.1-alpha.1)
 
+### PM File Attachments
+- File attachments on private messages across all transport types
+- `pm_attachments` table linked by `message_uuid`, `has_attachments` boolean on pm_inbox/pm_outbox
+- Attachment storage: `{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`
+- Config keys: `pm_attachment_dir`, `pm_max_attachment_size` (10MB default), `pm_max_attachments` (5 default)
+- LOCAL: shared file on disk, refs in both inbox and outbox
+- EMAIL inbound: SMTP MIME multipart extraction with recursive nested multipart, base64/QP decode
+- EMAIL outbound: nodemailer attachment passthrough
+- FTN inbound: file-attach flag (0x0010) parsed from type-2 packet, files linked from ftn/in
+- FTN outbound: flag set on attribute word, .flo flow file entries written for binkp delivery
+- Web: multer upload on compose/reply forms, download route with ownership check
+- IMAP: dynamic BODYSTRUCTURE (multipart/mixed), full RFC 2822 rendering with base64 attachment parts
+- Terminal: text indicator "[Attachments available -- use web or IMAP to download]"
+
+### Session Management
+- Remember Me checkbox on login (configurable via `remember_me_days`, default 14)
+- Session TTL default 12 hours (`session_ttl` config key), stored per-session for correct renewal
+- Log Out All Other Sessions on user profile (password protected)
+- Admin Kill Sessions button on user management page
+- Node >= 18.0.0 engine requirement added to package.json
+
 ### Web Art and Seasonal Art
 - Web art system: images served from `txtfiles/webart/{arttype}/` (PNG, JPG, SVG, GIF, WebP)
 - Random image selection per page load for call flow welcome splash

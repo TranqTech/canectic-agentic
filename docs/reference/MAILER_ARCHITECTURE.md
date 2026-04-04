@@ -655,7 +655,7 @@ Items 8–10 from the original plan (resume support, CRAM-MD5, poll scheduling) 
 ### Phase 5: Advanced Features
 
 22. **TLS support** — for both TCP and WebSocket transports
-23. **File attach handling** — file attach netmail integration (`.flo` flow file parsing is implemented in Phase 1's session controller; this covers the netmail attach workflow)
+23. ~~**File attach handling**~~ — **DONE.** Inbound: FTN tosser parses the file-attach flag (attribute word bit 0x0010) from type-2 packet netmail and links received files from `ftn/in` to the PM via `pm_attachments`. Outbound: tosser sets the file-attach flag on the attribute word and writes attachment paths as `.flo` flow file entries for binkp delivery. See `PM_ARCHITECTURE.md` Attachments section.
 24. **TIC file processing** — receive TIC bundles, validate CRC, store in file areas
 25. **BSO zone directory support in tosser** — update `ftnTosser.js` to write packets and flow files to zone-specific outbound directories (`ftn/out.NNN/`) for alternate zones. The mailer already resolves zone directories.
 26. **Nodelist integration** — dial flags, system capabilities, phone/IP lookup

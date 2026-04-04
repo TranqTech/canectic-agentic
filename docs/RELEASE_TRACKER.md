@@ -111,6 +111,18 @@ Last updated: 2026-03-31
 - [x] Bounce notifications (undeliverable to sender inbox)
 - [x] Sysop notifications
 - [x] Soft delete with trash purge
+- [x] File attachments (pm_attachments table, disk storage, all transports)
+- [x] FTN file-attach flag (inbound parse + outbound .flo flow file entries)
+- [x] EMAIL MIME attachment extraction (inbound) and nodemailer passthrough (outbound)
+- [x] IMAP BODYSTRUCTURE multipart/mixed with base64 attachment parts
+- [x] Web multer upload on compose/reply, download with ownership check
+- [x] Terminal attachment indicator text
+
+### Session Management
+- [x] Remember Me checkbox (configurable days, default 14)
+- [x] Session TTL default 12 hours, per-session TTL storage for correct renewal
+- [x] Log Out All Other Sessions (password protected, user profile)
+- [x] Admin Kill Sessions button on user management
 
 ### Email Transport
 - [x] Outbound via SMTP smart relay (nodemailer)
@@ -190,6 +202,12 @@ Last updated: 2026-03-31
 | 19 | Top 10 lists | [ ] | Top posters, top downloaders, most active users (week/month). Web page + terminal command |
 | 20 | Birthday messages | [ ] | "Happy birthday" in call flow when users have birthdays today (birthdate column exists) |
 | 21 | FTN netmail file attach | [x] | Inbound: recognize file-attach flag, link received files to netmail PM. Outbound: place attachment in BSO for binkp delivery. |
+| 22 | PM file attachments | [x] | Full attachment system across all transports (LOCAL, EMAIL, FTN, Web, IMAP, terminal indicator). pm_attachments table, disk storage, config limits. |
+| 23 | Session management | [x] | Remember Me, configurable session TTL, Log Out All Other Sessions, admin kill sessions |
+| 24 | AreaFix | [ ] | Automated echomail area management via netmail commands (subscribe, unsubscribe, list, query). Processor routing exists in ftnNetmailAdapter. |
+| 25 | FileFix | [ ] | Automated TIC file area management via netmail commands (subscribe, unsubscribe, list). Parallel to AreaFix for file distribution. |
+| 26 | FREQ (File Request) | [ ] | Inbound .req file handling during binkp sessions. Serve requested files from file areas or a magic filebox. |
+| 27 | areas.bbs export | [ ] | Generate areas.bbs from network area mappings for downstream nodes. Admin download per network. |
 
 ---
 

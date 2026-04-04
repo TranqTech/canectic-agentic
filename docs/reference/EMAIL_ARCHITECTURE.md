@@ -69,7 +69,8 @@ User composes EMAIL PM (web, terminal, or mail client)
           → emailTosser.tossOutbound()
             → getPendingByTransport('EMAIL')
             → for each PM (up to email_max_outbound_batch):
-              → nodemailer.sendMail() to configured relay
+              → load pm_attachments if has_attachments=true
+              → nodemailer.sendMail() to configured relay (attachments passed through as nodemailer attachment objects)
               → success: markSent(id, 'EmailTosser')
               → 5xx permanent: markOutboxUndeliverable(id, reason)
                 → notifySenderUndeliverable() — bounce to sender inbox
@@ -89,7 +90,10 @@ External MTA receives email (MX, TLS, spam filtering)
         → rejects: external domains, .ftn, .qwk (no relay out)
       → DATA: _processInboundData()
         → parse RFC 2822 headers + body
-        → deliverMessage() to pm_inbox
+        → extract MIME attachments (recursive nested multipart traversal)
+          → base64 and quoted-printable content-transfer-encoding decoded
+          → files saved to pm_attachment_dir, linked via pm_attachments table
+        → deliverMessage() to pm_inbox (has_attachments=true if any)
           → transport_type: 'EMAIL'
           → transport_data: { email_address: senderEnvelope, inbound: true }
           → from_user: parsed display name from From header
