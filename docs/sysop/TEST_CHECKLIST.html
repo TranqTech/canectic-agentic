@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Canectic BBS - Pre-Release Test Checklist</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 11pt; max-width: 800px; margin: 20px auto; line-height: 1.6; }
+  h1 { font-size: 18pt; border-bottom: 2px solid #000; padding-bottom: 5px; }
+  h2 { font-size: 13pt; margin-top: 20px; margin-bottom: 5px; background: #eee; padding: 4px 8px; }
+  label { display: block; padding: 2px 0; cursor: pointer; }
+  input[type=checkbox] { width: 16px; height: 16px; margin-right: 8px; vertical-align: middle; }
+  .note { color: #666; font-size: 9pt; font-style: italic; margin-left: 28px; }
+  @media print {
+    body { font-size: 10pt; }
+    h2 { background: #ddd; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    input[type=checkbox] { -webkit-appearance: checkbox; appearance: checkbox; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Canectic BBS - Pre-Release Test Checklist</h1>
+<p>Date: _____________ &nbsp;&nbsp; Tester: _____________ &nbsp;&nbsp; Version: _____________</p>
+
+<h2>Web Call Flow</h2>
+<label><input type="checkbox"> Fresh login redirects to /callflow</label>
+<label><input type="checkbox"> Welcome stage shows BBS name (and web art if configured)</label>
+<label><input type="checkbox"> Announcements stage shows new + pinned announcements with theme colours on black bg</label>
+<label><input type="checkbox"> Last Callers stage shows recent callers with terminal colour classes</label>
+<label><input type="checkbox"> Who's Online stage shows terminal + web users</label>
+<label><input type="checkbox"> Wall stage shows messages, post input works inline, form disappears after posting</label>
+<label><input type="checkbox"> News files stage shows configured news files (skip if none configured)</label>
+<label><input type="checkbox"> New Messages stage shows summary without links</label>
+<label><input type="checkbox"> New Files stage shows summary without links</label>
+<label><input type="checkbox"> Continue button and Enter key advance stages</label>
+<label><input type="checkbox"> Skip All and Escape/S key jump to end</label>
+<label><input type="checkbox"> Stages with no data auto-skip</label>
+<label><input type="checkbox"> Progress text shows "Stage X of Y" at top</label>
+<label><input type="checkbox"> Call flow completion redirects to home page</label>
+<label><input type="checkbox"> Idle resume: leave tab open past idle threshold, see "Welcome back" bar</label>
+<label><input type="checkbox"> "Welcome back" bar links to /callflow and dismiss works</label>
+<label><input type="checkbox"> Wall post form reappears after idle resume</label>
+
+<h2>Session Management</h2>
+<label><input type="checkbox"> Login page shows "Remember Me (14 Days)" checkbox</label>
+<label><input type="checkbox"> Login WITHOUT Remember Me: session expires after ~12 hours</label>
+<label><input type="checkbox"> Login WITH Remember Me: session persists across browser close/reopen</label>
+<label><input type="checkbox"> Profile: "Log Out All Other Sessions" with password field</label>
+<label><input type="checkbox"> Correct password kills other sessions (test with two browsers)</label>
+<label><input type="checkbox"> Wrong password shows error, sessions preserved</label>
+<label><input type="checkbox"> Admin user list: "Kill Sessions" button works</label>
+<label><input type="checkbox"> Stale session: tab expires, redirects to login (not stuck)</label>
+<label><input type="checkbox"> PresenceSocket reconnects after brief network interruption</label>
+
+<h2>PM Attachments -- Web</h2>
+<label><input type="checkbox"> Compose (local): file upload field present, can attach files</label>
+<label><input type="checkbox"> Compose (network): file upload field present</label>
+<label><input type="checkbox"> Reply: file upload field present</label>
+<label><input type="checkbox"> Sent message: attachments shown with download links</label>
+<label><input type="checkbox"> Received message: attachments shown with download links</label>
+<label><input type="checkbox"> Download link works, correct filename and content</label>
+<label><input type="checkbox"> Access denied for non-owner attachment ID</label>
+<label><input type="checkbox"> Max file size enforced (>10MB rejected)</label>
+<label><input type="checkbox"> Max file count enforced (>5 files, extras dropped)</label>
+<label><input type="checkbox"> Terminal PM reader: shows "[Attachments available]" indicator</label>
+
+<h2>PM Attachments -- IMAP</h2>
+<label><input type="checkbox"> Mail client shows attachment indicator in message list</label>
+<label><input type="checkbox"> Opening message shows attachment(s) for download</label>
+<label><input type="checkbox"> Downloading attachment from mail client works correctly</label>
+
+<h2>PM Attachments -- SMTP</h2>
+<label><input type="checkbox"> Email with attachment TO BBS: arrives with attachment linked</label>
+<label><input type="checkbox"> PM with attachment FROM BBS via relay: recipient sees attachment</label>
+
+<h2>PM Attachments -- FTN</h2>
+<div class="note">Skip if no FTN peer available</div>
+<label><input type="checkbox"> Inbound file-attach netmail: file arrives and links to PM</label>
+<label><input type="checkbox"> Outbound PM with attachment: .flo entry created for binkp delivery</label>
+
+<h2>Web Sysop Chat</h2>
+<label><input type="checkbox"> NodeSpy dashboard shows web presence users alongside terminal nodes</label>
+<label><input type="checkbox"> Click "Chat" on web user: overlay appears on their browser</label>
+<label><input type="checkbox"> Messages flow both ways</label>
+<label><input type="checkbox"> User navigates to different page: chat persists (Redis restore)</label>
+<label><input type="checkbox"> Sysop can close chat (X button visible)</label>
+<label><input type="checkbox"> User can only minimise, not close sysop chat</label>
+<label><input type="checkbox"> Minimised badge shows unread count</label>
+<label><input type="checkbox"> Typing indicator works</label>
+
+<h2>User-to-User Telegrams</h2>
+<label><input type="checkbox"> Who's Online: "Message" button next to web users (not yourself)</label>
+<label><input type="checkbox"> Click button: chat overlay appears on both sides</label>
+<label><input type="checkbox"> Both parties can send and close the chat</label>
+<label><input type="checkbox"> Chat persists across page navigation</label>
+
+<h2>QWK Packets</h2>
+<label><input type="checkbox"> Web /qwk page shows subscribed count and new message count</label>
+<label><input type="checkbox"> Download QWK packet: correct .qwk file</label>
+<label><input type="checkbox"> Open in QWK reader: messages readable</label>
+<label><input type="checkbox"> Upload REP: messages posted to correct areas</label>
+<label><input type="checkbox"> Conference 0 replies delivered as PMs</label>
+<label><input type="checkbox"> "No new messages" when nothing to download</label>
+<label><input type="checkbox"> Terminal qwkTransfer: D/U/Q menu works</label>
+<label><input type="checkbox"> Terminal ZMODEM download/upload works</label>
+
+<h2>AreaFix / FileFix</h2>
+<div class="note">Requires FTN peer connection with areafix_password configured</div>
+<label><input type="checkbox"> %LIST: response lists all areas with * for subscribed</label>
+<label><input type="checkbox"> +AREATAG: area subscribed, confirmation in response</label>
+<label><input type="checkbox"> -AREATAG: area unsubscribed, confirmation in response</label>
+<label><input type="checkbox"> %QUERY: lists currently subscribed areas</label>
+<label><input type="checkbox"> %AREAS: returns areas.bbs format listing</label>
+<label><input type="checkbox"> %HELP: returns command reference</label>
+<label><input type="checkbox"> %PAUSE / %RESUME: toggles subscriptions</label>
+<label><input type="checkbox"> Wrong password: authentication failed response</label>
+<label><input type="checkbox"> FileFix: same commands work for file areas</label>
+
+<h2>FREQ (File Requests)</h2>
+<label><input type="checkbox"> Admin FREQ page: magic aliases list shows "FILES" default</label>
+<label><input type="checkbox"> Add / edit / delete magic alias works</label>
+<label><input type="checkbox"> Create file request: .req file created in BSO outbound</label>
+<label><input type="checkbox"> Filebox browser shows files in configured directory</label>
+<div class="note">Inbound .req processing requires FTN peer session</div>
+<label><input type="checkbox"> Inbound .req: requested files offered back to remote</label>
+
+<h2>areas.bbs Import / Export</h2>
+<label><input type="checkbox"> Upload areas.bbs: preview shows areatags with status</label>
+<label><input type="checkbox"> Per-area action dropdown: Create New or map existing</label>
+<label><input type="checkbox"> Allow/enable checkboxes default correctly</label>
+<label><input type="checkbox"> Execute creates areas and maps to network</label>
+<label><input type="checkbox"> Network detail page: "areas.bbs" download button works</label>
+<label><input type="checkbox"> Export file contains all network areas in correct format</label>
+
+<h2>News Files</h2>
+<label><input type="checkbox"> Admin: add news file with path to ANSI/ASCII file</label>
+<label><input type="checkbox"> Web call flow: news file shown as monospace card</label>
+<label><input type="checkbox"> Terminal newsViewer: full-screen display, key advance, ESC skip</label>
+<label><input type="checkbox"> Centre option works on wide terminals</label>
+
+<h2>Seasonal Art</h2>
+<label><input type="checkbox"> Admin: default seasons present (Christmas, Halloween, New Year)</label>
+<label><input type="checkbox"> Add season: directories created automatically</label>
+<label><input type="checkbox"> Delete with "delete directories": empty dirs removed</label>
+
+<h2>Menu Management</h2>
+<label><input type="checkbox"> Duplicate menu: new menu with all entries copied</label>
+<label><input type="checkbox"> Export JSON: valid file downloads</label>
+<label><input type="checkbox"> Import JSON: menu created from file</label>
+<label><input type="checkbox"> Import with name override works</label>
+
+<h2>Wall / Oneliners</h2>
+<label><input type="checkbox"> Post message: form disappears after posting</label>
+<label><input type="checkbox"> Revisit /wall: form still hidden</label>
+<label><input type="checkbox"> After idle resume: form reappears</label>
+<label><input type="checkbox"> Call flow: own username in bright yellow</label>
+<label><input type="checkbox"> Home page: Wall tab only visible when logged in</label>
+
+<h2>Home Page</h2>
+<label><input type="checkbox"> Announcements tab active by default</label>
+<label><input type="checkbox"> Wall tab visible only when logged in</label>
+<label><input type="checkbox"> Announcement cards: black bg with theme text colour</label>
+<label><input type="checkbox"> Pinned announcements show "Pinned" badge</label>
+
+<h2>Admin</h2>
+<label><input type="checkbox"> Dashboard: News Files button present</label>
+<label><input type="checkbox"> Jobs: "Scan Nodelists" button triggers job</label>
+<label><input type="checkbox"> Jobs: "Purge Tossed Packets" button triggers job</label>
+<label><input type="checkbox"> User Kill Sessions: confirm dialog, sessions killed</label>
+<label><input type="checkbox"> QWK Conference # field on message area editor</label>
+<label><input type="checkbox"> Nodelist view: filter buttons work without DataTables error</label>
+
+<h2>General</h2>
+<label><input type="checkbox"> Font size visibly larger than default Bootstrap (1.2rem)</label>
+<label><input type="checkbox"> Node version >= 18.0.0</label>
+<label><input type="checkbox"> npm test: all 1,948 tests pass</label>
+
+<p style="margin-top: 30px; border-top: 1px solid #ccc; padding-top: 10px; color: #999; font-size: 9pt;">
+Notes: _______________________________________________________________________________<br><br>
+_______________________________________________________________________________<br><br>
+_______________________________________________________________________________<br><br>
+_______________________________________________________________________________
+</p>
+
+</body>
+</html>
