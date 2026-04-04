@@ -1214,3 +1214,35 @@ Items to update when renaming:
 - The `wspaths` array inside the file — the `/ws/doorserver` path is unchanged; it's a functional endpoint for doorserver (door game) clients, not named after the entry point file. `/ws/bbs` is the general-purpose gateway WebSocket path.
 - Documentation references in other architecture docs (now updated — `MAILER_ARCHITECTURE.md` references use `bin/gateway.js` and `bin/mailer.js`)
 - The `systemstartupmsg` / `systemshutdownmsg` strings if they reference the old name
+
+---
+
+## Future: Web/Terminal Process Separation
+
+The current gateway process handles both HTTP web routes and WebSocket terminal sessions on a single Node.js event loop. This means web traffic (page renders, API calls, crawler load) competes for CPU time with terminal sessions (door I/O, ANSI rendering).
+
+### The problem
+
+A web crawler hitting every page triggers Express route handlers, Pug template compilation, and database queries -- all on the same event loop that services terminal WebSocket frames. Under heavy web load, terminal sessions could experience increased latency or dropped frames.
+
+### Why it's hard to split
+
+Terminal WebSocket connections use HTTP upgrade on the same Express server that handles web routes. The `WsManager` dispatches upgrades by path (`/ws/bbs`, `/ws/doorserver`, `/ws/legacy`, `/ws/presence`, `/ws/nodespy`) from a single `httpServer.on('upgrade')` handler. Splitting requires one of:
+
+1. **Separate ports**: Terminal WebSocket on port A, web HTTP on port B. Simple but exposes two ports and breaks the single-URL model. Users and reverse proxies need to know about both.
+
+2. **Reverse proxy path routing**: nginx/HAProxy routes `/ws/*` to a terminal process and everything else to a web process. Both processes need shared state (nodeManager, presence, chat) via Redis. The in-memory sharing that makes NodeSpy, sysop chat, and who's online seamless would need to be replaced with Redis-backed equivalents.
+
+3. **Worker threads**: The web server runs in a worker thread while the main thread handles WebSocket I/O. Threads can't share sockets directly, so WebSocket handling stays on the main thread. Template rendering and route handling move to the worker. Communication via `MessageChannel`. This preserves the single-port model but adds complexity.
+
+### Recommended approach (when needed)
+
+Option 2 (reverse proxy routing) with Redis shared state is the most production-ready path. It extends the existing four-process model to five:
+
+- **Web process**: Express routes, template rendering, static files
+- **Terminal process**: WebSocket pools, CallManager, NodeManager, SocatManager
+- **Worker, Mailer, Mail**: unchanged
+
+The terminal process would own all WebSocket endpoints and the in-memory state (node registry, ring buffers, chat). The web process would read state from Redis (presence, online users) and enqueue actions via BullMQ. This is essentially the same separation the mail process already demonstrates.
+
+The trigger for building this would be observable event loop latency on the gateway under web load -- measurable via `process.hrtime()` or the `perf_hooks` module. Until then, the single gateway is simpler and sufficient.
