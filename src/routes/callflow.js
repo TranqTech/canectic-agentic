@@ -63,14 +63,24 @@ router.get('/', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 
+	// Read return URL from session
+	var returnUrl = '/';
+	if (req.cookies && req.cookies.sessionid) {
+		var sess = await sessionStore.sessionGet(req.cookies.sessionid);
+		if (sess && sess.callflow_return_url) {
+			returnUrl = sess.callflow_return_url;
+		}
+	}
+
 	if (!appConfig.getBoolean('callflow_enabled', true)) {
-		return res.redirect(req.session && req.session.callflow_return_url || '/');
+		return res.redirect(returnUrl);
 	}
 
 	res.render('callflow/index', {
 		title: 'Welcome',
 		activelink: '',
-		currentuser: currentuser
+		currentuser: currentuser,
+		returnUrl: returnUrl
 	});
 });
 

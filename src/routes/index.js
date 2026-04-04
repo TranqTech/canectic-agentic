@@ -108,6 +108,10 @@ router.use(async function(req, res, next) {
 	if (res.locals.callflowForce && !req.path.startsWith('/callflow') &&
 		!req.path.startsWith('/users') && !req.path.startsWith('/health') &&
 		!req.path.startsWith('/webart') && !req.path.startsWith('/ws/')) {
+		// Store the page they were trying to reach so callflow can redirect back
+		if (req.cookies && req.cookies.sessionid) {
+			sessionStore.sessionUpdate(req.cookies.sessionid, { callflow_return_url: req.path });
+		}
 		return res.redirect('/callflow');
 	}
 
@@ -157,6 +161,9 @@ router.get('/', async function(req, res, next) {
 
   // Redirect to callflow if 2+ hours since last callflow and user is logged in
   if (currentuser && res.locals.callflowPending && res.locals.callflowHoursSince >= 2) {
+	if (req.cookies && req.cookies.sessionid) {
+		sessionStore.sessionUpdate(req.cookies.sessionid, { callflow_return_url: '/' });
+	}
 	return res.redirect('/callflow');
   }
 

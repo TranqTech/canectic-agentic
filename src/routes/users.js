@@ -155,8 +155,8 @@ router.post('/login', urlencodedParser, async (req, res) => {
 	// Route through call flow on fresh login (if enabled)
 	var callflowEnabled = appConfig.getBoolean('callflow_enabled', true);
 	var finalRedirect = redirectTo;
-	if (callflowEnabled && redirectTo === '/') {
-		// Store the original destination so call flow can redirect after completion
+	if (callflowEnabled) {
+		// Store the original destination so call flow redirects there after completion
 		await sessionStore.sessionUpdate(sessionid, { callflow_return_url: redirectTo });
 		finalRedirect = '/callflow';
 	}

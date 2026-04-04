@@ -23,7 +23,7 @@ block content
     (function() {
       var stages = [];
       var currentIdx = -1;
-      var returnUrl = '#{currentuser && currentuser.callflow_return_url || "/"}';
+      var returnUrl = '#{returnUrl || "/"}';
 
       function init() {
         fetch('/callflow/stages.json')
