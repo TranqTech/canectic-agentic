@@ -60,9 +60,14 @@ html
               };
               ws.onclose = function(ev) {
                 if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-                // 4001 = session expired or invalid -- redirect to login
+                // 4001 = session expired or invalid
                 if (ev.code === 4001) {
-                  window.location.href = '/users/login';
+                  // If tab is visible, redirect immediately. If background, defer to visibilitychange.
+                  if (!document.hidden) {
+                    window.location.href = '/users/login';
+                  } else {
+                    window._sessionExpired = true;
+                  }
                   return;
                 }
                 // Exponential backoff: 5s, 10s, 20s, 40s... max 60s
@@ -317,7 +322,12 @@ html
 
           // Reconnect when background tab returns to foreground
           document.addEventListener('visibilitychange', function() {
-            if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+            if (document.hidden) return;
+            if (window._sessionExpired) {
+              window.location.href = '/users/login';
+              return;
+            }
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
               reconnectAttempts = 0;
               connect();
             }
