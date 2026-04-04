@@ -10,6 +10,9 @@ import * as systemAddresses from './systemAddresses.js';
 import { Message } from './ftnClasses.js';
 import * as alogger from '../utils/alogger.js';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as postgres from '../middleware/db/postgres.js';
+import { storeAttachments } from './pmAttachments.js';
 import appConfig from "../config/appConfig.js";
 
 // ============================================================
@@ -91,7 +94,14 @@ async function importFtnNetmail(ftnMessage) {
   retObj.imported = deliveryResult.status && !deliveryResult.duplicate;
 
   if (retObj.imported) {
-    alogger.writeAlog(1, "FTN netmail delivered: " + ftnMessage.FromUser + " → " + resolution.username + " (" + ftnMessage.Subject + ")", "green");
+    // Check for file-attach flag (bit 4 = 0x0010)
+    var attr = parseInt(ftnMessage.Attribute) || 0;
+    if ((attr & 0x0010) && deliveryResult.uuid) {
+      await _processFileAttach(ftnMessage, deliveryResult.uuid);
+    }
+
+    alogger.writeAlog(1, "FTN netmail delivered: " + ftnMessage.FromUser + " → " + resolution.username + " (" + ftnMessage.Subject + ")" +
+      ((attr & 0x0010) ? " [FILE ATTACH]" : ""), "green");
   } else if (retObj.duplicate) {
     alogger.writeAlog(1, "FTN netmail dupe skipped: " + (pmObj.msg_id || '(no msgid)'), "yellow");
   }
@@ -123,7 +133,11 @@ function privateMessageToFtn(pmRow) {
   msg.BodyText = pmRow.body_text || '';
 
   // Attribute: bit 0 = Private (required for netmail)
+  // bit 4 = FileAttach (set by caller if attachments present)
   msg.Attribute = 0x0001;
+  if (pmRow.has_attachments) {
+    msg.Attribute |= 0x0010; // File-attach flag
+  }
   msg.Cost = 0;
 
   // DateTime: FTN format "DD Mon YY  HH:MM:SS" (20 bytes with null terminator)
@@ -317,6 +331,74 @@ async function rejectRelay(ftnMessage, pmObj) {
     "Relay is disabled (allow_netmail_relay=false).\n" +
     "Raw message stored in " + badDir + "."
   );
+}
+
+// ============================================================
+// File-attach processing
+// ============================================================
+
+// FTN file-attach netmail: the subject line contains filename(s) to attach.
+// The files arrive separately via binkp and land in the inbound directory.
+// We scan inbound for matching filenames and link them as PM attachments.
+async function _processFileAttach(ftnMessage, inboxUuid) {
+  var subject = (ftnMessage.Subject || '').trim();
+  if (!subject) return;
+
+  var inboundDir = appConfig.get('ftninbound', 'ftn/in');
+
+  // Subject may contain full paths or bare filenames, separated by spaces.
+  // Extract bare filenames from each token.
+  var tokens = subject.split(/\s+/);
+  var attachments = [];
+
+  for (var token of tokens) {
+    var filename = path.basename(token.trim());
+    if (!filename) continue;
+
+    // Look for the file in the inbound directory
+    var filePath = path.join(inboundDir, filename);
+    if (!fs.existsSync(filePath)) {
+      // Try case-insensitive match
+      try {
+        var dirContents = fs.readdirSync(inboundDir);
+        var match = dirContents.find(function(f) {
+          return f.toLowerCase() === filename.toLowerCase();
+        });
+        if (match) {
+          filePath = path.join(inboundDir, match);
+          filename = match;
+        } else {
+          alogger.writeAlog(3, 'FTN file-attach: file not found in inbound: ' + filename, 'yellow');
+          continue;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    // Read the file
+    try {
+      var data = fs.readFileSync(filePath);
+      attachments.push({
+        filename: filename,
+        mimeType: 'application/octet-stream',
+        data: data
+      });
+
+      // Remove from inbound directory (it's been claimed)
+      fs.unlinkSync(filePath);
+      alogger.writeAlog(3, 'FTN file-attach: linked ' + filename + ' (' + data.length + ' bytes) to netmail', 'cyan');
+    } catch (err) {
+      alogger.writeAlog(3, 'FTN file-attach: error reading ' + filename + ': ' + err.message, 'yellow');
+    }
+  }
+
+  if (attachments.length > 0) {
+    var ids = await storeAttachments(inboxUuid, 'inbox', attachments);
+    if (ids.length > 0) {
+      await postgres.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [inboxUuid]);
+    }
+  }
 }
 
 export {

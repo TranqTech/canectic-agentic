@@ -1341,6 +1341,14 @@ async function TossOutboundNetmail(){
 			msg.OptionalAttributes.push({attribute: "INTL", value: intlval})
 		}
 		sendArray.push(msg)
+
+		// Track attachment info for flow file writing after packet creation
+		if (pmRow.has_attachments && pmRow.uuid) {
+			if (!msg._attachmentInfo) msg._attachmentInfo = {};
+			msg._attachmentInfo.pmUuid = pmRow.uuid;
+			msg._attachmentInfo.destNet = msg.DestinationNet;
+			msg._attachmentInfo.destNode = msg.DestinationNode;
+		}
 	}
 
 	if (sendArray.length === 0){
@@ -1352,6 +1360,37 @@ async function TossOutboundNetmail(){
 	if ((pktresult)&&(pktresult.processedmsgs)){
 		console.log("Wrote", pktresult.pktcount, "Packets")
 		await privateMessages.markSentArray(pktresult.processedmsgs, TosserName)
+
+		// Write flow file entries for file-attach netmail attachments
+		try {
+			var pmAtt = await import('../models/pmAttachments.js');
+			for (var smsg of sendArray) {
+				if (!smsg._attachmentInfo) continue;
+				var atts = await pmAtt.getAttachments(smsg._attachmentInfo.pmUuid);
+				if (atts.length === 0) continue;
+
+				var netHex = parseInt(smsg._attachmentInfo.destNet).toString(16).padStart(4, '0');
+				var nodeHex = parseInt(smsg._attachmentInfo.destNode).toString(16).padStart(4, '0');
+				var destHex = netHex + nodeHex;
+
+				for (var att of atts) {
+					if (fs.existsSync(att.storage_path)) {
+						// Use bare path (no prefix) = send and leave.
+						// Preserves the local copy for web/IMAP access.
+						var floFile = appConfig.get('ftnoutbound', 'ftn/out') + "/" + destHex + ".flo";
+						var floLine = att.storage_path + "\r\n";
+						try {
+							fs.appendFileSync(floFile, floLine);
+							console.log("FTN file-attach: queued " + att.filename + " for " + smsg.Destination);
+						} catch (floErr) {
+							console.log("FTN file-attach: flow file write error:", floErr.message);
+						}
+					}
+				}
+			}
+		} catch (attErr) {
+			console.log("FTN file-attach flow file error:", attErr.message);
+		}
 
 		// Signal the mailer to scan the BSO outbound directory.
 		// The scanner handles route resolution (peer and nodelist) for all

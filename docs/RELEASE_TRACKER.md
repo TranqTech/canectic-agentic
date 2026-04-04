@@ -189,7 +189,7 @@ Last updated: 2026-03-31
 | 18 | Web art + seasonal art | [x] | Web art from txtfiles/webart/, random selection, seasonal overrides with admin CRUD, call flow welcome splash |
 | 19 | Top 10 lists | [ ] | Top posters, top downloaders, most active users (week/month). Web page + terminal command |
 | 20 | Birthday messages | [ ] | "Happy birthday" in call flow when users have birthdays today (birthdate column exists) |
-| 21 | FTN netmail file attach | [ ] | Inbound: recognize file-attach flag, link received files to netmail PM. Outbound: place attachment in BSO for binkp delivery. |
+| 21 | FTN netmail file attach | [x] | Inbound: recognize file-attach flag, link received files to netmail PM. Outbound: place attachment in BSO for binkp delivery. |
 
 ---
 
