@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-03-31
+Last updated: 2026-04-02
 
 ---
 
@@ -208,6 +208,7 @@ Last updated: 2026-03-31
 | 25 | FileFix | [x] | Automated TIC file area management via netmail commands (+subscribe, -unsubscribe, %LIST, %QUERY, %HELP, %PAUSE, %RESUME). Parallel to AreaFix. |
 | 26 | FREQ (File Request) | [ ] | Inbound .req file handling during binkp sessions. Serve requested files from file areas or a magic filebox. |
 | 27 | areas.bbs/files.bbs export | [x] | Generate areas.bbs/files.bbs from network mappings. Admin download per network. %AREAS command in AreaFix/FileFix. |
+| 28 | Tossed packet retention | [x] | `ftn_keep_tossed_days` config (default 7, 0 = immediate delete, 999 = keep forever). Daily `purge-tossed` maintenance job. |
 
 ---
 

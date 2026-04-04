@@ -214,10 +214,30 @@
 - New test coverage: areaAccess, activityMap, wall, bulletins, announcements, systemStats, artCodes, qwkUser
 - Bulletin `updateById` argument order bugfix found and fixed via testing
 
+### AreaFix / FileFix
+- Automated echomail area management via FTN netmail (AreaFix)
+- Automated TIC file area management via FTN netmail (FileFix)
+- Commands: +AREATAG (subscribe), -AREATAG (unsubscribe), %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME
+- Authentication via `areafix_password` in peer connection_data (password in Subject line)
+- Auto-generates response netmail queued as outbound packet
+- Processor routing in `ftnNetmailAdapter.js`: 'areafix'/'areamgr' and 'filefix'/'filemgr'/'tic'
+
+### areas.bbs / files.bbs Export
+- `generateAreasBbs()` utility for generating areas.bbs/files.bbs from network mappings
+- Admin download routes: `/admin/export/areasbbs/:networkId`, `/admin/export/filesbbs/:networkId`
+- Download buttons on network detail pages in admin
+- `%AREAS` command in AreaFix and FileFix returns the listing in areas.bbs/files.bbs format
+
+### Tossed Packet Retention
+- `ftn_keep_tossed_days` config key controls retention of tossed FTN packets (default 7 days)
+- 0 = delete immediately after tossing, 999 = keep forever
+- Daily maintenance job `purge-tossed` at 2 AM removes expired packets
+- Tosser reads config at runtime instead of using hardcoded constants
+
 ### Infrastructure
 - Version read from `package.json` via config system (not per-call file reads)
 - Shared access check utility (`src/utils/areaAccess.js`) extracted from route code
-- `areasBbsParser.js` utility for areas.bbs file parsing
+- `areasBbsParser.js` utility for areas.bbs file parsing and generation
 - Web presence `userSockets` reverse index for targeted WebSocket message delivery
 - Redis-backed chat sessions with TTL safety net and automatic reconnect restore
 

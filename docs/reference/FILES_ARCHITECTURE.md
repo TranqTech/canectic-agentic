@@ -77,6 +77,7 @@ Cross-references:
 | File | Purpose |
 |------|---------|
 | `middleware/tossers/ticTosser.js` | FTN TIC file echo processor. **Inbound** (`tossInbound`): scan inbound dir for `.tic` files, parse TIC format, resolve source connection, validate password, resolve areatag via `file_network_areas`, verify CRC-32, dupe check, handle Replaces, move file to area dir, create entry, extract FILE_ID.DIZ if no LDesc, create distribution rows (excluding source + seenby), update area stats. **Outbound** (`tossOutbound`): get all pending distributions, group by connection, for each: resolve areatag, build TIC descriptor (append path/seenby), stage TIC + file in outbound dir (hardlink preferred, copy fallback), mark sent, signal mailer for CRASH connections. |
+| `models/filefix.js` | FileFix automated TIC file area manager. Processes netmail commands from FTN peers to subscribe/unsubscribe file distribution areas. Same command set as AreaFix (+AREATAG, -AREATAG, %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME). Authenticates via `areafix_password` in `connection_data`. Operates on `file_network_areas` + `file_peer_subscriptions`. See `NETWORKING_ARCHITECTURE.md` for full AreaFix/FileFix documentation. |
 
 ### Routes
 

@@ -292,6 +292,8 @@ Two-layer admin check:
 | Import areas.bbs | `GET /admin/import/areasbbs` | Upload areas.bbs file, select group + network, preview with per-area action/allow/enable controls. |
 | Import areas.bbs Preview | `POST /admin/import/areasbbs/preview` | Parse uploaded file, diff against existing network mappings, return preview table with unmapped group areas for manual mapping. |
 | Import areas.bbs Run | `POST /admin/import/areasbbs/run` | Execute import: create new areas or map existing ones, sync peer subscriptions with per-area allow/enable flags. |
+| Export areas.bbs | `GET /admin/export/areasbbs/:networkId` | Download areas.bbs for a message network (areatag + description per line). Button on network detail page. |
+| Export files.bbs | `GET /admin/export/filesbbs/:networkId` | Download files.bbs for a file network (file echo areatag + description per line). Button on network detail page. |
 
 ### Modal-Driven Editing Pattern
 

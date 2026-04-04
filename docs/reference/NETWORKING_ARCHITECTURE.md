@@ -23,6 +23,9 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | `ftnNodelist.js` | FTN nodelist database model. `ensureTable()` creates the `ftn_nodelist` table with unique constraint on (network_id, zone, net, node, point). `importNodelist()` performs batch upsert (500/batch) with historical tracking (first_seen preserved, last_seen updated, absent nodes deactivated). Lookups: `getNode`, `getNetHost`, `getNodeHub`, `getRegionCoord`, `getZoneCoord`, `findConnectable` (IBN+hostname+not Down/Hold/Pvt), `searchNodes`, `getNodesInNet`. Historical: `getRecentlyAdded`, `getRecentlyRemoved`, `getNetworkStats`, `getNodeHistory`. Utility: `getImportInfo`, `clearNetwork`. |
 | `ftnRouter.js` | FTN routing resolver. Given a destination FTN address, determines the next-hop peer connection. Cascade: direct connection match → routing rule wildcard match → nodelist direct → coordinator walk (hub → host → region → zone). Returns `routeResult` with nextHop, connection UUID, method, packet flavour, and `nodelistData` for nodelist-resolved routes. Accepts optional `networkId` parameter. |
 | `ftnUtils.js` | FTN utility functions. Message-ID generation, datetime string formatting, system time parsing with timezone offset handling. |
+| `areafix.js` | AreaFix automated echomail area manager. Processes netmail commands from FTN peers to subscribe/unsubscribe echomail areas. Authenticates via `areafix_password` in `connection_data`. Commands: +AREATAG, -AREATAG, %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME. Builds response netmail via `buildResponse()`. |
+| `filefix.js` | FileFix automated TIC file area manager. Same command set and authentication as AreaFix, operates on `file_network_areas` + `file_peer_subscriptions`. Handles netmail addressed to 'filefix', 'filemgr', or 'tic'. |
+| `ftnNetmailAdapter.js` | FTN netmail processor routing. Routes inbound netmail by `ToUser` field to AreaFix ('areafix'/'areamgr'), FileFix ('filefix'/'filemgr'/'tic'), or standard PM delivery. Queues response netmail as outbound packets. |
 | `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
 | `qwkTosser.js` | _(Located in `src/middleware/tossers/`)_ QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
@@ -745,6 +748,79 @@ Separate from the network-level QWK tosser, the user QWK system (`src/models/qwk
 - `qwk_enabled` (boolean, default true) — enable/disable user QWK transfers
 - `qwk_bbsid` (string) — QWK BBS ID for packet filenames (max 8 chars, falls back to boardname)
 - `qwk_max_msgs_per_area` (number, default 500) — per-area message cap in user packets
+
+---
+
+## AreaFix / FileFix (Automated Area Management)
+
+AreaFix and FileFix provide automated echomail and TIC file area management via FTN netmail. Remote peers send netmail to "AreaFix" or "FileFix" (case-insensitive) with commands in the message body, and receive a response netmail with results.
+
+### Processor Routing
+
+Inbound netmail is routed by `ftnNetmailAdapter.js` based on the `ToUser` field:
+
+| ToUser | Processor | Handler |
+|--------|-----------|---------|
+| `areafix`, `areamgr` | AreaFix | `src/models/areafix.js` |
+| `filefix`, `filemgr`, `tic` | FileFix | `src/models/filefix.js` |
+
+### Authentication
+
+The password is sent in the **Subject line** of the netmail. The handler looks up the source FTN address in `peer_connections`, then compares the Subject against the `areafix_password` field in `connection_data`. Both AreaFix and FileFix share the same password.
+
+### Commands
+
+Both handlers support the same command set (case-insensitive, one per line in the message body):
+
+| Command | Action |
+|---------|--------|
+| `+AREATAG` | Subscribe to area (sets both `allowed` and `enabled`) |
+| `-AREATAG` | Unsubscribe from area (clears `enabled`) |
+| `%LIST` | List all available areas on the network |
+| `%QUERY` | List currently subscribed areas |
+| `%AREAS` | List areas in areas.bbs/files.bbs format |
+| `%HELP` | Show command reference |
+| `%PAUSE` | Disable all subscriptions (preserves config) |
+| `%RESUME` | Re-enable all previously allowed subscriptions |
+
+### Response Generation
+
+Both handlers call `buildResponse(ftnMessage, responseLines, senderName)` to construct a response netmail (FTN `Message` object) addressed back to the requesting system. The response is returned to `ftnNetmailAdapter.js` which queues it as an outbound netmail packet.
+
+### AreaFix (`src/models/areafix.js`)
+
+Operates on `network_areas` + `peer_area_subscriptions` (echomail areas). `%AREAS` returns an areas.bbs-format listing generated by `generateAreasBbs()` from `areasBbsParser.js`.
+
+### FileFix (`src/models/filefix.js`)
+
+Operates on `file_network_areas` + `file_peer_subscriptions` (TIC file areas). `%AREAS` returns a files.bbs-format listing of file echo areatags and descriptions.
+
+---
+
+## areas.bbs / files.bbs Export
+
+`generateAreasBbs()` in `src/utils/areasBbsParser.js` generates standard areas.bbs text from an array of `{ areatag, description }` pairs with an optional header comment.
+
+### Admin Download Routes
+
+| Route | Purpose |
+|-------|---------|
+| `GET /admin/export/areasbbs/:networkId` | Download areas.bbs for a message network |
+| `GET /admin/export/filesbbs/:networkId` | Download files.bbs for a file network |
+
+Download buttons appear on the network detail pages in the admin panel. The same format is returned by the `%AREAS` command in AreaFix and FileFix.
+
+---
+
+## Tossed Packet Retention
+
+The FTN tosser moves processed `.pkt` files to a tossed directory after import. Retention is controlled by the `ftn_keep_tossed_days` config key:
+
+- **Default**: 7 days
+- **0**: Delete immediately after tossing (no retention)
+- **999**: Keep forever
+
+A daily maintenance job (`purge-tossed`) runs at 2 AM to remove packets older than the configured retention period. The tosser reads this config value at runtime rather than using hardcoded constants.
 
 ---
 
