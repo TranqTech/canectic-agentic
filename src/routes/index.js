@@ -56,18 +56,61 @@ router.use(async function(req, res, next) {
 	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
 	res.locals.pmUnreadCount = 0;
 	res.locals.callflowPending = false;
+	res.locals.callflowForce = false;
+	res.locals.callflowHoursSince = 0;
 	if (req.cookies.sessionid) {
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
 			var pmUid = parseInt(pmSession.id);
 			if (pmUid && pmUid > 0) {
 				res.locals.pmUnreadCount = await privateMessages.getUnreadCount(pmUid);
+
+				// Check last_callflow_at for time-based triggers (cached on session)
+				if (appConfig.getBoolean('callflow_enabled', true)) {
+					var lastCf = pmSession.last_callflow_at ? parseInt(pmSession.last_callflow_at) : 0;
+
+					// Lazy-init: if session doesn't have it cached, load from DB once
+					if (!lastCf && !pmSession._callflow_checked) {
+						try {
+							var lastCfDate = await userAccounts.getLastCallflowAt(pmUid);
+							lastCf = lastCfDate ? lastCfDate.getTime() : 0;
+							await sessionStore.sessionUpdate(req.cookies.sessionid, {
+								last_callflow_at: String(lastCf || '0'),
+								_callflow_checked: 'true'
+							});
+						} catch (_) {}
+					}
+
+					if (lastCf) {
+						var hoursSince = (Date.now() - lastCf) / 3600000;
+						res.locals.callflowHoursSince = hoursSince;
+
+						if (hoursSince >= 24) {
+							res.locals.callflowForce = true;
+						} else if (hoursSince >= 2) {
+							res.locals.callflowPending = true;
+						}
+					} else {
+						// Never done callflow -- force it
+						res.locals.callflowForce = true;
+						res.locals.callflowHoursSince = 999;
+					}
+				}
 			}
+			// Session-level pending flag (from idle resume) also triggers banner
 			if (pmSession.callflow_pending === 'true') {
 				res.locals.callflowPending = true;
 			}
 		}
 	}
+
+	// Force redirect to callflow after 24 hours (except for callflow, login, static routes)
+	if (res.locals.callflowForce && !req.path.startsWith('/callflow') &&
+		!req.path.startsWith('/users') && !req.path.startsWith('/health') &&
+		!req.path.startsWith('/webart') && !req.path.startsWith('/ws/')) {
+		return res.redirect('/callflow');
+	}
+
 	next();
 });
 
@@ -111,6 +154,12 @@ import { parseFlags, checkAreaReadAccess, checkAreaPostAccess } from '../utils/a
 router.get('/', async function(req, res, next) {
   var currentuser = await getCurrentUser(req);
   res.locals.currentuser = currentuser;
+
+  // Redirect to callflow if 2+ hours since last callflow and user is logged in
+  if (currentuser && res.locals.callflowPending && res.locals.callflowHoursSince >= 2) {
+	return res.redirect('/callflow');
+  }
+
   var activeAnnouncements = await announcements.getActiveAnnouncements(10);
   var wallMessages = await getWallMessages(15);
   var theme = await getDefaultTheme();

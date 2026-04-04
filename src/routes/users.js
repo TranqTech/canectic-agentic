@@ -137,7 +137,17 @@ router.post('/login', urlencodedParser, async (req, res) => {
 	try {
 		var redis = await import('../middleware/db/redis.js');
 		var rc = await redis.getClient();
-		await rc.set('web_activity:' + sessionid, String(Date.now()), { EX: appConfig.getNumber('session_ttl', 60) * 60 });
+		await rc.set('web_activity:' + sessionid, String(Date.now()), { EX: appConfig.getNumber('session_ttl', 720) * 60 });
+	} catch (_) {}
+
+	// Cache last_callflow_at on session so the middleware doesn't need to query DB every request
+	try {
+		var lastCfDate = await userAccounts.getLastCallflowAt(userobj.id);
+		var lastCfTs = lastCfDate ? String(lastCfDate.getTime()) : '0';
+		await sessionStore.sessionUpdate(sessionid, {
+			last_callflow_at: lastCfTs,
+			_callflow_checked: 'true'
+		});
 	} catch (_) {}
 
 	alogger.writeAlog(5, 'Web login: ' + username, 'greenbright');

@@ -372,13 +372,24 @@ router.get('/stage/newfiles', async (req, res) => {
 
 router.post('/complete', urlencodedParser, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
+	var nowTs = String(Date.now());
+
 	if (currentuser) {
 		await updateLastCallflowAt(parseInt(currentuser.id));
-	}
 
-	// Clear pending flag
-	if (req.cookies && req.cookies.sessionid) {
-		await sessionStore.sessionUpdate(req.cookies.sessionid, { callflow_pending: '' });
+		// Update last_callflow_at on ALL sessions for this user (handles multi-tab/device)
+		await sessionStore.sessionUpdateUser(currentuser.username, {
+			last_callflow_at: nowTs,
+			callflow_pending: '',
+			_callflow_checked: 'true'
+		});
+	} else if (req.cookies && req.cookies.sessionid) {
+		// Fallback: update just this session
+		await sessionStore.sessionUpdate(req.cookies.sessionid, {
+			last_callflow_at: nowTs,
+			callflow_pending: '',
+			_callflow_checked: 'true'
+		});
 	}
 
 	var returnUrl = req.body.return_url || '/';

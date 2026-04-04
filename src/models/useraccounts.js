@@ -790,5 +790,15 @@ export {
 	getUsersByPermissionFlag,
 	detectMailType,
 	reconcileMailTypes,
-	purgeUnverifiedUsers
+	purgeUnverifiedUsers,
+	getLastCallflowAt
 };
+
+// Get the timestamp of a user's last callflow completion. Returns Date or null.
+async function getLastCallflowAt(userId) {
+	var row = await postgres.queryOne(
+		'SELECT last_callflow_at FROM users WHERE id = $1',
+		[userId]
+	);
+	return row && row.last_callflow_at ? new Date(row.last_callflow_at) : null;
+}
