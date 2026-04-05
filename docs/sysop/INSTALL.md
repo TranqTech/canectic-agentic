@@ -82,13 +82,48 @@ cd /opt/canectic    # or your chosen path
 
 ### 3. Set Up PostgreSQL
 
-Create a database and user:
+Create a database and user for Canectic. You can use the helper script or do it manually.
+
+**Option A: Helper script**
 
 ```bash
 bash setup/create_pg_db_user.sh
 ```
 
-This prompts for a database name, username, and password. Remember these — you'll need them for `.env`.
+This prompts for a database name, username, and password. If it fails (common on systems where `sudo -u postgres` or `createuser` is restricted), use Option B instead.
+
+**Option B: Manual setup**
+
+Connect to PostgreSQL as the postgres superuser:
+
+```bash
+sudo -u postgres psql
+```
+
+Then run these commands (replace the values as desired):
+
+```sql
+CREATE USER canectic WITH PASSWORD 'your_password_here';
+CREATE DATABASE canectic_bbs OWNER canectic;
+```
+
+PostgreSQL 15+ changed the default permissions on the `public` schema. You must grant access explicitly. Connect to the new database and grant permissions:
+
+```sql
+\c canectic_bbs
+GRANT ALL ON SCHEMA public TO canectic;
+\q
+```
+
+Verify the connection works:
+
+```bash
+psql -U canectic -h localhost -d canectic_bbs
+```
+
+If prompted for a password, enter what you set above. If the connection fails with "peer authentication failed", ensure `pg_hba.conf` allows password auth for local connections (change `peer` to `md5` or `scram-sha-256` for the local IPv4/IPv6 lines, then `sudo systemctl reload postgresql`).
+
+Remember the database name, username, and password -- you'll need them for `.env`.
 
 ### 4. Configure Environment
 
