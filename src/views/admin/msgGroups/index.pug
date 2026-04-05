@@ -93,32 +93,34 @@ block content
                     br
                 .row
                   .col-1
-                  .col-5
+                  .col-10
                     label(for="shortcode") Short Code:
                     input(
                       type="text"
-                      id="shotcode"
+                      id="shortcode"
                       name="shortcode"
                       class="form-control"
                       required
                     )
+                .row.mt-2
+                  .col-1
                   .col-5
                     label(for="ng_readsecurity") Default Read Security:
                     input(
                       type="number"
                       id="ng_readsecurity"
-                      min=1
+                      min=0
                       max=255
                       name="readsecurity"
                       class="form-control"
                       value=50
                     )
-                    br
+                  .col-5
                     label(for="ng_postsecurity") Default Post Security:
                     input(
                       type="number"
                       id="ng_postsecurity"
-                      min=1
+                      min=0
                       max=255
                       name="postsecurity"
                       class="form-control"
