@@ -74,6 +74,7 @@ block content
                         table#fileAreas.table.table-hover
                           thead
                             tr
+                              th(style='width:30px')
                               th(scope='col') Name
                               th(scope='col') Shortcode
                               th(scope='col') Description
@@ -82,7 +83,7 @@ block content
                               th(scope='col') Total Size
                               th(scope='col') Latest
                               th(scope='col')
-                          tbody
+                          tbody#faBody
                             for area of arealist
                               tr(
                                 data-bs-id=area.id
@@ -106,7 +107,10 @@ block content
                                 data-bs-readrestflags=JSON.stringify(area.read_rest_flags || [])
                                 data-bs-postpermflags=JSON.stringify(area.post_perm_flags || [])
                                 data-bs-postrestflags=JSON.stringify(area.post_rest_flags || [])
+                                draggable='true'
                               )
+                                td.grip(style='cursor:grab')
+                                  i.bi.bi-grip-vertical
                                 td= area.name
                                 td= area.shortcode
                                 td= area.description
@@ -135,6 +139,9 @@ block content
                                       | N/A
                                 td.text-center
                                   a.btn.btn-sm.btn-outline-info(href=`/admin/fileArea/${area.shortcode}` onclick='event.stopPropagation()') Browse
+                        button.btn.btn-sm.btn-outline-primary.mt-2#saveFaOrder
+                          i.bi.bi-sort-numeric-down.me-1
+                          | Save Order
                       else
                         center
                           h4 No Areas Found
@@ -957,6 +964,44 @@ block content
           renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(groupReadRestFlags)), allRestrs, 'bg-danger');
           renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(groupPostPermFlags)), allPerms, 'bg-success');
           renderAreaFlags('na_post_rest', 'post_rest_flags', parseFlags(JSON.stringify(groupPostRestFlags)), allRestrs, 'bg-danger');
+        }
+
+        // --- Drag-to-reorder file areas ---
+        var faBody = document.getElementById('faBody');
+        if (faBody) {
+          var dragRow = null;
+          faBody.addEventListener('dragstart', function(e) {
+            dragRow = e.target.closest('tr');
+            if (dragRow) e.dataTransfer.effectAllowed = 'move';
+          });
+          faBody.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            var target = e.target.closest('tr');
+            if (target && target !== dragRow) {
+              var rect = target.getBoundingClientRect();
+              if (e.clientY < rect.top + rect.height / 2) {
+                faBody.insertBefore(dragRow, target);
+              } else {
+                faBody.insertBefore(dragRow, target.nextSibling);
+              }
+            }
+          });
+          faBody.querySelectorAll('.grip').forEach(function(grip) {
+            grip.addEventListener('click', function(e) { e.stopPropagation(); });
+          });
+        }
+        var saveFaBtn = document.getElementById('saveFaOrder');
+        if (saveFaBtn) {
+          saveFaBtn.addEventListener('click', function() {
+            var rows = document.querySelectorAll('#faBody tr');
+            var ids = [];
+            rows.forEach(function(r) { ids.push(r.getAttribute('data-bs-id')); });
+            fetch('/admin/fileAreas/reorder', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: ids })
+            }).then(function() { location.reload(); });
+          });
         }
 
         // Area table row click — populate and open info modal

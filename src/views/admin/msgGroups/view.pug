@@ -67,13 +67,14 @@ block content
                         table#msgAreas.table.table-hover
                           thead
                             tr
+                              th(style='width:30px')
                               th(scope='col') Name
                               th(scope='col') Shortcode
                               th(scope='col') Description
                               th(scope='col') Network / Tag
                               th(scope='col') Msg Count
                               th(scope='col') Latest
-                          tbody
+                          tbody#areaBody
                             for area of arealist
                               tr(
                                 data-bs-id=area.id
@@ -96,7 +97,10 @@ block content
                                 data-bs-readrestflags=JSON.stringify(area.read_rest_flags || [])
                                 data-bs-postpermflags=JSON.stringify(area.post_perm_flags || [])
                                 data-bs-postrestflags=JSON.stringify(area.post_rest_flags || [])
+                                draggable='true'
                               )
+                                td.grip(style='cursor:grab')
+                                  i.bi.bi-grip-vertical
                                 td= area.name
                                 td= area.shortcode
                                 td= area.description
@@ -120,6 +124,9 @@ block content
                                   else
                                     center
                                       | N/A
+                        button.btn.btn-sm.btn-outline-primary.mt-2#saveAreaOrder
+                          i.bi.bi-sort-numeric-down.me-1
+                          | Save Order
                       else
                         center
                           h4 No Areas Found
@@ -748,6 +755,44 @@ block content
 
     script.
       document.addEventListener('DOMContentLoaded', function() {
+
+        // --- Drag-to-reorder areas ---
+        var areaBody = document.getElementById('areaBody');
+        if (areaBody) {
+          var dragRow = null;
+          areaBody.addEventListener('dragstart', function(e) {
+            dragRow = e.target.closest('tr');
+            if (dragRow) e.dataTransfer.effectAllowed = 'move';
+          });
+          areaBody.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            var target = e.target.closest('tr');
+            if (target && target !== dragRow) {
+              var rect = target.getBoundingClientRect();
+              if (e.clientY < rect.top + rect.height / 2) {
+                areaBody.insertBefore(dragRow, target);
+              } else {
+                areaBody.insertBefore(dragRow, target.nextSibling);
+              }
+            }
+          });
+          areaBody.querySelectorAll('.grip').forEach(function(grip) {
+            grip.addEventListener('click', function(e) { e.stopPropagation(); });
+          });
+        }
+        var saveAreaBtn = document.getElementById('saveAreaOrder');
+        if (saveAreaBtn) {
+          saveAreaBtn.addEventListener('click', function() {
+            var rows = document.querySelectorAll('#areaBody tr');
+            var ids = [];
+            rows.forEach(function(r) { ids.push(r.getAttribute('data-bs-id')); });
+            fetch('/admin/msgAreas/reorder', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: ids })
+            }).then(function() { location.reload(); });
+          });
+        }
 
         const areaInfoModal   = new bootstrap.Modal(document.getElementById('areaInfoModal'));
         const editAreaModal   = new bootstrap.Modal(document.getElementById('editAreaModal'));

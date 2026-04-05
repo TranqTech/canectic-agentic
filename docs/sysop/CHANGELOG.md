@@ -8,6 +8,12 @@
 - Fix: Menu JSON import NaN error from null colour values (#2)
 - Fix: FTN NC addresses (node 0, e.g. 1:134/0) no longer rejected as invalid (#3)
 - Fix: Message group creation security field handling hardened (#4)
+- Fix: Message group create modal had single "Required Security" field instead of separate Read/Post Security + flags (#4)
+- Fix: Duplicate admin view template files (flat file shadowing index.pug) consolidated
+
+### Features
+- Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
+- Mocha upgraded to 11.3.0 (fixes diff DoS vulnerability) (#5)
 
 ## v0.9.5a (2026-04-04)
 

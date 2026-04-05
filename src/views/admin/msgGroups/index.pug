@@ -41,21 +41,23 @@ block content
                 table#msgGroups.table.table-hover
                   thead
                     tr
+                      th(style='width:30px')
                       th(scope='col') Name
-                      th(scope='col') Shortcode                      
+                      th(scope='col') Shortcode
                       th(scope='col') Description
                       th(scope='col') Area Count
-                    tbody
-                      for group of grouplist
-                        tr(data-bs-shortcode=group.shortcode)
-                          td
-                            =group.name
-                          td
-                            =group.shortcode
-                          td
-                            =group.description
-                          td                            
-                            =group.area_count
+                  tbody#groupBody
+                    for group of grouplist
+                      tr(data-bs-shortcode=group.shortcode data-id=group.id draggable='true')
+                        td.grip(style='cursor:grab')
+                          i.bi.bi-grip-vertical
+                        td= group.name
+                        td= group.shortcode
+                        td= group.description
+                        td= group.area_count
+                button.btn.btn-sm.btn-outline-primary.mt-2#saveGroupOrder
+                  i.bi.bi-sort-numeric-down.me-1
+                  | Save Order
               else
                 center
                   .h4
@@ -174,6 +176,45 @@ block content
             var shortcode = this.getAttribute('data-bs-shortcode');
             if (shortcode) window.location.href = '/admin/msggroup/' + shortcode;
           });
+        });
+      }
+
+      // --- Drag-to-reorder groups ---
+      var tbody = document.getElementById('groupBody');
+      if (tbody) {
+        var dragRow = null;
+        tbody.addEventListener('dragstart', function(e) {
+          dragRow = e.target.closest('tr');
+          if (dragRow) e.dataTransfer.effectAllowed = 'move';
+        });
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          var target = e.target.closest('tr');
+          if (target && target !== dragRow) {
+            var rect = target.getBoundingClientRect();
+            if (e.clientY < rect.top + rect.height / 2) {
+              tbody.insertBefore(dragRow, target);
+            } else {
+              tbody.insertBefore(dragRow, target.nextSibling);
+            }
+          }
+        });
+        // Prevent row click from firing during drag
+        tbody.querySelectorAll('.grip').forEach(function(grip) {
+          grip.addEventListener('click', function(e) { e.stopPropagation(); });
+        });
+      }
+      var saveBtn = document.getElementById('saveGroupOrder');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+          var rows = document.querySelectorAll('#groupBody tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(r.getAttribute('data-id')); });
+          fetch('/admin/msgGroups/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function() { location.reload(); });
         });
       }
 

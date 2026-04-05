@@ -41,21 +41,23 @@ block content
                 table#fileGroups.table.table-hover
                   thead
                     tr
+                      th(style='width:30px')
                       th(scope='col') Name
                       th(scope='col') Shortcode
                       th(scope='col') Description
                       th(scope='col') Area Count
-                    tbody
-                      for group of grouplist
-                        tr(data-bs-shortcode=group.shortcode)
-                          td
-                            =group.name
-                          td
-                            =group.shortcode
-                          td
-                            =group.description
-                          td
-                            =group.area_count
+                  tbody#fgBody
+                    for group of grouplist
+                      tr(data-bs-shortcode=group.shortcode data-id=group.id draggable='true')
+                        td.grip(style='cursor:grab')
+                          i.bi.bi-grip-vertical
+                        td= group.name
+                        td= group.shortcode
+                        td= group.description
+                        td= group.area_count
+                button.btn.btn-sm.btn-outline-primary.mt-2#saveFgOrder
+                  i.bi.bi-sort-numeric-down.me-1
+                  | Save Order
               else
                 center
                   .h4
@@ -221,6 +223,44 @@ block content
               window.location.href = `/admin/fileGroup/${shortcode}`;
             }
           });
+        });
+      }
+
+      // --- Drag-to-reorder file groups ---
+      var fgBody = document.getElementById('fgBody');
+      if (fgBody) {
+        var dragRow = null;
+        fgBody.addEventListener('dragstart', function(e) {
+          dragRow = e.target.closest('tr');
+          if (dragRow) e.dataTransfer.effectAllowed = 'move';
+        });
+        fgBody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          var target = e.target.closest('tr');
+          if (target && target !== dragRow) {
+            var rect = target.getBoundingClientRect();
+            if (e.clientY < rect.top + rect.height / 2) {
+              fgBody.insertBefore(dragRow, target);
+            } else {
+              fgBody.insertBefore(dragRow, target.nextSibling);
+            }
+          }
+        });
+        fgBody.querySelectorAll('.grip').forEach(function(grip) {
+          grip.addEventListener('click', function(e) { e.stopPropagation(); });
+        });
+      }
+      var saveFgBtn = document.getElementById('saveFgOrder');
+      if (saveFgBtn) {
+        saveFgBtn.addEventListener('click', function() {
+          var rows = document.querySelectorAll('#fgBody tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(r.getAttribute('data-id')); });
+          fetch('/admin/fileGroups/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function() { location.reload(); });
         });
       }
 
