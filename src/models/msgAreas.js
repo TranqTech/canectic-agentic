@@ -299,7 +299,7 @@ async function getAreaByAreatag(areatag) {
 async function getListByGroupShortcode(shortcode) {
 	var shorty = shortcode.toUpperCase().trim();
 	var dblist = await postgres.query(
-		'SELECT * FROM message_areas WHERE UPPER(group_shortcode) LIKE UPPER($1)',
+		'SELECT * FROM message_areas WHERE UPPER(group_shortcode) LIKE UPPER($1) ORDER BY sort_order ASC, name ASC',
 		[shorty]
 	);
 	return dblist || [];
@@ -527,7 +527,7 @@ async function removeArea(shortcode, deleteTables) {
 
 async function getAllAreas() {
 	var dblist = await postgres.query(
-		'SELECT * FROM message_areas ORDER BY group_shortcode ASC, name ASC',
+		'SELECT * FROM message_areas ORDER BY group_shortcode ASC, sort_order ASC, name ASC',
 		[]
 	);
 	return dblist || [];

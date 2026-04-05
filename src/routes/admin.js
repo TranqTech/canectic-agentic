@@ -372,6 +372,21 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 	}
 });
 
+// Reorder groups and areas
+router.post('/msgGroups/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') { try { ids = JSON.parse(ids); } catch (_) { ids = []; } }
+	if (Array.isArray(ids) && ids.length > 0) await msgGroups.reorderGroups(ids);
+	res.json({ status: true });
+});
+
+router.post('/msgAreas/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') { try { ids = JSON.parse(ids); } catch (_) { ids = []; } }
+	if (Array.isArray(ids) && ids.length > 0) await msgGroups.reorderAreas(ids);
+	res.json({ status: true });
+});
+
 // JSON endpoint — returns group security and flag defaults for new area modal auto-populate
 router.get('/msgGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 	var shortcode = req.params.shortcode.toUpperCase().trim();
@@ -1455,6 +1470,21 @@ router.post('/fileGroup/:shortcode/delete', urlencodedParser, requireAdmin, asyn
 			DateTime: DateTime
 		});
 	}
+});
+
+// Reorder file groups and areas
+router.post('/fileGroups/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') { try { ids = JSON.parse(ids); } catch (_) { ids = []; } }
+	if (Array.isArray(ids) && ids.length > 0) await fileGroups.reorderGroups(ids);
+	res.json({ status: true });
+});
+
+router.post('/fileAreas/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids;
+	if (typeof ids === 'string') { try { ids = JSON.parse(ids); } catch (_) { ids = []; } }
+	if (Array.isArray(ids) && ids.length > 0) await fileGroups.reorderAreas(ids);
+	res.json({ status: true });
 });
 
 // JSON endpoint — returns group security and flag defaults for new area modal auto-populate

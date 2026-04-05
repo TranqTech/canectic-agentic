@@ -7,6 +7,12 @@ import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
 import appConfig from "../config/appConfig.js";
 
+// Ensure sort_order column exists (migration)
+async function ensureSortOrder() {
+	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
+	await postgres.write("ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
+}
+
 
 // Normalize flag input from forms — may arrive as a string, an array, or undefined.
 function normalizeFlags(input) {
@@ -93,28 +99,28 @@ async function getGroupByShortcode(shortcode) {
 
 async function getAllGroups() {
 	var dblist = await postgres.query(
-		'SELECT * FROM message_groups ORDER BY name ASC'
+		'SELECT * FROM message_groups ORDER BY sort_order ASC, name ASC'
 	);
 	return dblist || [];
 }
 
 async function getActiveGroups() {
 	var dblist = await postgres.query(
-		'SELECT * FROM message_groups WHERE active ORDER BY name ASC'
+		'SELECT * FROM message_groups WHERE active ORDER BY sort_order ASC, name ASC'
 	);
 	return dblist || [];
 }
 
 async function getInactiveGroups() {
 	var dblist = await postgres.query(
-		'SELECT * FROM message_groups WHERE NOT active ORDER BY name ASC'
+		'SELECT * FROM message_groups WHERE NOT active ORDER BY sort_order ASC, name ASC'
 	);
 	return dblist || [];
 }
 
 async function getAllGroupsWithAreas() {
 	var grouplist = await postgres.query(
-		'SELECT id, name, description, shortcode FROM message_groups WHERE active ORDER BY name ASC',
+		'SELECT id, name, description, shortcode FROM message_groups WHERE active ORDER BY sort_order ASC, name ASC',
 		[]
 	);
 
@@ -240,7 +246,20 @@ async function removeGroup(shortcode, deleteTables) {
 	return returnObj;
 }
 
+async function reorderGroups(ids) {
+	for (var i = 0; i < ids.length; i++) {
+		await postgres.write('UPDATE message_groups SET sort_order = $1 WHERE id = $2', [i, parseInt(ids[i])]);
+	}
+}
+
+async function reorderAreas(ids) {
+	for (var i = 0; i < ids.length; i++) {
+		await postgres.write('UPDATE message_areas SET sort_order = $1 WHERE id = $2', [i, parseInt(ids[i])]);
+	}
+}
+
 export {
+	ensureSortOrder,
 	newGroup,
 	updateGroup,
 	removeGroup,
@@ -248,5 +267,7 @@ export {
 	getAllGroups,
 	getActiveGroups,
 	getInactiveGroups,
-	getAllGroupsWithAreas
+	getAllGroupsWithAreas,
+	reorderGroups,
+	reorderAreas
 };

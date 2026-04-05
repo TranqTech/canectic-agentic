@@ -133,6 +133,12 @@ async function prerunMaint(){
 	var newsFiles = await import("../src/models/newsFiles.js");
 	await newsFiles.ensureTable();
 
+	// Ensure sort_order columns on groups and areas
+	var msgGroupsMod = await import("../src/models/msgGroups.js");
+	await msgGroupsMod.ensureSortOrder();
+	var fileGroupsMod = await import("../src/models/fileGroups.js");
+	await fileGroupsMod.ensureSortOrder();
+
 	// Ensure PM attachments table and columns
 	var pmAttachments = await import("../src/models/pmAttachments.js");
 	await pmAttachments.ensureTable();

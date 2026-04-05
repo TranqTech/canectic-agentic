@@ -144,7 +144,7 @@ async function getAreasInGroup(groupShortcode) {
 	var dbgroup = await fileGroups.getGroupByShortcode(shorty);
 	if (!dbgroup) return [];
 	var dblist = await postgres.query(
-		'SELECT * FROM file_areas WHERE group_id = $1 ORDER BY name ASC',
+		'SELECT * FROM file_areas WHERE group_id = $1 ORDER BY sort_order ASC, name ASC',
 		[dbgroup.id]
 	);
 	return dblist || [];
@@ -152,14 +152,14 @@ async function getAreasInGroup(groupShortcode) {
 
 async function getAllAreas() {
 	var dblist = await postgres.query(
-		'SELECT fa.*, fg.name AS group_name FROM file_areas fa LEFT JOIN file_groups fg ON fg.id = fa.group_id ORDER BY fg.name ASC, fa.name ASC'
+		'SELECT fa.*, fg.name AS group_name FROM file_areas fa LEFT JOIN file_groups fg ON fg.id = fa.group_id ORDER BY fg.sort_order ASC, fg.name ASC, fa.sort_order ASC, fa.name ASC'
 	);
 	return dblist || [];
 }
 
 async function getActiveAreas() {
 	var dblist = await postgres.query(
-		'SELECT fa.*, fg.name AS group_name FROM file_areas fa LEFT JOIN file_groups fg ON fg.id = fa.group_id WHERE fa.active ORDER BY fg.name ASC, fa.name ASC'
+		'SELECT fa.*, fg.name AS group_name FROM file_areas fa LEFT JOIN file_groups fg ON fg.id = fa.group_id WHERE fa.active ORDER BY fg.sort_order ASC, fg.name ASC, fa.sort_order ASC, fa.name ASC'
 	);
 	return dblist || [];
 }

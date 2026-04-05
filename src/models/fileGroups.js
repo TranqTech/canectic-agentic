@@ -9,6 +9,11 @@ import * as alogger from "../utils/alogger.js";
 import * as fileAreas from "./fileAreas.js";
 import appConfig from "../config/appConfig.js";
 
+async function ensureSortOrder() {
+	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
+	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
+}
+
 function normalizeFlags(input) {
 	if (!input) return JSON.stringify([]);
 	if (typeof input === 'string') {
@@ -94,18 +99,18 @@ async function getGroupByShortcode(shortcode) {
 }
 
 async function getAllGroups() {
-	var dblist = await postgres.query('SELECT * FROM file_groups ORDER BY name ASC');
+	var dblist = await postgres.query('SELECT * FROM file_groups ORDER BY sort_order ASC, name ASC');
 	return dblist || [];
 }
 
 async function getActiveGroups() {
-	var dblist = await postgres.query('SELECT * FROM file_groups WHERE active ORDER BY name ASC');
+	var dblist = await postgres.query('SELECT * FROM file_groups WHERE active ORDER BY sort_order ASC, name ASC');
 	return dblist || [];
 }
 
 async function getAllGroupsWithAreas() {
 	var grouplist = await postgres.query(
-		'SELECT id, name, description, shortcode, base_dir FROM file_groups WHERE active ORDER BY name ASC'
+		'SELECT id, name, description, shortcode, base_dir FROM file_groups WHERE active ORDER BY sort_order ASC, name ASC'
 	);
 
 	if (grouplist && grouplist.length > 0) {
@@ -237,7 +242,20 @@ async function recalculateAreaCounts() {
 	);
 }
 
+async function reorderGroups(ids) {
+	for (var i = 0; i < ids.length; i++) {
+		await postgres.write('UPDATE file_groups SET sort_order = $1 WHERE id = $2', [i, parseInt(ids[i])]);
+	}
+}
+
+async function reorderAreas(ids) {
+	for (var i = 0; i < ids.length; i++) {
+		await postgres.write('UPDATE file_areas SET sort_order = $1 WHERE id = $2', [i, parseInt(ids[i])]);
+	}
+}
+
 export {
+	ensureSortOrder,
 	normalizeFlags,
 	newGroup,
 	updateGroup,
@@ -246,5 +264,7 @@ export {
 	getAllGroups,
 	getActiveGroups,
 	getAllGroupsWithAreas,
-	recalculateAreaCounts
+	recalculateAreaCounts,
+	reorderGroups,
+	reorderAreas
 };
