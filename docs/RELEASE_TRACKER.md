@@ -211,6 +211,8 @@ Last updated: 2026-04-02
 | 28 | Tossed packet retention | [x] | `ftn_keep_tossed_days` config (default 7, 0 = immediate delete, 999 = keep forever). Daily `purge-tossed` maintenance job. |
 | 29 | Notification system | [x] | Centralised notifications model, bell icon in nav bars, `/notifications` page, terminal reader, real-time push via PresenceSocket, sysop + user producers, daily purge. |
 | 30 | Multi-address binkp sessions | [x] | Password-filtered grouping of multiple peer connections per session. Per-connection outbound isolation. All FTN addresses advertised (defaults first). Session dedup across grouped connections. |
+| 31 | Default/example menus | [ ] | Ship a complete set of starter menus (main, messages, files, doors, sysop) so new installs have a working menu structure out of the box. |
+| 32 | Default/placeholder art | [ ] | Ship placeholder ANSI/ASCII art for login, logon, welcome, goodbye screens. First-run experience without requiring sysop art creation. |
 
 ---
 
