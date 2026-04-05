@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
+import appConfig from "../config/appConfig.js";
 
 
 // Normalize flag input from forms — may arrive as a string, an array, or undefined.
@@ -56,8 +57,8 @@ async function newGroup(formObj) {
 		name: formObj.name,
 		description: formObj.description,
 		shortcode: shorty,
-		read_security: formObj.readsecurity != null && formObj.readsecurity !== '' ? parseInt(formObj.readsecurity) : 0,
-		post_security: formObj.postsecurity != null && formObj.postsecurity !== '' ? parseInt(formObj.postsecurity) : 0,
+		read_security: formObj.readsecurity != null && formObj.readsecurity !== '' ? parseInt(formObj.readsecurity) : appConfig.getNumber('defaultsecurity', 50),
+		post_security: formObj.postsecurity != null && formObj.postsecurity !== '' ? parseInt(formObj.postsecurity) : appConfig.getNumber('defaultsecurity', 50),
 		created_at: currtime,
 		updated_at: null,
 		area_count: 0,
