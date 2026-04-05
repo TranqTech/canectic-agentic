@@ -81,7 +81,7 @@ sudo npm install -g pm2
 Download the latest release from the [Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases), or clone a specific version:
 
 ```bash
-git clone --branch v0.9.0-alpha.1 --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
+git clone --branch v0.9.5a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
 cd canectic
 bash setup/install.sh          # choose install directory
 cd /opt/canectic               # or your chosen path

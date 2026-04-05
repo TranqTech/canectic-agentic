@@ -1,6 +1,6 @@
 # Canectic BBS - Changelog
 
-## Pending Release (since v0.9.1-alpha.1)
+## v0.9.5a (2026-04-04)
 
 ### Notification System
 - Centralised notification model (`notifications` table) with user-targeted and sysop-broadcast types

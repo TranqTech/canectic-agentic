@@ -45,13 +45,13 @@ nvm use 20
 
 Download the latest release from the [Canectic Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases) and extract:
 ```bash
-tar xzf canectic-v0.9.0-alpha.1.tar.gz
-cd canectic-v0.9.0-alpha.1
+tar xzf canectic-v0.9.5a.tar.gz
+cd canectic-v0.9.5a
 ```
 
 **From git (specific release):**
 ```bash
-git clone --branch v0.9.0-alpha.1 --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
+git clone --branch v0.9.5a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
 cd canectic
 ```
 
