@@ -469,7 +469,7 @@ async function listMsgGroups(userSecurity) {
 		: 255;
 
 	var dblist = await postgres.query(
-		"SELECT * FROM message_groups WHERE active AND (read_security IS NULL OR read_security <= $1) ORDER BY name ASC",
+		"SELECT * FROM message_groups WHERE active AND (read_security IS NULL OR read_security <= $1) ORDER BY sort_order ASC, name ASC",
 		[sec]
 	);
 	return dblist || [];
@@ -486,7 +486,7 @@ async function getAreasInGroup(groupShortcode, userSecurity) {
 
 	// Filter by read_security — only return areas the user can read
 	var dblist = await postgres.query(
-		"SELECT * FROM message_areas WHERE active AND group_id = $1 AND read_security <= $2 ORDER BY name ASC",
+		"SELECT * FROM message_areas WHERE active AND group_id = $1 AND read_security <= $2 ORDER BY sort_order ASC, name ASC",
 		[dbgroup.id, sec]
 	);
 	return dblist || [];
