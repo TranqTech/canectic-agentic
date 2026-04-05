@@ -44,6 +44,9 @@ async function ensureTable() {
 	await postgres.write(
 		"CREATE INDEX IF NOT EXISTS idx_notif_sysop ON notifications(created_at DESC) WHERE user_id IS NULL"
 	);
+
+	// Clean up legacy broadcast rows if any (now using per-user rows instead)
+	// notification_reads table no longer needed -- all notifications are per-user
 }
 
 // ---------------------------------------------------------------------------
@@ -89,58 +92,69 @@ async function create(userId, type, title, body, opts) {
 	return notifId;
 }
 
-// Create a sysop broadcast notification (user_id = NULL).
+// Create a sysop notification -- one row per sysop user.
 async function createSysop(type, title, body, opts) {
 	if (!appConfig.getBoolean('notifications_enabled', true)) return null;
 
 	opts = opts || {};
-	var dbObj = {
-		user_id: null,
-		type: type,
-		title: (title || '').substring(0, 256),
-		body: body || null,
-		link: opts.link || null,
-		icon: opts.icon || 'exclamation-triangle',
-		severity: opts.severity || 'warning',
-		read: false,
-		created_at: new Date()
-	};
+	var truncTitle = (title || '').substring(0, 256);
+	var icon = opts.icon || 'exclamation-triangle';
+	var severity = opts.severity || 'warning';
+	var link = opts.link || null;
+	var now = new Date();
 
-	var result = await postgres.insertObject(dbObj, 'notifications');
-	if (!result.status) return null;
+	// Find all sysop users
+	var sysops = await postgres.query(
+		"SELECT id FROM users WHERE active = true AND permissionflags @> '[\"Sysop\"]'::jsonb",
+		[]
+	);
+	if (!sysops || sysops.length === 0) return null;
 
-	var notifId = result.insertId;
+	var ids = [];
+	for (var sysop of sysops) {
+		var dbObj = {
+			user_id: sysop.id,
+			type: type,
+			title: truncTitle,
+			body: body || null,
+			link: link,
+			icon: icon,
+			severity: severity,
+			read: false,
+			created_at: now
+		};
 
-	// Push to all connected sysop users
-	if (_presenceServer) {
-		_pushToSysops({
-			type: 'notification',
-			id: notifId,
-			notifType: type,
-			title: dbObj.title,
-			body: dbObj.body,
-			link: dbObj.link,
-			icon: dbObj.icon,
-			severity: dbObj.severity
-		});
+		var result = await postgres.insertObject(dbObj, 'notifications');
+		if (result.status && result.insertId) {
+			ids.push(result.insertId);
+
+			// Push via PresenceSocket
+			if (_presenceServer) {
+				_presenceServer._sendToUser(sysop.id, {
+					type: 'notification',
+					id: result.insertId,
+					notifType: type,
+					title: truncTitle,
+					body: body || null,
+					link: link,
+					icon: icon,
+					severity: severity
+				});
+			}
+		}
 	}
 
-	return notifId;
+	return ids.length > 0 ? ids[0] : null;
 }
 
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
 
-// Get unread notifications for a user (including sysop broadcasts if sysop).
+// Get unread notifications for a user.
+// All notifications are per-user (sysop broadcasts create one row per sysop).
 async function getUnread(userId, isSysop, limit) {
 	var max = limit || 20;
-	if (isSysop) {
-		return await postgres.query(
-			'SELECT * FROM notifications WHERE (user_id = $1 OR user_id IS NULL) AND read = false ORDER BY created_at DESC LIMIT $2',
-			[userId, max]
-		) || [];
-	}
 	return await postgres.query(
 		'SELECT * FROM notifications WHERE user_id = $1 AND read = false ORDER BY created_at DESC LIMIT $2',
 		[userId, max]
@@ -151,12 +165,6 @@ async function getUnread(userId, isSysop, limit) {
 async function getAll(userId, isSysop, limit, offset) {
 	var max = limit || 50;
 	var off = offset || 0;
-	if (isSysop) {
-		return await postgres.query(
-			'SELECT * FROM notifications WHERE (user_id = $1 OR user_id IS NULL) ORDER BY created_at DESC LIMIT $2 OFFSET $3',
-			[userId, max, off]
-		) || [];
-	}
 	return await postgres.query(
 		'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
 		[userId, max, off]
@@ -165,42 +173,27 @@ async function getAll(userId, isSysop, limit, offset) {
 
 // Get unread count.
 async function getUnreadCount(userId, isSysop) {
-	var row;
-	if (isSysop) {
-		row = await postgres.queryOne(
-			'SELECT COUNT(*) AS cnt FROM notifications WHERE (user_id = $1 OR user_id IS NULL) AND read = false',
-			[userId]
-		);
-	} else {
-		row = await postgres.queryOne(
-			'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = $1 AND read = false',
-			[userId]
-		);
-	}
+	var row = await postgres.queryOne(
+		'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = $1 AND read = false',
+		[userId]
+	);
 	return row ? parseInt(row.cnt) : 0;
 }
 
 // Mark a single notification as read.
 async function markRead(id, userId) {
 	await postgres.write(
-		'UPDATE notifications SET read = true, read_at = NOW() WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)',
+		'UPDATE notifications SET read = true, read_at = NOW() WHERE id = $1 AND user_id = $2',
 		[id, userId]
 	);
 }
 
 // Mark all as read for a user.
-async function markAllRead(userId, isSysop) {
-	if (isSysop) {
-		await postgres.write(
-			'UPDATE notifications SET read = true, read_at = NOW() WHERE (user_id = $1 OR user_id IS NULL) AND read = false',
-			[userId]
-		);
-	} else {
-		await postgres.write(
-			'UPDATE notifications SET read = true, read_at = NOW() WHERE user_id = $1 AND read = false',
-			[userId]
-		);
-	}
+async function markAllRead(userId) {
+	await postgres.write(
+		'UPDATE notifications SET read = true, read_at = NOW() WHERE user_id = $1 AND read = false',
+		[userId]
+	);
 }
 
 // Get a single notification by ID.
@@ -231,21 +224,6 @@ async function purgeOld(days) {
 // ---------------------------------------------------------------------------
 // Push helpers
 // ---------------------------------------------------------------------------
-
-// Push a message to all connected users with Sysop permission.
-function _pushToSysops(msg) {
-	if (!_presenceServer) return;
-
-	var json = JSON.stringify(msg);
-	for (var [ws, client] of _presenceServer.clients) {
-		// We need to check if this client is a sysop.
-		// The session data includes permissionflags.
-		// Rather than re-querying, we check a cached flag set during connect.
-		if (client._isSysop && ws.readyState === 1) {
-			ws.send(json);
-		}
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Exports

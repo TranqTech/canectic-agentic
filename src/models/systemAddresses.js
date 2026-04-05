@@ -56,15 +56,15 @@ async function newAddress(formObj) {
 		node  = parseInt(npsplit[0]);
 		point = npsplit.length > 1 ? parseInt(npsplit[1]) : null;
 
-		if (!zone || !Number.isInteger(zone)) {
+		if (zone == null || !Number.isInteger(zone) || zone < 0) {
 			returnObj.errormessages.push("Invalid Zone");
 			validaddress = false;
 		}
-		if (!net || !Number.isInteger(net)) {
+		if (net == null || !Number.isInteger(net) || net < 0) {
 			returnObj.errormessages.push("Invalid Net");
 			validaddress = false;
 		}
-		if (!node || !Number.isInteger(node)) {
+		if (node == null || !Number.isInteger(node) || node < 0) {
 			returnObj.errormessages.push("Invalid Node");
 			validaddress = false;
 		}
@@ -291,9 +291,9 @@ async function updateAddress(uuid, formObj) {
 			var node  = parseInt(npsplit[0]);
 			var point = npsplit.length > 1 ? parseInt(npsplit[1]) : null;
 
-			if (!zone  || !Number.isInteger(zone))  returnObj.errormessages.push("Invalid Zone");
-			if (!net   || !Number.isInteger(net))   returnObj.errormessages.push("Invalid Net");
-			if (!node  || !Number.isInteger(node))  returnObj.errormessages.push("Invalid Node");
+			if (zone == null || !Number.isInteger(zone) || zone < 0) returnObj.errormessages.push("Invalid Zone");
+			if (net == null  || !Number.isInteger(net)  || net < 0)  returnObj.errormessages.push("Invalid Net");
+			if (node == null || !Number.isInteger(node) || node < 0) returnObj.errormessages.push("Invalid Node");
 			if (point !== null && !Number.isInteger(point)) returnObj.errormessages.push("Invalid Point");
 			if (returnObj.errormessages.length > 0) return returnObj;
 

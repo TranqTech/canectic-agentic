@@ -1,5 +1,14 @@
 # Canectic BBS - Changelog
 
+## Pending (since v0.9.5a)
+
+### Bugfixes
+- Fix: Notification dropdown populated with recent unread notifications on connect (#1)
+- Fix: Sysop notifications create one row per sysop (not shared broadcast rows) for correct per-user read state (#1)
+- Fix: Menu JSON import NaN error from null colour values (#2)
+- Fix: FTN NC addresses (node 0, e.g. 1:134/0) no longer rejected as invalid (#3)
+- Fix: Message group creation security field handling hardened (#4)
+
 ## v0.9.5a (2026-04-04)
 
 ### Notification System

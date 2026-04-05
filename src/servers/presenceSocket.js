@@ -119,8 +119,8 @@ class PresenceServer {
 		// Send initial state
 		ws.send(JSON.stringify({ type: 'connected', username: username }));
 
-		// Send unread notification count
-		this._sendNotificationCount(ws, userId, isSysop);
+		// Send unread notification count + recent notifications to populate dropdown
+		this._sendNotificationCount(ws, userId, isSysop, true);
 
 		// Check for active chat session to restore
 		this._restoreChat(ws, userId);
@@ -494,11 +494,28 @@ class PresenceServer {
 	// Notifications
 	// -----------------------------------------------------------------------
 
-	async _sendNotificationCount(ws, userId, isSysop) {
+	async _sendNotificationCount(ws, userId, isSysop, includeRecent) {
 		try {
 			var notifMod = await import('../models/notifications.js');
 			var count = await notifMod.getUnreadCount(userId, isSysop);
 			this._sendJson(ws, { type: 'notification_count', count: count });
+
+			// On connect, also send recent unread notifications to populate the dropdown
+			if (includeRecent && count > 0) {
+				var recent = await notifMod.getUnread(userId, isSysop, 10);
+				for (var n of recent) {
+					this._sendJson(ws, {
+						type: 'notification',
+						id: n.id,
+						notifType: n.type,
+						title: n.title,
+						body: n.body,
+						link: n.link,
+						icon: n.icon,
+						severity: n.severity
+					});
+				}
+			}
 		} catch (_) {}
 	}
 
