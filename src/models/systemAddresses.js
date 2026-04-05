@@ -344,11 +344,11 @@ async function removeAddress(uuid) {
 		"DELETE FROM system_addresses WHERE id = $1",
 		[dbaddress.id]
 	);
-	if (dbres.status === true) {
+	if (dbres === null) {
 		returnObj.status = true;
 		alogger.writeAlog(5, "System address removed: " + dbaddress.address, "greenbright");
 	} else {
-		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages || []);
+		returnObj.errormessages.push(dbres.message || "Failed to remove address");
 	}
 	return returnObj;
 }

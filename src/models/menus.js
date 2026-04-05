@@ -3,6 +3,7 @@
 // Replaces the hardcoded defaultmenuarray with database queries.
 
 import * as postgres from '../middleware/db/postgres.js';
+import * as alogger from '../utils/alogger.js';
 
 // Valid display file types — maps to subdirectory in the art file hierarchy.
 // drawscreen() in terminalcommands.js resolves:
@@ -296,10 +297,10 @@ async function createEntry(menuId, data) {
 		display: (data.display || '').trim(),
 		command_name: (data.command_name || '').trim(),
 		command_arg: (data.command_arg || '').trim(),
-		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : null,
-		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : null,
+		fg_clr: data.fg_clr != null && data.fg_clr !== '' ? parseInt(data.fg_clr) : null,
+		bg_clr: data.bg_clr != null && data.bg_clr !== '' ? parseInt(data.bg_clr) : null,
 		featured: data.featured === 'true' || data.featured === true,
-		min_security: data.min_security !== undefined && data.min_security !== '' ? parseInt(data.min_security) : null,
+		min_security: data.min_security != null && data.min_security !== '' ? parseInt(data.min_security) : null,
 		required_flags: JSON.stringify(requiredFlags),
 		prohibited_flags: JSON.stringify(prohibitedFlags),
 		created_at: new Date(),
@@ -339,10 +340,10 @@ async function updateEntry(entryId, data) {
 		display: (data.display || '').trim(),
 		command_name: (data.command_name || '').trim(),
 		command_arg: (data.command_arg || '').trim(),
-		fg_clr: data.fg_clr !== undefined && data.fg_clr !== '' ? parseInt(data.fg_clr) : null,
-		bg_clr: data.bg_clr !== undefined && data.bg_clr !== '' ? parseInt(data.bg_clr) : null,
+		fg_clr: data.fg_clr != null && data.fg_clr !== '' ? parseInt(data.fg_clr) : null,
+		bg_clr: data.bg_clr != null && data.bg_clr !== '' ? parseInt(data.bg_clr) : null,
 		featured: data.featured === 'true' || data.featured === true,
-		min_security: data.min_security !== undefined && data.min_security !== '' ? parseInt(data.min_security) : null,
+		min_security: data.min_security != null && data.min_security !== '' ? parseInt(data.min_security) : null,
 		required_flags: JSON.stringify(requiredFlags),
 		prohibited_flags: JSON.stringify(prohibitedFlags),
 		updated_at: new Date()

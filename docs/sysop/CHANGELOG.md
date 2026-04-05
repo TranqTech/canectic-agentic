@@ -10,6 +10,8 @@
 - Fix: Message group creation security field handling hardened (#4)
 - Fix: Message group create modal had single "Required Security" field instead of separate Read/Post Security + flags (#4)
 - Fix: Duplicate admin view template files (flat file shadowing index.pug) consolidated
+- Fix: Removing a network address crashed with "Cannot read properties of null" due to `postgres.write()` return value mismatch (#7)
+- Fix: Missing `alogger` import in menus.js caused "alogger is not defined" error on menu import/duplicate
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
