@@ -126,18 +126,17 @@ block content
                       class="form-control"
                       value=50
                     )
-                .row
+                .row.mt-2
                   .col-1
                   .col-5
                     #ng_read_perm_inputs
                     #ng_read_rest_inputs
-                    br
-                    label Read Perm Flags (default for areas):
+                    label Read Permission Flags:
                     .border.rounded.p-2.mb-2.bg-light#ng_read_perm_badges(style='min-height:2.2rem')
                     .input-group.mb-2
                       select#ng_read_perm_select.form-control
                       button.btn.btn-sm.btn-success#ng_read_perm_add(type='button') Add
-                    label Read Restrict Flags:
+                    label Read Restriction Flags:
                     .border.rounded.p-2.mb-2.bg-light#ng_read_rest_badges(style='min-height:2.2rem')
                     .input-group
                       select#ng_read_rest_select.form-control
@@ -145,13 +144,12 @@ block content
                   .col-5
                     #ng_post_perm_inputs
                     #ng_post_rest_inputs
-                    br
-                    label Post Perm Flags (default for areas):
+                    label Post Permission Flags:
                     .border.rounded.p-2.mb-2.bg-light#ng_post_perm_badges(style='min-height:2.2rem')
                     .input-group.mb-2
                       select#ng_post_perm_select.form-control
                       button.btn.btn-sm.btn-success#ng_post_perm_add(type='button') Add
-                    label Post Restrict Flags:
+                    label Post Restriction Flags:
                     .border.rounded.p-2.mb-2.bg-light#ng_post_rest_badges(style='min-height:2.2rem')
                     .input-group
                       select#ng_post_rest_select.form-control
@@ -167,38 +165,28 @@ block content
                         class="btn btn-lg btn-success btn-block"
                         )
   script.
-    // Add click event listener to table rows
     document.addEventListener('DOMContentLoaded', function() {
-      const table = document.getElementById('msgGroups');
-
+      var table = document.getElementById('msgGroups');
       if (table) {
-        // Add click event to all tbody rows
-        const rows = table.querySelectorAll('tbody tr');
-        
-        rows.forEach(row => {
-          // Add pointer cursor to indicate clickable rows
+        table.querySelectorAll('tbody tr').forEach(function(row) {
           row.style.cursor = 'pointer';
-          
           row.addEventListener('click', function() {
-            const shortcode = this.getAttribute('data-bs-shortcode');
-            
-            if (shortcode) {
-              // Navigate to the msgGroup page
-              window.location.href = `/admin/msggroup/${shortcode}`;
-            }
+            var shortcode = this.getAttribute('data-bs-shortcode');
+            if (shortcode) window.location.href = '/admin/msggroup/' + shortcode;
           });
         });
       }
 
       // --- Flag management for new group modal ---
-      var allPerms  = !{JSON.stringify(availablePermissions)};
-      var allRestrs = !{JSON.stringify(availableRestrictions)};
+      var allPerms  = !{JSON.stringify(availablePermissions || [])};
+      var allRestrs = !{JSON.stringify(availableRestrictions || [])};
 
-      function renderAreaFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
+      function renderFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
         var badgeEl  = document.getElementById(prefix + '_badges');
         var inputEl  = document.getElementById(prefix + '_inputs');
         var selectEl = document.getElementById(prefix + '_select');
         var addBtn   = document.getElementById(prefix + '_add');
+        if (!badgeEl || !inputEl || !selectEl || !addBtn) return;
 
         badgeEl.innerHTML = '';
         activeFlags.forEach(function(flag) {
@@ -206,10 +194,9 @@ block content
           span.className = 'badge ' + badgeClass + ' me-1 mb-1';
           span.style.cursor = 'pointer';
           span.title = 'Click to remove';
-          span.textContent = flag + ' ×';
+          span.textContent = flag + ' \u00d7';
           span.addEventListener('click', function() {
-            var updated = activeFlags.filter(function(f) { return f !== flag; });
-            renderAreaFlags(prefix, inputName, updated, allFlags, badgeClass);
+            renderFlags(prefix, inputName, activeFlags.filter(function(f) { return f !== flag; }), allFlags, badgeClass);
           });
           badgeEl.appendChild(span);
         });
@@ -217,9 +204,7 @@ block content
         inputEl.innerHTML = '';
         activeFlags.forEach(function(flag) {
           var inp = document.createElement('input');
-          inp.type  = 'hidden';
-          inp.name  = inputName;
-          inp.value = flag;
+          inp.type = 'hidden'; inp.name = inputName; inp.value = flag;
           inputEl.appendChild(inp);
         });
 
@@ -227,32 +212,29 @@ block content
         var available = allFlags.filter(function(f) { return !activeFlags.includes(f); });
         if (available.length === 0) {
           var opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = '— none available —';
-          opt.disabled = true;
+          opt.value = ''; opt.textContent = '-- none available --'; opt.disabled = true;
           selectEl.appendChild(opt);
-          selectEl.disabled = true;
-          addBtn.disabled = true;
+          selectEl.disabled = true; addBtn.disabled = true;
         } else {
-          selectEl.disabled = false;
-          addBtn.disabled = false;
+          selectEl.disabled = false; addBtn.disabled = false;
           available.forEach(function(flag) {
             var opt = document.createElement('option');
-            opt.value = flag;
-            opt.textContent = flag;
+            opt.value = flag; opt.textContent = flag;
             selectEl.appendChild(opt);
           });
         }
       }
 
       function wireAddBtn(prefix, inputName, allFlags, badgeClass) {
-        document.getElementById(prefix + '_add').addEventListener('click', function() {
+        var btn = document.getElementById(prefix + '_add');
+        if (!btn) return;
+        btn.addEventListener('click', function() {
           var sel = document.getElementById(prefix + '_select');
-          if (!sel.value) return;
+          if (!sel || !sel.value) return;
           var current = Array.from(document.querySelectorAll('#' + prefix + '_inputs input')).map(function(i) { return i.value; });
           if (!current.includes(sel.value)) {
             current.push(sel.value);
-            renderAreaFlags(prefix, inputName, current, allFlags, badgeClass);
+            renderFlags(prefix, inputName, current, allFlags, badgeClass);
           }
         });
       }
@@ -262,8 +244,8 @@ block content
       wireAddBtn('ng_post_perm', 'post_perm_flags', allPerms, 'bg-success');
       wireAddBtn('ng_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
 
-      renderAreaFlags('ng_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
-      renderAreaFlags('ng_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
-      renderAreaFlags('ng_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
-      renderAreaFlags('ng_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+      renderFlags('ng_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+      renderFlags('ng_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+      renderFlags('ng_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+      renderFlags('ng_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
     });
