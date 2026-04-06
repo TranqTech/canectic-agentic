@@ -10,12 +10,8 @@ block content
       include ../../partials/status/unauthorized.pug
     else
       if !ismobile
-        .row
-          .col-12
-            br
-        .row
-          .col-1
-          .col-10
+        .row.mt-2
+          .col-lg-10.offset-lg-1.col-12
             if !network
               .card
                 .card-header.bg-darkblue.text-white
@@ -86,7 +82,7 @@ block content
 
                 .tab-content
                   #tabAll.tab-pane.fade.show.active(role='tabpanel')
-                    .card-body(style='height:65vh; overflow-y:auto')
+                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
                       if fileboneAreas.length === 0
                         p.text-muted No filebone areas found. Import a filebone first.
                       else
@@ -103,7 +99,7 @@ block content
                               +areaRow(area, true, true)
 
                   #tabCarried.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:65vh; overflow-y:auto')
+                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
                       if carriedAreas.length === 0
                         p.text-muted No locally carried areas.
                       else
@@ -120,7 +116,7 @@ block content
                               +areaRow(area, false, true)
 
                   #tabAvailable.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:65vh; overflow-y:auto')
+                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
                       if availableAreas.length === 0
                         p.text-muted All filebone areas are locally carried.
                       else
@@ -137,7 +133,7 @@ block content
                               +areaRow(area, true, false)
 
                   #tabOrphaned.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:65vh; overflow-y:auto')
+                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
                       if orphanedAreas.length === 0
                         p.text-muted All network areas are covered by at least one filebone.
                       else
@@ -164,8 +160,6 @@ block content
                                   button.btn.btn-sm.btn-outline-danger.unmap-btn(type='button' style='min-width:120px' data-area-id=oa.area_id data-areatag=oa.areatag data-shortcode=oa.shortcode || '' data-area-name=oa.area_name || '')
                                     i.bi.bi-x-circle.me-1
                                     | Unmap
-
-          .col-1
 
       //- Subscribe Modal
       if network
