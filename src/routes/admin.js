@@ -3386,6 +3386,7 @@ router.post('/filebone/:networkId/combined/subscribe', urlencodedParser, require
 			name:            req.body.name || areatag,
 			description:     req.body.description || areatag,
 			shortcode:       shortcode,
+			sub_dir:         req.body.sub_dir || '',
 			browsesecurity:  req.body.browse_security,
 			readsecurity:    req.body.read_security,
 			postsecurity:    req.body.post_security,

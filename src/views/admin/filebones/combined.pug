@@ -188,6 +188,9 @@ block content
                       .mb-3
                         label.form-label Shortcode
                         input#subShortcode.form-control(type='text' name='shortcode')
+                      .mb-3
+                        label.form-label Sub Directory
+                        input#subSubDir.form-control(type='text' name='sub_dir' placeholder='e.g. fsxnode (defaults to shortcode)')
                     .col-6
                       .mb-3
                         label.form-label Description
@@ -324,6 +327,7 @@ block content
                 document.getElementById('subName').value = tag;
                 document.getElementById('subDescription').value = desc;
                 document.getElementById('subShortcode').value = tag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64);
+                document.getElementById('subSubDir').value = tag.toLowerCase().replace(/[^a-z0-9]/g, '_');
                 document.getElementById('subAction').value = 'create';
                 new bootstrap.Modal(subModal).show();
               });
