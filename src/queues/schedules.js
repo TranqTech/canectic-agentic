@@ -49,7 +49,7 @@ export async function registerSchedules() {
 		var notifRetention = appConfig.getNumber('notifications_retention_days', 30);
 		if (notifRetention > 0) {
 			await maintenanceQueue.upsertJobScheduler('purge-notifications-daily', {
-				pattern: '0 2 30 * * *',   // 2:30 AM daily
+				pattern: '0 30 2 * * *',   // 2:30 AM daily
 			}, {
 				name: 'purge-notifications',
 				data: { days: notifRetention },
@@ -86,7 +86,7 @@ export async function registerSchedules() {
 		// Maintenance: daily echolist/filebone reconciliation
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('reconcile-echolists-daily', {
-			pattern: '0 3 30 * * *',   // 3:30 AM daily
+			pattern: '0 30 3 * * *',   // 3:30 AM daily
 		}, {
 			name: 'reconcile-echolists',
 			data: {},
