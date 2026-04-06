@@ -256,22 +256,20 @@ Set any port to `0` to disable that listener. Port changes require a process res
 ```bash
 cd /path/to/canectic-bbs-repo
 git pull
-bash setup/install.sh /opt/canectic
+bash setup/update.sh /opt/canectic
 ```
 
 The update script:
 - Overwrites code files cleanly
 - Preserves your `.env` and data directories
 - Prompts before overwriting locally-modified config/data files
-- Shows post-update steps
+- Installs/updates npm dependencies
+- Runs database migrations automatically
 
-### After Updating
+After the script completes, restart services:
 
 ```bash
-cd /opt/canectic
-npm install                          # install/update dependencies
-node src/tools/dbmigrations.js       # apply schema changes
-pm2 restart all                      # restart services
+pm2 restart all
 ```
 
 ---
