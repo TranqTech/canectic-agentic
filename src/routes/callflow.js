@@ -399,24 +399,27 @@ router.post('/complete', urlencodedParser, async (req, res) => {
 
 	alogger.writeAlog(5, 'Callflow complete: user=' + (currentuser ? currentuser.username : 'null') + ' nowTs=' + nowTs + ' session=' + (req.cookies ? req.cookies.sessionid : 'none'), 'cyan');
 
+	var sessionFields = {
+		last_callflow_at: nowTs,
+		callflow_pending: '',
+		_callflow_checked: 'true'
+	};
+
 	if (currentuser) {
 		await updateLastCallflowAt(parseInt(currentuser.id));
 
 		// Update last_callflow_at on ALL sessions for this user (handles multi-tab/device)
-		var updateCount = await sessionStore.sessionUpdateUser(currentuser.username, {
-			last_callflow_at: nowTs,
-			callflow_pending: '',
-			_callflow_checked: 'true'
-		});
+		var updateCount = await sessionStore.sessionUpdateUser(currentuser.username, sessionFields);
 		alogger.writeAlog(5, 'Callflow session update: ' + updateCount + ' session(s) updated for ' + currentuser.username, 'cyan');
+
+		// If index-based update missed this session (stale index), update directly as fallback
+		if (updateCount === 0 && req.cookies && req.cookies.sessionid) {
+			await sessionStore.sessionUpdate(req.cookies.sessionid, sessionFields);
+			alogger.writeAlog(5, 'Callflow session update: direct fallback for ' + req.cookies.sessionid, 'yellow');
+		}
 	} else if (req.cookies && req.cookies.sessionid) {
-		// Fallback: update just this session
-		await sessionStore.sessionUpdate(req.cookies.sessionid, {
-			last_callflow_at: nowTs,
-			callflow_pending: '',
-			_callflow_checked: 'true'
-		});
-		alogger.writeAlog(5, 'Callflow session update: fallback for session ' + req.cookies.sessionid, 'cyan');
+		await sessionStore.sessionUpdate(req.cookies.sessionid, sessionFields);
+		alogger.writeAlog(5, 'Callflow session update: no user, fallback for session ' + req.cookies.sessionid, 'cyan');
 	}
 
 	var returnUrl = req.body.return_url || '/';
