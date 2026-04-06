@@ -432,25 +432,25 @@ async function getAreasAcrossNetwork(networkId) {
 
 async function reconcileLocalAreaIds() {
 	await postgres.write(
-		"UPDATE file_echolist_areas nea SET local_area_id = fna.area_id " +
-		"FROM file_network_areas fna " +
-		"JOIN file_echolists nel ON nel.id = nea.echolist_id " +
-		"WHERE fna.network_id = nel.network_id " +
-		"AND UPPER(nea.areatag) = UPPER(fna.areatag) " +
-		"AND nea.active = true " +
-		"AND (nea.local_area_id IS NULL OR nea.local_area_id != fna.area_id)"
+		"UPDATE file_echolist_areas SET local_area_id = fna.area_id " +
+		"FROM file_network_areas fna, file_echolists nel " +
+		"WHERE nel.id = file_echolist_areas.echolist_id " +
+		"AND fna.network_id = nel.network_id " +
+		"AND UPPER(file_echolist_areas.areatag) = UPPER(fna.areatag) " +
+		"AND file_echolist_areas.active = true " +
+		"AND (file_echolist_areas.local_area_id IS NULL OR file_echolist_areas.local_area_id != fna.area_id)"
 	);
 
 	await postgres.write(
-		"UPDATE file_echolist_areas nea SET local_area_id = NULL " +
+		"UPDATE file_echolist_areas SET local_area_id = NULL " +
 		"FROM file_echolists nel " +
-		"WHERE nel.id = nea.echolist_id " +
-		"AND nea.local_area_id IS NOT NULL " +
-		"AND nea.active = true " +
+		"WHERE nel.id = file_echolist_areas.echolist_id " +
+		"AND file_echolist_areas.local_area_id IS NOT NULL " +
+		"AND file_echolist_areas.active = true " +
 		"AND NOT EXISTS (" +
 		"  SELECT 1 FROM file_network_areas fna " +
 		"  WHERE fna.network_id = nel.network_id " +
-		"  AND UPPER(fna.areatag) = UPPER(nea.areatag)" +
+		"  AND UPPER(fna.areatag) = UPPER(file_echolist_areas.areatag)" +
 		")"
 	);
 

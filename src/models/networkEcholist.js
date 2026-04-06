@@ -452,27 +452,27 @@ async function getAreasAcrossNetwork(networkId) {
 // clear where they don't. Safe to run repeatedly (idempotent).
 async function reconcileLocalAreaIds() {
 	// Set local_area_id where a matching network_areas mapping exists
-	var setResult = await postgres.write(
-		"UPDATE network_echolist_areas nea SET local_area_id = na.area_id " +
-		"FROM network_areas na " +
-		"JOIN network_echolists nel ON nel.id = nea.echolist_id " +
-		"WHERE na.network_id = nel.network_id " +
-		"AND UPPER(nea.areatag) = UPPER(na.areatag) " +
-		"AND nea.active = true " +
-		"AND (nea.local_area_id IS NULL OR nea.local_area_id != na.area_id)"
+	await postgres.write(
+		"UPDATE network_echolist_areas SET local_area_id = na.area_id " +
+		"FROM network_areas na, network_echolists nel " +
+		"WHERE nel.id = network_echolist_areas.echolist_id " +
+		"AND na.network_id = nel.network_id " +
+		"AND UPPER(network_echolist_areas.areatag) = UPPER(na.areatag) " +
+		"AND network_echolist_areas.active = true " +
+		"AND (network_echolist_areas.local_area_id IS NULL OR network_echolist_areas.local_area_id != na.area_id)"
 	);
 
 	// Clear local_area_id where no matching network_areas mapping exists
-	var clearResult = await postgres.write(
-		"UPDATE network_echolist_areas nea SET local_area_id = NULL " +
+	await postgres.write(
+		"UPDATE network_echolist_areas SET local_area_id = NULL " +
 		"FROM network_echolists nel " +
-		"WHERE nel.id = nea.echolist_id " +
-		"AND nea.local_area_id IS NOT NULL " +
-		"AND nea.active = true " +
+		"WHERE nel.id = network_echolist_areas.echolist_id " +
+		"AND network_echolist_areas.local_area_id IS NOT NULL " +
+		"AND network_echolist_areas.active = true " +
 		"AND NOT EXISTS (" +
 		"  SELECT 1 FROM network_areas na " +
 		"  WHERE na.network_id = nel.network_id " +
-		"  AND UPPER(na.areatag) = UPPER(nea.areatag)" +
+		"  AND UPPER(na.areatag) = UPPER(network_echolist_areas.areatag)" +
 		")"
 	);
 
