@@ -8,7 +8,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as echomail from '../models/echomail.js';
 import * as msgAreas from '../models/msgAreas.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
-import { convertCP437toUTF8 } from '../utils/codepageConversions.js';
+import { cp437ToUtf8 as convertCP437toUTF8 } from '../utils/codepageConversions.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as alogger from '../utils/alogger.js';
 
