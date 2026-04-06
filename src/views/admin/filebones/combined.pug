@@ -24,18 +24,6 @@ block content
                 .card-body
                   h3 Network Not Found
             else
-              nav(aria-label='breadcrumb')
-                ol.breadcrumb
-                  li.breadcrumb-item
-                    a(href='/admin') Admin
-                  li.breadcrumb-item
-                    a(href='/admin/networks') Networks
-                  li.breadcrumb-item
-                    a(href='/admin/network/' + network.uuid)= network.name
-                  li.breadcrumb-item
-                    a(href='/admin/filebone/' + network.id) Filebones
-                  li.breadcrumb-item.active Combined View
-
               include ../../partials/flash
 
               - var carriedAreas = fileboneAreas.filter(function(a) { return a.local_area_id; })
@@ -44,10 +32,16 @@ block content
               .card
                 .card-header.bg-darkblue.text-white
                   .d-flex.justify-content-between.align-items-center
-                    h5.mb-0
-                      i.bi.bi-list-ul.me-2
-                      | Filebone Areas
-                    a.btn.btn-sm.btn-info(href='/admin/filebone/' + network.id) Back to Filebones
+                    nav(aria-label='breadcrumb')
+                      ol.breadcrumb.mb-0
+                        li.breadcrumb-item
+                          a.text-white(href='/admin') Admin
+                        li.breadcrumb-item
+                          a.text-white(href='/admin/network/' + network.uuid)= network.name
+                        li.breadcrumb-item
+                          a.text-white(href='/admin/filebone/' + network.id) Filebones
+                        li.breadcrumb-item.active.text-light Combined
+                    a.btn.btn-sm.btn-info(href='/admin/filebones') All Filebones
 
                 ul.nav.nav-tabs.px-3.pt-2(role='tablist')
                   li.nav-item(role='presentation')
