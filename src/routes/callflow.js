@@ -7,6 +7,7 @@ import express from 'express';
 var router = express.Router();
 
 import bodyParser from 'body-parser';
+import * as alogger from '../utils/alogger.js';
 var urlencodedParser = bodyParser.urlencoded({ extended: true });
 
 import * as sessionStore from '../middleware/db/sessionstore.js';
@@ -408,15 +409,18 @@ router.post('/complete', urlencodedParser, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var nowTs = String(Date.now());
 
+	alogger.writeAlog(5, 'Callflow complete: user=' + (currentuser ? currentuser.username : 'null') + ' nowTs=' + nowTs + ' session=' + (req.cookies ? req.cookies.sessionid : 'none'), 'cyan');
+
 	if (currentuser) {
 		await updateLastCallflowAt(parseInt(currentuser.id));
 
 		// Update last_callflow_at on ALL sessions for this user (handles multi-tab/device)
-		await sessionStore.sessionUpdateUser(currentuser.username, {
+		var updateCount = await sessionStore.sessionUpdateUser(currentuser.username, {
 			last_callflow_at: nowTs,
 			callflow_pending: '',
 			_callflow_checked: 'true'
 		});
+		alogger.writeAlog(5, 'Callflow session update: ' + updateCount + ' session(s) updated for ' + currentuser.username, 'cyan');
 	} else if (req.cookies && req.cookies.sessionid) {
 		// Fallback: update just this session
 		await sessionStore.sessionUpdate(req.cookies.sessionid, {
@@ -424,10 +428,12 @@ router.post('/complete', urlencodedParser, async (req, res) => {
 			callflow_pending: '',
 			_callflow_checked: 'true'
 		});
+		alogger.writeAlog(5, 'Callflow session update: fallback for session ' + req.cookies.sessionid, 'cyan');
 	}
 
 	var returnUrl = req.body.return_url || '/';
 	if (returnUrl.startsWith('/callflow')) returnUrl = '/';
+	alogger.writeAlog(5, 'Callflow complete: redirecting to ' + returnUrl, 'cyan');
 	res.json({ redirect: returnUrl });
 });
 
