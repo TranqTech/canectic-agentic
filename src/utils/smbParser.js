@@ -227,7 +227,7 @@ function extractMessageText(sdtBuf, msgHeader, sdtBlockSize) {
 
 function parseIndex(sidBuf) {
 	var records = [];
-	var recSize = 28;
+	var recSize = 20;
 	var count = Math.floor(sidBuf.length / recSize);
 
 	for (var i = 0; i < count; i++) {

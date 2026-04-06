@@ -17,6 +17,13 @@
 - Fix: Nodelist import crash on duplicate addresses in same batch (e.g. ZC and RC both listed as zone:net/0)
 - Fix: SMB import crash on missing CP437 export name (convertCP437toUTF8 vs cp437ToUtf8)
 - Fix: SMB import empty string for integer columns (source/destination zone/net/node now null when no FTN address)
+- Fix: SMB import null bytes in text fields causing PostgreSQL rejection (0x00 stripped from all string fields)
+- Fix: SMB parser header layout corrected (dataOffset at 64, totalDfields at 68, dfields-before-hfields order)
+- Fix: SMB parser encoding changed from binary (Latin-1) to utf8
+- Fix: Message table seen_by/path columns widened from VARCHAR(255) to TEXT (FTN paths can be thousands of chars)
+- Fix: Callflow completion not updating session (session_index missing for pre-index sessions, added direct session ID fallback)
+- Fix: Callflow force redirect restricted to GET only and excludes admin/pm/notification routes
+- Fix: Callflow pending flag cleared on page render to break redirect loops
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
