@@ -814,7 +814,9 @@ User navbar: Messages, Files, Doors, Chat (links to `/whosonline` for who's onli
 
 ## Echolist and Filebone Admin
 
-Per-network echolist registries at `/admin/echolists` (all networks overview) and `/admin/echolist/:networkId` (per-network management). Browse areas, import from file with diff preview, edit individual entries. Filebones at `/admin/filebones` and `/admin/filebone/:networkId` (identical UI for file echo lists). Both linked from network detail pages.
+Per-network echolist registries at `/admin/echolists` (all networks overview) and `/admin/echolist/:networkId` (per-network management). Browse areas, import from file with diff preview, edit individual entries. Filebones at `/admin/filebones` and `/admin/filebone/:networkId` (identical UI for file echo lists). Both linked from network detail pages. Create from file upload (name from filename, import in one step).
+
+Combined views at `/admin/echolist/:networkId/combined` and `/admin/filebone/:networkId/combined`: tabbed layout (All/Carried/Available/Orphaned) with counts on tab labels. Subscribe modal with Create/Map tabs, config-based security defaults, flag selectors, group auto-populate, separate Allow/Enable peer checkboxes. Unsubscribe on carried areas, Unmap on orphaned areas with cascading delete options. Daily `reconcile-echolists` maintenance job ensures `local_area_id` stays in sync.
 
 ## Migration Tools
 

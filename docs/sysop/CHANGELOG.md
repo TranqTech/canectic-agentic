@@ -30,6 +30,9 @@
 - Fix: Threading window widened to 365 days for messages with "Re:" subject (was 30 days, missed long-running threads)
 - Fix: Outbound FTN packets missing REPLY kludge -- replies sent from Canectic had no @REPLY, breaking threading on downstream systems
 - Fix: Maintenance jobs blocked re-runs after completion (BullMQ jobId deduplication, added removeOnComplete/removeOnFail)
+- Fix: Echolist/filebone import not back-filling local_area_id for pre-existing network area mappings
+- Fix: Echolist reconciliation SQL using invalid table alias in UPDATE FROM clause
+- Fix: Combined echolist/filebone view page scroll caused by modals inside main-wrapper (moved to page level)
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
@@ -46,6 +49,17 @@
 - Admin message/thread deletion: per-message delete buttons in thread view, per-thread delete buttons in area view, Delete Thread in sidebar with confirmation modals
 - Thread rebuild maintenance tool: `--rethread` CLI flag, admin Rebuild Threads button, re-processes all messages in chronological order
 - Queue status panel on Jobs & Maintenance page: view active/waiting/delayed/failed jobs, remove stuck jobs, retry/remove failed, drain queues
+- Combined echolist view: tabbed (All/Carried/Available/Orphaned) with counts on tabs, subscribe and unsubscribe/unmap actions, DataTables search on All tab
+- Combined filebone view: same tabbed layout with browse/download/upload security fields and flag selectors
+- Echolist/filebone subscribe modal: config-based security defaults, permission/restriction flag selectors, group auto-populate, separate Allow/Enable peer checkboxes
+- Echolist/filebone unmap modal: cascading delete options (remove area, optionally delete tables/files)
+- Echolist/filebone create from file upload: name derived from filename, import in one step
+- Echolist/filebone local_area_id reconciliation: daily maintenance job + admin button, bidirectional sync
+- Select All / Deselect All buttons on peer connection subscription modals (message and file, allowed and enabled)
+- Message group post_as setting (username/realname) with push defaults to areas
+- Configurable default security levels: config keys for message read/post and file browse/download/upload defaults
+- Door collection membership: Collections tab on New Door and Edit Door modals with checkbox selection
+- Standalone update.sh script: copies code, merges data, runs npm install and db migrations automatically
 - 57 new unit tests for sbbsecho parser (2,016 total)
 
 ## v0.9.5a (2026-04-04)
