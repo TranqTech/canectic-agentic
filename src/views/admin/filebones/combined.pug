@@ -1,7 +1,7 @@
 extends ../../layouts/admin
 
 block content
-  .container-fluid.main-wrapper
+  .container-fluid.main-wrapper(style='overflow:hidden')
     if !currentuser
       - loginMode = 'guard'
       - loginRedirect = currentPath
