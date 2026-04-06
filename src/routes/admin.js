@@ -3142,7 +3142,7 @@ router.get('/filebone/view/:echolistId', async (req, res) => {
 	res.render('admin/filebones/view', {
 		sufficientAccess: sufficientAccess, title: 'Filebone',
 		activelink: 'networks', currentuser: currentuser,
-		echolist: echolist, network: network, areas: areas, stats: stats, diff: null
+		echolist: echolist, filebone: echolist, network: network, areas: areas, stats: stats, diff: null
 	});
 });
 
@@ -3157,7 +3157,7 @@ router.get('/filebone/:networkId', async (req, res) => {
 	res.render('admin/filebones/index', {
 		sufficientAccess: sufficientAccess, title: 'Filebones',
 		activelink: 'networks', currentuser: currentuser, network: network,
-		echolists: filebones
+		echolists: filebones, filebones: filebones
 	});
 });
 
@@ -3239,7 +3239,7 @@ router.post('/filebone/:echolistId/import', multer({ dest: os.tmpdir() }).single
 	res.render('admin/filebones/view', {
 		sufficientAccess: sufficientAccess, title: 'Filebone',
 		activelink: 'networks', currentuser: currentuser,
-		echolist: echolist, network: network, areas: areas, stats: stats, diff: diff
+		echolist: echolist, filebone: echolist, network: network, areas: areas, stats: stats, diff: diff
 	});
 });
 
