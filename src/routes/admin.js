@@ -3075,6 +3075,91 @@ router.get('/events', async (req, res) => {
 	});
 });
 
+// Queue status API
+router.get('/events/queues.json', requireAdmin, async (req, res) => {
+	var { Queue } = await import('bullmq');
+	var { createQueueConnection } = await import('../queues/connection.js');
+	var conn = createQueueConnection();
+	var result = {};
+
+	for (var name of ['toss', 'maintenance', 'mailer']) {
+		var q = new Queue(name, { connection: conn });
+		var active = await q.getActive();
+		var waiting = await q.getWaiting();
+		var delayed = await q.getDelayed();
+		var failed = await q.getFailed(0, 10);
+
+		result[name] = {
+			active: active.map(function(j) {
+				return { id: j.id, name: j.name, started: j.processedOn ? new Date(j.processedOn).toISOString() : null };
+			}),
+			waiting: waiting.length,
+			delayed: delayed.length,
+			failed: failed.map(function(j) {
+				return { id: j.id, name: j.name, reason: (j.failedReason || '').substring(0, 200), failed_at: j.finishedOn ? new Date(j.finishedOn).toISOString() : null };
+			})
+		};
+		await q.close();
+	}
+
+	conn.disconnect();
+	res.json(result);
+});
+
+// Clean stuck/failed jobs
+router.post('/events/clean', express.json(), requireAdmin, async (req, res) => {
+	var { Queue } = await import('bullmq');
+	var { createQueueConnection } = await import('../queues/connection.js');
+	var conn = createQueueConnection();
+	var action = req.body.action;
+	var queueName = req.body.queue;
+	var jobId = req.body.jobId;
+
+	if (!queueName || !['toss', 'maintenance', 'mailer'].includes(queueName)) {
+		conn.disconnect();
+		return res.json({ status: false, error: 'Invalid queue' });
+	}
+
+	var q = new Queue(queueName, { connection: conn });
+	var cleaned = 0;
+
+	if (action === 'remove-failed') {
+		// Remove all failed jobs
+		var failed = await q.getFailed();
+		for (var j of failed) {
+			await j.remove();
+			cleaned++;
+		}
+	} else if (action === 'retry-failed') {
+		// Retry all failed jobs
+		var failed = await q.getFailed();
+		for (var j of failed) {
+			await j.retry();
+			cleaned++;
+		}
+	} else if (action === 'remove-job' && jobId) {
+		// Remove a specific job by ID
+		var job = await q.getJob(jobId);
+		if (job) {
+			await job.remove();
+			cleaned = 1;
+		}
+	} else if (action === 'drain') {
+		// Remove all waiting jobs
+		await q.drain();
+		cleaned = -1; // drained
+	} else {
+		await q.close();
+		conn.disconnect();
+		return res.json({ status: false, error: 'Unknown action' });
+	}
+
+	await q.close();
+	conn.disconnect();
+	alogger.writeAlog(5, 'Queue clean: ' + action + ' on ' + queueName + (cleaned >= 0 ? ' (' + cleaned + ' jobs)' : ' (drained)'), 'yellow');
+	res.json({ status: true, cleaned: cleaned });
+});
+
 router.post('/events/trigger', express.json(), requireAdmin, async (req, res) => {
 	var job = req.body.job;
 	var triggered = null;

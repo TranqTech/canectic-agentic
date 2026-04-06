@@ -44,6 +44,10 @@ block content
                     button.nav-link(data-bs-toggle='tab' data-bs-target='#tab-users' type='button' role='tab')
                       i.bi.bi-people.me-1
                       | Users
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tab-queues' type='button' role='tab')
+                      i.bi.bi-list-task.me-1
+                      | Queue Status
 
                 .tab-content
 
@@ -126,6 +130,15 @@ block content
                         i.bi.bi-wrench.me-1
                         | User Maintenance
 
+                  #tab-queues.tab-pane.fade(role='tabpanel')
+                    .d-flex.justify-content-between.align-items-center.mb-3
+                      h5.mb-0 Queue Status
+                      button.btn.btn-sm.btn-outline-info#refreshQueues
+                        i.bi.bi-arrow-repeat.me-1
+                        | Refresh
+                    #queueStatusContainer
+                      p.text-muted Click Refresh to load queue status.
+
   script.
     document.addEventListener('DOMContentLoaded', function() {
       var alertEl = document.getElementById('triggerAlert');
@@ -137,6 +150,97 @@ block content
           alertEl.className = 'alert d-none';
         }, 4000);
       }
+
+      // Queue status
+      var queueContainer = document.getElementById('queueStatusContainer');
+      var refreshBtn = document.getElementById('refreshQueues');
+
+      function loadQueues() {
+        refreshBtn.disabled = true;
+        fetch('/admin/events/queues.json')
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var html = '';
+            for (var qname in data) {
+              var q = data[qname];
+              html += '<div class="card mb-3"><div class="card-header bg-dark d-flex justify-content-between align-items-center">';
+              html += '<h6 class="mb-0">' + qname + '</h6>';
+              html += '<span class="text-muted small">Active: ' + q.active.length + ' | Waiting: ' + q.waiting + ' | Delayed: ' + q.delayed + ' | Failed: ' + q.failed.length + '</span>';
+              html += '</div><div class="card-body p-2">';
+
+              if (q.active.length > 0) {
+                html += '<p class="mb-1 small fw-bold text-warning">Active Jobs:</p>';
+                for (var a of q.active) {
+                  html += '<div class="d-flex justify-content-between align-items-center mb-1 small">';
+                  html += '<span><span class="badge bg-warning text-dark">' + a.name + '</span> id=' + a.id + (a.started ? ' started ' + a.started : '') + '</span>';
+                  html += '<button class="btn btn-sm btn-outline-danger clean-btn" data-queue="' + qname + '" data-action="remove-job" data-job-id="' + a.id + '">Remove</button>';
+                  html += '</div>';
+                }
+              }
+
+              if (q.failed.length > 0) {
+                html += '<p class="mb-1 small fw-bold text-danger mt-2">Failed Jobs:</p>';
+                for (var f of q.failed) {
+                  html += '<div class="d-flex justify-content-between align-items-center mb-1 small">';
+                  html += '<span><span class="badge bg-danger">' + f.name + '</span> ' + (f.reason || '').substring(0, 100) + '</span>';
+                  html += '<button class="btn btn-sm btn-outline-danger clean-btn" data-queue="' + qname + '" data-action="remove-job" data-job-id="' + f.id + '">Remove</button>';
+                  html += '</div>';
+                }
+                html += '<div class="mt-2">';
+                html += '<button class="btn btn-sm btn-outline-warning clean-btn me-1" data-queue="' + qname + '" data-action="retry-failed">Retry All Failed</button>';
+                html += '<button class="btn btn-sm btn-outline-danger clean-btn" data-queue="' + qname + '" data-action="remove-failed">Remove All Failed</button>';
+                html += '</div>';
+              }
+
+              if (q.active.length === 0 && q.failed.length === 0) {
+                html += '<span class="text-muted small">No active or failed jobs.</span>';
+              }
+
+              if (q.waiting > 0) {
+                html += '<div class="mt-2"><button class="btn btn-sm btn-outline-secondary clean-btn" data-queue="' + qname + '" data-action="drain">Drain ' + q.waiting + ' Waiting</button></div>';
+              }
+
+              html += '</div></div>';
+            }
+            queueContainer.innerHTML = html;
+            wireCleanBtns();
+          })
+          .catch(function(err) {
+            queueContainer.innerHTML = '<p class="text-danger">Failed to load: ' + err.message + '</p>';
+          })
+          .finally(function() { refreshBtn.disabled = false; });
+      }
+
+      function wireCleanBtns() {
+        document.querySelectorAll('.clean-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var payload = { queue: btn.dataset.queue, action: btn.dataset.action };
+            if (btn.dataset.jobId) payload.jobId = btn.dataset.jobId;
+            btn.disabled = true;
+            fetch('/admin/events/clean', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data.status) {
+                showAlert('Cleaned: ' + btn.dataset.action + ' on ' + btn.dataset.queue, 'success');
+                loadQueues();
+              } else {
+                showAlert('Error: ' + (data.error || 'Unknown'), 'danger');
+              }
+            })
+            .catch(function(err) { showAlert('Failed: ' + err.message, 'danger'); });
+          });
+        });
+      }
+
+      refreshBtn.addEventListener('click', loadQueues);
+
+      // Auto-load when queue tab is shown
+      document.getElementById('tab-queues').closest('.nav-link') ||
+        document.querySelector('[data-bs-target="#tab-queues"]').addEventListener('shown.bs.tab', function() { loadQueues(); });
 
       document.querySelectorAll('.trigger-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
