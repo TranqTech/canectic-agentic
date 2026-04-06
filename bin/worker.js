@@ -367,6 +367,15 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'rethread': {
+				var msgBase = await import("../src/maintenance/messageBase.js");
+				await msgBase.rethreadAreas({
+					areas: job.data.areas || null,
+					dryRun: job.data.dryRun || false,
+				});
+				break;
+			}
+
 			case 'regen-file-desc-html': {
 				var fileEntries = await import("../src/models/fileEntries.js");
 				await fileEntries.regenerateDescHtml({

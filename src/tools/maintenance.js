@@ -40,6 +40,7 @@ function parseArgs() {
 		console.log('  --regen-pm-html    Regenerate body_html for private messages (pm_inbox + pm_outbox)');
 		console.log('  --purge-pm-trash   Hard-delete PM trash older than retention period');
 		console.log('  --recalc-counts    Recalculate message area counts');
+		console.log('  --rethread         Rebuild thread assignments for message areas');
 		console.log('');
 		console.log('Options:');
 		console.log('  --area SHORTCODE   Limit regen-html to specific area(s) (repeatable)');
@@ -59,6 +60,7 @@ function parseArgs() {
 	var regenPmHtml = args.includes('--regen-pm-html');
 	var purgePmTrash = args.includes('--purge-pm-trash');
 	var recalcCounts = args.includes('--recalc-counts');
+	var rethread = args.includes('--rethread');
 	var width = null;
 	var batchSize = 100;
 	var days = null;
@@ -79,7 +81,7 @@ function parseArgs() {
 		}
 	}
 
-	return { regenHtml, regenPmHtml, purgePmTrash, recalcCounts, areas, dryRun, width, batchSize, days };
+	return { regenHtml, regenPmHtml, purgePmTrash, recalcCounts, rethread, areas, dryRun, width, batchSize, days };
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +153,7 @@ async function waitForJobs(enqueuedJobs, timeoutMs) {
 async function main() {
 	var opts = parseArgs();
 
-	if (!opts.regenHtml && !opts.regenPmHtml && !opts.purgePmTrash && !opts.recalcCounts) {
+	if (!opts.regenHtml && !opts.regenPmHtml && !opts.purgePmTrash && !opts.recalcCounts && !opts.rethread) {
 		console.log('No task specified. Use --help for usage.');
 		process.exit(1);
 	}
@@ -191,6 +193,15 @@ async function main() {
 			var job = await jobs.enqueueRecalcAreaCounts();
 			enqueuedJobs.push(job);
 			console.log('  + recalc-area-counts');
+		}
+
+		if (opts.rethread) {
+			var job = await jobs.enqueueRethread({
+				areas: opts.areas.length > 0 ? opts.areas : null,
+				dryRun: opts.dryRun,
+			});
+			enqueuedJobs.push(job);
+			console.log('  + rethread' + (opts.areas.length > 0 ? ' (areas: ' + opts.areas.join(', ') + ')' : ' (all areas)'));
 		}
 
 		if (enqueuedJobs.length === 0) {

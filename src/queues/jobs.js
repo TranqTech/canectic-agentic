@@ -345,6 +345,19 @@ export async function enqueueRecalcAreaCounts() {
 }
 
 /**
+ * Rebuild thread assignments for message areas.
+ * Called by: admin panel, CLI.
+ */
+export async function enqueueRethread(opts = {}) {
+	return maintenanceQueue.add('rethread', {
+		areas: opts.areas || null,
+		dryRun: opts.dryRun || false,
+	}, {
+		jobId: 'rethread' + (opts.areas ? '-' + opts.areas.join('-') : '-all'),
+	});
+}
+
+/**
  * Regenerate long_desc_html for file entries.
  * Called by: admin panel, CLI.
  */

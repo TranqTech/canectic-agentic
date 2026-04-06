@@ -358,9 +358,125 @@ async function regeneratePmTableBodyHtml(tableName, options) {
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
+// rethreadArea
+// ---------------------------------------------------------------------------
+// Rebuilds all thread assignments for a message area. Clears existing threads,
+// then re-processes all messages in chronological order using the standard
+// threadMessage logic. Thread stats are flushed every 10 messages.
+//
+// Options:
+//   areas: string[] — shortcodes to rethread (null = all active areas)
+//   dryRun: boolean — preview only, don't write
+
+async function rethreadAreas(options) {
+	var opts = options || {};
+	var echomail = await import('../models/echomail.js');
+
+	var areaRows;
+	if (opts.areas && opts.areas.length > 0) {
+		areaRows = [];
+		for (var sc of opts.areas) {
+			var row = await postgres.queryOne("SELECT shortcode FROM message_areas WHERE UPPER(shortcode) = UPPER($1)", [sc]);
+			if (row) areaRows.push(row);
+			else alogger.writeAlog(3, '[Rethread] Area not found: ' + sc, 'yellow');
+		}
+	} else {
+		areaRows = await postgres.query("SELECT shortcode FROM message_areas WHERE active ORDER BY shortcode");
+	}
+
+	if (!areaRows || areaRows.length === 0) {
+		alogger.writeAlog(5, '[Rethread] No areas to process', 'cyan');
+		return;
+	}
+
+	alogger.writeAlog(5, '[Rethread] Processing ' + areaRows.length + ' area(s)', 'cyan');
+
+	for (var area of areaRows) {
+		var shorty = area.shortcode.toLowerCase();
+		var msgtable = 'mb_' + shorty + '_msgs';
+		var threadtable = 'mb_' + shorty + '_threads';
+
+		// Count messages
+		var countRow = await postgres.queryOne("SELECT COUNT(*) AS cnt FROM " + msgtable);
+		var msgCount = countRow ? parseInt(countRow.cnt) : 0;
+		alogger.writeAlog(5, '[Rethread] ' + area.shortcode + ': ' + msgCount + ' messages', 'cyan');
+
+		if (msgCount === 0) continue;
+		if (opts.dryRun) {
+			alogger.writeAlog(5, '[Rethread] ' + area.shortcode + ': dry run, skipping', 'cyan');
+			continue;
+		}
+
+		// Clear existing threads and thread references on messages
+		await postgres.write("DELETE FROM " + threadtable);
+		await postgres.write("UPDATE " + msgtable + " SET thread_id = NULL, threadid = NULL");
+
+		// Load all messages in chronological order
+		var allMsgs = await postgres.query(
+			"SELECT * FROM " + msgtable + " ORDER BY system_time ASC, id ASC"
+		);
+
+		var processed = 0;
+		for (var msg of (allMsgs || [])) {
+			// threadMessage expects these fields and modifies them
+			var msgObj = {
+				msg_id: msg.msg_id,
+				reply_to: msg.reply_to,
+				subject: msg.subject || '',
+				from_user: msg.from_user || '',
+				to_user: msg.to_user || '',
+				system_time: msg.system_time,
+				threadid: null,
+				thread_id: null
+			};
+
+			msgObj = await echomail.threadMessage(msgObj, msgtable, threadtable, shorty);
+
+			// Update the message row with thread assignment
+			var updateFields = {};
+			if (msgObj.thread_id) updateFields.thread_id = msgObj.thread_id;
+			if (msgObj.threadid) updateFields.threadid = msgObj.threadid;
+			if (Object.keys(updateFields).length > 0) {
+				await postgres.write(
+					"UPDATE " + msgtable + " SET thread_id = $1, threadid = $2 WHERE id = $3",
+					[msgObj.thread_id || null, msgObj.threadid || null, msg.id]
+				);
+			}
+
+			processed++;
+
+			// Flush thread stats periodically
+			if (processed % 10 === 0) {
+				var pending = echomail.drainThreadUpdateArray();
+				if (pending.length > 0) await echomail.updateThreadArray(pending);
+			}
+
+			if (processed % 100 === 0) {
+				alogger.writeAlog(5, '[Rethread] ' + area.shortcode + ': ' + processed + '/' + msgCount, 'cyan');
+			}
+		}
+
+		// Final flush
+		var remaining = echomail.drainThreadUpdateArray();
+		if (remaining.length > 0) await echomail.updateThreadArray(remaining);
+
+		// Update area stats
+		try {
+			var msgAreasModule = await import('../models/msgAreas.js');
+			await msgAreasModule.updateStatsForArea(area.shortcode);
+		} catch (e) {}
+
+		alogger.writeAlog(5, '[Rethread] ' + area.shortcode + ': complete (' + processed + ' messages)', 'greenbright');
+	}
+
+	alogger.writeAlog(5, '[Rethread] Done', 'greenbright');
+}
+
+// ---------------------------------------------------------------------------
 
 export {
 	regenerateAllBodyHtml,
 	regenerateAreaBodyHtml,
-	regeneratePmBodyHtml
+	regeneratePmBodyHtml,
+	rethreadAreas
 };

@@ -3103,6 +3103,7 @@ router.post('/events/trigger', express.json(), requireAdmin, async (req, res) =>
 		case 'file-maintenance':  await jobs.enqueueFileMaintenance(); triggered = 'File Maintenance'; break;
 		case 'scan-nodelists':    await jobs.enqueueScanNodelists(); triggered = 'Scan Nodelists'; break;
 		case 'purge-tossed':      await jobs.enqueuePurgeTossed(); triggered = 'Purge Tossed Packets'; break;
+		case 'rethread':          await jobs.enqueueRethread(); triggered = 'Rebuild Threads'; break;
 		default:
 			return res.json({ status: false, error: 'Unknown job' });
 	}
