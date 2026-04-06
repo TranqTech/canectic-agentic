@@ -2941,6 +2941,21 @@ router.get('/echolist/:networkId/combined', async (req, res) => {
 	var allAreas     = await msgAreas.getAllAreas();
 	var unmappedAreas = (allAreas || []).filter(function(a) { return !mappedIds.has(parseInt(a.id)); });
 
+	// Enrich echolist areas that are carried with shortcode/area_id for unmap action
+	var areaIdMap = {};
+	for (var a of (allAreas || [])) { areaIdMap[a.id] = a; }
+	var naTagMap = {};
+	for (var na of (mappedRows || [])) { naTagMap[na.areatag.toUpperCase()] = na; }
+	for (var el of echolistAreas) {
+		if (el.local_area_id) {
+			var localArea = areaIdMap[el.local_area_id];
+			el.local_shortcode = localArea ? localArea.shortcode : '';
+			el.local_area_name = localArea ? localArea.name : '';
+			var naRow = naTagMap[el.areatag.toUpperCase()];
+			el.network_area_id = naRow ? naRow.area_id : el.local_area_id;
+		}
+	}
+
 	res.render('admin/echolists/combined', {
 		sufficientAccess: sufficientAccess,
 		title: 'Combined Echolist',
@@ -3278,6 +3293,21 @@ router.get('/filebone/:networkId/combined', async (req, res) => {
 	var mappedIds    = new Set((mappedRows || []).map(function(na) { return parseInt(na.area_id); }));
 	var allAreas     = await fileAreas.getAllAreas();
 	var unmappedAreas = (allAreas || []).filter(function(a) { return !mappedIds.has(parseInt(a.id)); });
+
+	// Enrich carried filebones with shortcode/area_id for unmap action
+	var areaIdMap = {};
+	for (var a of (allAreas || [])) { areaIdMap[a.id] = a; }
+	var naTagMap = {};
+	for (var na of (mappedRows || [])) { naTagMap[na.areatag.toUpperCase()] = na; }
+	for (var el of fileboneAreas) {
+		if (el.local_area_id) {
+			var localArea = areaIdMap[el.local_area_id];
+			el.local_shortcode = localArea ? localArea.shortcode : '';
+			el.local_area_name = localArea ? localArea.name : '';
+			var naRow = naTagMap[el.areatag.toUpperCase()];
+			el.network_area_id = naRow ? naRow.area_id : el.local_area_id;
+		}
+	}
 
 	res.render('admin/filebones/combined', {
 		sufficientAccess: sufficientAccess,
