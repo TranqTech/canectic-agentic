@@ -208,7 +208,7 @@ block content
                       h5
                         i.bi.bi-collection.me-2
                         | Areas (#{areas.length})
-                    .card-body
+                    .card-body(style='max-height:60vh; overflow-y:auto')
                       if areas && areas.length > 0
                         table#areaTable.table.table-hover.table-sm
                           thead
@@ -282,7 +282,7 @@ block content
         script.
           $(document).ready(function() {
             $('#areaTable').DataTable({
-              pageLength: 50,
+              paging: false,
               order: [[0, 'asc']],
               language: {
                 search: '',

@@ -72,7 +72,7 @@ block content
                       | Filebone Areas
                       small.text-muted.ms-2 (deduplicated across all filebones)
                     a.btn.btn-sm.btn-info(href='/admin/filebone/' + network.id) Back to Filebones
-                .card-body
+                .card-body(style='max-height:60vh; overflow-y:auto')
                   if fileboneAreas.length === 0
                     p.text-muted No filebone areas found. Import an filebone first.
                   else
@@ -112,7 +112,7 @@ block content
                     i.bi.bi-exclamation-triangle.me-2.text-warning
                     | Orphaned Areas
                     small.text-muted.ms-2 Mapped to this network but not in any filebone
-                .card-body
+                .card-body(style='max-height:40vh; overflow-y:auto')
                   if orphanedAreas.length === 0
                     p.text-muted.mb-0 All network areas are covered by at least one filebone.
                   else
@@ -292,9 +292,9 @@ block content
       document.addEventListener('DOMContentLoaded', function() {
         // DataTables
         if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
-          jQuery('#fileboneTable').DataTable({ pageLength: 50, order: [[0, 'asc']] });
+          jQuery('#fileboneTable').DataTable({ paging: false, order: [[0, 'asc']] });
           if (document.querySelectorAll('#orphanedTable tbody tr').length > 0) {
-            jQuery('#orphanedTable').DataTable({ pageLength: 25, order: [[0, 'asc']] });
+            jQuery('#orphanedTable').DataTable({ paging: false, order: [[0, 'asc']] });
           }
         }
 
