@@ -226,6 +226,9 @@ Last updated: 2026-04-06
 | 33 | Echolist hub associations | [ ] | Link specific peer connections as hubs per echolist. Subscribe from echolist auto-enables on hub peers only (not all). |
 | 34 | Direct echolist editing | [ ] | Add/remove/edit areas and tags within echolists from the admin UI (for network administrators). |
 | 35 | Echolist subscribe from AreaFix | [ ] | Parse inbound AreaFix %LIST responses to auto-update echolist registry. Admin "request %LIST from upstream" action. |
+| 36 | Automated echolist/filebone scanning | [ ] | Auto-import echolist/filebone files from disk. Cascading directory config (network > echolist/filebone type > individual). Sysop notifications on new/orphaned areas. |
+| 37 | Cross-network orphaned area overview | [ ] | Summary view showing which networks have orphaned areas with counts and links. |
+| 38 | Echolist/filebone navigation improvements | [ ] | UX pass on echolist/filebone page organization, navigation flow, breadcrumbs, and view consolidation. |
 
 ---
 
