@@ -93,6 +93,13 @@ router.get('/', async (req, res) => {
 	res.locals.callflowPending = false;
 	res.locals.callflowForce = false;
 
+	// Clear callflow_pending flag so viewing the callflow page itself breaks the loop.
+	// If the user leaves without completing, the time-based check will still trigger
+	// when appropriate, but the session won't have a sticky pending flag.
+	if (sess && sess.callflow_pending === 'true') {
+		await sessionStore.sessionUpdate(req.cookies.sessionid, { callflow_pending: '' });
+	}
+
 	res.render('callflow/index', {
 		title: 'Welcome',
 		activelink: '',
