@@ -2724,6 +2724,29 @@ router.get('/echolists', async (req, res) => {
 	});
 });
 
+// GET /admin/echolist/view/:echolistId — Browse echolist areas (before :networkId to avoid param collision)
+router.get('/echolist/view/:echolistId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var echolistId       = parseInt(req.params.echolistId);
+	var echolist         = await networkEcholist.getEcholistById(echolistId);
+	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
+	var areas            = echolist ? await networkEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
+	var stats            = echolist ? await networkEcholist.getEcholistStats(echolistId) : {};
+
+	res.render('admin/echolists/view', {
+		sufficientAccess: sufficientAccess,
+		title: 'Echolist Browser',
+		activelink: 'networks',
+		currentuser: currentuser,
+		echolist: echolist,
+		network: network,
+		areas: areas,
+		stats: stats,
+		diff: null
+	});
+});
+
 // GET /admin/echolist/:networkId — List echolists for a network
 router.get('/echolist/:networkId', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
@@ -2788,29 +2811,6 @@ router.post('/echolist/:networkId/new', multer({ dest: os.tmpdir() }).single('ec
 	}
 
 	res.redirect('/admin/echolist/' + networkId);
-});
-
-// GET /admin/echolist/view/:echolistId — Browse echolist areas
-router.get('/echolist/view/:echolistId', async (req, res) => {
-	var currentuser      = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var echolistId       = parseInt(req.params.echolistId);
-	var echolist         = await networkEcholist.getEcholistById(echolistId);
-	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
-	var areas            = echolist ? await networkEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
-	var stats            = echolist ? await networkEcholist.getEcholistStats(echolistId) : {};
-
-	res.render('admin/echolists/view', {
-		sufficientAccess: sufficientAccess,
-		title: 'Echolist Browser',
-		activelink: 'networks',
-		currentuser: currentuser,
-		echolist: echolist,
-		network: network,
-		areas: areas,
-		stats: stats,
-		diff: null
-	});
 });
 
 // POST /admin/echolist/:echolistId/import — Upload and preview echolist import
@@ -3129,6 +3129,23 @@ router.get('/filebones', async (req, res) => {
 	});
 });
 
+// GET /admin/filebone/view/:echolistId — Browse filebone areas (before :networkId to avoid param collision)
+router.get('/filebone/view/:echolistId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var echolistId       = parseInt(req.params.echolistId);
+	var echolist         = await fileEcholist.getEcholistById(echolistId);
+	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
+	var areas            = echolist ? await fileEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
+	var stats            = echolist ? await fileEcholist.getEcholistStats(echolistId) : {};
+
+	res.render('admin/filebones/view', {
+		sufficientAccess: sufficientAccess, title: 'Filebone',
+		activelink: 'networks', currentuser: currentuser,
+		echolist: echolist, network: network, areas: areas, stats: stats, diff: null
+	});
+});
+
 // GET /admin/filebone/:networkId — List filebones for a network
 router.get('/filebone/:networkId', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
@@ -3188,23 +3205,6 @@ router.post('/filebone/:networkId/new', multer({ dest: os.tmpdir() }).single('ec
 	}
 
 	res.redirect('/admin/filebone/' + networkId);
-});
-
-// GET /admin/filebone/view/:echolistId — Browse filebone areas
-router.get('/filebone/view/:echolistId', async (req, res) => {
-	var currentuser      = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var echolistId       = parseInt(req.params.echolistId);
-	var echolist         = await fileEcholist.getEcholistById(echolistId);
-	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
-	var areas            = echolist ? await fileEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
-	var stats            = echolist ? await fileEcholist.getEcholistStats(echolistId) : {};
-
-	res.render('admin/filebones/view', {
-		sufficientAccess: sufficientAccess, title: 'Filebone',
-		activelink: 'networks', currentuser: currentuser,
-		echolist: echolist, network: network, areas: areas, stats: stats, diff: null
-	});
 });
 
 // POST /admin/filebone/:echolistId/import — Upload and diff
