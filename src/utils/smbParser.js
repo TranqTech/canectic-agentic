@@ -154,9 +154,9 @@ function parseMsgHeader(shdBuf, offset) {
 
 		if (pos + flen > shdBuf.length) break;
 
-		var fdata = shdBuf.subarray(pos, pos + flen).toString('binary');
-		// Strip null terminators
-		fdata = fdata.replace(/\x00+$/, '');
+		var fdata = shdBuf.subarray(pos, pos + flen).toString('utf8');
+		// Strip null terminators and any embedded nulls
+		fdata = fdata.replace(/\x00/g, '');
 
 		hdr.hfields.push({ type: ftype, data: fdata });
 
@@ -196,17 +196,24 @@ function parseMsgHeader(shdBuf, offset) {
 
 // --- Extract message text from .sdt ---
 
-function extractMessageText(sdtBuf, msgHeader) {
+function extractMessageText(sdtBuf, msgHeader, sdtBlockSize) {
 	var bodyText = '';
 	var tailText = '';
+	// dataOffset may be in SDT allocation blocks (multiply by block size) or direct bytes.
+	// Try block-based first; if it exceeds buffer, fall back to direct byte offset.
+	var blockLen = sdtBlockSize || 256;
+	var baseOffset = msgHeader.dataOffset * blockLen;
+	if (baseOffset >= sdtBuf.length && msgHeader.dataOffset < sdtBuf.length) {
+		baseOffset = msgHeader.dataOffset;
+	}
 
 	for (var df of msgHeader.dfields) {
-		var physOffset = msgHeader.dataOffset + df.offset;
+		var physOffset = baseOffset + df.offset;
 		if (physOffset + df.length > sdtBuf.length) continue;
 
 		var raw = sdtBuf.subarray(physOffset, physOffset + df.length);
-		// Strip null terminators and trailing whitespace
-		var text = raw.toString('binary').replace(/\x00+$/, '');
+		// Strip null terminators
+		var text = raw.toString('utf8').replace(/\x00/g, '');
 
 		if (df.type === DFIELD.TEXT_BODY) {
 			bodyText += text;
@@ -282,7 +289,7 @@ function parseSMB(shdPath, sdtPath, sidPath) {
 			if (!hdr) continue;
 			if (hdr.attr & MSG_ATTR.DELETE) continue;
 
-			var text = extractMessageText(sdtBuf, hdr);
+			var text = extractMessageText(sdtBuf, hdr, 256);
 			result.messages.push({
 				header: hdr,
 				bodyText: text.body,
@@ -301,7 +308,7 @@ function parseSMB(shdPath, sdtPath, sidPath) {
 			}
 
 			if (!(hdr.attr & MSG_ATTR.DELETE)) {
-				var text = extractMessageText(sdtBuf, hdr);
+				var text = extractMessageText(sdtBuf, hdr, 256);
 				result.messages.push({
 					header: hdr,
 					bodyText: text.body,

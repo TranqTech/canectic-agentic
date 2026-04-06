@@ -37,13 +37,9 @@ function smbToDbObj(msg) {
 	var rawTail = stripNulls(msg.tailText || '');
 	var fullText = rawBody + (rawTail ? '\r\n' + rawTail : '');
 
-	// Convert CP437 to UTF-8 for the utf8 column
-	var utf8Text = '';
-	try {
-		utf8Text = stripNulls(convertCP437toUTF8(Buffer.from(fullText, 'binary')));
-	} catch (e) {
-		utf8Text = fullText;
-	}
+	// The SMB parser now returns utf8 strings directly.
+	// Use the text as-is for the utf8 column.
+	var utf8Text = fullText;
 
 	// Extract origin line from tail or body
 	var originLine = '';
