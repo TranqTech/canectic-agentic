@@ -118,6 +118,20 @@ async function importNodelist(networkId, parsedNodes, opts) {
 async function upsertBatch(networkId, batch, importTimestamp, nodelistNumber, nodelistDate) {
 	if (!batch || batch.length === 0) return { newNodes: 0, updatedNodes: 0 };
 
+	// Deduplicate within the batch — same address appearing twice in one nodelist
+	// (e.g. point listings under different hubs). Keep the last occurrence.
+	// PostgreSQL ON CONFLICT DO UPDATE cannot affect the same row twice in one statement.
+	var seen = {};
+	var deduped = [];
+	for (var d = batch.length - 1; d >= 0; d--) {
+		var key = batch[d].zone + ':' + batch[d].net + '/' + batch[d].node + '.' + (batch[d].point || 0);
+		if (!seen[key]) {
+			seen[key] = true;
+			deduped.unshift(batch[d]);
+		}
+	}
+	batch = deduped;
+
 	// Each row has 21 columns (network_id + 20 from the parsed entry)
 	var columnsPerRow = 21;
 	var values = [];
