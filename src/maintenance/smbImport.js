@@ -179,13 +179,22 @@ async function importSMB(shdPath, sdtPath, sidPath, areaShortcode, options) {
 			result.skipped++;
 		}
 
+		// Flush thread stats frequently so subject matching and thread linking
+		// see accurate last_message timestamps during the import
+		if ((i + 1) % 10 === 0) {
+			var pending = echomail.drainThreadUpdateArray();
+			if (pending.length > 0) {
+				await echomail.updateThreadArray(pending);
+			}
+		}
+
 		// Progress logging every 100 messages
 		if ((i + 1) % 100 === 0) {
 			alogger.writeAlog(4, '[SMB Import] Progress: ' + (i + 1) + '/' + result.total, 'cyan');
 		}
 	}
 
-	// Finalize threads
+	// Final flush of any remaining thread updates
 	var updatearray = echomail.drainThreadUpdateArray();
 	if (updatearray.length > 0) {
 		await echomail.updateThreadArray(updatearray);
