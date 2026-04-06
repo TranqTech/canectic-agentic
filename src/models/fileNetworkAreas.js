@@ -190,6 +190,23 @@ async function updateMapping(id, updateObj) {
 	return count > 0;
 }
 
+// File areas mapped to this network that don't appear in any active filebone
+async function getOrphanedNetworkAreas(networkId) {
+	return await postgres.query(
+		"SELECT fna.*, fa.name AS area_name, fa.shortcode, fa.description AS area_description " +
+		"FROM file_network_areas fna " +
+		"JOIN file_areas fa ON fa.id = fna.area_id " +
+		"WHERE fna.network_id = $1 " +
+		"AND NOT EXISTS (" +
+		"  SELECT 1 FROM file_echolist_areas nea " +
+		"  JOIN file_echolists nel ON nel.id = nea.echolist_id " +
+		"  WHERE nel.network_id = $1 AND nea.active = true " +
+		"  AND UPPER(nea.areatag) = UPPER(fna.areatag)" +
+		") ORDER BY fna.areatag ASC",
+		[parseInt(networkId)]
+	) || [];
+}
+
 export {
 	getAreaByTag,
 	getNetworksByFileArea,
@@ -198,5 +215,6 @@ export {
 	getMappingById,
 	addMapping,
 	removeMapping,
-	updateMapping
+	updateMapping,
+	getOrphanedNetworkAreas
 };

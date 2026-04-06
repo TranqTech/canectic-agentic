@@ -53,6 +53,9 @@ block content
                         span.text-info= network.name
                     .col-4
                       .text-end
+                        a.btn.btn-lg.btn-secondary.me-1(href='/admin/filebone/' + network.id + '/combined')
+                          i.bi.bi-layers.me-1
+                          | Combined View
                         button.btn.btn-lg.btn-success.me-1(data-bs-toggle='modal' data-bs-target='#newFileboneModal')
                           i.bi.bi-plus-lg.me-1
                           | New Filebone
@@ -134,18 +137,24 @@ block content
 
           .col-1
 
-      //- New Filebone Modal
+      //- New Filebone Modal (create + import in one step)
       #newFileboneModal.modal.fade(tabindex='-1' aria-labelledby='newFileboneModalLabel' aria-hidden='true')
         .modal-dialog
           .modal-content
-            form(method='POST' action='/admin/filebone/' + network.id + '/new')
+            form(method='POST' action='/admin/filebone/' + network.id + '/new' enctype='multipart/form-data')
               .modal-header
                 h5#newFileboneModalLabel.modal-title New Filebone
                 button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
               .modal-body
                 .mb-3
+                  label.form-label(for='newFile') Filebone File
+                    span.text-danger *
+                  input#newFile.form-control(type='file' name='filebone_file' accept='.na,.txt,.bbs,.lst' required)
+                  small.text-muted Name will be taken from the filename unless overridden below
+                .mb-3
                   label.form-label(for='newName') Name
-                  input#newName.form-control(type='text' name='name' required placeholder='e.g. FILEBONE.NA')
+                    span.text-muted.ms-1 (optional, overrides filename)
+                  input#newName.form-control(type='text' name='name' placeholder='e.g. BACKBONE')
                 .mb-3
                   label.form-label(for='newDescription') Description
                   input#newDescription.form-control(type='text' name='description' placeholder='Optional description')
@@ -155,7 +164,7 @@ block content
               .modal-footer
                 button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                 button.btn.btn-success(type='submit')
-                  i.bi.bi-plus-lg.me-1
+                  i.bi.bi-upload.me-1
                   | Create
 
       //- Edit Filebone Modal

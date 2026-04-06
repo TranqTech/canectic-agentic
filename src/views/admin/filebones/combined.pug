@@ -1,0 +1,439 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            if !network
+              .card
+                .card-header.bg-darkblue.text-white
+                  h2= title
+                .card-body
+                  h3 Network Not Found
+            else
+              nav(aria-label='breadcrumb')
+                ol.breadcrumb
+                  li.breadcrumb-item
+                    a(href='/admin') Admin
+                  li.breadcrumb-item
+                    a(href='/admin/networks') Networks
+                  li.breadcrumb-item
+                    a(href='/admin/network/' + network.uuid)= network.name
+                  li.breadcrumb-item
+                    a(href='/admin/filebone/' + network.id) Filebones
+                  li.breadcrumb-item.active Combined View
+
+              include ../../partials/flash
+
+              //- Stats
+              - var carried = fileboneAreas.filter(function(a) { return a.local_area_id; }).length
+              - var notCarried = fileboneAreas.length - carried
+              .row.mb-3
+                .col-3
+                  .card.text-center
+                    .card-body.p-2
+                      .h4.mb-0= fileboneAreas.length
+                      small.text-muted Filebone Areas
+                .col-3
+                  .card.text-center
+                    .card-body.p-2
+                      .h4.mb-0.text-success= carried
+                      small.text-muted Locally Carried
+                .col-3
+                  .card.text-center
+                    .card-body.p-2
+                      .h4.mb-0.text-info= notCarried
+                      small.text-muted Available
+                .col-3
+                  .card.text-center
+                    .card-body.p-2
+                      .h4.mb-0.text-warning= orphanedAreas.length
+                      small.text-muted Orphaned
+
+              //- Filebone areas
+              .card.mb-3
+                .card-header.bg-darkblue.text-white
+                  .d-flex.justify-content-between.align-items-center
+                    h5.mb-0
+                      i.bi.bi-list-ul.me-2
+                      | Filebone Areas
+                      small.text-muted.ms-2 (deduplicated across all filebones)
+                    a.btn.btn-sm.btn-info(href='/admin/filebone/' + network.id) Back to Filebones
+                .card-body
+                  if fileboneAreas.length === 0
+                    p.text-muted No filebone areas found. Import an filebone first.
+                  else
+                    table#fileboneTable.table.table-hover.table-sm
+                      thead
+                        tr
+                          th Areatag
+                          th Description
+                          th Source
+                          th Status
+                      tbody
+                        each area in fileboneAreas
+                          tr
+                            td
+                              code= area.areatag
+                            td= area.description || ''
+                            td
+                              - var names = Array.isArray(area.filebone_names) ? area.filebone_names : []
+                              each name in names
+                                span.badge.bg-secondary.me-1= name
+                            td
+                              if area.local_area_id
+                                span.badge.bg-success Carried
+                              else
+                                button.btn.btn-sm.btn-outline-primary.subscribe-btn(
+                                  type='button'
+                                  data-areatag=area.areatag
+                                  data-description=area.description || ''
+                                )
+                                  i.bi.bi-plus-lg.me-1
+                                  | Subscribe
+
+              //- Orphaned areas
+              .card.mb-3
+                .card-header.bg-dark
+                  h5.mb-0
+                    i.bi.bi-exclamation-triangle.me-2.text-warning
+                    | Orphaned Areas
+                    small.text-muted.ms-2 Mapped to this network but not in any filebone
+                .card-body
+                  if orphanedAreas.length === 0
+                    p.text-muted.mb-0 All network areas are covered by at least one filebone.
+                  else
+                    table#orphanedTable.table.table-hover.table-sm
+                      thead
+                        tr
+                          th Areatag
+                          th Local Area
+                          th Shortcode
+                          th
+                      tbody
+                        each oa in orphanedAreas
+                          tr
+                            td
+                              code= oa.areatag
+                            td= oa.area_name || ''
+                            td
+                              code= oa.shortcode || ''
+                            td.text-end
+                              button.btn.btn-sm.btn-outline-danger.unmap-btn(
+                                type='button'
+                                data-area-id=oa.area_id
+                                data-areatag=oa.areatag
+                                data-shortcode=oa.shortcode || ''
+                                data-area-name=oa.area_name || ''
+                              )
+                                i.bi.bi-x-lg.me-1
+                                | Unmap
+
+          .col-1
+
+      //- Subscribe Modal
+      if network
+        #subscribeModal.modal.fade(tabindex='-1')
+          .modal-dialog.modal-lg
+            .modal-content
+              form#subscribeForm(method='POST' action='/admin/filebone/' + network.id + '/combined/subscribe')
+                input(type='hidden' name='areatag' id='subAreatag')
+                input(type='hidden' name='action' id='subAction' value='create')
+                .modal-header
+                  h5.modal-title Subscribe: #[code#subAreatagDisplay]
+                  button.btn-close(type='button' data-bs-dismiss='modal')
+                .modal-body
+                  ul.nav.nav-tabs.mb-3#subTabs
+                    li.nav-item
+                      a.nav-link.active(data-bs-toggle='tab' href='#tabCreate') Create New Area
+                    li.nav-item
+                      a.nav-link(data-bs-toggle='tab' href='#tabMap') Map Existing Area
+                  .tab-content
+                    #tabCreate.tab-pane.fade.show.active
+                      .row
+                        .col-6
+                          .mb-3
+                            label.form-label Name
+                            input#subName.form-control(type='text' name='name')
+                          .mb-3
+                            label.form-label Shortcode
+                            input#subShortcode.form-control(type='text' name='shortcode')
+                        .col-6
+                          .mb-3
+                            label.form-label Description
+                            input#subDescription.form-control(type='text' name='description')
+                          .mb-3
+                            label.form-label File Group
+                            select#subGroup.form-select(name='group_shortcode')
+                              option(value='') -- Select --
+                              each g in groups
+                                option(value=g.shortcode)= g.name
+                      .row
+                        .col-4
+                          label.form-label Browse Security
+                          input#subBrowseSec.form-control(type='number' name='browse_security' min=0 max=255 value=defaultBrowseSecurity)
+                        .col-4
+                          label.form-label Download Security
+                          input#subReadSec.form-control(type='number' name='read_security' min=0 max=255 value=defaultReadSecurity)
+                        .col-4
+                          label.form-label Upload Security
+                          input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=defaultPostSecurity)
+                      .row.mt-2
+                        .col-4
+                          #sub_browse_perm_inputs
+                          #sub_browse_rest_inputs
+                          label.small Browse Perm Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_browse_perm_badges(style='min-height:2rem')
+                          .input-group.input-group-sm.mb-2
+                            select#sub_browse_perm_select.form-control
+                            button.btn.btn-sm.btn-success#sub_browse_perm_add(type='button') Add
+                          label.small Browse Restrict Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_browse_rest_badges(style='min-height:2rem')
+                          .input-group.input-group-sm
+                            select#sub_browse_rest_select.form-control
+                            button.btn.btn-sm.btn-danger#sub_browse_rest_add(type='button') Add
+                        .col-4
+                          #sub_read_perm_inputs
+                          #sub_read_rest_inputs
+                          label.small Download Perm Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_read_perm_badges(style='min-height:2rem')
+                          .input-group.input-group-sm.mb-2
+                            select#sub_read_perm_select.form-control
+                            button.btn.btn-sm.btn-success#sub_read_perm_add(type='button') Add
+                          label.small Download Restrict Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_read_rest_badges(style='min-height:2rem')
+                          .input-group.input-group-sm
+                            select#sub_read_rest_select.form-control
+                            button.btn.btn-sm.btn-danger#sub_read_rest_add(type='button') Add
+                        .col-4
+                          #sub_post_perm_inputs
+                          #sub_post_rest_inputs
+                          label.small Upload Perm Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_post_perm_badges(style='min-height:2rem')
+                          .input-group.input-group-sm.mb-2
+                            select#sub_post_perm_select.form-control
+                            button.btn.btn-sm.btn-success#sub_post_perm_add(type='button') Add
+                          label.small Upload Restrict Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_post_rest_badges(style='min-height:2rem')
+                          .input-group.input-group-sm
+                            select#sub_post_rest_select.form-control
+                            button.btn.btn-sm.btn-danger#sub_post_rest_add(type='button') Add
+
+                      .form-check.mt-3
+                        input#subAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
+                        label.form-check-label(for='subAllowPeers') Allow for all network peers
+                      .form-check
+                        input#subEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true')
+                        label.form-check-label(for='subEnablePeers') Enable for all network peers
+
+                    #tabMap.tab-pane.fade
+                      .mb-3
+                        label.form-label Map to Existing Area
+                        select#subMapArea.form-select(name='area_id')
+                          option(value='') -- Select an area --
+                          each a in unmappedAreas
+                            option(value=a.id)= a.name + ' (' + a.shortcode + ')'
+                      .form-check.mt-3
+                        input#subMapAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
+                        label.form-check-label(for='subMapAllowPeers') Allow for all network peers
+                      .form-check
+                        input#subMapEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true')
+                        label.form-check-label(for='subMapEnablePeers') Enable for all network peers
+                .modal-footer
+                  button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                  button.btn.btn-success(type='submit')
+                    i.bi.bi-plus-lg.me-1
+                    | Subscribe
+
+        //- Unmap Modal
+        #unmapModal.modal.fade(tabindex='-1')
+          .modal-dialog
+            .modal-content
+              form(method='POST' action='/admin/filebone/' + network.id + '/combined/unmap')
+                input(type='hidden' name='area_id' id='unmapAreaId')
+                input(type='hidden' name='shortcode' id='unmapShortcode')
+                .modal-header.bg-dark
+                  h5.modal-title Unmap: #[code#unmapAreatagDisplay]
+                  button.btn-close(type='button' data-bs-dismiss='modal')
+                .modal-body
+                  p
+                    | Remove the network mapping for #[strong#unmapAreaName].
+                    |  The area and its messages will be kept by default.
+                  .alert.alert-warning
+                    i.bi.bi-exclamation-triangle.me-1
+                    | This area is not in any filebone for this network. Unmapping will stop it being exchanged with peers.
+                  .form-check
+                    input#unmapDelete.form-check-input(type='checkbox' name='delete_area' value='true')
+                    label.form-check-label(for='unmapDelete') Also delete the area (messages will be kept)
+                .modal-footer
+                  button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                  button.btn.btn-danger(type='submit')
+                    i.bi.bi-x-lg.me-1
+                    | Unmap
+
+  if network
+    script.
+      document.addEventListener('DOMContentLoaded', function() {
+        // DataTables
+        if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+          jQuery('#fileboneTable').DataTable({ pageLength: 50, order: [[0, 'asc']] });
+          if (document.querySelectorAll('#orphanedTable tbody tr').length > 0) {
+            jQuery('#orphanedTable').DataTable({ pageLength: 25, order: [[0, 'asc']] });
+          }
+        }
+
+        // Subscribe modal
+        var subModal = document.getElementById('subscribeModal');
+        if (subModal) {
+          document.querySelectorAll('.subscribe-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var tag = btn.dataset.areatag;
+              var desc = btn.dataset.description;
+              document.getElementById('subAreatag').value = tag;
+              document.getElementById('subAreatagDisplay').textContent = tag;
+              document.getElementById('subName').value = tag;
+              document.getElementById('subDescription').value = desc;
+              document.getElementById('subShortcode').value = tag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64);
+              document.getElementById('subAction').value = 'create';
+              new bootstrap.Modal(subModal).show();
+            });
+          });
+
+          // Switch action field based on active tab
+          subModal.querySelectorAll('[data-bs-toggle="tab"]').forEach(function(tab) {
+            tab.addEventListener('shown.bs.tab', function(e) {
+              document.getElementById('subAction').value =
+                e.target.getAttribute('href') === '#tabMap' ? 'map' : 'create';
+            });
+          });
+
+          // --- Flag management ---
+          var allPerms  = !{JSON.stringify(availablePermissions)};
+          var allRestrs = !{JSON.stringify(availableRestrictions)};
+
+          function renderFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
+            var badgeEl  = document.getElementById(prefix + '_badges');
+            var inputEl  = document.getElementById(prefix + '_inputs');
+            var selectEl = document.getElementById(prefix + '_select');
+            var addBtn   = document.getElementById(prefix + '_add');
+            badgeEl.innerHTML = '';
+            activeFlags.forEach(function(flag) {
+              var span = document.createElement('span');
+              span.className = 'badge ' + badgeClass + ' me-1 mb-1';
+              span.style.cursor = 'pointer';
+              span.title = 'Click to remove';
+              span.textContent = flag + ' x';
+              span.addEventListener('click', function() {
+                renderFlags(prefix, inputName, activeFlags.filter(function(f) { return f !== flag; }), allFlags, badgeClass);
+              });
+              badgeEl.appendChild(span);
+            });
+            inputEl.innerHTML = '';
+            activeFlags.forEach(function(flag) {
+              var inp = document.createElement('input');
+              inp.type = 'hidden'; inp.name = inputName; inp.value = flag;
+              inputEl.appendChild(inp);
+            });
+            selectEl.innerHTML = '';
+            var available = allFlags.filter(function(f) { return !activeFlags.includes(f); });
+            if (available.length === 0) {
+              var opt = document.createElement('option');
+              opt.value = ''; opt.textContent = '-- none --'; opt.disabled = true;
+              selectEl.appendChild(opt); selectEl.disabled = true; addBtn.disabled = true;
+            } else {
+              selectEl.disabled = false; addBtn.disabled = false;
+              available.forEach(function(flag) {
+                var opt = document.createElement('option');
+                opt.value = flag; opt.textContent = flag;
+                selectEl.appendChild(opt);
+              });
+            }
+          }
+
+          function wireAddBtn(prefix, inputName, allFlags, badgeClass) {
+            document.getElementById(prefix + '_add').addEventListener('click', function() {
+              var sel = document.getElementById(prefix + '_select');
+              if (!sel.value) return;
+              var current = Array.from(document.querySelectorAll('#' + prefix + '_inputs input')).map(function(i) { return i.value; });
+              if (!current.includes(sel.value)) {
+                current.push(sel.value);
+                renderFlags(prefix, inputName, current, allFlags, badgeClass);
+              }
+            });
+          }
+
+          wireAddBtn('sub_browse_perm', 'browse_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('sub_browse_rest', 'browse_rest_flags', allRestrs, 'bg-danger');
+          wireAddBtn('sub_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('sub_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+          wireAddBtn('sub_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('sub_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+
+          // Initial render (empty flags)
+          renderFlags('sub_browse_perm', 'browse_perm_flags', [], allPerms, 'bg-success');
+          renderFlags('sub_browse_rest', 'browse_rest_flags', [], allRestrs, 'bg-danger');
+          renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+          renderFlags('sub_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+          renderFlags('sub_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+          renderFlags('sub_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+
+          // Auto-populate security and flags from group defaults
+          document.getElementById('subGroup').addEventListener('change', function() {
+            var sc = this.value;
+            if (!sc) {
+              document.getElementById('subBrowseSec').value = !{defaultBrowseSecurity};
+              document.getElementById('subReadSec').value = !{defaultReadSecurity};
+              document.getElementById('subPostSec').value = !{defaultPostSecurity};
+              renderFlags('sub_browse_perm', 'browse_perm_flags', [], allPerms, 'bg-success');
+              renderFlags('sub_browse_rest', 'browse_rest_flags', [], allRestrs, 'bg-danger');
+              renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+              renderFlags('sub_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+              renderFlags('sub_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+              renderFlags('sub_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+              return;
+            }
+            fetch('/admin/fileGroup/' + sc + '/defaults')
+              .then(function(r) { return r.json(); })
+              .then(function(data) {
+                document.getElementById('subBrowseSec').value = data.browse_security || !{defaultBrowseSecurity};
+                document.getElementById('subReadSec').value = data.read_security || !{defaultReadSecurity};
+                document.getElementById('subPostSec').value = data.post_security || !{defaultPostSecurity};
+                var parseF = function(v) { try { return Array.isArray(v) ? v : JSON.parse(v || '[]'); } catch(e) { return []; } };
+                renderFlags('sub_browse_perm', 'browse_perm_flags', parseF(data.browse_perm_flags), allPerms, 'bg-success');
+                renderFlags('sub_browse_rest', 'browse_rest_flags', parseF(data.browse_rest_flags), allRestrs, 'bg-danger');
+                renderFlags('sub_read_perm', 'read_perm_flags', parseF(data.read_perm_flags), allPerms, 'bg-success');
+                renderFlags('sub_read_rest', 'read_rest_flags', parseF(data.read_rest_flags), allRestrs, 'bg-danger');
+                renderFlags('sub_post_perm', 'post_perm_flags', parseF(data.post_perm_flags), allPerms, 'bg-success');
+                renderFlags('sub_post_rest', 'post_rest_flags', parseF(data.post_rest_flags), allRestrs, 'bg-danger');
+              });
+          });
+        }
+
+        // Unmap modal
+        var unmapModal = document.getElementById('unmapModal');
+        if (unmapModal) {
+          document.querySelectorAll('.unmap-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              document.getElementById('unmapAreaId').value = btn.dataset.areaId;
+              document.getElementById('unmapShortcode').value = btn.dataset.shortcode;
+              document.getElementById('unmapAreatagDisplay').textContent = btn.dataset.areatag;
+              document.getElementById('unmapAreaName').textContent = btn.dataset.areaName || btn.dataset.areatag;
+              document.getElementById('unmapDelete').checked = false;
+              new bootstrap.Modal(unmapModal).show();
+            });
+          });
+        }
+      });

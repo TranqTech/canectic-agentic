@@ -3090,15 +3090,46 @@ router.get('/filebone/:networkId', async (req, res) => {
 	});
 });
 
-// POST /admin/filebone/:networkId/new — Create filebone
-router.post('/filebone/:networkId/new', urlencodedParser, requireAdmin, async (req, res) => {
-	var networkId = parseInt(req.params.networkId);
-	var result = await fileEcholist.createEcholist(networkId, req.body.name, req.body.description, req.body.is_default);
-	if (result.status) {
-		await flash.setOne(req, 'success', 'Filebone created.');
-	} else {
-		await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
+// POST /admin/filebone/:networkId/new — Create filebone + import from file
+router.post('/filebone/:networkId/new', multer({ dest: os.tmpdir() }).single('echolist_file'), requireAdmin, async (req, res) => {
+	var networkId   = parseInt(req.params.networkId);
+	var description = (req.body.description || '').trim();
+	var isDefault   = req.body.is_default === 'true';
+
+	var name = (req.body.name || '').trim();
+	if (!name && req.file && req.file.originalname) {
+		name = req.file.originalname.trim();
 	}
+	if (!name) name = 'Filebone';
+
+	var result = await fileEcholist.createEcholist(networkId, name, description, isDefault);
+	if (!result.status) {
+		if (req.file) try { fs.unlinkSync(req.file.path); } catch (e) {}
+		await flash.setOne(req, 'danger', 'Failed to create filebone: ' + (result.errormessages || []).join(', '));
+		return res.redirect('/admin/filebone/' + networkId);
+	}
+
+	var echolistId = result.insertId;
+
+	if (req.file) {
+		var fileText = '';
+		try { fileText = fs.readFileSync(req.file.path, 'utf8'); }
+		finally { try { fs.unlinkSync(req.file.path); } catch (e) {} }
+
+		var { parseAreasBbs } = await import('../utils/areasBbsParser.js');
+		var parsed = parseAreasBbs(fileText);
+
+		if (parsed && parsed.length > 0) {
+			var diff = await fileEcholist.buildImportDiff(echolistId, parsed);
+			var importResult = await fileEcholist.executeImport(echolistId, diff);
+			await flash.setOne(req, 'success', 'Filebone "' + name + '" created with ' + importResult.newCount + ' area(s) imported.');
+		} else {
+			await flash.setOne(req, 'warning', 'Filebone "' + name + '" created but no areas found in file.');
+		}
+	} else {
+		await flash.setOne(req, 'success', 'Filebone "' + name + '" created (no file uploaded).');
+	}
+
 	res.redirect('/admin/filebone/' + networkId);
 });
 
@@ -3225,6 +3256,135 @@ router.post('/filebone/area/:areaId/remove', urlencodedParser, requireAdmin, asy
 	if (result.status) { await flash.setOne(req, 'success', 'Area removed.'); }
 	else { await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', ')); }
 	res.redirect('/admin/filebone/view/' + (area ? area.echolist_id : ''));
+});
+
+// -------------------------------------------------------
+// Combined filebone view
+// -------------------------------------------------------
+
+router.get('/filebone/:networkId/combined', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+
+	var fileboneAreas    = network ? await fileEcholist.getAreasAcrossNetwork(networkId) : [];
+	var orphanedAreas    = network ? await fileNetworkAreas.getOrphanedNetworkAreas(networkId) : [];
+	var groups           = await fileGroups.getAllGroups();
+
+	var mappedRows   = await fileNetworkAreas.getMappingsForNetwork(networkId);
+	var mappedIds    = new Set((mappedRows || []).map(function(na) { return parseInt(na.area_id); }));
+	var allAreas     = await fileAreas.getAllAreas();
+	var unmappedAreas = (allAreas || []).filter(function(a) { return !mappedIds.has(parseInt(a.id)); });
+
+	res.render('admin/filebones/combined', {
+		sufficientAccess: sufficientAccess,
+		title: 'Combined Filebone',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		fileboneAreas: fileboneAreas,
+		orphanedAreas: orphanedAreas,
+		groups: groups,
+		unmappedAreas: unmappedAreas,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
+		defaultBrowseSecurity: appConfig.getNumber('default_file_browse_security', 50),
+		defaultReadSecurity: appConfig.getNumber('default_file_read_security', 60),
+		defaultPostSecurity: appConfig.getNumber('default_file_post_security', 100)
+	});
+});
+
+router.post('/filebone/:networkId/combined/subscribe', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var networkId   = parseInt(req.params.networkId);
+	var action      = (req.body.action || '').trim();
+	var areatag     = (req.body.areatag || '').trim();
+
+	var allowPeers  = req.body.allow_peers === 'true';
+	var enablePeers = req.body.enable_peers === 'true';
+	var syncOpts = {};
+	if (allowPeers)  syncOpts.allowAll = true;
+	if (enablePeers) syncOpts.enableAll = true;
+
+	if (action === 'create') {
+		var shortcode = req.body.shortcode || areatag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64);
+		var formObj = {
+			groupshortcode:  req.body.group_shortcode,
+			name:            req.body.name || areatag,
+			description:     req.body.description || areatag,
+			shortcode:       shortcode,
+			browsesecurity:  req.body.browse_security,
+			readsecurity:    req.body.read_security,
+			postsecurity:    req.body.post_security,
+			browse_perm_flags: req.body.browse_perm_flags,
+			browse_rest_flags: req.body.browse_rest_flags,
+			read_perm_flags: req.body.read_perm_flags,
+			read_rest_flags: req.body.read_rest_flags,
+			post_perm_flags: req.body.post_perm_flags,
+			post_rest_flags: req.body.post_rest_flags,
+			createdByUUID:   currentuser ? currentuser.uuid : '',
+			createdByName:   currentuser ? currentuser.username : ''
+		};
+		var result = await fileAreas.newArea(formObj);
+		if (result.status) {
+			// Map to network
+			var mapResult = await fileNetworkAreas.addMapping(networkId, result.insertId, areatag, {
+				createdByUUID: currentuser ? currentuser.uuid : '',
+				createdByName: currentuser ? currentuser.username : ''
+			});
+			if (mapResult.status && (allowPeers || enablePeers)) {
+				await filePeerSubscriptions.syncFileAreaToConnections(networkId, result.insertId, syncOpts);
+			}
+			var peerMsg = allowPeers ? (enablePeers ? ' Allowed and enabled for all peers.' : ' Allowed for all peers.') : '';
+			await flash.setOne(req, 'success', 'File area "' + shortcode + '" created and mapped.' + peerMsg);
+		} else {
+			await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
+		}
+	} else if (action === 'map') {
+		var areaId = parseInt(req.body.area_id);
+		var mapResult = await fileNetworkAreas.addMapping(networkId, areaId, areatag, {
+			createdByUUID: currentuser ? currentuser.uuid : '',
+			createdByName: currentuser ? currentuser.username : ''
+		});
+		if (mapResult.status) {
+			await filePeerSubscriptions.syncFileAreaToConnections(networkId, areaId, syncOpts);
+			var peerMsg = allowPeers ? (enablePeers ? ' Allowed and enabled for all peers.' : ' Allowed for all peers.') : '';
+			await flash.setOne(req, 'success', 'File area mapped to network.' + peerMsg);
+		} else {
+			await flash.setOne(req, 'danger', 'Failed: ' + (mapResult.errormessages || []).join(', '));
+		}
+	} else {
+		await flash.setOne(req, 'danger', 'Unknown action.');
+	}
+
+	res.redirect('/admin/filebone/' + networkId + '/combined');
+});
+
+router.post('/filebone/:networkId/combined/unmap', urlencodedParser, requireAdmin, async (req, res) => {
+	var networkId    = parseInt(req.params.networkId);
+	var areaId       = parseInt(req.body.area_id);
+	var deleteArea   = req.body.delete_area === 'true';
+	var shortcode    = (req.body.shortcode || '').trim();
+
+	var removeResult = await fileNetworkAreas.removeMapping(networkId, areaId);
+	if (removeResult) {
+		await filePeerSubscriptions.removeSubscriptionsForFileArea(networkId, areaId);
+		if (deleteArea && shortcode) {
+			var delResult = await fileAreas.removeArea(shortcode);
+			if (delResult && delResult.status) {
+				await flash.setOne(req, 'success', 'File area unmapped and deleted.');
+			} else {
+				await flash.setOne(req, 'warning', 'Unmapped but area deletion failed.');
+			}
+		} else {
+			await flash.setOne(req, 'success', 'File area unmapped from network.');
+		}
+	} else {
+		await flash.setOne(req, 'danger', 'Failed to unmap file area.');
+	}
+
+	res.redirect('/admin/filebone/' + networkId + '/combined');
 });
 
 // -------------------------------------------------------

@@ -394,6 +394,23 @@ async function getEcholistStats(echolistId) {
 	return row || { total_active: 0, total_inactive: 0, locally_carried: 0, available: 0 };
 }
 
+async function getAreasAcrossNetwork(networkId) {
+	return await postgres.query(
+		"SELECT " +
+		"UPPER(ea.areatag) AS areatag_upper, " +
+		"MIN(ea.areatag) AS areatag, " +
+		"MAX(ea.description) AS description, " +
+		"MAX(ea.local_area_id) AS local_area_id, " +
+		"array_agg(DISTINCT el.name ORDER BY el.name ASC) AS echolist_names " +
+		"FROM file_echolist_areas ea " +
+		"JOIN file_echolists el ON el.id = ea.echolist_id " +
+		"WHERE el.network_id = $1 AND ea.active = true " +
+		"GROUP BY UPPER(ea.areatag) " +
+		"ORDER BY UPPER(ea.areatag) ASC",
+		[parseInt(networkId)]
+	) || [];
+}
+
 // ---------------------------------------------------------------------------
 // local_area_id sync
 // ---------------------------------------------------------------------------
@@ -443,5 +460,6 @@ export {
 	executeImport,
 	getAreasByEcholist,
 	getEcholistStats,
+	getAreasAcrossNetwork,
 	syncLocalAreaId
 };
