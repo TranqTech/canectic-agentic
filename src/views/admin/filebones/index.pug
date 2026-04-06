@@ -1,0 +1,245 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            if !network
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/networks')
+                          | Exit
+                .card-body
+                  br
+                  h3 Network Not Found
+                  br
+            else
+              nav(aria-label='breadcrumb')
+                ol.breadcrumb
+                  li.breadcrumb-item
+                    a(href='/admin') Admin
+                  li.breadcrumb-item
+                    a(href='/admin/networks') Networks
+                  li.breadcrumb-item
+                    a(href='/admin/network/' + network.uuid)= network.name
+                  li.breadcrumb-item.active(aria-current='page') Filebones
+
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2
+                        i.bi.bi-list-ul.me-2
+                        | Filebones
+                        |
+                        span.text-info= network.name
+                    .col-4
+                      .text-end
+                        button.btn.btn-lg.btn-success.me-1(data-bs-toggle='modal' data-bs-target='#newFileboneModal')
+                          i.bi.bi-plus-lg.me-1
+                          | New Filebone
+                        a.button.btn.btn-lg.btn-info(href='/admin/network/' + network.uuid)
+                          | Exit
+                .card-body
+                  include ../../partials/flash
+
+                  if !filebones || filebones.length === 0
+                    .text-center.py-4
+                      h4 No Filebones Found
+                      p.text-muted
+                        | Create an filebone to track available areas for this network.
+                        br
+                        | Filebones can be imported from FILEBONE.NA or similar file echo list files.
+                  else
+                    each el in filebones
+                      .card.mb-3
+                        .card-header
+                          .row
+                            .col-8
+                              h5
+                                i.bi.bi-list-ul.me-2
+                                = el.name
+                                if el.is_default
+                                  |
+                                  span.badge.bg-primary.ms-2 Default
+                            .col-4
+                              .text-end
+                                a.btn.btn-sm.btn-info.me-1(href='/admin/filebone/view/' + el.id)
+                                  i.bi.bi-search.me-1
+                                  | Browse
+                                button.btn.btn-sm.btn-warning.me-1(
+                                  data-bs-toggle='modal'
+                                  data-bs-target='#editFileboneModal'
+                                  data-id=el.id
+                                  data-name=el.name
+                                  data-description=el.description
+                                  data-is-default=(el.is_default ? 'true' : 'false')
+                                )
+                                  i.bi.bi-pencil.me-1
+                                  | Edit
+                                button.btn.btn-sm.btn-danger(
+                                  data-bs-toggle='modal'
+                                  data-bs-target='#deleteFileboneModal'
+                                  data-id=el.id
+                                  data-name=el.name
+                                  data-area-count=el.area_count || 0
+                                )
+                                  i.bi.bi-trash.me-1
+                                  | Delete
+                        .card-body
+                          .row
+                            .col-md-6
+                              if el.description
+                                p= el.description
+                              else
+                                p.text-muted No description
+                            .col-md-6
+                              table.table.table-sm
+                                tr
+                                  td
+                                    strong Active Areas:
+                                  td
+                                    span.badge.bg-success= el.area_count || 0
+                                tr
+                                  td
+                                    strong Locally Carried:
+                                  td
+                                    span.badge.bg-info= el.carried_count || 0
+                                tr
+                                  td
+                                    strong Last Imported:
+                                  td
+                                    if el.last_imported_at
+                                      = new Date(el.last_imported_at).toLocaleString()
+                                    else
+                                      span.text-muted Never
+
+          .col-1
+
+      //- New Filebone Modal
+      #newFileboneModal.modal.fade(tabindex='-1' aria-labelledby='newFileboneModalLabel' aria-hidden='true')
+        .modal-dialog
+          .modal-content
+            form(method='POST' action='/admin/filebone/' + network.id + '/new')
+              .modal-header
+                h5#newFileboneModalLabel.modal-title New Filebone
+                button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+              .modal-body
+                .mb-3
+                  label.form-label(for='newName') Name
+                  input#newName.form-control(type='text' name='name' required placeholder='e.g. FILEBONE.NA')
+                .mb-3
+                  label.form-label(for='newDescription') Description
+                  input#newDescription.form-control(type='text' name='description' placeholder='Optional description')
+                .form-check.mb-3
+                  input#newIsDefault.form-check-input(type='checkbox' name='is_default' value='true')
+                  label.form-check-label(for='newIsDefault') Set as default filebone for this network
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                button.btn.btn-success(type='submit')
+                  i.bi.bi-plus-lg.me-1
+                  | Create
+
+      //- Edit Filebone Modal
+      #editFileboneModal.modal.fade(tabindex='-1' aria-labelledby='editFileboneModalLabel' aria-hidden='true')
+        .modal-dialog
+          .modal-content
+            form#editFileboneForm(method='POST' action='')
+              .modal-header
+                h5#editFileboneModalLabel.modal-title Edit Filebone
+                button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+              .modal-body
+                .mb-3
+                  label.form-label(for='editName') Name
+                  input#editName.form-control(type='text' name='name' required)
+                .mb-3
+                  label.form-label(for='editDescription') Description
+                  input#editDescription.form-control(type='text' name='description')
+                .form-check.mb-3
+                  input#editIsDefault.form-check-input(type='checkbox' name='is_default' value='true')
+                  label.form-check-label(for='editIsDefault') Set as default filebone for this network
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                button.btn.btn-warning(type='submit')
+                  i.bi.bi-check-lg.me-1
+                  | Save
+
+      //- Delete Filebone Modal
+      #deleteFileboneModal.modal.fade(tabindex='-1' aria-labelledby='deleteFileboneModalLabel' aria-hidden='true')
+        .modal-dialog
+          .modal-content
+            form#deleteFileboneForm(method='POST' action='')
+              .modal-header
+                h5#deleteFileboneModalLabel.modal-title Delete Filebone
+                button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+              .modal-body
+                p
+                  | Are you sure you want to delete the filebone
+                  strong#deleteFileboneName
+                  | ?
+                p.text-danger
+                  i.bi.bi-exclamation-triangle.me-1
+                  | This will remove
+                  strong
+                    |
+                    span#deleteAreaCount
+                  |  area entries. This action cannot be undone.
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                button.btn.btn-danger(type='submit')
+                  i.bi.bi-trash.me-1
+                  | Delete
+
+      script.
+        // Edit modal population
+        var editModal = document.getElementById('editFileboneModal');
+        if (editModal) {
+          editModal.addEventListener('show.bs.modal', function(event) {
+            var button = event.relatedTarget;
+            if (button) {
+              var id = button.getAttribute('data-id');
+              var name = button.getAttribute('data-name');
+              var desc = button.getAttribute('data-description');
+              var isDefault = button.getAttribute('data-is-default');
+              document.getElementById('editFileboneForm').action = '/admin/filebone/' + id + '/update';
+              document.getElementById('editName').value = name || '';
+              document.getElementById('editDescription').value = desc || '';
+              document.getElementById('editIsDefault').checked = isDefault === 'true';
+              document.getElementById('editFileboneModalLabel').textContent = 'Edit Filebone: ' + (name || '');
+            }
+          });
+        }
+
+        // Delete modal population
+        var deleteModal = document.getElementById('deleteFileboneModal');
+        if (deleteModal) {
+          deleteModal.addEventListener('show.bs.modal', function(event) {
+            var button = event.relatedTarget;
+            if (button) {
+              var id = button.getAttribute('data-id');
+              var name = button.getAttribute('data-name');
+              var areaCount = button.getAttribute('data-area-count');
+              document.getElementById('deleteFileboneForm').action = '/admin/filebone/' + id + '/remove';
+              document.getElementById('deleteFileboneName').textContent = ' ' + (name || '') + ' ';
+              document.getElementById('deleteAreaCount').textContent = areaCount || '0';
+            }
+          });
+        }

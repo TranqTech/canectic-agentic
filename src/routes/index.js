@@ -1102,7 +1102,7 @@ router.get('/whosonline', async (req, res) => {
 
 	res.render('public/whosonline', {
 		title: "Who's Online",
-		activelink: '',
+		activelink: 'chat',
 		currentuser: getCurrentUser(req),
 		onlineUsers: onlineUsers
 	});
@@ -1173,7 +1173,7 @@ router.get('/wall', async (req, res) => {
 
 	res.render('public/wall', {
 		title: 'The Wall',
-		activelink: '',
+		activelink: 'wall',
 		currentuser: currentuser,
 		wallMessages: wallMessages,
 		canPost: canPost

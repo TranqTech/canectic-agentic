@@ -1,0 +1,97 @@
+extends ../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else if !sufficientAccess
+      include ../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-lg-8.offset-lg-2.col-12
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin') Exit
+              .card-body
+
+                h4 Import Tools
+                p.text-muted Bring data from other BBS software into Canectic.
+                .row
+                  .col-lg-4.col-12.mb-3
+                    .card.h-100
+                      .card-header.bg-dark
+                        h5.mb-0
+                          i.bi.bi-chat-dots.me-2
+                          | Message Base (SMB)
+                      .card-body
+                        p Import messages from a Synchronet SMB message base (.shd/.sdt/.sid files) into a target message area.
+                        .d-grid
+                          a.btn.btn-primary(href='/admin/import/msgbase')
+                            i.bi.bi-upload.me-1
+                            | Import Message Base
+                  .col-lg-4.col-12.mb-3
+                    .card.h-100
+                      .card-header.bg-dark
+                        h5.mb-0
+                          i.bi.bi-list-check.me-2
+                          | areas.bbs
+                      .card-body
+                        p Bulk-create message areas from an FTN areas.bbs file. Select target group and network, preview and control per-area options.
+                        .d-grid
+                          a.btn.btn-primary(href='/admin/import/areasbbs')
+                            i.bi.bi-upload.me-1
+                            | Import areas.bbs
+                  .col-lg-4.col-12.mb-3
+                    .card.h-100
+                      .card-header.bg-dark
+                        h5.mb-0
+                          i.bi.bi-diagram-3.me-2
+                          | sbbsecho.ini
+                      .card-body
+                        p Import linked FTN nodes from a Synchronet sbbsecho.ini file. Drag-and-drop grouping to map nodes to peers.
+                        .d-grid
+                          a.btn.btn-primary(href='/admin/import/sbbsecho')
+                            i.bi.bi-upload.me-1
+                            | Import sbbsecho.ini
+
+                hr
+
+                h4 Export Tools
+                p.text-muted Export data from Canectic for use with other systems or as backups.
+                .row
+                  .col-lg-4.col-12.mb-3
+                    .card.h-100
+                      .card-header.bg-dark
+                        h5.mb-0
+                          i.bi.bi-file-earmark-text.me-2
+                          | areas.bbs / files.bbs
+                      .card-body
+                        p Download areas.bbs or files.bbs listings for any network. Available on each network's detail page.
+                        .d-grid
+                          a.btn.btn-outline-primary(href='/admin/networks')
+                            i.bi.bi-box-arrow-up-right.me-1
+                            | Go to Networks
+                  .col-lg-4.col-12.mb-3
+                    .card.h-100
+                      .card-header.bg-dark
+                        h5.mb-0
+                          i.bi.bi-menu-button-wide.me-2
+                          | Menu JSON
+                      .card-body
+                        p Export individual menus as portable JSON files. Import previously exported menus. Available on each menu's detail page.
+                        .d-grid
+                          a.btn.btn-outline-primary(href='/admin/menus')
+                            i.bi.bi-box-arrow-up-right.me-1
+                            | Go to Menus

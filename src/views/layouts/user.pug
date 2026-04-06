@@ -183,7 +183,11 @@ html
             if (!btn) return;
             // Telegram: both parties can close. Sysop chat: only initiator (sysop) can close.
             var canClose = (chatState.mode === 'telegram') || (chatState.role === 'initiator');
-            btn.style.display = canClose ? '' : 'none';
+            if (canClose) {
+              btn.classList.remove('web-chat-sysop-only');
+            } else {
+              btn.classList.add('web-chat-sysop-only');
+            }
           }
 
           function showOverlay() {

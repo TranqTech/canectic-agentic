@@ -572,6 +572,18 @@ node src/tools/maintenance.js --regen-html --batch 50
 
 ---
 
+## Echolist Registry
+
+Per-network registry of available echomail areas. See `NETWORKING_ARCHITECTURE.md` for full details.
+
+- Tables: `network_echolists` (list definitions, multiple per network, `is_default` flag), `network_echolist_areas` (entries with `areatag`, `description`, `tags` JSONB, historical tracking, `local_area_id` nullable FK to `message_areas`)
+- Model: `src/models/networkEcholist.js`
+- Import from BACKBONE.NA format with diff preview (new/removed/changed)
+- `local_area_id` sync: `networkAreas.addAreaToNetwork()` sets it, `removeAreaFromNetwork()` clears it
+- Sysop notification when locally-carried areas disappear from an echolist import
+
+---
+
 ## Future Development
 
 - **Web newscan route/view**: `GET /messages/newscan` using `getNewscanSummary()` with `userAreaSubs` filtering

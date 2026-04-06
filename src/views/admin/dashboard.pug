@@ -1,6 +1,14 @@
 extends ../layouts/admin
 
-block content  
+mixin card(href, icon, name, desc, category)
+  .col-lg-3.col-md-4.col-6
+    a.card.text-decoration-none.dash-card(href=href data-name=name.toLowerCase() data-desc=desc.toLowerCase() data-cat=category)
+      .card-body.text-center.p-3
+        i.bi(class=icon style='font-size:1.8rem')
+        h6.mt-2.mb-1.text-white= name
+        small.text-muted= desc
+
+block content
   .container-fluid.main-wrapper
     if !currentuser
       - loginMode = 'guard'
@@ -15,86 +23,134 @@ block content
             br
             br
         .row
-          .col-3
-          .col-6              
-            .card      
+          .col-lg-8.offset-lg-2.col-12
+            .card
               .card-header.bg-secondary
-                h2= title
+                .row.align-items-center
+                  .col-6
+                    h2.mb-0= title
+                  .col-6
+                    input#dashSearch.form-control.form-control-sm(type='text' placeholder='Search tools...' autocomplete='off')
               .card-body.bg-dark
-                .row
-                  .col-12
-                    br
-                .row
-                  .col-4
-                    .d-grid.gap-2
-                      center
-                        h3
-                          |Messages
-                      a.button.btn.btn-lg.btn-primary(href='/admin/msgGroups')
-                        |Message Groups
-                      a.button.btn.btn-lg.btn-primary(href='/admin/msgAreas')
-                        |Message Areas
-                      a.button.btn.btn-lg.btn-primary(href='/admin/import/msgbase')
-                        |Import Message Base
-                  .col-4
-                    .d-grid.gap-2
-                      center
-                        .h3
-                          |Files
-                      a.button.btn.btn-lg.btn-primary(href='/admin/fileGroups')
-                        |File Groups
-                      a.button.btn.btn-lg.btn-primary(href='/admin/fileAreas')
-                        |File Areas
-                  .col-4
-                    .d-grid.gap-2
-                      center
-                        .h3
-                          |Networking
-                      a.button.btn.btn-lg.btn-primary(href='/admin/networks')
-                        |Message Networks
-                      a.button.btn.btn-lg.btn-primary(href='/admin/peers')
-                        |Linked Nodes
-                      a.button.btn.btn-lg.btn-primary(href='/admin/nodelists')
-                        |Nodelists
-                .row
-                  .col-12
-                    br
-                    hr
-                    br
-                .row
-                  .col-4
-                    .d-grid.gap-2
-                      center
-                        .h3
-                          |Admin Tools
-                      a.button.btn.btn-lg.btn-primary(href='/admin/users')
-                        |Users
-                      a.button.btn.btn-lg.btn-primary(href='/admin/announcements')
-                        |Announcements
-                      a.button.btn.btn-lg.btn-primary(href='/admin/wall')
-                        |Wall Messages
-                      a.button.btn.btn-lg.btn-primary(href='/admin/newsfiles')
-                        |News Files
-                      a.button.btn.btn-lg.btn-primary(href='/admin/events')
-                        |Jobs &amp; Maintenance
-                  .col-4
-                    .d-grid.gap-2
-                      center
-                        .h3
-                          |External
-                      a.button.btn.btn-lg.btn-primary(href='/admin/doors')
-                        |Door Games
-                      a.button.btn.btn-lg.btn-primary(href='/admin/doorCollections')
-                        |Door Collections
-                      
-                  .col-4
-                    .d-grid.gap-2
-                      center
-                        .h3
-                          |System
-                      a.button.btn.btn-lg.btn-primary(href='/admin/menus')
-                        |Menus
-                      a.button.btn.btn-lg.btn-primary(href='/admin/themes')
-                        |Themes
-                      a.button.btn.btn-lg.btn-primary(href='/admin/config')
-                        |Config
+
+                ul.nav.nav-tabs.mb-3#dashTabs(role='tablist')
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-all' data-bs-toggle='tab' data-bs-target='#pane-all' type='button' role='tab') All
+                  li.nav-item(role='presentation')
+                    button.nav-link.active(id='tab-system' data-bs-toggle='tab' data-bs-target='#pane-system' type='button' role='tab' aria-selected='true') System
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-messages' data-bs-toggle='tab' data-bs-target='#pane-messages' type='button' role='tab') Messages
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-files' data-bs-toggle='tab' data-bs-target='#pane-files' type='button' role='tab') Files
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-networking' data-bs-toggle='tab' data-bs-target='#pane-networking' type='button' role='tab') Networking
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-content' data-bs-toggle='tab' data-bs-target='#pane-content' type='button' role='tab') Content
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-doors' data-bs-toggle='tab' data-bs-target='#pane-doors' type='button' role='tab') Doors
+                  li.nav-item(role='presentation')
+                    button.nav-link(id='tab-users' data-bs-toggle='tab' data-bs-target='#pane-users' type='button' role='tab') Users
+
+                .tab-content#dashPanes
+
+                  //- All
+                  #pane-all.tab-pane.fade(role='tabpanel')
+                    .row.g-3#allCards
+
+                  //- System
+                  #pane-system.tab-pane.fade.show.active(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/config', 'bi-gear', 'Config', 'System configuration settings', 'system')
+                      +card('/admin/menus', 'bi-menu-button-wide', 'Menus', 'Terminal menu editor', 'system')
+                      +card('/admin/themes', 'bi-palette', 'Themes', 'Terminal colour themes', 'system')
+                      +card('/admin/events', 'bi-calendar-check', 'Jobs & Maintenance', 'Worker queues and scheduled tasks', 'system')
+                      +card('/admin/nodespy', 'bi-eye', 'NodeSpy', 'Live node monitoring and sysop chat', 'system')
+                      +card('/adminlogs', 'bi-terminal', 'System Logs', 'View application log stream', 'system')
+                      +card('/admin/migrations', 'bi-box-arrow-in-down', 'Migrations', 'Import and export tools', 'system')
+
+                  //- Messages
+                  #pane-messages.tab-pane.fade(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/msgGroups', 'bi-collection', 'Message Groups', 'Manage message group hierarchy', 'messages')
+                      +card('/admin/msgAreas', 'bi-chat-square-text', 'Message Areas', 'Browse and manage message areas', 'messages')
+
+                  //- Files
+                  #pane-files.tab-pane.fade(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/fileGroups', 'bi-folder2', 'File Groups', 'Manage file group hierarchy', 'files')
+                      +card('/admin/fileAreas', 'bi-files', 'File Areas', 'Browse and manage file areas', 'files')
+
+                  //- Networking
+                  #pane-networking.tab-pane.fade(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/networks', 'bi-diagram-3', 'Networks', 'FTN, QWK, and NNTP network configuration', 'networking')
+                      +card('/admin/peers', 'bi-people', 'Linked Nodes', 'Peer systems and connections', 'networking')
+                      +card('/admin/nodelists', 'bi-card-list', 'Nodelists', 'FTN nodelist import and browse', 'networking')
+                      +card('/admin/echolists', 'bi-list-ul', 'Echolists', 'Network echolist registries', 'networking')
+                      +card('/admin/filebones', 'bi-list-ul', 'Filebones', 'File echo list registries', 'networking')
+                      +card('/admin/freq', 'bi-file-earmark-arrow-down', 'File Requests', 'FREQ magic aliases and filebox', 'networking')
+
+                  //- Content
+                  #pane-content.tab-pane.fade(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/announcements', 'bi-megaphone', 'Announcements', 'Login announcements', 'content')
+                      +card('/admin/bulletins', 'bi-journal-text', 'Bulletins', 'Bulletin documents', 'content')
+                      +card('/admin/newsfiles', 'bi-newspaper', 'News Files', 'Door scores and news displays', 'content')
+                      +card('/admin/seasonal-art', 'bi-snow2', 'Seasonal Art', 'Holiday and seasonal art overrides', 'content')
+                      +card('/admin/wall', 'bi-chat-left-quote', 'Wall Messages', 'Manage the wall / oneliners', 'content')
+
+                  //- Doors
+                  #pane-doors.tab-pane.fade(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/doors', 'bi-joystick', 'Door Games', 'Configure door game launchers', 'doors')
+                      +card('/admin/doorCollections', 'bi-grid-3x3-gap', 'Door Collections', 'Category groupings for doors', 'doors')
+
+                  //- Users
+                  #pane-users.tab-pane.fade(role='tabpanel')
+                    .row.g-3
+                      +card('/admin/users', 'bi-person-lines-fill', 'Users', 'User accounts and management', 'users')
+                      +card('/admin/nodespy', 'bi-eye', 'NodeSpy', 'Live node monitoring and sysop chat', 'users')
+
+  //- Search + All tab population
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      // Populate "All" tab with clones of every card from all category panes
+      var allRow = document.getElementById('allCards');
+      var seen = {};
+      document.querySelectorAll('.dash-card').forEach(function(card) {
+        var href = card.getAttribute('href');
+        if (seen[href]) return;
+        seen[href] = true;
+        var col = card.closest('.col-lg-3, .col-md-4, .col-6');
+        if (col) allRow.appendChild(col.cloneNode(true));
+      });
+
+      // Search filter
+      var searchInput = document.getElementById('dashSearch');
+      searchInput.addEventListener('input', function() {
+        var term = searchInput.value.toLowerCase().trim();
+        if (term) {
+          // Switch to All tab when searching
+          var allTab = document.getElementById('tab-all');
+          if (!allTab.classList.contains('active')) {
+            bootstrap.Tab.getOrCreateInstance(allTab).show();
+          }
+          // Filter cards in All pane
+          allRow.querySelectorAll('.dash-card').forEach(function(card) {
+            var name = card.dataset.name || '';
+            var desc = card.dataset.desc || '';
+            var cat = card.dataset.cat || '';
+            var match = name.includes(term) || desc.includes(term) || cat.includes(term);
+            card.closest('.col-lg-3, .col-md-4, .col-6').style.display = match ? '' : 'none';
+          });
+        } else {
+          // Restore all cards visible
+          allRow.querySelectorAll('.col-lg-3, .col-md-4, .col-6').forEach(function(col) {
+            col.style.display = '';
+          });
+          // Switch back to System tab
+          var sysTab = document.getElementById('tab-system');
+          bootstrap.Tab.getOrCreateInstance(sysTab).show();
+        }
+      });
+    });

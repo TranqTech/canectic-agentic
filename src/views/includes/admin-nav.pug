@@ -17,7 +17,65 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'dashboard'
               span.visually-hidden  (current)
 
-        //- Announcements & Wall
+        //- Messages
+        li.nav-item.dropdown
+          a.nav-link.dropdown-toggle(
+            data-bs-toggle='dropdown'
+            href='#'
+            role='button'
+            aria-haspopup='true'
+            aria-expanded='false'
+            class=(activenav === 'msgGroups' || activenav === 'msgAreas') ? 'active' : ''
+          )
+            | Messages
+            if activenav === 'msgGroups' || activenav === 'msgAreas'
+              span.visually-hidden  (current)
+          .dropdown-menu
+            a.dropdown-item(href='/admin/msgGroups') Message Groups
+            a.dropdown-item(href='/admin/msgAreas') Message Areas
+
+        //- Files
+        li.nav-item.dropdown
+          a.nav-link.dropdown-toggle(
+            data-bs-toggle='dropdown'
+            href='#'
+            role='button'
+            aria-haspopup='true'
+            aria-expanded='false'
+            class=(activenav === 'fileGroups' || activenav === 'fileAreas') ? 'active' : ''
+          )
+            | Files
+            if activenav === 'fileGroups' || activenav === 'fileAreas'
+              span.visually-hidden  (current)
+          .dropdown-menu
+            a.dropdown-item(href='/admin/fileGroups') File Groups
+            a.dropdown-item(href='/admin/fileAreas') File Areas
+
+        //- Networking
+        li.nav-item.dropdown
+          a.nav-link.dropdown-toggle(
+            data-bs-toggle='dropdown'
+            href='#'
+            role='button'
+            aria-haspopup='true'
+            aria-expanded='false'
+            class=(activenav === 'networks' || activenav === 'peers' || activenav === 'nodelists') ? 'active' : ''
+          )
+            | Networking
+            if activenav === 'networks' || activenav === 'peers' || activenav === 'nodelists'
+              span.visually-hidden  (current)
+          .dropdown-menu
+            a.dropdown-item(href='/admin/networks') Networks
+            a.dropdown-item(href='/admin/peers') Linked Nodes
+            a.dropdown-item(href='/admin/nodelists') Nodelists
+            .dropdown-divider
+            a.dropdown-item(href='/admin/echolists') Echolists
+            a.dropdown-item(href='/admin/filebones') Filebones
+            a.dropdown-item(href='/admin/freq') File Requests (FREQ)
+            .dropdown-divider
+            a.dropdown-item(href='/admin/migrations') Migrations
+
+        //- Content
         li.nav-item.dropdown
           a.nav-link.dropdown-toggle(
             data-bs-toggle='dropdown'
@@ -37,30 +95,6 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             a.dropdown-item(href='/admin/seasonal-art') Seasonal Art
             a.dropdown-item(href='/admin/wall') Wall Messages
 
-        //- Messages
-        li.nav-item.dropdown
-          a.nav-link.dropdown-toggle(
-            data-bs-toggle='dropdown'
-            href='#'
-            role='button'
-            aria-haspopup='true'
-            aria-expanded='false'
-            class=(activenav === 'msgGroups' || activenav === 'msgAreas' || activenav === 'import' || activenav === 'freq') ? 'active' : ''
-          )
-            | Messages
-            if activenav === 'msgGroups' || activenav === 'msgAreas'
-              span.visually-hidden  (current)
-          .dropdown-menu
-            a.dropdown-item(href='/admin/msgGroups') Message Groups
-            a.dropdown-item(href='/admin/msgAreas') Message Areas
-            .dropdown-divider
-            a.dropdown-item(href='/admin/networks') Networks
-            a.dropdown-item(href='/admin/nodelists') Nodelists
-            a.dropdown-item(href='/admin/freq') File Requests (FREQ)
-            .dropdown-divider
-            a.dropdown-item(href='/admin/import/areasbbs') Import areas.bbs
-            a.dropdown-item(href='/admin/import/msgbase') Import Message Base
-
         //- Doors
         li.nav-item.dropdown
           a.nav-link.dropdown-toggle(
@@ -75,25 +109,8 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'doors'
               span.visually-hidden  (current)
           .dropdown-menu
-            a.dropdown-item(href='/admin/doors') Door Config
+            a.dropdown-item(href='/admin/doors') Door Games
             a.dropdown-item(href='/admin/doorCollections') Door Collections
-
-        //- Files
-        li.nav-item.dropdown
-          a.nav-link.dropdown-toggle(
-            data-bs-toggle='dropdown'
-            href='#'
-            role='button'
-            aria-haspopup='true'
-            aria-expanded='false'
-            class=(activenav === 'fileGroups' || activenav === 'fileAreas') ? 'active' : ''
-          )
-            | Files
-            if activenav === 'fileGroups' || activenav === 'fileAreas'
-              span.visually-hidden  (current)
-          .dropdown-menu
-            a.dropdown-item(href='/admin/fileGroups') File Groups
-            a.dropdown-item(href='/admin/fileAreas') File Areas
 
         //- Users
         li.nav-item
@@ -121,17 +138,6 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
           .dropdown-menu
             a.dropdown-item(href='/admin/menus') Menu Editor
             a.dropdown-item(href='/admin/themes') Themes
-
-        //- Config
-        li.nav-item
-          a.nav-link(
-            href='/admin/config'
-            class=activenav === 'config' ? 'active' : ''
-          )
-            i.bi.bi-gear.me-1
-            | Config
-            if activenav === 'config'
-              span.visually-hidden  (current)
 
         //- Node Spy
         li.nav-item

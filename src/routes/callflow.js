@@ -63,11 +63,11 @@ router.get('/', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 
-	// Read return URL from session
+	// Read return URL from session (avoid looping back to callflow itself)
 	var returnUrl = '/';
 	if (req.cookies && req.cookies.sessionid) {
 		var sess = await sessionStore.sessionGet(req.cookies.sessionid);
-		if (sess && sess.callflow_return_url) {
+		if (sess && sess.callflow_return_url && !sess.callflow_return_url.startsWith('/callflow')) {
 			returnUrl = sess.callflow_return_url;
 		}
 	}
@@ -407,6 +407,7 @@ router.post('/complete', urlencodedParser, async (req, res) => {
 	}
 
 	var returnUrl = req.body.return_url || '/';
+	if (returnUrl.startsWith('/callflow')) returnUrl = '/';
 	res.json({ redirect: returnUrl });
 });
 

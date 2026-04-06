@@ -692,6 +692,18 @@ Synchronet message base (SMB) import support for migrating from Synchronet BBS:
 
 ---
 
+## Filebone Registry
+
+Per-network registry of available file echo areas, imported from FILEBONE.NA or similar area list files. Identical architecture to message echolists (see `NETWORKING_ARCHITECTURE.md` for full details).
+
+- Tables: `file_echolists` (list definitions), `file_echolist_areas` (area entries with historical tracking)
+- Model: `src/models/fileEcholist.js`
+- `local_area_id` nullable FK links entries to `file_areas` when locally carried
+- Sync hooks in `fileNetworkAreas.addMapping()` / `removeMapping()` maintain `local_area_id`
+- Admin: `/admin/filebones` (overview), `/admin/filebone/:networkId` (per-network), `/admin/filebone/view/:id` (browse + import)
+
+---
+
 ## Future Development
 
 ### Planned/Possible Enhancements

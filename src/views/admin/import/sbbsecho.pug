@@ -1,0 +1,490 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-lg-10.offset-lg-1.col-12
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin/migrations') Exit
+              .card-body
+
+                //- Import result (step 3)
+                if result
+                  if result.created_peers && result.created_peers.length > 0
+                    .alert.alert-success
+                      h5 Import Complete
+                      p Created #[strong= result.created_peers.length] peer(s) with #[strong= result.created_connections] connection(s).
+                      if result.mapped_peers && result.mapped_peers.length > 0
+                        p Mapped #[strong= result.mapped_peers.length] connection(s) to existing peers.
+                  if result.errors && result.errors.length > 0
+                    .alert.alert-warning
+                      h6 Warnings:
+                      ul.mb-0
+                        each err in result.errors.slice(0, 30)
+                          li= err
+                        if result.errors.length > 30
+                          li.text-muted ... and #{result.errors.length - 30} more
+                  if !result.created_peers || result.created_peers.length === 0
+                    if !result.mapped_peers || result.mapped_peers.length === 0
+                      .alert.alert-danger
+                        h5 Nothing imported
+                        if result.errors && result.errors.length > 0
+                          ul.mb-0
+                            each err in result.errors
+                              li= err
+                  .text-end
+                    a.btn.btn-primary(href='/admin/import/sbbsecho') Import Another File
+
+                //- Step 2: Peer grouping (after networks resolved)
+                if step === 'peers'
+                  .alert.alert-info
+                    h6 Step 2 of 2: Peer Grouping
+                    if networkResult && networkResult.created && networkResult.created.length > 0
+                      p Created networks: #[strong= networkResult.created.join(', ')]
+                    if networkResult && networkResult.createdAddrs && networkResult.createdAddrs.length > 0
+                      p Created addresses: #[strong= networkResult.createdAddrs.join(', ')]
+                    if networkResult && networkResult.skipped && networkResult.skipped.length > 0
+                      p.mb-0 Skipped domains: #[span.text-muted= networkResult.skipped.join(', ')]
+                    if networkResult && networkResult.errors && networkResult.errors.length > 0
+                      each err in networkResult.errors
+                        p.text-warning.mb-0= err
+
+                  form#importForm(action='/admin/import/sbbsecho/run' method='POST')
+                    textarea#importData(name='import_data' style='display:none')
+
+                    h4.mb-3 Peer Grouping
+                    p.text-muted
+                      | Drag connection cards between groups to merge or split peers.
+                      | Each group becomes one peer with the connections shown inside it.
+                      | Use the network dropdown on each connection to assign the correct network.
+                    .mb-3
+                      button.btn.btn-sm.btn-outline-success#addGroupBtn(type='button')
+                        i.bi.bi-plus-circle.me-1
+                        | New Empty Group
+                      span.text-muted.ms-3.small
+                        | #[strong= parsedData.nodes.length] connection(s) in #[strong= parsedData.groups.length] group(s)
+
+                    #groupContainer.row
+
+                    hr
+                    .text-end
+                      button.btn.btn-lg.btn-success#submitImport(type='button')
+                        i.bi.bi-database-add.me-1
+                        | Import Selected
+
+                //- Step 1: Networks and local addresses (after upload parse)
+                if step === 'networks'
+                  if preview.error
+                    .alert.alert-danger= preview.error
+                  else
+                    .alert.alert-info
+                      h6 Step 1 of 2: Networks &amp; Addresses
+                      p.mb-0 Found #[strong= preview.nodes.length] linked node(s) across #[strong= preview.domains.length] network domain(s). Resolve networks and local addresses, then group peers.
+
+                    form(action='/admin/import/sbbsecho/networks' method='POST')
+                      textarea(name='parsed_data' style='display:none')= JSON.stringify(parsedData)
+
+                      h5.mb-3 Networks
+                      table.table.table-sm.table-hover.mb-4
+                        thead
+                          tr
+                            th Domain
+                            th Zones
+                            th Connections
+                            th Action
+                        tbody
+                          each dom, idx in preview.domains
+                            tr
+                              td= dom.name
+                              td= dom.zones.join(', ')
+                              td= dom.node_count
+                              td
+                                select.form-select.form-select-sm(name='network_' + dom.name)
+                                  option(value='skip') -- Skip --
+                                  option(value='new' selected=!networks.some(n => n.domain === dom.name)) Create New Network
+                                  each net in networks
+                                    option(value=net.id selected=(net.domain === dom.name))= net.name + ' (' + net.domain + ')'
+
+                      if localAddresses && localAddresses.length > 0
+                        hr
+                        h5.mb-3 Local Addresses
+                        p.text-muted Your local FTN addresses referenced in the file. Verify existing addresses or create missing ones.
+                        table.table.table-sm.table-hover.mb-4
+                          thead
+                            tr
+                              th Address
+                              th Network Domain
+                              th Status
+                              th Action
+                          tbody
+                            each la in localAddresses
+                              tr(class=la.exists ? '' : 'table-warning')
+                                td= la.address
+                                td= la.domain
+                                td
+                                  if la.exists
+                                    span.badge.bg-success Exists
+                                  else
+                                    span.badge.bg-warning.text-dark Missing
+                                td
+                                  select.form-select.form-select-sm(name='addr_' + la.address + '_' + la.domain)
+                                    if la.exists
+                                      option(value='keep' selected) Keep Existing
+                                      option(value='skip') Skip
+                                    else
+                                      option(value='create' selected) Create
+                                      option(value='skip') Skip
+
+                      .text-end
+                        button.btn.btn-lg.btn-primary(type='submit')
+                          i.bi.bi-arrow-right.me-1
+                          | Confirm Networks &amp; Addresses
+
+                //- Upload form (initial)
+                if step === 'upload'
+                  h5 Synchronet sbbsecho.ini Import
+                  p.text-muted
+                    | Upload your sbbsecho.ini file to extract linked node configurations.
+                    | Step 1 maps network domains, Step 2 groups and imports peers.
+                  hr
+                  form(action='/admin/import/sbbsecho/preview' method='POST' enctype='multipart/form-data')
+                    .row.mb-3
+                      .col-6
+                        label.form-label
+                          | sbbsecho.ini file
+                          span.text-danger *
+                        input.form-control(type='file' name='sbbsecho_file' accept='.ini,.cfg,.txt' required)
+                    .text-end
+                      button.btn.btn-primary(type='submit')
+                        i.bi.bi-search.me-1
+                        | Parse &amp; Preview
+
+  //- Step 2 client-side logic
+  if step === 'peers'
+    script.
+      var _nodes = !{JSON.stringify(parsedData.nodes)};
+      var _groups = !{JSON.stringify(parsedData.groups)};
+      var _existingPeers = !{JSON.stringify(existingPeers)};
+      var _systemAddresses = !{JSON.stringify(systemAddresses)};
+      var _networks = !{JSON.stringify(networks)};
+
+      document.addEventListener('DOMContentLoaded', function() {
+        var container = document.getElementById('groupContainer');
+        var groupCounter = _groups.length;
+
+        // Build the initial groups
+        _groups.forEach(function(group, gIdx) {
+          container.appendChild(buildGroupCard(gIdx, group.peer_name, group.sysop_name, group.node_indices));
+        });
+
+        // --- Build a group card ---
+        function buildGroupCard(gIdx, peerName, sysopName, nodeIndices) {
+          var col = document.createElement('div');
+          col.className = 'col-lg-6 col-12 mb-3';
+
+          var card = document.createElement('div');
+          card.className = 'card group-card';
+          card.dataset.groupIdx = gIdx;
+
+          // Header
+          var header = document.createElement('div');
+          header.className = 'card-header bg-dark d-flex justify-content-between align-items-center';
+          var titleInput = document.createElement('input');
+          titleInput.type = 'text';
+          titleInput.className = 'form-control form-control-sm bg-dark text-white border-secondary peer-name';
+          titleInput.value = peerName || '';
+          titleInput.placeholder = 'Peer name';
+          titleInput.style.maxWidth = '50%';
+          header.appendChild(titleInput);
+
+          var peerSelect = document.createElement('select');
+          peerSelect.className = 'form-select form-select-sm bg-dark text-white border-secondary existing-peer';
+          peerSelect.style.maxWidth = '45%';
+          var optSkip = document.createElement('option');
+          optSkip.value = 'skip';
+          optSkip.textContent = '-- Skip (do not import) --';
+          peerSelect.appendChild(optSkip);
+          var optNew = document.createElement('option');
+          optNew.value = 'new';
+          optNew.textContent = 'Create New Peer';
+          optNew.selected = true;
+          peerSelect.appendChild(optNew);
+          _existingPeers.forEach(function(p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name + (p.sysop_name ? ' (' + p.sysop_name + ')' : '');
+            peerSelect.appendChild(opt);
+          });
+          peerSelect.addEventListener('change', function() {
+            if (peerSelect.value === 'skip') {
+              card.classList.add('opacity-50');
+            } else {
+              card.classList.remove('opacity-50');
+            }
+          });
+          header.appendChild(peerSelect);
+          card.appendChild(header);
+
+          // Body (drop zone)
+          var body = document.createElement('div');
+          body.className = 'card-body node-drop-zone';
+          body.style.minHeight = '60px';
+          body.dataset.groupIdx = gIdx;
+
+          // Sysop name row
+          var sysRow = document.createElement('div');
+          sysRow.className = 'mb-2';
+          var sysLabel = document.createElement('small');
+          sysLabel.className = 'text-muted';
+          sysLabel.textContent = 'Sysop: ';
+          var sysInput = document.createElement('input');
+          sysInput.type = 'text';
+          sysInput.className = 'form-control form-control-sm d-inline-block sysop-name';
+          sysInput.style.width = '60%';
+          sysInput.value = sysopName || '';
+          sysInput.placeholder = 'Sysop name (optional)';
+          sysRow.appendChild(sysLabel);
+          sysRow.appendChild(sysInput);
+          body.appendChild(sysRow);
+
+          // Node cards
+          (nodeIndices || []).forEach(function(nIdx) {
+            body.appendChild(buildNodeCard(nIdx));
+          });
+
+          card.appendChild(body);
+          col.appendChild(card);
+
+          // Wire drop zone
+          wireDropZone(body);
+
+          return col;
+        }
+
+        // --- Build a draggable node card ---
+        function buildNodeCard(nIdx) {
+          var node = _nodes[nIdx];
+          var card = document.createElement('div');
+          card.className = 'card mb-2 node-card border-secondary';
+          card.draggable = true;
+          card.dataset.nodeIdx = nIdx;
+
+          var body = document.createElement('div');
+          body.className = 'card-body p-2';
+
+          // Top row: checkbox + address + name
+          var topRow = document.createElement('div');
+          topRow.className = 'd-flex align-items-center gap-2 mb-1';
+
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'form-check-input node-include';
+          cb.checked = true;
+          cb.title = 'Include in import';
+          cb.addEventListener('click', function(e) { e.stopPropagation(); });
+          topRow.appendChild(cb);
+
+          var grip = document.createElement('i');
+          grip.className = 'bi bi-grip-vertical text-muted';
+          grip.style.cursor = 'grab';
+          topRow.appendChild(grip);
+
+          var addrBadge = document.createElement('span');
+          addrBadge.className = 'badge bg-primary';
+          addrBadge.textContent = node.ftn_address;
+          topRow.appendChild(addrBadge);
+
+          if (node.name) {
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'text-white small';
+            nameSpan.textContent = node.name;
+            topRow.appendChild(nameSpan);
+          }
+
+          body.appendChild(topRow);
+
+          // Network dropdown
+          var netRow = document.createElement('div');
+          netRow.className = 'mb-1 d-flex align-items-center gap-2';
+          var netLabel = document.createElement('small');
+          netLabel.className = 'text-muted';
+          netLabel.textContent = 'Network: ';
+          netRow.appendChild(netLabel);
+
+          var netSelect = document.createElement('select');
+          netSelect.className = 'form-select form-select-sm d-inline-block net-map';
+          netSelect.style.width = 'auto';
+          netSelect.style.minWidth = '180px';
+          _networks.forEach(function(net) {
+            var opt = document.createElement('option');
+            opt.value = net.id;
+            opt.textContent = net.name + ' (' + net.domain + ')';
+            if (net.domain === node.domain) opt.selected = true;
+            netSelect.appendChild(opt);
+          });
+          netRow.appendChild(netSelect);
+          body.appendChild(netRow);
+
+          // Details row
+          var detRow = document.createElement('div');
+          detRow.className = 'small text-muted';
+          var details = [];
+          if (node.binkp_host) details.push('Host: ' + node.binkp_host + ':' + node.binkp_port);
+          if (node.binkp_poll) details.push('Poll');
+          if (node.direct) details.push('Direct');
+          if (node.session_password) details.push('Session pwd set');
+          if (node.packet_password) details.push('Packet pwd set');
+          if (node.areafix_password) details.push('AreaFix pwd set');
+          if (node.tic_password) details.push('TIC pwd set');
+          if (node.route) details.push('Route: ' + node.route);
+          if (node.group_hub) details.push('GroupHub: ' + node.group_hub);
+          detRow.textContent = details.join(' | ');
+          body.appendChild(detRow);
+
+          // Local address mapping (filtered by selected network)
+          var addrRow = document.createElement('div');
+          addrRow.className = 'mt-1 d-flex align-items-center gap-2';
+          var addrLabel = document.createElement('small');
+          addrLabel.className = 'text-muted';
+          addrLabel.textContent = 'Local addr: ';
+          addrRow.appendChild(addrLabel);
+
+          var addrSelect = document.createElement('select');
+          addrSelect.className = 'form-select form-select-sm d-inline-block addr-map';
+          addrSelect.style.width = 'auto';
+          addrSelect.style.minWidth = '180px';
+
+          function populateAddrSelect(sel, networkId, preferAddr) {
+            sel.innerHTML = '';
+            var optAuto = document.createElement('option');
+            optAuto.value = '';
+            optAuto.textContent = '-- Auto --';
+            sel.appendChild(optAuto);
+            var filtered = _systemAddresses.filter(function(sa) {
+              return String(sa.network_id) === String(networkId);
+            });
+            filtered.forEach(function(sa) {
+              var opt = document.createElement('option');
+              opt.value = sa.id;
+              opt.textContent = sa.address + ' (' + (sa.domain || '') + ')';
+              if (preferAddr && sa.address === preferAddr) opt.selected = true;
+              sel.appendChild(opt);
+            });
+          }
+
+          // Initial populate based on default network selection
+          var initialNetId = netSelect.value;
+          populateAddrSelect(addrSelect, initialNetId, node.local_address);
+
+          // Re-populate when network changes
+          netSelect.addEventListener('change', function() {
+            populateAddrSelect(addrSelect, netSelect.value, node.local_address);
+          });
+
+          addrRow.appendChild(addrSelect);
+          body.appendChild(addrRow);
+
+          card.appendChild(body);
+
+          // Drag events
+          card.addEventListener('dragstart', function(e) {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', nIdx.toString());
+            card.classList.add('opacity-50');
+          });
+          card.addEventListener('dragend', function() {
+            card.classList.remove('opacity-50');
+            document.querySelectorAll('.node-drop-zone').forEach(function(z) {
+              z.classList.remove('border-primary', 'border-2');
+            });
+          });
+
+          return card;
+        }
+
+        // --- Wire a drop zone ---
+        function wireDropZone(zone) {
+          zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            zone.classList.add('border-primary', 'border-2');
+          });
+          zone.addEventListener('dragleave', function(e) {
+            if (!zone.contains(e.relatedTarget)) {
+              zone.classList.remove('border-primary', 'border-2');
+            }
+          });
+          zone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            zone.classList.remove('border-primary', 'border-2');
+            var nIdx = e.dataTransfer.getData('text/plain');
+            var card = document.querySelector('.node-card[data-node-idx="' + nIdx + '"]');
+            if (card) {
+              zone.appendChild(card);
+            }
+          });
+        }
+
+        // --- Add new empty group ---
+        document.getElementById('addGroupBtn').addEventListener('click', function() {
+          var col = buildGroupCard(groupCounter++, '', '', []);
+          container.appendChild(col);
+        });
+
+        // --- Serialize and submit ---
+        document.getElementById('submitImport').addEventListener('click', function() {
+          var importData = { nodes: _nodes, groups: [] };
+
+          // Collect peer groups (skip groups marked as skip)
+          document.querySelectorAll('.group-card').forEach(function(card) {
+            var existingPeer = card.querySelector('.existing-peer').value;
+            if (existingPeer === 'skip') return;
+            var peerName = card.querySelector('.peer-name').value.trim();
+            var sysopName = card.querySelector('.sysop-name').value.trim();
+
+            var nodes = [];
+            card.querySelectorAll('.node-card').forEach(function(nc) {
+              var included = nc.querySelector('.node-include').checked;
+              if (!included) return;
+              var nIdx = parseInt(nc.dataset.nodeIdx);
+              var addrMap = nc.querySelector('.addr-map');
+              var netMap = nc.querySelector('.net-map');
+              nodes.push({
+                node_idx: nIdx,
+                system_address_id: addrMap ? addrMap.value : '',
+                network_id: netMap ? netMap.value : ''
+              });
+            });
+
+            if (nodes.length === 0) return;
+
+            importData.groups.push({
+              peer_name: peerName,
+              sysop_name: sysopName,
+              existing_peer_id: existingPeer !== 'new' ? existingPeer : null,
+              nodes: nodes
+            });
+          });
+
+          document.getElementById('importData').value = JSON.stringify(importData);
+          document.getElementById('importForm').submit();
+        });
+      });

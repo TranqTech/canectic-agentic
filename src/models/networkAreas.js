@@ -59,6 +59,11 @@ async function addAreaToNetwork(networkId, areaId, areatag, formObj) {
 		returnObj.status = true;
 		await invalidateNetworkAreaCache(networkId);
 		alogger.writeAlog(5, 'Area ' + areaId + ' added to network ' + networkId + ' as ' + areatag, 'greenbright');
+		// Sync echolist local_area_id
+		try {
+			var networkEcholist = await import('./networkEcholist.js');
+			await networkEcholist.syncLocalAreaId(networkId, areaId, areatag, 'add');
+		} catch (e) { /* echolist sync is non-critical */ }
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
@@ -90,6 +95,11 @@ async function removeAreaFromNetwork(networkId, areaId) {
 
 	await invalidateNetworkAreaCache(networkId);
 	alogger.writeAlog(5, 'Area ' + areaId + ' removed from network ' + networkId, 'greenbright');
+	// Sync echolist local_area_id
+	try {
+		var networkEcholist = await import('./networkEcholist.js');
+		await networkEcholist.syncLocalAreaId(networkId, null, existing.areatag, 'remove');
+	} catch (e) { /* echolist sync is non-critical */ }
 	returnObj.status = true;
 	return returnObj;
 }

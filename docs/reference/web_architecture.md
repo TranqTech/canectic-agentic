@@ -287,6 +287,15 @@ Two-layer admin check:
 | Nodelist Clear | `POST /admin/nodelists/clear/:networkId` | Deletes all nodelist data for a network via `ftnNodelist.clearNetwork()`. Confirmation modal in UI. |
 | Nodelist Browser | `GET /admin/nodelist/:networkId` | Browse imported nodelist for a specific FTN network. DataTables listing with row-click detail modal. |
 | Nodelist Search | `GET /admin/nodelist/:networkId/search.json` | JSON endpoint for AJAX search/filter. Params: `q` (search term), `filter` (active/added/removed/all), `limit`. |
+| Echolists | `GET /admin/echolist/:networkId` | List echolists for a network. Cards showing name, area counts, import date. Create/edit/delete modals. |
+| Echolist Create | `POST /admin/echolist/:networkId/new` | Create new echolist with name, description, is_default flag. |
+| Echolist View | `GET /admin/echolist/view/:echolistId` | Browse echolist areas with stats bar, DataTable listing, collapsible import section. |
+| Echolist Import | `POST /admin/echolist/:echolistId/import` | Upload echolist file (BACKBONE.NA etc.), parse with `parseAreasBbs`, show diff preview. |
+| Echolist Import Run | `POST /admin/echolist/:echolistId/import/run` | Execute previewed import diff. Creates sysop notification if locally-carried areas removed. |
+| Echolist Update | `POST /admin/echolist/:echolistId/update` | Update echolist name, description, default flag. |
+| Echolist Remove | `POST /admin/echolist/:echolistId/remove` | Delete echolist and all area entries. |
+| Echolist Area Update | `POST /admin/echolist/area/:areaId/update` | Update individual echolist area entry (description, tags, active, local_area_id). |
+| Echolist Area Remove | `POST /admin/echolist/area/:areaId/remove` | Delete individual echolist area entry. |
 | Node Spy | `GET /admin/nodespy` | Dashboard: card grid of active terminal nodes + web presence users with auto-updating AJAX poll. |
 | Node Spy Status | `GET /admin/nodespy/status.json` | JSON endpoint for dashboard AJAX polling (terminal nodes + web users with activity, duration). |
 | Node Spy Watch | `GET /admin/nodespy/:nodenum` | Live snoop viewer: xterm.js terminal matched to target node dimensions, one-time Redis token auth for WebSocket. |
@@ -793,14 +802,29 @@ Three layers ensure the sentinel renders correctly on the web:
 
 ---
 
+## Admin Dashboard
+
+The admin dashboard (`/admin`) uses a tabbed card layout with 8 category tabs (System as default, plus Messages, Files, Networking, Content, Doors, Users, All). Each tool is an icon card with name and description. A search bar filters all cards in real-time, auto-switching to the All tab when typing.
+
+Admin navbar order: Dashboard, Messages, Files, Networking, Content, Doors, Users, Menus, Nodes, Logs. The Networking dropdown contains: Networks, Linked Nodes, Nodelists, Echolists, Filebones, FREQ, Migrations.
+
+## User Navigation
+
+User navbar: Messages, Files, Doors, Chat (links to `/whosonline` for who's online and user-to-user telegrams), Wall (links to `/wall`). Right side: Admin Dashboard (sysop only), Mail with unread badge, notification bell, user dropdown (Profile, Logout).
+
+## Echolist and Filebone Admin
+
+Per-network echolist registries at `/admin/echolists` (all networks overview) and `/admin/echolist/:networkId` (per-network management). Browse areas, import from file with diff preview, edit individual entries. Filebones at `/admin/filebones` and `/admin/filebone/:networkId` (identical UI for file echo lists). Both linked from network detail pages.
+
+## Migration Tools
+
+Consolidated at `/admin/migrations`. Import tools: SMB message base, areas.bbs, sbbsecho.ini (Synchronet linked nodes with two-step network/peer flow and drag-and-drop grouping). Export tools: areas.bbs and files.bbs downloads from network pages, menu JSON export from menu pages.
+
 ## Future Development
 
-- **Navigation polish** - Both nav includes are basic Bootstrap dropdowns, functional but need design attention.
 - **Rich text editor integration** - TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
 - **Admin real-time dashboard** - Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
 - **Rate limiting** - No rate limiting on login attempts or API endpoints currently.
-- **Lightbar menu type** - `menu_type` column is in the schema and persisted through admin UI, but `MenuHandler` does not yet branch on it. Currently all menus use hotkey dispatch.
-- **User-to-user instant messaging** - Via the existing presence WebSocket channel, Redis pub/sub for delivery, Redis lists for history.
 
 ### Recently Completed
 

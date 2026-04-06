@@ -838,6 +838,44 @@ A daily maintenance job (`purge-tossed`) runs at 2 AM to remove packets older th
 
 ---
 
+## Echolist and Filebone Registries
+
+Per-network registries of available areas, imported from standard area list files (BACKBONE.NA, FILEBONE.NA, etc.).
+
+### Schema
+
+- `network_echolists` -- echolist definitions. Multiple per network, `is_default` flag identifies the primary list.
+- `network_echolist_areas` -- area entries. `areatag`, `description`, `tags` (JSONB), historical tracking (`first_seen`, `last_seen`, `removed_at`, `active`), `local_area_id` (nullable FK to `message_areas`).
+- `file_echolists` / `file_echolist_areas` -- identical structure for file echo areas, `local_area_id` links to `file_areas`.
+
+### Import Workflow
+
+1. Upload area list file (same format as areas.bbs, parsed by `parseAreasBbs()`)
+2. Diff engine compares incoming entries against existing: categorises as new, removed, changed (description), unchanged
+3. Preview shows counts and flags locally-carried areas that disappeared
+4. Execute: inserts new, updates changed descriptions, soft-deletes removed (preserves history), touches `last_seen` on unchanged
+5. Sysop notification fired if locally-carried areas disappeared (`echolist_removal` / `filebone_removal` type)
+
+### local_area_id Sync
+
+- `networkAreas.addAreaToNetwork()` -- sets `local_area_id` on matching echolist entries
+- `networkAreas.removeAreaFromNetwork()` -- clears `local_area_id`
+- `fileNetworkAreas.addMapping()` / `removeMapping()` -- same for filebone entries
+- Hooks use dynamic import to avoid circular dependencies; wrapped in try/catch (non-critical)
+
+### Models
+
+- `src/models/networkEcholist.js` -- echolist CRUD, import diff/execute, query helpers, sync
+- `src/models/fileEcholist.js` -- filebone CRUD (identical API, different tables)
+
+## sbbsecho.ini Import
+
+Migration tool for importing linked FTN node configuration from Synchronet BBS.
+
+- Parser: `src/utils/sbbsechoParser.js` -- parses `[node:*]` sections (peer connections) and `[domain:*]` sections (networks). Filters wildcard routing entries (`ALL`). Auto-groups nodes by BinkpHost then Name.
+- Two-step admin flow: Step 1 resolves networks (create/map/skip) and local addresses (create/keep/skip, with zone creation for new networks). Step 2 groups connections into peers with drag-and-drop, per-connection network and local address dropdowns.
+- Routes: `/admin/import/sbbsecho` (upload), `/admin/import/sbbsecho/preview` (parse), `/admin/import/sbbsecho/networks` (process networks, show peer grouping), `/admin/import/sbbsecho/run` (create peers + connections)
+
 ## Future Development Areas
 
 _Networking-specific items. For message platform items (web newscan, rich editor, thread preferences, etc.), see `message_architecture.md`._

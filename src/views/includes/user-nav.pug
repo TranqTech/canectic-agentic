@@ -37,6 +37,26 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'doors'
               span.visually-hidden  (current)
 
+        //- Chat (who's online + telegrams)
+        li.nav-item
+          a.nav-link(
+            href='/whosonline'
+            class=activenav === 'chat' ? 'active' : ''
+          )
+            | Chat
+            if activenav === 'chat'
+              span.visually-hidden  (current)
+
+        //- Wall
+        li.nav-item
+          a.nav-link(
+            href='/wall'
+            class=activenav === 'wall' ? 'active' : ''
+          )
+            | Wall
+            if activenav === 'wall'
+              span.visually-hidden  (current)
+
       //- Right side — mail link + user dropdown or login
       ul.navbar-nav.ms-auto
         if currentuser

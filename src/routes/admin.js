@@ -14,7 +14,7 @@ import * as msgNetworks from '../models/msgNetworks.js';
 import * as msgZones from '../models/msgZones.js';
 import * as msgGroups from '../models/msgGroups.js';
 import * as msgAreas from '../models/msgAreas.js';
-import * as netmail from '../models/netmail.js';
+// netmail import removed -- legacy admin netmail routes replaced by PM system
 import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
@@ -47,6 +47,8 @@ import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
 import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
+import * as networkEcholist from '../models/networkEcholist.js';
+import * as fileEcholist from '../models/fileEcholist.js';
 import * as flash from '../middleware/db/flash.js';
 import { formatActivity } from '../utils/activityMap.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
@@ -159,79 +161,7 @@ router.get('/msgGroups', async (req, res, next) => {
 	});
 });
 
-router.get('/netmail', async (req, res, next) => {
-	var currentuser  = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var inboundlist  = await netmail.getAllInbound();
-	var outboundlist = await netmail.getAllOutbound();
-	res.render('admin/netmail/index', {
-		sufficientAccess: sufficientAccess,
-		title: 'Netmail',
-		activelink: 'msgGroups',
-		currentuser: currentuser,
-		inboundlist: inboundlist,
-		outboundlist: outboundlist,
-		DateTime: DateTime
-	});
-});
-
-router.get('/netmail/in/:uuid', async (req, res, next) => {
-	var currentuser = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var uuid        = req.params.uuid.toUpperCase().trim();
-	var message     = await netmail.getInboundMsgByUUID(uuid);
-	var ftext       = message ? message.body_text.replace(/\r/g, '<br>') : "";
-	res.render('admin/netmail/ibmsg', {
-		sufficientAccess: sufficientAccess,
-		title: 'Netmail',
-		activelink: 'msgGroups',
-		currentuser: currentuser,
-		message: message,
-		ftext: ftext,
-		DateTime: DateTime
-	});
-});
-
-router.get('/netmail/out/:uuid', async (req, res, next) => {
-	var currentuser = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var uuid        = req.params.uuid.toUpperCase().trim();
-	var message     = await netmail.getOutboundMsgByUUID(uuid);
-	var ftext       = message ? message.body_text.replace(/\r/g, '<br>') : "";
-	res.render('admin/netmail/obmsg', {
-		sufficientAccess: sufficientAccess,
-		title: 'Sent Netmail',
-		activelink: 'msgGroups',
-		currentuser: currentuser,
-		message: message,
-		ftext: ftext,
-		DateTime: DateTime
-	});
-});
-
-router.post('/netmail/new', urlencodedParser, requireAdmin, async (req, res) => {
-	var currentuser = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var formObj     = req.body;
-	formObj.FromUser = currentuser ? currentuser.name : appConfig.get('DefaultUser', 'John Doe');
-	var result = await netmail.newOutboundNetmail(formObj);
-	if (result.status === true) {
-		res.redirect('/admin/netmail');
-	} else {
-		var inboundlist  = await netmail.getAllInbound();
-		var outboundlist = await netmail.getAllOutbound();
-		res.render('admin/netmail/index', {
-			sufficientAccess: sufficientAccess,
-			title: 'Netmail',
-			activelink: 'msgGroups',
-			currentuser: currentuser,
-			errormessages: result.errormessages,
-			inboundlist: inboundlist,
-			outboundlist: outboundlist,
-			DateTime: DateTime
-		});
-	}
-});
+// Legacy netmail admin routes removed -- netmail now flows through the PM system.
 
 router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
@@ -2688,6 +2618,424 @@ router.get('/nodelist/:networkId/search.json', async (req, res) => {
 });
 
 // -------------------------------------------------------
+// Echolists
+// -------------------------------------------------------
+
+// GET /admin/echolists — All echolists across all networks
+router.get('/echolists', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networks         = await msgNetworks.getActiveNetworks();
+	var echolists        = await networkEcholist.getAllEcholists();
+
+	// Group echolists by network, then ensure all networks are represented
+	var echoMap = {};
+	for (var el of (echolists || [])) {
+		if (!echoMap[el.network_id]) echoMap[el.network_id] = [];
+		echoMap[el.network_id].push(el);
+	}
+
+	var grouped = (networks || []).map(function(n) {
+		return {
+			network_name: n.name,
+			network_domain: n.domain,
+			network_id: n.id,
+			echolists: echoMap[n.id] || []
+		};
+	});
+
+	res.render('admin/echolists/all', {
+		sufficientAccess: sufficientAccess,
+		title: 'All Echolists',
+		activelink: 'networks',
+		currentuser: currentuser,
+		grouped: grouped
+	});
+});
+
+// GET /admin/echolist/:networkId — List echolists for a network
+router.get('/echolist/:networkId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+	var echolists        = network ? await networkEcholist.getEcholistsByNetwork(networkId) : [];
+
+	res.render('admin/echolists/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Echolists',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		echolists: echolists
+	});
+});
+
+// POST /admin/echolist/:networkId/new — Create a new echolist
+router.post('/echolist/:networkId/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var name        = (req.body.name || '').trim();
+	var description = (req.body.description || '').trim();
+	var isDefault   = req.body.is_default === 'true';
+
+	var result = await networkEcholist.createEcholist(networkId, name, description, isDefault);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Echolist "' + name + '" created.');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed to create echolist: ' + (result.errormessages || []).join(', '));
+	}
+
+	res.redirect('/admin/echolist/' + networkId);
+});
+
+// GET /admin/echolist/view/:echolistId — Browse echolist areas
+router.get('/echolist/view/:echolistId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var echolistId       = parseInt(req.params.echolistId);
+	var echolist         = await networkEcholist.getEcholistById(echolistId);
+	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
+	var areas            = echolist ? await networkEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
+	var stats            = echolist ? await networkEcholist.getEcholistStats(echolistId) : {};
+
+	res.render('admin/echolists/view', {
+		sufficientAccess: sufficientAccess,
+		title: 'Echolist Browser',
+		activelink: 'networks',
+		currentuser: currentuser,
+		echolist: echolist,
+		network: network,
+		areas: areas,
+		stats: stats,
+		diff: null
+	});
+});
+
+// POST /admin/echolist/:echolistId/import — Upload and preview echolist import
+var echolistUpload = multer({ dest: path.join(os.tmpdir(), 'canectic-echolist-uploads') });
+router.post('/echolist/:echolistId/import', echolistUpload.single('echolist_file'), requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var echolistId       = parseInt(req.params.echolistId);
+	var echolist         = await networkEcholist.getEcholistById(echolistId);
+
+	if (!echolist || !req.file) {
+		await flash.setOne(req, 'danger', 'Echolist and file are required.');
+		return res.redirect('/admin/echolist/view/' + echolistId);
+	}
+
+	var network = await msgNetworks.getNetworkById(echolist.network_id);
+	var areas   = await networkEcholist.getAreasByEcholist(echolistId, { activeOnly: false });
+	var stats   = await networkEcholist.getEcholistStats(echolistId);
+
+	try {
+		var fileContent = fs.readFileSync(req.file.path, 'utf8');
+		var { parseAreasBbs } = await import('../utils/areasBbsParser.js');
+		var parsed = parseAreasBbs(fileContent);
+		var diff   = await networkEcholist.buildImportDiff(echolistId, parsed);
+
+		// Clean up temp file
+		try { fs.unlinkSync(req.file.path); } catch (_) {}
+
+		res.render('admin/echolists/view', {
+			sufficientAccess: sufficientAccess,
+			title: 'Echolist Browser',
+			activelink: 'networks',
+			currentuser: currentuser,
+			echolist: echolist,
+			network: network,
+			areas: areas,
+			stats: stats,
+			diff: diff
+		});
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/echolist] Import preview failed: ' + err.message, 'redbright');
+		try { fs.unlinkSync(req.file.path); } catch (_) {}
+		await flash.setOne(req, 'danger', 'Failed to parse echolist file: ' + err.message);
+		res.redirect('/admin/echolist/view/' + echolistId);
+	}
+});
+
+// POST /admin/echolist/:echolistId/import/run — Execute the import
+router.post('/echolist/:echolistId/import/run', urlencodedParser, requireAdmin, async (req, res) => {
+	var echolistId = parseInt(req.params.echolistId);
+	var echolist   = await networkEcholist.getEcholistById(echolistId);
+
+	if (!echolist) {
+		await flash.setOne(req, 'danger', 'Echolist not found.');
+		return res.redirect('/admin/networks');
+	}
+
+	try {
+		var diff   = JSON.parse(req.body.diff_data);
+		var result = await networkEcholist.executeImport(echolistId, diff);
+
+		// Notify sysop if locally-carried areas disappeared
+		if (diff.localCarriedRemovals && diff.localCarriedRemovals.length > 0) {
+			var notifications = await import('../models/notifications.js');
+			var tags = diff.localCarriedRemovals.map(function(r) { return r.areatag; }).join(', ');
+			await notifications.createSysop(
+				'echolist_removal',
+				'Echolist areas removed: ' + echolist.name,
+				diff.localCarriedRemovals.length + ' locally-carried area(s) disappeared from echolist "' + echolist.name + '": ' + tags,
+				{ icon: 'exclamation-triangle', severity: 'warning', link: '/admin/echolist/view/' + echolistId }
+			);
+		}
+
+		await flash.setOne(req, 'success',
+			'Import complete: ' + result.newCount + ' new, ' +
+			result.changedCount + ' changed, ' +
+			result.removedCount + ' removed, ' +
+			result.unchangedCount + ' unchanged.'
+		);
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/echolist] Import execution failed: ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Import failed: ' + err.message);
+	}
+
+	res.redirect('/admin/echolist/view/' + echolistId);
+});
+
+// POST /admin/echolist/:echolistId/update — Update echolist properties
+router.post('/echolist/:echolistId/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var echolistId = parseInt(req.params.echolistId);
+	var result = await networkEcholist.updateEcholist(echolistId, req.body);
+
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Echolist updated.');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed to update echolist: ' + (result.errormessages || []).join(', '));
+	}
+
+	res.redirect('/admin/echolist/view/' + echolistId);
+});
+
+// POST /admin/echolist/:echolistId/remove — Delete echolist and all its areas
+router.post('/echolist/:echolistId/remove', urlencodedParser, requireAdmin, async (req, res) => {
+	var echolistId = parseInt(req.params.echolistId);
+	var echolist   = await networkEcholist.getEcholistById(echolistId);
+	var networkId  = echolist ? echolist.network_id : null;
+
+	var result = await networkEcholist.removeEcholist(echolistId);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Echolist "' + (echolist ? echolist.name : '') + '" deleted.');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed to delete echolist: ' + (result.errormessages || []).join(', '));
+	}
+
+	res.redirect('/admin/echolist/' + (networkId || ''));
+});
+
+// POST /admin/echolist/area/:areaId/update — Update an echolist area entry
+router.post('/echolist/area/:areaId/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var areaId = parseInt(req.params.areaId);
+	var area   = await networkEcholist.getAreaById(areaId);
+
+	var result = await networkEcholist.updateArea(areaId, req.body);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Area updated.');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed to update area: ' + (result.errormessages || []).join(', '));
+	}
+
+	res.redirect('/admin/echolist/view/' + (area ? area.echolist_id : ''));
+});
+
+// POST /admin/echolist/area/:areaId/remove — Remove an echolist area entry
+router.post('/echolist/area/:areaId/remove', urlencodedParser, requireAdmin, async (req, res) => {
+	var areaId = parseInt(req.params.areaId);
+	var area   = await networkEcholist.getAreaById(areaId);
+
+	var result = await networkEcholist.removeArea(areaId);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Area removed.');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed to remove area: ' + (result.errormessages || []).join(', '));
+	}
+
+	res.redirect('/admin/echolist/view/' + (area ? area.echolist_id : ''));
+});
+
+// -------------------------------------------------------
+// Filebones (file echo lists)
+// -------------------------------------------------------
+
+// GET /admin/filebones — All filebones across all networks
+router.get('/filebones', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networks         = await msgNetworks.getActiveNetworks();
+	var filebones        = await fileEcholist.getAllEcholists();
+
+	var fbMap = {};
+	for (var el of (filebones || [])) {
+		if (!fbMap[el.network_id]) fbMap[el.network_id] = [];
+		fbMap[el.network_id].push(el);
+	}
+
+	var grouped = (networks || []).map(function(n) {
+		return { network_name: n.name, network_domain: n.domain, network_id: n.id, filebones: fbMap[n.id] || [] };
+	});
+
+	res.render('admin/filebones/all', {
+		sufficientAccess: sufficientAccess, title: 'All Filebones',
+		activelink: 'networks', currentuser: currentuser, grouped: grouped
+	});
+});
+
+// GET /admin/filebone/:networkId — List filebones for a network
+router.get('/filebone/:networkId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+	var filebones        = network ? await fileEcholist.getEcholistsByNetwork(networkId) : [];
+
+	res.render('admin/filebones/index', {
+		sufficientAccess: sufficientAccess, title: 'Filebones',
+		activelink: 'networks', currentuser: currentuser, network: network,
+		echolists: filebones
+	});
+});
+
+// POST /admin/filebone/:networkId/new — Create filebone
+router.post('/filebone/:networkId/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var result = await fileEcholist.createEcholist(networkId, req.body.name, req.body.description, req.body.is_default);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Filebone created.');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
+	}
+	res.redirect('/admin/filebone/' + networkId);
+});
+
+// GET /admin/filebone/view/:echolistId — Browse filebone areas
+router.get('/filebone/view/:echolistId', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var echolistId       = parseInt(req.params.echolistId);
+	var echolist         = await fileEcholist.getEcholistById(echolistId);
+	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
+	var areas            = echolist ? await fileEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
+	var stats            = echolist ? await fileEcholist.getEcholistStats(echolistId) : {};
+
+	res.render('admin/filebones/view', {
+		sufficientAccess: sufficientAccess, title: 'Filebone',
+		activelink: 'networks', currentuser: currentuser,
+		echolist: echolist, network: network, areas: areas, stats: stats, diff: null
+	});
+});
+
+// POST /admin/filebone/:echolistId/import — Upload and diff
+router.post('/filebone/:echolistId/import', multer({ dest: os.tmpdir() }).single('echolist_file'), requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var echolistId = parseInt(req.params.echolistId);
+	var echolist   = await fileEcholist.getEcholistById(echolistId);
+	var network    = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
+
+	if (!req.file || !echolist) {
+		await flash.setOne(req, 'danger', !req.file ? 'No file uploaded.' : 'Filebone not found.');
+		return res.redirect('/admin/filebone/view/' + echolistId);
+	}
+
+	var fileText = '';
+	try { fileText = fs.readFileSync(req.file.path, 'utf8'); }
+	finally { try { fs.unlinkSync(req.file.path); } catch (e) {} }
+
+	var { parseAreasBbs } = await import('../utils/areasBbsParser.js');
+	var parsed = parseAreasBbs(fileText);
+
+	if (!parsed || parsed.length === 0) {
+		await flash.setOne(req, 'danger', 'No areas found in file.');
+		return res.redirect('/admin/filebone/view/' + echolistId);
+	}
+
+	var diff = await fileEcholist.buildImportDiff(echolistId, parsed);
+	var areas = await fileEcholist.getAreasByEcholist(echolistId, { activeOnly: false });
+	var stats = await fileEcholist.getEcholistStats(echolistId);
+
+	res.render('admin/filebones/view', {
+		sufficientAccess: sufficientAccess, title: 'Filebone',
+		activelink: 'networks', currentuser: currentuser,
+		echolist: echolist, network: network, areas: areas, stats: stats, diff: diff
+	});
+});
+
+// POST /admin/filebone/:echolistId/import/run — Execute import
+router.post('/filebone/:echolistId/import/run', urlencodedParser, requireAdmin, async (req, res) => {
+	var echolistId = parseInt(req.params.echolistId);
+	var echolist   = await fileEcholist.getEcholistById(echolistId);
+
+	var diff;
+	try { diff = JSON.parse(req.body.diff_data); }
+	catch (e) {
+		await flash.setOne(req, 'danger', 'Invalid diff data.');
+		return res.redirect('/admin/filebone/view/' + echolistId);
+	}
+
+	var result = await fileEcholist.executeImport(echolistId, diff);
+
+	if (diff.localCarriedRemovals && diff.localCarriedRemovals.length > 0 && echolist) {
+		try {
+			var notifications = await import('../models/notifications.js');
+			var tags = diff.localCarriedRemovals.map(function(r) { return r.areatag; }).join(', ');
+			await notifications.createSysop(
+				'filebone_removal',
+				'Filebone areas removed: ' + echolist.name,
+				diff.localCarriedRemovals.length + ' locally-carried file area(s) disappeared from filebone "' + echolist.name + '": ' + tags,
+				{ icon: 'exclamation-triangle', severity: 'warning', link: '/admin/filebone/view/' + echolistId }
+			);
+		} catch (e) {}
+	}
+
+	await flash.setOne(req, 'success', 'Import complete: ' + result.newCount + ' new, ' + result.changedCount + ' changed, ' + result.removedCount + ' removed, ' + result.unchangedCount + ' unchanged.');
+	res.redirect('/admin/filebone/view/' + echolistId);
+});
+
+// POST /admin/filebone/:echolistId/update — Edit filebone
+router.post('/filebone/:echolistId/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var echolistId = parseInt(req.params.echolistId);
+	var echolist   = await fileEcholist.getEcholistById(echolistId);
+	var result = await fileEcholist.updateEcholist(echolistId, req.body);
+	if (result.status) { await flash.setOne(req, 'success', 'Filebone updated.'); }
+	else { await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', ')); }
+	res.redirect('/admin/filebone/' + (echolist ? echolist.network_id : ''));
+});
+
+// POST /admin/filebone/:echolistId/remove — Delete filebone
+router.post('/filebone/:echolistId/remove', urlencodedParser, requireAdmin, async (req, res) => {
+	var echolistId = parseInt(req.params.echolistId);
+	var echolist   = await fileEcholist.getEcholistById(echolistId);
+	var networkId  = echolist ? echolist.network_id : '';
+	var result = await fileEcholist.removeEcholist(echolistId);
+	if (result.status) { await flash.setOne(req, 'success', 'Filebone deleted.'); }
+	else { await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', ')); }
+	res.redirect('/admin/filebone/' + networkId);
+});
+
+// POST /admin/filebone/area/:areaId/update — Edit filebone area
+router.post('/filebone/area/:areaId/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var areaId = parseInt(req.params.areaId);
+	var area   = await fileEcholist.getAreaById(areaId);
+	var result = await fileEcholist.updateArea(areaId, req.body);
+	if (result.status) { await flash.setOne(req, 'success', 'Area updated.'); }
+	else { await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', ')); }
+	res.redirect('/admin/filebone/view/' + (area ? area.echolist_id : ''));
+});
+
+// POST /admin/filebone/area/:areaId/remove — Remove filebone area
+router.post('/filebone/area/:areaId/remove', urlencodedParser, requireAdmin, async (req, res) => {
+	var areaId = parseInt(req.params.areaId);
+	var area   = await fileEcholist.getAreaById(areaId);
+	var result = await fileEcholist.removeArea(areaId);
+	if (result.status) { await flash.setOne(req, 'success', 'Area removed.'); }
+	else { await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', ')); }
+	res.redirect('/admin/filebone/view/' + (area ? area.echolist_id : ''));
+});
+
+// -------------------------------------------------------
 // Announcements
 // -------------------------------------------------------
 // Events / Maintenance
@@ -3153,6 +3501,321 @@ router.get('/export/filesbbs/:networkId', requireAdmin, async (req, res) => {
 	res.setHeader('Content-Type', 'text/plain');
 	res.setHeader('Content-Disposition', 'attachment; filename="files-' + networkName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '.bbs"');
 	res.send(text);
+});
+
+// -------------------------------------------------------
+// Migrations hub
+// -------------------------------------------------------
+
+router.get('/migrations', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	res.render('admin/migrations', {
+		sufficientAccess: sufficientAccess, title: 'Migrations',
+		activelink: 'migrations', currentuser: currentuser
+	});
+});
+
+// -------------------------------------------------------
+// sbbsecho.ini import (Synchronet linked nodes)
+// -------------------------------------------------------
+
+// Step 0: Upload form
+router.get('/import/sbbsecho', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	res.render('admin/import/sbbsecho', {
+		sufficientAccess: sufficientAccess, title: 'Import sbbsecho.ini',
+		activelink: 'import', currentuser: currentuser,
+		step: 'upload', preview: null, result: null, parsedData: null,
+		networks: [], existingPeers: [], systemAddresses: [], networkResult: null
+	});
+});
+
+// Step 1: Parse file -> show network mapping
+router.post('/import/sbbsecho/preview', multer({ dest: os.tmpdir() }).single('sbbsecho_file'), requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var base = { sufficientAccess: sufficientAccess, title: 'Import sbbsecho.ini', activelink: 'import', currentuser: currentuser, result: null, networkResult: null };
+
+	if (!req.file) {
+		return res.render('admin/import/sbbsecho', Object.assign(base, {
+			step: 'upload', preview: { error: 'No file uploaded.' }, parsedData: null,
+			networks: [], existingPeers: [], systemAddresses: []
+		}));
+	}
+
+	var fileText = '';
+	try {
+		fileText = fs.readFileSync(req.file.path, 'utf8');
+	} finally {
+		try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+	}
+
+	var { parseSbbsecho } = await import('../utils/sbbsechoParser.js');
+	var parsed = parseSbbsecho(fileText);
+
+	if (parsed.nodes.length === 0) {
+		return res.render('admin/import/sbbsecho', Object.assign(base, {
+			step: 'upload', preview: { error: 'No linked nodes found in the file.' }, parsedData: null,
+			networks: [], existingPeers: [], systemAddresses: []
+		}));
+	}
+
+	// Annotate domains with node counts
+	var domainCounts = {};
+	for (var n of parsed.nodes) {
+		if (n.domain) domainCounts[n.domain] = (domainCounts[n.domain] || 0) + 1;
+	}
+	for (var d of parsed.domains) {
+		d.node_count = domainCounts[d.name] || 0;
+	}
+
+	var networkList = await msgNetworks.getActiveNetworks();
+
+	// Extract unique local addresses per domain and check which exist
+	var addrList = await systemAddresses.getActiveAddresses();
+	var addrSet = new Set((addrList || []).map(function(a) { return a.address + '@' + (a.domain || ''); }));
+	var localAddrMap = {};
+	for (var node of parsed.nodes) {
+		if (!node.local_address || !node.domain) continue;
+		var key = node.local_address + '@' + node.domain;
+		if (!localAddrMap[key]) {
+			localAddrMap[key] = {
+				address: node.local_address,
+				domain: node.domain,
+				exists: addrSet.has(key)
+			};
+		}
+	}
+	var localAddresses = Object.values(localAddrMap).sort(function(a, b) {
+		return a.domain.localeCompare(b.domain) || a.address.localeCompare(b.address);
+	});
+
+	res.render('admin/import/sbbsecho', Object.assign(base, {
+		step: 'networks',
+		preview: { nodes: parsed.nodes, domains: parsed.domains, groups: parsed.groups },
+		parsedData: parsed,
+		networks: networkList || [],
+		localAddresses: localAddresses,
+		existingPeers: [], systemAddresses: []
+	}));
+});
+
+// Step 1b: Process network mappings -> show peer grouping
+router.post('/import/sbbsecho/networks', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var base = { sufficientAccess: sufficientAccess, title: 'Import sbbsecho.ini', activelink: 'import', currentuser: currentuser, result: null, preview: null };
+
+	var parsed;
+	try {
+		parsed = JSON.parse(req.body.parsed_data);
+	} catch (e) {
+		return res.render('admin/import/sbbsecho', Object.assign(base, {
+			step: 'upload', preview: { error: 'Invalid parsed data. Please re-upload.' }, parsedData: null,
+			networks: [], existingPeers: [], systemAddresses: [], networkResult: null
+		}));
+	}
+
+	// Process network mappings from form fields (network_<domain>)
+	var createdNets = [];
+	var skippedNets = [];
+	var createdAddrs = [];
+	var errors = [];
+
+	// Build a lookup of domain -> zone numbers from parsed data
+	var domainZones = {};
+	for (var pd of parsed.domains) {
+		domainZones[pd.name] = pd.zones || [];
+	}
+
+	for (var d = 0; d < parsed.domains.length; d++) {
+		var domain = parsed.domains[d].name;
+		var mapping = req.body['network_' + domain] || 'skip';
+
+		if (mapping === 'skip') {
+			skippedNets.push(domain);
+			continue;
+		}
+
+		if (mapping === 'new') {
+			var netResult = await msgNetworks.newNetwork({
+				name: domain.charAt(0).toUpperCase() + domain.slice(1),
+				domain: domain,
+				description: 'Imported from sbbsecho.ini',
+				network_type: 'FTN',
+				createdByUUID: currentuser.uuid,
+				createdByName: currentuser.username
+			});
+			if (netResult.status) {
+				createdNets.push(domain);
+				// Create zones for the new network from parsed domain data
+				var zones = domainZones[domain] || [];
+				for (var z = 0; z < zones.length; z++) {
+					await msgZones.newZone({
+						network_id: netResult.insertId,
+						zone_number: zones[z],
+						name: 'Zone ' + zones[z],
+						createdByName: currentuser.username,
+						createdByUUID: currentuser.uuid
+					});
+				}
+			} else {
+				var existing = await msgNetworks.getNetworkByDomain(domain);
+				if (existing) {
+					createdNets.push(domain + ' (already existed)');
+				} else {
+					errors.push('Failed to create network "' + domain + '": ' + netResult.errormessages.join(', '));
+				}
+			}
+		}
+		// mapping is an existing network ID -- nothing to do
+	}
+
+	// Process local address creation from form fields (addr_<address>_<domain>)
+	// Collect unique addr+domain keys from parsed nodes
+	var addrKeys = {};
+	for (var node of parsed.nodes) {
+		if (!node.local_address || !node.domain) continue;
+		var akey = node.local_address + '_' + node.domain;
+		addrKeys[akey] = { address: node.local_address, domain: node.domain };
+	}
+
+	for (var akey in addrKeys) {
+		if (!addrKeys.hasOwnProperty(akey)) continue;
+		var action = req.body['addr_' + akey] || 'skip';
+		if (action === 'create') {
+			var addrInfo = addrKeys[akey];
+			// Look up the network for this domain (may have just been created)
+			var addrNetwork = await msgNetworks.getNetworkByDomain(addrInfo.domain);
+			if (!addrNetwork) {
+				// Domain was skipped or failed to create
+				continue;
+			}
+			var addrResult = await systemAddresses.newAddress({
+				address: addrInfo.address,
+				network_id: addrNetwork.id,
+				createdByName: currentuser.username,
+				createdByUUID: currentuser.uuid
+			});
+			if (addrResult.status) {
+				createdAddrs.push(addrInfo.address + '@' + addrInfo.domain);
+			} else {
+				errors.push('Address ' + addrInfo.address + '@' + addrInfo.domain + ': ' + addrResult.errormessages.join(', '));
+			}
+		}
+	}
+
+	// Fetch fresh data for peer step (includes any just-created networks and addresses)
+	var networkList = await msgNetworks.getActiveNetworks();
+	var peerList = await peers.getAllPeers();
+	var addrList = await systemAddresses.getActiveAddresses();
+
+	res.render('admin/import/sbbsecho', Object.assign(base, {
+		step: 'peers',
+		parsedData: parsed,
+		networks: (networkList || []).map(function(n) { return { id: n.id, name: n.name, domain: n.domain }; }),
+		existingPeers: (peerList || []).map(function(p) { return { id: p.id, name: p.name, sysop_name: p.sysop_name || '' }; }),
+		systemAddresses: (addrList || []).map(function(a) { return { id: a.id, address: a.address, domain: a.domain || '', network_id: a.network_id }; }),
+		networkResult: { created: createdNets, skipped: skippedNets, createdAddrs: createdAddrs, errors: errors }
+	}));
+});
+
+// Step 2: Import peers and connections
+router.post('/import/sbbsecho/run', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var base = { sufficientAccess: sufficientAccess, title: 'Import sbbsecho.ini', activelink: 'import', currentuser: currentuser, preview: null, step: 'result', parsedData: null, networks: [], existingPeers: [], systemAddresses: [], networkResult: null };
+
+	var importData;
+	try {
+		importData = JSON.parse(req.body.import_data);
+	} catch (e) {
+		return res.render('admin/import/sbbsecho', Object.assign(base, {
+			result: { errors: ['Invalid import data.'], created_peers: [], mapped_peers: [], created_connections: 0 }
+		}));
+	}
+
+	var errors = [];
+	var createdPeers = [];
+	var mappedPeers = [];
+	var createdConnections = 0;
+	var nodes = importData.nodes || [];
+
+	for (var g = 0; g < importData.groups.length; g++) {
+		var group = importData.groups[g];
+		var peerId;
+
+		if (group.existing_peer_id) {
+			peerId = parseInt(group.existing_peer_id);
+			mappedPeers.push(group.peer_name || ('Peer #' + peerId));
+		} else {
+			var peerResult = await peers.newPeer({
+				name: group.peer_name || 'Imported Peer',
+				sysop_name: group.sysop_name || '',
+				createdByUUID: currentuser.uuid,
+				createdByName: currentuser.username
+			});
+			if (peerResult.status) {
+				peerId = peerResult.insertId;
+				createdPeers.push(group.peer_name || 'Imported Peer');
+			} else {
+				errors.push('Failed to create peer "' + group.peer_name + '": ' + peerResult.errormessages.join(', '));
+				continue;
+			}
+		}
+
+		for (var c = 0; c < group.nodes.length; c++) {
+			var nodeRef = group.nodes[c];
+			var node = nodes[nodeRef.node_idx];
+			if (!node) {
+				errors.push('Node index ' + nodeRef.node_idx + ' not found');
+				continue;
+			}
+
+			var networkId = nodeRef.network_id ? parseInt(nodeRef.network_id) : null;
+			if (!networkId) {
+				errors.push('No network selected for ' + node.ftn_address);
+				continue;
+			}
+
+			var connResult = await peerConnections.newConnection({
+				peer_id: peerId,
+				network_id: networkId,
+				connection_type: 'FTN',
+				system_address_id: nodeRef.system_address_id || null,
+				poll_enabled: node.binkp_poll === true,
+				address: node.ftn_address,
+				remote_host: node.binkp_host || '',
+				remote_port: node.binkp_port || null,
+				session_password: node.session_password || '',
+				packet_password: node.packet_password || '',
+				tic_password: node.tic_password || '',
+				areafix_password: node.areafix_password || '',
+				direct: node.direct ? 'Yes' : 'No',
+				status: node.status || 'NORMAL',
+				route_to: node.route || '',
+				createdByUUID: currentuser.uuid,
+				createdByName: currentuser.username
+			});
+
+			if (connResult.status) {
+				createdConnections++;
+			} else {
+				errors.push('Connection ' + node.ftn_address + ': ' + connResult.errormessages.join(', '));
+			}
+		}
+	}
+
+	res.render('admin/import/sbbsecho', Object.assign(base, {
+		result: {
+			created_peers: createdPeers,
+			mapped_peers: mappedPeers,
+			created_connections: createdConnections,
+			errors: errors
+		}
+	}));
 });
 
 // -------------------------------------------------------

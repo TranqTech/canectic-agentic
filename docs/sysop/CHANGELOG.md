@@ -12,10 +12,22 @@
 - Fix: Duplicate admin view template files (flat file shadowing index.pug) consolidated
 - Fix: Removing a network address crashed with "Cannot read properties of null" due to `postgres.write()` return value mismatch (#7)
 - Fix: Missing `alogger` import in menus.js caused "alogger is not defined" error on menu import/duplicate
+- Fix: Call flow completion loop when redirected from /callflow (return URL now sanitized to avoid redirect back to callflow)
+- Fix: User-to-user telegram chat close button not appearing (CSS class specificity overriding inline style)
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
 - Mocha upgraded to 11.3.0 (fixes diff DoS vulnerability) (#5)
+- sbbsecho.ini import: two-step migration tool to import linked FTN nodes from Synchronet, with network/address resolution, drag-and-drop peer grouping, and per-connection network selection
+- Migrations hub: admin page consolidating all import and export tools at /admin/migrations
+- Network echolist registry: per-network echolist management with import, diff preview, historical tracking, local-carried status, sysop notifications on area removals, multiple echolists per network with default flag
+- Filebone registry: file echo list management (mirrors echolist system) with import, diff, historical tracking, sysop notifications on removals
+- Admin dashboard redesign: tabbed layout with icon cards and instant search, System tab as default, all tools accessible
+- Admin navbar reorganised: dedicated Networking dropdown (Networks, Peers, Nodelists, Echolists, Filebones, FREQ, Migrations), Config removed from nav
+- Legacy admin netmail routes and views removed (netmail flows through PM system)
+- User navbar: added Chat (links to who's online/telegrams) and Wall links
+- PostgreSQL setup: install guide now includes manual DB/user creation walkthrough with PG 15+ schema grant instructions
+- 57 new unit tests for sbbsecho parser (2,016 total)
 
 ## v0.9.5a (2026-04-04)
 

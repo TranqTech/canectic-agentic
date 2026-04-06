@@ -1,0 +1,76 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-lg-8.offset-lg-2.col-12
+            .card
+              .card-header.bg-darkblue.text-white
+                .row
+                  .col-8
+                    h2= title
+                  .col-4
+                    .text-end
+                      a.button.btn.btn-sm.btn-info(href='/admin') Exit
+              .card-body
+                if !grouped || grouped.length === 0
+                  p.text-muted No networks configured. Add a network first.
+                else
+                  each group in grouped
+                    .card.mb-3
+                      .card-header.bg-dark.d-flex.justify-content-between.align-items-center
+                        h5.mb-0
+                          i.bi.bi-diagram-3.me-2
+                          = group.network_name
+                          small.text-muted.ms-2 (#{group.network_domain})
+                        a.btn.btn-sm.btn-outline-info(href='/admin/echolist/' + group.network_id)
+                          | Manage
+                      if group.echolists.length > 0
+                        .card-body.p-0
+                          table.table.table-hover.table-sm.mb-0
+                            thead
+                              tr
+                                th Name
+                                th Areas
+                                th Carried
+                                th Available
+                                th Last Imported
+                                th(style='width:80px')
+                            tbody
+                              each el in group.echolists
+                                tr
+                                  td
+                                    a(href='/admin/echolist/view/' + el.id)= el.name
+                                    if el.is_default
+                                      span.badge.bg-primary.ms-2 Default
+                                    if !el.active
+                                      span.badge.bg-secondary.ms-2 Inactive
+                                  td= el.area_count || 0
+                                  td= el.carried_count || 0
+                                  td= (parseInt(el.area_count || 0) - parseInt(el.carried_count || 0))
+                                  td
+                                    if el.last_imported_at
+                                      = new Date(el.last_imported_at).toLocaleDateString()
+                                    else
+                                      span.text-muted Never
+                                  td
+                                    a.btn.btn-sm.btn-outline-primary(href='/admin/echolist/view/' + el.id)
+                                      i.bi.bi-eye
+                      else
+                        .card-body
+                          p.text-muted.mb-0 No echolists yet.
+                          a.btn.btn-sm.btn-outline-success.mt-2(href='/admin/echolist/' + group.network_id)
+                            i.bi.bi-plus-circle.me-1
+                            | Add Echolist

@@ -1,0 +1,293 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row
+          .col-12
+            br
+            br
+        .row
+          .col-1
+          .col-10
+            if !filebone
+              .card
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2= title
+                    .col-4
+                      .text-end
+                        a.button.btn.btn-lg.btn-info(href='/admin/networks')
+                          | Back
+                .card-body
+                  br
+                  h3 Filebone Not Found
+                  br
+            else
+              //- Breadcrumb
+              nav(aria-label='breadcrumb')
+                ol.breadcrumb
+                  li.breadcrumb-item
+                    a(href='/admin') Admin
+                  li.breadcrumb-item
+                    a(href='/admin/networks') Networks
+                  li.breadcrumb-item
+                    a(href='/admin/network/' + network.uuid)= network.name
+                  li.breadcrumb-item
+                    a(href='/admin/filebone/' + network.id) Filebones
+                  li.breadcrumb-item.active(aria-current='page')= filebone.name
+
+              //- Filebone info card
+              .card.mb-3
+                .card-header.bg-darkblue.text-white
+                  .row
+                    .col-8
+                      h2
+                        i.bi.bi-list-ul.me-2
+                        = filebone.name
+                        if filebone.is_default
+                          |
+                          span.badge.bg-primary.ms-2 Default
+                    .col-4
+                      .text-end
+                        button.btn.btn-lg.btn-success.me-1(data-bs-toggle='collapse' data-bs-target='#importSection')
+                          i.bi.bi-upload.me-1
+                          | Import
+                        button.btn.btn-lg.btn-warning.me-1(data-bs-toggle='modal' data-bs-target='#editFileboneModal')
+                          i.bi.bi-pencil.me-1
+                          | Edit
+                        a.button.btn.btn-lg.btn-info(href='/admin/filebone/' + network.id)
+                          | Back
+                .card-body
+                  include ../../partials/flash
+
+                  //- Stats row
+                  .row.mb-3
+                    .col-md-3
+                      .card.text-center
+                        .card-body
+                          h3.text-success= stats.total_active || 0
+                          small Active Areas
+                    .col-md-3
+                      .card.text-center
+                        .card-body
+                          h3.text-info= stats.locally_carried || 0
+                          small Locally Carried
+                    .col-md-3
+                      .card.text-center
+                        .card-body
+                          h3.text-warning= stats.available || 0
+                          small Available
+                    .col-md-3
+                      .card.text-center
+                        .card-body
+                          h3.text-secondary= stats.total_inactive || 0
+                          small Inactive/Removed
+
+                  if filebone.description
+                    p.text-muted= filebone.description
+
+                  if filebone.last_imported_at
+                    p.text-muted
+                      i.bi.bi-clock.me-1
+                      | Last imported: #{new Date(filebone.last_imported_at).toLocaleString()}
+
+                  //- Import section (collapsible)
+                  #importSection.collapse.mb-3(class=(diff ? 'show' : ''))
+                    .card
+                      .card-header
+                        h5
+                          i.bi.bi-upload.me-2
+                          | Import Filebone File
+                      .card-body
+                        if !diff
+                          form(method='POST' action='/admin/filebone/' + filebone.id + '/import' enctype='multipart/form-data')
+                            .row
+                              .col-md-8
+                                .mb-3
+                                  label.form-label(for='fileboneFile') Filebone File (FILEBONE.NA, areas.bbs, or similar)
+                                  input#fileboneFile.form-control(type='file' name='filebone_file' required accept='.na,.bbs,.txt,.lst,.*')
+                                  .form-text One area per line: AREATAG followed by description. Comment lines (;, #) are skipped.
+                              .col-md-4.d-flex.align-items-end
+                                .mb-3
+                                  button.btn.btn-success(type='submit')
+                                    i.bi.bi-eye.me-1
+                                    | Preview Import
+                        else
+                          //- Import preview
+                          h5 Import Preview
+                          .row.mb-3
+                            .col-auto
+                              span.badge.bg-success.fs-6.me-2= diff.newAreas.length
+                              | New
+                            .col-auto
+                              span.badge.bg-danger.fs-6.me-2= diff.removedAreas.length
+                              | Removed
+                            .col-auto
+                              span.badge.bg-warning.fs-6.me-2= diff.changedAreas.length
+                              | Changed
+                            .col-auto
+                              span.badge.bg-secondary.fs-6.me-2= diff.unchangedCount
+                              | Unchanged
+
+                          if diff.localCarriedRemovals && diff.localCarriedRemovals.length > 0
+                            .alert.alert-warning
+                              i.bi.bi-exclamation-triangle.me-2
+                              strong Warning:
+                              |  #{diff.localCarriedRemovals.length} locally-carried area(s) will be marked as removed:
+                              ul.mb-0.mt-1
+                                each lcr in diff.localCarriedRemovals
+                                  li
+                                    code= lcr.areatag
+
+                          if diff.newAreas.length > 0 || diff.removedAreas.length > 0 || diff.changedAreas.length > 0
+                            table.table.table-sm.table-hover
+                              thead
+                                tr
+                                  th Type
+                                  th Areatag
+                                  th Details
+                              tbody
+                                if diff.newAreas.length > 0
+                                  each entry in diff.newAreas
+                                    tr
+                                      td
+                                        span.badge.bg-success New
+                                      td
+                                        code= entry.areatag
+                                      td= entry.description || ''
+                                if diff.removedAreas.length > 0
+                                  each entry in diff.removedAreas
+                                    tr
+                                      td
+                                        span.badge.bg-danger Removed
+                                        if entry.local_area_id
+                                          |
+                                          span.badge.bg-warning
+                                            i.bi.bi-exclamation-triangle
+                                            |  Carried
+                                      td
+                                        code= entry.areatag
+                                      td= entry.description || ''
+                                if diff.changedAreas.length > 0
+                                  each entry in diff.changedAreas
+                                    tr
+                                      td
+                                        span.badge.bg-warning Changed
+                                      td
+                                        code= entry.areatag
+                                      td
+                                        del.text-muted= entry.oldDescription
+                                        br
+                                        = entry.newDescription
+
+                            form(method='POST' action='/admin/filebone/' + filebone.id + '/import/run')
+                              input(type='hidden' name='diff_data' value=JSON.stringify(diff))
+                              .d-flex.gap-2
+                                button.btn.btn-success(type='submit')
+                                  i.bi.bi-check-lg.me-1
+                                  | Apply Import
+                                a.btn.btn-secondary(href='/admin/filebone/view/' + filebone.id)
+                                  | Cancel
+                          else
+                            .alert.alert-info
+                              i.bi.bi-info-circle.me-1
+                              | No changes detected. The filebone file matches the current data.
+
+                  //- Area listing
+                  .card
+                    .card-header
+                      h5
+                        i.bi.bi-collection.me-2
+                        | Areas (#{areas.length})
+                    .card-body
+                      if areas && areas.length > 0
+                        table#areaTable.table.table-hover.table-sm
+                          thead
+                            tr
+                              th Areatag
+                              th Description
+                              th Tags
+                              th Status
+                              th Locally Carried
+                              th First Seen
+                              th Last Seen
+                          tbody
+                            each area in areas
+                              tr
+                                td
+                                  code= area.areatag
+                                td= area.description || ''
+                                td
+                                  - var areaTags = []
+                                  - try { areaTags = typeof area.tags === 'string' ? JSON.parse(area.tags) : (area.tags || []); } catch(e) { areaTags = []; }
+                                  each tag in areaTags
+                                    span.badge.bg-secondary.me-1= tag
+                                td
+                                  if area.active
+                                    span.badge.bg-success Active
+                                  else
+                                    span.badge.bg-dark Inactive
+                                td
+                                  if area.local_area_id
+                                    span.badge.bg-info Yes
+                                  else
+                                    span.text-muted No
+                                td
+                                  if area.first_seen
+                                    small= new Date(area.first_seen).toLocaleDateString()
+                                td
+                                  if area.last_seen
+                                    small= new Date(area.last_seen).toLocaleDateString()
+                      else
+                        .text-center.py-3
+                          p.text-muted No areas found. Import an filebone file to populate this list.
+
+          .col-1
+
+      //- Edit Filebone Modal
+      if filebone
+        #editFileboneModal.modal.fade(tabindex='-1' aria-labelledby='editFileboneModalLabel' aria-hidden='true')
+          .modal-dialog
+            .modal-content
+              form(method='POST' action='/admin/filebone/' + filebone.id + '/update')
+                .modal-header
+                  h5#editFileboneModalLabel.modal-title Edit Filebone
+                  button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
+                .modal-body
+                  .mb-3
+                    label.form-label(for='editElName') Name
+                    input#editElName.form-control(type='text' name='name' required value=filebone.name)
+                  .mb-3
+                    label.form-label(for='editElDescription') Description
+                    input#editElDescription.form-control(type='text' name='description' value=filebone.description || '')
+                  .form-check.mb-3
+                    input#editElIsDefault.form-check-input(type='checkbox' name='is_default' value='true' checked=filebone.is_default)
+                    label.form-check-label(for='editElIsDefault') Set as default filebone for this network
+                .modal-footer
+                  button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                  button.btn.btn-warning(type='submit')
+                    i.bi.bi-check-lg.me-1
+                    | Save
+
+      if filebone && areas && areas.length > 0
+        script.
+          $(document).ready(function() {
+            $('#areaTable').DataTable({
+              pageLength: 50,
+              order: [[0, 'asc']],
+              language: {
+                search: '',
+                searchPlaceholder: 'Filter areas...',
+                emptyTable: 'No areas found'
+              }
+            });
+          });

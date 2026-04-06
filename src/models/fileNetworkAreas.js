@@ -135,6 +135,11 @@ async function addMapping(networkId, areaId, areatag, formObj) {
 		returnObj.status = true;
 		returnObj.insertId = dbres.insertId;
 		alogger.writeAlog(5, 'fileNetworkAreas: mapped ' + tag + ' to area ' + aid + ' on network ' + netId, 'greenbright');
+		// Sync filebone local_area_id
+		try {
+			var fileEcholist = await import('./fileEcholist.js');
+			await fileEcholist.syncLocalAreaId(netId, aid, tag, 'add');
+		} catch (e) { /* filebone sync is non-critical */ }
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
@@ -149,6 +154,10 @@ async function removeMapping(networkId, areaId) {
 	var netId = parseInt(networkId);
 	var aid = parseInt(areaId);
 
+	// Look up areatag before deleting (needed for filebone sync)
+	var existing = await getMapping(netId, aid);
+	var areatag = existing ? existing.areatag : null;
+
 	var err = await postgres.write(
 		'DELETE FROM file_network_areas WHERE network_id = $1 AND area_id = $2',
 		[netId, aid]
@@ -160,6 +169,13 @@ async function removeMapping(networkId, areaId) {
 	}
 
 	alogger.writeAlog(5, 'fileNetworkAreas: removed mapping for area ' + aid + ' on network ' + netId, 'greenbright');
+	// Sync filebone local_area_id
+	if (areatag) {
+		try {
+			var fileEcholist = await import('./fileEcholist.js');
+			await fileEcholist.syncLocalAreaId(netId, null, areatag, 'remove');
+		} catch (e) { /* filebone sync is non-critical */ }
+	}
 	return true;
 }
 
