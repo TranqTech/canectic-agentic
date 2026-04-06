@@ -264,7 +264,8 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 
 	if (!message.reply_to) {
 		var checksubject = message.subject;
-		if (message.subject.toUpperCase().startsWith('RE:')) {
+		var isReply = message.subject.toUpperCase().startsWith('RE:');
+		if (isReply) {
 			var i = 0;
 			while (checksubject.toUpperCase().startsWith('RE:')) {
 				checksubject = checksubject.substring(3).trim();
@@ -273,9 +274,13 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 			}
 		}
 
-		existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true);
+		// Messages with "Re:" in subject but no reply_to kludge are clearly replies;
+		// use a wider time window (365 days) to find the parent thread
+		var subjectAgeDays = isReply ? 365 : 30;
+
+		existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, subjectAgeDays);
 		if (!existingthread && checksubject !== message.subject) {
-			existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false);
+			existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, subjectAgeDays);
 		}
 
 		if (existingthread) {
