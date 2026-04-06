@@ -791,6 +791,7 @@ function WritePktToNode(messageArray, conn, systemaddress){
 		// Parse and populate required attributes if empty.
 		var setattribs = {
 			msgid: false,
+			reply: false,
 			tid: false,
 			tz: false,
 		}
@@ -801,6 +802,12 @@ function WritePktToNode(messageArray, conn, systemaddress){
 					setattribs.msgid = true
 					if ((msg.MsgId) && (attrib.value != msg.MsgId)){
 						attrib.value = msg.MsgId
+					}
+					break;
+				case "REPLY":
+					setattribs.reply = true
+					if ((msg.ReplyTo) && (attrib.value != msg.ReplyTo)){
+						attrib.value = msg.ReplyTo
 					}
 					break;
 				case "TID":
@@ -824,6 +831,12 @@ function WritePktToNode(messageArray, conn, systemaddress){
 				value: msg.MsgId
 			}
 			msg.OptionalAttributes.push(newattrib)
+		}
+		if (!setattribs.reply && msg.ReplyTo){
+			msg.OptionalAttributes.push({
+				attribute: "REPLY",
+				value: msg.ReplyTo
+			})
 		}
 		if (!setattribs.tid){
 			const newattrib = {
@@ -1116,6 +1129,7 @@ function WritePkts(messageArray){
 				// Parse and populate required attributes if empty.
 				var setattribs = {
 					msgid: false,
+					reply: false,
 					tid: false,
 					tz: false,
 				}
@@ -1126,6 +1140,12 @@ function WritePkts(messageArray){
 							setattribs.msgid = true
 							if ((msg.MsgId) && (attrib.value != msg.MsgId)){
 								attrib.value = msg.MsgId
+							}
+							break;
+						case "REPLY":
+							setattribs.reply = true
+							if ((msg.ReplyTo) && (attrib.value != msg.ReplyTo)){
+								attrib.value = msg.ReplyTo
 							}
 							break;
 						case "TID":
@@ -1146,6 +1166,12 @@ function WritePkts(messageArray){
 						value: msg.MsgId
 					}
 					msg.OptionalAttributes.push(newattrib)
+				}
+				if (!setattribs.reply && msg.ReplyTo){
+					msg.OptionalAttributes.push({
+						attribute: "REPLY",
+						value: msg.ReplyTo
+					})
 				}
 				if (!setattribs.tid){
 					const newattrib = {
