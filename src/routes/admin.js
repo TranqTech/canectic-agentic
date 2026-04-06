@@ -263,6 +263,19 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 	}
 });
 
+router.post('/msgGroup/:shortcode/pushDefaults', urlencodedParser, requireAdmin, async (req, res) => {
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var fields = req.body.fields;
+	if (typeof fields === 'string') fields = [fields];
+	var result = await msgGroups.pushDefaultsToAreas(shortcode, fields || ['all']);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Pushed defaults to ' + result.updated + ' area(s).');
+	} else {
+		await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
+	}
+	res.redirect('/admin/msgGroup/' + shortcode);
+});
+
 router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser  = await getCurrentUser(req);
 	var deleteTables = (req.body.delete_tables === 'true');
@@ -330,7 +343,8 @@ router.get('/msgGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 		read_perm_flags: group.read_perm_flags || [],
 		read_rest_flags: group.read_rest_flags || [],
 		post_perm_flags: group.post_perm_flags || [],
-		post_rest_flags: group.post_rest_flags || []
+		post_rest_flags: group.post_rest_flags || [],
+		post_as: group.post_as || 'username'
 	});
 });
 

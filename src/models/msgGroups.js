@@ -7,10 +7,11 @@ import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
 import appConfig from "../config/appConfig.js";
 
-// Ensure sort_order column exists (migration)
+// Ensure sort_order and post_as columns exist (migration)
 async function ensureSortOrder() {
 	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
 	await postgres.write("ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
+	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS post_as VARCHAR(16) DEFAULT 'username'");
 }
 
 
@@ -74,7 +75,9 @@ async function newGroup(formObj) {
 		read_perm_flags: normalizeFlags(formObj.read_perm_flags),
 		read_rest_flags: normalizeFlags(formObj.read_rest_flags),
 		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
-		post_rest_flags: normalizeFlags(formObj.post_rest_flags)
+		post_rest_flags: normalizeFlags(formObj.post_rest_flags),
+		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
+			? formObj.post_as.trim().toLowerCase() : 'username'
 	};
 
 	var dbres = await postgres.insertObject(pgObj, "message_groups");
@@ -168,6 +171,10 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.read_rest_flags !== undefined) updateObj.read_rest_flags = normalizeFlags(formObj.read_rest_flags);
 	if (formObj.post_perm_flags !== undefined) updateObj.post_perm_flags = normalizeFlags(formObj.post_perm_flags);
 	if (formObj.post_rest_flags !== undefined) updateObj.post_rest_flags = normalizeFlags(formObj.post_rest_flags);
+	if (formObj.post_as !== undefined) {
+		var postAs = (formObj.post_as || '').trim().toLowerCase();
+		if (['username', 'realname'].includes(postAs)) updateObj.post_as = postAs;
+	}
 
 	if (Object.keys(updateObj).length === 0) {
 		returnObj.errormessages.push("No updatable fields provided");
@@ -258,6 +265,66 @@ async function reorderAreas(ids) {
 	}
 }
 
+// Push group-level defaults to all member areas.
+// fields: array of field names to push, e.g. ['security', 'flags', 'post_as'] or ['all']
+async function pushDefaultsToAreas(shortcode, fields) {
+	var group = await getGroupByShortcode(shortcode);
+	if (!group) return { status: false, errormessages: ['Group not found'], updated: 0 };
+
+	var pushAll = !fields || fields.length === 0 || fields.includes('all');
+	var updateObj = {};
+
+	if (pushAll || fields.includes('security')) {
+		updateObj.read_security = group.read_security;
+		updateObj.post_security = group.post_security;
+	}
+	if (pushAll || fields.includes('flags')) {
+		updateObj.read_perm_flags = group.read_perm_flags;
+		updateObj.read_rest_flags = group.read_rest_flags;
+		updateObj.post_perm_flags = group.post_perm_flags;
+		updateObj.post_rest_flags = group.post_rest_flags;
+	}
+	if (pushAll || fields.includes('post_as')) {
+		updateObj.post_as = group.post_as || 'username';
+	}
+
+	if (Object.keys(updateObj).length === 0) {
+		return { status: false, errormessages: ['No fields to push'], updated: 0 };
+	}
+
+	// Build SET clause
+	var setClauses = [];
+	var params = [];
+	var paramIdx = 1;
+	for (var col in updateObj) {
+		if (!updateObj.hasOwnProperty(col)) continue;
+		var val = updateObj[col];
+		if (typeof val === 'object' && val !== null) val = JSON.stringify(val);
+		setClauses.push(col + ' = $' + paramIdx);
+		params.push(val);
+		paramIdx++;
+	}
+	params.push(group.shortcode);
+
+	var err = await postgres.write(
+		'UPDATE message_areas SET ' + setClauses.join(', ') + ', updated_at = NOW() WHERE group_shortcode = $' + paramIdx,
+		params
+	);
+
+	if (err) {
+		return { status: false, errormessages: [err.message || 'Database error'], updated: 0 };
+	}
+
+	var countRow = await postgres.queryOne(
+		'SELECT COUNT(*) AS cnt FROM message_areas WHERE group_shortcode = $1',
+		[group.shortcode]
+	);
+	var updated = countRow ? parseInt(countRow.cnt) : 0;
+
+	alogger.writeAlog(5, 'Pushed group defaults to ' + updated + ' area(s) in ' + shortcode + ' (fields: ' + (pushAll ? 'all' : fields.join(',')) + ')', 'greenbright');
+	return { status: true, updated: updated };
+}
+
 export {
 	ensureSortOrder,
 	newGroup,
@@ -269,5 +336,6 @@ export {
 	getInactiveGroups,
 	getAllGroupsWithAreas,
 	reorderGroups,
-	reorderAreas
+	reorderAreas,
+	pushDefaultsToAreas
 };

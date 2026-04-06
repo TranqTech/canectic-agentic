@@ -42,6 +42,7 @@ block content
                         a.button.btn.btn-sm.btn-info(href='/admin/msgGroups')
                           | Exit
                 .card-body
+                  include ../../partials/flash
                   h4= msgGroup.description
                   .row
                     .col-6
@@ -53,8 +54,11 @@ block content
                         = msgGroup.read_security || '—'
                     .col-6
                       h5
-                        | Post Security: 
+                        | Post Security:
                         = msgGroup.post_security || '—'
+                      h5
+                        | Post As:
+                        = msgGroup.post_as === 'realname' ? 'Real Name' : 'Username'
               .card
                 .card-header.bg-darkblue.text-white
                   h4 Areas
@@ -148,6 +152,8 @@ block content
                           | Edit Group
                         button.btn.btn-danger.w-100(data-bs-toggle='modal' data-bs-target='#deleteGroupModal')
                           | Delete Group
+                        button.btn.btn-info.w-100.mt-1(data-bs-toggle='modal' data-bs-target='#pushDefaultsModal')
+                          | Push Defaults to Areas
                         br
                         h6.text-white.mb-1 Areas:
                         button.btn.btn-success.w-100(data-bs-toggle='modal' data-bs-target='#newAreaModal')
@@ -665,12 +671,22 @@ block content
                           value=msgGroup.post_security || 0
                         )
                       .col-5
+                        label(for='edit_post_as') Post As:
+                        select(
+                          id='edit_post_as'
+                          name='post_as'
+                          class='form-control'
+                          tabindex='5'
+                        )
+                          option(value='username' selected=(msgGroup.post_as !== 'realname')) Username
+                          option(value='realname' selected=(msgGroup.post_as === 'realname')) Real Name
+                        br
                         label(for='edit_active') Status:
                         select(
                           id='edit_active'
                           name='active'
                           class='form-control'
-                          tabindex='5'
+                          tabindex='6'
                         )
                           option(value='true'  selected=(msgGroup.active == true))  Active
                           option(value='false' selected=(msgGroup.active == false)) Inactive
@@ -752,6 +768,34 @@ block content
                       value='Delete Group'
                       class='btn btn-danger'
                     )
+
+          // Push Defaults Modal
+          #pushDefaultsModal.modal.fade(tabindex='-1' aria-hidden='true')
+            .modal-dialog.modal-dialog-centered
+              .modal-content
+                .modal-header.bg-info.text-white
+                  h5.modal-title Push Group Defaults to Areas
+                  button.btn-close(type='button' data-bs-dismiss='modal')
+                .modal-body
+                  p Push this group's default settings to all member areas. Select which settings to push:
+                  form#pushDefaultsForm(action='/admin/msgGroup/' + msgGroup.shortcode + '/pushDefaults' method='POST')
+                    .form-check.mb-2
+                      input.form-check-input#push_security(type='checkbox' name='fields' value='security' checked)
+                      label.form-check-label(for='push_security') Security Levels (Read: #{msgGroup.read_security}, Post: #{msgGroup.post_security})
+                    .form-check.mb-2
+                      input.form-check-input#push_flags(type='checkbox' name='fields' value='flags' checked)
+                      label.form-check-label(for='push_flags') Permission & Restriction Flags
+                    .form-check.mb-2
+                      input.form-check-input#push_post_as(type='checkbox' name='fields' value='post_as' checked)
+                      label.form-check-label(for='push_post_as') Post As (#{msgGroup.post_as || 'username'})
+                    .alert.alert-warning.mt-3
+                      i.bi.bi-exclamation-triangle.me-1
+                      | This will overwrite the selected settings on all areas in this group.
+                .modal-footer
+                  button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                  button.btn.btn-info(type='submit' form='pushDefaultsForm')
+                    i.bi.bi-arrow-down-circle.me-1
+                    | Push to Areas
 
     script.
       document.addEventListener('DOMContentLoaded', function() {
