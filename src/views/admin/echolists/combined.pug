@@ -189,6 +189,10 @@ block content
                           label.form-label Post Security
                           input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=50)
 
+                      .form-check.mt-3
+                        input#subEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true' checked)
+                        label.form-check-label(for='subEnablePeers') Enable for all network peers
+
                     #tabMap.tab-pane.fade
                       .mb-3
                         label.form-label Map to Existing Area
@@ -196,6 +200,9 @@ block content
                           option(value='') -- Select an area --
                           each a in unmappedAreas
                             option(value=a.id)= a.name + ' (' + a.shortcode + ')'
+                      .form-check.mt-3
+                        input#subMapEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true' checked)
+                        label.form-check-label(for='subMapEnablePeers') Enable for all network peers
                 .modal-footer
                   button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                   button.btn.btn-success(type='submit')

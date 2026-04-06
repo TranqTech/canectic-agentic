@@ -2960,6 +2960,9 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 	var action      = (req.body.action || '').trim();
 	var areatag     = (req.body.areatag || '').trim();
 
+	var enablePeers = req.body.enable_peers === 'true';
+	var syncOpts = enablePeers ? { allowAll: true, enableAll: true } : {};
+
 	if (action === 'create') {
 		var formObj = {
 			groupshortcode:  req.body.group_shortcode,
@@ -2975,7 +2978,15 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 		};
 		var result = await msgAreas.newArea(formObj);
 		if (result.status) {
-			await flash.setOne(req, 'success', 'Area "' + formObj.shortcode + '" created and mapped.');
+			// newArea creates subscription rows but doesn't set allowed/enabled.
+			// If "enable for all peers" is checked, sync with allowAll/enableAll.
+			if (enablePeers && result.shortcode) {
+				var newArea = await msgAreas.getAreaByShortcode(result.shortcode);
+				if (newArea) {
+					await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, newArea.id, syncOpts);
+				}
+			}
+			await flash.setOne(req, 'success', 'Area "' + formObj.shortcode + '" created and mapped.' + (enablePeers ? ' Enabled for all peers.' : ''));
 		} else {
 			await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
 		}
@@ -2986,8 +2997,8 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 			createdByName: currentuser ? currentuser.username : ''
 		});
 		if (mapResult.status) {
-			await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, areaId, {});
-			await flash.setOne(req, 'success', 'Area mapped to network.');
+			await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, areaId, syncOpts);
+			await flash.setOne(req, 'success', 'Area mapped to network.' + (enablePeers ? ' Enabled for all peers.' : ''));
 		} else {
 			await flash.setOne(req, 'danger', 'Failed: ' + (mapResult.errormessages || []).join(', '));
 		}
