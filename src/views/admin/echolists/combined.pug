@@ -184,10 +184,37 @@ block content
                       .row
                         .col-6
                           label.form-label Read Security
-                          input#subReadSec.form-control(type='number' name='read_security' min=0 max=255 value=50)
+                          input#subReadSec.form-control(type='number' name='read_security' min=0 max=255 value=defaultReadSecurity)
                         .col-6
                           label.form-label Post Security
-                          input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=60)
+                          input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=defaultPostSecurity)
+                      .row.mt-2
+                        .col-6
+                          #sub_read_perm_inputs
+                          #sub_read_rest_inputs
+                          label.small Read Perm Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_read_perm_badges(style='min-height:2rem')
+                          .input-group.input-group-sm.mb-2
+                            select#sub_read_perm_select.form-control
+                            button.btn.btn-sm.btn-success#sub_read_perm_add(type='button') Add
+                          label.small Read Restrict Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_read_rest_badges(style='min-height:2rem')
+                          .input-group.input-group-sm
+                            select#sub_read_rest_select.form-control
+                            button.btn.btn-sm.btn-danger#sub_read_rest_add(type='button') Add
+                        .col-6
+                          #sub_post_perm_inputs
+                          #sub_post_rest_inputs
+                          label.small Post Perm Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_post_perm_badges(style='min-height:2rem')
+                          .input-group.input-group-sm.mb-2
+                            select#sub_post_perm_select.form-control
+                            button.btn.btn-sm.btn-success#sub_post_perm_add(type='button') Add
+                          label.small Post Restrict Flags:
+                          .border.rounded.p-2.mb-2.bg-light#sub_post_rest_badges(style='min-height:2rem')
+                          .input-group.input-group-sm
+                            select#sub_post_rest_select.form-control
+                            button.btn.btn-sm.btn-danger#sub_post_rest_add(type='button') Add
 
                       .form-check.mt-3
                         input#subAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
@@ -277,15 +304,94 @@ block content
             });
           });
 
-          // Auto-populate security from group defaults
+          // --- Flag management ---
+          var allPerms  = !{JSON.stringify(availablePermissions)};
+          var allRestrs = !{JSON.stringify(availableRestrictions)};
+
+          function renderFlags(prefix, inputName, activeFlags, allFlags, badgeClass) {
+            var badgeEl  = document.getElementById(prefix + '_badges');
+            var inputEl  = document.getElementById(prefix + '_inputs');
+            var selectEl = document.getElementById(prefix + '_select');
+            var addBtn   = document.getElementById(prefix + '_add');
+            badgeEl.innerHTML = '';
+            activeFlags.forEach(function(flag) {
+              var span = document.createElement('span');
+              span.className = 'badge ' + badgeClass + ' me-1 mb-1';
+              span.style.cursor = 'pointer';
+              span.title = 'Click to remove';
+              span.textContent = flag + ' x';
+              span.addEventListener('click', function() {
+                renderFlags(prefix, inputName, activeFlags.filter(function(f) { return f !== flag; }), allFlags, badgeClass);
+              });
+              badgeEl.appendChild(span);
+            });
+            inputEl.innerHTML = '';
+            activeFlags.forEach(function(flag) {
+              var inp = document.createElement('input');
+              inp.type = 'hidden'; inp.name = inputName; inp.value = flag;
+              inputEl.appendChild(inp);
+            });
+            selectEl.innerHTML = '';
+            var available = allFlags.filter(function(f) { return !activeFlags.includes(f); });
+            if (available.length === 0) {
+              var opt = document.createElement('option');
+              opt.value = ''; opt.textContent = '-- none --'; opt.disabled = true;
+              selectEl.appendChild(opt); selectEl.disabled = true; addBtn.disabled = true;
+            } else {
+              selectEl.disabled = false; addBtn.disabled = false;
+              available.forEach(function(flag) {
+                var opt = document.createElement('option');
+                opt.value = flag; opt.textContent = flag;
+                selectEl.appendChild(opt);
+              });
+            }
+          }
+
+          function wireAddBtn(prefix, inputName, allFlags, badgeClass) {
+            document.getElementById(prefix + '_add').addEventListener('click', function() {
+              var sel = document.getElementById(prefix + '_select');
+              if (!sel.value) return;
+              var current = Array.from(document.querySelectorAll('#' + prefix + '_inputs input')).map(function(i) { return i.value; });
+              if (!current.includes(sel.value)) {
+                current.push(sel.value);
+                renderFlags(prefix, inputName, current, allFlags, badgeClass);
+              }
+            });
+          }
+
+          wireAddBtn('sub_read_perm', 'read_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('sub_read_rest', 'read_rest_flags', allRestrs, 'bg-danger');
+          wireAddBtn('sub_post_perm', 'post_perm_flags', allPerms, 'bg-success');
+          wireAddBtn('sub_post_rest', 'post_rest_flags', allRestrs, 'bg-danger');
+
+          // Initial render (empty flags)
+          renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+          renderFlags('sub_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+          renderFlags('sub_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+          renderFlags('sub_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+
+          // Auto-populate security and flags from group defaults
           document.getElementById('subGroup').addEventListener('change', function() {
             var sc = this.value;
-            if (!sc) return;
+            if (!sc) {
+              document.getElementById('subReadSec').value = !{defaultReadSecurity};
+              document.getElementById('subPostSec').value = !{defaultPostSecurity};
+              renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
+              renderFlags('sub_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
+              renderFlags('sub_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
+              renderFlags('sub_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+              return;
+            }
             fetch('/admin/msgGroup/' + sc + '/defaults')
               .then(function(r) { return r.json(); })
               .then(function(data) {
-                document.getElementById('subReadSec').value = data.read_security || 50;
-                document.getElementById('subPostSec').value = data.post_security || 60;
+                document.getElementById('subReadSec').value = data.read_security || !{defaultReadSecurity};
+                document.getElementById('subPostSec').value = data.post_security || !{defaultPostSecurity};
+                var parseF = function(v) { try { return Array.isArray(v) ? v : JSON.parse(v || '[]'); } catch(e) { return []; } };
+                renderFlags('sub_read_perm', 'read_perm_flags', parseF(data.read_perm_flags), allPerms, 'bg-success');
+                renderFlags('sub_read_rest', 'read_rest_flags', parseF(data.read_rest_flags), allRestrs, 'bg-danger');
+                renderFlags('sub_post_perm', 'post_perm_flags', parseF(data.post_perm_flags), allPerms, 'bg-success');
+                renderFlags('sub_post_rest', 'post_rest_flags', parseF(data.post_rest_flags), allRestrs, 'bg-danger');
               });
           });
         }

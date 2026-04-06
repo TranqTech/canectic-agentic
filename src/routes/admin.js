@@ -2950,7 +2950,11 @@ router.get('/echolist/:networkId/combined', async (req, res) => {
 		echolistAreas: echolistAreas,
 		orphanedAreas: orphanedAreas,
 		groups: groups,
-		unmappedAreas: unmappedAreas
+		unmappedAreas: unmappedAreas,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
+		defaultReadSecurity: appConfig.getNumber('default_msg_read_security', 50),
+		defaultPostSecurity: appConfig.getNumber('default_msg_post_security', 60)
 	});
 });
 
@@ -2974,6 +2978,10 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 			shortcode:       req.body.shortcode || areatag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64),
 			readsecurity:    req.body.read_security,
 			postsecurity:    req.body.post_security,
+			read_perm_flags: req.body.read_perm_flags,
+			read_rest_flags: req.body.read_rest_flags,
+			post_perm_flags: req.body.post_perm_flags,
+			post_rest_flags: req.body.post_rest_flags,
 			network_id:      networkId,
 			areatag:         areatag,
 			createdByUUID:   currentuser ? currentuser.uuid : '',
