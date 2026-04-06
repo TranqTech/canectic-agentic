@@ -24,6 +24,12 @@
 - Fix: Callflow completion not updating session (session_index missing for pre-index sessions, added direct session ID fallback)
 - Fix: Callflow force redirect restricted to GET only and excludes admin/pm/notification routes
 - Fix: Callflow pending flag cleared on page render to break redirect loops
+- Fix: SMB index record size corrected (20 bytes, not 28) -- was only finding 18 of 125 messages
+- Fix: SMB import threading: flush thread stats every 10 messages during import for accurate subject matching
+- Fix: Threading fallback: when reply parent is missing, falls back to subject matching instead of orphaning
+- Fix: Threading window widened to 365 days for messages with "Re:" subject (was 30 days, missed long-running threads)
+- Fix: Outbound FTN packets missing REPLY kludge -- replies sent from Canectic had no @REPLY, breaking threading on downstream systems
+- Fix: Maintenance jobs blocked re-runs after completion (BullMQ jobId deduplication, added removeOnComplete/removeOnFail)
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
@@ -37,6 +43,9 @@
 - Legacy admin netmail routes and views removed (netmail flows through PM system)
 - User navbar: added Chat (links to who's online/telegrams) and Wall links
 - PostgreSQL setup: install guide now includes manual DB/user creation walkthrough with PG 15+ schema grant instructions
+- Admin message/thread deletion: per-message delete buttons in thread view, per-thread delete buttons in area view, Delete Thread in sidebar with confirmation modals
+- Thread rebuild maintenance tool: `--rethread` CLI flag, admin Rebuild Threads button, re-processes all messages in chronological order
+- Queue status panel on Jobs & Maintenance page: view active/waiting/delayed/failed jobs, remove stuck jobs, retry/remove failed, drain queues
 - 57 new unit tests for sbbsecho parser (2,016 total)
 
 ## v0.9.5a (2026-04-04)
