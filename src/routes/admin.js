@@ -1325,6 +1325,38 @@ router.get('/fileGroups', async (req, res, next) => {
 	});
 });
 
+// Expand ~ to home directory for filesystem paths
+function expandHome(dir) {
+	if (!dir) return dir;
+	if (dir.startsWith('~/') || dir === '~') return path.join(os.homedir(), dir.substring(1));
+	return dir;
+}
+
+// Check if a directory exists (AJAX endpoint for file group/area forms)
+router.get('/fileGroup/checkdir', requireAdmin, async (req, res) => {
+	var dir = expandHome((req.query.dir || '').trim());
+	if (!dir) return res.json({ exists: false, error: 'No path specified' });
+	try {
+		var exists = fs.existsSync(dir);
+		return res.json({ exists: exists, path: dir });
+	} catch (e) {
+		return res.json({ exists: false, error: e.message });
+	}
+});
+
+// Create a directory (AJAX endpoint for file group/area forms)
+router.post('/fileGroup/mkdir', express.json(), requireAdmin, async (req, res) => {
+	var dir = expandHome((req.body.dir || '').trim());
+	if (!dir) return res.json({ status: false, error: 'No path specified' });
+	try {
+		fs.mkdirSync(dir, { recursive: true });
+		alogger.writeAlog(5, 'Created directory: ' + dir, 'cyan');
+		return res.json({ status: true, path: dir });
+	} catch (e) {
+		return res.json({ status: false, error: e.message });
+	}
+});
+
 router.post('/fileGroup/new', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);

@@ -5,9 +5,16 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
+import os from 'os';
 import * as postgres from '../middleware/db/postgres.js';
 import * as fileGroups from "./fileGroups.js";
 import * as alogger from "../utils/alogger.js";
+
+function expandHome(dir) {
+	if (!dir) return dir;
+	if (dir.startsWith('~/') || dir === '~') return path.join(os.homedir(), dir.substring(1));
+	return dir;
+}
 import appConfig from "../config/appConfig.js";
 
 function normalizeFlags(input) {
@@ -32,7 +39,7 @@ function normalizeFlags(input) {
  * Three-level hierarchy: global file_base_dir → group base_dir → area sub_dir
  */
 function resolveAreaPath(group, area) {
-	var root = (group && group.base_dir) ? group.base_dir : appConfig.get('file_base_dir', 'files');
+	var root = (group && group.base_dir) ? expandHome(group.base_dir) : appConfig.get('file_base_dir', 'files');
 	var sub = (area && area.sub_dir) ? area.sub_dir : (area ? area.shortcode.toLowerCase() : '');
 	return path.join(root, sub);
 }

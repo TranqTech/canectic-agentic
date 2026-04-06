@@ -4,6 +4,13 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
+import os from 'os';
+
+function expandHome(dir) {
+	if (!dir) return dir;
+	if (dir.startsWith('~/') || dir === '~') return path.join(os.homedir(), dir.substring(1));
+	return dir;
+}
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as fileAreas from "./fileAreas.js";
@@ -72,7 +79,7 @@ async function newGroup(formObj) {
 	if (dbres.status === true) {
 		returnObj.status = true;
 		// Create the group's base directory if specified
-		var groupDir = pgObj.base_dir || path.join(appConfig.get('file_base_dir', 'files'));
+		var groupDir = expandHome(pgObj.base_dir) || appConfig.get('file_base_dir', 'files');
 		try {
 			if (!fs.existsSync(groupDir)) {
 				fs.mkdirSync(groupDir, { recursive: true });

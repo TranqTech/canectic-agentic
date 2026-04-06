@@ -94,13 +94,16 @@ block content
                     )
                     br
                     label(for="base_dir") Base Directory (optional):
-                    input(
-                      type="text"
-                      id="base_dir"
-                      name="base_dir"
-                      class="form-control"
-                      placeholder="/path/to/files"
-                    )
+                    .input-group
+                      input(
+                        type="text"
+                        id="base_dir"
+                        name="base_dir"
+                        class="form-control"
+                        placeholder="/path/to/files"
+                      )
+                      button.btn.btn-outline-secondary#checkDirBtn(type='button') Check
+                    #dirStatus.small.mt-1
                     br
                 .row
                   .col-1
@@ -203,8 +206,48 @@ block content
                         class="btn btn-lg btn-success btn-block"
                         )
   script.
-    // Add click event listener to table rows
     document.addEventListener('DOMContentLoaded', function() {
+      // Directory check/create for base_dir
+      var checkBtn = document.getElementById('checkDirBtn');
+      var dirInput = document.getElementById('base_dir');
+      var dirStatus = document.getElementById('dirStatus');
+      if (checkBtn && dirInput) {
+        checkBtn.addEventListener('click', function() {
+          var dir = dirInput.value.trim();
+          if (!dir) { dirStatus.innerHTML = '<span class="text-muted">Enter a path to check.</span>'; return; }
+          dirStatus.innerHTML = '<span class="text-muted">Checking...</span>';
+          fetch('/admin/fileGroup/checkdir?dir=' + encodeURIComponent(dir))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data.exists) {
+                dirStatus.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Directory exists: ' + data.path + '</span>';
+              } else {
+                dirStatus.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Directory does not exist: ' + (data.path || dir) + '</span> ' +
+                  '<button type="button" class="btn btn-sm btn-outline-success ms-2" id="createDirBtn"><i class="bi bi-folder-plus me-1"></i>Create</button>';
+                document.getElementById('createDirBtn').addEventListener('click', function() {
+                  fetch('/admin/fileGroup/mkdir', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dir: dir })
+                  })
+                  .then(function(r) { return r.json(); })
+                  .then(function(res) {
+                    if (res.status) {
+                      dirStatus.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Directory created: ' + res.path + '</span>';
+                    } else {
+                      dirStatus.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>Failed: ' + (res.error || 'Unknown error') + '</span>';
+                    }
+                  });
+                });
+              }
+            })
+            .catch(function(err) {
+              dirStatus.innerHTML = '<span class="text-danger">Error: ' + err.message + '</span>';
+            });
+        });
+      }
+
+    // Add click event listener to table rows
+    // (rest of existing DOMContentLoaded code follows)
       const table = document.getElementById('fileGroups');
 
       if (table) {
