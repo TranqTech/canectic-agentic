@@ -1055,6 +1055,9 @@ block content
                           .col-10
                             h5 Areas manageable via AreaFix
                             hr
+                            .mb-2
+                              button.btn.btn-sm.btn-outline-success.me-1.select-all-btn(type='button' data-target='setAllowedFieldset') Select All
+                              button.btn.btn-sm.btn-outline-secondary.deselect-all-btn(type='button' data-target='setAllowedFieldset') Deselect All
                             fieldset#setAllowedFieldset
                               p.text-muted.small.mb-0 Loading areas…
                         .row
@@ -1084,6 +1087,9 @@ block content
                           .col-10
                             h5 Areas to toss to/from this connection
                             hr
+                            .mb-2
+                              button.btn.btn-sm.btn-outline-success.me-1.select-all-btn(type='button' data-target='setEnabledFieldset') Select All
+                              button.btn.btn-sm.btn-outline-secondary.deselect-all-btn(type='button' data-target='setEnabledFieldset') Deselect All
                             fieldset#setEnabledFieldset
                               p.text-muted.small.mb-0 Loading areas…
                         .row
@@ -1113,6 +1119,9 @@ block content
                           .col-10
                             h5 File areas this connection may request
                             hr
+                            .mb-2
+                              button.btn.btn-sm.btn-outline-success.me-1.select-all-btn(type='button' data-target='setFileAllowedFieldset') Select All
+                              button.btn.btn-sm.btn-outline-secondary.deselect-all-btn(type='button' data-target='setFileAllowedFieldset') Deselect All
                             fieldset#setFileAllowedFieldset
                               p.text-muted.small.mb-0 Loading file areas…
                         .row
@@ -1142,6 +1151,9 @@ block content
                           .col-10
                             h5 File areas to toss TIC to/from this connection
                             hr
+                            .mb-2
+                              button.btn.btn-sm.btn-outline-success.me-1.select-all-btn(type='button' data-target='setFileEnabledFieldset') Select All
+                              button.btn.btn-sm.btn-outline-secondary.deselect-all-btn(type='button' data-target='setFileEnabledFieldset') Deselect All
                             fieldset#setFileEnabledFieldset
                               p.text-muted.small.mb-0 Loading file areas…
                         .row
@@ -1501,6 +1513,20 @@ block content
           const subs       = fileSubscriptionData[uuid] || [];
           const checkedIds = subs.filter(s => s.enabled).map(s => s.file_area_id);
           buildFileAreaCheckboxes('setFileEnabledFieldset', 'file-enabled-check', 'enabledfileareas', 'sfen', networkId, checkedIds);
+        });
+      });
+
+      // Select All / Deselect All buttons for subscription modals
+      document.querySelectorAll('.select-all-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var fieldset = document.getElementById(btn.dataset.target);
+          if (fieldset) fieldset.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.checked = true; });
+        });
+      });
+      document.querySelectorAll('.deselect-all-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var fieldset = document.getElementById(btn.dataset.target);
+          if (fieldset) fieldset.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
         });
       });
 
