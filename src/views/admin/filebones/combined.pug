@@ -13,7 +13,6 @@ block content
         .row
           .col-12
             br
-            br
         .row
           .col-1
           .col-10
@@ -77,27 +76,17 @@ block content
                         span.badge.bg-info Available
                     td.text-end
                       if showSubscribe && !area.local_area_id
-                        button.btn.btn-sm.btn-outline-primary.subscribe-btn(
-                          type='button'
-                          data-areatag=area.areatag
-                          data-description=area.description || ''
-                        )
-                          i.bi.bi-plus-lg.me-1
+                        button.btn.btn-sm.btn-outline-primary.subscribe-btn(type='button' style='min-width:120px' data-areatag=area.areatag data-description=area.description || '')
+                          i.bi.bi-plus-circle.me-1
                           | Subscribe
                       if showUnmap && area.local_area_id
-                        button.btn.btn-sm.btn-outline-danger.unmap-btn(
-                          type='button'
-                          data-area-id=area.network_area_id || area.local_area_id
-                          data-areatag=area.areatag
-                          data-shortcode=area.local_shortcode || ''
-                          data-area-name=area.local_area_name || area.areatag
-                        )
-                          i.bi.bi-x-lg.me-1
-                          | Unmap
+                        button.btn.btn-sm.btn-outline-danger.unmap-btn(type='button' style='min-width:120px' data-area-id=area.network_area_id || area.local_area_id data-areatag=area.areatag data-shortcode=area.local_shortcode || '' data-area-name=area.local_area_name || area.areatag)
+                          i.bi.bi-dash-circle.me-1
+                          | Unsubscribe
 
                 .tab-content
                   #tabAll.tab-pane.fade.show.active(role='tabpanel')
-                    .card-body(style='max-height:70vh; overflow-y:auto')
+                    .card-body(style='height:65vh; overflow-y:auto')
                       if fileboneAreas.length === 0
                         p.text-muted No filebone areas found. Import a filebone first.
                       else
@@ -114,7 +103,7 @@ block content
                               +areaRow(area, true, true)
 
                   #tabCarried.tab-pane.fade(role='tabpanel')
-                    .card-body(style='max-height:70vh; overflow-y:auto')
+                    .card-body(style='height:65vh; overflow-y:auto')
                       if carriedAreas.length === 0
                         p.text-muted No locally carried areas.
                       else
@@ -131,7 +120,7 @@ block content
                               +areaRow(area, false, true)
 
                   #tabAvailable.tab-pane.fade(role='tabpanel')
-                    .card-body(style='max-height:70vh; overflow-y:auto')
+                    .card-body(style='height:65vh; overflow-y:auto')
                       if availableAreas.length === 0
                         p.text-muted All filebone areas are locally carried.
                       else
@@ -148,7 +137,7 @@ block content
                               +areaRow(area, true, false)
 
                   #tabOrphaned.tab-pane.fade(role='tabpanel')
-                    .card-body(style='max-height:70vh; overflow-y:auto')
+                    .card-body(style='height:65vh; overflow-y:auto')
                       if orphanedAreas.length === 0
                         p.text-muted All network areas are covered by at least one filebone.
                       else
@@ -172,14 +161,8 @@ block content
                                 td
                                   span.badge.bg-warning Orphaned
                                 td.text-end
-                                  button.btn.btn-sm.btn-outline-danger.unmap-btn(
-                                    type='button'
-                                    data-area-id=oa.area_id
-                                    data-areatag=oa.areatag
-                                    data-shortcode=oa.shortcode || ''
-                                    data-area-name=oa.area_name || ''
-                                  )
-                                    i.bi.bi-x-lg.me-1
+                                  button.btn.btn-sm.btn-outline-danger.unmap-btn(type='button' style='min-width:120px' data-area-id=oa.area_id data-areatag=oa.areatag data-shortcode=oa.shortcode || '' data-area-name=oa.area_name || '')
+                                    i.bi.bi-x-circle.me-1
                                     | Unmap
 
           .col-1
