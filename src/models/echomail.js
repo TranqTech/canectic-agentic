@@ -219,14 +219,15 @@ function drainThreadUpdateArray() {
 	return items;
 }
 
-async function getExistingThreadBySubject(message, threadtable, subject, strippedre) {
+async function getExistingThreadBySubject(message, threadtable, subject, strippedre, maxAgeDays) {
 	var uselike  = !!strippedre;
 	var currtime = new Date();
 	var existingthread;
+	var ageDays = maxAgeDays || 30;
 
 	var starttime  = new Date(message.system_time);
 	var moderntime = new Date(message.system_time);
-	starttime.setDate(starttime.getDate() - 30);
+	starttime.setDate(starttime.getDate() - ageDays);
 	moderntime.setDate(moderntime.getDate() + 14);
 
 	var querytext;
@@ -343,9 +344,11 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 				}
 			}
 
-			existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true);
+			// Use a wider time window (365 days) since the parent is missing and
+			// the reply could be months after the original thread started
+			existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, 365);
 			if (!existingthread && checksubject !== message.subject) {
-				existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false);
+				existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, 365);
 			}
 
 			if (existingthread) {
