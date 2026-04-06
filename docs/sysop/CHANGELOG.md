@@ -14,6 +14,9 @@
 - Fix: Missing `alogger` import in menus.js caused "alogger is not defined" error on menu import/duplicate
 - Fix: Call flow completion loop when redirected from /callflow (return URL now sanitized to avoid redirect back to callflow)
 - Fix: User-to-user telegram chat close button not appearing (CSS class specificity overriding inline style)
+- Fix: Nodelist import crash on duplicate addresses in same batch (e.g. ZC and RC both listed as zone:net/0)
+- Fix: SMB import crash on missing CP437 export name (convertCP437toUTF8 vs cp437ToUtf8)
+- Fix: SMB import empty string for integer columns (source/destination zone/net/node now null when no FTN address)
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
