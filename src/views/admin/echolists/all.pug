@@ -68,12 +68,45 @@ block content
                                   td.text-end
                                     a.btn.btn-sm.btn-outline-primary.me-1(href='/admin/echolist/view/' + el.id)
                                       i.bi.bi-eye
-                                    form.d-inline(method='POST' action='/admin/echolist/' + el.id + '/remove' onsubmit='return confirm("Delete this echolist and all its area entries?")')
-                                      button.btn.btn-sm.btn-outline-danger(type='submit')
-                                        i.bi.bi-trash
+                                    button.btn.btn-sm.btn-outline-danger.del-echolist-btn(type='button' data-id=el.id data-name=el.name data-count=el.area_count || 0)
+                                      i.bi.bi-trash
                       else
                         .card-body
                           p.text-muted.mb-0 No echolists yet.
                           a.btn.btn-sm.btn-outline-success.mt-2(href='/admin/echolist/' + group.network_id)
                             i.bi.bi-plus-circle.me-1
                             | Add Echolist
+
+  //- Delete confirmation modal
+  #delEcholistModal.modal.fade(tabindex='-1')
+    .modal-dialog.modal-dialog-centered
+      .modal-content
+        .modal-header.bg-danger.text-white
+          h5.modal-title Delete Echolist
+          button.btn-close.btn-close-white(type='button' data-bs-dismiss='modal')
+        .modal-body
+          p Are you sure you want to delete #[strong#delEcholistName]?
+          p.text-danger
+            i.bi.bi-exclamation-triangle.me-1
+            | This will permanently remove #[strong#delEcholistCount] area entries.
+        .modal-footer
+          button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+          form#delEcholistForm(method='POST' style='display:inline')
+            button.btn.btn-danger(type='submit')
+              i.bi.bi-trash.me-1
+              | Delete
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var modal = document.getElementById('delEcholistModal');
+      if (modal) {
+        document.querySelectorAll('.del-echolist-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            document.getElementById('delEcholistName').textContent = btn.dataset.name || '';
+            document.getElementById('delEcholistCount').textContent = btn.dataset.count || '0';
+            document.getElementById('delEcholistForm').action = '/admin/echolist/' + btn.dataset.id + '/remove';
+            new bootstrap.Modal(modal).show();
+          });
+        });
+      }
+    });
