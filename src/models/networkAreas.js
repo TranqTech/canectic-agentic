@@ -198,6 +198,23 @@ async function invalidateNetworkAreaCache(networkId) {
 	await redis.cacheInvalidate(CACHE_NS, String(networkId));
 }
 
+// Areas mapped to this network that don't appear in any active echolist
+async function getOrphanedNetworkAreas(networkId) {
+	return await postgres.query(
+		"SELECT na.*, ma.name AS area_name, ma.shortcode, ma.description AS area_description " +
+		"FROM network_areas na " +
+		"JOIN message_areas ma ON ma.id = na.area_id " +
+		"WHERE na.network_id = $1 " +
+		"AND NOT EXISTS (" +
+		"  SELECT 1 FROM network_echolist_areas nea " +
+		"  JOIN network_echolists nel ON nel.id = nea.echolist_id " +
+		"  WHERE nel.network_id = $1 AND nea.active = true " +
+		"  AND UPPER(nea.areatag) = UPPER(na.areatag)" +
+		") ORDER BY na.areatag ASC",
+		[parseInt(networkId)]
+	) || [];
+}
+
 export {
 	addAreaToNetwork,
 	removeAreaFromNetwork,
@@ -207,5 +224,6 @@ export {
 	getNetworkArea,
 	getNetworkAreaById,
 	getCachedAreasByNetwork,
-	invalidateNetworkAreaCache
+	invalidateNetworkAreaCache,
+	getOrphanedNetworkAreas
 };

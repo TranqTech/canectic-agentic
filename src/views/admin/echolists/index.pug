@@ -53,6 +53,9 @@ block content
                         span.text-info= network.name
                     .col-4
                       .text-end
+                        a.btn.btn-lg.btn-secondary.me-1(href='/admin/echolist/' + network.id + '/combined')
+                          i.bi.bi-layers.me-1
+                          | Combined View
                         button.btn.btn-lg.btn-success.me-1(data-bs-toggle='modal' data-bs-target='#newEcholistModal')
                           i.bi.bi-plus-lg.me-1
                           | New Echolist

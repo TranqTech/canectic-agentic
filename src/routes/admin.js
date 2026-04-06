@@ -2893,6 +2893,109 @@ router.post('/echolist/area/:areaId/remove', urlencodedParser, requireAdmin, asy
 });
 
 // -------------------------------------------------------
+// Combined echolist view
+// -------------------------------------------------------
+
+router.get('/echolist/:networkId/combined', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+
+	var echolistAreas    = network ? await networkEcholist.getAreasAcrossNetwork(networkId) : [];
+	var orphanedAreas    = network ? await networkAreas.getOrphanedNetworkAreas(networkId) : [];
+	var groups           = await msgGroups.getActiveGroups();
+
+	// Build list of areas not already mapped to this network for the "map existing" dropdown
+	var mappedRows   = await networkAreas.getAreasByNetwork(networkId);
+	var mappedIds    = new Set((mappedRows || []).map(function(na) { return parseInt(na.area_id); }));
+	var allAreas     = await msgAreas.getAllAreas();
+	var unmappedAreas = (allAreas || []).filter(function(a) { return !mappedIds.has(parseInt(a.id)); });
+
+	res.render('admin/echolists/combined', {
+		sufficientAccess: sufficientAccess,
+		title: 'Combined Echolist',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		echolistAreas: echolistAreas,
+		orphanedAreas: orphanedAreas,
+		groups: groups,
+		unmappedAreas: unmappedAreas
+	});
+});
+
+router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var networkId   = parseInt(req.params.networkId);
+	var action      = (req.body.action || '').trim();
+	var areatag     = (req.body.areatag || '').trim();
+
+	if (action === 'create') {
+		var formObj = {
+			groupshortcode:  req.body.group_shortcode,
+			name:            req.body.name || areatag,
+			description:     req.body.description || areatag,
+			shortcode:       req.body.shortcode || areatag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64),
+			readsecurity:    req.body.read_security,
+			postsecurity:    req.body.post_security,
+			network_id:      networkId,
+			areatag:         areatag,
+			createdByUUID:   currentuser ? currentuser.uuid : '',
+			createdByName:   currentuser ? currentuser.username : ''
+		};
+		var result = await msgAreas.newArea(formObj);
+		if (result.status) {
+			await flash.setOne(req, 'success', 'Area "' + formObj.shortcode + '" created and mapped.');
+		} else {
+			await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
+		}
+	} else if (action === 'map') {
+		var areaId = parseInt(req.body.area_id);
+		var mapResult = await networkAreas.addAreaToNetwork(networkId, areaId, areatag, {
+			createdByUUID: currentuser ? currentuser.uuid : '',
+			createdByName: currentuser ? currentuser.username : ''
+		});
+		if (mapResult.status) {
+			await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, areaId, {});
+			await flash.setOne(req, 'success', 'Area mapped to network.');
+		} else {
+			await flash.setOne(req, 'danger', 'Failed: ' + (mapResult.errormessages || []).join(', '));
+		}
+	} else {
+		await flash.setOne(req, 'danger', 'Unknown action.');
+	}
+
+	res.redirect('/admin/echolist/' + networkId + '/combined');
+});
+
+router.post('/echolist/:networkId/combined/unmap', urlencodedParser, requireAdmin, async (req, res) => {
+	var networkId    = parseInt(req.params.networkId);
+	var areaId       = parseInt(req.body.area_id);
+	var deleteArea   = req.body.delete_area === 'true';
+	var shortcode    = (req.body.shortcode || '').trim();
+
+	var removeResult = await networkAreas.removeAreaFromNetwork(networkId, areaId);
+	if (removeResult.status) {
+		await peerAreaSubscriptions.removeSubscriptionsForNetworkArea(networkId, areaId);
+		if (deleteArea && shortcode) {
+			var delResult = await msgAreas.removeArea(shortcode, false);
+			if (delResult.status) {
+				await flash.setOne(req, 'success', 'Area unmapped and deleted.');
+			} else {
+				await flash.setOne(req, 'warning', 'Unmapped but area deletion failed: ' + (delResult.errormessages || []).join(', '));
+			}
+		} else {
+			await flash.setOne(req, 'success', 'Area unmapped from network.');
+		}
+	} else {
+		await flash.setOne(req, 'danger', 'Failed: ' + (removeResult.errormessages || []).join(', '));
+	}
+
+	res.redirect('/admin/echolist/' + networkId + '/combined');
+});
+
+// -------------------------------------------------------
 // Filebones (file echo lists)
 // -------------------------------------------------------
 
