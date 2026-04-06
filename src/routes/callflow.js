@@ -78,18 +78,6 @@ router.get('/', async (req, res) => {
 		return res.redirect(returnUrl);
 	}
 
-	// If callflow was completed recently (within the last 2 hours), skip it.
-	// This prevents loops from stale tabs or back-button navigation.
-	if (sess) {
-		var lastCf = sess.last_callflow_at ? parseInt(sess.last_callflow_at) : 0;
-		if (lastCf) {
-			var hoursSince = (Date.now() - lastCf) / 3600000;
-			if (hoursSince < 2) {
-				return res.redirect(returnUrl);
-			}
-		}
-	}
-
 	// Suppress the banner on the callflow page itself
 	res.locals.callflowPending = false;
 	res.locals.callflowForce = false;
