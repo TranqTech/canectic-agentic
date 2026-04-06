@@ -1,7 +1,7 @@
 extends ../../layouts/admin
 
 block content
-  .container-fluid.main-wrapper(style='height:calc(100vh - 70px)')
+  .container-fluid.main-wrapper(style='height:calc(100vh - 80px)')
     if !currentuser
       - loginMode = 'guard'
       - loginRedirect = currentPath
@@ -13,6 +13,7 @@ block content
         .row.mt-2
           .col-lg-10.offset-lg-1.col-12
             if !network
+              br
               .card
                 .card-header.bg-darkblue.text-white
                   h2= title
