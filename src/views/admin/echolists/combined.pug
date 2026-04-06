@@ -190,7 +190,10 @@ block content
                           input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=50)
 
                       .form-check.mt-3
-                        input#subEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true' checked)
+                        input#subAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
+                        label.form-check-label(for='subAllowPeers') Allow for all network peers
+                      .form-check
+                        input#subEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true')
                         label.form-check-label(for='subEnablePeers') Enable for all network peers
 
                     #tabMap.tab-pane.fade
@@ -201,7 +204,10 @@ block content
                           each a in unmappedAreas
                             option(value=a.id)= a.name + ' (' + a.shortcode + ')'
                       .form-check.mt-3
-                        input#subMapEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true' checked)
+                        input#subMapAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
+                        label.form-check-label(for='subMapAllowPeers') Allow for all network peers
+                      .form-check
+                        input#subMapEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true')
                         label.form-check-label(for='subMapEnablePeers') Enable for all network peers
                 .modal-footer
                   button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel

@@ -2960,8 +2960,11 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 	var action      = (req.body.action || '').trim();
 	var areatag     = (req.body.areatag || '').trim();
 
+	var allowPeers  = req.body.allow_peers === 'true';
 	var enablePeers = req.body.enable_peers === 'true';
-	var syncOpts = enablePeers ? { allowAll: true, enableAll: true } : {};
+	var syncOpts = {};
+	if (allowPeers)  syncOpts.allowAll = true;
+	if (enablePeers) syncOpts.enableAll = true;
 
 	if (action === 'create') {
 		var formObj = {
@@ -2986,7 +2989,8 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 					await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, newArea.id, syncOpts);
 				}
 			}
-			await flash.setOne(req, 'success', 'Area "' + formObj.shortcode + '" created and mapped.' + (enablePeers ? ' Enabled for all peers.' : ''));
+			var peerMsg = allowPeers ? (enablePeers ? ' Allowed and enabled for all peers.' : ' Allowed for all peers.') : '';
+			await flash.setOne(req, 'success', 'Area "' + formObj.shortcode + '" created and mapped.' + peerMsg);
 		} else {
 			await flash.setOne(req, 'danger', 'Failed: ' + (result.errormessages || []).join(', '));
 		}
@@ -2998,7 +3002,8 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 		});
 		if (mapResult.status) {
 			await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, areaId, syncOpts);
-			await flash.setOne(req, 'success', 'Area mapped to network.' + (enablePeers ? ' Enabled for all peers.' : ''));
+			var peerMsg = allowPeers ? (enablePeers ? ' Allowed and enabled for all peers.' : ' Allowed for all peers.') : '';
+			await flash.setOne(req, 'success', 'Area mapped to network.' + peerMsg);
 		} else {
 			await flash.setOne(req, 'danger', 'Failed: ' + (mapResult.errormessages || []).join(', '));
 		}
