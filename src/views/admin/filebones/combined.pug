@@ -1,7 +1,7 @@
 extends ../../layouts/admin
 
 block content
-  .container-fluid.main-wrapper(style='height:calc(100vh - 70px)')
+  .container-fluid.main-wrapper(style='height:calc(100vh - 80px)')
     if !currentuser
       - loginMode = 'guard'
       - loginRedirect = currentPath
