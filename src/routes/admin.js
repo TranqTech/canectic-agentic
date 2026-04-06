@@ -2185,6 +2185,15 @@ router.get('/doors', async (req, res) => {
 	var dropfileTypes      = doors.getValidDropfileTypes();
 	var dropfileTypeLabels = doors.getDropfileTypeLabels();
 	var configVars         = getVariableList();
+	var collections        = await doorCollections.getActiveCollections();
+
+	// Build per-door collection membership map for edit modal
+	var doorCollectionMap = {};
+	for (var d of (doorlist || [])) {
+		var dc = await doorCollections.getCollectionsForDoor(d.id);
+		doorCollectionMap[d.id] = dc.map(function(c) { return c.id; });
+	}
+
 	res.render('admin/doors/index', {
 		sufficientAccess: sufficientAccess,
 		title: 'Door Games',
@@ -2195,13 +2204,23 @@ router.get('/doors', async (req, res) => {
 		launchTypeLabels: launchTypeLabels,
 		dropfileTypes: dropfileTypes,
 		dropfileTypeLabels: dropfileTypeLabels,
-		configVars: configVars
+		configVars: configVars,
+		collections: collections || [],
+		doorCollectionMap: doorCollectionMap
 	});
 });
 
 router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 	var result = await doors.createDoor(req.body);
-	if (result.status) {
+	if (result.status && result.insertId) {
+		// Sync collection membership
+		var collIds = req.body.collections;
+		if (typeof collIds === 'string') collIds = [collIds];
+		if (Array.isArray(collIds)) {
+			for (var cid of collIds) {
+				await doorCollections.addDoorToCollection(parseInt(cid), result.insertId);
+			}
+		}
 		res.redirect('/admin/doors');
 	} else {
 		var currentuser      = await getCurrentUser(req);
@@ -2223,6 +2242,8 @@ router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 			dropfileTypes: dropfileTypes,
 			dropfileTypeLabels: dropfileTypeLabels,
 			configVars: configVars,
+			collections: await doorCollections.getActiveCollections() || [],
+			doorCollectionMap: {},
 			errormessages: result.errormessages
 		});
 	}
@@ -2234,6 +2255,20 @@ router.post('/doors/:id/update', urlencodedParser, requireAdmin, async (req, res
 	if (!result.status) {
 		alogger.writeAlog(3, "updateDoor failed for id " + doorId + ": " + result.errormessages.join(", "), "redbright");
 	}
+
+	// Sync collection membership: remove all, re-add selected
+	var currentColls = await doorCollections.getCollectionsForDoor(doorId);
+	for (var cc of currentColls) {
+		await doorCollections.removeDoorFromCollection(cc.id, doorId);
+	}
+	var collIds = req.body.collections;
+	if (typeof collIds === 'string') collIds = [collIds];
+	if (Array.isArray(collIds)) {
+		for (var cid of collIds) {
+			await doorCollections.addDoorToCollection(parseInt(cid), doorId);
+		}
+	}
+
 	res.redirect('/admin/doors');
 });
 

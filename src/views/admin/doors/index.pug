@@ -231,6 +231,8 @@ block content
                   button.nav-link#newExtTab(data-bs-toggle='tab' data-bs-target='#newExtPane' type='button' role='tab' aria-selected='false') Extended Info
                 li.nav-item(role='presentation')
                   button.nav-link#newMediaTab(data-bs-toggle='tab' data-bs-target='#newMediaPane' type='button' role='tab' aria-selected='false') Media
+                li.nav-item(role='presentation')
+                  button.nav-link#newCollTab(data-bs-toggle='tab' data-bs-target='#newCollPane' type='button' role='tab' aria-selected='false') Collections
               .tab-content
                 //- Tab 1: Configuration
                 #newConfigPane.tab-pane.fade.show.active(role='tabpanel')
@@ -357,6 +359,17 @@ block content
                     img#new_icon_preview.img-fluid(style='max-height:200px; display:none' alt='Preview')
                     p#new_icon_placeholder.text-muted Enter an image URL above to see a preview.
 
+                //- Tab 4: Collections
+                #newCollPane.tab-pane.fade(role='tabpanel')
+                  if collections && collections.length > 0
+                    p.text-muted Select collections this door belongs to:
+                    each coll in collections
+                      .form-check.mb-1
+                        input.form-check-input(type='checkbox' name='collections' value=coll.id id='new_coll_' + coll.id)
+                        label.form-check-label(for='new_coll_' + coll.id)= coll.name
+                  else
+                    p.text-muted No collections available. Create collections first.
+
               .row.mt-3
                 .col-12
                   .text-end
@@ -380,6 +393,8 @@ block content
                   button.nav-link#edExtTab(data-bs-toggle='tab' data-bs-target='#edExtPane' type='button' role='tab' aria-selected='false') Extended Info
                 li.nav-item(role='presentation')
                   button.nav-link#edMediaTab(data-bs-toggle='tab' data-bs-target='#edMediaPane' type='button' role='tab' aria-selected='false') Media
+                li.nav-item(role='presentation')
+                  button.nav-link#edCollTab(data-bs-toggle='tab' data-bs-target='#edCollPane' type='button' role='tab' aria-selected='false') Collections
               .tab-content
                 //- Tab 1: Configuration
                 #edConfigPane.tab-pane.fade.show.active(role='tabpanel')
@@ -506,6 +521,17 @@ block content
                     img#ed_icon_preview.img-fluid(style='max-height:200px; display:none' alt='Preview')
                     p#ed_icon_placeholder.text-muted Enter an image URL above to see a preview.
 
+                //- Tab 4: Collections
+                #edCollPane.tab-pane.fade(role='tabpanel')
+                  if collections && collections.length > 0
+                    p.text-muted Select collections this door belongs to:
+                    each coll in collections
+                      .form-check.mb-1
+                        input.form-check-input.ed-coll-check(type='checkbox' name='collections' value=coll.id id='ed_coll_' + coll.id)
+                        label.form-check-label(for='ed_coll_' + coll.id)= coll.name
+                  else
+                    p.text-muted No collections available. Create collections first.
+
               .row.mt-3
                 .col-12
                   .text-end
@@ -529,6 +555,7 @@ block content
                 input.btn.btn-danger(type='submit' value='Delete Door')
 
   script.
+    var _doorCollectionMap = !{JSON.stringify(doorCollectionMap)};
     document.addEventListener('DOMContentLoaded', function() {
       // Initialize Bootstrap tooltips
       document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) {
@@ -712,6 +739,12 @@ block content
             edPh.textContent    = 'Enter an image URL above to see a preview.';
             edPh.style.display  = 'block';
           }
+
+          // Collections tab: check boxes for this door's memberships
+          var doorColls = _doorCollectionMap[d.id] || [];
+          document.querySelectorAll('.ed-coll-check').forEach(function(cb) {
+            cb.checked = doorColls.includes(parseInt(cb.value));
+          });
 
           editDoorModal.show();
         });
