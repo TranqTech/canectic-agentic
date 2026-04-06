@@ -38,109 +38,158 @@ block content
 
               include ../../partials/flash
 
-              //- Stats
-              - var carried = echolistAreas.filter(function(a) { return a.local_area_id; }).length
-              - var notCarried = echolistAreas.length - carried
-              .row.mb-3
-                .col-3
-                  .card.text-center
-                    .card-body.p-2
-                      .h4.mb-0= echolistAreas.length
-                      small.text-muted Echolist Areas
-                .col-3
-                  .card.text-center
-                    .card-body.p-2
-                      .h4.mb-0.text-success= carried
-                      small.text-muted Locally Carried
-                .col-3
-                  .card.text-center
-                    .card-body.p-2
-                      .h4.mb-0.text-info= notCarried
-                      small.text-muted Available
-                .col-3
-                  .card.text-center
-                    .card-body.p-2
-                      .h4.mb-0.text-warning= orphanedAreas.length
-                      small.text-muted Orphaned
+              - var carriedAreas = echolistAreas.filter(function(a) { return a.local_area_id; })
+              - var availableAreas = echolistAreas.filter(function(a) { return !a.local_area_id; })
 
-              //- Echolist areas
-              .card.mb-3
+              .card
                 .card-header.bg-darkblue.text-white
                   .d-flex.justify-content-between.align-items-center
                     h5.mb-0
                       i.bi.bi-list-ul.me-2
                       | Echolist Areas
-                      small.text-muted.ms-2 (deduplicated across all echolists)
                     a.btn.btn-sm.btn-info(href='/admin/echolist/' + network.id) Back to Echolists
-                .card-body(style='max-height:60vh; overflow-y:auto')
-                  if echolistAreas.length === 0
-                    p.text-muted No echolist areas found. Import an echolist first.
-                  else
-                    table#echolistTable.table.table-hover.table-sm
-                      thead
-                        tr
-                          th Areatag
-                          th Description
-                          th Source
-                          th Status
-                      tbody
-                        each area in echolistAreas
-                          tr
-                            td
-                              code= area.areatag
-                            td= area.description || ''
-                            td
-                              - var names = Array.isArray(area.echolist_names) ? area.echolist_names : []
-                              each name in names
-                                span.badge.bg-secondary.me-1= name
-                            td
-                              if area.local_area_id
-                                span.badge.bg-success Carried
-                              else
-                                button.btn.btn-sm.btn-outline-primary.subscribe-btn(
-                                  type='button'
-                                  data-areatag=area.areatag
-                                  data-description=area.description || ''
-                                )
-                                  i.bi.bi-plus-lg.me-1
-                                  | Subscribe
 
-              //- Orphaned areas
-              .card.mb-3
-                .card-header.bg-dark
-                  h5.mb-0
-                    i.bi.bi-exclamation-triangle.me-2.text-warning
-                    | Orphaned Areas
-                    small.text-muted.ms-2 Mapped to this network but not in any echolist
-                .card-body(style='max-height:40vh; overflow-y:auto')
-                  if orphanedAreas.length === 0
-                    p.text-muted.mb-0 All network areas are covered by at least one echolist.
-                  else
-                    table#orphanedTable.table.table-hover.table-sm
-                      thead
-                        tr
-                          th Areatag
-                          th Local Area
-                          th Shortcode
-                          th
-                      tbody
-                        each oa in orphanedAreas
-                          tr
-                            td
-                              code= oa.areatag
-                            td= oa.area_name || ''
-                            td
-                              code= oa.shortcode || ''
-                            td.text-end
-                              button.btn.btn-sm.btn-outline-danger.unmap-btn(
-                                type='button'
-                                data-area-id=oa.area_id
-                                data-areatag=oa.areatag
-                                data-shortcode=oa.shortcode || ''
-                                data-area-name=oa.area_name || ''
-                              )
-                                i.bi.bi-x-lg.me-1
-                                | Unmap
+                ul.nav.nav-tabs.px-3.pt-2(role='tablist')
+                  li.nav-item(role='presentation')
+                    button.nav-link.active(data-bs-toggle='tab' data-bs-target='#tabAll' type='button' role='tab')
+                      | All
+                      span.badge.bg-secondary.ms-1= echolistAreas.length
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tabCarried' type='button' role='tab')
+                      | Carried
+                      span.badge.bg-success.ms-1= carriedAreas.length
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tabAvailable' type='button' role='tab')
+                      | Available
+                      span.badge.bg-info.ms-1= availableAreas.length
+                  li.nav-item(role='presentation')
+                    button.nav-link(data-bs-toggle='tab' data-bs-target='#tabOrphaned' type='button' role='tab')
+                      | Orphaned
+                      span.badge.bg-warning.ms-1= orphanedAreas.length
+
+                .tab-content
+                  //- All
+                  #tabAll.tab-pane.fade.show.active(role='tabpanel')
+                    .card-body(style='max-height:70vh; overflow-y:auto')
+                      if echolistAreas.length === 0
+                        p.text-muted No echolist areas found. Import an echolist first.
+                      else
+                        table#echolistTable.table.table-hover.table-sm
+                          thead
+                            tr
+                              th Areatag
+                              th Description
+                              th Source
+                              th Status
+                          tbody
+                            each area in echolistAreas
+                              tr
+                                td
+                                  code= area.areatag
+                                td= area.description || ''
+                                td
+                                  - var names = Array.isArray(area.echolist_names) ? area.echolist_names : []
+                                  each name in names
+                                    span.badge.bg-secondary.me-1= name
+                                td
+                                  if area.local_area_id
+                                    span.badge.bg-success Carried
+                                  else
+                                    button.btn.btn-sm.btn-outline-primary.subscribe-btn(
+                                      type='button'
+                                      data-areatag=area.areatag
+                                      data-description=area.description || ''
+                                    )
+                                      i.bi.bi-plus-lg.me-1
+                                      | Subscribe
+
+                  //- Carried
+                  #tabCarried.tab-pane.fade(role='tabpanel')
+                    .card-body(style='max-height:70vh; overflow-y:auto')
+                      if carriedAreas.length === 0
+                        p.text-muted No locally carried areas.
+                      else
+                        table.table.table-hover.table-sm
+                          thead
+                            tr
+                              th Areatag
+                              th Description
+                              th Source
+                          tbody
+                            each area in carriedAreas
+                              tr
+                                td
+                                  code= area.areatag
+                                td= area.description || ''
+                                td
+                                  - var names = Array.isArray(area.echolist_names) ? area.echolist_names : []
+                                  each name in names
+                                    span.badge.bg-secondary.me-1= name
+
+                  //- Available
+                  #tabAvailable.tab-pane.fade(role='tabpanel')
+                    .card-body(style='max-height:70vh; overflow-y:auto')
+                      if availableAreas.length === 0
+                        p.text-muted All echolist areas are locally carried.
+                      else
+                        table.table.table-hover.table-sm
+                          thead
+                            tr
+                              th Areatag
+                              th Description
+                              th Source
+                              th
+                          tbody
+                            each area in availableAreas
+                              tr
+                                td
+                                  code= area.areatag
+                                td= area.description || ''
+                                td
+                                  - var names = Array.isArray(area.echolist_names) ? area.echolist_names : []
+                                  each name in names
+                                    span.badge.bg-secondary.me-1= name
+                                td
+                                  button.btn.btn-sm.btn-outline-primary.subscribe-btn(
+                                    type='button'
+                                    data-areatag=area.areatag
+                                    data-description=area.description || ''
+                                  )
+                                    i.bi.bi-plus-lg.me-1
+                                    | Subscribe
+
+                  //- Orphaned
+                  #tabOrphaned.tab-pane.fade(role='tabpanel')
+                    .card-body(style='max-height:70vh; overflow-y:auto')
+                      if orphanedAreas.length === 0
+                        p.text-muted All network areas are covered by at least one echolist.
+                      else
+                        p.text-muted.small Mapped to this network but not in any echolist.
+                        table.table.table-hover.table-sm
+                          thead
+                            tr
+                              th Areatag
+                              th Local Area
+                              th Shortcode
+                              th
+                          tbody
+                            each oa in orphanedAreas
+                              tr
+                                td
+                                  code= oa.areatag
+                                td= oa.area_name || ''
+                                td
+                                  code= oa.shortcode || ''
+                                td.text-end
+                                  button.btn.btn-sm.btn-outline-danger.unmap-btn(
+                                    type='button'
+                                    data-area-id=oa.area_id
+                                    data-areatag=oa.areatag
+                                    data-shortcode=oa.shortcode || ''
+                                    data-area-name=oa.area_name || ''
+                                  )
+                                    i.bi.bi-x-lg.me-1
+                                    | Unmap
 
           .col-1
 
@@ -274,12 +323,9 @@ block content
   if network
     script.
       document.addEventListener('DOMContentLoaded', function() {
-        // DataTables
+        // DataTables on the All tab only (other tabs are pre-filtered)
         if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
           jQuery('#echolistTable').DataTable({ paging: false, order: [[0, 'asc']] });
-          if (document.querySelectorAll('#orphanedTable tbody tr').length > 0) {
-            jQuery('#orphanedTable').DataTable({ paging: false, order: [[0, 'asc']] });
-          }
         }
 
         // Subscribe modal
