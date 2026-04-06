@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-04-02
+Last updated: 2026-04-06
 
 ---
 
@@ -92,10 +92,20 @@ Last updated: 2026-04-02
 - [x] Jobs & Maintenance page (manual trigger for all worker jobs by category)
 - [x] SMB message base import (upload .shd/.sdt/.sid, preview, import to area)
 - [x] areas.bbs import (upload, preview with per-area controls, create/map areas, sync peer subscriptions)
+- [x] sbbsecho.ini import (two-step Synchronet linked node migration with drag-and-drop peer grouping)
+- [x] Migrations hub (consolidated import/export tools page)
+- [x] Network echolist registry (per-network echolist management, import, diff preview, historical tracking, sysop notifications)
+- [x] Filebone registry (file echo list management, mirrors echolist system)
+- [x] Combined echolist view (deduplicated cross-echolist areas, orphaned areas, subscribe/unmap modals)
+- [x] Admin dashboard redesign (tabbed categories, icon cards, instant search, System tab default)
+- [x] Admin message/thread deletion (per-message and per-thread with confirmation modals)
+- [x] Queue status panel (view active/waiting/delayed/failed jobs, remove/retry/drain)
+- [x] Thread rebuild maintenance tool (--rethread CLI, admin button)
+- [x] Push group defaults to areas (security, flags, post_as)
 - [ ] JAM message base import
 
 ### Message Networking
-- [x] FTN tosser (inbound/outbound, type-2 packets)
+- [x] FTN tosser (inbound/outbound, type-2 packets, REPLY kludge)
 - [x] FTN binkp mailer (TCP + WebSocket transports)
 - [x] BSO outbound scanner
 - [x] QWK tosser (client pull/push, hub mode)
@@ -167,7 +177,7 @@ Last updated: 2026-04-02
 - [x] .env.example template (examples/env.example)
 
 ### Testing
-- [x] 1,948 tests passing (mocha)
+- [x] 2,016 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
@@ -213,6 +223,9 @@ Last updated: 2026-04-02
 | 30 | Multi-address binkp sessions | [x] | Password-filtered grouping of multiple peer connections per session. Per-connection outbound isolation. All FTN addresses advertised (defaults first). Session dedup across grouped connections. |
 | 31 | Default/example menus | [ ] | Ship a complete set of starter menus (main, messages, files, doors, sysop) so new installs have a working menu structure out of the box. |
 | 32 | Default/placeholder art | [ ] | Ship placeholder ANSI/ASCII art for login, logon, welcome, goodbye screens. First-run experience without requiring sysop art creation. |
+| 33 | Echolist hub associations | [ ] | Link specific peer connections as hubs per echolist. Subscribe from echolist auto-enables on hub peers only (not all). |
+| 34 | Direct echolist editing | [ ] | Add/remove/edit areas and tags within echolists from the admin UI (for network administrators). |
+| 35 | Echolist subscribe from AreaFix | [ ] | Parse inbound AreaFix %LIST responses to auto-update echolist registry. Admin "request %LIST from upstream" action. |
 
 ---
 
