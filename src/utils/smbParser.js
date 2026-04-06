@@ -54,8 +54,11 @@ var MSG_ATTR = {
 	VALIDATED: 0x0100,
 };
 
-// Fixed header size
-var MSGHDR_FIXED_SIZE = 74;
+// Fixed header size (the variable-length section starts after this)
+// Note: The SMB spec says 74 bytes, but the actual struct packing in
+// Synchronet v3.x puts totalDfields at offset 68 and the variable area
+// (dfields then hfields) starts at offset 70.
+var MSGHDR_FIXED_SIZE = 70;
 
 // --- Read helpers (little-endian) ---
 
@@ -114,12 +117,12 @@ function parseMsgHeader(shdBuf, offset) {
 		netattr:       readU32(shdBuf, offset + 16),
 		whenWritten:   readWhen(shdBuf, offset + 20),
 		whenImported:  readWhen(shdBuf, offset + 26),
-		number:        readU32(shdBuf, offset + 36),
-		threadOrig:    readU32(shdBuf, offset + 40),
-		threadNext:    readU32(shdBuf, offset + 44),
-		threadFirst:   readU32(shdBuf, offset + 48),
-		dataOffset:    readU32(shdBuf, offset + 68),
-		totalDfields:  readU16(shdBuf, offset + 72),
+		number:        readU32(shdBuf, offset + 32),
+		threadOrig:    readU32(shdBuf, offset + 36),
+		threadNext:    readU32(shdBuf, offset + 40),
+		threadFirst:   readU32(shdBuf, offset + 44),
+		dataOffset:    readU32(shdBuf, offset + 64),
+		totalDfields:  readU16(shdBuf, offset + 68),
 		// Parsed fields
 		hfields:       [],
 		dfields:       [],
@@ -138,21 +141,28 @@ function parseMsgHeader(shdBuf, offset) {
 		fidoCtrl:      [],
 	};
 
-	// Parse variable header fields
+	// Parse variable header: data field descriptors come FIRST, then header fields.
 	var pos = offset + MSGHDR_FIXED_SIZE;
 	var hdrEnd = offset + hdr.length;
 
-	// Header fields come first, then data fields
-	// Data fields are at the end: totalDfields * 10 bytes
-	var dfieldBytes = hdr.totalDfields * 10;
-	var hfieldEnd = hdrEnd - dfieldBytes;
+	// Data field descriptors: totalDfields * 10 bytes (type U16 + offset U32 + length U32)
+	for (var di = 0; di < hdr.totalDfields; di++) {
+		if (pos + 10 > shdBuf.length) break;
+		hdr.dfields.push({
+			type:   readU16(shdBuf, pos),
+			offset: readU32(shdBuf, pos + 2),
+			length: readU32(shdBuf, pos + 6),
+		});
+		pos += 10;
+	}
 
-	while (pos < hfieldEnd && pos + 4 <= shdBuf.length) {
+	// Header fields follow the data field descriptors
+	while (pos < hdrEnd && pos + 4 <= shdBuf.length) {
 		var ftype = readU16(shdBuf, pos);
 		var flen = readU16(shdBuf, pos + 2);
 		pos += 4;
 
-		if (pos + flen > shdBuf.length) break;
+		if (pos + flen > shdBuf.length || pos + flen > hdrEnd) break;
 
 		var fdata = shdBuf.subarray(pos, pos + flen).toString('utf8');
 		// Strip null terminators and any embedded nulls
@@ -177,18 +187,6 @@ function parseMsgHeader(shdBuf, offset) {
 		}
 
 		pos += flen;
-	}
-
-	// Parse data field descriptors
-	var dfieldPos = hfieldEnd;
-	for (var di = 0; di < hdr.totalDfields; di++) {
-		if (dfieldPos + 10 > shdBuf.length) break;
-		hdr.dfields.push({
-			type:   readU16(shdBuf, dfieldPos),
-			offset: readU32(shdBuf, dfieldPos + 2),
-			length: readU32(shdBuf, dfieldPos + 6),
-		});
-		dfieldPos += 10;
 	}
 
 	return hdr;
