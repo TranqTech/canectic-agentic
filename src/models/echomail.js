@@ -329,6 +329,30 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 			if (hasthread) {
 				await pushThreadIdToUpdateQueue(upstreammsg.thread_id, shortcode);
 			}
+		} else {
+			// Parent message not found (deleted or not imported).
+			// Fall back to subject matching so the reply joins an existing thread
+			// rather than becoming an orphan.
+			var checksubject = message.subject;
+			if (checksubject.toUpperCase().startsWith('RE:')) {
+				var j = 0;
+				while (checksubject.toUpperCase().startsWith('RE:')) {
+					checksubject = checksubject.substring(3).trim();
+					j++;
+					if (j > 10) break;
+				}
+			}
+
+			existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true);
+			if (!existingthread && checksubject !== message.subject) {
+				existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false);
+			}
+
+			if (existingthread) {
+				message.threadid  = existingthread.threadid;
+				message.thread_id = existingthread.id;
+				await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+			}
 		}
 	}
 
