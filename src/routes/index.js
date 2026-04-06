@@ -104,10 +104,13 @@ router.use(async function(req, res, next) {
 		}
 	}
 
-	// Force redirect to callflow after 24 hours (except for callflow, login, static routes)
+	// Force redirect to callflow after 24 hours
+	// Skip: callflow itself, login/register, admin, health, static, websocket, API endpoints
 	if (res.locals.callflowForce && !req.path.startsWith('/callflow') &&
-		!req.path.startsWith('/users') && !req.path.startsWith('/health') &&
-		!req.path.startsWith('/webart') && !req.path.startsWith('/ws/')) {
+		!req.path.startsWith('/users') && !req.path.startsWith('/admin') &&
+		!req.path.startsWith('/health') && !req.path.startsWith('/webart') &&
+		!req.path.startsWith('/ws/') && !req.path.startsWith('/pm') &&
+		!req.path.startsWith('/notifications') && req.method === 'GET') {
 		// Store the page they were trying to reach so callflow can redirect back
 		if (req.cookies && req.cookies.sessionid) {
 			sessionStore.sessionUpdate(req.cookies.sessionid, { callflow_return_url: req.path });
