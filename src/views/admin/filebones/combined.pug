@@ -82,7 +82,7 @@ block content
 
                 .tab-content
                   #tabAll.tab-pane.fade.show.active(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if fileboneAreas.length === 0
                         p.text-muted No filebone areas found. Import a filebone first.
                       else
@@ -99,7 +99,7 @@ block content
                               +areaRow(area, true, true)
 
                   #tabCarried.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if carriedAreas.length === 0
                         p.text-muted No locally carried areas.
                       else
@@ -116,7 +116,7 @@ block content
                               +areaRow(area, false, true)
 
                   #tabAvailable.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if availableAreas.length === 0
                         p.text-muted All filebone areas are locally carried.
                       else
@@ -133,7 +133,7 @@ block content
                               +areaRow(area, true, false)
 
                   #tabOrphaned.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if orphanedAreas.length === 0
                         p.text-muted All network areas are covered by at least one filebone.
                       else

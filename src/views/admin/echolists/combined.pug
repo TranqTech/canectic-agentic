@@ -83,7 +83,7 @@ block content
                 .tab-content
                   //- All
                   #tabAll.tab-pane.fade.show.active(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if echolistAreas.length === 0
                         p.text-muted No echolist areas found. Import an echolist first.
                       else
@@ -101,7 +101,7 @@ block content
 
                   //- Carried
                   #tabCarried.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if carriedAreas.length === 0
                         p.text-muted No locally carried areas.
                       else
@@ -119,7 +119,7 @@ block content
 
                   //- Available
                   #tabAvailable.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if availableAreas.length === 0
                         p.text-muted All echolist areas are locally carried.
                       else
@@ -137,7 +137,7 @@ block content
 
                   //- Orphaned
                   #tabOrphaned.tab-pane.fade(role='tabpanel')
-                    .card-body(style='height:calc(100vh - 180px); overflow-y:auto')
+                    .card-body.vh-75
                       if orphanedAreas.length === 0
                         p.text-muted All network areas are covered by at least one echolist.
                       else
