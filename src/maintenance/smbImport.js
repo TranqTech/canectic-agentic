@@ -12,6 +12,15 @@ import { cp437ToUtf8 as convertCP437toUTF8 } from '../utils/codepageConversions.
 import { v4 as uuidv4 } from 'uuid';
 import * as alogger from '../utils/alogger.js';
 
+// --- Helpers ---
+
+// Strip null bytes (0x00) from strings — PostgreSQL rejects them in text columns.
+// SMB data files use nulls as padding/terminators.
+function stripNulls(str) {
+	if (typeof str !== 'string') return str;
+	return str.replace(/\x00/g, '');
+}
+
 // --- Convert SMB message to our DB format ---
 
 function smbToDbObj(msg) {
@@ -24,14 +33,14 @@ function smbToDbObj(msg) {
 		: currtime;
 
 	// Build body text - combine body and tail (origin/tearline)
-	var rawBody = msg.bodyText || '';
-	var rawTail = msg.tailText || '';
+	var rawBody = stripNulls(msg.bodyText || '');
+	var rawTail = stripNulls(msg.tailText || '');
 	var fullText = rawBody + (rawTail ? '\r\n' + rawTail : '');
 
 	// Convert CP437 to UTF-8 for the utf8 column
 	var utf8Text = '';
 	try {
-		utf8Text = convertCP437toUTF8(Buffer.from(fullText, 'binary'));
+		utf8Text = stripNulls(convertCP437toUTF8(Buffer.from(fullText, 'binary')));
 	} catch (e) {
 		utf8Text = fullText;
 	}
@@ -71,29 +80,29 @@ function smbToDbObj(msg) {
 	return {
 		user_id: 0,
 		uuid: uuidv4(),
-		msg_id: hdr.msgId || ('smb-' + hdr.number),
-		reply_to: hdr.replyId || null,
-		tosser_id: hdr.fidoPid || 'SMB Import',
-		source: hdr.senderAddr || '',
+		msg_id: stripNulls(hdr.msgId || ('smb-' + hdr.number)),
+		reply_to: stripNulls(hdr.replyId || null),
+		tosser_id: stripNulls(hdr.fidoPid || 'SMB Import'),
+		source: stripNulls(hdr.senderAddr || ''),
 		domain: '',
-		destination: hdr.recipientAddr || '',
+		destination: stripNulls(hdr.recipientAddr || ''),
 		source_zone: sourceZone,
 		source_net: sourceNet,
 		source_node: sourceNode,
 		destination_zone: destZone,
 		destination_net: destNet,
 		destination_node: destNode,
-		to_user: hdr.recipient || 'All',
-		from_user: hdr.sender || 'Unknown',
-		subject: hdr.subject || '(no subject)',
+		to_user: stripNulls(hdr.recipient || 'All'),
+		from_user: stripNulls(hdr.sender || 'Unknown'),
+		subject: stripNulls(hdr.subject || '(no subject)'),
 		body_text: fullText,
 		utf8: utf8Text,
-		origin_line: originLine,
+		origin_line: stripNulls(originLine),
 		raw_text: fullText,
 		datetime_string: '',
 		tz_utc: '',
-		seen_by: hdr.fidoSeenBy || '',
-		path: hdr.fidoPath || '',
+		seen_by: stripNulls(hdr.fidoSeenBy || ''),
+		path: stripNulls(hdr.fidoPath || ''),
 		system_time: systemTime,
 		created_at: currtime,
 		updated_at: null,
