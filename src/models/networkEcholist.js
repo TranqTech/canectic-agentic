@@ -344,6 +344,22 @@ async function executeImport(echolistId, diff) {
 	// Update echolist last_imported_at
 	await postgres.updateById(echolistId, { last_imported_at: now }, 'network_echolists');
 
+	// Back-fill local_area_id for echolist entries that match existing network_areas
+	// This handles the case where areas were mapped before the echolist was imported
+	var echolist = await getEcholistById(echolistId);
+	if (echolist) {
+		await postgres.write(
+			"UPDATE network_echolist_areas nea SET local_area_id = na.area_id " +
+			"FROM network_areas na " +
+			"WHERE na.network_id = $1 " +
+			"AND UPPER(nea.areatag) = UPPER(na.areatag) " +
+			"AND nea.echolist_id = $2 " +
+			"AND nea.local_area_id IS NULL " +
+			"AND nea.active = true",
+			[echolist.network_id, parseInt(echolistId)]
+		);
+	}
+
 	alogger.writeAlog(5,
 		'Echolist import: echolist_id=' + echolistId +
 		' new=' + newCount + ' changed=' + changedCount +

@@ -330,6 +330,21 @@ async function executeImport(echolistId, diff) {
 
 	await postgres.updateById(echolistId, { last_imported_at: now }, 'file_echolists');
 
+	// Back-fill local_area_id for entries matching existing file_network_areas
+	var echolist = await getEcholistById(echolistId);
+	if (echolist) {
+		await postgres.write(
+			"UPDATE file_echolist_areas nea SET local_area_id = fna.area_id " +
+			"FROM file_network_areas fna " +
+			"WHERE fna.network_id = $1 " +
+			"AND UPPER(nea.areatag) = UPPER(fna.areatag) " +
+			"AND nea.echolist_id = $2 " +
+			"AND nea.local_area_id IS NULL " +
+			"AND nea.active = true",
+			[echolist.network_id, parseInt(echolistId)]
+		);
+	}
+
 	alogger.writeAlog(5,
 		'Filebone import: echolist_id=' + echolistId +
 		' new=' + newCount + ' changed=' + changedCount +
