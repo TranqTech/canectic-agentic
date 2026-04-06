@@ -65,8 +65,9 @@ router.get('/', async (req, res) => {
 
 	// Read return URL from session (avoid looping back to callflow itself)
 	var returnUrl = '/';
+	var sess = null;
 	if (req.cookies && req.cookies.sessionid) {
-		var sess = await sessionStore.sessionGet(req.cookies.sessionid);
+		sess = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (sess && sess.callflow_return_url && !sess.callflow_return_url.startsWith('/callflow')) {
 			returnUrl = sess.callflow_return_url;
 		}
@@ -74,6 +75,18 @@ router.get('/', async (req, res) => {
 
 	if (!appConfig.getBoolean('callflow_enabled', true)) {
 		return res.redirect(returnUrl);
+	}
+
+	// If callflow was completed recently (within the last 2 hours), skip it.
+	// This prevents loops from stale tabs or back-button navigation.
+	if (sess) {
+		var lastCf = sess.last_callflow_at ? parseInt(sess.last_callflow_at) : 0;
+		if (lastCf) {
+			var hoursSince = (Date.now() - lastCf) / 3600000;
+			if (hoursSince < 2) {
+				return res.redirect(returnUrl);
+			}
+		}
 	}
 
 	// Suppress the banner on the callflow page itself
