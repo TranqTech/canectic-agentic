@@ -282,6 +282,7 @@ export async function enqueueMailerNodelistConnect(nodelistData, destinationAddr
 export async function enqueueUserMaintenance() {
 	return maintenanceQueue.add('user-maintenance', {}, {
 		jobId: 'user-maintenance',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -292,6 +293,7 @@ export async function enqueueUserMaintenance() {
 export async function enqueueFileMaintenance() {
 	return maintenanceQueue.add('file-maintenance', {}, {
 		jobId: 'file-maintenance',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -306,6 +308,7 @@ export async function enqueueRegenHtml(opts = {}) {
 		forceWidth: opts.forceWidth || null,
 	}, {
 		jobId: 'regen-html',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -319,6 +322,7 @@ export async function enqueueRegenPmHtml(opts = {}) {
 		forceWidth: opts.forceWidth || null,
 	}, {
 		jobId: 'regen-pm-html',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -331,6 +335,7 @@ export async function enqueuePurgePmTrash(days) {
 		days: days || appConfig.getNumber('pm_trash_retention_days', 30),
 	}, {
 		jobId: 'purge-pm-trash',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -341,6 +346,7 @@ export async function enqueuePurgePmTrash(days) {
 export async function enqueueRecalcAreaCounts() {
 	return maintenanceQueue.add('recalc-area-counts', {}, {
 		jobId: 'recalc-area-counts',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -354,6 +360,8 @@ export async function enqueueRethread(opts = {}) {
 		dryRun: opts.dryRun || false,
 	}, {
 		jobId: 'rethread' + (opts.areas ? '-' + opts.areas.join('-') : '-all'),
+		removeOnComplete: true,
+		removeOnFail: true,
 	});
 }
 
@@ -366,6 +374,7 @@ export async function enqueueRegenFileDescHtml(opts = {}) {
 		batchSize: opts.batchSize || 100,
 	}, {
 		jobId: 'regen-file-desc-html',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -376,6 +385,7 @@ export async function enqueueRegenFileDescHtml(opts = {}) {
 export async function enqueueRecalcFileCounts() {
 	return maintenanceQueue.add('recalc-file-counts', {}, {
 		jobId: 'recalc-file-counts',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -388,6 +398,7 @@ export async function enqueueScanFileArea(areaShortcode) {
 		areaShortcode: areaShortcode,
 	}, {
 		jobId: `scan-file-area--${areaShortcode}`,
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -408,6 +419,7 @@ export async function enqueueNodelistImport(opts = {}) {
 export async function enqueueScanNodelists() {
 	return maintenanceQueue.add('scan-nodelists', {}, {
 		jobId: 'scan-nodelists-manual',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
@@ -416,5 +428,6 @@ export async function enqueuePurgeTossed(days) {
 		days: days || appConfig.getNumber('ftn_keep_tossed_days', 7),
 	}, {
 		jobId: 'purge-tossed-manual',
+		removeOnComplete: true, removeOnFail: true,
 	});
 }
