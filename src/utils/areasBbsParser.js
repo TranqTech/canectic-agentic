@@ -16,9 +16,31 @@ function parseAreasBbs(text) {
 	for (var i = 0; i < lines.length; i++) {
 		var line = lines[i].trim();
 		if (!line) continue;
-		if (line.charAt(0) === ';' || line.charAt(0) === '#') continue;
+		// Comment lines: ; # %
+		if (line.charAt(0) === ';' || line.charAt(0) === '#' || line.charAt(0) === '%') continue;
 
-		// First token is the areatag, rest is description
+		// SBBSecho filebone format: "Area AREATAG flags description"
+		// Detect and strip the "Area " prefix
+		if (/^Area\s+/i.test(line)) {
+			line = line.replace(/^Area\s+/i, '').trim();
+			if (!line) continue;
+			// After "Area AREATAG", there may be numeric flags (e.g. "0     !")
+			// before the description. Strip leading tokens that are numbers or "!".
+			var tokens = line.split(/\s+/);
+			var areatag = tokens[0];
+			var rest = tokens.slice(1);
+			// Skip numeric/flag tokens until we hit description text
+			while (rest.length > 0 && /^[0-9!]+$/.test(rest[0])) {
+				rest.shift();
+			}
+			areas.push({
+				areatag: areatag,
+				description: rest.join(' ')
+			});
+			continue;
+		}
+
+		// Standard format: AREATAG description
 		var spaceIdx = line.indexOf(' ');
 		var tabIdx = line.indexOf('\t');
 		var sepIdx = -1;
