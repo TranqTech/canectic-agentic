@@ -65,9 +65,12 @@ block content
                                       = new Date(el.last_imported_at).toLocaleDateString()
                                     else
                                       span.text-muted Never
-                                  td
-                                    a.btn.btn-sm.btn-outline-primary(href='/admin/filebone/view/' + el.id)
+                                  td.text-end
+                                    a.btn.btn-sm.btn-outline-primary.me-1(href='/admin/filebone/view/' + el.id)
                                       i.bi.bi-eye
+                                    form.d-inline(method='POST' action='/admin/filebone/' + el.id + '/remove' onsubmit='return confirm("Delete this filebone and all its area entries?")')
+                                      button.btn.btn-sm.btn-outline-danger(type='submit')
+                                        i.bi.bi-trash
                       else
                         .card-body
                           p.text-muted.mb-0 No filebones yet.

@@ -36,6 +36,18 @@ async function createEcholist(networkId, name, description, isDefault) {
 	if (!networkId) { returnObj.errormessages.push('Network ID is required'); return returnObj; }
 	if (!name || !name.trim()) { returnObj.errormessages.push('Name is required'); return returnObj; }
 
+	// Check for existing filebone with same name on this network -- return it instead of creating duplicate
+	var existing = await postgres.queryOne(
+		"SELECT id FROM file_echolists WHERE network_id = $1 AND LOWER(name) = LOWER($2)",
+		[parseInt(networkId), name.trim()]
+	);
+	if (existing) {
+		returnObj.status = true;
+		returnObj.insertId = existing.id;
+		returnObj.existing = true;
+		return returnObj;
+	}
+
 	if (isDefault) {
 		await postgres.write(
 			"UPDATE file_echolists SET is_default = false WHERE network_id = $1 AND is_default = true",

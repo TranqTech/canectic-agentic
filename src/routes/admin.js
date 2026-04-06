@@ -2776,13 +2776,15 @@ router.post('/echolist/:networkId/new', multer({ dest: os.tmpdir() }).single('ec
 		if (parsed && parsed.length > 0) {
 			var diff = await networkEcholist.buildImportDiff(echolistId, parsed);
 			var importResult = await networkEcholist.executeImport(echolistId, diff);
+			var verb = result.existing ? 'updated' : 'created';
 			await flash.setOne(req, 'success',
-				'Echolist "' + name + '" created with ' + importResult.newCount + ' area(s) imported.');
+				'Echolist "' + name + '" ' + verb + ' with ' + importResult.newCount + ' new, ' + importResult.changedCount + ' changed, ' + importResult.removedCount + ' removed.');
 		} else {
-			await flash.setOne(req, 'warning', 'Echolist "' + name + '" created but no areas found in file.');
+			await flash.setOne(req, result.existing ? 'info' : 'warning',
+				'Echolist "' + name + '" ' + (result.existing ? 'already exists' : 'created') + (result.existing ? '.' : ' but no areas found in file.'));
 		}
 	} else {
-		await flash.setOne(req, 'success', 'Echolist "' + name + '" created (no file uploaded).');
+		await flash.setOne(req, 'success', 'Echolist "' + name + '" ' + (result.existing ? 'already exists.' : 'created (no file uploaded).'));
 	}
 
 	res.redirect('/admin/echolist/' + networkId);
@@ -3174,12 +3176,15 @@ router.post('/filebone/:networkId/new', multer({ dest: os.tmpdir() }).single('ec
 		if (parsed && parsed.length > 0) {
 			var diff = await fileEcholist.buildImportDiff(echolistId, parsed);
 			var importResult = await fileEcholist.executeImport(echolistId, diff);
-			await flash.setOne(req, 'success', 'Filebone "' + name + '" created with ' + importResult.newCount + ' area(s) imported.');
+			var verb = result.existing ? 'updated' : 'created';
+			await flash.setOne(req, 'success',
+				'Filebone "' + name + '" ' + verb + ' with ' + importResult.newCount + ' new, ' + importResult.changedCount + ' changed, ' + importResult.removedCount + ' removed.');
 		} else {
-			await flash.setOne(req, 'warning', 'Filebone "' + name + '" created but no areas found in file.');
+			await flash.setOne(req, result.existing ? 'info' : 'warning',
+				'Filebone "' + name + '" ' + (result.existing ? 'already exists' : 'created') + (result.existing ? '.' : ' but no areas found in file.'));
 		}
 	} else {
-		await flash.setOne(req, 'success', 'Filebone "' + name + '" created (no file uploaded).');
+		await flash.setOne(req, 'success', 'Filebone "' + name + '" ' + (result.existing ? 'already exists.' : 'created (no file uploaded).'));
 	}
 
 	res.redirect('/admin/filebone/' + networkId);
