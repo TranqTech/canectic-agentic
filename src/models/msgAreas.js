@@ -326,9 +326,6 @@ async function createMsgTables() {
 		var tTable = "mb_" + shorty + "_threads";
 		await tableTools.checkOrCreateTable(mTable, msgCols, msgRemoveCols);
 		await tableTools.checkOrCreateTable(tTable, threadCols, threadRemoveCols);
-		// Migrate seen_by and path from VARCHAR(255) to TEXT on existing tables
-		await postgres.write("ALTER TABLE " + mTable + " ALTER COLUMN seen_by TYPE TEXT");
-		await postgres.write("ALTER TABLE " + mTable + " ALTER COLUMN path TYPE TEXT");
 	}
 }
 

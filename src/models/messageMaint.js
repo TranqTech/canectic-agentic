@@ -60,6 +60,9 @@ async function maintainAllAreaTables() {
 
 		await tableTools.checkOrCreateTable(mTable, msgCols,    msgRemove);
 		await tableTools.checkOrCreateTable(tTable, threadCols, threadRemove);
+		// Migrate seen_by and path from VARCHAR(255) to TEXT on existing tables
+		await pgdb.write("ALTER TABLE " + mTable + " ALTER COLUMN seen_by TYPE TEXT");
+		await pgdb.write("ALTER TABLE " + mTable + " ALTER COLUMN path TYPE TEXT");
 	}
 
 	alogger.writeAlog(5, 'messageMaint: done', 'greenbright');
