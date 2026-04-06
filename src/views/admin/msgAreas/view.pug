@@ -58,25 +58,33 @@ block content
                               = edate.toFormat('MMMM dd, yyyy')
                       .card-body
                         .row
-                          .col-6
+                          .col-4
                             h6
                               - var mcount = thread.message_count.toLocaleString()
-                              //#{thread.message_count.toLocaleString()}
-                              //=thread.message_count
                               = mcount
-                              | 
+                              |
                               if thread.message_count > 1
                                 |Messages
                               else
                                 |Message
-                          .col-6
-                            .text-end
+                          .col-4
+                            .text-center
                               h6
                                 |Started:
-                                | 
+                                |
                                 - var e1date = Date.parse(thread.started_at)
                                 - var edate = DateTime.fromMillis(e1date)
                                 = edate.toFormat('MMMM dd, yyyy')
+                          .col-4
+                            .text-end
+                              button.btn.btn-sm.btn-outline-danger.delete-thread-btn(
+                                type='button'
+                                data-uuid=thread.uuid
+                                data-subject=thread.subject
+                                data-count=thread.message_count
+                                onclick='event.stopPropagation()'
+                              )
+                                i.bi.bi-trash
                     br
         .col-3
           .row
@@ -167,22 +175,57 @@ block content
                         )
 
 
+      //- Delete thread confirmation modal
+      if msgArea
+        #deleteThreadModal.modal.fade(tabindex='-1' aria-hidden='true')
+          .modal-dialog.modal-dialog-centered
+            .modal-content
+              .modal-header.bg-danger.text-white
+                h5.modal-title Delete Thread
+                button.btn-close(type='button' data-bs-dismiss='modal')
+              .modal-body
+                p Are you sure you want to delete this thread?
+                p.fw-bold#delThreadSubject
+                p.text-danger
+                  i.bi.bi-exclamation-triangle.me-1
+                  | This will permanently delete #[strong#delThreadCount] message(s).
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                form#delThreadForm(method='POST' style='display:inline')
+                  button.btn.btn-danger(type='submit')
+                    i.bi.bi-trash.me-1
+                    | Delete Thread
+
   script.
-    
+    var card_shortcode = !{JSON.stringify(msgArea ? msgArea.shortcode : '')};
     document.addEventListener('DOMContentLoaded', function() {
-      const threadcards = document.querySelectorAll('.threadcard');
-      threadcards.forEach(card =>{
-        card.style.cursor = 'pointer'
+      var threadcards = document.querySelectorAll('.threadcard');
+      threadcards.forEach(function(card) {
+        card.style.cursor = 'pointer';
         card.addEventListener('click', function() {
-          //alert("Bang!")
-          const threaduuid = this.getAttribute('data-bs-thread-uuid')
-          const shortcode = this.getAttribute('data-bs-shortcode')
-          if ((threaduuid)&&(shortcode)){
-            //alert(threadid)
-            window.location.href = `/admin/msgArea/${shortcode}/thread/${threaduuid}`
-          }else{
-            alert("No ID!")
+          var threaduuid = this.getAttribute('data-bs-thread-uuid');
+          var shortcode = this.getAttribute('data-bs-shortcode');
+          if (threaduuid && shortcode) {
+            window.location.href = '/admin/msgArea/' + shortcode + '/thread/' + threaduuid;
           }
-        })
-      })
-    })
+        });
+      });
+
+      // Delete thread buttons
+      var delBtns = document.querySelectorAll('.delete-thread-btn');
+      var delModal = document.getElementById('deleteThreadModal');
+      if (delModal) {
+        delBtns.forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var uuid = btn.getAttribute('data-uuid');
+            var subject = btn.getAttribute('data-subject');
+            var count = btn.getAttribute('data-count');
+            document.getElementById('delThreadSubject').textContent = subject;
+            document.getElementById('delThreadCount').textContent = count;
+            document.getElementById('delThreadForm').action = '/admin/msgArea/' + card_shortcode + '/thread/' + uuid + '/delete';
+            new bootstrap.Modal(delModal).show();
+          });
+        });
+      }
+    });

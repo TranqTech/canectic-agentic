@@ -597,6 +597,7 @@ export {
 	createTablesForArea,
 	GetShortcodeList,
 	updateAreaStats,
+	updateStatsForArea,
 	recalculateAreaCounts,
 	ensureQwkConfNumbers
 };

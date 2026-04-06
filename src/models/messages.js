@@ -803,6 +803,52 @@ async function deleteMessageByUUID(uuid, shortcode) {
 	}
 }
 
+async function deleteThreadByUUID(uuid, shortcode) {
+	if (!uuid || !shortcode) return { status: false, deleted: 0 };
+
+	var shorty      = shortcode.toLowerCase().trim();
+	var msgtable    = "mb_" + shorty + "_msgs";
+	var threadtable = "mb_" + shorty + "_threads";
+
+	var thread = await postgres.queryOne(
+		"SELECT * FROM " + threadtable + " WHERE uuid = $1",
+		[uuid]
+	);
+	if (!thread) return { status: false, deleted: 0 };
+
+	try {
+		// Delete all messages in the thread
+		var msgResult = await postgres.query(
+			"SELECT id FROM " + msgtable + " WHERE thread_id = $1",
+			[thread.id]
+		);
+		var msgCount = msgResult ? msgResult.length : 0;
+
+		await postgres.write(
+			"DELETE FROM " + msgtable + " WHERE thread_id = $1",
+			[thread.id]
+		);
+
+		// Delete the thread row
+		await postgres.write(
+			"DELETE FROM " + threadtable + " WHERE id = $1",
+			[thread.id]
+		);
+
+		// Update area message count
+		try {
+			var msgAreasModule = await import('./msgAreas.js');
+			await msgAreasModule.updateStatsForArea(shortcode);
+		} catch (e) { /* stats update is non-critical */ }
+
+		alogger.writeAlog(5, 'Deleted thread ' + uuid + ' (' + msgCount + ' messages) from ' + shortcode, 'yellow');
+		return { status: true, deleted: msgCount };
+	} catch (error) {
+		alogger.writeAlog(3, 'deleteThreadByUUID: error deleting thread ' + uuid + ': ' + error.message, 'redbright');
+		return { status: false, deleted: 0 };
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -837,6 +883,7 @@ export {
 
 	// Message deletion (migrated)
 	deleteMessageByUUID,
+	deleteThreadByUUID,
 
 	// Utilities (view-layer copies)
 	formatBodyHtml,

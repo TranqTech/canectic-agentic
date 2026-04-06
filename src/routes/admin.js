@@ -1255,19 +1255,41 @@ router.get('/msgArea/:shortcode', async (req, res, next) => {
 });
 
 router.post('/deletemsg/:shortcode/:uuid', urlencodedParser, requireAdmin, async (req, res) => {
-	var currentuser = await getCurrentUser(req);
 	var shortcode   = req.params.shortcode.trim();
 	var uuid        = req.params.uuid.trim();
-	if (!uuid || !shortcode) {
-		res.redirect('/admin/');
-		return;
+	if (!uuid || !shortcode) return res.redirect('/admin/');
+
+	// Find the thread UUID so we can redirect back to the thread view
+	var msgtable = 'mb_' + shortcode.toLowerCase() + '_msgs';
+	var dbmsg = await postgres.queryOne("SELECT thread_id FROM " + msgtable + " WHERE uuid = $1", [uuid]);
+	var threadUuid = null;
+	if (dbmsg && dbmsg.thread_id) {
+		var threadtable = 'mb_' + shortcode.toLowerCase() + '_threads';
+		var thread = await postgres.queryOne("SELECT uuid FROM " + threadtable + " WHERE id = $1", [dbmsg.thread_id]);
+		if (thread) threadUuid = thread.uuid;
 	}
+
 	var delsuccess = await messages.deleteMessageByUUID(uuid, shortcode);
-	if (delsuccess) {
-		res.redirect('/admin/msgArea/' + shortcode);
-	} else {
-		res.redirect('/admin');
+	if (delsuccess && threadUuid) {
+		// Check if the thread still has messages
+		var remaining = await postgres.queryOne("SELECT COUNT(*) AS cnt FROM " + msgtable + " WHERE thread_id = $1", [dbmsg.thread_id]);
+		if (remaining && parseInt(remaining.cnt) > 0) {
+			return res.redirect('/admin/msgArea/' + shortcode + '/thread/' + threadUuid);
+		}
 	}
+	res.redirect('/admin/msgArea/' + shortcode);
+});
+
+router.post('/msgArea/:shortcode/thread/:uuid/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var shortcode = req.params.shortcode.trim();
+	var uuid      = req.params.uuid.trim();
+	if (!uuid || !shortcode) return res.redirect('/admin/');
+
+	var result = await messages.deleteThreadByUUID(uuid, shortcode);
+	if (result.status) {
+		alogger.writeAlog(5, 'Thread ' + uuid + ' deleted from ' + shortcode + ' (' + result.deleted + ' messages)', 'yellow');
+	}
+	res.redirect('/admin/msgArea/' + shortcode);
 });
 
 // -------------------------------------------------------
