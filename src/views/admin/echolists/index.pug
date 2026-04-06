@@ -137,18 +137,24 @@ block content
 
           .col-1
 
-      //- New Echolist Modal
+      //- New Echolist Modal (create + import in one step)
       #newEcholistModal.modal.fade(tabindex='-1' aria-labelledby='newEcholistModalLabel' aria-hidden='true')
         .modal-dialog
           .modal-content
-            form(method='POST' action='/admin/echolist/' + network.id + '/new')
+            form(method='POST' action='/admin/echolist/' + network.id + '/new' enctype='multipart/form-data')
               .modal-header
                 h5#newEcholistModalLabel.modal-title New Echolist
                 button.btn-close(type='button' data-bs-dismiss='modal' aria-label='Close')
               .modal-body
                 .mb-3
+                  label.form-label(for='newFile') Echolist File
+                    span.text-danger *
+                  input#newFile.form-control(type='file' name='echolist_file' accept='.na,.txt,.bbs,.lst' required)
+                  small.text-muted Name will be taken from the filename unless overridden below
+                .mb-3
                   label.form-label(for='newName') Name
-                  input#newName.form-control(type='text' name='name' required placeholder='e.g. BACKBONE.NA')
+                    span.text-muted.ms-1 (optional, overrides filename)
+                  input#newName.form-control(type='text' name='name' placeholder='e.g. BACKBONE')
                 .mb-3
                   label.form-label(for='newDescription') Description
                   input#newDescription.form-control(type='text' name='description' placeholder='Optional description')
@@ -158,7 +164,7 @@ block content
               .modal-footer
                 button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                 button.btn.btn-success(type='submit')
-                  i.bi.bi-plus-lg.me-1
+                  i.bi.bi-upload.me-1
                   | Create
 
       //- Edit Echolist Modal

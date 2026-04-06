@@ -2707,18 +2707,47 @@ router.get('/echolist/:networkId', async (req, res) => {
 	});
 });
 
-// POST /admin/echolist/:networkId/new — Create a new echolist
-router.post('/echolist/:networkId/new', urlencodedParser, requireAdmin, async (req, res) => {
-	var networkId = parseInt(req.params.networkId);
-	var name        = (req.body.name || '').trim();
+// POST /admin/echolist/:networkId/new — Create echolist + import from file
+router.post('/echolist/:networkId/new', multer({ dest: os.tmpdir() }).single('echolist_file'), requireAdmin, async (req, res) => {
+	var networkId   = parseInt(req.params.networkId);
 	var description = (req.body.description || '').trim();
 	var isDefault   = req.body.is_default === 'true';
 
+	// Derive name from filename if not provided (keep extension)
+	var name = (req.body.name || '').trim();
+	if (!name && req.file && req.file.originalname) {
+		name = req.file.originalname.trim();
+	}
+	if (!name) name = 'Echolist';
+
 	var result = await networkEcholist.createEcholist(networkId, name, description, isDefault);
-	if (result.status) {
-		await flash.setOne(req, 'success', 'Echolist "' + name + '" created.');
-	} else {
+	if (!result.status) {
+		if (req.file) try { fs.unlinkSync(req.file.path); } catch (e) {}
 		await flash.setOne(req, 'danger', 'Failed to create echolist: ' + (result.errormessages || []).join(', '));
+		return res.redirect('/admin/echolist/' + networkId);
+	}
+
+	var echolistId = result.insertId;
+
+	// Import file if provided
+	if (req.file) {
+		var fileText = '';
+		try { fileText = fs.readFileSync(req.file.path, 'utf8'); }
+		finally { try { fs.unlinkSync(req.file.path); } catch (e) {} }
+
+		var { parseAreasBbs } = await import('../utils/areasBbsParser.js');
+		var parsed = parseAreasBbs(fileText);
+
+		if (parsed && parsed.length > 0) {
+			var diff = await networkEcholist.buildImportDiff(echolistId, parsed);
+			var importResult = await networkEcholist.executeImport(echolistId, diff);
+			await flash.setOne(req, 'success',
+				'Echolist "' + name + '" created with ' + importResult.newCount + ' area(s) imported.');
+		} else {
+			await flash.setOne(req, 'warning', 'Echolist "' + name + '" created but no areas found in file.');
+		}
+	} else {
+		await flash.setOne(req, 'success', 'Echolist "' + name + '" created (no file uploaded).');
 	}
 
 	res.redirect('/admin/echolist/' + networkId);
