@@ -366,6 +366,18 @@ export async function enqueueRethread(opts = {}) {
 }
 
 /**
+ * Reconcile echolist/filebone local_area_id with network area mappings.
+ * Called by: scheduler (daily), admin panel.
+ */
+export async function enqueueReconcileEcholists() {
+	return maintenanceQueue.add('reconcile-echolists', {}, {
+		jobId: 'reconcile-echolists',
+		removeOnComplete: true,
+		removeOnFail: true,
+	});
+}
+
+/**
  * Regenerate long_desc_html for file entries.
  * Called by: admin panel, CLI.
  */

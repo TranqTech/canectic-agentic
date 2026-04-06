@@ -430,6 +430,33 @@ async function getAreasAcrossNetwork(networkId) {
 // local_area_id sync
 // ---------------------------------------------------------------------------
 
+async function reconcileLocalAreaIds() {
+	await postgres.write(
+		"UPDATE file_echolist_areas nea SET local_area_id = fna.area_id " +
+		"FROM file_network_areas fna " +
+		"JOIN file_echolists nel ON nel.id = nea.echolist_id " +
+		"WHERE fna.network_id = nel.network_id " +
+		"AND UPPER(nea.areatag) = UPPER(fna.areatag) " +
+		"AND nea.active = true " +
+		"AND (nea.local_area_id IS NULL OR nea.local_area_id != fna.area_id)"
+	);
+
+	await postgres.write(
+		"UPDATE file_echolist_areas nea SET local_area_id = NULL " +
+		"FROM file_echolists nel " +
+		"WHERE nel.id = nea.echolist_id " +
+		"AND nea.local_area_id IS NOT NULL " +
+		"AND nea.active = true " +
+		"AND NOT EXISTS (" +
+		"  SELECT 1 FROM file_network_areas fna " +
+		"  WHERE fna.network_id = nel.network_id " +
+		"  AND UPPER(fna.areatag) = UPPER(nea.areatag)" +
+		")"
+	);
+
+	alogger.writeAlog(5, 'Filebone local_area_id reconciliation complete', 'greenbright');
+}
+
 async function syncLocalAreaId(networkId, areaId, areatag, action) {
 	var echolists = await postgres.query(
 		"SELECT id FROM file_echolists WHERE network_id = $1",
@@ -476,5 +503,6 @@ export {
 	getAreasByEcholist,
 	getEcholistStats,
 	getAreasAcrossNetwork,
+	reconcileLocalAreaIds,
 	syncLocalAreaId
 };

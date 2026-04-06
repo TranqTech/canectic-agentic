@@ -83,6 +83,17 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily echolist/filebone reconciliation
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('reconcile-echolists-daily', {
+			pattern: '0 3 30 * * *',   // 3:30 AM daily
+		}, {
+			name: 'reconcile-echolists',
+			data: {},
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily user record maintenance
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('user-maintenance-daily', {

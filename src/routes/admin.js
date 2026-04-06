@@ -3523,6 +3523,7 @@ router.post('/events/trigger', express.json(), requireAdmin, async (req, res) =>
 		case 'scan-nodelists':    await jobs.enqueueScanNodelists(); triggered = 'Scan Nodelists'; break;
 		case 'purge-tossed':      await jobs.enqueuePurgeTossed(); triggered = 'Purge Tossed Packets'; break;
 		case 'rethread':          await jobs.enqueueRethread(); triggered = 'Rebuild Threads'; break;
+		case 'reconcile-echolists': await jobs.enqueueReconcileEcholists(); triggered = 'Reconcile Echolists'; break;
 		default:
 			return res.json({ status: false, error: 'Unknown job' });
 	}

@@ -367,6 +367,14 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'reconcile-echolists': {
+				var networkEcholist = await import("../src/models/networkEcholist.js");
+				var fileEcholist = await import("../src/models/fileEcholist.js");
+				await networkEcholist.reconcileLocalAreaIds();
+				await fileEcholist.reconcileLocalAreaIds();
+				break;
+			}
+
 			case 'rethread': {
 				var msgBase = await import("../src/maintenance/messageBase.js");
 				await msgBase.rethreadAreas({
