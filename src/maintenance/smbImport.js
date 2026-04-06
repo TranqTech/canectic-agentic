@@ -44,15 +44,27 @@ function smbToDbObj(msg) {
 	}
 
 	// Build FTN address components from sender address
-	var sourceZone = '';
-	var sourceNet = '';
-	var sourceNode = '';
+	var sourceZone = null;
+	var sourceNet = null;
+	var sourceNode = null;
 	if (hdr.senderAddr) {
 		var addrParts = hdr.senderAddr.match(/(\d+):(\d+)\/(\d+)/);
 		if (addrParts) {
-			sourceZone = addrParts[1];
-			sourceNet = addrParts[2];
-			sourceNode = addrParts[3];
+			sourceZone = parseInt(addrParts[1]);
+			sourceNet = parseInt(addrParts[2]);
+			sourceNode = parseInt(addrParts[3]);
+		}
+	}
+
+	var destZone = null;
+	var destNet = null;
+	var destNode = null;
+	if (hdr.recipientAddr) {
+		var destParts = hdr.recipientAddr.match(/(\d+):(\d+)\/(\d+)/);
+		if (destParts) {
+			destZone = parseInt(destParts[1]);
+			destNet = parseInt(destParts[2]);
+			destNode = parseInt(destParts[3]);
 		}
 	}
 
@@ -68,9 +80,9 @@ function smbToDbObj(msg) {
 		source_zone: sourceZone,
 		source_net: sourceNet,
 		source_node: sourceNode,
-		destination_zone: '',
-		destination_net: '',
-		destination_node: '',
+		destination_zone: destZone,
+		destination_net: destNet,
+		destination_node: destNode,
 		to_user: hdr.recipient || 'All',
 		from_user: hdr.sender || 'Unknown',
 		subject: hdr.subject || '(no subject)',
