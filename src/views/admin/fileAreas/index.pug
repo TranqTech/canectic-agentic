@@ -382,7 +382,7 @@ block content
                       input(type='number' id='na_readsecurity' min=1 max=255 name='readsecurity' class='form-control' value=50 required)
                       br
                       label(for='na_postsecurity') Upload Security:
-                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=50 required)
+                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=100 required)
                       br
                       label(for='na_active') Status:
                       select#na_active(name='active').form-select
@@ -683,7 +683,7 @@ block content
             // Reset to empty defaults
             document.getElementById('na_browsesecurity').value = 0;
             document.getElementById('na_readsecurity').value = 50;
-            document.getElementById('na_postsecurity').value = 50;
+            document.getElementById('na_postsecurity').value = 100;
             renderAreaFlags('na_browse_perm', 'browse_perm_flags', [], allPerms, 'bg-success');
             renderAreaFlags('na_browse_rest', 'browse_rest_flags', [], allRestrs, 'bg-danger');
             renderAreaFlags('na_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
@@ -699,7 +699,7 @@ block content
             var data = await resp.json();
             document.getElementById('na_browsesecurity').value = data.browse_security || 0;
             document.getElementById('na_readsecurity').value = data.read_security || 50;
-            document.getElementById('na_postsecurity').value = data.post_security || 50;
+            document.getElementById('na_postsecurity').value = data.post_security || 100;
             renderAreaFlags('na_browse_perm', 'browse_perm_flags', parseFlags(JSON.stringify(data.browse_perm_flags)), allPerms, 'bg-success');
             renderAreaFlags('na_browse_rest', 'browse_rest_flags', parseFlags(JSON.stringify(data.browse_rest_flags)), allRestrs, 'bg-danger');
             renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');

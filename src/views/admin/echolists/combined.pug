@@ -187,7 +187,7 @@ block content
                           input#subReadSec.form-control(type='number' name='read_security' min=0 max=255 value=50)
                         .col-6
                           label.form-label Post Security
-                          input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=50)
+                          input#subPostSec.form-control(type='number' name='post_security' min=0 max=255 value=60)
 
                       .form-check.mt-3
                         input#subAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
@@ -285,7 +285,7 @@ block content
               .then(function(r) { return r.json(); })
               .then(function(data) {
                 document.getElementById('subReadSec').value = data.read_security || 50;
-                document.getElementById('subPostSec').value = data.post_security || 50;
+                document.getElementById('subPostSec').value = data.post_security || 60;
               });
           });
         }

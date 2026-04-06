@@ -372,7 +372,7 @@ block content
                       input(type='number' id='na_readsecurity' min=1 max=255 name='readsecurity' class='form-control' value=50 required)
                       br
                       label(for='na_postsecurity') Post Security:
-                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=50 required)
+                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=60 required)
                       br
                       label(for='na_maxage') Maximum Participant Age:
                       input(type='number' id='na_maxage' min=13 max=255 name='maxage' class='form-control' value=255)
@@ -656,7 +656,7 @@ block content
           if (!sc) {
             // Reset to empty defaults
             document.getElementById('na_readsecurity').value = 50;
-            document.getElementById('na_postsecurity').value = 50;
+            document.getElementById('na_postsecurity').value = 60;
             renderAreaFlags('na_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
             renderAreaFlags('na_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
             renderAreaFlags('na_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
@@ -669,7 +669,7 @@ block content
             if (!resp.ok) return;
             var data = await resp.json();
             document.getElementById('na_readsecurity').value = data.read_security || 50;
-            document.getElementById('na_postsecurity').value = data.post_security || 50;
+            document.getElementById('na_postsecurity').value = data.post_security || 60;
             renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');
             renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(data.read_rest_flags)), allRestrs, 'bg-danger');
             renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(data.post_perm_flags)), allPerms, 'bg-success');
