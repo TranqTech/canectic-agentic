@@ -3028,13 +3028,15 @@ router.post('/echolist/:networkId/combined/unmap', urlencodedParser, requireAdmi
 	var deleteArea   = req.body.delete_area === 'true';
 	var shortcode    = (req.body.shortcode || '').trim();
 
+	var deleteTables = req.body.delete_tables === 'true';
+
 	var removeResult = await networkAreas.removeAreaFromNetwork(networkId, areaId);
 	if (removeResult.status) {
 		await peerAreaSubscriptions.removeSubscriptionsForNetworkArea(networkId, areaId);
 		if (deleteArea && shortcode) {
-			var delResult = await msgAreas.removeArea(shortcode, false);
+			var delResult = await msgAreas.removeArea(shortcode, deleteTables);
 			if (delResult.status) {
-				await flash.setOne(req, 'success', 'Area unmapped and deleted.');
+				await flash.setOne(req, 'success', 'Area unmapped and deleted.' + (deleteTables ? ' Message tables removed.' : ''));
 			} else {
 				await flash.setOne(req, 'warning', 'Unmapped but area deletion failed: ' + (delResult.errormessages || []).join(', '));
 			}
@@ -3367,13 +3369,15 @@ router.post('/filebone/:networkId/combined/unmap', urlencodedParser, requireAdmi
 	var deleteArea   = req.body.delete_area === 'true';
 	var shortcode    = (req.body.shortcode || '').trim();
 
+	var deleteFiles = req.body.delete_files === 'true';
+
 	var removeResult = await fileNetworkAreas.removeMapping(networkId, areaId);
 	if (removeResult) {
 		await filePeerSubscriptions.removeSubscriptionsForFileArea(networkId, areaId);
 		if (deleteArea && shortcode) {
-			var delResult = await fileAreas.removeArea(shortcode);
+			var delResult = await fileAreas.removeArea(shortcode, deleteFiles);
 			if (delResult && delResult.status) {
-				await flash.setOne(req, 'success', 'File area unmapped and deleted.');
+				await flash.setOne(req, 'success', 'File area unmapped and deleted.' + (deleteFiles ? ' Files removed from disk.' : ''));
 			} else {
 				await flash.setOne(req, 'warning', 'Unmapped but area deletion failed.');
 			}

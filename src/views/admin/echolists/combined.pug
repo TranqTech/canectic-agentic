@@ -261,7 +261,10 @@ block content
                     | This area is not in any echolist for this network. Unmapping will stop it being exchanged with peers.
                   .form-check
                     input#unmapDelete.form-check-input(type='checkbox' name='delete_area' value='true')
-                    label.form-check-label(for='unmapDelete') Also delete the area (messages will be kept)
+                    label.form-check-label(for='unmapDelete') Also delete the area
+                  .form-check.ms-4#unmapTablesRow(style='display:none')
+                    input#unmapDeleteTables.form-check-input(type='checkbox' name='delete_tables' value='true')
+                    label.form-check-label.text-danger(for='unmapDeleteTables') Also delete message tables and all messages (cannot be undone)
                 .modal-footer
                   button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                   button.btn.btn-danger(type='submit')
@@ -406,8 +409,16 @@ block content
               document.getElementById('unmapAreatagDisplay').textContent = btn.dataset.areatag;
               document.getElementById('unmapAreaName').textContent = btn.dataset.areaName || btn.dataset.areatag;
               document.getElementById('unmapDelete').checked = false;
+              document.getElementById('unmapDeleteTables').checked = false;
+              document.getElementById('unmapTablesRow').style.display = 'none';
               new bootstrap.Modal(unmapModal).show();
             });
+          });
+
+          // Show/hide delete tables checkbox when delete area is toggled
+          document.getElementById('unmapDelete').addEventListener('change', function() {
+            document.getElementById('unmapTablesRow').style.display = this.checked ? '' : 'none';
+            if (!this.checked) document.getElementById('unmapDeleteTables').checked = false;
           });
         }
       });

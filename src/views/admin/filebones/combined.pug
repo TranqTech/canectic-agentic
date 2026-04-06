@@ -277,7 +277,10 @@ block content
                     | This area is not in any filebone for this network. Unmapping will stop it being exchanged with peers.
                   .form-check
                     input#unmapDelete.form-check-input(type='checkbox' name='delete_area' value='true')
-                    label.form-check-label(for='unmapDelete') Also delete the area (messages will be kept)
+                    label.form-check-label(for='unmapDelete') Also delete the area
+                  .form-check.ms-4#unmapFilesRow(style='display:none')
+                    input#unmapDeleteFiles.form-check-input(type='checkbox' name='delete_files' value='true')
+                    label.form-check-label.text-danger(for='unmapDeleteFiles') Also delete files from disk (cannot be undone)
                 .modal-footer
                   button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
                   button.btn.btn-danger(type='submit')
@@ -432,8 +435,15 @@ block content
               document.getElementById('unmapAreatagDisplay').textContent = btn.dataset.areatag;
               document.getElementById('unmapAreaName').textContent = btn.dataset.areaName || btn.dataset.areatag;
               document.getElementById('unmapDelete').checked = false;
+              document.getElementById('unmapDeleteFiles').checked = false;
+              document.getElementById('unmapFilesRow').style.display = 'none';
               new bootstrap.Modal(unmapModal).show();
             });
+          });
+
+          document.getElementById('unmapDelete').addEventListener('change', function() {
+            document.getElementById('unmapFilesRow').style.display = this.checked ? '' : 'none';
+            if (!this.checked) document.getElementById('unmapDeleteFiles').checked = false;
           });
         }
       });
