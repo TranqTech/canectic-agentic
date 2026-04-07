@@ -1332,9 +1332,18 @@ function expandHome(dir) {
 	return dir;
 }
 
+// Resolve a file group/area directory path (expand ~ and resolve relative to file_base_dir)
+function resolveFileDir(dir) {
+	if (!dir) return null;
+	var expanded = expandHome(dir);
+	if (path.isAbsolute(expanded)) return expanded;
+	var globalBase = expandHome(appConfig.get('file_base_dir', 'files'));
+	return path.join(globalBase, expanded);
+}
+
 // Check if a directory exists (AJAX endpoint for file group/area forms)
 router.get('/fileGroup/checkdir', requireAdmin, async (req, res) => {
-	var dir = expandHome((req.query.dir || '').trim());
+	var dir = resolveFileDir((req.query.dir || '').trim());
 	if (!dir) return res.json({ exists: false, error: 'No path specified' });
 	try {
 		var exists = fs.existsSync(dir);
@@ -1346,7 +1355,7 @@ router.get('/fileGroup/checkdir', requireAdmin, async (req, res) => {
 
 // Create a directory (AJAX endpoint for file group/area forms)
 router.post('/fileGroup/mkdir', express.json(), requireAdmin, async (req, res) => {
-	var dir = expandHome((req.body.dir || '').trim());
+	var dir = resolveFileDir((req.body.dir || '').trim());
 	if (!dir) return res.json({ status: false, error: 'No path specified' });
 	try {
 		fs.mkdirSync(dir, { recursive: true });

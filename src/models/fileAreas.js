@@ -39,7 +39,15 @@ function normalizeFlags(input) {
  * Three-level hierarchy: global file_base_dir → group base_dir → area sub_dir
  */
 function resolveAreaPath(group, area) {
-	var root = (group && group.base_dir) ? expandHome(group.base_dir) : appConfig.get('file_base_dir', 'files');
+	var globalBase = expandHome(appConfig.get('file_base_dir', 'files'));
+	var root;
+	if (group && group.base_dir) {
+		var groupDir = expandHome(group.base_dir);
+		// Relative group base_dir is treated as a subdirectory of the global file_base_dir
+		root = path.isAbsolute(groupDir) ? groupDir : path.join(globalBase, groupDir);
+	} else {
+		root = globalBase;
+	}
 	var sub = (area && area.sub_dir) ? area.sub_dir : (area ? area.shortcode.toLowerCase() : '');
 	return path.join(root, sub);
 }

@@ -79,7 +79,14 @@ async function newGroup(formObj) {
 	if (dbres.status === true) {
 		returnObj.status = true;
 		// Create the group's base directory if specified
-		var groupDir = expandHome(pgObj.base_dir) || appConfig.get('file_base_dir', 'files');
+		var globalBase = expandHome(appConfig.get('file_base_dir', 'files'));
+		var groupDir;
+		if (pgObj.base_dir) {
+			var expanded = expandHome(pgObj.base_dir);
+			groupDir = path.isAbsolute(expanded) ? expanded : path.join(globalBase, expanded);
+		} else {
+			groupDir = globalBase;
+		}
 		try {
 			if (!fs.existsSync(groupDir)) {
 				fs.mkdirSync(groupDir, { recursive: true });
