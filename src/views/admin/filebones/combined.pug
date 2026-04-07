@@ -206,6 +206,19 @@ block content
                         select#subNewscan.form-select(name='newscan_default')
                           option(value='true' selected) Yes
                           option(value='false') No
+                      .row
+                        .col-6
+                          .mb-3
+                            label.form-label Max Age (days)
+                              |
+                              span(data-bs-toggle='tooltip' title='Auto-remove files older than this. Blank = no limit.') ⓘ
+                            input#subMaxAge.form-control(type='number' name='max_age_days' min=0)
+                        .col-6
+                          .mb-3
+                            label.form-label Max Files
+                              |
+                              span(data-bs-toggle='tooltip' title='Keep only the N newest files. Blank = no limit.') ⓘ
+                            input#subMaxFiles.form-control(type='number' name='max_files' min=0)
                   .row
                     .col-4
                       label.form-label Browse Security
@@ -424,6 +437,8 @@ block content
                 document.getElementById('subReadSec').value = !{defaultReadSecurity};
                 document.getElementById('subPostSec').value = !{defaultPostSecurity};
                 document.getElementById('subNewscan').value = 'true';
+                document.getElementById('subMaxAge').value = '';
+                document.getElementById('subMaxFiles').value = '';
                 renderFlags('sub_browse_perm', 'browse_perm_flags', [], allPerms, 'bg-success');
                 renderFlags('sub_browse_rest', 'browse_rest_flags', [], allRestrs, 'bg-danger');
                 renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
@@ -439,6 +454,8 @@ block content
                   document.getElementById('subReadSec').value = data.read_security || !{defaultReadSecurity};
                   document.getElementById('subPostSec').value = data.post_security || !{defaultPostSecurity};
                   document.getElementById('subNewscan').value = data.newscan_default !== false ? 'true' : 'false';
+                  document.getElementById('subMaxAge').value = data.max_age_days || '';
+                  document.getElementById('subMaxFiles').value = data.max_files || '';
                   var parseF = function(v) { try { return Array.isArray(v) ? v : JSON.parse(v || '[]'); } catch(e) { return []; } };
                   renderFlags('sub_browse_perm', 'browse_perm_flags', parseF(data.browse_perm_flags), allPerms, 'bg-success');
                   renderFlags('sub_browse_rest', 'browse_rest_flags', parseF(data.browse_rest_flags), allRestrs, 'bg-danger');

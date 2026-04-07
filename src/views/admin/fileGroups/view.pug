@@ -65,6 +65,14 @@ block content
                       h5
                         | Newscan Default:
                         = fileGroup.newscan_default !== false ? 'Yes' : 'No'
+                      if fileGroup.max_age_days
+                        h5
+                          | Max Age:
+                          = fileGroup.max_age_days + ' days'
+                      if fileGroup.max_files
+                        h5
+                          | Max Files:
+                          = fileGroup.max_files
               .card
                 .card-header.bg-darkblue.text-white
                   h4 File Areas
@@ -532,6 +540,12 @@ block content
                         select#na_newscan(name='newscan_default').form-select
                           option(value='true' selected=(fileGroup.newscan_default !== false)) Yes
                           option(value='false' selected=(fileGroup.newscan_default === false)) No
+                        br
+                        label(for='na_max_age') Max Age (days):
+                        input(type='number' id='na_max_age' name='max_age_days' class='form-control' min=0 value=fileGroup.max_age_days || '')
+                        br
+                        label(for='na_max_files') Max Files:
+                        input(type='number' id='na_max_files' name='max_files' class='form-control' min=0 value=fileGroup.max_files || '')
                       .col-5
                         label(for='na_browsesecurity') Browse Security:
                         input(
@@ -729,6 +743,12 @@ block content
                         )
                           option(value='true'  selected=(fileGroup.newscan_default !== false))  Yes
                           option(value='false' selected=(fileGroup.newscan_default === false)) No
+                        br
+                        label(for='edit_max_age') Max Age (days):
+                        input(type='number' id='edit_max_age' name='max_age_days' class='form-control' min=0 tabindex='9' value=fileGroup.max_age_days || '')
+                        br
+                        label(for='edit_max_files') Max Files:
+                        input(type='number' id='edit_max_files' name='max_files' class='form-control' min=0 tabindex='10' value=fileGroup.max_files || '')
                     .row
                       .col-1
                       .col-10

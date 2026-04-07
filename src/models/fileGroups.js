@@ -23,6 +23,8 @@ async function ensureSortOrder() {
 	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS newscan_default BOOLEAN DEFAULT true");
 	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS max_age_days INTEGER");
 	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS max_files INTEGER");
+	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS max_age_days INTEGER");
+	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS max_files INTEGER");
 }
 
 function normalizeFlags(input) {
@@ -68,6 +70,8 @@ async function newGroup(formObj) {
 		read_security: formObj.readsecurity != null && formObj.readsecurity !== '' ? parseInt(formObj.readsecurity) : appConfig.getNumber('default_file_read_security', 60),
 		post_security: formObj.postsecurity != null && formObj.postsecurity !== '' ? parseInt(formObj.postsecurity) : appConfig.getNumber('default_file_post_security', 100),
 		newscan_default: formObj.newscan_default !== 'false' && formObj.newscan_default !== false,
+		max_age_days: formObj.max_age_days ? parseInt(formObj.max_age_days) : null,
+		max_files: formObj.max_files ? parseInt(formObj.max_files) : null,
 		created_at: new Date(),
 		updated_at: null,
 		area_count: 0,
@@ -171,6 +175,8 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.readsecurity  !== undefined) updateObj.read_security = parseInt(formObj.readsecurity);
 	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
 	if (formObj.newscan_default !== undefined) updateObj.newscan_default = (formObj.newscan_default === 'true' || formObj.newscan_default === true);
+	if (formObj.max_age_days !== undefined) updateObj.max_age_days = formObj.max_age_days ? parseInt(formObj.max_age_days) : null;
+	if (formObj.max_files !== undefined) updateObj.max_files = formObj.max_files ? parseInt(formObj.max_files) : null;
 	if (formObj.active      !== undefined) updateObj.active      = (formObj.active === "true" || formObj.active === true);
 	if (formObj.browse_perm_flags !== undefined) updateObj.browse_perm_flags = normalizeFlags(formObj.browse_perm_flags);
 	if (formObj.browse_rest_flags !== undefined) updateObj.browse_rest_flags = normalizeFlags(formObj.browse_rest_flags);

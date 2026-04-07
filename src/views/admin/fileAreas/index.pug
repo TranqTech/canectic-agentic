@@ -725,6 +725,8 @@ block content
             document.getElementById('na_readsecurity').value = data.read_security || 50;
             document.getElementById('na_postsecurity').value = data.post_security || 100;
             document.getElementById('na_newscan').value = data.newscan_default !== false ? 'true' : 'false';
+            document.getElementById('na_max_age').value = data.max_age_days || '';
+            document.getElementById('na_max_files').value = data.max_files || '';
             renderAreaFlags('na_browse_perm', 'browse_perm_flags', parseFlags(JSON.stringify(data.browse_perm_flags)), allPerms, 'bg-success');
             renderAreaFlags('na_browse_rest', 'browse_rest_flags', parseFlags(JSON.stringify(data.browse_rest_flags)), allRestrs, 'bg-danger');
             renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');

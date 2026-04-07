@@ -154,6 +154,16 @@ block content
                     select#ng_newscan(name='newscan_default').form-select
                       option(value='true' selected) Yes
                       option(value='false') No
+                    br
+                    label(for="ng_max_age") Max Age (days):
+                      |
+                      span(data-bs-toggle='tooltip' title='Default for new areas. Auto-remove files older than this. 0 or blank = no limit.') ⓘ
+                    input(type='number' id='ng_max_age' name='max_age_days' class='form-control' min=0)
+                    br
+                    label(for="ng_max_files") Max Files:
+                      |
+                      span(data-bs-toggle='tooltip' title='Default for new areas. Keep only the N newest files. 0 or blank = no limit.') ⓘ
+                    input(type='number' id='ng_max_files' name='max_files' class='form-control' min=0)
                 .row
                   .col-1
                   .col-10
