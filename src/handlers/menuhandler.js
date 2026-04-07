@@ -30,6 +30,7 @@ import { QwkTransfer } from "./menucommands/qwkTransfer.js";
 import { NewsViewer } from "./menucommands/newsViewer.js";
 import { NotificationReader } from "./menucommands/notificationReader.js";
 import { FileNewscan } from "./menucommands/fileNewscan.js";
+import { DisplayScreen } from "./menucommands/displayScreen.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -1086,6 +1087,10 @@ class MenuHandler extends BaseHandler {
 
 			case "newsViewer":
 				this._runSubModule(new NewsViewer(this.call));
+				return;
+
+			case "displayScreen":
+				this._runSubModule(new DisplayScreen(this.call, { arg: entry.command_arg }));
 				return;
 
 			case "notifications":

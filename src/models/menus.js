@@ -409,6 +409,10 @@ function getAvailableCommands() {
 		{ name: 'downloadBatch',   label: 'Download Batch',    needsArg: false },
 		{ name: 'fileUpload',      label: 'Upload File',       needsArg: false },
 		{ name: 'fileSearch',      label: 'File Search',       needsArg: false },
+		{ name: 'qwkTransfer',    label: 'QWK Transfer',      needsArg: false },
+		{ name: 'newsViewer',     label: 'News Viewer',       needsArg: false },
+		{ name: 'notifications',  label: 'Notifications',     needsArg: false },
+		{ name: 'displayScreen',  label: 'Display Screen',    needsArg: true,  argLabel: 'type:Welcome or screens/filename' },
 	].sort(function(a, b) { return a.label.localeCompare(b.label); });
 }
 
