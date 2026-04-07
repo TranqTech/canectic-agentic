@@ -188,6 +188,30 @@ function getOutboundDir() {
 	return appConfig.get('ftnoutbound', 'ftn/out');
 }
 
+// BSO zone-aware outbound directory (matches ftnTosser pattern)
+function getOutboundDirForZone(zone) {
+	var baseDir = getOutboundDir();
+	var z = parseInt(zone) || 1;
+	if (z === 1) return baseDir;
+	var zoneHex = z.toString(16).padStart(3, '0');
+	return baseDir + '.' + zoneHex;
+}
+
+function _parseAddress(addr) {
+	try {
+		var zsplit  = addr.split(':');
+		var nnsplit = zsplit[1] ? zsplit[1].split('/') : [];
+		var npsplit = nnsplit[1] ? nnsplit[1].split('.') : [];
+		var zone  = parseInt(zsplit[0]);
+		var net   = parseInt(nnsplit[0]);
+		var node  = parseInt(npsplit[0]);
+		if (isNaN(zone) || isNaN(net) || isNaN(node)) return null;
+		return { zone, net, node };
+	} catch (_) {
+		return null;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Inbound TIC processing
 // ---------------------------------------------------------------------------
@@ -658,9 +682,14 @@ async function tossOutbound() {
 				continue;
 			}
 
+			// Resolve zone-aware outbound directory for this peer
+			var peerAddrParts = _parseAddress(peerAddress);
+			var peerOutDir = peerAddrParts ? getOutboundDirForZone(peerAddrParts.zone) : outDir;
+			ensureDirSync(peerOutDir);
+
 			for (var distRow of files) {
 				try {
-					var sent = await stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, outDir);
+					var sent = await stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, peerOutDir, peerAddrParts);
 					if (sent) {
 						summary.sent++;
 					} else {
@@ -708,7 +737,7 @@ async function tossOutbound() {
 /**
  * Stage one file + TIC descriptor for outbound delivery.
  */
-async function stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, outDir) {
+async function stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, outDir, peerAddrParts) {
 	// Resolve the file area for the areatag
 	var areaMapping = await fileNetworkAreas.getNetworksByFileArea(distRow.area_id);
 	var areatag = '';
@@ -811,6 +840,23 @@ async function stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, 
 			fs.linkSync(srcFilePath, attachedOutPath);
 		} catch (_) {
 			fs.copyFileSync(srcFilePath, attachedOutPath);
+		}
+	}
+
+	// Create .flo entries so the BSO scanner and mailer session can find these files.
+	// Both the TIC descriptor and attached file need flow file entries.
+	// ^ prefix = delete after send (these are outbound copies, not the originals).
+	if (peerAddrParts) {
+		var netHex  = peerAddrParts.net.toString(16).padStart(4, '0');
+		var nodeHex = peerAddrParts.node.toString(16).padStart(4, '0');
+		var destHex = netHex + nodeHex;
+		var floPath = path.join(outDir, destHex + '.flo');
+
+		try {
+			var floLines = '^' + ticOutPath + '\r\n' + '^' + attachedOutPath + '\r\n';
+			fs.appendFileSync(floPath, floLines);
+		} catch (floErr) {
+			alogger.writeAlog(3, '[TIC] Failed to create .flo entry for ' + peerAddress + ': ' + floErr.message, 'redbright');
 		}
 	}
 
