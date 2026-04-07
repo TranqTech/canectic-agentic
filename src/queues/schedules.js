@@ -25,6 +25,7 @@
 
 import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
 import * as peerConnections from '../models/peerConnections.js';
+import * as timedEvents from '../models/timedEvents.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from '../config/appConfig.js';
 
@@ -231,6 +232,28 @@ export async function registerSchedules() {
 			}
 		}
 
+		// -----------------------------------------------------------------
+		// Timed events: sysop-configured scheduled commands
+		// -----------------------------------------------------------------
+		var events = await timedEvents.getActive();
+		if (events && events.length > 0) {
+			for (var evt of events) {
+				try {
+					await maintenanceQueue.upsertJobScheduler(
+						`timed-event:${evt.id}`, {
+							pattern: evt.cron_pattern,
+						}, {
+							name: 'timed-event',
+							data: { eventId: evt.id },
+						}
+					);
+					scheduleCount++;
+				} catch (evtErr) {
+					alogger.writeAlog(3, `Failed to register timed event "${evt.name}": ${evtErr.message}`, "yellow");
+				}
+			}
+		}
+
 		alogger.writeAlog(2, `  Registered ${scheduleCount} job schedule(s)`, "cyan");
 
 	} catch (err) {
@@ -339,4 +362,30 @@ export async function removeConnectionSchedule(connectionUUID, networkType) {
 			await tossQueue.removeJobScheduler(`nntp-push:${connectionUUID}`);
 			break;
 	}
+}
+
+/**
+ * Update the schedule for a single timed event.
+ * Call from admin routes when an event is created, updated, or toggled.
+ */
+export async function updateTimedEventSchedule(eventId, cronPattern, active) {
+	var key = `timed-event:${eventId}`;
+	if (!active || !cronPattern) {
+		try { await maintenanceQueue.removeJobScheduler(key); } catch (_) {}
+		return;
+	}
+	await maintenanceQueue.upsertJobScheduler(key, {
+		pattern: cronPattern,
+	}, {
+		name: 'timed-event',
+		data: { eventId: parseInt(eventId) },
+	});
+}
+
+/**
+ * Remove the schedule for a timed event.
+ * Call when an event is deleted.
+ */
+export async function removeTimedEventSchedule(eventId) {
+	try { await maintenanceQueue.removeJobScheduler(`timed-event:${eventId}`); } catch (_) {}
 }

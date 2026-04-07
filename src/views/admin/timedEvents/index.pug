@@ -1,0 +1,248 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-clock-history.me-2
+          | Timed Events
+
+        //- Events Table
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Scheduled Events
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addEventModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Event
+          .card-body
+            if events && events.length > 0
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Name
+                    th Type
+                    th Command
+                    th Schedule
+                    th Last Run
+                    th Status
+                    th(style='width:160px')
+                tbody
+                  each evt in events
+                    tr
+                      td
+                        strong= evt.name
+                        if evt.description
+                          br
+                          small.text-muted= evt.description
+                      td: span.badge(class=evt.launch_type === 'Dosemu' ? 'bg-warning text-dark' : 'bg-info')= launchTypes[evt.launch_type] || evt.launch_type
+                      td: code.small= evt.command.length > 40 ? evt.command.substring(0, 40) + '...' : evt.command
+                      td: code= evt.cron_pattern
+                      td
+                        if evt.last_run_at
+                          small= new Date(evt.last_run_at).toLocaleString()
+                        else
+                          small.text-muted Never
+                      td
+                        if !evt.active
+                          span.badge.bg-secondary Inactive
+                        else if evt.last_exit_code === null || evt.last_exit_code === undefined
+                          span.badge.bg-info Pending
+                        else if evt.last_exit_code === 0
+                          span.badge.bg-success OK
+                        else
+                          span.badge.bg-danger Exit #{evt.last_exit_code}
+                      td
+                        button.btn.btn-sm.btn-primary.me-1(
+                          data-bs-toggle='modal' data-bs-target='#editEventModal'
+                          data-id=evt.id
+                          data-name=evt.name
+                          data-description=evt.description || ''
+                          data-launchtype=evt.launch_type
+                          data-command=evt.command
+                          data-workingdir=evt.working_dir || ''
+                          data-cronpattern=evt.cron_pattern
+                          data-timeout=evt.timeout_seconds || 300
+                          data-active=(evt.active ? 'true' : 'false')
+                          data-lastresult=evt.last_result || ''
+                        )
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/timed-events/' + evt.id + '/run')
+                          button.btn.btn-sm.btn-warning.me-1(type='submit' title='Run Now')
+                            i.bi.bi-play-fill
+                        form.d-inline(method='POST' action='/admin/timed-events/' + evt.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this event?")')
+                            i.bi.bi-trash
+            else
+              p.text-muted No timed events configured.
+
+        //- Variable Reference
+        .card.mb-4
+          .card-header.bg-dark
+            h5.mb-0 Variable Reference
+            small.text-muted.ms-2 Use %X variables in command and working directory
+          .card-body
+            .row
+              .col-md-4
+                dl.mb-0
+                  dt %M
+                  dd DOSemu drive_c directory
+                  dt %!
+                  dd Door base directory
+              .col-md-4
+                dl.mb-0
+                  dt %J
+                  dd Data directory
+                  dt %K
+                  dd Config directory
+              .col-md-4
+                dl.mb-0
+                  dt %Z
+                  dd Text/art directory
+                  dt %O
+                  dd Board name
+                  dt %%
+                  dd Literal percent sign
+
+        //- Cron Reference
+        .card.mb-4
+          .card-header.bg-dark
+            h5.mb-0 Cron Pattern Reference
+          .card-body
+            code minute hour day-of-month month day-of-week
+            .row.mt-2
+              .col-md-6
+                dl.mb-0
+                  dt 0 2 * * *
+                  dd Daily at 2:00 AM
+                  dt 0 3 * * 0
+                  dd Weekly, Sunday at 3:00 AM
+              .col-md-6
+                dl.mb-0
+                  dt 30 4 1 * *
+                  dd Monthly, 1st at 4:30 AM
+                  dt 0 */6 * * *
+                  dd Every 6 hours
+
+    //- Add Modal
+    .modal.fade#addEventModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title Add Timed Event
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/timed-events/new')
+            .modal-body
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Name
+                    input.form-control(name='name' required placeholder='e.g. LORD Maintenance')
+                  .mb-3
+                    label.form-label Description
+                    input.form-control(name='description' placeholder='What this event does')
+                  .mb-3
+                    label.form-label Launch Type
+                    select.form-select(name='launch_type')
+                      each label, key in launchTypes
+                        option(value=key selected=(key === 'NativeCommand'))= label
+                .col-6
+                  .mb-3
+                    label.form-label Command
+                    input.form-control(name='command' required placeholder='e.g. %M/lord/MAINT.BAT or /opt/scripts/cleanup.sh')
+                  .mb-3
+                    label.form-label Working Directory
+                    input.form-control(name='working_dir' placeholder='e.g. %M/lord or /opt/game')
+                  .mb-3
+                    label.form-label Cron Schedule
+                    input.form-control(name='cron_pattern' required placeholder='e.g. 0 2 * * *')
+              .row
+                .col-4
+                  .mb-3
+                    label.form-label Timeout (seconds)
+                    input.form-control(type='number' name='timeout_seconds' value='300' min=10 max=3600)
+                .col-4
+                  .form-check.mt-4
+                    input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
+                    label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Modal
+    .modal.fade#editEventModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Timed Event
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editEventForm(method='POST')
+            .modal-body
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Name
+                    input.form-control(name='name' id='editName' required)
+                  .mb-3
+                    label.form-label Description
+                    input.form-control(name='description' id='editDescription')
+                  .mb-3
+                    label.form-label Launch Type
+                    select.form-select(name='launch_type' id='editLaunchType')
+                      each label, key in launchTypes
+                        option(value=key)= label
+                .col-6
+                  .mb-3
+                    label.form-label Command
+                    input.form-control(name='command' id='editCommand' required)
+                  .mb-3
+                    label.form-label Working Directory
+                    input.form-control(name='working_dir' id='editWorkingDir')
+                  .mb-3
+                    label.form-label Cron Schedule
+                    input.form-control(name='cron_pattern' id='editCronPattern' required)
+              .row
+                .col-4
+                  .mb-3
+                    label.form-label Timeout (seconds)
+                    input.form-control(type='number' name='timeout_seconds' id='editTimeout' min=10 max=3600)
+                .col-4
+                  .form-check.mt-4
+                    input.form-check-input(type='checkbox' name='active' id='editActive' value='true')
+                    label.form-check-label(for='editActive') Active
+              //- Last run output
+              #editLastResult.mt-3(style='display:none')
+                label.form-label Last Run Output
+                pre.bg-dark.text-light.p-2(style='max-height:200px;overflow:auto;font-size:0.8rem')#editResultPre
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      var editModal = document.getElementById('editEventModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editEventForm').action = '/admin/timed-events/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('editName').value = btn.getAttribute('data-name') || '';
+          document.getElementById('editDescription').value = btn.getAttribute('data-description') || '';
+          document.getElementById('editLaunchType').value = btn.getAttribute('data-launchtype') || 'NativeCommand';
+          document.getElementById('editCommand').value = btn.getAttribute('data-command') || '';
+          document.getElementById('editWorkingDir').value = btn.getAttribute('data-workingdir') || '';
+          document.getElementById('editCronPattern').value = btn.getAttribute('data-cronpattern') || '';
+          document.getElementById('editTimeout').value = btn.getAttribute('data-timeout') || '300';
+          document.getElementById('editActive').checked = btn.getAttribute('data-active') === 'true';
+
+          var lastResult = btn.getAttribute('data-lastresult') || '';
+          var resultSection = document.getElementById('editLastResult');
+          if (lastResult) {
+            resultSection.style.display = '';
+            document.getElementById('editResultPre').textContent = lastResult;
+          } else {
+            resultSection.style.display = 'none';
+          }
+        });
+      }

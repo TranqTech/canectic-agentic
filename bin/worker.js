@@ -373,6 +373,12 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'timed-event': {
+				var timedEventRunner = await import("../src/maintenance/timedEventRunner.js");
+				await timedEventRunner.runEvent(job.data.eventId);
+				break;
+			}
+
 			case 'reconcile-echolists': {
 				var networkEcholist = await import("../src/models/networkEcholist.js");
 				var fileEcholist = await import("../src/models/fileEcholist.js");

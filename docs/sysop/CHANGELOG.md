@@ -91,6 +91,8 @@
 - Fix: FTN outbound packet buffer overflow on messages with long SEEN-BY/PATH lines (fixed 10KB buffer replaced with dynamic sizing)
 - Fix: FTN outbound zone awareness -- packets and .flo files were always written to ftn/out/ regardless of destination zone, now uses BSO zone directories (ftn/out.015/ for zone 21, etc.)
 - Fix: TIC outbound delivery broken -- staged TIC descriptors and attached files had no .flo flow file entries, so the mailer never discovered or sent them. Now creates .flo entries with zone-aware directories.
+- Timed events system: sysop-configurable scheduled commands for door maintenance, backups, etc. Launch types: Native Command (shell) and Dosemu (headless). Cron scheduling via BullMQ, %X variable substitution, timeout enforcement, output capture. Admin CRUD at /admin/timed-events with run-now button.
+- Update script: txtfiles/ now completely skipped during updates (was copying new files which could still interfere with custom art). Use --include-art to merge art files explicitly.
 
 ## v0.9.5a (2026-04-04)
 

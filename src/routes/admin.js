@@ -26,6 +26,7 @@ import * as newsFiles from '../models/newsFiles.js';
 import * as seasonalArt from '../models/seasonalArt.js';
 import * as freqModel from '../models/freq.js';
 import * as fileWildcards from '../models/fileWildcards.js';
+import * as timedEvents from '../models/timedEvents.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -36,6 +37,8 @@ import * as userAccounts from "../models/useraccounts.js";
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
 import * as jobs from "../queues/jobs.js";
+import { updateTimedEventSchedule, removeTimedEventSchedule } from "../queues/schedules.js";
+import { maintenanceQueue } from "../queues/queues.js";
 import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
 import { CONFIG_DEFINITIONS, getDefinition, getCategories } from "../config/configDefaults.js";
@@ -4707,6 +4710,65 @@ router.post('/wildcards/test', express.json(), requireAdmin, async (req, res) =>
 	} else {
 		res.json({ match: false, message: 'No match -- file would go to default inbound directory' });
 	}
+});
+
+// -------------------------------------------------------
+// Timed Events
+// -------------------------------------------------------
+
+router.get('/timed-events', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var events = await timedEvents.getAll();
+	res.render('admin/timedEvents/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Timed Events',
+		activelink: 'timed-events',
+		activenav: 'system',
+		currentuser: currentuser,
+		events: events,
+		launchTypes: timedEvents.LAUNCH_TYPE_LABELS,
+		variableList: getVariableList()
+	});
+});
+
+router.post('/timed-events/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await timedEvents.create(req.body);
+	if (result.status && result.insertId) {
+		var evt = await timedEvents.getById(result.insertId);
+		if (evt && evt.active) {
+			await updateTimedEventSchedule(evt.id, evt.cron_pattern, true);
+		}
+	}
+	res.redirect('/admin/timed-events');
+});
+
+router.post('/timed-events/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var result = await timedEvents.update(id, req.body);
+	if (result.status) {
+		var evt = await timedEvents.getById(id);
+		if (evt) {
+			await updateTimedEventSchedule(evt.id, evt.cron_pattern, evt.active);
+		}
+	}
+	res.redirect('/admin/timed-events');
+});
+
+router.post('/timed-events/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	await removeTimedEventSchedule(id);
+	await timedEvents.remove(id);
+	res.redirect('/admin/timed-events');
+});
+
+router.post('/timed-events/:id/run', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	await maintenanceQueue.add('timed-event', { eventId: id }, {
+		jobId: 'timed-event-manual-' + id + '-' + Date.now(),
+		removeOnComplete: true, removeOnFail: true
+	});
+	res.redirect('/admin/timed-events');
 });
 
 // -------------------------------------------------------

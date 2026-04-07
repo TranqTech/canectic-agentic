@@ -151,6 +151,17 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'nodespy'
               span.visually-hidden  (current)
 
+        //- Timed Events
+        li.nav-item
+          a.nav-link(
+            href='/admin/timed-events'
+            class=activenav === 'timed-events' ? 'active' : ''
+          )
+            i.bi.bi-clock-history.me-1
+            | Events
+            if activenav === 'timed-events'
+              span.visually-hidden  (current)
+
         //- System Logs
         li.nav-item
           a.nav-link(
