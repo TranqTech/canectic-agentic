@@ -458,6 +458,7 @@ block content
                     label.form-label.arg-label Argument:
                     select.form-control.arg-select(name='command_arg')
                       option(value='') -- Select --
+                    input.form-control.arg-text(type='text' name='command_arg' style='display:none' placeholder='e.g. type:Welcome or screens/rules')
                 br
                 .row
                   .col-1
@@ -535,6 +536,7 @@ block content
                     label.form-label.arg-label Argument:
                     select#ee_arg.form-control.arg-select(name='command_arg')
                       option(value='') -- Select --
+                    input#ee_arg_text.form-control.arg-text(type='text' style='display:none' placeholder='e.g. type:Welcome or screens/rules')
                 br
                 .row
                   .col-1
@@ -591,19 +593,48 @@ block content
         runXtrn: !{JSON.stringify((allDoors || []).map(function(d) { return { value: d.slug, label: d.name + ' (' + d.slug + ')' }; }))}
       };
 
+      // Commands that need a free-text argument (no dropdown)
+      var textArgCommands = {
+        displayScreen: 'Screen (type:Welcome or subdir/filename):'
+      };
+
       // Show/hide argument select and populate options based on selected command
       function syncArgField(cmdSel) {
         var wrapper = cmdSel.closest('.row').querySelector('.arg-wrapper');
         var argSel = wrapper.querySelector('.arg-select');
+        var argText = wrapper.querySelector('.arg-text');
         var label = wrapper.querySelector('.arg-label');
         var cmd = cmdSel.value;
         var items = argData[cmd];
+        var textLabel = textArgCommands[cmd];
 
-        if (!items) {
+        if (!items && !textLabel) {
           wrapper.style.display = 'none';
           argSel.value = '';
+          if (argText) { argText.value = ''; argText.style.display = 'none'; argText.name = ''; }
+          argSel.style.display = '';
+          argSel.name = 'command_arg';
           return;
         }
+
+        wrapper.style.display = '';
+
+        if (textLabel) {
+          // Free-text input mode
+          label.textContent = textLabel;
+          argSel.style.display = 'none';
+          argSel.name = '';
+          if (argText) {
+            argText.style.display = '';
+            argText.name = 'command_arg';
+          }
+          return;
+        }
+
+        // Dropdown select mode
+        if (argText) { argText.style.display = 'none'; argText.name = ''; }
+        argSel.style.display = '';
+        argSel.name = 'command_arg';
 
         // Set label
         if (cmd === 'loadMenu') label.textContent = 'Menu:';
@@ -620,8 +651,6 @@ block content
           if (items[i].value === curVal) opt.selected = true;
           argSel.appendChild(opt);
         }
-
-        wrapper.style.display = '';
       }
 
       // Bind command selects
@@ -764,8 +793,14 @@ block content
           var eeCmdSel = document.getElementById('ee_command');
           eeCmdSel.value = d.command_name || '';
           syncArgField(eeCmdSel);
+          var cmdArg = d.command_arg || '';
           var eeArgSel = document.getElementById('ee_arg');
-          if (eeArgSel) eeArgSel.value = d.command_arg || '';
+          var eeArgText = document.getElementById('ee_arg_text');
+          if (textArgCommands[d.command_name]) {
+            if (eeArgText) eeArgText.value = cmdArg;
+          } else {
+            if (eeArgSel) eeArgSel.value = cmdArg;
+          }
           document.getElementById('ee_sort').value        = d.sort || '0';
           document.getElementById('ee_security').value    = d.min_security || '';
           document.getElementById('ee_featured').value    = d.featured || 'false';
