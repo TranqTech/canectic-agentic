@@ -232,6 +232,7 @@ Last updated: 2026-04-06
 | 39 | File group base_dir change: move area subdirectories | [ ] | When group base_dir changes, preview and move member area subdirs. Skip absolute/external paths. Handle edge cases. |
 | 40 | Per-peer outbound fileboxes | [x] | Optional outbox_dir on FTN peer connections. BSO scanner picks up files, sends with delete-after-send. %X variable substitution for paths. |
 | 41 | Inbound file wildcards | [x] | Sysop-configurable glob pattern rules route inbound files to specific directories. Skip toss by default, still_toss flag. Admin CRUD with drag-to-reorder and test tool. |
+| 42 | File area retention limits | [x] | Optional max_age_days and max_files on file areas and file groups. Daily file-maintenance job enforces limits (DB + disk cleanup). |
 
 ---
 

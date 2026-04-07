@@ -81,7 +81,8 @@
 - Per-echolist/filebone scan_area: optional file area override for individual list scanning (highest priority)
 - Scan Echolists/Filebones button on Jobs & Maintenance page for manual trigger
 - Echolist reconciliation schedule moved to 4:30 AM (after echolist scan at 4:15 AM)
-- File area retention limits: optional max_age_days and max_files on file areas, enforced by daily file-maintenance job (removes oldest files from DB and disk). Useful for nodelist/nodediff/infopack areas.
+- File area retention limits: optional max_age_days and max_files on file areas and file groups (group defaults inherited by new areas), enforced by daily file-maintenance job (removes oldest files from DB and disk). Useful for nodelist/nodediff/infopack areas. 0 or blank clears the limit.
+- Fix: fileAreas.newArea not returning insertId -- file areas created from filebone combined subscribe were not getting their network mapping created
 
 ## v0.9.5a (2026-04-04)
 
