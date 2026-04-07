@@ -597,12 +597,34 @@ block content
                                     option(value=fa.shortcode selected=(networkConfig && networkConfig.nodelist_area_shortcode === fa.shortcode))
                                       = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
                               br
+                              label(for='en_echolist_area')
+                                | Echolist File Area:
+                                |
+                                span(data-bs-toggle='tooltip' title='File area where echolist files (e.g. BACKBONE.NA) are received. Checked before infopack for echolists.') ⓘ
+                              select#en_echolist_area(name='echolist_area' tabindex='7').form-select
+                                option(value='' selected=(!networkConfig || !networkConfig.echolist_area)) None
+                                if allFileAreasList && allFileAreasList.length > 0
+                                  each fa in allFileAreasList
+                                    option(value=fa.shortcode selected=(networkConfig && networkConfig.echolist_area === fa.shortcode))
+                                      = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
+                              br
+                              label(for='en_filebone_area')
+                                | Filebone File Area:
+                                |
+                                span(data-bs-toggle='tooltip' title='File area where filebone files (e.g. FILEBONE.NA) are received. Checked before infopack for filebones.') ⓘ
+                              select#en_filebone_area(name='filebone_area' tabindex='8').form-select
+                                option(value='' selected=(!networkConfig || !networkConfig.filebone_area)) None
+                                if allFileAreasList && allFileAreasList.length > 0
+                                  each fa in allFileAreasList
+                                    option(value=fa.shortcode selected=(networkConfig && networkConfig.filebone_area === fa.shortcode))
+                                      = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
+                              br
                               label(for='en_infopack_area')
                                 | Infopack File Area:
                                 |
-                                span(data-bs-toggle='tooltip' title='File area where this network\'s infopack ZIP is received. The system will auto-scan for updated echolists and filebones daily.') ⓘ
-                              select#en_infopack_area(name='infopack_area' tabindex='7').form-select
-                                option(value='' selected=(!networkConfig || !networkConfig.infopack_area)) None (manual import only)
+                                span(data-bs-toggle='tooltip' title='Catch-all: file area where the network infopack ZIP is received. Scanned last for any lists not found in echolist/filebone areas.') ⓘ
+                              select#en_infopack_area(name='infopack_area' tabindex='9').form-select
+                                option(value='' selected=(!networkConfig || !networkConfig.infopack_area)) None
                                 if allFileAreasList && allFileAreasList.length > 0
                                   each fa in allFileAreasList
                                     option(value=fa.shortcode selected=(networkConfig && networkConfig.infopack_area === fa.shortcode))

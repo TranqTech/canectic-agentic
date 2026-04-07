@@ -205,17 +205,16 @@ async function _scanListOverride(echolist, model, type, fileEntriesModel, fileAr
 }
 
 // ---------------------------------------------------------------------------
-// Per-network scan: check infopack_area
+// Network-level area scan: check a file area for matching echolist/filebone files
+// Used for echolist_area, filebone_area, and infopack_area tiers.
 // ---------------------------------------------------------------------------
 
-async function _scanNetworkInfopack(network, echolists, filebones, networkEcholist, fileEcholist, fileEntriesModel, fileAreasModel, fileGroupsModel) {
-	var config = network.config;
-	if (typeof config === 'string') { try { config = JSON.parse(config); } catch(_) { config = {}; } }
-	if (!config || !config.infopack_area) return 0;
+async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel, fileAreasModel, fileGroupsModel) {
+	if (!areaShortcode || nameMap.size === 0) return 0;
 
-	var area = await fileAreasModel.getAreaByShortcode(config.infopack_area);
+	var area = await fileAreasModel.getAreaByShortcode(areaShortcode);
 	if (!area) {
-		alogger.writeAlog(5, '[EcholistScan] infopack_area not found for network ' + network.name + ': ' + config.infopack_area, 'yellow');
+		alogger.writeAlog(5, '[EcholistScan] ' + label + ' area not found: ' + areaShortcode, 'yellow');
 		return 0;
 	}
 
@@ -224,54 +223,49 @@ async function _scanNetworkInfopack(network, echolists, filebones, networkEcholi
 	var files = await fileEntriesModel.getEntriesForArea(area.id, { limit: 500, orderBy: 'upload_date DESC' });
 	if (!files || files.length === 0) return 0;
 
-	// Find the newest file (ZIP or direct) in the infopack area
-	var newestFile = _findNewestFile(files);
-	if (!newestFile) return 0;
-
-	// Build a map of echolist/filebone names to check against
-	var nameMap = new Map(); // lowercase name -> { echolist, model, type }
-	for (var el of (echolists || [])) {
-		if (el.scan_area) continue; // has override, already scanned
-		nameMap.set(el.name.toLowerCase(), { echolist: el, model: networkEcholist, type: 'echolist' });
-	}
-	for (var fb of (filebones || [])) {
-		if (fb.scan_area) continue;
-		nameMap.set(fb.name.toLowerCase(), { echolist: fb, model: fileEcholist, type: 'filebone' });
-	}
-
-	if (nameMap.size === 0) return 0;
-
 	var imported = 0;
-	var filePath = _resolveFilePath(newestFile, areaPath);
-	if (!fs.existsSync(filePath)) return 0;
 
-	var ext = path.extname(newestFile.filename || '').toLowerCase();
-	var isArchive = ext === '.zip' || ext === '.7z';
-
-	if (isArchive) {
-		// Unzip and match contents against all echolist/filebone names
-		var tmpDir = _unzipToTemp(filePath, 'infopack for ' + network.name);
-		if (!tmpDir) return 0;
-
-		try {
-			var extracted = fs.readdirSync(tmpDir);
-			for (var fname of extracted) {
-				var entry = nameMap.get(fname.toLowerCase());
-				if (!entry) continue;
-				if (!_isNewer(newestFile, entry.echolist.last_imported_at)) continue;
-
-				var result = await _importFile(path.join(tmpDir, fname), entry.echolist.id, entry.echolist.name, entry.model, entry.type);
-				if (result && !result.unchanged) imported++;
+	// First pass: direct filename matches
+	for (var [lowerName, entry] of nameMap) {
+		var directMatch = _findFileByName(files, entry.echolist.name);
+		if (directMatch && _isNewer(directMatch, entry.echolist.last_imported_at)) {
+			var filePath = _resolveFilePath(directMatch, areaPath);
+			if (fs.existsSync(filePath)) {
+				var result = await _importFile(filePath, entry.echolist.id, entry.echolist.name, entry.model, entry.type);
+				if (result !== null) {
+					nameMap.delete(lowerName); // handled, remove from map
+					if (!result.unchanged) imported++;
+				}
 			}
-		} finally {
-			_cleanupTemp(tmpDir);
 		}
-	} else {
-		// Direct file -- check if it matches any echolist/filebone name
-		var entry = nameMap.get((newestFile.filename || '').toLowerCase());
-		if (entry && _isNewer(newestFile, entry.echolist.last_imported_at)) {
-			var result = await _importFile(filePath, entry.echolist.id, entry.echolist.name, entry.model, entry.type);
-			if (result && !result.unchanged) imported++;
+	}
+
+	if (nameMap.size === 0) return imported;
+
+	// Second pass: newest ZIP, unzip and match remaining names
+	var newestZip = _findNewestZip(files);
+	if (newestZip) {
+		var zipPath = _resolveFilePath(newestZip, areaPath);
+		if (fs.existsSync(zipPath)) {
+			var tmpDir = _unzipToTemp(zipPath, label);
+			if (tmpDir) {
+				try {
+					var extracted = fs.readdirSync(tmpDir);
+					for (var fname of extracted) {
+						var entry = nameMap.get(fname.toLowerCase());
+						if (!entry) continue;
+						if (!_isNewer(newestZip, entry.echolist.last_imported_at)) continue;
+
+						var result = await _importFile(path.join(tmpDir, fname), entry.echolist.id, entry.echolist.name, entry.model, entry.type);
+						if (result !== null) {
+							nameMap.delete(fname.toLowerCase()); // handled
+							if (!result.unchanged) imported++;
+						}
+					}
+				} finally {
+					_cleanupTemp(tmpDir);
+				}
+			}
 		}
 	}
 
@@ -305,25 +299,68 @@ async function scanForUpdates() {
 
 		networksScanned++;
 
-		// Phase 1: Per-list scan_area overrides (checked first)
+		var config = net.config;
+		if (typeof config === 'string') { try { config = JSON.parse(config); } catch(_) { config = {}; } }
+		if (!config) config = {};
+
+		// Phase 1: Per-list scan_area overrides (highest priority)
+		var handledIds = new Set();
 		for (var el of (echolists || [])) {
 			if (!el.scan_area || !el.active) continue;
 			var handled = await _scanListOverride(el, networkEcholist, 'echolist', fileEntriesModel, fileAreasModel, fileGroupsModel);
-			if (handled) totalImported++;
+			if (handled) { totalImported++; handledIds.add('e:' + el.id); }
+			else handledIds.add('e:' + el.id); // had override, even if no update found
 		}
 		for (var fb of (filebones || [])) {
 			if (!fb.scan_area || !fb.active) continue;
 			var handled = await _scanListOverride(fb, fileEcholist, 'filebone', fileEntriesModel, fileAreasModel, fileGroupsModel);
-			if (handled) totalImported++;
+			if (handled) { totalImported++; handledIds.add('f:' + fb.id); }
+			else handledIds.add('f:' + fb.id);
 		}
 
-		// Phase 2: Network infopack_area (for lists without scan_area override)
-		var infoImported = await _scanNetworkInfopack(
-			net, echolists, filebones,
-			networkEcholist, fileEcholist,
-			fileEntriesModel, fileAreasModel, fileGroupsModel
-		);
-		totalImported += infoImported;
+		// Phase 2: Network echolist_area (for echolists without scan_area override)
+		if (config.echolist_area) {
+			var echoNameMap = new Map();
+			for (var el of (echolists || [])) {
+				if (handledIds.has('e:' + el.id) || !el.active) continue;
+				echoNameMap.set(el.name.toLowerCase(), { echolist: el, model: networkEcholist, type: 'echolist' });
+			}
+			var echoImported = await _scanNetworkArea(config.echolist_area, echoNameMap, 'echolist_area for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel);
+			totalImported += echoImported;
+			// Mark handled items so infopack doesn't re-scan them
+			for (var el of (echolists || [])) {
+				if (!echoNameMap.has(el.name.toLowerCase())) handledIds.add('e:' + el.id);
+			}
+		}
+
+		// Phase 3: Network filebone_area (for filebones without scan_area override)
+		if (config.filebone_area) {
+			var fbNameMap = new Map();
+			for (var fb of (filebones || [])) {
+				if (handledIds.has('f:' + fb.id) || !fb.active) continue;
+				fbNameMap.set(fb.name.toLowerCase(), { echolist: fb, model: fileEcholist, type: 'filebone' });
+			}
+			var fbImported = await _scanNetworkArea(config.filebone_area, fbNameMap, 'filebone_area for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel);
+			totalImported += fbImported;
+			for (var fb of (filebones || [])) {
+				if (!fbNameMap.has(fb.name.toLowerCase())) handledIds.add('f:' + fb.id);
+			}
+		}
+
+		// Phase 4: Network infopack_area (catch-all for remaining lists)
+		if (config.infopack_area) {
+			var infoNameMap = new Map();
+			for (var el of (echolists || [])) {
+				if (handledIds.has('e:' + el.id) || !el.active) continue;
+				infoNameMap.set(el.name.toLowerCase(), { echolist: el, model: networkEcholist, type: 'echolist' });
+			}
+			for (var fb of (filebones || [])) {
+				if (handledIds.has('f:' + fb.id) || !fb.active) continue;
+				infoNameMap.set(fb.name.toLowerCase(), { echolist: fb, model: fileEcholist, type: 'filebone' });
+			}
+			var infoImported = await _scanNetworkArea(config.infopack_area, infoNameMap, 'infopack for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel);
+			totalImported += infoImported;
+		}
 	}
 
 	alogger.writeAlog(3,

@@ -76,9 +76,9 @@
 - %X variable substitution in filebox paths, wildcard target directories, file group base_dir, and file area sub_dir (e.g. %M for DOSemu drive_c)
 - `filebox_base_dir` config key for per-peer filebox parent directory
 - Inbound Wildcards link added to admin Networking dropdown
-- Automated echolist/filebone scanning: daily maintenance job scans network infopack areas and per-list override areas for updated files, auto-imports via diff pipeline with sysop notifications on locally-carried removals
-- Network infopack file area: new field on network edit form for configuring where the network's infopack ZIP is received
-- Per-echolist/filebone scan_area: optional file area override for individual list scanning (direct file or ZIP)
+- Automated echolist/filebone scanning: daily maintenance job with four-tier priority: per-list scan_area, network echolist_area, network filebone_area, network infopack_area. Each tier checks for direct file match then newest ZIP. Auto-imports via diff pipeline with sysop notifications on locally-carried removals.
+- Network file area config: echolist_area, filebone_area, and infopack_area fields on network edit form for configuring where network list files and infopacks are received
+- Per-echolist/filebone scan_area: optional file area override for individual list scanning (highest priority)
 - Scan Echolists/Filebones button on Jobs & Maintenance page for manual trigger
 - Echolist reconciliation schedule moved to 4:30 AM (after echolist scan at 4:15 AM)
 

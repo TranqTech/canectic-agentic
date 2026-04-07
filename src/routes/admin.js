@@ -546,16 +546,16 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	// Merge config fields into the network's config JSONB
-	if (formObj.nodelist_area_shortcode !== undefined || formObj.infopack_area !== undefined) {
+	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area'];
+	var hasConfigField = configKeys.some(function(k) { return formObj[k] !== undefined; });
+	if (hasConfigField) {
 		var dbnet = await msgNetworks.getNetworkByUUID(uuid);
 		var existingConfig = (dbnet && dbnet.config) ? (typeof dbnet.config === 'string' ? JSON.parse(dbnet.config) : dbnet.config) : {};
-		if (formObj.nodelist_area_shortcode !== undefined) {
-			existingConfig.nodelist_area_shortcode = formObj.nodelist_area_shortcode || null;
-			delete formObj.nodelist_area_shortcode;
-		}
-		if (formObj.infopack_area !== undefined) {
-			existingConfig.infopack_area = formObj.infopack_area || null;
-			delete formObj.infopack_area;
+		for (var ck of configKeys) {
+			if (formObj[ck] !== undefined) {
+				existingConfig[ck] = formObj[ck] || null;
+				delete formObj[ck];
+			}
 		}
 		formObj.config = existingConfig;
 	}
