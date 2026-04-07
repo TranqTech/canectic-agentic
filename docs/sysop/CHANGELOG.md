@@ -88,6 +88,9 @@
 - Fix: FTN address matching normalizes .0 point suffix (169:1/107.0 matches 169:1/107) for mailers like Argus that advertise point 0 explicitly
 - Fix: New message area with network mapping now sets allowed=true for peers (was leaving both allowed and enabled as false)
 - Fix: Combined echolist/filebone subscribe allow/enable peer checkboxes -- both tabs had same-named checkboxes in one form, Express received array instead of string, sync was silently skipped
+- Fix: FTN outbound packet buffer overflow on messages with long SEEN-BY/PATH lines (fixed 10KB buffer replaced with dynamic sizing)
+- Fix: FTN outbound zone awareness -- packets and .flo files were always written to ftn/out/ regardless of destination zone, now uses BSO zone directories (ftn/out.015/ for zone 21, etc.)
+- Fix: TIC outbound delivery broken -- staged TIC descriptors and attached files had no .flo flow file entries, so the mailer never discovered or sent them. Now creates .flo entries with zone-aware directories.
 
 ## v0.9.5a (2026-04-04)
 

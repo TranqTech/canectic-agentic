@@ -457,14 +457,16 @@ Worker: tic:outbound job
   3. For each connection:
      a. Validate connection is active and has FTN address
      b. Get system address for the network
-     c. For each pending file:
+     c. Resolve zone-aware outbound directory (ftn/out/ for zone 1, ftn/out.NNN/ for others)
+     d. For each pending file:
         - Resolve areatag via file_network_areas
         - Resolve file on disk via resolveAreaPath
         - Build TIC descriptor (append our address to path/seenby)
-        - Write .tic file to ftn/out/
-        - Copy/hardlink attached file to ftn/out/
+        - Write .tic file to zone outbound dir
+        - Copy/hardlink attached file to zone outbound dir
+        - Create .flo flow file entry for both TIC + attached file (^ = delete after send)
         - Mark distribution row as 'sent'
-     d. Signal mailer for CRASH-status connections
+     e. Enqueue bso-scan job to trigger mailer delivery
 ```
 
 ### TIC File Format
