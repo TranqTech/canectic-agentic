@@ -21,6 +21,8 @@ async function ensureSortOrder() {
 	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
 	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
 	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS newscan_default BOOLEAN DEFAULT true");
+	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS max_age_days INTEGER");
+	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS max_files INTEGER");
 }
 
 function normalizeFlags(input) {

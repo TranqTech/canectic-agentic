@@ -426,6 +426,7 @@ function createMaintenanceProcessor() {
 				var fileMaint = await import("../src/models/fileEntries.js");
 				await fileMaint.cleanDuplicates();
 				await fileMaint.cleanMissingFiles();
+				await fileMaint.enforceRetentionLimits();
 				break;
 			}
 

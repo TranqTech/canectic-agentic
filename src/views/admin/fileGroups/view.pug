@@ -99,6 +99,8 @@ block content
                                 data-bs-postsecurity=area.post_security
                                 data-bs-active=(area.active ? 'true' : 'false')
                                 data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
+                                data-bs-maxagedays=area.max_age_days || ''
+                                data-bs-maxfiles=area.max_files || ''
                                 data-bs-filecount=area.file_count || 0
                                 data-bs-totalbytes=area.total_bytes || 0
                                 data-bs-lastupload=area.last_upload || ''
@@ -330,6 +332,12 @@ block content
                         )
                           option(value='true') Yes
                           option(value='false') No
+                        br
+                        label(for='ea_max_age') Max Age (days):
+                        input(type='number' id='ea_max_age' name='max_age_days' class='form-control' min=0 tabindex='5')
+                        br
+                        label(for='ea_max_files') Max Files:
+                        input(type='number' id='ea_max_files' name='max_files' class='form-control' min=0 tabindex='6')
                       .col-5
                         label(for='ea_browsesecurity') Browse Security:
                         input(
@@ -1070,6 +1078,8 @@ block content
           document.getElementById('ea_postsecurity').value   = d.bsPostsecurity;
           document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
           document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
+          document.getElementById('ea_max_age').value       = d.bsMaxagedays || '';
+          document.getElementById('ea_max_files').value     = d.bsMaxfiles || '';
 
           renderAreaFlags('ea_browse_perm', 'browse_perm_flags', parseFlags(d.bsBrowsepermflags), allPerms, 'bg-success');
           renderAreaFlags('ea_browse_rest', 'browse_rest_flags', parseFlags(d.bsBrowserestflags), allRestrs, 'bg-danger');

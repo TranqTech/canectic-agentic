@@ -106,6 +106,8 @@ async function newArea(formObj) {
 		file_count: 0,
 		total_bytes: 0,
 		newscan_default: formObj.newscan_default !== 'false',
+		max_age_days: formObj.max_age_days ? parseInt(formObj.max_age_days) : null,
+		max_files: formObj.max_files ? parseInt(formObj.max_files) : null,
 		read_perm_flags: normalizeFlags(formObj.read_perm_flags),
 		read_rest_flags: normalizeFlags(formObj.read_rest_flags),
 		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
@@ -201,6 +203,8 @@ async function updateArea(shortcode, formObj) {
 	if (formObj.postsecurity !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
 	if (formObj.active       !== undefined) updateObj.active       = (formObj.active === "true" || formObj.active === true);
 	if (formObj.newscan_default !== undefined) updateObj.newscan_default = (formObj.newscan_default === "true" || formObj.newscan_default === true);
+	if (formObj.max_age_days !== undefined) updateObj.max_age_days = formObj.max_age_days ? parseInt(formObj.max_age_days) : null;
+	if (formObj.max_files !== undefined) updateObj.max_files = formObj.max_files ? parseInt(formObj.max_files) : null;
 	if (formObj.browse_perm_flags !== undefined) updateObj.browse_perm_flags = normalizeFlags(formObj.browse_perm_flags);
 	if (formObj.browse_rest_flags !== undefined) updateObj.browse_rest_flags = normalizeFlags(formObj.browse_rest_flags);
 	if (formObj.read_perm_flags !== undefined) updateObj.read_perm_flags = normalizeFlags(formObj.read_perm_flags);

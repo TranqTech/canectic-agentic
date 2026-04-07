@@ -396,6 +396,106 @@ async function cleanMissingFiles() {
 	return { checked: checked, removed: removed };
 }
 
+// ---------------------------------------------------------------------------
+// Area retention maintenance
+// ---------------------------------------------------------------------------
+
+/**
+ * Enforce max_age_days and max_files limits on file areas.
+ * Deletes file entries (and disk files) that exceed the configured limits.
+ * Called by the daily file-maintenance job.
+ *
+ * @returns {object} { areasChecked, filesRemoved }
+ */
+async function enforceRetentionLimits() {
+	var fs = await import('fs');
+	var path = await import('path');
+	var fileAreasModel = await import('./fileAreas.js');
+	var fileGroupsModel = await import('./fileGroups.js');
+
+	var areas = await postgres.query(
+		"SELECT * FROM file_areas WHERE active = true AND (max_age_days IS NOT NULL OR max_files IS NOT NULL)"
+	);
+	if (!areas || areas.length === 0) return { areasChecked: 0, filesRemoved: 0 };
+
+	var areasChecked = 0;
+	var filesRemoved = 0;
+
+	for (var area of areas) {
+		areasChecked++;
+		var group = area.group_shortcode ? await fileGroupsModel.getGroupByShortcode(area.group_shortcode) : null;
+		var areaPath = fileAreasModel.resolveAreaPath(group, area);
+
+		// Collect entries to remove
+		var toRemove = new Set();
+
+		// max_age_days: remove files older than N days
+		if (area.max_age_days && area.max_age_days > 0) {
+			var cutoff = new Date();
+			cutoff.setDate(cutoff.getDate() - area.max_age_days);
+
+			var oldEntries = await postgres.query(
+				"SELECT id, uuid, filename, disk_path FROM file_entries WHERE area_id = $1 AND active = true AND upload_date < $2 ORDER BY upload_date ASC",
+				[area.id, cutoff]
+			);
+			for (var entry of (oldEntries || [])) {
+				toRemove.add(entry);
+			}
+		}
+
+		// max_files: keep only the N newest, remove the rest
+		if (area.max_files && area.max_files > 0) {
+			var allEntries = await postgres.query(
+				"SELECT id, uuid, filename, disk_path FROM file_entries WHERE area_id = $1 AND active = true ORDER BY upload_date DESC, id DESC",
+				[area.id]
+			);
+			if (allEntries && allEntries.length > area.max_files) {
+				var excess = allEntries.slice(area.max_files);
+				for (var entry of excess) {
+					toRemove.add(entry);
+				}
+			}
+		}
+
+		if (toRemove.size === 0) continue;
+
+		// Delete entries and disk files
+		for (var entry of toRemove) {
+			// Remove from disk
+			if (entry.disk_path) {
+				try {
+					var filePath = path.join(areaPath, entry.disk_path);
+					if (fs.existsSync(filePath)) {
+						fs.unlinkSync(filePath);
+					}
+				} catch (err) {
+					alogger.writeAlog(3, 'enforceRetentionLimits: disk delete failed for ' + entry.filename + ': ' + err.message, 'yellow');
+				}
+			}
+
+			// Remove from DB (handles distribution rows)
+			await deleteEntry(entry.uuid);
+			filesRemoved++;
+		}
+
+		// Update area stats
+		await fileAreasModel.updateStatsForArea(area.shortcode);
+
+		alogger.writeAlog(5,
+			'enforceRetentionLimits: ' + area.shortcode + ': removed ' + toRemove.size + ' file(s)' +
+			(area.max_age_days ? ' (max_age=' + area.max_age_days + 'd)' : '') +
+			(area.max_files ? ' (max_files=' + area.max_files + ')' : ''),
+			'cyan'
+		);
+	}
+
+	if (filesRemoved > 0) {
+		alogger.writeAlog(3, 'enforceRetentionLimits: checked ' + areasChecked + ' area(s), removed ' + filesRemoved + ' file(s)', 'greenbright');
+	}
+
+	return { areasChecked, filesRemoved };
+}
+
 export {
 	addFileEntry,
 	getEntryByUUID,
@@ -414,5 +514,6 @@ export {
 	regenerateDescHtml,
 	scanAreaDirectory,
 	cleanDuplicates,
-	cleanMissingFiles
+	cleanMissingFiles,
+	enforceRetentionLimits
 };

@@ -59,6 +59,8 @@ block content
                           data-bs-postsecurity=area.post_security
                           data-bs-active=(area.active ? 'true' : 'false')
                           data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
+                          data-bs-maxagedays=area.max_age_days || ''
+                          data-bs-maxfiles=area.max_files || ''
                           data-bs-filecount=area.file_count || 0
                           data-bs-totalbytes=area.total_bytes || 0
                           data-bs-lastupload=area.last_upload || ''
@@ -239,6 +241,16 @@ block content
                       select(id='ea_newscan' name='newscan_default' class='form-control' tabindex='4')
                         option(value='true') Yes
                         option(value='false') No
+                      br
+                      label(for='ea_max_age') Max Age (days):
+                        |
+                        span(data-bs-toggle='tooltip' title='Auto-remove files older than this. 0 or blank = no limit.') ⓘ
+                      input(type='number' id='ea_max_age' name='max_age_days' class='form-control' min=0 tabindex='5')
+                      br
+                      label(for='ea_max_files') Max Files:
+                        |
+                        span(data-bs-toggle='tooltip' title='Keep only the N newest files, remove the rest. 0 or blank = no limit.') ⓘ
+                      input(type='number' id='ea_max_files' name='max_files' class='form-control' min=0 tabindex='6')
                     .col-5
                       label(for='ea_browsesecurity') Browse Security:
                       input(type='number' id='ea_browsesecurity' name='browsesecurity' class='form-control' min=0 max=255 tabindex='5' required)
@@ -374,6 +386,16 @@ block content
                       select#na_newscan(name='newscan_default').form-select
                         option(value='true' selected) Yes
                         option(value='false') No
+                      br
+                      label(for='na_max_age') Max Age (days):
+                        |
+                        span(data-bs-toggle='tooltip' title='Auto-remove files older than this. 0 or blank = no limit.') ⓘ
+                      input(type='number' id='na_max_age' name='max_age_days' class='form-control' min=0)
+                      br
+                      label(for='na_max_files') Max Files:
+                        |
+                        span(data-bs-toggle='tooltip' title='Keep only the N newest files, remove the rest. 0 or blank = no limit.') ⓘ
+                      input(type='number' id='na_max_files' name='max_files' class='form-control' min=0)
                     .col-5
                       label(for='na_browsesecurity') Browse Security:
                       input(type='number' id='na_browsesecurity' min=0 max=255 name='browsesecurity' class='form-control' value=0 required)
@@ -634,6 +656,8 @@ block content
         document.getElementById('ea_postsecurity').value   = d.bsPostsecurity;
         document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
         document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
+        document.getElementById('ea_max_age').value       = d.bsMaxagedays || '';
+        document.getElementById('ea_max_files').value     = d.bsMaxfiles || '';
 
         renderAreaFlags('ea_browse_perm', 'browse_perm_flags', parseFlags(d.bsBrowsepermflags), allPerms, 'bg-success');
         renderAreaFlags('ea_browse_rest', 'browse_rest_flags', parseFlags(d.bsBrowserestflags), allRestrs, 'bg-danger');
