@@ -203,6 +203,11 @@ block content
                           option(value='') -- Select --
                           each g in groups
                             option(value=g.shortcode)= g.name
+                      .mb-3
+                        label.form-label Post As
+                        select#subPostAs.form-select(name='post_as')
+                          option(value='realname' selected) Real Name
+                          option(value='username') Username
                   .row
                     .col-6
                       label.form-label Read Security
@@ -396,6 +401,7 @@ block content
             if (!sc) {
               document.getElementById('subReadSec').value = !{defaultReadSecurity};
               document.getElementById('subPostSec').value = !{defaultPostSecurity};
+              document.getElementById('subPostAs').value = 'realname';
               renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
               renderFlags('sub_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
               renderFlags('sub_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
@@ -407,6 +413,7 @@ block content
               .then(function(data) {
                 document.getElementById('subReadSec').value = data.read_security || !{defaultReadSecurity};
                 document.getElementById('subPostSec').value = data.post_security || !{defaultPostSecurity};
+                document.getElementById('subPostAs').value = data.post_as || 'realname';
                 var parseF = function(v) { try { return Array.isArray(v) ? v : JSON.parse(v || '[]'); } catch(e) { return []; } };
                 renderFlags('sub_read_perm', 'read_perm_flags', parseF(data.read_perm_flags), allPerms, 'bg-success');
                 renderFlags('sub_read_rest', 'read_rest_flags', parseF(data.read_rest_flags), allRestrs, 'bg-danger');

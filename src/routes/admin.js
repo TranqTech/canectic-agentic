@@ -3072,6 +3072,7 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 			shortcode:       req.body.shortcode || areatag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64),
 			readsecurity:    req.body.read_security,
 			postsecurity:    req.body.post_security,
+			post_as:         req.body.post_as || 'realname',
 			read_perm_flags: req.body.read_perm_flags,
 			read_rest_flags: req.body.read_rest_flags,
 			post_perm_flags: req.body.post_perm_flags,
