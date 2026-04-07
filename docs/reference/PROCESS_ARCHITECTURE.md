@@ -106,7 +106,7 @@ Manages FTN mailer sessions — both inbound (listening for connections) and out
 
 ### Process 4 -- Worker (`bin/worker.js`)
 
-Stateless batch processor. Runs toss cycles, maintenance tasks, and future TIC processing. Can be stopped and restarted freely — BullMQ resumes incomplete jobs with retry.
+Stateless batch processor. Runs toss cycles, maintenance tasks, TIC processing, echolist scanning, and sysop-configured timed events. Can be stopped and restarted freely -- BullMQ resumes incomplete jobs with retry.
 
 **Owns:** Tosser modules (ftnTosser, qwkTosser, nntpTosser), maintenance functions. Loads its own pgpool and Redis connection.
 
@@ -194,10 +194,13 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `recalc-file-counts` | Admin | Worker | `{}` | Recalculate file_count/total_bytes for all file areas |
 | `scan-file-area` | Admin, CLI | Worker | `{ areaShortcode }` | Scan file area directory for untracked files |
 | `user-maintenance` | Scheduler (daily 5AM) | Worker | `{}` | Mailtype reconciliation, unverified user purge based on `unverified_retention_days` |
-| `file-maintenance` | Scheduler, Admin | Worker | `{}` | Duplicate cleanup (`cleanDuplicates`), missing file removal (`cleanMissingFiles`) |
+| `file-maintenance` | Scheduler, Admin | Worker | `{}` | Duplicate cleanup, missing file removal, retention limit enforcement (max_age_days/max_files) |
 | `outbound-sweep` | Scheduler (configurable, default 120 min) | Worker | `{}` | All-protocol periodic outbound toss cycle |
 | `scan-inbound` | Scheduler (configurable, default 300s) | Worker | `{}` | Periodic scan of FTN inbound directory for unprocessed .pkt/.tic files |
 | `scan-nodelists` | Scheduler (daily 4AM) | Worker | `{}` | Auto-import nodelists from configured file areas |
+| `scan-echolists` | Scheduler (daily 4:15AM), Admin | Worker | `{}` | Auto-scan network infopack/echolist/filebone areas for updated list files |
+| `reconcile-echolists` | Scheduler (daily 4:30AM), Admin | Worker | `{}` | Reconcile echolist/filebone local_area_id with network area mappings |
+| `timed-event` | Scheduler (cron per event), Admin | Worker | `{ eventId }` | Execute a sysop-configured timed event (door maintenance, backups, etc.) |
 
 ### Concurrency and deduplication
 
