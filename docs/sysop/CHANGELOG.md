@@ -83,6 +83,11 @@
 - Echolist reconciliation schedule moved to 4:30 AM (after echolist scan at 4:15 AM)
 - File area retention limits: optional max_age_days and max_files on file areas and file groups (group defaults inherited by new areas), enforced by daily file-maintenance job (removes oldest files from DB and disk). Useful for nodelist/nodediff/infopack areas. 0 or blank clears the limit.
 - Fix: fileAreas.newArea not returning insertId -- file areas created from filebone combined subscribe were not getting their network mapping created
+- Fix: Binkp session race -- TransferEngine was created after async multi-address discovery, so M_FILE offers from fast remotes (e.g. binkd) during the await were lost, causing 60s timeout
+- Fix: Peer polling with no remote_host now falls back to nodelist lookup for connection info
+- Fix: FTN address matching normalizes .0 point suffix (169:1/107.0 matches 169:1/107) for mailers like Argus that advertise point 0 explicitly
+- Fix: New message area with network mapping now sets allowed=true for peers (was leaving both allowed and enabled as false)
+- Fix: Combined echolist/filebone subscribe allow/enable peer checkboxes -- both tabs had same-named checkboxes in one form, Express received array instead of string, sync was silently skipped
 
 ## v0.9.5a (2026-04-04)
 

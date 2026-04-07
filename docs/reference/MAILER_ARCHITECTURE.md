@@ -335,13 +335,15 @@ Transport accepts connection
 ```
 MailerManager decides to call a peer (poll event or outbound mail waiting)
   → Load peer_connection record
+  → Resolve host: connection_data.remote_host, or nodelist lookup fallback
   → Create transport (TCP or WebSocket based on connection_data)
-  → Connect to mailer_host:mailer_port
+  → Connect to host:port
   → MailerManager creates SessionController(transport, 'caller')
   → Protocol module starts caller handshake
   → Present our addresses and password
   → Receive remote addresses → validate against expected peer
   → 'authenticated' event → state = AUTHENTICATED
+  → Create TransferEngine (wired BEFORE any async work to avoid M_FILE race)
   → Build outbound file list for this connection
   → Enter TRANSFER state
   → Exchange files
