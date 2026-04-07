@@ -3096,12 +3096,12 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 		};
 		var result = await msgAreas.newArea(formObj);
 		if (result.status) {
-			// newArea creates subscription rows but doesn't set allowed/enabled.
-			// If "enable for all peers" is checked, sync with allowAll/enableAll.
+			// newArea handles allowAll internally, but if enableAll was requested
+			// we need an explicit sync pass to set enabled = true.
 			if (enablePeers && result.shortcode) {
 				var newArea = await msgAreas.getAreaByShortcode(result.shortcode);
 				if (newArea) {
-					await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, newArea.id, syncOpts);
+					await peerAreaSubscriptions.syncNetworkAreaToConnections(networkId, newArea.id, { enableAll: true });
 				}
 			}
 			var peerMsg = allowPeers ? (enablePeers ? ' Allowed and enabled for all peers.' : ' Allowed for all peers.') : '';
