@@ -281,14 +281,36 @@ class MailerManager extends EventEmitter {
 	}
 
 	// Internal — initiate TCP/WS connection to a peer (from peer_connections record)
-	_connectToPeer(conn) {
+	async _connectToPeer(conn) {
 		var cd = conn.connection_data || {};
 		var mailerTransport = cd.mailer_transport || 'tcp';
 		var host = cd.mailer_host || cd.remote_host || '';
 		var port = cd.mailer_port || cd.remote_port || BINKP_PORT;
 
+		// If no host configured, try nodelist lookup for this address
+		if (!host && cd.address) {
+			try {
+				var ftnNodelist = (await import('../models/ftnNodelist.js'));
+				var addrParts = cd.address.split(':');
+				var nnParts = (addrParts[1] || '').split('/');
+				var zone = parseInt(addrParts[0]);
+				var net  = parseInt(nnParts[0]);
+				var node = parseInt(nnParts[1] || '0');
+				if (!isNaN(zone) && !isNaN(net) && !isNaN(node) && conn.network_id) {
+					var nlNode = await ftnNodelist.getNode(conn.network_id, zone, net, node, 0);
+					if (nlNode && nlNode.hostname) {
+						host = nlNode.hostname;
+						port = nlNode.binkp_port || BINKP_PORT;
+						alogger.writeClog(5, 'Mailer: resolved ' + cd.address + ' via nodelist: ' + host + ':' + port, 'mailer', 'cyan');
+					}
+				}
+			} catch (err) {
+				alogger.writeClog(5, 'Mailer: nodelist lookup failed for ' + cd.address + ': ' + err.message, 'mailer', 'yellow');
+			}
+		}
+
 		if (!host) {
-			alogger.writeClog(4, 'Mailer: no host configured for ' + (cd.address || conn.uuid) + ' — cannot connect', 'mailer', 'yellow');
+			alogger.writeClog(4, 'Mailer: no host configured for ' + (cd.address || conn.uuid) + ' and no nodelist entry — cannot connect', 'mailer', 'yellow');
 			return;
 		}
 

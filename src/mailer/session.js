@@ -296,15 +296,15 @@ class SessionController extends EventEmitter {
 		// and is non-empty (security: no free ride on unverified addresses).
 		if (info.addresses.length > 1 && expectedPassword) {
 			var allConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
-			var primaryAddr = (cd.address || '').toLowerCase();
+			var primaryAddr = this._normalizeAddress(cd.address);
 
 			for (var extraAddr of info.addresses) {
-				var bareAddr = extraAddr.split('@')[0].toLowerCase();
-				if (bareAddr === primaryAddr) continue;
+				var normalAddr = this._normalizeAddress(extraAddr);
+				if (normalAddr === primaryAddr) continue;
 
 				for (var extraConn of (allConns || [])) {
 					var extraCd = extraConn.connection_data || {};
-					if (!extraCd.address || extraCd.address.toLowerCase() !== bareAddr) continue;
+					if (!extraCd.address || this._normalizeAddress(extraCd.address) !== normalAddr) continue;
 					if (!extraCd.session_password) continue;
 					if (extraCd.session_password !== expectedPassword) continue;
 					// Password matches -- safe to group
@@ -372,12 +372,12 @@ class SessionController extends EventEmitter {
 			if (callerPassword) {
 				var allConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
 				for (var rAddr of this.peerAddresses) {
-					var bareAddr = rAddr.split('@')[0].toLowerCase();
-					if (bareAddr === callerPrimaryAddr) continue;
+					var normalAddr = this._normalizeAddress(rAddr);
+					if (normalAddr === this._normalizeAddress(callerPrimaryAddr)) continue;
 
 					for (var extraConn of (allConns || [])) {
 						var extraCd = extraConn.connection_data || {};
-						if (!extraCd.address || extraCd.address.toLowerCase() !== bareAddr) continue;
+						if (!extraCd.address || this._normalizeAddress(extraCd.address) !== normalAddr) continue;
 						if (!extraCd.session_password || extraCd.session_password !== callerPassword) continue;
 						// Already in list?
 						if (this.peerConnections.some(function(c) { return c.id === extraConn.id; })) continue;
@@ -779,17 +779,17 @@ class SessionController extends EventEmitter {
 
 		// Remote binkd presents addresses like "1:134/101@fidonet".
 		// We store address "1:134/101" and domain "fidonet" separately.
+		// Addresses are normalized: .0 point suffix stripped (e.g. 169:1/107.0 → 169:1/107).
 		// First pass: match both address AND domain for strongest match.
 		// Second pass: match address only (for remotes that don't send @domain).
 		for (var addr of addresses) {
-			var parts    = addr.split('@');
-			var bareAddr = parts[0].toLowerCase();
-			var domain   = parts.length > 1 ? parts[1].toLowerCase() : null;
+			var normalAddr = this._normalizeAddress(addr);
+			var domain     = addr.split('@').length > 1 ? addr.split('@')[1].toLowerCase() : null;
 
 			if (domain) {
 				for (var conn of connections) {
 					var cd = conn.connection_data || {};
-					if (cd.address && cd.address.toLowerCase() === bareAddr &&
+					if (cd.address && this._normalizeAddress(cd.address) === normalAddr &&
 						conn.domain && conn.domain.toLowerCase() === domain) {
 						return conn;
 					}
@@ -799,10 +799,10 @@ class SessionController extends EventEmitter {
 
 		// Second pass — address-only match (no domain or domain didn't match)
 		for (var addr of addresses) {
-			var bareAddr = addr.split('@')[0].toLowerCase();
+			var normalAddr = this._normalizeAddress(addr);
 			for (var conn of connections) {
 				var cd = conn.connection_data || {};
-				if (cd.address && cd.address.toLowerCase() === bareAddr) {
+				if (cd.address && this._normalizeAddress(cd.address) === normalAddr) {
 					return conn;
 				}
 			}
@@ -834,6 +834,15 @@ class SessionController extends EventEmitter {
 			alogger.writeClog(3, 'Session: failed to load local addresses: ' + err.message, 'mailer', 'redbright');
 			return [];
 		}
+	}
+
+	// Normalize an FTN address for comparison: strip @domain, strip .0 point suffix, lowercase.
+	// "169:1/107.0@battlnet" → "169:1/107", "1:134/101@fidonet" → "1:134/101"
+	_normalizeAddress(addr) {
+		var bare = (addr || '').split('@')[0].toLowerCase().trim();
+		// Strip trailing .0 (point 0 = the boss node itself)
+		if (bare.endsWith('.0')) bare = bare.substring(0, bare.length - 2);
+		return bare;
 	}
 
 	_parseAddress(addr) {
