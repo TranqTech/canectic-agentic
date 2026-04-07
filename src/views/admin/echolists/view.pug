@@ -100,6 +100,11 @@ block content
                       i.bi.bi-clock.me-1
                       | Last imported: #{new Date(echolist.last_imported_at).toLocaleString()}
 
+                  if echolist.scan_area
+                    p.text-muted
+                      i.bi.bi-search.me-1
+                      | Auto-scan area: #{echolist.scan_area}
+
                   //- Import section (collapsible)
                   #importSection.collapse.mb-3(class=(diff ? 'show' : ''))
                     .card
@@ -269,6 +274,15 @@ block content
                   .mb-3
                     label.form-label(for='editElDescription') Description
                     input#editElDescription.form-control(type='text' name='description' value=echolist.description || '')
+                  .mb-3
+                    label.form-label(for='editElScanArea') Auto-Scan File Area
+                      |
+                      span(data-bs-toggle='tooltip' title='File area to scan for updated copies of this echolist. Overrides network infopack area.') ⓘ
+                    select#editElScanArea.form-select(name='scan_area')
+                      option(value='' selected=!echolist.scan_area) None (use network infopack)
+                      if allFileAreas && allFileAreas.length > 0
+                        each fa in allFileAreas
+                          option(value=fa.shortcode selected=(echolist.scan_area === fa.shortcode))= fa.name + ' [' + fa.shortcode + ']'
                   .form-check.mb-3
                     input#editElIsDefault.form-check-input(type='checkbox' name='is_default' value='true' checked=echolist.is_default)
                     label.form-check-label(for='editElIsDefault') Set as default echolist for this network

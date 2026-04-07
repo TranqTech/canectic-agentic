@@ -367,6 +367,12 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'scan-echolists': {
+				var echolistScan = await import("../src/maintenance/echolistScan.js");
+				await echolistScan.scanForUpdates();
+				break;
+			}
+
 			case 'reconcile-echolists': {
 				var networkEcholist = await import("../src/models/networkEcholist.js");
 				var fileEcholist = await import("../src/models/fileEcholist.js");

@@ -545,13 +545,19 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 		formObj.updatedByName = currentuser.name;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
-	// Merge nodelist_area_shortcode into the network's config JSONB
-	if (formObj.nodelist_area_shortcode !== undefined) {
+	// Merge config fields into the network's config JSONB
+	if (formObj.nodelist_area_shortcode !== undefined || formObj.infopack_area !== undefined) {
 		var dbnet = await msgNetworks.getNetworkByUUID(uuid);
 		var existingConfig = (dbnet && dbnet.config) ? (typeof dbnet.config === 'string' ? JSON.parse(dbnet.config) : dbnet.config) : {};
-		existingConfig.nodelist_area_shortcode = formObj.nodelist_area_shortcode || null;
+		if (formObj.nodelist_area_shortcode !== undefined) {
+			existingConfig.nodelist_area_shortcode = formObj.nodelist_area_shortcode || null;
+			delete formObj.nodelist_area_shortcode;
+		}
+		if (formObj.infopack_area !== undefined) {
+			existingConfig.infopack_area = formObj.infopack_area || null;
+			delete formObj.infopack_area;
+		}
 		formObj.config = existingConfig;
-		delete formObj.nodelist_area_shortcode;
 	}
 	var result = await msgNetworks.updateNetwork(uuid, formObj);
 	if (result.status !== true) {
@@ -2776,6 +2782,7 @@ router.get('/echolist/view/:echolistId', async (req, res) => {
 	var network          = echolist ? await msgNetworks.getNetworkById(echolist.network_id) : null;
 	var areas            = echolist ? await networkEcholist.getAreasByEcholist(echolistId, { activeOnly: false }) : [];
 	var stats            = echolist ? await networkEcholist.getEcholistStats(echolistId) : {};
+	var allFileAreas     = await fileAreas.getAllAreas();
 
 	res.render('admin/echolists/view', {
 		sufficientAccess: sufficientAccess,
@@ -2786,7 +2793,8 @@ router.get('/echolist/view/:echolistId', async (req, res) => {
 		network: network,
 		areas: areas,
 		stats: stats,
-		diff: null
+		diff: null,
+		allFileAreas: allFileAreas || []
 	});
 });
 
@@ -2891,7 +2899,8 @@ router.post('/echolist/:echolistId/import', echolistUpload.single('echolist_file
 			network: network,
 			areas: areas,
 			stats: stats,
-			diff: diff
+			diff: diff,
+			allFileAreas: (await fileAreas.getAllAreas()) || []
 		});
 	} catch (err) {
 		alogger.writeAlog(2, '[admin/echolist] Import preview failed: ' + err.message, 'redbright');
@@ -3186,7 +3195,8 @@ router.get('/filebone/view/:echolistId', async (req, res) => {
 	res.render('admin/filebones/view', {
 		sufficientAccess: sufficientAccess, title: 'Filebone',
 		activelink: 'networks', currentuser: currentuser,
-		echolist: echolist, filebone: echolist, network: network, areas: areas, stats: stats, diff: null
+		echolist: echolist, filebone: echolist, network: network, areas: areas, stats: stats, diff: null,
+		allFileAreas: (await fileAreas.getAllAreas()) || []
 	});
 });
 
@@ -3283,7 +3293,8 @@ router.post('/filebone/:echolistId/import', multer({ dest: os.tmpdir() }).single
 	res.render('admin/filebones/view', {
 		sufficientAccess: sufficientAccess, title: 'Filebone',
 		activelink: 'networks', currentuser: currentuser,
-		echolist: echolist, filebone: echolist, network: network, areas: areas, stats: stats, diff: diff
+		echolist: echolist, filebone: echolist, network: network, areas: areas, stats: stats, diff: diff,
+		allFileAreas: (await fileAreas.getAllAreas()) || []
 	});
 });
 
@@ -3639,6 +3650,7 @@ router.post('/events/trigger', express.json(), requireAdmin, async (req, res) =>
 		case 'scan-nodelists':    await jobs.enqueueScanNodelists(); triggered = 'Scan Nodelists'; break;
 		case 'purge-tossed':      await jobs.enqueuePurgeTossed(); triggered = 'Purge Tossed Packets'; break;
 		case 'rethread':          await jobs.enqueueRethread(); triggered = 'Rebuild Threads'; break;
+		case 'scan-echolists':      await jobs.enqueueScanEcholists(); triggered = 'Scan Echolists/Filebones'; break;
 		case 'reconcile-echolists': await jobs.enqueueReconcileEcholists(); triggered = 'Reconcile Echolists'; break;
 		default:
 			return res.json({ status: false, error: 'Unknown job' });

@@ -83,10 +83,21 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily echolist/filebone auto-scan
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('scan-echolists-daily', {
+			pattern: '0 15 4 * * *',   // 4:15 AM daily (after nodelist scan)
+		}, {
+			name: 'scan-echolists',
+			data: {},
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily echolist/filebone reconciliation
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('reconcile-echolists-daily', {
-			pattern: '0 30 3 * * *',   // 3:30 AM daily
+			pattern: '0 30 4 * * *',   // 4:30 AM daily (after echolist scan)
 		}, {
 			name: 'reconcile-echolists',
 			data: {},

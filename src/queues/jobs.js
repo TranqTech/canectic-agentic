@@ -435,6 +435,13 @@ export async function enqueueScanNodelists() {
 	});
 }
 
+export async function enqueueScanEcholists() {
+	return maintenanceQueue.add('scan-echolists', {}, {
+		jobId: 'scan-echolists-manual',
+		removeOnComplete: true, removeOnFail: true,
+	});
+}
+
 export async function enqueuePurgeTossed(days) {
 	return maintenanceQueue.add('purge-tossed', {
 		days: days || appConfig.getNumber('ftn_keep_tossed_days', 7),

@@ -26,6 +26,7 @@ async function ensureIndexes() {
 	await postgres.write(
 		"CREATE INDEX IF NOT EXISTS idx_echolist_areas_local ON network_echolist_areas(local_area_id) WHERE local_area_id IS NOT NULL"
 	);
+	await postgres.write("ALTER TABLE network_echolists ADD COLUMN IF NOT EXISTS scan_area VARCHAR(255)");
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,10 @@ async function createEcholist(networkId, name, description, isDefault) {
 		active: true,
 		created_at: new Date()
 	};
+	if (arguments.length > 4 && arguments[4]) {
+		var opts = arguments[4];
+		if (opts.scan_area !== undefined) dbObj.scan_area = opts.scan_area ? opts.scan_area.trim() : null;
+	}
 
 	var dbres = await postgres.insertObject(dbObj, 'network_echolists');
 	if (dbres.status && dbres.insertId) {
@@ -98,6 +103,7 @@ async function updateEcholist(echolistId, formObj) {
 		}
 		updateObj.is_default = setDefault;
 	}
+	if (formObj.scan_area !== undefined) updateObj.scan_area = formObj.scan_area ? formObj.scan_area.trim() : null;
 
 	var dbres = await postgres.updateById(echolistId, updateObj, 'network_echolists');
 	if (dbres.status) {
