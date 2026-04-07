@@ -1,0 +1,251 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-signpost-split.me-2
+          | Inbound Wildcards
+          small.text-muted.ms-2 Route inbound files by filename pattern
+
+        //- Rules Table
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Wildcard Rules
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addWildcardModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Rule
+          .card-body
+            if rules && rules.length > 0
+              table.table.table-sm.table-hover.mb-0#wildcardTable
+                thead
+                  tr
+                    th(style='width:30px')
+                    th Pattern
+                    th Target Directory
+                    th Description
+                    th Still Toss
+                    th Active
+                    th(style='width:100px')
+                tbody
+                  each r in rules
+                    tr(data-id=r.id)
+                      td.drag-handle(style='cursor:grab')
+                        i.bi.bi-grip-vertical.text-muted
+                      td: code= r.pattern
+                      td: code= r.target_dir
+                      td= r.description || ''
+                      td
+                        if r.still_toss
+                          span.badge.bg-warning.text-dark Yes
+                        else
+                          span.badge.bg-secondary No
+                      td
+                        if r.active
+                          span.badge.bg-success Active
+                        else
+                          span.badge.bg-danger Inactive
+                      td
+                        button.btn.btn-sm.btn-primary.me-1(
+                          data-bs-toggle='modal' data-bs-target='#editWildcardModal'
+                          data-id=r.id
+                          data-pattern=r.pattern
+                          data-targetdir=r.target_dir
+                          data-description=r.description || ''
+                          data-stilltoss=(r.still_toss ? 'true' : 'false')
+                          data-active=(r.active ? 'true' : 'false')
+                        )
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/wildcards/' + r.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this rule?")')
+                            i.bi.bi-trash
+              small.text-muted.mt-2.d-block Drag rows to reorder. Rules are evaluated in order -- first match wins.
+            else
+              p.text-muted No wildcard rules configured. Inbound files go to the default FTN inbound directory.
+
+        //- Test Tool
+        .card.mb-4
+          .card-header.bg-secondary
+            h5.mb-0 Test Filename
+          .card-body
+            .row
+              .col-md-6
+                .input-group
+                  input.form-control#testFilename(type='text' placeholder='e.g. LORD01.PKT or NODEDIFF.Z06')
+                  button.btn.btn-primary#testBtn(type='button')
+                    i.bi.bi-search.me-1
+                    | Test
+              .col-md-6
+                #testResult
+
+        //- Variable Reference
+        .card.mb-4
+          .card-header.bg-dark
+            h5.mb-0 Variable Reference
+            small.text-muted.ms-2 Use %X variables in target directory paths
+          .card-body
+            .row
+              .col-md-4
+                dl.mb-0
+                  dt %M
+                  dd DOSemu drive_c directory
+                  dt %!
+                  dd Door base directory
+              .col-md-4
+                dl.mb-0
+                  dt %J
+                  dd Data directory
+                  dt %K
+                  dd Config directory
+              .col-md-4
+                dl.mb-0
+                  dt %Z
+                  dd Text/art directory
+                  dt %%
+                  dd Literal percent sign
+
+    //- Add Modal
+    .modal.fade#addWildcardModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Wildcard Rule
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/wildcards/new')
+            .modal-body
+              .mb-3
+                label.form-label Pattern
+                input.form-control(name='pattern' required placeholder='e.g. LORD*.* or *.TIC')
+                .form-text Case-insensitive glob. * matches any characters, ? matches one.
+              .mb-3
+                label.form-label Target Directory
+                input.form-control(name='target_dir' required placeholder='e.g. %M/lord/inbound or /opt/game/data')
+                .form-text Supports %X variables. Relative paths resolve under current directory.
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' placeholder='What this rule is for')
+              .form-check.mb-3
+                input.form-check-input(type='checkbox' name='still_toss' id='addStillToss' value='true')
+                label.form-check-label(for='addStillToss') Still toss (also queue for FTN toss processing)
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
+                label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Modal
+    .modal.fade#editWildcardModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Wildcard Rule
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editWildcardForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Pattern
+                input.form-control(name='pattern' id='ewPattern' required)
+              .mb-3
+                label.form-label Target Directory
+                input.form-control(name='target_dir' id='ewTargetDir' required)
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='ewDescription')
+              .form-check.mb-3
+                input.form-check-input(type='checkbox' name='still_toss' id='ewStillToss' value='true')
+                label.form-check-label(for='ewStillToss') Still toss (also queue for FTN toss processing)
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='ewActive' value='true')
+                label.form-check-label(for='ewActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      // Edit modal population
+      var editModal = document.getElementById('editWildcardModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editWildcardForm').action = '/admin/wildcards/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('ewPattern').value     = btn.getAttribute('data-pattern') || '';
+          document.getElementById('ewTargetDir').value    = btn.getAttribute('data-targetdir') || '';
+          document.getElementById('ewDescription').value  = btn.getAttribute('data-description') || '';
+          document.getElementById('ewStillToss').checked  = btn.getAttribute('data-stilltoss') === 'true';
+          document.getElementById('ewActive').checked     = btn.getAttribute('data-active') === 'true';
+        });
+      }
+
+      // Drag-to-reorder
+      var table = document.getElementById('wildcardTable');
+      if (table) {
+        var tbody = table.querySelector('tbody');
+        var dragRow = null;
+        tbody.addEventListener('dragstart', function(e) {
+          dragRow = e.target.closest('tr');
+          if (dragRow) e.dataTransfer.effectAllowed = 'move';
+        });
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          var target = e.target.closest('tr');
+          if (target && target !== dragRow) {
+            var rect = target.getBoundingClientRect();
+            var mid = rect.top + rect.height / 2;
+            if (e.clientY < mid) {
+              tbody.insertBefore(dragRow, target);
+            } else {
+              tbody.insertBefore(dragRow, target.nextSibling);
+            }
+          }
+        });
+        tbody.addEventListener('dragend', function() {
+          if (!dragRow) return;
+          dragRow = null;
+          // Save new order
+          var rows = tbody.querySelectorAll('tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(r.getAttribute('data-id')); });
+          fetch('/admin/wildcards/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          });
+        });
+        // Make rows draggable
+        tbody.querySelectorAll('tr').forEach(function(r) {
+          r.draggable = true;
+        });
+      }
+
+      // Test tool
+      var testBtn = document.getElementById('testBtn');
+      if (testBtn) {
+        testBtn.addEventListener('click', function() {
+          var filename = document.getElementById('testFilename').value.trim();
+          if (!filename) return;
+          fetch('/admin/wildcards/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var el = document.getElementById('testResult');
+            if (data.match) {
+              el.innerHTML = '<span class="badge bg-success">Match</span> Pattern: <code>' +
+                data.pattern + '</code> &rarr; <code>' + data.target_dir + '</code>' +
+                (data.still_toss ? ' <span class="badge bg-warning text-dark">still toss</span>' : '');
+            } else {
+              el.innerHTML = '<span class="badge bg-secondary">No match</span> ' + (data.message || '');
+            }
+          });
+        });
+        document.getElementById('testFilename').addEventListener('keypress', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); testBtn.click(); }
+        });
+      }

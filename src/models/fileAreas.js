@@ -9,6 +9,7 @@ import os from 'os';
 import * as postgres from '../middleware/db/postgres.js';
 import * as fileGroups from "./fileGroups.js";
 import * as alogger from "../utils/alogger.js";
+import { substitute } from '../utils/configvars.js';
 
 function expandHome(dir) {
 	if (!dir) return dir;
@@ -39,16 +40,16 @@ function normalizeFlags(input) {
  * Three-level hierarchy: global file_base_dir → group base_dir → area sub_dir
  */
 function resolveAreaPath(group, area) {
-	var globalBase = expandHome(appConfig.get('file_base_dir', 'files'));
+	var globalBase = expandHome(substitute(appConfig.get('file_base_dir', 'files')));
 	var root;
 	if (group && group.base_dir) {
-		var groupDir = expandHome(group.base_dir);
+		var groupDir = expandHome(substitute(group.base_dir));
 		// Relative group base_dir is treated as a subdirectory of the global file_base_dir
 		root = path.isAbsolute(groupDir) ? groupDir : path.join(globalBase, groupDir);
 	} else {
 		root = globalBase;
 	}
-	var sub = (area && area.sub_dir) ? area.sub_dir : (area ? area.shortcode.toLowerCase() : '');
+	var sub = (area && area.sub_dir) ? substitute(area.sub_dir) : (area ? area.shortcode.toLowerCase() : '');
 	return path.join(root, sub);
 }
 

@@ -55,6 +55,7 @@ function buildConnectionData(networkType, formObj) {
 			var rawMailerTransport = formObj.ftn_mailer_transport || formObj.mailer_transport || 'tcp';
 			var rawMailerProtocol  = formObj.ftn_mailer_protocol  || formObj.mailer_protocol  || 'binkp';
 			var rawMailerWsUrl     = formObj.ftn_mailer_ws_url    || formObj.mailer_ws_url    || '';
+			var rawOutboxDir       = formObj.ftn_outbox_dir !== undefined ? formObj.ftn_outbox_dir : (formObj.outbox_dir || '');
 			return {
 				address:          rawAddress  ? rawAddress.trim()        : '',
 				direct:           rawDirect !== 'No' && rawDirect !== false ? true : false,
@@ -70,7 +71,8 @@ function buildConnectionData(networkType, formObj) {
 				poll_interval:    rawPollInterval ? parseInt(rawPollInterval) : 60,
 				mailer_transport: rawMailerTransport ? rawMailerTransport.trim().toLowerCase() : 'tcp',
 				mailer_protocol:  rawMailerProtocol  ? rawMailerProtocol.trim().toLowerCase()  : 'binkp',
-				mailer_ws_url:    rawMailerWsUrl     ? rawMailerWsUrl.trim()                   : ''
+				mailer_ws_url:    rawMailerWsUrl     ? rawMailerWsUrl.trim()                   : '',
+				outbox_dir:       rawOutboxDir        ? rawOutboxDir.trim()                     : ''
 			};
 		}
 		case 'NNTP': {
@@ -342,12 +344,12 @@ async function updateConnection(uuid, formObj) {
 		'session_password', 'packet_password', 'tic_password', 'areafix_password',
 		'routing_rules', 'host', 'port', 'use_tls', 'username', 'password',
 		'poll_interval_minutes', 'pull_interval_minutes', 'transport', 'remote_inbox', 'remote_outbox',
-		'remote_qwk_id',
+		'remote_qwk_id', 'outbox_dir',
 		// FTN form fields
 		'ftn_address', 'ftn_direct', 'ftn_route_to', 'ftn_status',
 		'ftn_remote_host', 'ftn_remote_port', 'ftn_session_password',
 		'ftn_packet_password', 'ftn_tic_password', 'ftn_areafix_password',
-		'ftn_routing_rules',
+		'ftn_routing_rules', 'ftn_outbox_dir',
 		// NNTP form fields
 		'nntp_host', 'nntp_port', 'nntp_use_tls', 'nntp_username',
 		'nntp_password', 'nntp_pull_interval_minutes',

@@ -25,6 +25,7 @@ import * as bulletins from '../models/bulletins.js';
 import * as newsFiles from '../models/newsFiles.js';
 import * as seasonalArt from '../models/seasonalArt.js';
 import * as freqModel from '../models/freq.js';
+import * as fileWildcards from '../models/fileWildcards.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -4627,6 +4628,60 @@ router.post('/freq/request', urlencodedParser, requireAdmin, async (req, res) =>
 	}
 
 	res.redirect('/admin/freq');
+});
+
+// -------------------------------------------------------
+// Inbound Wildcards
+// -------------------------------------------------------
+
+router.get('/wildcards', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var rules = await fileWildcards.getAll();
+	res.render('admin/wildcards/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Inbound Wildcards',
+		activelink: 'wildcards',
+		activenav: 'networks',
+		currentuser: currentuser,
+		rules: rules
+	});
+});
+
+router.post('/wildcards/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await fileWildcards.create(req.body);
+	res.redirect('/admin/wildcards');
+});
+
+router.post('/wildcards/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await fileWildcards.update(parseInt(req.params.id), req.body);
+	res.redirect('/admin/wildcards');
+});
+
+router.post('/wildcards/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await fileWildcards.remove(parseInt(req.params.id));
+	res.redirect('/admin/wildcards');
+});
+
+router.post('/wildcards/reorder', express.json(), requireAdmin, async (req, res) => {
+	if (req.body && Array.isArray(req.body.ids)) {
+		await fileWildcards.reorder(req.body.ids);
+	}
+	res.json({ status: true });
+});
+
+router.post('/wildcards/test', express.json(), requireAdmin, async (req, res) => {
+	var filename = req.body && req.body.filename;
+	if (!filename) {
+		return res.json({ match: false, message: 'No filename provided' });
+	}
+	var rules = await fileWildcards.getActive();
+	var match = await fileWildcards.matchFilename(filename, rules);
+	if (match) {
+		res.json({ match: true, pattern: match.pattern, target_dir: match.target_dir, still_toss: match.still_toss });
+	} else {
+		res.json({ match: false, message: 'No match -- file would go to default inbound directory' });
+	}
 });
 
 // -------------------------------------------------------

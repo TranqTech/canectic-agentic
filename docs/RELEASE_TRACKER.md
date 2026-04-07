@@ -230,6 +230,8 @@ Last updated: 2026-04-06
 | 37 | Cross-network orphaned area overview | [ ] | Summary view showing which networks have orphaned areas with counts and links. |
 | 38 | Echolist/filebone navigation improvements | [ ] | UX pass on echolist/filebone page organization, navigation flow, breadcrumbs, and view consolidation. |
 | 39 | File group base_dir change: move area subdirectories | [ ] | When group base_dir changes, preview and move member area subdirs. Skip absolute/external paths. Handle edge cases. |
+| 40 | Per-peer outbound fileboxes | [x] | Optional outbox_dir on FTN peer connections. BSO scanner picks up files, sends with delete-after-send. %X variable substitution for paths. |
+| 41 | Inbound file wildcards | [x] | Sysop-configurable glob pattern rules route inbound files to specific directories. Skip toss by default, still_toss flag. Admin CRUD with drag-to-reorder and test tool. |
 
 ---
 
@@ -272,5 +274,6 @@ Last updated: 2026-04-06
 | `QWK_USER_DESIGN.md` | [x] |
 | `WEB_CHAT_DESIGN.md` | [x] |
 | `WEB_CALLFLOW_DESIGN.md` | [x] |
+| `FILEBOX_WILDCARD_DESIGN.md` | [x] |
 | `INSTALL.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |

@@ -20,6 +20,7 @@ import * as peerConnections from '../models/peerConnections.js';
 import * as systemAddresses from '../models/systemAddresses.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
+import { resolveFileboxPath } from '../utils/fileboxPath.js';
 
 class SessionController extends EventEmitter {
 	constructor(transport, role, options) {
@@ -45,6 +46,7 @@ class SessionController extends EventEmitter {
 		this.startTime     = Date.now();
 		this.filesSent     = 0;
 		this.filesReceived = 0;
+		this.filesToToss   = 0;   // Files needing toss (excludes wildcard-routed skipToss files)
 		this.bytesSent     = 0;
 		this.bytesReceived = 0;
 
@@ -384,7 +386,9 @@ class SessionController extends EventEmitter {
 		this.transfer.on('receiveComplete', (info) => {
 			this.filesReceived++;
 			this.bytesReceived += info.size;
-			alogger.writeClog(5, 'Session ' + this.uuid + ': received ' + info.name + ' (' + info.size + ' bytes)', 'mailer', 'green');
+			if (!info.skipToss) this.filesToToss++;
+			alogger.writeClog(5, 'Session ' + this.uuid + ': received ' + info.name + ' (' + info.size + ' bytes)' +
+				(info.wildcardMatch ? ' [wildcard: ' + info.wildcardMatch + ']' : ''), 'mailer', 'green');
 
 			// FREQ: if we received a .req file, process it
 			if (info.name && info.name.toLowerCase().endsWith('.req') && info.path) {
@@ -497,6 +501,23 @@ class SessionController extends EventEmitter {
 			}
 		}
 
+		// Per-peer outbound filebox
+		if (cd.outbox_dir) {
+			var outboxPath = resolveFileboxPath(cd.outbox_dir);
+			if (outboxPath && fs.existsSync(outboxPath)) {
+				try {
+					var outboxEntries = fs.readdirSync(outboxPath);
+					for (var fbEntry of outboxEntries) {
+						var fbPath = outboxPath + '/' + fbEntry;
+						try {
+							var fbStat = fs.statSync(fbPath);
+							if (fbStat.isFile()) files.push({ path: fbPath });
+						} catch (_) {}
+					}
+				} catch (_) {}
+			}
+		}
+
 		return files;
 	}
 
@@ -559,6 +580,47 @@ class SessionController extends EventEmitter {
 			if (fs.existsSync(reqPath)) {
 				this.transfer.queueFile(reqPath, { deleteAfterSend: true });
 				alogger.writeClog(5, 'Session ' + this.uuid + ': queued FREQ request ' + path.basename(reqPath) + ' for ' + peerAddr, 'mailer', 'cyan');
+			}
+		}
+
+		// Scan per-peer outbound fileboxes
+		for (var fbConn of connections) {
+			var fbCd = fbConn.connection_data || {};
+			if (!fbCd.outbox_dir) continue;
+
+			var outboxPath = resolveFileboxPath(fbCd.outbox_dir);
+			if (!outboxPath) continue;
+
+			try {
+				if (!fs.existsSync(outboxPath)) continue;
+				var outboxStat = fs.statSync(outboxPath);
+				if (!outboxStat.isDirectory()) continue;
+
+				var outboxEntries = fs.readdirSync(outboxPath);
+				var queued = 0;
+				for (var fbEntry of outboxEntries) {
+					var fbFilePath = path.join(outboxPath, fbEntry);
+					try {
+						var fbStat = fs.statSync(fbFilePath);
+						if (!fbStat.isFile()) continue;
+						this.transfer.queueFile(fbFilePath, { deleteAfterSend: true });
+						queued++;
+					} catch (_) {}
+				}
+				if (queued > 0) {
+					alogger.writeClog(5,
+						'Session ' + this.uuid + ': queued ' + queued + ' filebox file(s) from ' + outboxPath +
+						' for ' + (fbCd.address || 'unknown'),
+						'mailer', 'cyan'
+					);
+				}
+			} catch (err) {
+				if (err.code !== 'ENOENT') {
+					alogger.writeClog(3,
+						'Session ' + this.uuid + ': error scanning filebox ' + outboxPath + ': ' + err.message,
+						'mailer', 'yellow'
+					);
+				}
 			}
 		}
 
@@ -696,6 +758,7 @@ class SessionController extends EventEmitter {
 			reason:        reason,
 			filesSent:     this.filesSent,
 			filesReceived: this.filesReceived,
+			filesToToss:   this.filesToToss,
 			duration:      Math.floor((Date.now() - this.startTime) / 1000)
 		});
 	}

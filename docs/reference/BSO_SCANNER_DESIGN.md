@@ -63,6 +63,12 @@ These are passed via the `options.manager` reference, avoiding circular imports.
 
 ---
 
+### Outbound Filebox Scanning
+
+After the normal BSO directory scan, the scanner checks per-peer outbound fileboxes. It queries all active FTN connections with `outbox_dir` set in `connection_data`, resolves each path via `resolveFileboxPath()` (supports `%X` variable substitution), and checks for files. If files are found, the connection's address is added to the address map with the connection's `status` as the flavour. This enables the same session-triggering logic to handle filebox delivery alongside normal BSO mail.
+
+---
+
 ## 2. BSO Filename Parsing
 
 ### Filename structure

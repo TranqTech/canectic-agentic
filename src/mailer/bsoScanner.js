@@ -14,6 +14,7 @@ import * as alogger from '../utils/alogger.js';
 import * as ftnRouter from '../models/ftnRouter.js';
 import * as peerConnections from '../models/peerConnections.js';
 import appConfig from '../config/appConfig.js';
+import { resolveFileboxPath } from '../utils/fileboxPath.js';
 
 // -------------------------------------------------------------------------
 // BSO extension maps
@@ -207,6 +208,9 @@ class BsoScanner {
 		// Scan zone-specific sibling directories: <base>.002, <base>.003, etc.
 		this._scanZoneDirectories(baseDir, allAddresses);
 
+		// Scan per-peer outbound fileboxes
+		var fileboxTriggered = await this._scanOutboundFileboxes(allAddresses);
+
 		// Process discovered addresses
 		var triggered = 0;
 		var skipped = 0;
@@ -229,7 +233,8 @@ class BsoScanner {
 				triggered + ' connection(s) triggered' +
 				(skipped > 0 ? ', ' + skipped + ' active session(s) skipped' : '') +
 				(holdCount > 0 ? ', ' + holdCount + ' hold' : '') +
-				(noRoute > 0 ? ', ' + noRoute + ' unroutable' : ''),
+				(noRoute > 0 ? ', ' + noRoute + ' unroutable' : '') +
+				(fileboxTriggered > 0 ? ', ' + fileboxTriggered + ' filebox(es)' : ''),
 				'mailer', 'cyan'
 			);
 		} else {
@@ -330,6 +335,92 @@ class BsoScanner {
 			if (err.code !== 'ENOENT') {
 				alogger.writeClog(3, 'BSO scan: error scanning zone directories in ' + parentDir + ': ' + err.message, 'mailer', 'yellow');
 			}
+		}
+	}
+
+	// -------------------------------------------------------------------
+	// Outbound filebox scanning
+	// -------------------------------------------------------------------
+
+	async _scanOutboundFileboxes(addressMap) {
+		var fileboxCount = 0;
+		try {
+			var allConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
+			if (!allConns) return 0;
+
+			for (var conn of allConns) {
+				var cd = conn.connection_data || {};
+				if (!cd.outbox_dir || !cd.address) continue;
+
+				var outboxPath = resolveFileboxPath(cd.outbox_dir);
+				if (!outboxPath) continue;
+
+				try {
+					if (!fs.existsSync(outboxPath)) continue;
+					var stat = fs.statSync(outboxPath);
+					if (!stat.isDirectory()) continue;
+
+					var entries = fs.readdirSync(outboxPath);
+					var fileCount = 0;
+					for (var entry of entries) {
+						try {
+							var entStat = fs.statSync(path.join(outboxPath, entry));
+							if (entStat.isFile()) fileCount++;
+						} catch (_) {}
+					}
+
+					if (fileCount === 0) continue;
+
+					// Add this address to the address map so _handleAddress triggers a session
+					var addrKey = cd.address;
+					// Normalize to zone:net/node format
+					if (!addressMap.has(addrKey)) {
+						// Use the connection's status as the flavour
+						var flavour = cd.status === 'CRASH' ? 'Crash' : cd.status === 'HOLD' ? 'Hold' : 'Normal';
+						var addrParts = this._parseAddress(cd.address);
+						if (addrParts) {
+							var normalKey = addrParts.zone + ':' + addrParts.net + '/' + addrParts.node;
+							if (!addressMap.has(normalKey)) {
+								addressMap.set(normalKey, {
+									zone:    addrParts.zone,
+									net:     addrParts.net,
+									node:    addrParts.node,
+									flavour: flavour
+								});
+							}
+						}
+					}
+
+					fileboxCount++;
+					alogger.writeClog(5,
+						'BSO scan: filebox for ' + cd.address + ' has ' + fileCount + ' file(s) in ' + outboxPath,
+						'mailer', 'cyan'
+					);
+				} catch (err) {
+					if (err.code !== 'ENOENT') {
+						alogger.writeClog(3, 'BSO scan: error scanning filebox ' + outboxPath + ': ' + err.message, 'mailer', 'yellow');
+					}
+				}
+			}
+		} catch (err) {
+			alogger.writeClog(3, 'BSO scan: filebox scan error: ' + err.message, 'mailer', 'yellow');
+		}
+		return fileboxCount;
+	}
+
+	// Parse a FTN address string into components
+	_parseAddress(addr) {
+		try {
+			var zsplit  = addr.split(':');
+			var nnsplit = zsplit[1] ? zsplit[1].split('/') : [];
+			var npsplit = nnsplit[1] ? nnsplit[1].split('.') : [];
+			var zone  = parseInt(zsplit[0]);
+			var net   = parseInt(nnsplit[0]);
+			var node  = parseInt(npsplit[0]);
+			if (isNaN(zone) || isNaN(net) || isNaN(node)) return null;
+			return { zone, net, node };
+		} catch (_) {
+			return null;
 		}
 	}
 

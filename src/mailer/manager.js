@@ -395,12 +395,14 @@ class MailerManager extends EventEmitter {
 			// Notify listeners that files arrived and need tossing.
 			// connectionUUID comes from caller options (outbound) or
 			// peer matching during handshake (inbound).
-			if (info.filesReceived > 0) {
+			// Only trigger toss for files that weren't wildcard-routed with skipToss.
+			var filesToToss = info.filesToToss !== undefined ? info.filesToToss : info.filesReceived;
+			if (filesToToss > 0) {
 				var connectionUUID = session.options.connectionUUID
 					|| (session.peerConnection ? session.peerConnection.uuid : null);
 				this.emit('filesReceived', {
 					connectionUUID: connectionUUID,
-					fileCount:      info.filesReceived,
+					fileCount:      filesToToss,
 					sessionUUID:    info.uuid,
 				});
 			}

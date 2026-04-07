@@ -234,6 +234,8 @@ global file_base_dir     (appConfig 'file_base_dir', default: 'files')
        └── area.sub_dir  (defaults to lowercase shortcode)
 ```
 
+All three levels support `%X` variable substitution via `configvars.js` (e.g. `%M` for DOSemu drive_c, `%!` for door base directory). Tilde (`~`) expansion is also applied. This allows file areas to target DOSemu or door game directories directly -- for example, a group `base_dir` of `%M/doors` or an area `sub_dir` of `%M/lord/files`.
+
 Example: If `file_base_dir = '/data/files'`, group has `base_dir = '/data/files'`, and area has `sub_dir = 'dos_games'`, the resolved path is `/data/files/dos_games/`.
 
 If a group has a custom `base_dir`, that replaces the global base entirely. The area's `sub_dir` is always appended.

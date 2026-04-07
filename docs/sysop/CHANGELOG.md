@@ -71,6 +71,11 @@
 - Delete confirmation modals on all-echolists and all-filebones listing pages (replaces alert confirms)
 - Standalone update.sh script: copies code, merges data, runs npm install and db migrations automatically
 - 57 new unit tests for sbbsecho parser (2,016 total)
+- Per-peer outbound fileboxes: optional `outbox_dir` on FTN peer connections, BSO scanner picks up files and sends with delete-after-send, admin UI field on connection forms
+- Inbound file wildcards: sysop-configurable glob pattern rules route inbound files to specific directories, skip toss by default with still_toss override, admin CRUD at /admin/wildcards with drag-to-reorder and test tool
+- %X variable substitution in filebox paths, wildcard target directories, file group base_dir, and file area sub_dir (e.g. %M for DOSemu drive_c)
+- `filebox_base_dir` config key for per-peer filebox parent directory
+- Inbound Wildcards link added to admin Networking dropdown
 
 ## v0.9.5a (2026-04-04)
 

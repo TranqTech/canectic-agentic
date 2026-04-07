@@ -693,6 +693,19 @@ block content
                                 class='form-control'
                                 tabindex='10'
                               )
+                              br
+                              label(for='nc_ftn_outbox_dir') Outbox Directory:
+                                |
+                                span(data-bs-toggle='tooltip' data-bs-placement='right' title='Files in this directory will be sent to this peer. Supports %X variables (e.g. %M for DOSemu drive). Relative paths resolve under filebox base directory.')
+                                  i.bi.bi-info-circle.text-muted
+                              input(
+                                type='text'
+                                id='nc_ftn_outbox_dir'
+                                name='ftn_outbox_dir'
+                                class='form-control'
+                                tabindex='11'
+                                placeholder='e.g. peer_101 or %M/lord/outbound'
+                              )
                             // NNTP fields
                             #nc_fields_nntp(style='display:none')
                               label(for='nc_nntp_host') Host:
@@ -947,6 +960,12 @@ block content
                               br
                               label(for='ec_ftn_areafixpw') AreaFix Password:
                               input(type='text' id='ec_ftn_areafixpw' name='ftn_areafix_password' class='form-control' tabindex='8')
+                              br
+                              label(for='ec_ftn_outbox_dir') Outbox Directory:
+                                |
+                                span(data-bs-toggle='tooltip' data-bs-placement='right' title='Files in this directory will be sent to this peer. Supports %X variables (e.g. %M for DOSemu drive). Relative paths resolve under filebox base directory.')
+                                  i.bi.bi-info-circle.text-muted
+                              input(type='text' id='ec_ftn_outbox_dir' name='ftn_outbox_dir' class='form-control' tabindex='9' placeholder='e.g. peer_101 or %M/lord/outbound')
                             // NNTP edit fields
                             #ec_fields_nntp(style='display:none')
                               label(for='ec_nntp_host') Host:
@@ -1345,6 +1364,7 @@ block content
             document.getElementById('ec_ftn_mailer_transport').value = cd.mailer_transport || 'tcp';
             document.getElementById('ec_ftn_mailer_protocol').value  = cd.mailer_protocol || 'binkp';
             document.getElementById('ec_ftn_mailer_ws_url').value    = cd.mailer_ws_url || '';
+            document.getElementById('ec_ftn_outbox_dir').value      = cd.outbox_dir || '';
             toggleFtnRouteField('ec');
             toggleFtnWsUrlField('ec');
           } else if (type === 'NNTP') {

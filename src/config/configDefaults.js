@@ -222,6 +222,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'ftn_keep_tossed_days',     defaultValue: '7',                    type: 'number',  category: 'maintenance', description: 'Days to keep tossed FTN packets (0 = delete immediately, 999 = keep forever)' },
 	{ key: 'freq_enabled',             defaultValue: 'true',                 type: 'boolean', category: 'mailer',      description: 'Enable FREQ (File Request) responses during binkp sessions' },
 	{ key: 'freq_filebox_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Directory for FREQ filebox (files available to any authenticated session)' },
+	{ key: 'filebox_base_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Parent directory for per-peer filebox subdirectories (outbox_dir resolves relative to this)' },
 	{ key: 'freq_max_files',           defaultValue: '10',                   type: 'number',  category: 'mailer',      description: 'Maximum files to send per FREQ request' },
 	{ key: 'pm_attachment_dir',        defaultValue: 'files/pm_attachments', type: 'string',  category: 'paths',    description: 'Storage directory for PM file attachments' },
 	{ key: 'pm_max_attachment_size',   defaultValue: '10485760',             type: 'number',  category: 'security', description: 'Maximum PM attachment size in bytes (default 10MB)' },

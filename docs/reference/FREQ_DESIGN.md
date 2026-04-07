@@ -58,6 +58,8 @@ Config key: `freq_filebox_dir` (default: `ftn/filebox`)
 
 This takes priority over file_entries so the sysop can override database files with specific versions for FREQ (e.g. a custom README, a specific release build).
 
+Note: This global FREQ filebox is separate from the per-peer outbound fileboxes (`outbox_dir` on peer connections). The FREQ filebox serves files on request; outbound fileboxes are proactively sent. See `FILEBOX_WILDCARD_DESIGN.md` for the per-peer filebox system.
+
 #### Layer 3: File Entries (Database, Broadest Fallback)
 
 Search `file_entries` for an exact filename match (case-insensitive). This is the broadest search -- any file uploaded to the BBS file areas is potentially requestable.

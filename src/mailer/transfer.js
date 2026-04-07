@@ -12,6 +12,8 @@ import { EventEmitter } from 'node:events';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as alogger from '../utils/alogger.js';
+import * as fileWildcards from '../models/fileWildcards.js';
+import { resolveFileboxPath } from '../utils/fileboxPath.js';
 
 const SEND_CHUNK_SIZE = 4096;
 
@@ -348,34 +350,73 @@ class TransferEngine extends EventEmitter {
 				return;
 			}
 
-			// Move to inbound directory
-			var destPath = path.join(self._inboundDir, rxInfo.name);
+			// Check inbound wildcard rules for filename routing
+			self._routeInboundFile(rxInfo).catch(function(err) {
+				alogger.writeClog(3, 'TransferEngine: wildcard routing error: ' + err.message, 'mailer', 'redbright');
+			});
+		});
+	}
 
-			// Avoid overwriting — append timestamp if needed
-			if (fs.existsSync(destPath)) {
-				var ext  = path.extname(rxInfo.name);
-				var base = path.basename(rxInfo.name, ext);
-				destPath = path.join(self._inboundDir, base + '_' + Date.now() + ext);
+	async _routeInboundFile(rxInfo) {
+		var destDir = this._inboundDir;
+		var wildcardMatch = null;
+		var skipToss = false;
+
+		// Test against wildcard rules
+		try {
+			wildcardMatch = await fileWildcards.matchFilename(rxInfo.name);
+		} catch (_) {
+			// Wildcard matching failure is non-fatal — fall through to default
+		}
+
+		if (wildcardMatch) {
+			var targetDir = resolveFileboxPath(wildcardMatch.target_dir);
+			if (targetDir) {
+				this._ensureDir(targetDir);
+				destDir = targetDir;
+				skipToss = !wildcardMatch.still_toss;
+				alogger.writeClog(5,
+					'TransferEngine: wildcard match — ' + rxInfo.name +
+					' -> ' + targetDir + ' (pattern: ' + wildcardMatch.pattern +
+					', toss: ' + (wildcardMatch.still_toss ? 'yes' : 'no') + ')',
+					'mailer', 'cyan'
+				);
 			}
+		}
 
+		// Move to destination directory
+		var destPath = path.join(destDir, rxInfo.name);
+
+		// Avoid overwriting — append timestamp if needed
+		if (fs.existsSync(destPath)) {
+			var ext  = path.extname(rxInfo.name);
+			var base = path.basename(rxInfo.name, ext);
+			destPath = path.join(destDir, base + '_' + Date.now() + ext);
+		}
+
+		try {
+			fs.renameSync(rxInfo.tempPath, destPath);
+		} catch (err) {
+			// Cross-device rename fallback
 			try {
-				fs.renameSync(rxInfo.tempPath, destPath);
-			} catch (err) {
-				// Cross-device rename fallback
-				try {
-					fs.copyFileSync(rxInfo.tempPath, destPath);
-					fs.unlinkSync(rxInfo.tempPath);
-				} catch (copyErr) {
-					alogger.writeClog(3, 'TransferEngine: cannot move file to inbound: ' + copyErr.message, 'mailer', 'redbright');
-					return;
-				}
+				fs.copyFileSync(rxInfo.tempPath, destPath);
+				fs.unlinkSync(rxInfo.tempPath);
+			} catch (copyErr) {
+				alogger.writeClog(3, 'TransferEngine: cannot move file to destination: ' + copyErr.message, 'mailer', 'redbright');
+				return;
 			}
+		}
 
-			// Tell remote we got the file
-			self._protocol.sendGOT(rxInfo.name, rxInfo.size, rxInfo.time);
+		// Tell remote we got the file
+		this._protocol.sendGOT(rxInfo.name, rxInfo.size, rxInfo.time);
 
-			alogger.writeClog(5, 'TransferEngine: received ' + rxInfo.name + ' (' + rxInfo.size + ' bytes)', 'mailer', 'greenbright');
-			self.emit('receiveComplete', { name: rxInfo.name, size: rxInfo.size, path: destPath });
+		alogger.writeClog(5, 'TransferEngine: received ' + rxInfo.name + ' (' + rxInfo.size + ' bytes)', 'mailer', 'greenbright');
+		this.emit('receiveComplete', {
+			name: rxInfo.name,
+			size: rxInfo.size,
+			path: destPath,
+			wildcardMatch: wildcardMatch ? wildcardMatch.pattern : null,
+			skipToss: skipToss
 		});
 	}
 

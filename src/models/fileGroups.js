@@ -15,6 +15,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as fileAreas from "./fileAreas.js";
 import appConfig from "../config/appConfig.js";
+import { substitute } from '../utils/configvars.js';
 
 async function ensureSortOrder() {
 	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
@@ -79,10 +80,10 @@ async function newGroup(formObj) {
 	if (dbres.status === true) {
 		returnObj.status = true;
 		// Create the group's base directory if specified
-		var globalBase = expandHome(appConfig.get('file_base_dir', 'files'));
+		var globalBase = expandHome(substitute(appConfig.get('file_base_dir', 'files')));
 		var groupDir;
 		if (pgObj.base_dir) {
-			var expanded = expandHome(pgObj.base_dir);
+			var expanded = expandHome(substitute(pgObj.base_dir));
 			groupDir = path.isAbsolute(expanded) ? expanded : path.join(globalBase, expanded);
 		} else {
 			groupDir = globalBase;

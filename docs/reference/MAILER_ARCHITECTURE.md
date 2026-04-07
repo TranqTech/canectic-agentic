@@ -144,7 +144,8 @@ Existing fields used by the mailer:
 - `address` — remote FTN address, presented during handshake
 - `session_password` — validated during session authentication
 - `packet_password` — used for packet header password field
-- `status` — NORMAL/CRASH/HOLD (controls polling behavior)
+- `status` — NORMAL/CRASH/HOLD (controls polling behavior and BSO flavour for filebox files)
+- `outbox_dir` — optional per-peer outbound filebox directory (see Outbound Fileboxes below)
 
 ---
 
@@ -575,6 +576,58 @@ Both binkp and Zmodem support resume:
 - **Zmodem**: Built-in crash recovery. Receiver reports last good position, sender resumes.
 
 Partial inbound files in the temp directory are kept between sessions. On the next session with the same peer, if the remote offers a file that matches a partial, the protocol requests resume from the existing offset.
+
+---
+
+## Outbound Fileboxes
+
+Each FTN peer connection can optionally have an `outbox_dir` configured in `connection_data`. Files placed in this directory are automatically sent to the peer and deleted after successful delivery.
+
+### Use Case
+
+Inter-BBS (IBBS) door games (LORD, TradeWars, etc.) drop outbound files into directories. DOS-based games have no knowledge of BSO transports or netmail file-attach. Outbound fileboxes bridge this gap -- the sysop configures the game's output directory as the peer's `outbox_dir`, and the mailer handles delivery.
+
+### Path Resolution
+
+The `outbox_dir` value supports `%X` variable substitution via `configvars.js` (e.g. `%M/lord/outbound/` expands the DOSemu drive_c path). After substitution:
+- Absolute paths are used as-is
+- Relative paths resolve under `filebox_base_dir` config (default: `ftn/filebox`)
+
+Resolution is handled by `resolveFileboxPath()` in `src/utils/fileboxPath.js`.
+
+### Scanner Integration
+
+The BSO scanner (`bsoScanner.js`) checks outbox directories alongside the normal BSO hex-addressed scan. For each active FTN connection with `outbox_dir` set, if the directory exists and contains files, the connection's address is added to the scan results. The connection's `status` field determines the BSO flavour (NORMAL/CRASH/HOLD).
+
+### Session Integration
+
+During `_buildOutboundList()`, the session controller scans each connection's `outbox_dir` (if configured) after the normal BSO flow file and packet scan. All files found are queued with `deleteAfterSend: true`. This applies to both binkp (TransferEngine) and EMSI/Wazoo sessions.
+
+---
+
+## Inbound Wildcards
+
+Sysop-configurable rules that route received files to specific directories based on filename patterns, instead of the default `ftn/in/` landing zone.
+
+### Use Case
+
+Same IBBS motivation as outbound fileboxes -- door games expect inbound files in specific directories. Wildcards like `LORD*.*` route game packets directly to the game's inbound directory without requiring the sysop to manually move files.
+
+### Schema
+
+The `file_wildcards` table stores rules with: `pattern` (glob), `target_dir` (destination), `still_toss` (boolean, default false), `sort_order`, `active`. Model: `src/models/fileWildcards.js`.
+
+### Transfer Integration
+
+In `TransferEngine._onFileComplete()`, after file verification, the filename is tested against cached wildcard rules (loaded once, invalidated on change). First match wins. Matched files are moved to the resolved `target_dir` instead of `ftn/in/`. The `receiveComplete` event includes `skipToss: true` for matched files (unless `still_toss` is set), and the session tracks `filesToToss` separately from `filesReceived`. The mailer manager only triggers toss jobs for files that need tossing.
+
+### Admin UI
+
+Managed at `/admin/wildcards` with drag-to-reorder, create/edit modals, and a filename test tool. Listed under Networking in the admin navbar.
+
+### Design Doc
+
+Full design details in `docs/reference/FILEBOX_WILDCARD_DESIGN.md`.
 
 ---
 
