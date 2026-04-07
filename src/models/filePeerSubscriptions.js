@@ -295,11 +295,21 @@ async function syncFileAreaToConnections(networkId, fileAreaId, options) {
 			if (opts.allowAll)  setClauses.push('allowed = true');
 			if (opts.enableAll) setClauses.push('enabled = true');
 
+			var sql = 'UPDATE file_peer_subscriptions SET ' + setClauses.join(', ') +
+				' WHERE peer_connection_id = $2 AND file_area_id = $3';
+			alogger.writeAlog(5,
+				'filePeerSubs.syncFileAreaToConnections: ' + sql +
+				' [' + currtime.toISOString() + ', ' + row.id + ', ' + faId + ']' +
+				' opts=' + JSON.stringify(opts),
+				'cyan'
+			);
+
 			try {
-				await postgres.write(
-					'UPDATE file_peer_subscriptions SET ' + setClauses.join(', ') +
-					' WHERE peer_connection_id = $2 AND file_area_id = $3',
-					[currtime, row.id, faId]
+				var writeResult = await postgres.pgpool.query(sql, [currtime, row.id, faId]);
+				alogger.writeAlog(5,
+					'filePeerSubs.syncFileAreaToConnections: UPDATE rowCount=' + writeResult.rowCount +
+					' for connection ' + row.id + ' file_area ' + faId,
+					writeResult.rowCount > 0 ? 'greenbright' : 'yellow'
 				);
 			} catch (err) {
 				alogger.writeAlog(3,
