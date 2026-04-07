@@ -201,6 +201,11 @@ block content
                           option(value='') -- Select --
                           each g in groups
                             option(value=g.shortcode)= g.name
+                      .mb-3
+                        label.form-label Newscan Default
+                        select#subNewscan.form-select(name='newscan_default')
+                          option(value='true' selected) Yes
+                          option(value='false') No
                   .row
                     .col-4
                       label.form-label Browse Security
@@ -418,6 +423,7 @@ block content
                 document.getElementById('subBrowseSec').value = !{defaultBrowseSecurity};
                 document.getElementById('subReadSec').value = !{defaultReadSecurity};
                 document.getElementById('subPostSec').value = !{defaultPostSecurity};
+                document.getElementById('subNewscan').value = 'true';
                 renderFlags('sub_browse_perm', 'browse_perm_flags', [], allPerms, 'bg-success');
                 renderFlags('sub_browse_rest', 'browse_rest_flags', [], allRestrs, 'bg-danger');
                 renderFlags('sub_read_perm', 'read_perm_flags', [], allPerms, 'bg-success');
@@ -432,6 +438,7 @@ block content
                   document.getElementById('subBrowseSec').value = data.browse_security || !{defaultBrowseSecurity};
                   document.getElementById('subReadSec').value = data.read_security || !{defaultReadSecurity};
                   document.getElementById('subPostSec').value = data.post_security || !{defaultPostSecurity};
+                  document.getElementById('subNewscan').value = data.newscan_default !== false ? 'true' : 'false';
                   var parseF = function(v) { try { return Array.isArray(v) ? v : JSON.parse(v || '[]'); } catch(e) { return []; } };
                   renderFlags('sub_browse_perm', 'browse_perm_flags', parseF(data.browse_perm_flags), allPerms, 'bg-success');
                   renderFlags('sub_browse_rest', 'browse_rest_flags', parseF(data.browse_rest_flags), allRestrs, 'bg-danger');

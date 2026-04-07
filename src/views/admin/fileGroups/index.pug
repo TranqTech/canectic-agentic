@@ -149,6 +149,11 @@ block content
                       class="form-control"
                       value=100
                     )
+                    br
+                    label(for="ng_newscan") Newscan Default:
+                    select#ng_newscan(name='newscan_default').form-select
+                      option(value='true' selected) Yes
+                      option(value='false') No
                 .row
                   .col-1
                   .col-10

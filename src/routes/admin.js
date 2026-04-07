@@ -1511,7 +1511,8 @@ router.get('/fileGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 		read_perm_flags: group.read_perm_flags || [],
 		read_rest_flags: group.read_rest_flags || [],
 		post_perm_flags: group.post_perm_flags || [],
-		post_rest_flags: group.post_rest_flags || []
+		post_rest_flags: group.post_rest_flags || [],
+		newscan_default: group.newscan_default !== false
 	});
 });
 
@@ -3433,6 +3434,7 @@ router.post('/filebone/:networkId/combined/subscribe', urlencodedParser, require
 			browsesecurity:  req.body.browse_security,
 			readsecurity:    req.body.read_security,
 			postsecurity:    req.body.post_security,
+			newscan_default: req.body.newscan_default,
 			browse_perm_flags: req.body.browse_perm_flags,
 			browse_rest_flags: req.body.browse_rest_flags,
 			read_perm_flags: req.body.read_perm_flags,

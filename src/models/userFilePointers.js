@@ -21,6 +21,14 @@ async function ensureConstraintsAndIndexes() {
 		"  UNIQUE(user_id, area_shortcode)" +
 		")"
 	);
+	// Ensure UNIQUE constraint exists (may be missing if table was created by schema system)
+	await postgres.write(
+		`DO $$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_file_pointers_user_id_area_shortcode_key')
+			THEN ALTER TABLE user_file_pointers ADD CONSTRAINT user_file_pointers_user_id_area_shortcode_key UNIQUE (user_id, area_shortcode);
+			END IF;
+		END $$`
+	);
 	// Indexes (idempotent)
 	await postgres.write("CREATE INDEX IF NOT EXISTS idx_ufp_user ON " + TABLE + "(user_id)");
 	await postgres.write("CREATE INDEX IF NOT EXISTS idx_ufp_area ON " + TABLE + "(area_shortcode)");

@@ -62,6 +62,9 @@ block content
                       h5
                         | Upload Security:
                         = fileGroup.post_security || '—'
+                      h5
+                        | Newscan Default:
+                        = fileGroup.newscan_default !== false ? 'Yes' : 'No'
               .card
                 .card-header.bg-darkblue.text-white
                   h4 File Areas
@@ -519,8 +522,8 @@ block content
                         br
                         label(for='na_newscan') Newscan Default:
                         select#na_newscan(name='newscan_default').form-select
-                          option(value='true' selected) Yes
-                          option(value='false') No
+                          option(value='true' selected=(fileGroup.newscan_default !== false)) Yes
+                          option(value='false' selected=(fileGroup.newscan_default === false)) No
                       .col-5
                         label(for='na_browsesecurity') Browse Security:
                         input(
@@ -708,6 +711,16 @@ block content
                         )
                           option(value='true'  selected=(fileGroup.active == true))  Active
                           option(value='false' selected=(fileGroup.active == false)) Inactive
+                        br
+                        label(for='edit_newscan') Newscan Default:
+                        select(
+                          id='edit_newscan'
+                          name='newscan_default'
+                          class='form-control'
+                          tabindex='8'
+                        )
+                          option(value='true'  selected=(fileGroup.newscan_default !== false))  Yes
+                          option(value='false' selected=(fileGroup.newscan_default === false)) No
                     .row
                       .col-1
                       .col-10

@@ -20,6 +20,7 @@ import { substitute } from '../utils/configvars.js';
 async function ensureSortOrder() {
 	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
 	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
+	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS newscan_default BOOLEAN DEFAULT true");
 }
 
 function normalizeFlags(input) {
@@ -64,6 +65,7 @@ async function newGroup(formObj) {
 		browse_rest_flags: normalizeFlags(formObj.browse_rest_flags),
 		read_security: formObj.readsecurity != null && formObj.readsecurity !== '' ? parseInt(formObj.readsecurity) : appConfig.getNumber('default_file_read_security', 60),
 		post_security: formObj.postsecurity != null && formObj.postsecurity !== '' ? parseInt(formObj.postsecurity) : appConfig.getNumber('default_file_post_security', 100),
+		newscan_default: formObj.newscan_default !== 'false' && formObj.newscan_default !== false,
 		created_at: new Date(),
 		updated_at: null,
 		area_count: 0,
@@ -166,6 +168,7 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.browsesecurity !== undefined) updateObj.browse_security = parseInt(formObj.browsesecurity);
 	if (formObj.readsecurity  !== undefined) updateObj.read_security = parseInt(formObj.readsecurity);
 	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
+	if (formObj.newscan_default !== undefined) updateObj.newscan_default = (formObj.newscan_default === 'true' || formObj.newscan_default === true);
 	if (formObj.active      !== undefined) updateObj.active      = (formObj.active === "true" || formObj.active === true);
 	if (formObj.browse_perm_flags !== undefined) updateObj.browse_perm_flags = normalizeFlags(formObj.browse_perm_flags);
 	if (formObj.browse_rest_flags !== undefined) updateObj.browse_rest_flags = normalizeFlags(formObj.browse_rest_flags);
