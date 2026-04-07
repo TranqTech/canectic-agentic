@@ -147,15 +147,17 @@ async function getByCategory(category) {
 async function seedDefaults(definitions) {
 	var inserted = 0;
 	for (var def of definitions) {
-		var err = await postgres.write(
-			"INSERT INTO " + TABLE + " (key, value, type, category, description, readonly) " +
-			"VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (key) DO NOTHING",
-			[def.key, def.defaultValue, def.type, def.category, def.description, false]
-		);
-		if (!err) inserted++;
+		try {
+			var result = await postgres.pgpool.query(
+				"INSERT INTO " + TABLE + " (key, value, type, category, description, readonly) " +
+				"VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (key) DO NOTHING",
+				[def.key, def.defaultValue, def.type, def.category, def.description, false]
+			);
+			if (result.rowCount > 0) inserted++;
+		} catch (_) {}
 	}
 	if (inserted > 0) {
-		alogger.writeAlog(3, "[configStore] Seeded " + inserted + " default config keys", "cyan");
+		alogger.writeAlog(3, "[configStore] Seeded " + inserted + " new default config keys", "cyan");
 	}
 }
 
