@@ -328,6 +328,38 @@ class SessionController extends EventEmitter {
 		this.peerAddresses = info.addresses || [];
 		this.peerName      = (info.options && info.options.systemName) || '';
 
+		// Create TransferEngine immediately BEFORE any async work.
+		// The protocol may receive M_FILE during the awaits below (e.g.,
+		// multi-address discovery). Without the engine wired, fileOffered
+		// events are lost and the session hangs until the remote times out.
+		if (this.protocolType !== 'emsi') {
+			this.transfer = new TransferEngine(this.protocol, {
+				inboundDir: this._inboundDir,
+				tempDir:    this._tempDir,
+				sessionId:  this.uuid
+			});
+
+			this.transfer.on('sendComplete', (info) => {
+				this.filesSent++;
+				alogger.writeClog(5, 'Session ' + this.uuid + ': sent ' + info.name, 'mailer', 'green');
+			});
+			this.transfer.on('receiveComplete', (info) => {
+				this.filesReceived++;
+				this.bytesReceived += info.size;
+				if (!info.skipToss) this.filesToToss++;
+				alogger.writeClog(5, 'Session ' + this.uuid + ': received ' + info.name + ' (' + info.size + ' bytes)' +
+					(info.wildcardMatch ? ' [wildcard: ' + info.wildcardMatch + ']' : ''), 'mailer', 'green');
+
+				// FREQ: if we received a .req file, process it
+				if (info.name && info.name.toLowerCase().endsWith('.req') && info.path) {
+					this._processFreqRequest(info.path);
+				}
+			});
+			this.transfer.on('allSent', () => {
+				this.protocol.sendEOB();
+			});
+		}
+
 		// For caller sessions: discover additional connections matching remote's addresses
 		if (this.role === 'caller' && this.peerConnection && this.peerAddresses.length > 1) {
 			if (!this.peerConnections.length) {
@@ -371,33 +403,6 @@ class SessionController extends EventEmitter {
 			await this._runWazooTransfer();
 			return;
 		}
-
-		// binkp — use the existing TransferEngine
-		this.transfer = new TransferEngine(this.protocol, {
-			inboundDir: this._inboundDir,
-			tempDir:    this._tempDir,
-			sessionId:  this.uuid
-		});
-
-		this.transfer.on('sendComplete', (info) => {
-			this.filesSent++;
-			alogger.writeClog(5, 'Session ' + this.uuid + ': sent ' + info.name, 'mailer', 'green');
-		});
-		this.transfer.on('receiveComplete', (info) => {
-			this.filesReceived++;
-			this.bytesReceived += info.size;
-			if (!info.skipToss) this.filesToToss++;
-			alogger.writeClog(5, 'Session ' + this.uuid + ': received ' + info.name + ' (' + info.size + ' bytes)' +
-				(info.wildcardMatch ? ' [wildcard: ' + info.wildcardMatch + ']' : ''), 'mailer', 'green');
-
-			// FREQ: if we received a .req file, process it
-			if (info.name && info.name.toLowerCase().endsWith('.req') && info.path) {
-				this._processFreqRequest(info.path);
-			}
-		});
-		this.transfer.on('allSent', () => {
-			this.protocol.sendEOB();
-		});
 
 		// Build outbound file list and start sending
 		await this._buildOutboundList();
