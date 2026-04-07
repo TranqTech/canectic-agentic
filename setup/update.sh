@@ -13,6 +13,10 @@ set -euo pipefail
 # Usage:
 #   ./setup/update.sh                  # interactive -- prompts for target
 #   ./setup/update.sh /opt/canectic    # specify target directly
+#   ./setup/update.sh --include-art    # also merge art files (txtfiles/)
+#
+# Art files (txtfiles/) are skipped by default to preserve sysop custom art.
+# New art files that don't exist locally are always added regardless.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +58,6 @@ CODE_FILES=(
 # --- Data directories (merge-prompted on update) ---
 DATA_DIRS=(
     config
-    txtfiles
     ftn
     qwk
     qnet
@@ -64,6 +67,10 @@ DATA_DIRS=(
     tmp
     export
 )
+
+# --- Art directory (skipped unless --include-art is passed) ---
+ART_DIR="txtfiles"
+INCLUDE_ART=false
 
 # =============================================================================
 # Target directory selection
@@ -229,6 +236,34 @@ do_update() {
         fi
     done
 
+    # Art files (txtfiles/) -- skipped by default to preserve custom art
+    if [[ "$INCLUDE_ART" == true ]]; then
+        if [[ -d "$SOURCE_DIR/$ART_DIR" ]]; then
+            info "Merging art files ($ART_DIR/) -- new files added, modified files prompted"
+            merge_data_dir "$ART_DIR"
+        fi
+    else
+        # Still add new files that don't exist locally (e.g. new placeholder art)
+        if [[ -d "$SOURCE_DIR/$ART_DIR" ]]; then
+            local new_count=0
+            while IFS= read -r -d '' src_file; do
+                local rel_path="${src_file#$SOURCE_DIR/$ART_DIR/}"
+                local tgt_file="$TARGET_DIR/$ART_DIR/$rel_path"
+                if [[ ! -e "$tgt_file" ]]; then
+                    local tgt_parent
+                    tgt_parent="$(dirname "$tgt_file")"
+                    mkdir -p "$tgt_parent"
+                    cp -a "$src_file" "$tgt_file"
+                    ((new_count++)) || true
+                fi
+            done < <(find "$SOURCE_DIR/$ART_DIR" -type f -print0 2>/dev/null)
+            if [[ $new_count -gt 0 ]]; then
+                ok "Added $new_count new art file(s) (existing files untouched)"
+            fi
+        fi
+        info "Art files ($ART_DIR/): existing files preserved (use --include-art to merge)"
+    fi
+
     # Ensure logs directory exists
     mkdir -p "$TARGET_DIR/logs/production"
 
@@ -265,7 +300,16 @@ do_update() {
 # Entry point
 # =============================================================================
 
-select_target "${1:-}"
+# Parse arguments
+POSITIONAL=()
+for arg in "$@"; do
+    case "$arg" in
+        --include-art) INCLUDE_ART=true ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+
+select_target "${POSITIONAL[0]:-}"
 preflight
 
 echo ""
