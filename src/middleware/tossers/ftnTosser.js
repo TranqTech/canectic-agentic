@@ -752,8 +752,16 @@ function WritePktToNode(messageArray, conn, systemaddress){
 	//packet.Messages = messageArray;
 	packet.MessageCount = messageArray.length;
 
-	// Build buffer
-	const bufferSize = 10000; // Sufficient size
+	// Build buffer — calculate required size (header + all messages + terminator)
+	var bufferSize = 58 + 2; // 58-byte packet header + 2-byte terminator
+	for (var bsMsg of messageArray) {
+		// 14-byte msg header + 20-byte datetime + null-terminated strings + body estimate
+		bufferSize += 14 + 20;
+		bufferSize += Buffer.byteLength((bsMsg.ToUser || '') + '\0');
+		bufferSize += Buffer.byteLength((bsMsg.FromUser || '') + '\0');
+		bufferSize += Buffer.byteLength((bsMsg.Subject || '') + '\0');
+		bufferSize += Buffer.byteLength((bsMsg.BodyText || '') + '\0') + 4096; // kludges, SEEN-BY, PATH overhead
+	}
 	const buffer = Buffer.alloc(bufferSize);
 	let offset = 0;
 
@@ -1090,8 +1098,15 @@ function WritePkts(messageArray){
 			packet.Messages = destination;
 			packet.MessageCount = destination.length;
 
-			// Build buffer
-			const bufferSize = 10000; // Sufficient size
+			// Build buffer — calculate required size (header + all messages + terminator)
+			var bufferSize = 58 + 2; // 58-byte packet header + 2-byte terminator
+			for (var bsMsg of destination) {
+				bufferSize += 14 + 20;
+				bufferSize += Buffer.byteLength((bsMsg.ToUser || '') + '\0');
+				bufferSize += Buffer.byteLength((bsMsg.FromUser || '') + '\0');
+				bufferSize += Buffer.byteLength((bsMsg.Subject || '') + '\0');
+				bufferSize += Buffer.byteLength((bsMsg.BodyText || '') + '\0') + 4096;
+			}
 			const buffer = Buffer.alloc(bufferSize);
 			let offset = 0;
 
