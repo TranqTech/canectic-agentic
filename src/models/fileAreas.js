@@ -58,7 +58,7 @@ function resolveAreaPath(group, area) {
 // ---------------------------------------------------------------------------
 
 async function newArea(formObj) {
-	var returnObj = { status: false, errormessages: [] };
+	var returnObj = { status: false, errormessages: [], insertId: 0, shortcode: '' };
 
 	if (!formObj.groupshortcode) returnObj.errormessages.push("Could not determine group!");
 	if (!formObj.name) returnObj.errormessages.push("Name cannot be empty!");
@@ -143,6 +143,8 @@ async function newArea(formObj) {
 
 	alogger.writeAlog(5, "File area created: " + formObj.name + " (" + shorty + ") in group " + groupshort, "greenbright");
 	returnObj.status = true;
+	returnObj.insertId = dbres.insertId;
+	returnObj.shortcode = shorty;
 	return returnObj;
 }
 
