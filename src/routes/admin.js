@@ -3070,8 +3070,11 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 	var action      = (req.body.action || '').trim();
 	var areatag     = (req.body.areatag || '').trim();
 
-	var allowPeers  = req.body.allow_peers === 'true';
-	var enablePeers = req.body.enable_peers === 'true';
+	// allow_peers/enable_peers may be an array when both tabs have checkboxes in the same form
+	var rawAllow = req.body.allow_peers;
+	var rawEnable = req.body.enable_peers;
+	var allowPeers  = rawAllow === 'true' || (Array.isArray(rawAllow) && rawAllow.includes('true'));
+	var enablePeers = rawEnable === 'true' || (Array.isArray(rawEnable) && rawEnable.includes('true'));
 	var syncOpts = {};
 	if (allowPeers)  syncOpts.allowAll = true;
 	if (enablePeers) syncOpts.enableAll = true;
@@ -3430,8 +3433,11 @@ router.post('/filebone/:networkId/combined/subscribe', urlencodedParser, require
 	var action      = (req.body.action || '').trim();
 	var areatag     = (req.body.areatag || '').trim();
 
-	var allowPeers  = req.body.allow_peers === 'true';
-	var enablePeers = req.body.enable_peers === 'true';
+	// allow_peers/enable_peers may be an array when both tabs have checkboxes in the same form
+	var rawAllow = req.body.allow_peers;
+	var rawEnable = req.body.enable_peers;
+	var allowPeers  = rawAllow === 'true' || (Array.isArray(rawAllow) && rawAllow.includes('true'));
+	var enablePeers = rawEnable === 'true' || (Array.isArray(rawEnable) && rawEnable.includes('true'));
 	var syncOpts = {};
 	if (allowPeers)  syncOpts.allowAll = true;
 	if (enablePeers) syncOpts.enableAll = true;
