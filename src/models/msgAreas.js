@@ -204,20 +204,10 @@ async function newArea(formObj) {
 			);
 			returnObj.networkMappingError = netAreaResult.errormessages.join(", ");
 		} else {
-			// Sync subscription rows for all existing connections on this network
-			var peerConns = await getPeerConnections();
-			var connections = await peerConns.getConnectionsByNetwork(parseInt(formObj.network_id));
+			// Sync subscription rows for all connections on this network:
+			// allowed = true (peers can see the area), enabled = false (sysop enables explicitly)
 			var pasMod = await import('./peerAreaSubscriptions.js');
-			for (var conn of connections) {
-				var syncResult = await pasMod.syncConnectionToNetwork(conn.id);
-				if (!syncResult.status) {
-					alogger.writeAlog(3,
-						"newArea: subscription sync failed for connection " + conn.id +
-						" after adding area " + shorty + ": " + syncResult.errormessages.join(", "),
-						"redbright"
-					);
-				}
-			}
+			await pasMod.syncNetworkAreaToConnections(parseInt(formObj.network_id), areaId, { allowAll: true });
 		}
 	}
 
