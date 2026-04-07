@@ -33,6 +33,13 @@
 - Fix: Echolist/filebone import not back-filling local_area_id for pre-existing network area mappings
 - Fix: Echolist reconciliation SQL using invalid table alias in UPDATE FROM clause
 - Fix: Combined echolist/filebone view page scroll caused by modals inside main-wrapper (moved to page level)
+- Fix: Filebone upload form field name mismatch with multer (filebone_file vs echolist_file)
+- Fix: Filebone view/index routes matching :networkId before view/:id (Express route ordering)
+- Fix: Filebone templates using renamed variable names (filebone/filebones) but routes passing echolist/echolists
+- Fix: Area list parser not handling % comment lines or SBBSecho "Area AREATAG flags description" filebone format
+- Fix: Cron schedule patterns had minute/hour fields swapped (hour 30 invalid)
+- Fix: File group/area ~ path expansion (Node.js fs treats ~ literally, not as home directory)
+- Fix: Echolist/filebone duplicate creation (same name on same network now re-uses existing entry)
 
 ### Features
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
@@ -59,6 +66,9 @@
 - Message group post_as setting (username/realname) with push defaults to areas
 - Configurable default security levels: config keys for message read/post and file browse/download/upload defaults
 - Door collection membership: Collections tab on New Door and Edit Door modals with checkbox selection
+- File group directory check/create: Check button on base_dir field shows whether directory exists, offers inline Create button
+- Filebone subscribe modal: sub directory field for file area disk location
+- Delete confirmation modals on all-echolists and all-filebones listing pages (replaces alert confirms)
 - Standalone update.sh script: copies code, merges data, runs npm install and db migrations automatically
 - 57 new unit tests for sbbsecho parser (2,016 total)
 

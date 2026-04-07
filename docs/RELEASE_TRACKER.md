@@ -229,6 +229,7 @@ Last updated: 2026-04-06
 | 36 | Automated echolist/filebone scanning | [ ] | Auto-import echolist/filebone files from disk. Cascading directory config (network > echolist/filebone type > individual). Sysop notifications on new/orphaned areas. |
 | 37 | Cross-network orphaned area overview | [ ] | Summary view showing which networks have orphaned areas with counts and links. |
 | 38 | Echolist/filebone navigation improvements | [ ] | UX pass on echolist/filebone page organization, navigation flow, breadcrumbs, and view consolidation. |
+| 39 | File group base_dir change: move area subdirectories | [ ] | When group base_dir changes, preview and move member area subdirs. Skip absolute/external paths. Handle edge cases. |
 
 ---
 
