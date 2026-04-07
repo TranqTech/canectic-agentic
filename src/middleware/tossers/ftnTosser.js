@@ -53,6 +53,17 @@ function ensureDirectories() {
 	}
 }
 
+// --- BSO zone-aware outbound directory resolver ---
+// Zone 1 (default): ftn/out/
+// Other zones:      ftn/out.NNN/ (3-digit hex zone)
+function getOutboundDirForZone(zone) {
+	var baseDir = appConfig.get('ftnoutbound', 'ftn/out');
+	var z = parseInt(zone) || 1;
+	if (z === 1) return baseDir;
+	var zoneHex = z.toString(16).padStart(3, '0');
+	return baseDir + '.' + zoneHex;
+}
+
 // --- 8.3-safe unique packet filename generator ---
 // 4 hex chars from lower 16 bits of epoch seconds (time-ordered, ~18hr cycle)
 // + 4 hex chars from a monotonic counter (wraps at 0xFFFF, 65536 per cycle)
@@ -940,8 +951,9 @@ function WritePktToNode(messageArray, conn, systemaddress){
 	// Trim buffer
 	const finalBuffer = buffer.subarray(0, offset);
 
-	// Filename
-	const pktFile = generatePktFilename(appConfig.get('ftnoutbound', 'ftn/out'))
+	// Filename — zone-aware outbound directory
+	var outDir = getOutboundDirForZone(packet.DestinationZone);
+	const pktFile = generatePktFilename(outDir)
 	const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
 	const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
 	const filename = pktFile.filepath;
@@ -951,10 +963,9 @@ function WritePktToNode(messageArray, conn, systemaddress){
 		//increment pkt count
 		//count++;
 		const desthex = netHex + nodeHex
-		console.log(netHex, nodeHex)
-		UpcertMailerFile(filename, desthex, "Normal")
+		UpcertMailerFile(filename, desthex, "Normal", packet.DestinationZone)
 	} catch (error) {
-		console.error(`Failed to write ${filename}: ${error.message}`);
+		alogger.writeClog(3, 'WritePkts: failed to write ' + filename + ': ' + error.message, 'tosser', 'redbright');
 		return false;
 	}
 	return returnObj
@@ -1276,8 +1287,9 @@ function WritePkts(messageArray){
 			// Trim buffer
 			const finalBuffer = buffer.subarray(0, offset);
 
-			// Filename
-			const pktFile = generatePktFilename(appConfig.get('ftnoutbound', 'ftn/out'))
+			// Filename — zone-aware outbound directory
+			var outDir = getOutboundDirForZone(packet.DestinationZone);
+			const pktFile = generatePktFilename(outDir)
 			const netHex = parseInt(packet.DestinationNet).toString(16).padStart(4, '0');
 			const nodeHex = parseInt(packet.DestinationNode).toString(16).padStart(4, '0');
 			const filename = pktFile.filepath;
@@ -1287,8 +1299,7 @@ function WritePkts(messageArray){
 				//increment pkt count
 				count++;
 				const desthex = netHex + nodeHex
-				console.log(netHex, nodeHex)
-				UpcertMailerFile(filename, desthex, "Normal")
+				UpcertMailerFile(filename, desthex, "Normal", packet.DestinationZone)
 			} catch (error) {
 				console.error(`Failed to write ${filename}: ${error.message}`);
 				return false;
@@ -1300,42 +1311,29 @@ function WritePkts(messageArray){
 	return returnObj
 }
 
-async function UpcertMailerFile(filename, desthex, flavour){
-	//ut vs lo
-	var extension = ".flo"
-	if (flavour){
-		switch (flavour){
-			case "Normal":
-				extension = ".flo"
-				break;
-			case "Direct":
-				extension = ".dlo"
-				break;
-			//may be continuous instead of crash
-			case "Crash":
-				extension = ".clo"
-				break;
-			case "Immediate":
-				extension = ".ilo"
-				break;
-			case "Hold":
-				extension = ".hlo"
-				break;
-			default:
-				//normal
-				extension = ".flo"
+async function UpcertMailerFile(filename, desthex, flavour, zone){
+	var extension = ".flo";
+	if (flavour) {
+		switch (flavour) {
+			case "Normal":    extension = ".flo"; break;
+			case "Direct":    extension = ".dlo"; break;
+			case "Crash":     extension = ".clo"; break;
+			case "Immediate": extension = ".ilo"; break;
+			case "Hold":      extension = ".hlo"; break;
+			default:          extension = ".flo";
 		}
 	}
-	var fline = "^" + filename + "\r\n"
-	console.log(fline)
-	var mfile = appConfig.get('ftnoutbound', 'ftn/out') + "/" + desthex + extension
-	try{
-		await fs.appendFileSync(mfile, fline)
-	}catch(error){
-		console.log(error)
+	var outDir = getOutboundDirForZone(zone);
+	if (!fs.existsSync(outDir)) {
+		fs.mkdirSync(outDir, { recursive: true });
 	}
-	
-
+	var fline = "^" + filename + "\r\n";
+	var mfile = outDir + "/" + desthex + extension;
+	try {
+		fs.appendFileSync(mfile, fline);
+	} catch (error) {
+		alogger.writeClog(3, 'UpcertMailerFile: failed to write ' + mfile + ': ' + error.message, 'tosser', 'redbright');
+	}
 }
 
 async function TossOutboundNetmail(){
@@ -1413,6 +1411,7 @@ async function TossOutboundNetmail(){
 		if (pmRow.has_attachments && pmRow.uuid) {
 			if (!msg._attachmentInfo) msg._attachmentInfo = {};
 			msg._attachmentInfo.pmUuid = pmRow.uuid;
+			msg._attachmentInfo.destZone = msg.DestinationZone;
 			msg._attachmentInfo.destNet = msg.DestinationNet;
 			msg._attachmentInfo.destNode = msg.DestinationNode;
 		}
@@ -1444,13 +1443,15 @@ async function TossOutboundNetmail(){
 					if (fs.existsSync(att.storage_path)) {
 						// Use bare path (no prefix) = send and leave.
 						// Preserves the local copy for web/IMAP access.
-						var floFile = appConfig.get('ftnoutbound', 'ftn/out') + "/" + destHex + ".flo";
+						var attOutDir = getOutboundDirForZone(smsg._attachmentInfo.destZone);
+						if (!fs.existsSync(attOutDir)) fs.mkdirSync(attOutDir, { recursive: true });
+						var floFile = attOutDir + "/" + destHex + ".flo";
 						var floLine = att.storage_path + "\r\n";
 						try {
 							fs.appendFileSync(floFile, floLine);
-							console.log("FTN file-attach: queued " + att.filename + " for " + smsg.Destination);
+							alogger.writeClog(5, 'FTN file-attach: queued ' + att.filename + ' for ' + smsg.Destination, 'tosser', 'cyan');
 						} catch (floErr) {
-							console.log("FTN file-attach: flow file write error:", floErr.message);
+							alogger.writeClog(3, 'FTN file-attach: flow file write error: ' + floErr.message, 'tosser', 'redbright');
 						}
 					}
 				}
