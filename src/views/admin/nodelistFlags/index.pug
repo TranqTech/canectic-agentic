@@ -38,6 +38,8 @@ block content
                       td
                         if flag.has_argument
                           span.badge.bg-info= flag.argument_hint || 'value'
+                        if flag.auto_managed
+                          span.badge.bg-warning.text-dark.ms-1 Auto
                       td.text-muted= flag.sort_order
                       td
                         if flag.active
@@ -53,6 +55,7 @@ block content
                           data-category=flag.category || 'custom'
                           data-hasargument=(flag.has_argument ? 'true' : 'false')
                           data-argumenthint=flag.argument_hint || ''
+                          data-automanaged=(flag.auto_managed ? 'true' : 'false')
                           data-sortorder=flag.sort_order
                           data-active=(flag.active ? 'true' : 'false')
                         )
@@ -99,6 +102,10 @@ block content
               .mb-3
                 label.form-label Sort order
                 input.form-control(type='number' name='sort_order' value='0')
+              .form-check.mb-2
+                input.form-check-input(type='checkbox' name='auto_managed' id='addAutoManaged' value='true')
+                label.form-check-label(for='addAutoManaged') Auto-managed
+                .form-text.ms-4 Flag is set automatically from connectivity fields (e.g. INA, IBN, ITN)
               .form-check
                 input.form-check-input(type='checkbox' name='active' id='addFlagActive' checked value='true')
                 label.form-check-label(for='addFlagActive') Active
@@ -142,6 +149,9 @@ block content
               .mb-3
                 label.form-label Sort order
                 input.form-control(type='number' name='sort_order' id='efSortOrder')
+              .form-check.mb-2
+                input.form-check-input(type='checkbox' name='auto_managed' id='efAutoManaged' value='true')
+                label.form-check-label(for='efAutoManaged') Auto-managed
               .form-check
                 input.form-check-input(type='checkbox' name='active' id='efActive' value='true')
                 label.form-check-label(for='efActive') Active
@@ -161,6 +171,7 @@ block content
         document.getElementById('efCategory').value = btn.dataset.category || 'custom';
         document.getElementById('efHasArg').checked = btn.dataset.hasargument === 'true';
         document.getElementById('efArgHint').value = btn.dataset.argumenthint || '';
+        document.getElementById('efAutoManaged').checked = btn.dataset.automanaged === 'true';
         document.getElementById('efSortOrder').value = btn.dataset.sortorder || '0';
         document.getElementById('efActive').checked = btn.dataset.active === 'true';
       });

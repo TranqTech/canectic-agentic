@@ -120,21 +120,31 @@ block content
         if catFlags.length > 0
           h6.text-muted.mb-2.mt-3= categoryLabels[cat] || cat
           each fd in catFlags
-            .d-flex.align-items-center.mb-2
-              .form-check
-                input.form-check-input(type='checkbox' class=cssClass id=prefix + 'Flag_' + fd.code value=fd.code data-bs-toggle='tooltip' data-bs-placement='top' title=fd.description data-hasarg=fd.has_argument ? 'true' : 'false')
-                label.form-check-label.me-2(for=prefix + 'Flag_' + fd.code)
-                  strong= fd.code
-                  if fd.description
-                    small.text-muted.ms-2= fd.description
-              if fd.has_argument
-                input.form-control.form-control-sm.flag-arg-input(
-                  type='text'
-                  id=prefix + 'FlagArg_' + fd.code
-                  placeholder=fd.argument_hint || 'value'
-                  style='width: 150px; display: none;'
-                  data-flagcode=fd.code
-                )
+            if fd.auto_managed
+              //- Auto-managed flags: informational display, not editable
+              .d-flex.align-items-center.mb-2.opacity-50
+                .form-check
+                  input.form-check-input(type='checkbox' disabled checked=false id=prefix + 'Flag_' + fd.code value=fd.code data-automanaged='true')
+                  label.form-check-label.me-2(for=prefix + 'Flag_' + fd.code)
+                    strong= fd.code
+                    span.badge.bg-warning.text-dark.ms-2 auto
+                    small.text-muted.ms-2 Set from Connectivity tab
+            else
+              .d-flex.align-items-center.mb-2
+                .form-check
+                  input.form-check-input(type='checkbox' class=cssClass id=prefix + 'Flag_' + fd.code value=fd.code data-bs-toggle='tooltip' data-bs-placement='top' title=fd.description data-hasarg=fd.has_argument ? 'true' : 'false')
+                  label.form-check-label.me-2(for=prefix + 'Flag_' + fd.code)
+                    strong= fd.code
+                    if fd.description
+                      small.text-muted.ms-2= fd.description
+                if fd.has_argument
+                  input.form-control.form-control-sm.flag-arg-input(
+                    type='text'
+                    id=prefix + 'FlagArg_' + fd.code
+                    placeholder=fd.argument_hint || 'value'
+                    style='width: 150px; display: none;'
+                    data-flagcode=fd.code
+                  )
       hr.mt-3
       input.form-control(name='flags' id=prefix + 'FlagsField' placeholder='Additional custom flags (comma-separated)')
       .form-text Any flags not listed above can be added here
@@ -385,16 +395,16 @@ block content
               button.btn.btn-primary(type='submit') Save
 
   //- Flatten grouped flags for script interpolation
-  - var allFlagDefs = []; validCategories.forEach(function(c) { (flagsGrouped[c] || []).forEach(function(fd) { allFlagDefs.push({ code: fd.code, has_argument: fd.has_argument }); }); });
+  - var allFlagDefs = []; validCategories.forEach(function(c) { (flagsGrouped[c] || []).forEach(function(fd) { allFlagDefs.push({ code: fd.code, has_argument: fd.has_argument, auto_managed: fd.auto_managed || false }); }); });
   script.
     //- Flag definitions from DB (for JS logic)
     var flagDefs = !{JSON.stringify(allFlagDefs)};
     var knownCodes = flagDefs.map(function(fd) { return fd.code; });
 
-    //- Show/hide argument input when flag checkbox toggled
+    //- Show/hide argument input when flag checkbox toggled (skip auto-managed)
     function setupArgToggles(prefix) {
       flagDefs.forEach(function(fd) {
-        if (!fd.has_argument) return;
+        if (fd.auto_managed || !fd.has_argument) return;
         var cb = document.getElementById(prefix + 'Flag_' + fd.code);
         var argInput = document.getElementById(prefix + 'FlagArg_' + fd.code);
         if (!cb || !argInput) return;
@@ -404,10 +414,11 @@ block content
       });
     }
 
-    //- Build flags value from checkboxes + arg inputs + extra text
+    //- Build flags value from checkboxes + arg inputs + extra text (skip auto-managed)
     function collectFlags(prefix) {
       var parts = [];
       flagDefs.forEach(function(fd) {
+        if (fd.auto_managed) return;
         var cb = document.getElementById(prefix + 'Flag_' + fd.code);
         if (!cb || !cb.checked) return;
         if (fd.has_argument) {
@@ -440,9 +451,13 @@ block content
     }
 
     //- Set checkboxes and arg inputs from a flags array (e.g. ['CM', 'IBN:24555', 'INA:bbs.example.com'])
+    //- Auto-managed flags are skipped (they're generated from connectivity fields)
+    var autoManagedCodes = flagDefs.filter(function(fd) { return fd.auto_managed; }).map(function(fd) { return fd.code; });
+
     function setFlagsFromArray(prefix, flagsArray) {
-      // Clear all checkboxes and arg inputs
+      // Clear all editable checkboxes and arg inputs
       flagDefs.forEach(function(fd) {
+        if (fd.auto_managed) return;
         var cb = document.getElementById(prefix + 'Flag_' + fd.code);
         if (cb) cb.checked = false;
         if (fd.has_argument) {
@@ -456,6 +471,8 @@ block content
         var parts = f.split(':');
         var code = parts[0];
         var arg = parts.slice(1).join(':');
+        // Skip auto-managed flags silently
+        if (autoManagedCodes.includes(code)) return;
         var cb = document.getElementById(prefix + 'Flag_' + code);
         if (cb) {
           cb.checked = true;
@@ -463,7 +480,6 @@ block content
             var argInput = document.getElementById(prefix + 'FlagArg_' + code);
             if (argInput) { argInput.value = arg; argInput.style.display = ''; }
           } else {
-            // Show arg input if checked (even without value)
             var argInput = document.getElementById(prefix + 'FlagArg_' + code);
             if (argInput) argInput.style.display = '';
           }

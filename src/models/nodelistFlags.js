@@ -87,6 +87,7 @@ async function create(formObj) {
 		category:       category,
 		has_argument:   formObj.has_argument === 'true' || formObj.has_argument === true,
 		argument_hint:  (formObj.argument_hint || '').trim() || null,
+		auto_managed:   formObj.auto_managed === 'true' || formObj.auto_managed === true,
 		sort_order:     parseInt(formObj.sort_order) || 0,
 		active:         formObj.active !== 'false' && formObj.active !== false,
 		created_at:     new Date()
@@ -128,6 +129,7 @@ async function update(id, formObj) {
 	}
 	if (formObj.has_argument !== undefined) updateObj.has_argument = formObj.has_argument === 'true' || formObj.has_argument === true;
 	if (formObj.argument_hint !== undefined) updateObj.argument_hint = formObj.argument_hint.trim() || null;
+	if (formObj.auto_managed !== undefined) updateObj.auto_managed = formObj.auto_managed === 'true' || formObj.auto_managed === true;
 	if (formObj.sort_order !== undefined) updateObj.sort_order = parseInt(formObj.sort_order) || 0;
 	if (formObj.active !== undefined) updateObj.active = formObj.active !== 'false' && formObj.active !== false;
 
@@ -164,6 +166,7 @@ async function seedDefaults() {
 				category:      flag.category || 'custom',
 				has_argument:  flag.has_argument || false,
 				argument_hint: flag.argument_hint || null,
+				auto_managed:  flag.auto_managed || false,
 				sort_order:    flag.sort_order || 0,
 				active:        true,
 				created_at:    new Date()
