@@ -238,6 +238,12 @@ Last updated: 2026-04-06
 
 ---
 
+## Post-Release (Alpha+)
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| 1 | JS Door SDK (dorkit-style) | [ ] | Library for writing JS doors that integrate with Canectic. Provide terminal I/O helpers, user context, drop file parsing, colour/cursor utilities, input handling. Similar to Synchronet's dorkit. Publish as standalone npm package. |
+
 ## Post-Release (Beta+)
 
 | # | Item | Status | Notes |
