@@ -3,7 +3,7 @@ import { checkUserPass, updateUserCalls } from "../models/useraccounts.js";
 import * as alogger from "../utils/alogger.js";
 
 const validunamechars = new RegExp("[A-Za-z0-9 ]");
-const validpwchars = new RegExp("[A-Za-z0-9]");
+const validpwchars = new RegExp("[\\x20-\\x7e]");  // all printable ASCII
 const login_limit = 3;
 
 // Colors

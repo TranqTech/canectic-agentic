@@ -11,7 +11,7 @@ const validnamechars = new RegExp("[A-Za-z ]");
 const validlocationchars = new RegExp("[A-Za-z0-9, ]");
 const validrnamechars = new RegExp("[A-Za-z]");
 const validnetmailchars = new RegExp("[A-Za-z0-9:/\\.@]");
-const validpwchars = new RegExp("[A-Za-z0-9]");
+const validpwchars = new RegExp("[\\x20-\\x7e]");  // all printable ASCII
 const validdatechars = new RegExp("[0-9]");
 
 // Gender selection options — hotkey is first character of each label
