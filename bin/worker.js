@@ -369,6 +369,16 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'purge-inbound-log': {
+				var inboundLog = await import("../src/models/inboundFileLog.js");
+				var logDays = job.data.days || appConfig.getNumber('inbound_log_retention_days', 90);
+				if (logDays > 0) {
+					var logPurged = await inboundLog.purgeOld(logDays);
+					if (logPurged > 0) alogger.writeAlog(3, 'Purged ' + logPurged + ' inbound file log entries older than ' + logDays + ' days', 'cyan');
+				}
+				break;
+			}
+
 			case 'recalc-area-counts': {
 				await msgAreas.recalculateAreaCounts();
 				break;

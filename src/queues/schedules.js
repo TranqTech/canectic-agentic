@@ -98,6 +98,20 @@ export async function registerSchedules() {
 		}
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily inbound file log purge
+		// -----------------------------------------------------------------
+		var inboundLogDays = appConfig.getNumber('inbound_log_retention_days', 90);
+		if (inboundLogDays > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-inbound-log-daily', {
+				pattern: '0 50 3 * * *',   // 3:50 AM daily
+			}, {
+				name: 'purge-inbound-log',
+				data: { days: inboundLogDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily echolist/filebone auto-scan
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('scan-echolists-daily', {
