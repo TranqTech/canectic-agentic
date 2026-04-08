@@ -164,12 +164,9 @@ block content
                 a.btn.btn-sm.btn-outline-light(href=`/messages/area/${msgArea.shortcode}`)
                   i.bi.bi-list-ul
                   |  Threads
-                a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
+                a.btn.btn-sm.btn-outline-light(href=`/messages`)
                   i.bi.bi-folder2-open
-                  |  Area
-                a.btn.btn-sm.btn-outline-light(href='/messages')
-                  i.bi.bi-chat-dots
-                  |  Groups
+                  |  Change Area
 
       //- Offcanvas sidebar — slides in from right on smaller screens
       #sidebarOffcanvas.offcanvas.offcanvas-end.bg-dark.text-white(
@@ -206,12 +203,9 @@ block content
             a.btn.btn-sm.btn-outline-light(href=`/messages/area/${msgArea.shortcode}`)
               i.bi.bi-list-ul
               |  Threads
-            a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
+            a.btn.btn-sm.btn-outline-light(href=`/messages`)
               i.bi.bi-folder2-open
-              |  Area
-            a.btn.btn-sm.btn-outline-light(href='/messages')
-              i.bi.bi-chat-dots
-              |  Groups
+              |  Change Area
 
       if msgArea && thread && canPost
         //- Reply Modal

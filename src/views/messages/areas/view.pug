@@ -40,10 +40,9 @@ block content
                         a.btn.btn-sm.btn-outline-info.me-2(href=`/messages/area/${msgArea.shortcode}?view=flat` title='View as flat message list')
                           i.bi.bi-list-task
                           |  Flat View
-                      a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
-                        i.bi.bi-arrow-left
-                        |  
-                        = msgArea.group_shortcode
+                        a.btn.btn-sm.btn-outline-light(href=`/messages`)
+                          i.bi.bi-folder2-open
+                          |  Change Area
               if msgArea.description
                 .card-body.py-1.bg-dark.border-bottom.border-secondary
                   .small.text-muted= msgArea.description

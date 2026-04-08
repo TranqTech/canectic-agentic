@@ -41,10 +41,9 @@ block content
                       a.btn.btn-sm.btn-outline-info.me-2.d-none.d-xl-inline-flex(href=`/messages/area/${msgArea.shortcode}` title='View as threads')
                         i.bi.bi-chat-left-text
                         |  Threads
-                    a.btn.btn-sm.btn-outline-light.me-2.d-none.d-xl-inline-flex(href=`/messages/group/${msgArea.group_shortcode}`)
+                    a.btn.btn-sm.btn-outline-light.me-2.d-none.d-xl-inline-flex(href=`/messages`)
                       i.bi.bi-arrow-left
-                      |  
-                      = msgArea.group_shortcode
+                      |  Change Area
                     //- Hamburger — visible below xl
                     button.btn.btn-outline-light.d-xl-none(
                       type='button'
@@ -184,12 +183,9 @@ block content
                   a.btn.btn-sm.btn-outline-info(href=`/messages/area/${msgArea.shortcode}`)
                     i.bi.bi-chat-left-text
                     |  Threads
-                a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
+                a.btn.btn-sm.btn-outline-light(href=`/messages`)
                   i.bi.bi-folder2-open
-                  |  Area
-                a.btn.btn-sm.btn-outline-light(href='/messages')
-                  i.bi.bi-chat-dots
-                  |  Groups
+                  |  Change Area
 
       //- Offcanvas sidebar — slides in from right on smaller screens
       #sidebarOffcanvas.offcanvas.offcanvas-end.bg-dark.text-white(
@@ -230,12 +226,9 @@ block content
               a.btn.btn-sm.btn-outline-info(href=`/messages/area/${msgArea.shortcode}`)
                 i.bi.bi-chat-left-text
                 |  Threads
-            a.btn.btn-sm.btn-outline-light(href=`/messages/group/${msgArea.group_shortcode}`)
-              i.bi.bi-folder2-open
-              |  Area
-            a.btn.btn-sm.btn-outline-light(href='/messages')
-              i.bi.bi-chat-dots
-              |  Groups
+              a.btn.btn-sm.btn-outline-light(href=`/messages`)
+                i.bi.bi-folder2-open
+                |  Change Area
 
       if msgArea && canPost
         //- Reply Modal (action set dynamically per thread)

@@ -21,7 +21,7 @@ block content
                   h2.mb-0.me-3
                     i.bi.bi-chat-dots.me-2
                     | Message Areas
-                  .btn-group.btn-group-sm
+                  .btn-group.btn-group-md
                     button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
                     button.btn.btn-outline-light.view-toggle(data-view='all') All
                 .d-flex.align-items-center
@@ -64,7 +64,7 @@ block content
                             td.text-center(style='width:80px')
                               if area.unread_count && area.unread_count > 0
                                 span.badge.bg-info= area.unread_count
-                            td(style='width:120px')
+                            td(style='width:200px')
                               if area.last_message
                                 .small
                                   - var ldate = Date.parse(area.last_message)
