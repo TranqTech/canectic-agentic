@@ -1,0 +1,65 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-exclamation-triangle.me-2
+          | Bad Echomail
+          small.text-muted.ms-2 Messages received for unknown areatags
+
+        if tags && tags.length > 0
+          .card
+            .card-body
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Areatag
+                    th.text-center Pending
+                    th.text-center Total Received
+                    th First Seen
+                    th Last Seen
+                    th Last From
+                    th Status
+                    th(style='width:200px')
+                tbody
+                  each tag in tags
+                    tr
+                      td
+                        a(href='/admin/bad-echomail/' + tag.areatag)
+                          code= tag.areatag
+                      td.text-center
+                        if tag.pending_count > 0
+                          span.badge.bg-warning.text-dark= tag.pending_count
+                        else
+                          span.text-muted 0
+                      td.text-center= tag.total_received || 0
+                      td
+                        if tag.first_seen
+                          small= new Date(tag.first_seen).toLocaleDateString()
+                      td
+                        if tag.last_seen
+                          small= new Date(tag.last_seen).toLocaleDateString()
+                      td
+                        if tag.last_source_address
+                          small.text-muted= tag.last_source_address
+                      td
+                        if tag.active
+                          span.badge.bg-warning.text-dark Active
+                        else
+                          span.badge.bg-secondary Cleared
+                      td
+                        if tag.pending_count > 0
+                          form.d-inline(method='POST' action='/admin/bad-echomail/' + tag.areatag + '/recover')
+                            button.btn.btn-sm.btn-success.me-1(type='submit' title='Recover messages to area (areatag must be mapped first)')
+                              i.bi.bi-arrow-repeat.me-1
+                              | Recover
+                          form.d-inline(method='POST' action='/admin/bad-echomail/' + tag.areatag + '/purge')
+                            button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Purge all messages for " + this.closest("tr").querySelector("code").textContent + "?")' title='Delete all pending messages')
+                              i.bi.bi-trash
+        else
+          .card
+            .card-body
+              p.text-muted No bad echomail received. All incoming echomail matched known areatags.

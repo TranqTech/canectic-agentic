@@ -99,6 +99,7 @@
 - Honeypot login detection with fail2ban integration: login attempts with known-bad usernames (root, admin, etc.) logged to security.log with [HONEYPOT] tag. Normal auth failures logged with [AUTHFAIL] tag. Terminal connections using honeypot names are immediately disconnected. Honeypot names blocked from registration (show as "taken"). Config keys: honeypot_enabled, honeypot_usernames, trust_proxy. Example fail2ban filter + jail configs in examples/fail2ban/.
 - Reverse proxy support: trust_proxy config key for correct client IP resolution behind nginx/Caddy/HAProxy (X-Forwarded-For headers)
 - Fix: Terminal login and registration now accept special characters in passwords (was restricted to alphanumeric only)
+- Bad echomail handling: messages received for unknown areatags are stored in a holding table instead of being silently lost. Tracked per-areatag with first/last seen, counts, and source addresses. Admin UI at /admin/bad-echomail with per-tag message browser, recover (import to area when created), and purge. Daily auto-purge via bad_echo_retention_days config (default 30). Fixes packets retrying endlessly when they contain messages for areas we don't carry.
 - Combined area browser for messages and files: single page grouped by group with Subscribed/All toggle, instant search, and AJAX subscribe/unsubscribe buttons. Replaces two-page group list + area list navigation.
 
 ## v0.9.5a (2026-04-04)

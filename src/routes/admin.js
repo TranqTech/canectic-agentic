@@ -28,6 +28,7 @@ import * as freqModel from '../models/freq.js';
 import * as fileWildcards from '../models/fileWildcards.js';
 import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
+import * as badEchomail from '../models/badEchomail.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -3665,6 +3666,7 @@ router.post('/events/trigger', express.json(), requireAdmin, async (req, res) =>
 		case 'file-maintenance':  await jobs.enqueueFileMaintenance(); triggered = 'File Maintenance'; break;
 		case 'scan-nodelists':    await jobs.enqueueScanNodelists(); triggered = 'Scan Nodelists'; break;
 		case 'purge-tossed':      await jobs.enqueuePurgeTossed(); triggered = 'Purge Tossed Packets'; break;
+		case 'purge-bad-echomail': await jobs.enqueuePurgeBadEchomail(); triggered = 'Purge Bad Echomail'; break;
 		case 'rethread':          await jobs.enqueueRethread(); triggered = 'Rebuild Threads'; break;
 		case 'scan-echolists':      await jobs.enqueueScanEcholists(); triggered = 'Scan Echolists/Filebones'; break;
 		case 'reconcile-echolists': await jobs.enqueueReconcileEcholists(); triggered = 'Reconcile Echolists'; break;
@@ -4713,6 +4715,49 @@ router.post('/wildcards/test', express.json(), requireAdmin, async (req, res) =>
 	} else {
 		res.json({ match: false, message: 'No match -- file would go to default inbound directory' });
 	}
+});
+
+// -------------------------------------------------------
+// Bad Echomail
+// -------------------------------------------------------
+
+router.get('/bad-echomail', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var tags = await badEchomail.getAllTags();
+	res.render('admin/badEchomail/index', {
+		sufficientAccess, title: 'Bad Echomail', activelink: 'bad-echomail',
+		activenav: 'messages', currentuser, tags
+	});
+});
+
+router.get('/bad-echomail/:areatag', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var areatag = req.params.areatag.toUpperCase().trim();
+	var messages = await badEchomail.getMessagesForTag(areatag, 200);
+	var count = await badEchomail.getCountForTag(areatag);
+	res.render('admin/badEchomail/view', {
+		sufficientAccess, title: 'Bad Echomail: ' + areatag, activelink: 'bad-echomail',
+		activenav: 'messages', currentuser, areatag, messages, count
+	});
+});
+
+router.post('/bad-echomail/:areatag/recover', urlencodedParser, requireAdmin, async (req, res) => {
+	var areatag = req.params.areatag.toUpperCase().trim();
+	var echomail = await import('../models/echomail.js');
+	var result = await badEchomail.recoverMessages(areatag, echomail);
+	await flash.setOne(req, 'success',
+		'Recovered ' + result.recovered + ' message(s), ' + result.dupes + ' dupe(s), ' + result.remaining + ' remaining.'
+	);
+	res.redirect('/admin/bad-echomail');
+});
+
+router.post('/bad-echomail/:areatag/purge', urlencodedParser, requireAdmin, async (req, res) => {
+	var areatag = req.params.areatag.toUpperCase().trim();
+	var purged = await badEchomail.purgeTag(areatag);
+	await flash.setOne(req, 'info', 'Purged ' + purged + ' message(s) for ' + areatag);
+	res.redirect('/admin/bad-echomail');
 });
 
 // -------------------------------------------------------

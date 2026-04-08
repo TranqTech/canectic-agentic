@@ -554,21 +554,23 @@ async function TossInboundFile(pktfilepath, movepktpath){
 				//
 			}
 		}else if (message.Type === "Echomail"){
-			//console.log("Echomail in", message.AreaTag, "Subject:", message.Subject)
-			//handle echomail
 			var result = await echomail.handleInboundEchoMessage(message)
-			//validate result
 			if (result.status === true){
 				if (result.duplicate){
 					returnObj.pktdupecount ++
 				}else if (result.imported){
 					returnObj.pktimportcount ++
-				}else{
-					//do something else here.
 				}
 				returnObj.pktsuccesscount ++
 			}else{
-				//handle non success potentials (Toss to badecho?)
+				// Unknown areatag or toss error — store in bad echomail holding table
+				try {
+					var badEchomail = (await import('../../models/badEchomail.js'));
+					await badEchomail.storeBadMessage(message, returnObj._connectionInfo || {});
+				} catch (badErr) {
+					alogger.writeClog(3, 'Failed to store bad echomail: ' + badErr.message, 'tosser', 'yellow');
+				}
+				returnObj.pktsuccesscount ++ // Count as handled so packet doesn't retry endlessly
 			}
 		}else{
 			//Add any additional type handlers.
@@ -646,21 +648,23 @@ async function OldTossInbound(inboundDir){
 					//
 				}
 			}else if (message.Type === "Echomail"){
-				//console.log("Echomail in", message.AreaTag, "Subject:", message.Subject)
-				//handle echomail
 				var result = await echomail.handleInboundEchoMessage(message)
-				//validate result
 				if (result.status === true){
 					if (result.duplicate){
 						pktdupecount ++
 					}else if (result.imported){
 						pktimportcount ++
-					}else{
-						//do something else here.
 					}
 					pktsuccesscount ++
 				}else{
-					//handle non success potentials (Toss to badecho?)
+					// Unknown areatag or toss error — store in bad echomail holding table
+					try {
+						var badEchomail = (await import('../../models/badEchomail.js'));
+						await badEchomail.storeBadMessage(message, {});
+					} catch (badErr) {
+						alogger.writeClog(3, 'Failed to store bad echomail: ' + badErr.message, 'tosser', 'yellow');
+					}
+					pktsuccesscount ++ // Count as handled so packet doesn't retry endlessly
 				}
 			}else{
 				//Add any additional type handlers.

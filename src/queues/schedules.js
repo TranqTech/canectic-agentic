@@ -84,6 +84,20 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily bad echomail purge
+		// -----------------------------------------------------------------
+		var badEchoDays = appConfig.getNumber('bad_echo_retention_days', 30);
+		if (badEchoDays > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-bad-echomail-daily', {
+				pattern: '0 45 3 * * *',   // 3:45 AM daily
+			}, {
+				name: 'purge-bad-echomail',
+				data: { days: badEchoDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily echolist/filebone auto-scan
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('scan-echolists-daily', {

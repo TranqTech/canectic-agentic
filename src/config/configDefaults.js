@@ -223,6 +223,7 @@ var CONFIG_DEFINITIONS = [
 	// PM Attachments
 	// -----------------------------------------------------------------------
 	{ key: 'ftn_keep_tossed_days',     defaultValue: '7',                    type: 'number',  category: 'maintenance', description: 'Days to keep tossed FTN packets (0 = delete immediately, 999 = keep forever)' },
+	{ key: 'bad_echo_retention_days',  defaultValue: '30',                   type: 'number',  category: 'maintenance', description: 'Days to keep bad echomail before auto-purge (0 = keep forever)' },
 	{ key: 'freq_enabled',             defaultValue: 'true',                 type: 'boolean', category: 'mailer',      description: 'Enable FREQ (File Request) responses during binkp sessions' },
 	{ key: 'freq_filebox_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Directory for FREQ filebox (files available to any authenticated session)' },
 	{ key: 'filebox_base_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Parent directory for per-peer filebox subdirectories (outbox_dir resolves relative to this)' },

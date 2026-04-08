@@ -1,0 +1,46 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        .d-flex.justify-content-between.align-items-center.mb-4
+          h2
+            i.bi.bi-exclamation-triangle.me-2
+            | Bad Echomail:
+            code.ms-2= areatag
+            span.badge.bg-warning.text-dark.ms-2= count + ' message(s)'
+          a.btn.btn-outline-light(href='/admin/bad-echomail')
+            i.bi.bi-arrow-left.me-1
+            | Back
+
+        if messages && messages.length > 0
+          .card
+            .card-body
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th From
+                    th To
+                    th Subject
+                    th Source
+                    th Received From
+                    th Received
+                tbody
+                  each msg in messages
+                    tr
+                      td= msg.from_user
+                      td= msg.to_user
+                      td= msg.subject
+                      td
+                        small.text-muted= msg.source_address
+                      td
+                        if msg.received_from_address
+                          small.text-muted= msg.received_from_address
+                      td
+                        small= new Date(msg.received_at).toLocaleString()
+        else
+          .card
+            .card-body
+              p.text-muted No messages for this areatag.

@@ -450,3 +450,10 @@ export async function enqueuePurgeTossed(days) {
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
+
+export async function enqueuePurgeBadEchomail() {
+	return maintenanceQueue.add('purge-bad-echomail', {}, {
+		jobId: 'purge-bad-echomail-manual',
+		removeOnComplete: true, removeOnFail: true,
+	});
+}

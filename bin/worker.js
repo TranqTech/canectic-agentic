@@ -362,6 +362,13 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'purge-bad-echomail': {
+				var badEchomail = await import("../src/models/badEchomail.js");
+				var days = job.data.days || appConfig.getNumber('bad_echo_retention_days', 30);
+				if (days > 0) await badEchomail.purgeOld(days);
+				break;
+			}
+
 			case 'recalc-area-counts': {
 				await msgAreas.recalculateAreaCounts();
 				break;
