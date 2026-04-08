@@ -137,9 +137,13 @@ block content
                         option(value=dm)= dm
                   .mb-3
                     label.form-label Schedule
-                    select.form-select(name='schedule')
-                      each s in schedules
-                        option(value=s)= s
+                    input.form-control(name='schedule' value='manual' placeholder='manual or 0 6 * * 3')
+                    .form-text
+                      | "manual" = on demand only. Or use a cron pattern: e.g.
+                      code.ms-1 0 6 * * 3
+                      |  = Wednesday 6 AM,
+                      code.ms-1 0 6 * * 4
+                      |  = Thursday 6 AM
               .mb-3
                 label.form-label Description
                 input.form-control(name='description')
@@ -189,9 +193,7 @@ block content
                         option(value=dm)= dm
                   .mb-3
                     label.form-label Schedule
-                    select.form-select(name='schedule' id='esSchedule')
-                      each s in schedules
-                        option(value=s)= s
+                    input.form-control(name='schedule' id='esSchedule' placeholder='manual or cron pattern')
               .mb-3
                 label.form-label Description
                 input.form-control(name='description' id='esDescription')

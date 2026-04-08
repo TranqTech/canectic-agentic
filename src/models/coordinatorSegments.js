@@ -19,7 +19,6 @@ var ROLE_LABELS = {
 };
 
 var DISTRIBUTION_METHODS = ['manual', 'filebox', 'tic', 'netmail_attach'];
-var SCHEDULES = ['manual', 'weekly_friday', 'daily'];
 
 // ---------------------------------------------------------------------------
 // CRUD
@@ -72,7 +71,7 @@ async function create(formObj) {
 		upstream_connection_id: formObj.upstream_connection_id ? parseInt(formObj.upstream_connection_id) : null,
 		stub_filename:         (formObj.stub_filename || '').trim() || null,
 		distribution_method:   DISTRIBUTION_METHODS.includes(formObj.distribution_method) ? formObj.distribution_method : 'manual',
-		schedule:              SCHEDULES.includes(formObj.schedule) ? formObj.schedule : 'manual',
+		schedule:              (formObj.schedule || '').trim() || 'manual',
 		description:           (formObj.description || '').trim() || null,
 		active:                formObj.active !== 'false' && formObj.active !== false,
 		created_at:            new Date()
@@ -107,7 +106,7 @@ async function update(id, formObj) {
 	if (formObj.upstream_connection_id !== undefined) updateObj.upstream_connection_id = formObj.upstream_connection_id ? parseInt(formObj.upstream_connection_id) : null;
 	if (formObj.stub_filename !== undefined) updateObj.stub_filename = formObj.stub_filename.trim() || null;
 	if (formObj.distribution_method !== undefined && DISTRIBUTION_METHODS.includes(formObj.distribution_method)) updateObj.distribution_method = formObj.distribution_method;
-	if (formObj.schedule !== undefined && SCHEDULES.includes(formObj.schedule)) updateObj.schedule = formObj.schedule;
+	if (formObj.schedule !== undefined) updateObj.schedule = (formObj.schedule || '').trim() || 'manual';
 	if (formObj.description !== undefined) updateObj.description = formObj.description.trim() || null;
 	if (formObj.active !== undefined) updateObj.active = formObj.active !== 'false' && formObj.active !== false;
 
@@ -132,7 +131,6 @@ export {
 	VALID_ROLES,
 	ROLE_LABELS,
 	DISTRIBUTION_METHODS,
-	SCHEDULES,
 	getAll,
 	getByNetwork,
 	getById,

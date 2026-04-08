@@ -4786,8 +4786,7 @@ router.get('/coordinator/:networkId', requireAdmin, async (req, res) => {
 		activenav: 'networks', currentuser, network, segments, connections,
 		validRoles: coordinatorSegments.VALID_ROLES,
 		roleLabels: coordinatorSegments.ROLE_LABELS,
-		distributionMethods: coordinatorSegments.DISTRIBUTION_METHODS,
-		schedules: coordinatorSegments.SCHEDULES
+		distributionMethods: coordinatorSegments.DISTRIBUTION_METHODS
 	});
 });
 
