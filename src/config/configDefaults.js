@@ -85,6 +85,8 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'session_ttl',       defaultValue: '720',            type: 'number',  category: 'security',    description: 'Web session expiry in minutes (default 720 = 12 hours)' },
 	{ key: 'remember_me_days',  defaultValue: '14',             type: 'number',  category: 'security',    description: 'Days to keep session alive when "Remember Me" is checked on login (default 14)' },
 	{ key: 'pwmin',             defaultValue: '12',             type: 'number',  category: 'security',    description: 'Minimum password length' },
+	{ key: 'honeypot_enabled',  defaultValue: 'true',           type: 'boolean', category: 'security',    description: 'Log honeypot login attempts to security.log for fail2ban integration' },
+	{ key: 'honeypot_usernames', defaultValue: 'root,admin,administrator,test,guest,user,oracle,postgres,mysql,ftp,www,nobody,pi,ubuntu,centos,vagrant,ansible,deploy', type: 'string', category: 'security', description: 'Comma-separated honeypot usernames. Login attempts with these names are logged to security.log (never real BBS accounts).' },
 	{ key: 'minage',            defaultValue: '13',             type: 'number',  category: 'security',    description: 'Minimum registration age' },
 	{ key: 'verified_security', defaultValue: '60',             type: 'number',  category: 'security',    description: 'Security level granted on address verification (only applied if higher than current)' },
 	{ key: 'unverified_retention_days', defaultValue: '14',  type: 'number',  category: 'security',    description: 'Days to keep unverified accounts before deletion (0 = never delete)' },

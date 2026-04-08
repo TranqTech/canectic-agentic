@@ -350,7 +350,8 @@ class LoginHandler extends BaseHandler {
 
     // --- Auth ---
     _checkLogin() {
-        checkUserPass(this.username, this.password)
+        var clientIp = this.call.callerId || 'unknown';
+        checkUserPass(this.username, this.password, { ip: clientIp })
             .then(result => {
                 if (!this.active) return;
                 if (result.isvalid) {

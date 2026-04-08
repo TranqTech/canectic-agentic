@@ -233,13 +233,17 @@ async function createNewUser(newrecord) {
 
 // --- Authentication ---
 
-async function checkUserPass(username, password) {
+async function checkUserPass(username, password, options) {
+	var opts = options || {};
+	var clientIp = opts.ip || 'unknown';
+
 	var resultobj = {
 		status: false,
 		resultmsg: "",
 		errormessages: [],
 		isvalid: false,
-		useraccount: null
+		useraccount: null,
+		honeypot: false
 	};
 
 	if (!username || !password) {
@@ -249,11 +253,30 @@ async function checkUserPass(username, password) {
 		return resultobj;
 	}
 
+	// Honeypot check: known-bad usernames trigger immediate security log
+	if (appConfig.getBoolean('honeypot_enabled', true)) {
+		var honeypotList = (appConfig.get('honeypot_usernames', '') || '').toLowerCase().split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+		if (honeypotList.includes(username.toLowerCase().trim())) {
+			alogger.writeClog(1,
+				'[HONEYPOT] Login attempt with banned username "' + username + '" from ' + clientIp,
+				'security', 'redbright'
+			);
+			resultobj.resultmsg = "No User";
+			resultobj.errormessages.push("No User");
+			resultobj.honeypot = true;
+			return resultobj;
+		}
+	}
+
 	var userobj = await getUserRecord(username);
 	if (!userobj) {
 		resultobj.errormessages.push("No User");
 		resultobj.resultmsg = "No User";
 		alogger.writeAlog(5, "No User Found", "redbright");
+		alogger.writeClog(3,
+			'[AUTHFAIL] Login attempt for unknown user "' + username + '" from ' + clientIp,
+			'security', 'yellow'
+		);
 		return resultobj;
 	}
 
@@ -275,6 +298,10 @@ async function checkUserPass(username, password) {
 		resultobj.useraccount = userobj;
 	} else {
 		alogger.writeAlog(5, "User password incorrect", "redbright");
+		alogger.writeClog(3,
+			'[AUTHFAIL] Failed login for "' + username + '" from ' + clientIp,
+			'security', 'yellow'
+		);
 		resultobj.errormessages.push("Password BAD");
 		resultobj.resultmsg = "Password BAD";
 	}

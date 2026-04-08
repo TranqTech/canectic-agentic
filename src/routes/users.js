@@ -101,7 +101,8 @@ router.post('/login', urlencodedParser, async (req, res) => {
 		return fail(['Username and password are required']);
 	}
 
-	var result = await userAccounts.checkUserPass(username, password);
+	var clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+	var result = await userAccounts.checkUserPass(username, password, { ip: clientIp });
 
 	if (!result.isvalid) {
 		alogger.writeAlog(4, 'Failed login attempt for: ' + username, 'yellowbright');
