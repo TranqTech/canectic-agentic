@@ -226,7 +226,32 @@ New admin section (or subsection of Networking) for coordinator tools:
 
 ---
 
-## 9. Future Considerations
+## 9. UX Improvements (Planned)
+
+### Hierarchy-aware node editing
+
+The FTN nodelist is hierarchical: Zone > Region > Net (Host) > Hub > Node. The node editor should reflect this based on the segment's role:
+
+- **NC role**: auto-fills zone/net from segment, only asks for node number. Keyword choices limited to Hub, normal, Down, Hold, Pvt. Hub routing dropdown lists existing Hub nodes in the segment.
+- **RC role**: primary entries are `Host` lines (net coordinators). Adding a Host entry represents adding a net to the region. Individual nodes under each net are secondary.
+- **ZC role**: primary entries are `Region` lines. Each region contains Host/net entries.
+- **Hub role**: auto-fills zone/net/hub_node from segment. Only manages nodes that route through this hub.
+
+### Modal improvements
+
+- Auto-populate zone/net/region from segment (read-only unless overridden)
+- Keyword selector with descriptions ("Normal Node", "Hub (routes other nodes through this system)", "Down (temporarily offline)")
+- Hub routing as a dropdown of existing Hub nodes in the segment (not a raw number)
+- Common flags as checkboxes (CM, IBN, ITN, IP, MO) with a text field for additional custom flags
+- Show/hide binkp/telnet port fields based on whether hostname is filled
+- Auto-check IBN flag when hostname is provided
+- Phone defaults to `-Unpublished-` (collapsed behind "show" link)
+- Baud defaults to 300 (collapsed behind "advanced" toggle)
+- Step-by-step: address first, then system info, then connectivity, then flags
+
+---
+
+## 10. Future Considerations
 
 - **Nodediff generation**: produce diffs between nodelist versions for bandwidth-efficient distribution
 - **Application processing**: nodes apply to join via netmail or web form, coordinator approves
