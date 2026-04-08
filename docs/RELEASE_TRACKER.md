@@ -235,6 +235,8 @@ Last updated: 2026-04-06
 | 42 | File area retention limits | [x] | Optional max_age_days and max_files on file areas and file groups. Daily file-maintenance job enforces limits (DB + disk cleanup). |
 | 43 | Timed events | [x] | Sysop-configurable scheduled commands (door maintenance, backups). NativeCommand + Dosemu launch types, cron scheduling, %X variables, timeout, output capture. Admin CRUD. |
 | 44 | Call flow editor | [x] | DB-backed call flows and pools. Admin stage editor with drag-to-reorder, pool-to-flow assignment. Replaces hardcoded arrays. |
+| 45 | Honeypot + fail2ban integration | [x] | Honeypot login detection, security.log for fail2ban, immediate disconnect, registration block. trust_proxy for reverse proxies. |
+| 46 | displayScreen menu command | [x] | Art file display from menus/call flow. Random by type or specific subdir/filename. |
 
 ---
 

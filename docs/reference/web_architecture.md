@@ -39,6 +39,7 @@ Standard Express 4 setup with Pug view engine.
 
 ### Middleware Stack (in order)
 
+0. `trust proxy` — Configured via `trust_proxy` config key for reverse proxy support (nginx, Caddy, HAProxy). Ensures `req.ip` returns the real client IP from `X-Forwarded-For` headers.
 1. `express.json()` — JSON body parsing
 2. `express.urlencoded({ extended: false })` — URL-encoded form bodies
 3. `cookieParser()` — Parses cookies (session ID lives here)

@@ -96,7 +96,8 @@
 - Call flow editor: DB-backed call flows and call pools, replacing hardcoded arrays. Admin UI at /admin/callflows with drag-to-reorder stage editor, add/remove stages, pool-to-flow assignment, WS path config. System flows (Standard, Doorserver, WebDoor) seeded on first run, protected from deletion.
 - displayScreen menu command: display art files from menus and call flow stages with type:Welcome/Goodbye random selection or specific subdir/filename targeting
 - Missing menu commands added to admin dropdown: QWK Transfer, News Viewer, Notifications
-- Honeypot login detection with fail2ban integration: login attempts with known-bad usernames (root, admin, etc.) logged to security.log. Normal auth failures also logged. Config keys: honeypot_enabled, honeypot_usernames. Example fail2ban filter + jail configs in examples/fail2ban/.
+- Honeypot login detection with fail2ban integration: login attempts with known-bad usernames (root, admin, etc.) logged to security.log with [HONEYPOT] tag. Normal auth failures logged with [AUTHFAIL] tag. Terminal connections using honeypot names are immediately disconnected. Honeypot names blocked from registration (show as "taken"). Config keys: honeypot_enabled, honeypot_usernames, trust_proxy. Example fail2ban filter + jail configs in examples/fail2ban/.
+- Reverse proxy support: trust_proxy config key for correct client IP resolution behind nginx/Caddy/HAProxy (X-Forwarded-For headers)
 - Fix: Terminal login and registration now accept special characters in passwords (was restricted to alphanumeric only)
 
 ## v0.9.5a (2026-04-04)
