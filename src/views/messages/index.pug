@@ -28,6 +28,8 @@ block content
                   .btn-group.btn-group-sm
                     button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
                     button.btn.btn-outline-light.view-toggle(data-view='all') All
+                  button.btn.btn-sm.btn-outline-light.ms-2(data-bs-toggle='modal' data-bs-target='#helpModal' title='Help')
+                    i.bi.bi-question-circle
             .card-body
               if groupedAreas && groupedAreas.length > 0
                 each entry in groupedAreas
@@ -61,17 +63,41 @@ block content
                             td.text-center(style='width:80px')
                               if area.unread_count && area.unread_count > 0
                                 span.badge.bg-info= area.unread_count
-                            td(style='width:150px')
+                            td(style='width:120px')
                               if area.last_message
                                 .small
                                   - var ldate = Date.parse(area.last_message)
                                   - var ld = DateTime.fromMillis(ldate)
-                                  span.fg-yellow= ld.toFormat('MMM dd')
-                                  |
-                                  span.fg-green= area.last_from || ''
+                                  div
+                                    span.fg-yellow= ld.toFormat('MMM dd')
+                                  div
+                                    span.fg-green= area.last_from || ''
               else
                 .text-center.py-4
                   h5.text-muted No message areas available
+
+    //- Help Modal
+    .modal.fade#helpModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Message Areas
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          .modal-body
+            h6 Subscribing
+            p Click the #[span.badge.bg-success #[i.bi.bi-check-circle-fill]] button next to an area to subscribe or unsubscribe. Subscribed areas are included in new message scans and the web call flow.
+            h6 Views
+            p
+              strong Subscribed
+              |  shows only your subscribed areas.
+              strong  All
+              |  shows every area you have access to, so you can discover and subscribe to new ones.
+            h6 Search
+            p Use the search box to quickly filter areas by name, description, or shortcode. The filter works across all groups.
+            h6 Reading Messages
+            p Click an area name to open it and browse threads. Unread counts are shown as badges.
+          .modal-footer
+            button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Close
 
     script.
       document.addEventListener('DOMContentLoaded', function() {
