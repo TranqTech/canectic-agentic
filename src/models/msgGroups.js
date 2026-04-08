@@ -292,6 +292,9 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	if (pushAll || fields.includes('post_as')) {
 		updateObj.post_as = group.post_as || 'username';
 	}
+	if (pushAll || fields.includes('newscan_default')) {
+		updateObj.newscan_default = group.newscan_default || false;
+	}
 
 	if (Object.keys(updateObj).length === 0) {
 		return { status: false, errormessages: ['No fields to push'], updated: 0 };

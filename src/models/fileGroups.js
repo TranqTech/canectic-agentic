@@ -280,6 +280,69 @@ async function reorderAreas(ids) {
 	}
 }
 
+// Push group-level defaults to all member areas.
+// fields: array of field names to push, e.g. ['security', 'flags', 'newscan_default', 'retention'] or ['all']
+async function pushDefaultsToAreas(shortcode, fields) {
+	var group = await getGroupByShortcode(shortcode);
+	if (!group) return { status: false, errormessages: ['Group not found'], updated: 0 };
+
+	var pushAll = !fields || fields.length === 0 || fields.includes('all');
+	var updateObj = {};
+
+	if (pushAll || fields.includes('security')) {
+		updateObj.browse_security = group.browse_security;
+		updateObj.read_security = group.read_security;
+		updateObj.post_security = group.post_security;
+	}
+	if (pushAll || fields.includes('flags')) {
+		updateObj.browse_perm_flags = group.browse_perm_flags;
+		updateObj.browse_rest_flags = group.browse_rest_flags;
+		updateObj.read_perm_flags = group.read_perm_flags;
+		updateObj.read_rest_flags = group.read_rest_flags;
+		updateObj.post_perm_flags = group.post_perm_flags;
+		updateObj.post_rest_flags = group.post_rest_flags;
+	}
+	if (pushAll || fields.includes('newscan_default')) {
+		updateObj.newscan_default = group.newscan_default || false;
+	}
+	if (pushAll || fields.includes('retention')) {
+		updateObj.max_age_days = group.max_age_days;
+		updateObj.max_files = group.max_files;
+	}
+
+	if (Object.keys(updateObj).length === 0) {
+		return { status: false, errormessages: ['No fields to push'], updated: 0 };
+	}
+
+	var setClauses = [];
+	var params = [];
+	var paramIdx = 1;
+	for (var col in updateObj) {
+		if (!updateObj.hasOwnProperty(col)) continue;
+		var val = updateObj[col];
+		if (typeof val === 'object' && val !== null) val = JSON.stringify(val);
+		setClauses.push(col + ' = $' + paramIdx);
+		params.push(val);
+		paramIdx++;
+	}
+	params.push(group.shortcode);
+
+	var err = await postgres.write(
+		'UPDATE file_areas SET ' + setClauses.join(', ') + ', updated_at = NOW() WHERE group_shortcode = $' + paramIdx,
+		params
+	);
+
+	if (err) {
+		return { status: false, errormessages: [err.message || 'Database error'], updated: 0 };
+	}
+
+	var countRow = await postgres.queryOne(
+		'SELECT COUNT(*) AS cnt FROM file_areas WHERE group_shortcode = $1',
+		[group.shortcode]
+	);
+	return { status: true, updated: countRow ? parseInt(countRow.cnt) : 0 };
+}
+
 export {
 	ensureSortOrder,
 	normalizeFlags,
@@ -292,5 +355,6 @@ export {
 	getAllGroupsWithAreas,
 	recalculateAreaCounts,
 	reorderGroups,
-	reorderAreas
+	reorderAreas,
+	pushDefaultsToAreas
 };

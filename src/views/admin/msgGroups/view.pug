@@ -812,6 +812,9 @@ block content
                     .form-check.mb-2
                       input.form-check-input#push_post_as(type='checkbox' name='fields' value='post_as' checked)
                       label.form-check-label(for='push_post_as') Post As (#{msgGroup.post_as || 'username'})
+                    .form-check.mb-2
+                      input.form-check-input#push_newscan(type='checkbox' name='fields' value='newscan_default' checked)
+                      label.form-check-label(for='push_newscan') Newscan Default (#{msgGroup.newscan_default ? 'Yes' : 'No'})
                     .alert.alert-warning.mt-3
                       i.bi.bi-exclamation-triangle.me-1
                       | This will overwrite the selected settings on all areas in this group.

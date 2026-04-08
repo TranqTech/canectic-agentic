@@ -1511,6 +1511,19 @@ router.post('/fileAreas/reorder', express.json(), requireAdmin, async (req, res)
 	res.json({ status: true });
 });
 
+router.post('/fileGroup/:shortcode/pushDefaults', urlencodedParser, requireAdmin, async (req, res) => {
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var fields = req.body.fields;
+	if (typeof fields === 'string') fields = [fields];
+	var result = await fileGroups.pushDefaultsToAreas(shortcode, fields || ['all']);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Pushed defaults to ' + result.updated + ' area(s).');
+	} else {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	}
+	res.redirect('/admin/fileGroup/' + shortcode);
+});
+
 // JSON endpoint — returns group security and flag defaults for new area modal auto-populate
 router.get('/fileGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 	var shortcode = req.params.shortcode.toUpperCase().trim();
