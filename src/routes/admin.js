@@ -29,6 +29,7 @@ import * as fileWildcards from '../models/fileWildcards.js';
 import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
 import * as badEchomail from '../models/badEchomail.js';
+import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -4758,6 +4759,20 @@ router.post('/bad-echomail/:areatag/purge', urlencodedParser, requireAdmin, asyn
 	var purged = await badEchomail.purgeTag(areatag);
 	await flash.setOne(req, 'info', 'Purged ' + purged + ' message(s) for ' + areatag);
 	res.redirect('/admin/bad-echomail');
+});
+
+// -------------------------------------------------------
+// Inbound File Log
+// -------------------------------------------------------
+
+router.get('/inbound-log', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var entries = await inboundFileLog.getRecent(500);
+	res.render('admin/inboundLog/index', {
+		sufficientAccess, title: 'Inbound File Log', activelink: 'inbound-log',
+		activenav: 'networks', currentuser, entries
+	});
 });
 
 // -------------------------------------------------------

@@ -1,0 +1,55 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-inbox.me-2
+          | Inbound File Log
+          small.text-muted.ms-2 Files received via mailer sessions
+
+        .card
+          .card-body
+            if entries && entries.length > 0
+              table#inboundLogTable.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Filename
+                    th Peer Address
+                    th Peer Name
+                    th Size
+                    th Session
+                    th Received
+                tbody
+                  each entry in entries
+                    tr
+                      td: code= entry.filename
+                      td
+                        if entry.peer_address
+                          code= entry.peer_address
+                      td
+                        if entry.peer_name
+                          small= entry.peer_name
+                      td
+                        if entry.file_size
+                          = Math.round(entry.file_size / 1024) + ' KB'
+                      td
+                        if entry.session_uuid
+                          small.text-muted= entry.session_uuid.substring(0, 8)
+                      td
+                        small= new Date(entry.received_at).toLocaleString()
+            else
+              p.text-muted No inbound files logged yet.
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+        jQuery('#inboundLogTable').DataTable({
+          paging: true,
+          pageLength: 50,
+          order: [[5, 'desc']]
+        });
+      }
+    });
