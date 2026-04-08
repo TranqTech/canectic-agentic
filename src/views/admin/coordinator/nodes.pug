@@ -113,24 +113,28 @@ block content
             else
               p.text-muted No managed nodes. Add nodes to build your network segment.
 
-    //- Flag descriptions for tooltips
-    -
-      var flagDescs = {
-        'CM': 'Continuous Mail -- system is always available',
-        'MO': 'Modem Only -- no internet connectivity',
-        'LO': 'Listed Only -- accepts calls only from listed nodes',
-        'MN': 'Mailer Not Running -- no mailer software active',
-        'IBN': 'Binkp -- supports binkp protocol (port 24554)',
-        'ITN': 'Telnet -- supports telnet connections (port 23)',
-        'IFC': 'IFCico -- supports ifcico protocol',
-        'ISSH': 'SSH -- supports secure shell connections',
-        'IVM': 'VModem -- supports VModem protocol',
-        'IEM': 'Email -- email gateway capability',
-        'IP': 'IP connectivity -- reachable via internet',
-        'INO4': 'IPv6 Only -- no IPv4 connectivity',
-        'IPv6': 'Has IPv6 connectivity',
-        'PING': 'Responds to ICMP ping'
-      }
+    //- Reusable flag checkbox mixin
+    mixin flagCheckboxes(prefix, cssClass)
+      .mb-3
+        each fd in flagDefs
+          .d-flex.align-items-center.mb-2
+            .form-check
+              input.form-check-input(type='checkbox' class=cssClass id=prefix + 'Flag_' + fd.code value=fd.code data-bs-toggle='tooltip' data-bs-placement='top' title=fd.description data-hasarg=fd.has_argument ? 'true' : 'false')
+              label.form-check-label.me-2(for=prefix + 'Flag_' + fd.code)
+                strong= fd.code
+                if fd.description
+                  small.text-muted.ms-2= fd.description
+            if fd.has_argument
+              input.form-control.form-control-sm.flag-arg-input(
+                type='text'
+                id=prefix + 'FlagArg_' + fd.code
+                placeholder=fd.argument_hint || 'value'
+                style='width: 150px; display: none;'
+                data-flagcode=fd.code
+              )
+        hr.mt-2
+        input.form-control(name='flags' id=prefix + 'FlagsField' placeholder='Additional flags (comma-separated)')
+        .form-text Checked flags above are combined with any additional flags entered here
 
     //- Add Node Modal
     .modal.fade#addNodeModal(tabindex='-1')
@@ -151,9 +155,9 @@ block content
                     i.bi.bi-wifi.me-1
                     | Connectivity
                 li.nav-item(role='presentation')
-                  button.nav-link#addLegacyTab(data-bs-toggle='tab' data-bs-target='#addLegacyPane' type='button' role='tab' aria-selected='false')
-                    i.bi.bi-telephone.me-1
-                    | Legacy
+                  button.nav-link#addFlagsTab(data-bs-toggle='tab' data-bs-target='#addFlagsPane' type='button' role='tab' aria-selected='false')
+                    i.bi.bi-flag.me-1
+                    | Flags
 
               .tab-content
                 //- Tab 1: Identity (Address + System Info)
@@ -185,7 +189,6 @@ block content
                           each kw in validKeywords
                             option(value=kw)= kw || '(normal)'
 
-                  //- Hub routing (only for NC segments with hub children)
                   if hubNodes && hubNodes.length > 0
                     .mb-3
                       label.form-label Hub Routing
@@ -218,7 +221,7 @@ block content
                     input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
                     label.form-check-label(for='addActive') Active
 
-                //- Tab 2: Connectivity (Network + Flags)
+                //- Tab 2: Connectivity (Network + Legacy)
                 #addConnPane.tab-pane.fade(role='tabpanel')
                   h6.text-muted.mb-3 Network
                   .row
@@ -237,18 +240,7 @@ block content
 
                   hr.my-3
 
-                  h6.text-muted.mb-3 Flags
-                  .mb-3
-                    .d-flex.flex-wrap.gap-3.mb-2
-                      each f in commonFlags
-                        .form-check.form-check-inline
-                          input.form-check-input.flag-check(type='checkbox' id='addFlag_' + f value=f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)
-                          label.form-check-label(for='addFlag_' + f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)= f
-                    input.form-control(name='flags' id='addFlagsField' placeholder='Additional flags (comma-separated)')
-                    .form-text Checked flags above are combined with any additional flags entered here
-
-                //- Tab 3: Legacy (Phone, Baud, Notes)
-                #addLegacyPane.tab-pane.fade(role='tabpanel')
+                  h6.text-muted.mb-3 Legacy
                   .row
                     .col-6
                       .mb-3
@@ -260,7 +252,11 @@ block content
                         input.form-control(type='number' name='baud' value='300')
                   .mb-3
                     label.form-label Notes (internal)
-                    textarea.form-control(name='notes' rows='3')
+                    textarea.form-control(name='notes' rows='2')
+
+                //- Tab 3: Flags
+                #addFlagsPane.tab-pane.fade(role='tabpanel')
+                  +flagCheckboxes('add', 'flag-check')
 
             .modal-footer
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
@@ -285,9 +281,9 @@ block content
                     i.bi.bi-wifi.me-1
                     | Connectivity
                 li.nav-item(role='presentation')
-                  button.nav-link#editLegacyTab(data-bs-toggle='tab' data-bs-target='#editLegacyPane' type='button' role='tab' aria-selected='false')
-                    i.bi.bi-telephone.me-1
-                    | Legacy
+                  button.nav-link#editFlagsTab(data-bs-toggle='tab' data-bs-target='#editFlagsPane' type='button' role='tab' aria-selected='false')
+                    i.bi.bi-flag.me-1
+                    | Flags
 
               .tab-content
                 //- Tab 1: Identity
@@ -344,7 +340,7 @@ block content
                     input.form-check-input(type='checkbox' name='active' id='enActive' value='true')
                     label.form-check-label(for='enActive') Active
 
-                //- Tab 2: Connectivity
+                //- Tab 2: Connectivity + Legacy
                 #editConnPane.tab-pane.fade(role='tabpanel')
                   h6.text-muted.mb-3 Network
                   .row
@@ -363,17 +359,7 @@ block content
 
                   hr.my-3
 
-                  h6.text-muted.mb-3 Flags
-                  .mb-3
-                    .d-flex.flex-wrap.gap-3.mb-2
-                      each f in commonFlags
-                        .form-check.form-check-inline
-                          input.form-check-input.edit-flag-check(type='checkbox' id='enFlag_' + f value=f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)
-                          label.form-check-label(for='enFlag_' + f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)= f
-                    input.form-control(name='flags' id='enFlags' placeholder='Additional flags (comma-separated)')
-
-                //- Tab 3: Legacy
-                #editLegacyPane.tab-pane.fade(role='tabpanel')
+                  h6.text-muted.mb-3 Legacy
                   .row
                     .col-6
                       .mb-3
@@ -385,41 +371,104 @@ block content
                         input.form-control(type='number' name='baud' id='enBaud')
                   .mb-3
                     label.form-label Notes
-                    textarea.form-control(name='notes' id='enNotes' rows='3')
+                    textarea.form-control(name='notes' id='enNotes' rows='2')
+
+                //- Tab 3: Flags
+                #editFlagsPane.tab-pane.fade(role='tabpanel')
+                  +flagCheckboxes('en', 'edit-flag-check')
 
             .modal-footer
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
               button.btn.btn-primary(type='submit') Save
 
   script.
-    var commonFlagList = !{JSON.stringify(commonFlags)};
+    //- Flag definitions from DB (for JS logic)
+    var flagDefs = !{JSON.stringify(flagDefs.map(function(fd) { return { code: fd.code, has_argument: fd.has_argument }; }))};
+    var knownCodes = flagDefs.map(function(fd) { return fd.code; });
 
-    //- Flag checkbox sync: checkboxes + text field -> combined flags value
-    function syncFlagCheckboxes(checkboxSelector, flagsFieldId) {
-      var flagsField = document.getElementById(flagsFieldId);
-      var checks = document.querySelectorAll(checkboxSelector);
-
-      function updateField() {
-        var checked = [];
-        checks.forEach(function(cb) { if (cb.checked) checked.push(cb.value); });
-        var textVal = flagsField.value;
-        var textFlags = textVal.split(',').map(function(f) { return f.trim(); }).filter(function(f) {
-          return f && !commonFlagList.includes(f);
-        });
-        flagsField.value = checked.concat(textFlags).join(', ');
-      }
-
-      checks.forEach(function(cb) { cb.addEventListener('change', updateField); });
-    }
-
-    function setFlagCheckboxes(flagsArray, checkboxSelector) {
-      document.querySelectorAll(checkboxSelector).forEach(function(cb) {
-        cb.checked = flagsArray.includes(cb.value);
+    //- Show/hide argument input when flag checkbox toggled
+    function setupArgToggles(prefix) {
+      flagDefs.forEach(function(fd) {
+        if (!fd.has_argument) return;
+        var cb = document.getElementById(prefix + 'Flag_' + fd.code);
+        var argInput = document.getElementById(prefix + 'FlagArg_' + fd.code);
+        if (!cb || !argInput) return;
+        function toggle() { argInput.style.display = cb.checked ? '' : 'none'; }
+        cb.addEventListener('change', toggle);
+        toggle();
       });
     }
 
-    function getNonCommonFlags(flagsArray) {
-      return flagsArray.filter(function(f) { return !commonFlagList.includes(f); }).join(', ');
+    //- Build flags value from checkboxes + arg inputs + extra text
+    function collectFlags(prefix) {
+      var parts = [];
+      flagDefs.forEach(function(fd) {
+        var cb = document.getElementById(prefix + 'Flag_' + fd.code);
+        if (!cb || !cb.checked) return;
+        if (fd.has_argument) {
+          var argInput = document.getElementById(prefix + 'FlagArg_' + fd.code);
+          var argVal = argInput ? argInput.value.trim() : '';
+          parts.push(argVal ? fd.code + ':' + argVal : fd.code);
+        } else {
+          parts.push(fd.code);
+        }
+      });
+      // Add extra text flags
+      var extraField = document.getElementById(prefix + 'FlagsField');
+      if (extraField && extraField.value.trim()) {
+        var extras = extraField.value.split(',').map(function(f) { return f.trim(); }).filter(function(f) {
+          return f && !knownCodes.includes(f.split(':')[0]);
+        });
+        parts = parts.concat(extras);
+      }
+      return parts;
+    }
+
+    //- Sync checkboxes -> hidden flags field on change
+    function syncFlagCheckboxes(prefix) {
+      var flagsField = document.getElementById(prefix + 'FlagsField');
+      function update() { flagsField.value = collectFlags(prefix).join(', '); }
+      document.querySelectorAll('#' + prefix + 'FlagsPane input').forEach(function(el) {
+        el.addEventListener('change', update);
+        el.addEventListener('input', update);
+      });
+    }
+
+    //- Set checkboxes and arg inputs from a flags array (e.g. ['CM', 'IBN:24555', 'INA:bbs.example.com'])
+    function setFlagsFromArray(prefix, flagsArray) {
+      // Clear all checkboxes and arg inputs
+      flagDefs.forEach(function(fd) {
+        var cb = document.getElementById(prefix + 'Flag_' + fd.code);
+        if (cb) cb.checked = false;
+        if (fd.has_argument) {
+          var argInput = document.getElementById(prefix + 'FlagArg_' + fd.code);
+          if (argInput) { argInput.value = ''; argInput.style.display = 'none'; }
+        }
+      });
+
+      var extras = [];
+      flagsArray.forEach(function(f) {
+        var parts = f.split(':');
+        var code = parts[0];
+        var arg = parts.slice(1).join(':');
+        var cb = document.getElementById(prefix + 'Flag_' + code);
+        if (cb) {
+          cb.checked = true;
+          if (arg) {
+            var argInput = document.getElementById(prefix + 'FlagArg_' + code);
+            if (argInput) { argInput.value = arg; argInput.style.display = ''; }
+          } else {
+            // Show arg input if checked (even without value)
+            var argInput = document.getElementById(prefix + 'FlagArg_' + code);
+            if (argInput) argInput.style.display = '';
+          }
+        } else {
+          extras.push(f);
+        }
+      });
+
+      var extraField = document.getElementById(prefix + 'FlagsField');
+      if (extraField) extraField.value = extras.join(', ');
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -431,10 +480,13 @@ block content
       var tooltipEls = document.querySelectorAll('[data-bs-toggle="tooltip"]');
       tooltipEls.forEach(function(el) { new bootstrap.Tooltip(el); });
 
-      // Add modal: sync flag checkboxes
-      syncFlagCheckboxes('.flag-check', 'addFlagsField');
+      // Setup argument toggles and sync for both modals
+      setupArgToggles('add');
+      setupArgToggles('en');
+      syncFlagCheckboxes('add');
+      syncFlagCheckboxes('en');
 
-      // Edit modal
+      // Edit modal population
       var editModal = document.getElementById('editNodeModal');
       if (editModal) {
         editModal.addEventListener('show.bs.modal', function(e) {
@@ -457,18 +509,14 @@ block content
           document.getElementById('enNotes').value = btn.dataset.notes || '';
           document.getElementById('enActive').checked = btn.dataset.active === 'true';
 
-          // Flags: set checkboxes and extra text
+          // Flags: set checkboxes, arg inputs, and extra text from stored flags
           var flags = [];
           try { flags = JSON.parse(btn.dataset.flags || '[]'); } catch(_) {}
-          setFlagCheckboxes(flags, '.edit-flag-check');
-          document.getElementById('enFlags').value = getNonCommonFlags(flags);
+          setFlagsFromArray('en', flags);
 
-          // Reset to Identity tab when opening
+          // Reset to Identity tab
           var identityTab = document.getElementById('editIdentityTab');
           if (identityTab) bootstrap.Tab.getOrCreateInstance(identityTab).show();
         });
-
-        // Edit modal: sync flag checkboxes
-        syncFlagCheckboxes('.edit-flag-check', 'enFlags');
       }
     });

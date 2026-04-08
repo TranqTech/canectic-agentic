@@ -1,0 +1,17 @@
+[
+  { "code": "CM",   "description": "Continuous Mail -- system is always available for mail transfers",  "has_argument": false, "sort_order": 10 },
+  { "code": "MO",   "description": "Modem Only -- no internet connectivity",                           "has_argument": false, "sort_order": 20 },
+  { "code": "LO",   "description": "Listed Only -- accepts calls only from listed nodes",              "has_argument": false, "sort_order": 30 },
+  { "code": "MN",   "description": "Mailer Not Running -- no mailer software active",                  "has_argument": false, "sort_order": 40 },
+  { "code": "IBN",  "description": "Binkp -- supports binkp protocol (default port 24554)",            "has_argument": true,  "argument_hint": "port", "sort_order": 100 },
+  { "code": "ITN",  "description": "Telnet -- supports telnet connections (default port 23)",           "has_argument": true,  "argument_hint": "port", "sort_order": 110 },
+  { "code": "IFC",  "description": "IFCico -- supports ifcico protocol",                               "has_argument": true,  "argument_hint": "port", "sort_order": 120 },
+  { "code": "ISSH", "description": "SSH -- supports secure shell connections",                          "has_argument": true,  "argument_hint": "port", "sort_order": 130 },
+  { "code": "IVM",  "description": "VModem -- supports VModem protocol",                               "has_argument": true,  "argument_hint": "port", "sort_order": 140 },
+  { "code": "IEM",  "description": "Email -- email gateway capability",                                "has_argument": true,  "argument_hint": "address", "sort_order": 150 },
+  { "code": "INA",  "description": "Internet Address -- hostname or IP address of the system",          "has_argument": true,  "argument_hint": "hostname", "sort_order": 200 },
+  { "code": "IP",   "description": "IP connectivity -- system is reachable via internet",               "has_argument": false, "sort_order": 210 },
+  { "code": "INO4", "description": "IPv6 Only -- system has no IPv4 connectivity",                      "has_argument": false, "sort_order": 220 },
+  { "code": "IPv6", "description": "Has IPv6 connectivity",                                             "has_argument": false, "sort_order": 230 },
+  { "code": "PING", "description": "Responds to ICMP ping requests",                                    "has_argument": false, "sort_order": 240 }
+]

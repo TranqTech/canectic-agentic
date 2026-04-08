@@ -28,6 +28,7 @@ import * as userFileSubs from '../src/models/userFileSubs.js';
 import { ensureQwkConfNumbers } from '../src/models/msgAreas.js';
 import * as callFlowsModel from '../src/models/callFlows.js';
 import { seedDefaultTheme } from '../src/models/themes.js';
+import { seedDefaults as seedNodelistFlags } from '../src/models/nodelistFlags.js';
 
 // --- Queue infrastructure ---
 import { closeQueues } from "../src/queues/queues.js";
@@ -476,6 +477,7 @@ async function main(){
 
 	await appConfig.load()
 	await seedDefaultTheme()
+	await seedNodelistFlags()
 	await prerunMaint()
 	await startNodeManager()
 	await startSocatManager()

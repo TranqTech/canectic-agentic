@@ -32,6 +32,7 @@ import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as managedNodes from '../models/managedNodes.js';
 import * as coordinatorSegments from '../models/coordinatorSegments.js';
+import * as nodelistFlags from '../models/nodelistFlags.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -4920,12 +4921,14 @@ router.get('/coordinator/segment/:segmentId/nodes', requireAdmin, async (req, re
 		hubNodes = nodes.filter(function(n) { return n.keyword === 'Hub' && n.active; });
 	}
 
+	var flagDefs = await nodelistFlags.getActive();
+
 	res.render('admin/coordinator/nodes', {
 		sufficientAccess, title: 'Managed Nodes', activelink: 'coordinator',
 		activenav: 'networks', currentuser, network, segment, nodes, stats,
 		validKeywords: filteredKeywords,
 		allKeywords: managedNodes.VALID_KEYWORDS,
-		commonFlags: managedNodes.COMMON_FLAGS,
+		flagDefs: flagDefs,
 		hubNodes: hubNodes
 	});
 });
@@ -5026,6 +5029,41 @@ router.get('/coordinator/:networkId/compiled/download', requireAdmin, async (req
 	res.setHeader('Content-Type', 'application/octet-stream');
 	res.setHeader('Content-Disposition', 'attachment; filename="' + result.filename + '"');
 	res.send(content);
+});
+
+// -------------------------------------------------------
+// Nodelist Flag Definitions
+// -------------------------------------------------------
+
+router.get('/nodelist-flags', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var flags = await nodelistFlags.getAll();
+	res.render('admin/nodelistFlags/index', {
+		sufficientAccess, title: 'Nodelist Flags', activelink: 'nodelist-flags',
+		activenav: 'networks', currentuser, flags
+	});
+});
+
+router.post('/nodelist-flags/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await nodelistFlags.create(req.body);
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	}
+	res.redirect('/admin/nodelist-flags');
+});
+
+router.post('/nodelist-flags/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await nodelistFlags.update(parseInt(req.params.id), req.body);
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	}
+	res.redirect('/admin/nodelist-flags');
+});
+
+router.post('/nodelist-flags/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await nodelistFlags.remove(parseInt(req.params.id));
+	res.redirect('/admin/nodelist-flags');
 });
 
 // -------------------------------------------------------

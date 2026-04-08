@@ -1,0 +1,151 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        .d-flex.justify-content-between.align-items-center.mb-3
+          h2
+            i.bi.bi-flag.me-2
+            | Nodelist Flag Definitions
+          button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addFlagModal')
+            i.bi.bi-plus-circle.me-1
+            | Add Flag
+
+        .card
+          .card-body
+            if flags && flags.length > 0
+              table#flagTable.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Code
+                    th Description
+                    th Argument
+                    th Order
+                    th Status
+                    th(style='width:100px')
+                tbody
+                  each flag in flags
+                    tr(class=!flag.active ? 'table-secondary' : '')
+                      td
+                        code.fw-bold= flag.code
+                      td= flag.description
+                      td
+                        if flag.has_argument
+                          span.badge.bg-info= flag.argument_hint || 'value'
+                      td.text-muted= flag.sort_order
+                      td
+                        if flag.active
+                          span.badge.bg-success Active
+                        else
+                          span.badge.bg-secondary Inactive
+                      td
+                        button.btn.btn-sm.btn-primary.me-1.edit-flag-btn(
+                          data-bs-toggle='modal' data-bs-target='#editFlagModal'
+                          data-id=flag.id
+                          data-code=flag.code
+                          data-description=flag.description
+                          data-hasargument=(flag.has_argument ? 'true' : 'false')
+                          data-argumenthint=flag.argument_hint || ''
+                          data-sortorder=flag.sort_order
+                          data-active=(flag.active ? 'true' : 'false')
+                        )
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/nodelist-flags/' + flag.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this flag definition?")')
+                            i.bi.bi-trash
+            else
+              p.text-muted No flag definitions. They will be seeded automatically on next restart, or add them manually.
+
+    //- Add Flag Modal
+    .modal.fade#addFlagModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Flag Definition
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/nodelist-flags/new')
+            .modal-body
+              .mb-3
+                label.form-label Code
+                input.form-control(name='code' required placeholder='e.g. IBN' style='text-transform: uppercase')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' placeholder='Binkp -- supports binkp protocol')
+              .row
+                .col-6
+                  .mb-3
+                    .form-check
+                      input.form-check-input(type='checkbox' name='has_argument' id='addHasArg' value='true')
+                      label.form-check-label(for='addHasArg') Accepts argument
+                .col-6
+                  .mb-3
+                    label.form-label Argument hint
+                    input.form-control(name='argument_hint' id='addArgHint' placeholder='e.g. port, hostname')
+              .mb-3
+                label.form-label Sort order
+                input.form-control(type='number' name='sort_order' value='0')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addFlagActive' checked value='true')
+                label.form-check-label(for='addFlagActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Flag Modal
+    .modal.fade#editFlagModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Flag Definition
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editFlagForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Code
+                input.form-control(name='code' id='efCode' required style='text-transform: uppercase')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='efDescription')
+              .row
+                .col-6
+                  .mb-3
+                    .form-check
+                      input.form-check-input(type='checkbox' name='has_argument' id='efHasArg' value='true')
+                      label.form-check-label(for='efHasArg') Accepts argument
+                .col-6
+                  .mb-3
+                    label.form-label Argument hint
+                    input.form-control(name='argument_hint' id='efArgHint')
+              .mb-3
+                label.form-label Sort order
+                input.form-control(type='number' name='sort_order' id='efSortOrder')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='efActive' value='true')
+                label.form-check-label(for='efActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+  script.
+    var editModal = document.getElementById('editFlagModal');
+    if (editModal) {
+      editModal.addEventListener('show.bs.modal', function(e) {
+        var btn = e.relatedTarget;
+        if (!btn) return;
+        document.getElementById('editFlagForm').action = '/admin/nodelist-flags/' + btn.dataset.id + '/update';
+        document.getElementById('efCode').value = btn.dataset.code || '';
+        document.getElementById('efDescription').value = btn.dataset.description || '';
+        document.getElementById('efHasArg').checked = btn.dataset.hasargument === 'true';
+        document.getElementById('efArgHint').value = btn.dataset.argumenthint || '';
+        document.getElementById('efSortOrder').value = btn.dataset.sortorder || '0';
+        document.getElementById('efActive').checked = btn.dataset.active === 'true';
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+        jQuery('#flagTable').DataTable({ paging: false, order: [] });
+      }
+    });
