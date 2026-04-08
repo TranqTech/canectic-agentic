@@ -31,7 +31,7 @@ async function storeBadMessage(message, connectionInfo) {
 		seen_by:                    message.SeenBy || '',
 		path:                       message.Path || '',
 		kludges:                    JSON.stringify(message.OptionalAttributes || []),
-		source_address:             message.SourceAddress || (message.SourceZone + ':' + message.SourceNet + '/' + message.SourceNode) || '',
+		source_address:             message.Source || message.SourceAddress || ((message.SourceZone || '') + ':' + (message.SourceNet || '') + '/' + (message.SourceNode || '')) || '',
 		received_from_address:      connInfo.address || '',
 		received_from_connection_id: connInfo.connectionId || null,
 		datetime:                   message.DateTime || '',
