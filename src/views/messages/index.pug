@@ -17,18 +17,19 @@ block content
           .card
             .card-header.bg-darkblue.text-white
               .d-flex.justify-content-between.align-items-center
-                h2.mb-0
-                  i.bi.bi-chat-dots.me-2
-                  | Message Areas
                 .d-flex.align-items-center
-                  .input-group.input-group-sm.me-3(style='width:220px')
-                    span.input-group-text
-                      i.bi.bi-search
-                    input#areaSearch.form-control(type='text' placeholder='Search areas...')
+                  h2.mb-0.me-3
+                    i.bi.bi-chat-dots.me-2
+                    | Message Areas
                   .btn-group.btn-group-sm
                     button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
                     button.btn.btn-outline-light.view-toggle(data-view='all') All
-                  button.btn.btn-sm.btn-outline-light.ms-2(data-bs-toggle='modal' data-bs-target='#helpModal' title='Help')
+                .d-flex.align-items-center
+                  .input-group.input-group-sm.me-2(style='width:220px')
+                    span.input-group-text
+                      i.bi.bi-search
+                    input#areaSearch.form-control(type='text' placeholder='Search areas...')
+                  button.btn.btn-sm.btn-outline-light(data-bs-toggle='modal' data-bs-target='#helpModal' title='Help')
                     i.bi.bi-question-circle
             .card-body
               if groupedAreas && groupedAreas.length > 0

@@ -17,21 +17,21 @@ block content
           .card
             .card-header.bg-darkblue.text-white
               .d-flex.justify-content-between.align-items-center
-                h2.mb-0
-                  i.bi.bi-folder.me-2
-                  | File Areas
                 .d-flex.align-items-center
-                  a.btn.btn-sm.btn-outline-light.me-3(href='/files/search')
-                    i.bi.bi-search.me-1
-                    | Search
-                  .input-group.input-group-sm.me-3(style='width:220px')
-                    span.input-group-text
-                      i.bi.bi-search
-                    input#areaSearch.form-control(type='text' placeholder='Filter areas...')
+                  h2.mb-0.me-3
+                    i.bi.bi-folder.me-2
+                    | File Areas
                   .btn-group.btn-group-sm
                     button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
                     button.btn.btn-outline-light.view-toggle(data-view='all') All
-                  button.btn.btn-sm.btn-outline-light.ms-2(data-bs-toggle='modal' data-bs-target='#helpModal' title='Help')
+                .d-flex.align-items-center
+                  .input-group.input-group-sm.me-2(style='width:220px')
+                    span.input-group-text
+                      i.bi.bi-search
+                    input#areaSearch.form-control(type='text' placeholder='Filter areas...')
+                  a.btn.btn-sm.btn-outline-light.me-2(href='/files/search' title='Search Files')
+                    i.bi.bi-search
+                  button.btn.btn-sm.btn-outline-light(data-bs-toggle='modal' data-bs-target='#helpModal' title='Help')
                     i.bi.bi-question-circle
             .card-body
               if groupedAreas && groupedAreas.length > 0
