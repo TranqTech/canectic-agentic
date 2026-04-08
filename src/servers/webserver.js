@@ -22,6 +22,14 @@ import appConfig from '../config/appConfig.js';
 const node_env = process.env.NODE_ENV || "development"
 var webserver = express();
 
+// Trust proxy configuration — needed behind reverse proxies (nginx, Caddy)
+// so req.ip returns the real client IP from X-Forwarded-For headers.
+// Values: false (default), 'loopback', specific IP/CIDR, or number of hops.
+var trustProxy = appConfig.get('trust_proxy', '');
+if (trustProxy) {
+	webserver.set('trust proxy', trustProxy);
+}
+
 // view engine setup
 webserver.set('views', path.join(path.dirname("./"), 'src', 'views'));
 webserver.set('view engine', 'pug');
