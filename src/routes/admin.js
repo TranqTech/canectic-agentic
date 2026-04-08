@@ -42,7 +42,7 @@ import * as userAccounts from "../models/useraccounts.js";
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
 import * as jobs from "../queues/jobs.js";
-import { updateTimedEventSchedule, removeTimedEventSchedule } from "../queues/schedules.js";
+import { updateTimedEventSchedule, removeTimedEventSchedule, updateSegmentSchedule, removeSegmentSchedule } from "../queues/schedules.js";
 import { maintenanceQueue } from "../queues/queues.js";
 import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
@@ -4792,7 +4792,13 @@ router.get('/coordinator/:networkId', requireAdmin, async (req, res) => {
 
 router.post('/coordinator/:networkId/segments/new', urlencodedParser, requireAdmin, async (req, res) => {
 	req.body.network_id = parseInt(req.params.networkId);
-	await coordinatorSegments.create(req.body);
+	var result = await coordinatorSegments.create(req.body);
+	if (result.status && result.insertId) {
+		var seg = await coordinatorSegments.getById(result.insertId);
+		if (seg && seg.schedule && seg.schedule !== 'manual' && seg.active) {
+			await updateSegmentSchedule(seg.id, seg.schedule, true);
+		}
+	}
 	res.redirect('/admin/coordinator/' + req.params.networkId);
 });
 
@@ -4800,12 +4806,17 @@ router.post('/coordinator/segments/:id/update', urlencodedParser, requireAdmin, 
 	var id = parseInt(req.params.id);
 	var seg = await coordinatorSegments.getById(id);
 	await coordinatorSegments.update(id, req.body);
+	var updated = await coordinatorSegments.getById(id);
+	if (updated) {
+		await updateSegmentSchedule(id, updated.schedule, updated.active);
+	}
 	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
 });
 
 router.post('/coordinator/segments/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
 	var id = parseInt(req.params.id);
 	var seg = await coordinatorSegments.getById(id);
+	await removeSegmentSchedule(id);
 	await coordinatorSegments.remove(id);
 	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
 });
@@ -4879,6 +4890,18 @@ router.get('/coordinator/segment/:segmentId/stub/download', requireAdmin, async 
 	res.setHeader('Content-Type', 'application/octet-stream');
 	res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
 	res.send(stub);
+});
+
+// Manual generate + distribute
+router.post('/coordinator/segment/:segmentId/generate', urlencodedParser, requireAdmin, async (req, res) => {
+	var segmentId = parseInt(req.params.segmentId);
+	var seg = await coordinatorSegments.getById(segmentId);
+	await maintenanceQueue.add('generate-stub', { segmentId: segmentId }, {
+		jobId: 'generate-stub-manual-' + segmentId + '-' + Date.now(),
+		removeOnComplete: true, removeOnFail: true
+	});
+	await flash.setOne(req, 'info', 'Stub generation queued for ' + (seg ? seg.name : 'segment'));
+	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
 });
 
 // -------------------------------------------------------

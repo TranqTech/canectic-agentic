@@ -104,7 +104,7 @@
 - Newscan default on message groups and areas: new column (default false) on groups and areas, admin UI on all group/area create/edit forms and echolist subscribe modal. Groups inherit to new areas.
 - Combined area browser for messages and files: single page grouped by group with Subscribed/All toggle, instant search, AJAX subscribe/unsubscribe buttons, and help modal. Replaces two-page group list + area list navigation.
 - Fix: Message body_html with unclosed tags (del/s) no longer cascades strikethrough to subsequent messages (CSS containment on .msg-card)
-- Network Coordinator Phase 1: managed nodes table for FTN network segments. Admin CRUD at /admin/coordinator/:networkId/nodes with add/edit/remove, flag editor, status indicators. Stub preview and download in standard FTN nodelist format. "Managed Nodes" button on FTN network view pages.
+- Network Coordinator: segment definitions with role (Hub/NC/RC/ZC), managed nodes, and stub generation. Segments define what you coordinate with upstream address, distribution method (filebox/BSO/manual), and cron schedule. Admin at /admin/coordinator/:networkId with segment overview and per-segment node management. Stub generation in standard FTN nodelist format. Distribution via peer filebox, BSO flow file delivery, or manual download. Scheduled and on-demand generation via "Send" button.
 
 ## v0.9.5a (2026-04-04)
 

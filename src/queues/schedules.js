@@ -26,6 +26,7 @@
 import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as timedEvents from '../models/timedEvents.js';
+import * as coordinatorSegments from '../models/coordinatorSegments.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from '../config/appConfig.js';
 
@@ -282,6 +283,29 @@ export async function registerSchedules() {
 			}
 		}
 
+		// -----------------------------------------------------------------
+		// Coordinator: scheduled stub generation/distribution
+		// -----------------------------------------------------------------
+		var segments = await coordinatorSegments.getAll();
+		if (segments && segments.length > 0) {
+			for (var seg of segments) {
+				if (!seg.active || !seg.schedule || seg.schedule === 'manual') continue;
+				try {
+					await maintenanceQueue.upsertJobScheduler(
+						`generate-stub:${seg.id}`, {
+							pattern: seg.schedule,
+						}, {
+							name: 'generate-stub',
+							data: { segmentId: seg.id },
+						}
+					);
+					scheduleCount++;
+				} catch (segErr) {
+					alogger.writeAlog(3, `Failed to register stub schedule for "${seg.name}": ${segErr.message}`, "yellow");
+				}
+			}
+		}
+
 		alogger.writeAlog(2, `  Registered ${scheduleCount} job schedule(s)`, "cyan");
 
 	} catch (err) {
@@ -416,4 +440,25 @@ export async function updateTimedEventSchedule(eventId, cronPattern, active) {
  */
 export async function removeTimedEventSchedule(eventId) {
 	try { await maintenanceQueue.removeJobScheduler(`timed-event:${eventId}`); } catch (_) {}
+}
+
+/**
+ * Update the schedule for a coordinator segment.
+ */
+export async function updateSegmentSchedule(segmentId, cronPattern, active) {
+	var key = `generate-stub:${segmentId}`;
+	if (!active || !cronPattern || cronPattern === 'manual') {
+		try { await maintenanceQueue.removeJobScheduler(key); } catch (_) {}
+		return;
+	}
+	await maintenanceQueue.upsertJobScheduler(key, {
+		pattern: cronPattern,
+	}, {
+		name: 'generate-stub',
+		data: { segmentId: parseInt(segmentId) },
+	});
+}
+
+export async function removeSegmentSchedule(segmentId) {
+	try { await maintenanceQueue.removeJobScheduler(`generate-stub:${segmentId}`); } catch (_) {}
 }

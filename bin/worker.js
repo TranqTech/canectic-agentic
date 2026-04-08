@@ -396,6 +396,12 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'generate-stub': {
+				var stubDist = await import("../src/maintenance/stubDistribution.js");
+				await stubDist.generateAndDistribute(job.data.segmentId);
+				break;
+			}
+
 			case 'reconcile-echolists': {
 				var networkEcholist = await import("../src/models/networkEcholist.js");
 				var fileEcholist = await import("../src/models/fileEcholist.js");

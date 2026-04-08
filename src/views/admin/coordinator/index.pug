@@ -39,6 +39,9 @@ block content
                     i.bi.bi-eye
                   a.btn.btn-sm.btn-outline-success.me-1(href='/admin/coordinator/segment/' + seg.id + '/stub/download' title='Download stub')
                     i.bi.bi-download
+                  form.d-inline(method='POST' action='/admin/coordinator/segment/' + seg.id + '/generate')
+                    button.btn.btn-sm.btn-warning.me-1(type='submit' title='Generate and distribute now')
+                      i.bi.bi-send
                   button.btn.btn-sm.btn-outline-warning.me-1.edit-seg-btn(
                     data-bs-toggle='modal' data-bs-target='#editSegmentModal'
                     data-id=seg.id
