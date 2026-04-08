@@ -21,6 +21,7 @@ block content
                   tr
                     th Code
                     th Description
+                    th Category
                     th Argument
                     th Order
                     th Status
@@ -31,6 +32,9 @@ block content
                       td
                         code.fw-bold= flag.code
                       td= flag.description
+                      td
+                        - var catLabel = categoryLabels[flag.category] || flag.category
+                        span.badge(class=flag.category === 'internet' ? 'bg-primary' : flag.category === 'mail' ? 'bg-success' : flag.category === 'modem' ? 'bg-warning text-dark' : 'bg-secondary')= catLabel
                       td
                         if flag.has_argument
                           span.badge.bg-info= flag.argument_hint || 'value'
@@ -46,6 +50,7 @@ block content
                           data-id=flag.id
                           data-code=flag.code
                           data-description=flag.description
+                          data-category=flag.category || 'custom'
                           data-hasargument=(flag.has_argument ? 'true' : 'false')
                           data-argumenthint=flag.argument_hint || ''
                           data-sortorder=flag.sort_order
@@ -67,9 +72,17 @@ block content
             button.btn-close(type='button' data-bs-dismiss='modal')
           form(method='POST' action='/admin/nodelist-flags/new')
             .modal-body
-              .mb-3
-                label.form-label Code
-                input.form-control(name='code' required placeholder='e.g. IBN' style='text-transform: uppercase')
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Code
+                    input.form-control(name='code' required placeholder='e.g. IBN' style='text-transform: uppercase')
+                .col-6
+                  .mb-3
+                    label.form-label Category
+                    select.form-select(name='category')
+                      each cat in validCategories
+                        option(value=cat)= categoryLabels[cat] || cat
               .mb-3
                 label.form-label Description
                 input.form-control(name='description' placeholder='Binkp -- supports binkp protocol')
@@ -102,9 +115,17 @@ block content
             button.btn-close(type='button' data-bs-dismiss='modal')
           form#editFlagForm(method='POST')
             .modal-body
-              .mb-3
-                label.form-label Code
-                input.form-control(name='code' id='efCode' required style='text-transform: uppercase')
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Code
+                    input.form-control(name='code' id='efCode' required style='text-transform: uppercase')
+                .col-6
+                  .mb-3
+                    label.form-label Category
+                    select.form-select(name='category' id='efCategory')
+                      each cat in validCategories
+                        option(value=cat)= categoryLabels[cat] || cat
               .mb-3
                 label.form-label Description
                 input.form-control(name='description' id='efDescription')
@@ -137,6 +158,7 @@ block content
         document.getElementById('editFlagForm').action = '/admin/nodelist-flags/' + btn.dataset.id + '/update';
         document.getElementById('efCode').value = btn.dataset.code || '';
         document.getElementById('efDescription').value = btn.dataset.description || '';
+        document.getElementById('efCategory').value = btn.dataset.category || 'custom';
         document.getElementById('efHasArg').checked = btn.dataset.hasargument === 'true';
         document.getElementById('efArgHint').value = btn.dataset.argumenthint || '';
         document.getElementById('efSortOrder').value = btn.dataset.sortorder || '0';

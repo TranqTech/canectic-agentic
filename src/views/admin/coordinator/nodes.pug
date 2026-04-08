@@ -113,28 +113,31 @@ block content
             else
               p.text-muted No managed nodes. Add nodes to build your network segment.
 
-    //- Reusable flag checkbox mixin
+    //- Reusable flag checkbox mixin grouped by category
     mixin flagCheckboxes(prefix, cssClass)
-      .mb-3
-        each fd in flagDefs
-          .d-flex.align-items-center.mb-2
-            .form-check
-              input.form-check-input(type='checkbox' class=cssClass id=prefix + 'Flag_' + fd.code value=fd.code data-bs-toggle='tooltip' data-bs-placement='top' title=fd.description data-hasarg=fd.has_argument ? 'true' : 'false')
-              label.form-check-label.me-2(for=prefix + 'Flag_' + fd.code)
-                strong= fd.code
-                if fd.description
-                  small.text-muted.ms-2= fd.description
-            if fd.has_argument
-              input.form-control.form-control-sm.flag-arg-input(
-                type='text'
-                id=prefix + 'FlagArg_' + fd.code
-                placeholder=fd.argument_hint || 'value'
-                style='width: 150px; display: none;'
-                data-flagcode=fd.code
-              )
-        hr.mt-2
-        input.form-control(name='flags' id=prefix + 'FlagsField' placeholder='Additional flags (comma-separated)')
-        .form-text Checked flags above are combined with any additional flags entered here
+      each cat in validCategories
+        - var catFlags = flagsGrouped[cat] || []
+        if catFlags.length > 0
+          h6.text-muted.mb-2.mt-3= categoryLabels[cat] || cat
+          each fd in catFlags
+            .d-flex.align-items-center.mb-2
+              .form-check
+                input.form-check-input(type='checkbox' class=cssClass id=prefix + 'Flag_' + fd.code value=fd.code data-bs-toggle='tooltip' data-bs-placement='top' title=fd.description data-hasarg=fd.has_argument ? 'true' : 'false')
+                label.form-check-label.me-2(for=prefix + 'Flag_' + fd.code)
+                  strong= fd.code
+                  if fd.description
+                    small.text-muted.ms-2= fd.description
+              if fd.has_argument
+                input.form-control.form-control-sm.flag-arg-input(
+                  type='text'
+                  id=prefix + 'FlagArg_' + fd.code
+                  placeholder=fd.argument_hint || 'value'
+                  style='width: 150px; display: none;'
+                  data-flagcode=fd.code
+                )
+      hr.mt-3
+      input.form-control(name='flags' id=prefix + 'FlagsField' placeholder='Additional custom flags (comma-separated)')
+      .form-text Any flags not listed above can be added here
 
     //- Add Node Modal
     .modal.fade#addNodeModal(tabindex='-1')
@@ -383,7 +386,9 @@ block content
 
   script.
     //- Flag definitions from DB (for JS logic)
-    var flagDefs = !{JSON.stringify(flagDefs.map(function(fd) { return { code: fd.code, has_argument: fd.has_argument }; }))};
+    //- Flatten grouped flags for JS logic
+    - var allFlagDefs = []; validCategories.forEach(function(c) { (flagsGrouped[c] || []).forEach(function(fd) { allFlagDefs.push(fd); }); });
+    var flagDefs = !{JSON.stringify(allFlagDefs.map(function(fd) { return { code: fd.code, has_argument: fd.has_argument }; }))};
     var knownCodes = flagDefs.map(function(fd) { return fd.code; });
 
     //- Show/hide argument input when flag checkbox toggled

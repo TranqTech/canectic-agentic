@@ -13,16 +13,36 @@ import * as path from 'path';
 // Queries
 // ---------------------------------------------------------------------------
 
+var VALID_CATEGORIES = ['internet', 'mail', 'modem', 'custom'];
+
+var CATEGORY_LABELS = {
+	'internet': 'Internet',
+	'mail':     'Mail & Requests',
+	'modem':    'Modem & ISDN',
+	'custom':   'Custom'
+};
+
 async function getAll() {
 	return await postgres.query(
-		'SELECT * FROM nodelist_flag_definitions ORDER BY sort_order ASC, code ASC'
+		'SELECT * FROM nodelist_flag_definitions ORDER BY category ASC, sort_order ASC, code ASC'
 	) || [];
 }
 
 async function getActive() {
 	return await postgres.query(
-		'SELECT * FROM nodelist_flag_definitions WHERE active = true ORDER BY sort_order ASC, code ASC'
+		'SELECT * FROM nodelist_flag_definitions WHERE active = true ORDER BY category ASC, sort_order ASC, code ASC'
 	) || [];
+}
+
+async function getActiveGrouped() {
+	var all = await getActive();
+	var grouped = {};
+	for (var cat of VALID_CATEGORIES) grouped[cat] = [];
+	for (var flag of all) {
+		var cat = VALID_CATEGORIES.includes(flag.category) ? flag.category : 'custom';
+		grouped[cat].push(flag);
+	}
+	return grouped;
 }
 
 async function getById(id) {
@@ -58,9 +78,13 @@ async function create(formObj) {
 		return returnObj;
 	}
 
+	var category = (formObj.category || 'custom').trim().toLowerCase();
+	if (!VALID_CATEGORIES.includes(category)) category = 'custom';
+
 	var dbObj = {
 		code:           code,
 		description:    (formObj.description || '').trim(),
+		category:       category,
 		has_argument:   formObj.has_argument === 'true' || formObj.has_argument === true,
 		argument_hint:  (formObj.argument_hint || '').trim() || null,
 		sort_order:     parseInt(formObj.sort_order) || 0,
@@ -98,6 +122,10 @@ async function update(id, formObj) {
 		updateObj.code = code;
 	}
 	if (formObj.description !== undefined) updateObj.description = formObj.description.trim();
+	if (formObj.category !== undefined) {
+		var cat = formObj.category.trim().toLowerCase();
+		updateObj.category = VALID_CATEGORIES.includes(cat) ? cat : 'custom';
+	}
 	if (formObj.has_argument !== undefined) updateObj.has_argument = formObj.has_argument === 'true' || formObj.has_argument === true;
 	if (formObj.argument_hint !== undefined) updateObj.argument_hint = formObj.argument_hint.trim() || null;
 	if (formObj.sort_order !== undefined) updateObj.sort_order = parseInt(formObj.sort_order) || 0;
@@ -133,6 +161,7 @@ async function seedDefaults() {
 			await postgres.insertObject({
 				code:          flag.code,
 				description:   flag.description || '',
+				category:      flag.category || 'custom',
 				has_argument:  flag.has_argument || false,
 				argument_hint: flag.argument_hint || null,
 				sort_order:    flag.sort_order || 0,
@@ -147,8 +176,11 @@ async function seedDefaults() {
 }
 
 export {
+	VALID_CATEGORIES,
+	CATEGORY_LABELS,
 	getAll,
 	getActive,
+	getActiveGrouped,
 	getById,
 	getByCode,
 	create,

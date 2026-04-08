@@ -4921,14 +4921,16 @@ router.get('/coordinator/segment/:segmentId/nodes', requireAdmin, async (req, re
 		hubNodes = nodes.filter(function(n) { return n.keyword === 'Hub' && n.active; });
 	}
 
-	var flagDefs = await nodelistFlags.getActive();
+	var flagsGrouped = await nodelistFlags.getActiveGrouped();
 
 	res.render('admin/coordinator/nodes', {
 		sufficientAccess, title: 'Managed Nodes', activelink: 'coordinator',
 		activenav: 'networks', currentuser, network, segment, nodes, stats,
 		validKeywords: filteredKeywords,
 		allKeywords: managedNodes.VALID_KEYWORDS,
-		flagDefs: flagDefs,
+		flagsGrouped: flagsGrouped,
+		categoryLabels: nodelistFlags.CATEGORY_LABELS,
+		validCategories: nodelistFlags.VALID_CATEGORIES,
 		hubNodes: hubNodes
 	});
 });
@@ -5041,7 +5043,9 @@ router.get('/nodelist-flags', requireAdmin, async (req, res) => {
 	var flags = await nodelistFlags.getAll();
 	res.render('admin/nodelistFlags/index', {
 		sufficientAccess, title: 'Nodelist Flags', activelink: 'nodelist-flags',
-		activenav: 'networks', currentuser, flags
+		activenav: 'networks', currentuser, flags,
+		validCategories: nodelistFlags.VALID_CATEGORIES,
+		categoryLabels: nodelistFlags.CATEGORY_LABELS
 	});
 });
 
