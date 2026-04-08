@@ -10,227 +10,167 @@ Primary use case: Network Coordinator for FidoNet Net 134.
 
 ---
 
-## 1. Coordinator Role Model
+## Current State (Implemented)
 
-### Per-network coordinator config
+Phases 1-4 are built with a flat segment model. This works for a single NC role but doesn't handle multi-role coordination or the hierarchical nature of FTN nodelists. **The nested segment redesign below supersedes the flat model.**
 
-Each network can have one coordinator role configured (stored in `message_networks.config` JSONB):
-
-```json
-{
-  "coordinator_role": "NC",
-  "coordinator_net": 134,
-  "coordinator_zone": 1,
-  "coordinator_region": null,
-  "upstream_address": "1:1/21",
-  "upstream_connection_id": null,
-  "stub_distribution": "filebox",
-  "nodelist_area": "NODELIST",
-  "stub_filename_pattern": "NET134",
-  "nodelist_schedule": "weekly_friday"
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `coordinator_role` | `Hub`, `NC`, `RC`, or `ZC` |
-| `coordinator_net` | The net number being coordinated |
-| `coordinator_zone` | Zone number |
-| `coordinator_region` | Region number (RC/ZC only) |
-| `upstream_address` | FTN address of the next coordinator up |
-| `upstream_connection_id` | Peer connection for stub delivery |
-| `stub_distribution` | How to send stubs: `filebox`, `tic`, `netmail_attach` |
-| `nodelist_area` | File area shortcode for nodelist/stub distribution |
-| `stub_filename_pattern` | Base name for generated stubs (e.g., `NET134`) |
-| `nodelist_schedule` | When to generate: `weekly_friday`, `daily`, `manual` |
+What exists:
+- `coordinator_segments` table -- flat, one level per network
+- `managed_nodes` table -- nodes with segment_id
+- Stub generation in standard FTN format with day numbering
+- Distribution via filebox, BSO flow files, or manual download
+- Scheduled generation via cron patterns
+- Nodelist compilation from segments + incoming stubs
+- Admin UI: segment overview, node CRUD, preview/download/send
 
 ---
 
-## 2. Managed Nodes Table
+## REDESIGN: Nested Segment Model
 
-### `managed_nodes`
+### Problem
 
-Nodes in the coordinator's segment. Edited directly by the sysop, independent of the imported `ftn_nodelist` table.
+A sysop often holds multiple coordinator roles simultaneously:
+- NC for Net 134 (manages individual nodes)
+- Hub 120 within Net 134 (subset of nodes routing through them)
+- RC for Region 12 (manages nets, receives stubs from NCs)
+
+The flat model can't represent:
+- Parent/child relationships between segments
+- Which entries are internally managed vs received from external sources
+- The hierarchical compilation order (Zone > Region > Net > Hub > Node)
+
+### Nested Segment Hierarchy
+
+```
+Network: FidoNet
+  └── Zone 1 (ZC role) ← manages regions
+       ├── Region 12 (RC role) ← manages nets
+       │    ├── Net 134 (NC role) ← manages nodes [INTERNAL]
+       │    │    ├── Hub 120 (Hub role) ← manages hub downlinks [INTERNAL]
+       │    │    │    ├── Node 121 [INTERNAL]
+       │    │    │    └── Node 122 [INTERNAL]
+       │    │    ├── Node 101 [INTERNAL]
+       │    │    └── Node 102 [INTERNAL]
+       │    ├── Net 135 [EXTERNAL - received stub from NC]
+       │    └── Net 140 [EXTERNAL - received stub from NC]
+       ├── Region 13 [EXTERNAL - received stub from RC]
+       └── Region 18 [EXTERNAL - received stub from RC]
+```
+
+### Schema Changes
+
+**`coordinator_segments` -- add hierarchy and source tracking:**
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | SERIAL | Primary key |
-| `network_id` | INTEGER | FK to message_networks |
-| `zone` | INTEGER | FTN zone |
-| `region` | INTEGER | Region number (0 if N/A) |
-| `net` | INTEGER | Net number |
-| `node` | INTEGER | Node number |
-| `keyword` | VARCHAR(16) | `Hub`, `Host`, `Pvt`, `Hold`, `Down`, or empty (normal) |
-| `hub_node` | INTEGER | Hub routing node (0 = direct) |
-| `system_name` | VARCHAR(255) | System name |
-| `location` | VARCHAR(255) | City, Province/State |
-| `sysop_name` | VARCHAR(255) | Sysop name |
-| `phone` | VARCHAR(60) | Phone number or `-Unpublished-` |
-| `baud` | INTEGER | Baud rate (legacy, typically 300) |
-| `hostname` | VARCHAR(255) | INA hostname or IP |
-| `binkp_port` | INTEGER | IBN port (default 24554) |
-| `telnet_port` | INTEGER | ITN port |
-| `flags` | JSONB | Array of flag strings (`CM`, `MO`, `IBN`, `INA:host`, etc.) |
-| `notes` | TEXT | Sysop notes (not published) |
-| `active` | BOOLEAN | Include in generated stub |
-| `joined_at` | TIMESTAMPTZ | When node joined the segment |
-| `updated_at` | TIMESTAMPTZ | Last edit |
+| `parent_segment_id` | INTEGER | FK to parent segment (null = top-level for this network) |
+| `source` | VARCHAR(16) | `internal` (we manage it) or `external` (received stub) |
+| `stub_file_area` | VARCHAR(255) | File area where this external segment's stubs arrive |
+| `depth` | INTEGER | 0 = top-level, 1 = child, etc. (denormalized for query convenience) |
 
-### Relationship to `ftn_nodelist`
+Existing columns remain. `role` determines what kind of entries this segment contains:
+- **ZC**: children are Region segments
+- **RC**: children are Net (Host) segments  
+- **NC**: children are Hub segments (optional), leaf nodes are individual systems
+- **Hub**: leaf nodes are systems routing through this hub
 
-- `managed_nodes` is the source of truth for YOUR segment
-- `ftn_nodelist` is the imported full nodelist (read-only from this perspective)
-- When generating a full nodelist (ZC role), you merge your `managed_nodes` with imported stubs from hubs
-- No automatic sync between the two -- they serve different purposes
+**`managed_nodes` -- unchanged.** Nodes still belong to a segment via `segment_id`. The hierarchy is in the segments, not the nodes.
 
----
+### Internal vs External Segments
 
-## 3. Stub / Segment Generation
+- **Internal**: sysop directly manages the nodes/entries. CRUD enabled. Stub is generated from managed_nodes.
+- **External**: represents a downstream coordinator's segment. Read-only in terms of node editing. Content comes from received stub files. Sysop can see the nodes but doesn't edit them directly.
 
-### Output format
+When compiling, internal segments generate from managed_nodes; external segments pull from their latest received stub file.
 
-Standard FTN nodelist segment format:
+### Compilation Walk
 
 ```
-; NET134 segment -- generated by Canectic BBS
-; Day 097, Fri 07 Apr 2026
-;
-Host,134,Net_134_Hub,Edmonton_AB,Kostie_Muirhead,-Unpublished-,300,IBN,INA:bbs.example.com
-,101,System_One,Calgary_AB,John_Doe,-Unpublished-,300,CM,IBN,INA:system1.example.com
-Hub,120,Hub_System,Vancouver_BC,Jane_Smith,-Unpublished-,300,IBN,INA:hub120.example.com
-,121,Under_Hub,Victoria_BC,Bob_Jones,-Unpublished-,300,IBN,INA:node121.example.com
-Down,122,Offline_System,Nanaimo_BC,Dave_Brown,-Unpublished-,300,
+compileNodelist(topSegmentId):
+  1. Emit header comments
+  2. For this segment:
+     a. If INTERNAL: generate from managed_nodes
+     b. If EXTERNAL: read latest stub from stub_file_area
+  3. For each child segment (ordered by role priority, then net/region number):
+     a. Recurse: compileNodelist(childSegmentId)
+  4. Return accumulated lines
 ```
 
-### Generation rules
+This naturally produces the correct FTN ordering: Zone line, then Regions, then Nets within each region, then Hubs and nodes within each net.
 
-1. Query `managed_nodes` for the network, ordered by: keyword priority (Host first, then Hubs with their nodes, then remaining nodes)
-2. Format each node as a comma-separated line per the FTN nodelist spec
-3. Underscores replace spaces in system_name, location, sysop_name
-4. Flags are appended after baud rate
-5. INA/IBN/ITN flags are generated from hostname/port fields if not already in flags array
-6. Header comment with segment name, day number, and date
+### Admin UI Redesign
 
-### Stub files
+**Coordinator overview (`/admin/coordinator/:networkId`):**
 
-- Named: `{pattern}.{day}` (e.g., `NET134.097`)
-- Optionally: diff against previous version for nodediff distribution
+Tree view instead of flat card list. Each segment shows:
+- Role badge, address (zone:net or zone:region), name
+- Source badge (Internal/External)
+- Node/child count
+- Expand to see children
+- Action buttons: Add Child, Edit, Nodes, Preview, Send
+
+**Adding a child segment:**
+- Context-aware: if parent is RC, new child defaults to NC role with Host keyword
+- If parent is NC, new child defaults to Hub role
+- If parent is ZC, new child defaults to RC role
+- Source selector: Internal (I manage this) or External (I receive stubs for this)
+
+**External segment management:**
+- Configure which file area receives stubs for this segment
+- View the latest received stub content (read-only)
+- Import: parse a received stub file and display the nodes it contains
+
+**Node editing (internal segments only):**
+- Auto-populate zone/net/region from the segment context
+- Keyword limited to what makes sense for the segment role
+- Hub routing dropdown lists existing Hub children of the parent NC segment
+- Flag checkboxes for common flags + text field for custom
+- Progressive disclosure: address > system info > connectivity > flags
+
+### Migration Path
+
+The existing flat data can migrate to nested:
+1. Each existing segment becomes a top-level internal segment
+2. Existing managed_nodes retain their segment_id
+3. No data loss -- just adding parent_segment_id (nullable) and source columns
 
 ---
 
-## 4. Nodelist Compilation (ZC/Independent Network)
-
-For zone coordinators or independent network operators who compile the full nodelist:
-
-1. Start with the Zone/Region header lines
-2. Insert each coordinator's stub in net/region order
-3. Your own managed segment goes in at its position
-4. Imported stubs from downstream hubs/RCs are merged
-5. Output as a complete nodelist file
-
-### Stub intake
-
-Downstream coordinators send their stubs. These could arrive via:
-- TIC file echo area (automated)
-- Filebox/inbound wildcard (file drop)
-- Direct file upload in admin UI
-
-Stubs are stored and versioned so compilation can use the latest from each source.
-
----
-
-## 5. Distribution
+## Distribution (Implemented)
 
 ### Stub distribution (to upstream)
 
-When your stub changes, send it to your upstream coordinator:
+When a stub changes, send it to the upstream coordinator:
 
 | Method | How |
 |--------|-----|
 | Filebox | Place in upstream peer's `outbox_dir` -- sent on next session |
-| TIC | Stage in a file area for TIC distribution |
-| Netmail attach | Send as file-attach netmail to upstream address |
+| BSO | Stage in zone-aware outbound dir with `.flo` entry + BSO scan trigger |
+| Manual | Generate for download only |
 
-### Nodelist distribution (to downstream)
+### Scheduled generation
 
-For ZC/network operators distributing the compiled nodelist:
-
-- Place in a file area configured for TIC distribution
-- Subscribers receive it automatically
-- FREQ: make available via magic alias `NODELIST`
+Cron pattern on each segment. BullMQ repeatable jobs registered at gateway startup. "Send" button for on-demand generation.
 
 ---
 
-## 6. Admin UI
+## Network Config Fields (on message_networks.config JSONB)
 
-### Network Management section
-
-New admin section (or subsection of Networking) for coordinator tools:
-
-**Managed Nodes page (`/admin/coordinator/:networkId/nodes`)**
-- DataTable of all nodes in your segment
-- Add/edit/remove nodes via modals
-- Inline status toggles (Active, Down, Hold)
-- Flag editor (checkbox grid for common flags, text input for custom)
-- Drag-to-reorder for hub grouping
-
-**Stub Generator page (`/admin/coordinator/:networkId/stub`)**
-- Preview the generated stub
-- Download as file
-- Send to upstream (button triggers distribution)
-- History of previous stubs with day numbers
-
-**Network Config (`/admin/coordinator/:networkId/config`)**
-- Coordinator role and network segment settings
-- Upstream connection selection
-- Distribution method
-- Schedule (weekly/daily/manual)
+| Field | Description |
+|-------|-------------|
+| `nodelist_area_shortcode` | File area for nodelist auto-import |
+| `echolist_area` | File area for echolist files |
+| `filebone_area` | File area for filebone files |
+| `infopack_area` | File area for network infopack ZIPs |
+| `stub_intake_area` | File area where downstream stubs arrive (for compilation) |
 
 ---
 
-## 7. Scheduled Operations
-
-| Job | Schedule | Description |
-|-----|----------|-------------|
-| `generate-stub` | Weekly Friday or daily | Generate stub from managed_nodes, compare with previous |
-| `distribute-stub` | After generation | Send to upstream if changed |
-| `compile-nodelist` | After all stubs received | ZC only: merge all stubs into full nodelist |
-| `distribute-nodelist` | After compilation | Stage in file area for TIC/FREQ |
-
----
-
-## 8. Implementation Phases
-
-### Phase 1: Node Management
-- `managed_nodes` table and model
-- Admin CRUD with flag editor
-- Basic segment preview
-
-### Phase 2: Stub Generation
-- Standard format output from managed_nodes
-- Day numbering
-- Download and preview
-- Stub file history/versioning
-
-### Phase 3: Distribution
-- Upstream stub delivery (filebox, TIC, netmail attach)
-- Distribution method config on network
-- Manual send button
-- Automated schedule
-
-### Phase 4: Compilation (ZC/Independent)
-- Stub intake from downstream
-- Merge/compile into full nodelist
-- Nodediff generation
-- Full nodelist distribution via TIC
-
----
-
-## 9. UX Improvements (Planned)
+## UX Improvements (Planned)
 
 ### Hierarchy-aware node editing
 
-The FTN nodelist is hierarchical: Zone > Region > Net (Host) > Hub > Node. The node editor should reflect this based on the segment's role:
+The node editor adapts based on the segment's role:
 
 - **NC role**: auto-fills zone/net from segment, only asks for node number. Keyword choices limited to Hub, normal, Down, Hold, Pvt. Hub routing dropdown lists existing Hub nodes in the segment.
 - **RC role**: primary entries are `Host` lines (net coordinators). Adding a Host entry represents adding a net to the region. Individual nodes under each net are secondary.
@@ -251,7 +191,7 @@ The FTN nodelist is hierarchical: Zone > Region > Net (Host) > Hub > Node. The n
 
 ---
 
-## 10. Future Considerations
+## Future Considerations
 
 - **Nodediff generation**: produce diffs between nodelist versions for bandwidth-efficient distribution
 - **Application processing**: nodes apply to join via netmail or web form, coordinator approves
