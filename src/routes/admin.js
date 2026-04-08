@@ -4767,26 +4767,72 @@ router.post('/bad-echomail/:areatag/purge', urlencodedParser, requireAdmin, asyn
 // Network Coordinator — Managed Nodes
 // -------------------------------------------------------
 
+// Helper: load the content of an external segment's received stub file
+async function _loadExternalStubContent(segment) {
+	var stubFilename = (segment.stub_filename || '').toUpperCase();
+	if (!stubFilename) return null;
+
+	var areaShortcode = segment.stub_file_area || null;
+	if (!areaShortcode) {
+		// Try network-level fallback
+		try {
+			var net = await msgNetworks.getNetworkById(segment.network_id);
+			if (net && net.config) {
+				var config = typeof net.config === 'string' ? JSON.parse(net.config) : net.config;
+				areaShortcode = config.stub_intake_area || null;
+			}
+		} catch (_) {}
+	}
+	if (!areaShortcode) return null;
+
+	var area = await fileAreas.getAreaByShortcode(areaShortcode);
+	if (!area) return null;
+	var group = area.group_shortcode ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
+	var areaPath = fileAreas.resolveAreaPath(group, area);
+
+	var entries = await fileEntries.getEntriesForArea(area.id, { limit: 50, orderBy: 'upload_date DESC' });
+	if (!entries) return null;
+
+	for (var entry of entries) {
+		var fname = (entry.filename || '').toUpperCase();
+		if (fname.startsWith(stubFilename + '.') && /\.\d{3}$/.test(fname)) {
+			var filePath = path.join(areaPath, entry.disk_path || entry.filename);
+			try {
+				return fs.readFileSync(filePath, 'utf8');
+			} catch (_) {}
+		}
+	}
+	return null;
+}
+
 // Segments overview for a network
 router.get('/coordinator/:networkId', requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var networkId = parseInt(req.params.networkId);
 	var network = await msgNetworks.getNetworkById(networkId);
-	var segments = await coordinatorSegments.getByNetwork(networkId);
-
-	// Attach node counts per segment
-	for (var seg of segments) {
-		seg._stats = await managedNodes.getStats(null, seg.id);
-	}
-
 	var connections = await peerConnections.getConnectionsByNetwork(networkId);
+	var roles = await coordinatorSegments.getRolesForNetwork(networkId);
+	var tree = await coordinatorSegments.getTree(networkId);
+	var allFileAreas = await fileAreas.getAllAreas();
+
+	// Attach node stats to tree nodes (recursive)
+	async function attachStats(nodes) {
+		for (var seg of nodes) {
+			if (seg.source !== 'external') seg._stats = await managedNodes.getStats(null, seg.id);
+			if (seg.children && seg.children.length > 0) await attachStats(seg.children);
+		}
+	}
+	await attachStats(tree);
+
 	res.render('admin/coordinator/index', {
 		sufficientAccess, title: 'Network Coordinator', activelink: 'coordinator',
-		activenav: 'networks', currentuser, network, segments, connections,
-		validRoles: coordinatorSegments.VALID_ROLES,
+		activenav: 'networks', currentuser, network, connections,
+		tree, validRoles: roles,
 		roleLabels: coordinatorSegments.ROLE_LABELS,
-		distributionMethods: coordinatorSegments.DISTRIBUTION_METHODS
+		validSources: coordinatorSegments.VALID_SOURCES,
+		distributionMethods: coordinatorSegments.DISTRIBUTION_METHODS,
+		allFileAreas: allFileAreas || []
 	});
 });
 
@@ -4816,8 +4862,12 @@ router.post('/coordinator/segments/:id/update', urlencodedParser, requireAdmin, 
 router.post('/coordinator/segments/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
 	var id = parseInt(req.params.id);
 	var seg = await coordinatorSegments.getById(id);
-	await removeSegmentSchedule(id);
-	await coordinatorSegments.remove(id);
+	var result = await coordinatorSegments.remove(id);
+	if (result.status) {
+		await removeSegmentSchedule(id);
+	} else if (result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	}
 	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
 });
 
@@ -4828,14 +4878,55 @@ router.get('/coordinator/segment/:segmentId/nodes', requireAdmin, async (req, re
 	var segmentId = parseInt(req.params.segmentId);
 	var segment = await coordinatorSegments.getById(segmentId);
 	if (!segment) return res.redirect('/admin/networks');
+	if (segment.source === 'external') return res.redirect('/admin/coordinator/' + segment.network_id);
 	var network = await msgNetworks.getNetworkById(segment.network_id);
 	var nodes = await managedNodes.getBySegment(segmentId);
 	var stats = await managedNodes.getStats(null, segmentId);
+
+	// Role-aware keyword filtering
+	var role = segment.role || 'NC';
+	var roleKeywords = { '': true };  // always allow normal
+	if (role === 'NC') {
+		roleKeywords['Hub'] = true;
+		roleKeywords['Pvt'] = true;
+		roleKeywords['Hold'] = true;
+		roleKeywords['Down'] = true;
+	} else if (role === 'RC') {
+		roleKeywords['Host'] = true;
+		roleKeywords['Hub'] = true;
+		roleKeywords['Pvt'] = true;
+		roleKeywords['Hold'] = true;
+		roleKeywords['Down'] = true;
+	} else if (role === 'ZC') {
+		roleKeywords['Region'] = true;
+		roleKeywords['Host'] = true;
+		roleKeywords['Hub'] = true;
+		roleKeywords['Pvt'] = true;
+		roleKeywords['Hold'] = true;
+		roleKeywords['Down'] = true;
+	} else if (role === 'Hub') {
+		roleKeywords['Pvt'] = true;
+		roleKeywords['Hold'] = true;
+		roleKeywords['Down'] = true;
+	}
+	var filteredKeywords = managedNodes.VALID_KEYWORDS.filter(function(kw) { return roleKeywords[kw]; });
+
+	// Hub nodes list for hub routing dropdown (hubs within the parent NC segment)
+	var hubNodes = [];
+	if (segment.parent_segment_id) {
+		var siblings = await managedNodes.getBySegment(segment.parent_segment_id);
+		hubNodes = (siblings || []).filter(function(n) { return n.keyword === 'Hub' && n.active; });
+	} else {
+		hubNodes = nodes.filter(function(n) { return n.keyword === 'Hub' && n.active; });
+	}
+
 	res.render('admin/coordinator/nodes', {
 		sufficientAccess, title: 'Managed Nodes', activelink: 'coordinator',
 		activenav: 'networks', currentuser, network, segment, nodes, stats,
-		validKeywords: managedNodes.VALID_KEYWORDS,
-		commonFlags: managedNodes.COMMON_FLAGS
+		validKeywords: filteredKeywords,
+		allKeywords: managedNodes.VALID_KEYWORDS,
+		commonFlags: managedNodes.COMMON_FLAGS,
+		hubNodes: hubNodes
 	});
 });
 
@@ -4874,7 +4965,13 @@ router.post('/coordinator/nodes/:id/delete', urlencodedParser, requireAdmin, asy
 router.get('/coordinator/segment/:segmentId/stub', requireAdmin, async (req, res) => {
 	var segmentId = parseInt(req.params.segmentId);
 	var segment = await coordinatorSegments.getById(segmentId);
-	var stub = await managedNodes.generateStub(segment ? segment.network_id : 0, segmentId);
+	var stub = '';
+	if (segment && segment.source === 'external') {
+		stub = await _loadExternalStubContent(segment);
+		if (!stub) stub = '; No received stub file found for ' + (segment.name || 'segment');
+	} else {
+		stub = await managedNodes.generateStub(segment ? segment.network_id : 0, segmentId);
+	}
 	res.setHeader('Content-Type', 'text/plain');
 	res.setHeader('Content-Disposition', 'inline; filename="' + (segment ? segment.name : 'segment') + '.txt"');
 	res.send(stub);

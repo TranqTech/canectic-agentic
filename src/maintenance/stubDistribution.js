@@ -27,6 +27,9 @@ async function generateAndDistribute(segmentId) {
 	if (!segment.active) {
 		return { success: false, error: 'Segment inactive' };
 	}
+	if (segment.source === 'external') {
+		return { success: false, error: 'External segments do not generate stubs' };
+	}
 
 	// Generate the stub content
 	var stubContent = await managedNodes.generateStub(segment.network_id, segmentId);

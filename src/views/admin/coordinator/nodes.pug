@@ -122,62 +122,112 @@ block content
             button.btn-close(type='button' data-bs-dismiss='modal')
           form(method='POST' action=baseUrl + '/nodes/new')
             .modal-body
+              //- Section 1: Address
+              h6.text-muted.mb-3 Address
               .row
-                .col-4
+                .col-3
                   .mb-3
                     label.form-label Zone
-                    input.form-control(type='number' name='zone' value='1' required)
+                    if segment
+                      input.form-control(type='number' name='zone' value=segment.zone readonly)
+                    else
+                      input.form-control(type='number' name='zone' value='1' required)
+                .col-3
                   .mb-3
                     label.form-label Net
-                    input.form-control(type='number' name='net' required)
+                    if segment && (segment.role === 'NC' || segment.role === 'Hub')
+                      input.form-control(type='number' name='net' value=segment.net readonly)
+                    else
+                      input.form-control(type='number' name='net' required)
+                .col-3
                   .mb-3
                     label.form-label Node
-                    input.form-control(type='number' name='node' required)
+                    input.form-control(type='number' name='node' required autofocus)
+                .col-3
                   .mb-3
                     label.form-label Keyword
-                    select.form-select(name='keyword')
+                    select.form-select(name='keyword' id='addKeyword')
                       each kw in validKeywords
                         option(value=kw)= kw || '(normal)'
-                  .mb-3
-                    label.form-label Hub Node
-                    input.form-control(type='number' name='hub_node' value='0')
-                    .form-text Node number of the hub this node routes through (0 = direct)
+
+              //- Hub routing (only for NC segments with hub children)
+              if hubNodes && hubNodes.length > 0
+                .mb-3#addHubRouting
+                  label.form-label Hub Routing
+                  select.form-select(name='hub_node' id='addHubNode')
+                    option(value='0') Direct (no hub)
+                    each h in hubNodes
+                      option(value=h.node)= h.system_name + ' (' + h.zone + ':' + h.net + '/' + h.node + ')'
+                  .form-text Route this node through a hub
+              else
+                input(type='hidden' name='hub_node' value='0')
+
+              hr.my-3
+
+              //- Section 2: System Info
+              h6.text-muted.mb-3 System Information
+              .row
                 .col-4
                   .mb-3
                     label.form-label System Name
                     input.form-control(name='system_name' required)
+                .col-4
                   .mb-3
                     label.form-label Location
                     input.form-control(name='location' placeholder='City, Province')
+                .col-4
                   .mb-3
                     label.form-label Sysop Name
                     input.form-control(name='sysop_name' required)
-                  .mb-3
-                    label.form-label Phone
-                    input.form-control(name='phone' value='-Unpublished-')
-                  .mb-3
-                    label.form-label Baud
-                    input.form-control(type='number' name='baud' value='300')
+
+              hr.my-3
+
+              //- Section 3: Connectivity
+              h6.text-muted.mb-3 Connectivity
+              .row
                 .col-4
                   .mb-3
                     label.form-label Hostname / IP
-                    input.form-control(name='hostname' placeholder='bbs.example.com')
+                    input.form-control(name='hostname' id='addHostname' placeholder='bbs.example.com')
+                .col-4
                   .mb-3
                     label.form-label Binkp Port
-                    input.form-control(type='number' name='binkp_port' placeholder='24554')
+                    input.form-control(type='number' name='binkp_port' id='addBinkpPort' placeholder='24554')
+                .col-4
                   .mb-3
                     label.form-label Telnet Port
                     input.form-control(type='number' name='telnet_port' placeholder='23')
-                  .mb-3
-                    label.form-label Flags (comma-separated)
-                    input.form-control(name='flags' placeholder='CM,IBN')
-                    .form-text
-                      | Common:
-                      each f in commonFlags
-                        code.me-1= f
+
+              hr.my-3
+
+              //- Section 4: Flags
+              h6.text-muted.mb-3 Flags
+              .mb-3
+                .d-flex.flex-wrap.gap-2.mb-2
+                  each f in commonFlags
+                    .form-check.form-check-inline
+                      input.form-check-input.flag-check(type='checkbox' id='addFlag_' + f value=f)
+                      label.form-check-label(for='addFlag_' + f)= f
+                input.form-control(name='flags' id='addFlagsField' placeholder='Additional flags (comma-separated)')
+                .form-text Checked flags above are combined with any additional flags entered here
+
+              //- Section 5: Advanced (collapsed)
+              .mb-3
+                a.text-muted(data-bs-toggle='collapse' href='#addAdvanced' role='button') Advanced options...
+                #addAdvanced.collapse
+                  .row.mt-2
+                    .col-6
+                      .mb-3
+                        label.form-label Phone
+                        input.form-control(name='phone' value='-Unpublished-')
+                    .col-6
+                      .mb-3
+                        label.form-label Baud
+                        input.form-control(type='number' name='baud' value='300')
                   .mb-3
                     label.form-label Notes (internal)
                     textarea.form-control(name='notes' rows='2')
+
               .form-check
                 input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
                 label.form-check-label(for='addActive') Active
@@ -194,57 +244,103 @@ block content
             button.btn-close(type='button' data-bs-dismiss='modal')
           form#editNodeForm(method='POST')
             .modal-body
+              //- Section 1: Address
+              h6.text-muted.mb-3 Address
               .row
-                .col-4
+                .col-3
                   .mb-3
                     label.form-label Zone
                     input.form-control(type='number' name='zone' id='enZone' required)
+                .col-3
                   .mb-3
                     label.form-label Net
                     input.form-control(type='number' name='net' id='enNet' required)
+                .col-3
                   .mb-3
                     label.form-label Node
                     input.form-control(type='number' name='node' id='enNode' required)
+                .col-3
                   .mb-3
                     label.form-label Keyword
                     select.form-select(name='keyword' id='enKeyword')
                       each kw in validKeywords
                         option(value=kw)= kw || '(normal)'
-                  .mb-3
-                    label.form-label Hub Node
-                    input.form-control(type='number' name='hub_node' id='enHubNode')
+
+              if hubNodes && hubNodes.length > 0
+                .mb-3
+                  label.form-label Hub Routing
+                  select.form-select(name='hub_node' id='enHubNode')
+                    option(value='0') Direct (no hub)
+                    each h in hubNodes
+                      option(value=h.node)= h.system_name + ' (' + h.zone + ':' + h.net + '/' + h.node + ')'
+              else
+                input(type='hidden' name='hub_node' id='enHubNode' value='0')
+
+              hr.my-3
+
+              //- Section 2: System Info
+              h6.text-muted.mb-3 System Information
+              .row
                 .col-4
                   .mb-3
                     label.form-label System Name
                     input.form-control(name='system_name' id='enSystemName' required)
+                .col-4
                   .mb-3
                     label.form-label Location
                     input.form-control(name='location' id='enLocation')
+                .col-4
                   .mb-3
                     label.form-label Sysop Name
                     input.form-control(name='sysop_name' id='enSysopName' required)
-                  .mb-3
-                    label.form-label Phone
-                    input.form-control(name='phone' id='enPhone')
-                  .mb-3
-                    label.form-label Baud
-                    input.form-control(type='number' name='baud' id='enBaud')
+
+              hr.my-3
+
+              //- Section 3: Connectivity
+              h6.text-muted.mb-3 Connectivity
+              .row
                 .col-4
                   .mb-3
                     label.form-label Hostname / IP
                     input.form-control(name='hostname' id='enHostname')
+                .col-4
                   .mb-3
                     label.form-label Binkp Port
                     input.form-control(type='number' name='binkp_port' id='enBinkpPort')
+                .col-4
                   .mb-3
                     label.form-label Telnet Port
                     input.form-control(type='number' name='telnet_port' id='enTelnetPort')
-                  .mb-3
-                    label.form-label Flags (comma-separated)
-                    input.form-control(name='flags' id='enFlags')
+
+              hr.my-3
+
+              //- Section 4: Flags
+              h6.text-muted.mb-3 Flags
+              .mb-3
+                .d-flex.flex-wrap.gap-2.mb-2
+                  each f in commonFlags
+                    .form-check.form-check-inline
+                      input.form-check-input.edit-flag-check(type='checkbox' id='enFlag_' + f value=f)
+                      label.form-check-label(for='enFlag_' + f)= f
+                input.form-control(name='flags' id='enFlags' placeholder='Additional flags (comma-separated)')
+
+              //- Section 5: Advanced
+              .mb-3
+                a.text-muted(data-bs-toggle='collapse' href='#editAdvanced' role='button') Advanced options...
+                #editAdvanced.collapse
+                  .row.mt-2
+                    .col-6
+                      .mb-3
+                        label.form-label Phone
+                        input.form-control(name='phone' id='enPhone')
+                    .col-6
+                      .mb-3
+                        label.form-label Baud
+                        input.form-control(type='number' name='baud' id='enBaud')
                   .mb-3
                     label.form-label Notes
                     textarea.form-control(name='notes' id='enNotes' rows='2')
+
               .form-check
                 input.form-check-input(type='checkbox' name='active' id='enActive' value='true')
                 label.form-check-label(for='enActive') Active
@@ -252,36 +348,89 @@ block content
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
               button.btn.btn-primary(type='submit') Save
 
-    script.
-      document.addEventListener('DOMContentLoaded', function() {
-        if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
-          jQuery('#nodeTable').DataTable({ paging: false, order: [] });
-        }
+  script.
+    var commonFlagList = !{JSON.stringify(commonFlags)};
 
-        var editModal = document.getElementById('editNodeModal');
-        if (editModal) {
-          editModal.addEventListener('show.bs.modal', function(e) {
-            var btn = e.relatedTarget;
-            if (!btn) return;
-            document.getElementById('editNodeForm').action = '/admin/coordinator/nodes/' + btn.dataset.id + '/update';
-            document.getElementById('enZone').value = btn.dataset.zone || '1';
-            document.getElementById('enNet').value = btn.dataset.net || '';
-            document.getElementById('enNode').value = btn.dataset.node || '';
-            document.getElementById('enKeyword').value = btn.dataset.keyword || '';
-            document.getElementById('enHubNode').value = btn.dataset.hubnode || '0';
-            document.getElementById('enSystemName').value = btn.dataset.systemname || '';
-            document.getElementById('enLocation').value = btn.dataset.location || '';
-            document.getElementById('enSysopName').value = btn.dataset.sysopname || '';
-            document.getElementById('enPhone').value = btn.dataset.phone || '-Unpublished-';
-            document.getElementById('enBaud').value = btn.dataset.baud || '300';
-            document.getElementById('enHostname').value = btn.dataset.hostname || '';
-            document.getElementById('enBinkpPort').value = btn.dataset.binkpport || '';
-            document.getElementById('enTelnetPort').value = btn.dataset.telnetport || '';
-            var flags = [];
-            try { flags = JSON.parse(btn.dataset.flags || '[]'); } catch(_) {}
-            document.getElementById('enFlags').value = flags.join(', ');
-            document.getElementById('enNotes').value = btn.dataset.notes || '';
-            document.getElementById('enActive').checked = btn.dataset.active === 'true';
-          });
-        }
+    //- Flag checkbox sync: checkboxes + text field -> combined flags value
+    function syncFlagCheckboxes(checkboxSelector, flagsFieldId) {
+      var flagsField = document.getElementById(flagsFieldId);
+      var checks = document.querySelectorAll(checkboxSelector);
+
+      function updateField() {
+        var checked = [];
+        checks.forEach(function(cb) { if (cb.checked) checked.push(cb.value); });
+        // Parse additional text flags
+        var textVal = flagsField.value;
+        var textFlags = textVal.split(',').map(function(f) { return f.trim(); }).filter(function(f) {
+          return f && !commonFlagList.includes(f);
+        });
+        flagsField.value = checked.concat(textFlags).join(', ');
+      }
+
+      checks.forEach(function(cb) { cb.addEventListener('change', updateField); });
+    }
+
+    //- Set flag checkboxes from flags array
+    function setFlagCheckboxes(flagsArray, checkboxSelector) {
+      document.querySelectorAll(checkboxSelector).forEach(function(cb) {
+        cb.checked = flagsArray.includes(cb.value);
       });
+    }
+
+    //- Get non-common flags as text
+    function getNonCommonFlags(flagsArray) {
+      return flagsArray.filter(function(f) { return !commonFlagList.includes(f); }).join(', ');
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+        jQuery('#nodeTable').DataTable({ paging: false, order: [] });
+      }
+
+      // Add modal: sync flag checkboxes
+      syncFlagCheckboxes('.flag-check', 'addFlagsField');
+
+      // Edit modal
+      var editModal = document.getElementById('editNodeModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editNodeForm').action = '/admin/coordinator/nodes/' + btn.dataset.id + '/update';
+          document.getElementById('enZone').value = btn.dataset.zone || '1';
+          document.getElementById('enNet').value = btn.dataset.net || '';
+          document.getElementById('enNode').value = btn.dataset.node || '';
+          document.getElementById('enKeyword').value = btn.dataset.keyword || '';
+          document.getElementById('enHubNode').value = btn.dataset.hubnode || '0';
+          document.getElementById('enSystemName').value = btn.dataset.systemname || '';
+          document.getElementById('enLocation').value = btn.dataset.location || '';
+          document.getElementById('enSysopName').value = btn.dataset.sysopname || '';
+          document.getElementById('enPhone').value = btn.dataset.phone || '-Unpublished-';
+          document.getElementById('enBaud').value = btn.dataset.baud || '300';
+          document.getElementById('enHostname').value = btn.dataset.hostname || '';
+          document.getElementById('enBinkpPort').value = btn.dataset.binkpport || '';
+          document.getElementById('enTelnetPort').value = btn.dataset.telnetport || '';
+          document.getElementById('enNotes').value = btn.dataset.notes || '';
+          document.getElementById('enActive').checked = btn.dataset.active === 'true';
+
+          // Flags: set checkboxes and extra text
+          var flags = [];
+          try { flags = JSON.parse(btn.dataset.flags || '[]'); } catch(_) {}
+          setFlagCheckboxes(flags, '.edit-flag-check');
+          document.getElementById('enFlags').value = getNonCommonFlags(flags);
+
+          // Show advanced section if phone or baud differ from defaults
+          var phone = btn.dataset.phone || '-Unpublished-';
+          var baud = btn.dataset.baud || '300';
+          if (phone !== '-Unpublished-' || baud !== '300' || btn.dataset.notes) {
+            var advPanel = document.getElementById('editAdvanced');
+            if (advPanel && !advPanel.classList.contains('show')) {
+              new bootstrap.Collapse(advPanel, { toggle: true });
+            }
+          }
+        });
+
+        // Edit modal: sync flag checkboxes
+        syncFlagCheckboxes('.edit-flag-check', 'enFlags');
+      }
+    });

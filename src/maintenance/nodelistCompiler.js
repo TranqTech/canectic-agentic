@@ -1,15 +1,9 @@
-// maintenance/nodelistCompiler.js — Compile a full nodelist from segments and stubs.
+// maintenance/nodelistCompiler.js — Compile a full nodelist from the segment tree.
 //
-// For Zone Coordinators or independent network operators who compile
-// the complete nodelist from their own managed nodes plus incoming
-// stubs from downstream hubs/NCs/RCs.
-//
-// Flow:
-//   1. Load the coordinator's own managed segment(s)
-//   2. Load incoming stubs from configured file areas or directories
-//   3. Merge into a single nodelist in standard FTN format
-//   4. Write the compiled nodelist file
-//   5. Optionally stage for distribution via TIC/FREQ
+// Walks the coordinator segment tree recursively. Internal segments
+// generate node lines from managed_nodes. External segments pull
+// content from received stub files in their configured file area
+// (or the network-level stub_intake_area as fallback).
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -22,7 +16,7 @@ import * as fileEntries from '../models/fileEntries.js';
 import appConfig from '../config/appConfig.js';
 
 /**
- * Compile a full nodelist for a network from all segments and stubs.
+ * Compile a full nodelist for a network from the segment tree.
  *
  * @param {number} networkId
  * @param {object} options
@@ -33,10 +27,20 @@ import appConfig from '../config/appConfig.js';
  */
 async function compileNodelist(networkId, options) {
 	var opts = options || {};
-	var segments = await coordinatorSegments.getByNetwork(networkId);
-	if (!segments || segments.length === 0) {
+	var tree = await coordinatorSegments.getTree(networkId);
+	if (!tree || tree.length === 0) {
 		return { success: false, error: 'No coordinator segments for this network' };
 	}
+
+	// Load network config for stub_intake_area fallback
+	var networkConfig = {};
+	try {
+		var msgNetworks = (await import('../models/msgNetworks.js'));
+		var net = await msgNetworks.getNetworkById(networkId);
+		if (net && net.config) {
+			networkConfig = typeof net.config === 'string' ? JSON.parse(net.config) : net.config;
+		}
+	} catch (_) {}
 
 	var now = new Date();
 	var dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
@@ -49,113 +53,19 @@ async function compileNodelist(networkId, options) {
 	lines.push('; Day ' + dayStr + ', ' + dateStr);
 	lines.push(';');
 
-	var totalNodes = 0;
-	var segmentCount = 0;
-	var stubCount = 0;
+	var counts = { segments: 0, stubs: 0, nodes: 0 };
 
-	// Sort segments: ZC first, then RC, then NC, then Hub
-	var roleOrder = { 'ZC': 0, 'RC': 1, 'NC': 2, 'Hub': 3 };
-	segments.sort(function(a, b) {
-		var ra = roleOrder[a.role] !== undefined ? roleOrder[a.role] : 9;
-		var rb = roleOrder[b.role] !== undefined ? roleOrder[b.role] : 9;
-		if (ra !== rb) return ra - rb;
-		return (a.net || 0) - (b.net || 0);
-	});
-
-	for (var seg of segments) {
-		if (!seg.active) continue;
-
-		// Generate this segment's own nodes
-		var stubContent = await managedNodes.generateStub(networkId, seg.id);
-		if (stubContent && stubContent.trim()) {
-			// Strip header comments from sub-stubs (we have our own header)
-			var stubLines = stubContent.split(/\r?\n/).filter(function(l) {
-				return l.trim() && !l.startsWith(';');
-			});
-
-			if (stubLines.length > 0) {
-				lines.push(';');
-				lines.push('; Segment: ' + seg.name + ' (' + seg.role + ')');
-				lines.push(';');
-
-				for (var sl of stubLines) {
-					lines.push(sl);
-					totalNodes++;
-				}
-				segmentCount++;
-			}
-		}
-
-		// Load incoming stubs from downstream if this is an NC/RC/ZC
-		// Look for stub files in a configured file area
-		var networkConfig = {};
-		try {
-			var msgNetworks = (await import('../models/msgNetworks.js'));
-			var net = await msgNetworks.getNetworkById(networkId);
-			if (net && net.config) {
-				networkConfig = typeof net.config === 'string' ? JSON.parse(net.config) : net.config;
-			}
-		} catch (_) {}
-
-		// Check for a stub intake area (could be network-level or segment-specific)
-		var stubAreaShortcode = networkConfig.stub_intake_area || null;
-		if (stubAreaShortcode) {
-			var area = await fileAreas.getAreaByShortcode(stubAreaShortcode);
-			if (area) {
-				var group = area.group_shortcode ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
-				var areaPath = fileAreas.resolveAreaPath(group, area);
-
-				var entries = await fileEntries.getEntriesForArea(area.id, { limit: 200, orderBy: 'upload_date DESC' });
-				if (entries && entries.length > 0) {
-					// Find stub files that look like nodelist segments (*.NNN or known patterns)
-					var processedStubs = new Set();
-					for (var entry of entries) {
-						var fname = (entry.filename || '').toUpperCase();
-						// Skip our own stubs and the compiled nodelist
-						if (seg.stub_filename && fname.startsWith(seg.stub_filename.toUpperCase())) continue;
-
-						// Match segment files: NET*.NNN, HUB*.NNN, REGION*.NNN, etc.
-						if (/^[A-Z]+\d*\.\d{3}$/.test(fname)) {
-							var stubBase = fname.split('.')[0];
-							if (processedStubs.has(stubBase)) continue; // already got newest for this base
-							processedStubs.add(stubBase);
-
-							var filePath = path.join(areaPath, entry.disk_path || entry.filename);
-							if (fs.existsSync(filePath)) {
-								try {
-									var content = fs.readFileSync(filePath, 'utf8');
-									var contentLines = content.split(/\r?\n/).filter(function(l) {
-										return l.trim() && !l.startsWith(';');
-									});
-
-									if (contentLines.length > 0) {
-										lines.push(';');
-										lines.push('; Stub: ' + entry.filename);
-										lines.push(';');
-
-										for (var cl of contentLines) {
-											lines.push(cl);
-											totalNodes++;
-										}
-										stubCount++;
-									}
-								} catch (readErr) {
-									alogger.writeAlog(3, '[Compiler] Failed to read stub ' + entry.filename + ': ' + readErr.message, 'yellow');
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	// Walk the tree recursively
+	for (var root of tree) {
+		await _compileSegment(root, lines, counts, networkId, networkConfig);
 	}
 
-	if (totalNodes === 0) {
+	if (counts.nodes === 0) {
 		return { success: false, error: 'No nodes in compiled nodelist' };
 	}
 
 	lines.push(';');
-	lines.push('; End of nodelist — ' + totalNodes + ' entries');
+	lines.push('; End of nodelist — ' + counts.nodes + ' entries');
 	lines.push(';');
 
 	var content = lines.join('\r\n') + '\r\n';
@@ -181,7 +91,7 @@ async function compileNodelist(networkId, options) {
 
 	alogger.writeAlog(2,
 		'[Compiler] Compiled nodelist: ' + filename +
-		' (' + totalNodes + ' nodes from ' + segmentCount + ' segment(s) + ' + stubCount + ' stub(s))',
+		' (' + counts.nodes + ' nodes from ' + counts.segments + ' segment(s) + ' + counts.stubs + ' stub(s))',
 		'greenbright'
 	);
 
@@ -189,10 +99,116 @@ async function compileNodelist(networkId, options) {
 		success: true,
 		filename: filename,
 		filepath: filepath,
-		segmentCount: segmentCount,
-		stubCount: stubCount,
-		nodeCount: totalNodes
+		segmentCount: counts.segments,
+		stubCount: counts.stubs,
+		nodeCount: counts.nodes
 	};
+}
+
+/**
+ * Recursively compile a segment and its children into nodelist lines.
+ */
+async function _compileSegment(segment, lines, counts, networkId, networkConfig) {
+	if (!segment.active) return;
+
+	var source = segment.source || 'internal';
+
+	if (source === 'internal') {
+		// Generate from managed nodes
+		var stubContent = await managedNodes.generateStub(networkId, segment.id);
+		if (stubContent && stubContent.trim()) {
+			var stubLines = stubContent.split(/\r?\n/).filter(function(l) {
+				return l.trim() && !l.startsWith(';');
+			});
+
+			if (stubLines.length > 0) {
+				lines.push(';');
+				lines.push('; Segment: ' + segment.name + ' (' + segment.role + ')');
+				lines.push(';');
+
+				for (var sl of stubLines) {
+					lines.push(sl);
+					counts.nodes++;
+				}
+				counts.segments++;
+			}
+		}
+	} else if (source === 'external') {
+		// Read from received stub file
+		var stubLines = await _loadExternalStub(segment, networkConfig);
+		if (stubLines && stubLines.length > 0) {
+			lines.push(';');
+			lines.push('; External: ' + segment.name + ' (' + segment.role + ')');
+			lines.push(';');
+
+			for (var sl of stubLines) {
+				lines.push(sl);
+				counts.nodes++;
+			}
+			counts.stubs++;
+		}
+	}
+
+	// Recurse into children (already ordered by zone, net from getTree)
+	if (segment.children && segment.children.length > 0) {
+		for (var child of segment.children) {
+			await _compileSegment(child, lines, counts, networkId, networkConfig);
+		}
+	}
+}
+
+/**
+ * Load the content of an external segment's stub file.
+ * Checks the segment's stub_file_area first, falls back to network stub_intake_area.
+ * Matches files by the segment's stub_filename prefix.
+ */
+async function _loadExternalStub(segment, networkConfig) {
+	var stubFilename = (segment.stub_filename || '').toUpperCase();
+	if (!stubFilename) {
+		alogger.writeAlog(5, '[Compiler] External segment ' + segment.name + ' has no stub_filename', 'yellow');
+		return null;
+	}
+
+	// Determine which file area to search
+	var areaShortcode = segment.stub_file_area || networkConfig.stub_intake_area || null;
+	if (!areaShortcode) {
+		alogger.writeAlog(5, '[Compiler] No file area configured for external segment ' + segment.name, 'yellow');
+		return null;
+	}
+
+	var area = await fileAreas.getAreaByShortcode(areaShortcode);
+	if (!area) {
+		alogger.writeAlog(3, '[Compiler] File area not found: ' + areaShortcode, 'yellow');
+		return null;
+	}
+
+	var group = area.group_shortcode ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
+	var areaPath = fileAreas.resolveAreaPath(group, area);
+
+	// Find the newest file matching this segment's stub filename pattern
+	var entries = await fileEntries.getEntriesForArea(area.id, { limit: 200, orderBy: 'upload_date DESC' });
+	if (!entries || entries.length === 0) return null;
+
+	for (var entry of entries) {
+		var fname = (entry.filename || '').toUpperCase();
+		// Match: STUBNAME.NNN (3-digit day of year extension)
+		if (fname.startsWith(stubFilename + '.') && /\.\d{3}$/.test(fname)) {
+			var filePath = path.join(areaPath, entry.disk_path || entry.filename);
+			if (fs.existsSync(filePath)) {
+				try {
+					var content = fs.readFileSync(filePath, 'utf8');
+					return content.split(/\r?\n/).filter(function(l) {
+						return l.trim() && !l.startsWith(';');
+					});
+				} catch (err) {
+					alogger.writeAlog(3, '[Compiler] Failed to read stub ' + entry.filename + ': ' + err.message, 'yellow');
+				}
+			}
+		}
+	}
+
+	alogger.writeAlog(5, '[Compiler] No stub file found for ' + segment.name + ' (looking for ' + stubFilename + '.NNN)', 'yellow');
+	return null;
 }
 
 export { compileNodelist };

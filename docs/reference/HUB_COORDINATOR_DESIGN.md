@@ -12,16 +12,19 @@ Primary use case: Network Coordinator for FidoNet Net 134.
 
 ## Current State (Implemented)
 
-Phases 1-4 are built with a flat segment model. This works for a single NC role but doesn't handle multi-role coordination or the hierarchical nature of FTN nodelists. **The nested segment redesign below supersedes the flat model.**
+Nested segment model is implemented. Segments form a tree (parent/child), support internal/external sources, and per-network role configuration.
 
 What exists:
-- `coordinator_segments` table -- flat, one level per network
+- `coordinator_segments` table with `parent_segment_id`, `source`, `stub_file_area`, `depth`
 - `managed_nodes` table -- nodes with segment_id
-- Stub generation in standard FTN format with day numbering
-- Distribution via filebox, BSO flow files, or manual download
+- Per-network `coordinator_roles` config (ordered array in network JSONB, defaults to `['ZC', 'RC', 'NC', 'Hub']`)
+- Internal segments: managed nodes edited by sysop, stub generation, distribution
+- External segments: read-only, content from received stub files in configured file area
+- Tree-recursive nodelist compilation (internal = generate from nodes, external = read stub file)
+- Stub distribution via filebox, BSO flow files, or manual download
 - Scheduled generation via cron patterns
-- Nodelist compilation from segments + incoming stubs
-- Admin UI: segment overview, node CRUD, preview/download/send
+- Admin UI: tree view with indentation, source badges, context-aware Add Child with role defaults
+- Node editor: role-aware keyword filtering, auto-populated zone/net from segment, hub routing dropdown, flag checkboxes with progressive disclosure
 
 ---
 
