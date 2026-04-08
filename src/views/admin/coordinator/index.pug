@@ -12,10 +12,16 @@ block content
             if network
               small.text-muted.ms-2= network.name
           div
-            button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addSegmentModal')
+            button.btn.btn-sm.btn-success.me-1(data-bs-toggle='modal' data-bs-target='#addSegmentModal')
               i.bi.bi-plus-circle.me-1
               | Add Segment
-            a.btn.btn-sm.btn-outline-light.ms-2(href='/admin/network/' + network.uuid)
+            form.d-inline(method='POST' action='/admin/coordinator/' + network.id + '/compile')
+              button.btn.btn-sm.btn-info.me-1(type='submit' title='Compile full nodelist from all segments and stubs')
+                i.bi.bi-layers.me-1
+                | Compile
+            a.btn.btn-sm.btn-outline-info.me-1(href='/admin/coordinator/' + network.id + '/compiled/download' title='Download compiled nodelist')
+              i.bi.bi-download
+            a.btn.btn-sm.btn-outline-light.ms-1(href='/admin/network/' + network.uuid)
               i.bi.bi-arrow-left.me-1
               | Network
 

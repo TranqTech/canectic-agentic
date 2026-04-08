@@ -555,7 +555,7 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	// Merge config fields into the network's config JSONB
-	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area'];
+	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area', 'stub_intake_area'];
 	var hasConfigField = configKeys.some(function(k) { return formObj[k] !== undefined; });
 	if (hasConfigField) {
 		var dbnet = await msgNetworks.getNetworkByUUID(uuid);
@@ -4902,6 +4902,33 @@ router.post('/coordinator/segment/:segmentId/generate', urlencodedParser, requir
 	});
 	await flash.setOne(req, 'info', 'Stub generation queued for ' + (seg ? seg.name : 'segment'));
 	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
+});
+
+// Compile full nodelist from all segments + stubs
+router.post('/coordinator/:networkId/compile', urlencodedParser, requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	await maintenanceQueue.add('compile-nodelist', { networkId: networkId }, {
+		jobId: 'compile-nodelist-manual-' + networkId + '-' + Date.now(),
+		removeOnComplete: true, removeOnFail: true
+	});
+	await flash.setOne(req, 'info', 'Nodelist compilation queued');
+	res.redirect('/admin/coordinator/' + networkId);
+});
+
+// Download compiled nodelist
+router.get('/coordinator/:networkId/compiled/download', requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var nodelistCompiler = await import('../maintenance/nodelistCompiler.js');
+	var result = await nodelistCompiler.compileNodelist(networkId);
+	if (!result.success) {
+		await flash.setOne(req, 'danger', 'Compilation failed: ' + (result.error || 'unknown'));
+		return res.redirect('/admin/coordinator/' + networkId);
+	}
+	var fs = await import('fs');
+	var content = fs.readFileSync(result.filepath, 'utf8');
+	res.setHeader('Content-Type', 'application/octet-stream');
+	res.setHeader('Content-Disposition', 'attachment; filename="' + result.filename + '"');
+	res.send(content);
 });
 
 // -------------------------------------------------------

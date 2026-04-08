@@ -633,6 +633,17 @@ block content
                                   each fa in allFileAreasList
                                     option(value=fa.shortcode selected=(networkConfig && networkConfig.infopack_area === fa.shortcode))
                                       = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
+                              br
+                              label(for='en_stub_intake_area')
+                                | Stub Intake Area:
+                                |
+                                span(data-bs-toggle='tooltip' title='File area where downstream hubs/NCs submit their nodelist stubs. Used by the compiler to merge stubs into the full nodelist.') ⓘ
+                              select#en_stub_intake_area(name='stub_intake_area' tabindex='10').form-select
+                                option(value='' selected=(!networkConfig || !networkConfig.stub_intake_area)) None
+                                if allFileAreasList && allFileAreasList.length > 0
+                                  each fa in allFileAreasList
+                                    option(value=fa.shortcode selected=(networkConfig && networkConfig.stub_intake_area === fa.shortcode))
+                                      = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
                         .row
                           .col-1
                           .col-10

@@ -402,6 +402,12 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'compile-nodelist': {
+				var compiler = await import("../src/maintenance/nodelistCompiler.js");
+				await compiler.compileNodelist(job.data.networkId, job.data.options || {});
+				break;
+			}
+
 			case 'reconcile-echolists': {
 				var networkEcholist = await import("../src/models/networkEcholist.js");
 				var fileEcholist = await import("../src/models/fileEcholist.js");
