@@ -113,6 +113,21 @@ block content
             else
               p.text-muted No managed nodes. Add nodes to build your network segment.
 
+    //- Flag descriptions for tooltips
+    -
+      var flagDescs = {
+        'CM': 'Continuous Mail -- system is always available',
+        'MO': 'Mailer Only -- no BBS, mail transfers only',
+        'LO': 'Listed Only -- accepts calls only from listed nodes',
+        'MN': 'Mailer Not Running -- no mailer software active',
+        'IBN': 'Binkp capable -- supports binkp protocol',
+        'ITN': 'Telnet capable -- supports telnet connections',
+        'IFC': 'IFCico capable -- supports ifcico protocol',
+        'IP': 'IP connectivity -- reachable via internet',
+        'PING': 'Responds to ICMP ping',
+        'IPv6': 'Has IPv6 connectivity'
+      }
+
     //- Add Node Modal
     .modal.fade#addNodeModal(tabindex='-1')
       .modal-dialog.modal-lg
@@ -122,100 +137,115 @@ block content
             button.btn-close(type='button' data-bs-dismiss='modal')
           form(method='POST' action=baseUrl + '/nodes/new')
             .modal-body
-              //- Section 1: Address
-              h6.text-muted.mb-3 Address
-              .row
-                .col-3
-                  .mb-3
-                    label.form-label Zone
-                    if segment
-                      input.form-control(type='number' name='zone' value=segment.zone readonly)
-                    else
-                      input.form-control(type='number' name='zone' value='1' required)
-                .col-3
-                  .mb-3
-                    label.form-label Net
-                    if segment && (segment.role === 'NC' || segment.role === 'Hub')
-                      input.form-control(type='number' name='net' value=segment.net readonly)
-                    else
-                      input.form-control(type='number' name='net' required)
-                .col-3
-                  .mb-3
-                    label.form-label Node
-                    input.form-control(type='number' name='node' required autofocus)
-                .col-3
-                  .mb-3
-                    label.form-label Keyword
-                    select.form-select(name='keyword' id='addKeyword')
-                      each kw in validKeywords
-                        option(value=kw)= kw || '(normal)'
+              ul.nav.nav-tabs.mb-3(role='tablist')
+                li.nav-item(role='presentation')
+                  button.nav-link.active#addIdentityTab(data-bs-toggle='tab' data-bs-target='#addIdentityPane' type='button' role='tab' aria-selected='true')
+                    i.bi.bi-card-heading.me-1
+                    | Identity
+                li.nav-item(role='presentation')
+                  button.nav-link#addConnTab(data-bs-toggle='tab' data-bs-target='#addConnPane' type='button' role='tab' aria-selected='false')
+                    i.bi.bi-wifi.me-1
+                    | Connectivity
+                li.nav-item(role='presentation')
+                  button.nav-link#addLegacyTab(data-bs-toggle='tab' data-bs-target='#addLegacyPane' type='button' role='tab' aria-selected='false')
+                    i.bi.bi-telephone.me-1
+                    | Legacy
 
-              //- Hub routing (only for NC segments with hub children)
-              if hubNodes && hubNodes.length > 0
-                .mb-3#addHubRouting
-                  label.form-label Hub Routing
-                  select.form-select(name='hub_node' id='addHubNode')
-                    option(value='0') Direct (no hub)
-                    each h in hubNodes
-                      option(value=h.node)= h.system_name + ' (' + h.zone + ':' + h.net + '/' + h.node + ')'
-                  .form-text Route this node through a hub
-              else
-                input(type='hidden' name='hub_node' value='0')
+              .tab-content
+                //- Tab 1: Identity (Address + System Info)
+                #addIdentityPane.tab-pane.fade.show.active(role='tabpanel')
+                  h6.text-muted.mb-3 Address
+                  .row
+                    .col-3
+                      .mb-3
+                        label.form-label Zone
+                        if segment
+                          input.form-control(type='number' name='zone' value=segment.zone readonly)
+                        else
+                          input.form-control(type='number' name='zone' value='1' required)
+                    .col-3
+                      .mb-3
+                        label.form-label Net
+                        if segment && (segment.role === 'NC' || segment.role === 'Hub')
+                          input.form-control(type='number' name='net' value=segment.net readonly)
+                        else
+                          input.form-control(type='number' name='net' required)
+                    .col-3
+                      .mb-3
+                        label.form-label Node
+                        input.form-control(type='number' name='node' required autofocus)
+                    .col-3
+                      .mb-3
+                        label.form-label Keyword
+                        select.form-select(name='keyword' id='addKeyword')
+                          each kw in validKeywords
+                            option(value=kw)= kw || '(normal)'
 
-              hr.my-3
+                  //- Hub routing (only for NC segments with hub children)
+                  if hubNodes && hubNodes.length > 0
+                    .mb-3
+                      label.form-label Hub Routing
+                      select.form-select(name='hub_node' id='addHubNode')
+                        option(value='0') Direct (no hub)
+                        each h in hubNodes
+                          option(value=h.node)= h.system_name + ' (' + h.zone + ':' + h.net + '/' + h.node + ')'
+                      .form-text Route this node through a hub
+                  else
+                    input(type='hidden' name='hub_node' value='0')
 
-              //- Section 2: System Info
-              h6.text-muted.mb-3 System Information
-              .row
-                .col-4
+                  hr.my-3
+
+                  h6.text-muted.mb-3 System Information
+                  .row
+                    .col-4
+                      .mb-3
+                        label.form-label System Name
+                        input.form-control(name='system_name' required)
+                    .col-4
+                      .mb-3
+                        label.form-label Location
+                        input.form-control(name='location' placeholder='City, Province')
+                    .col-4
+                      .mb-3
+                        label.form-label Sysop Name
+                        input.form-control(name='sysop_name' required)
+
+                  .form-check.mt-2
+                    input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
+                    label.form-check-label(for='addActive') Active
+
+                //- Tab 2: Connectivity (Network + Flags)
+                #addConnPane.tab-pane.fade(role='tabpanel')
+                  h6.text-muted.mb-3 Network
+                  .row
+                    .col-4
+                      .mb-3
+                        label.form-label Hostname / IP
+                        input.form-control(name='hostname' id='addHostname' placeholder='bbs.example.com')
+                    .col-4
+                      .mb-3
+                        label.form-label Binkp Port
+                        input.form-control(type='number' name='binkp_port' id='addBinkpPort' placeholder='24554')
+                    .col-4
+                      .mb-3
+                        label.form-label Telnet Port
+                        input.form-control(type='number' name='telnet_port' placeholder='23')
+
+                  hr.my-3
+
+                  h6.text-muted.mb-3 Flags
                   .mb-3
-                    label.form-label System Name
-                    input.form-control(name='system_name' required)
-                .col-4
-                  .mb-3
-                    label.form-label Location
-                    input.form-control(name='location' placeholder='City, Province')
-                .col-4
-                  .mb-3
-                    label.form-label Sysop Name
-                    input.form-control(name='sysop_name' required)
+                    .d-flex.flex-wrap.gap-3.mb-2
+                      each f in commonFlags
+                        .form-check.form-check-inline
+                          input.form-check-input.flag-check(type='checkbox' id='addFlag_' + f value=f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)
+                          label.form-check-label(for='addFlag_' + f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)= f
+                    input.form-control(name='flags' id='addFlagsField' placeholder='Additional flags (comma-separated)')
+                    .form-text Checked flags above are combined with any additional flags entered here
 
-              hr.my-3
-
-              //- Section 3: Connectivity
-              h6.text-muted.mb-3 Connectivity
-              .row
-                .col-4
-                  .mb-3
-                    label.form-label Hostname / IP
-                    input.form-control(name='hostname' id='addHostname' placeholder='bbs.example.com')
-                .col-4
-                  .mb-3
-                    label.form-label Binkp Port
-                    input.form-control(type='number' name='binkp_port' id='addBinkpPort' placeholder='24554')
-                .col-4
-                  .mb-3
-                    label.form-label Telnet Port
-                    input.form-control(type='number' name='telnet_port' placeholder='23')
-
-              hr.my-3
-
-              //- Section 4: Flags
-              h6.text-muted.mb-3 Flags
-              .mb-3
-                .d-flex.flex-wrap.gap-2.mb-2
-                  each f in commonFlags
-                    .form-check.form-check-inline
-                      input.form-check-input.flag-check(type='checkbox' id='addFlag_' + f value=f)
-                      label.form-check-label(for='addFlag_' + f)= f
-                input.form-control(name='flags' id='addFlagsField' placeholder='Additional flags (comma-separated)')
-                .form-text Checked flags above are combined with any additional flags entered here
-
-              //- Section 5: Advanced (collapsed)
-              .mb-3
-                a.text-muted(data-bs-toggle='collapse' href='#addAdvanced' role='button') Advanced options...
-                #addAdvanced.collapse
-                  .row.mt-2
+                //- Tab 3: Legacy (Phone, Baud, Notes)
+                #addLegacyPane.tab-pane.fade(role='tabpanel')
+                  .row
                     .col-6
                       .mb-3
                         label.form-label Phone
@@ -226,11 +256,8 @@ block content
                         input.form-control(type='number' name='baud' value='300')
                   .mb-3
                     label.form-label Notes (internal)
-                    textarea.form-control(name='notes' rows='2')
+                    textarea.form-control(name='notes' rows='3')
 
-              .form-check
-                input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
-                label.form-check-label(for='addActive') Active
             .modal-footer
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
               button.btn.btn-success(type='submit') Add Node
@@ -244,91 +271,106 @@ block content
             button.btn-close(type='button' data-bs-dismiss='modal')
           form#editNodeForm(method='POST')
             .modal-body
-              //- Section 1: Address
-              h6.text-muted.mb-3 Address
-              .row
-                .col-3
-                  .mb-3
-                    label.form-label Zone
-                    input.form-control(type='number' name='zone' id='enZone' required)
-                .col-3
-                  .mb-3
-                    label.form-label Net
-                    input.form-control(type='number' name='net' id='enNet' required)
-                .col-3
-                  .mb-3
-                    label.form-label Node
-                    input.form-control(type='number' name='node' id='enNode' required)
-                .col-3
-                  .mb-3
-                    label.form-label Keyword
-                    select.form-select(name='keyword' id='enKeyword')
-                      each kw in validKeywords
-                        option(value=kw)= kw || '(normal)'
+              ul.nav.nav-tabs.mb-3(role='tablist')
+                li.nav-item(role='presentation')
+                  button.nav-link.active#editIdentityTab(data-bs-toggle='tab' data-bs-target='#editIdentityPane' type='button' role='tab' aria-selected='true')
+                    i.bi.bi-card-heading.me-1
+                    | Identity
+                li.nav-item(role='presentation')
+                  button.nav-link#editConnTab(data-bs-toggle='tab' data-bs-target='#editConnPane' type='button' role='tab' aria-selected='false')
+                    i.bi.bi-wifi.me-1
+                    | Connectivity
+                li.nav-item(role='presentation')
+                  button.nav-link#editLegacyTab(data-bs-toggle='tab' data-bs-target='#editLegacyPane' type='button' role='tab' aria-selected='false')
+                    i.bi.bi-telephone.me-1
+                    | Legacy
 
-              if hubNodes && hubNodes.length > 0
-                .mb-3
-                  label.form-label Hub Routing
-                  select.form-select(name='hub_node' id='enHubNode')
-                    option(value='0') Direct (no hub)
-                    each h in hubNodes
-                      option(value=h.node)= h.system_name + ' (' + h.zone + ':' + h.net + '/' + h.node + ')'
-              else
-                input(type='hidden' name='hub_node' id='enHubNode' value='0')
+              .tab-content
+                //- Tab 1: Identity
+                #editIdentityPane.tab-pane.fade.show.active(role='tabpanel')
+                  h6.text-muted.mb-3 Address
+                  .row
+                    .col-3
+                      .mb-3
+                        label.form-label Zone
+                        input.form-control(type='number' name='zone' id='enZone' required)
+                    .col-3
+                      .mb-3
+                        label.form-label Net
+                        input.form-control(type='number' name='net' id='enNet' required)
+                    .col-3
+                      .mb-3
+                        label.form-label Node
+                        input.form-control(type='number' name='node' id='enNode' required)
+                    .col-3
+                      .mb-3
+                        label.form-label Keyword
+                        select.form-select(name='keyword' id='enKeyword')
+                          each kw in validKeywords
+                            option(value=kw)= kw || '(normal)'
 
-              hr.my-3
+                  if hubNodes && hubNodes.length > 0
+                    .mb-3
+                      label.form-label Hub Routing
+                      select.form-select(name='hub_node' id='enHubNode')
+                        option(value='0') Direct (no hub)
+                        each h in hubNodes
+                          option(value=h.node)= h.system_name + ' (' + h.zone + ':' + h.net + '/' + h.node + ')'
+                  else
+                    input(type='hidden' name='hub_node' id='enHubNode' value='0')
 
-              //- Section 2: System Info
-              h6.text-muted.mb-3 System Information
-              .row
-                .col-4
+                  hr.my-3
+
+                  h6.text-muted.mb-3 System Information
+                  .row
+                    .col-4
+                      .mb-3
+                        label.form-label System Name
+                        input.form-control(name='system_name' id='enSystemName' required)
+                    .col-4
+                      .mb-3
+                        label.form-label Location
+                        input.form-control(name='location' id='enLocation')
+                    .col-4
+                      .mb-3
+                        label.form-label Sysop Name
+                        input.form-control(name='sysop_name' id='enSysopName' required)
+
+                  .form-check.mt-2
+                    input.form-check-input(type='checkbox' name='active' id='enActive' value='true')
+                    label.form-check-label(for='enActive') Active
+
+                //- Tab 2: Connectivity
+                #editConnPane.tab-pane.fade(role='tabpanel')
+                  h6.text-muted.mb-3 Network
+                  .row
+                    .col-4
+                      .mb-3
+                        label.form-label Hostname / IP
+                        input.form-control(name='hostname' id='enHostname')
+                    .col-4
+                      .mb-3
+                        label.form-label Binkp Port
+                        input.form-control(type='number' name='binkp_port' id='enBinkpPort')
+                    .col-4
+                      .mb-3
+                        label.form-label Telnet Port
+                        input.form-control(type='number' name='telnet_port' id='enTelnetPort')
+
+                  hr.my-3
+
+                  h6.text-muted.mb-3 Flags
                   .mb-3
-                    label.form-label System Name
-                    input.form-control(name='system_name' id='enSystemName' required)
-                .col-4
-                  .mb-3
-                    label.form-label Location
-                    input.form-control(name='location' id='enLocation')
-                .col-4
-                  .mb-3
-                    label.form-label Sysop Name
-                    input.form-control(name='sysop_name' id='enSysopName' required)
+                    .d-flex.flex-wrap.gap-3.mb-2
+                      each f in commonFlags
+                        .form-check.form-check-inline
+                          input.form-check-input.edit-flag-check(type='checkbox' id='enFlag_' + f value=f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)
+                          label.form-check-label(for='enFlag_' + f data-bs-toggle='tooltip' data-bs-placement='top' title=flagDescs[f] || f)= f
+                    input.form-control(name='flags' id='enFlags' placeholder='Additional flags (comma-separated)')
 
-              hr.my-3
-
-              //- Section 3: Connectivity
-              h6.text-muted.mb-3 Connectivity
-              .row
-                .col-4
-                  .mb-3
-                    label.form-label Hostname / IP
-                    input.form-control(name='hostname' id='enHostname')
-                .col-4
-                  .mb-3
-                    label.form-label Binkp Port
-                    input.form-control(type='number' name='binkp_port' id='enBinkpPort')
-                .col-4
-                  .mb-3
-                    label.form-label Telnet Port
-                    input.form-control(type='number' name='telnet_port' id='enTelnetPort')
-
-              hr.my-3
-
-              //- Section 4: Flags
-              h6.text-muted.mb-3 Flags
-              .mb-3
-                .d-flex.flex-wrap.gap-2.mb-2
-                  each f in commonFlags
-                    .form-check.form-check-inline
-                      input.form-check-input.edit-flag-check(type='checkbox' id='enFlag_' + f value=f)
-                      label.form-check-label(for='enFlag_' + f)= f
-                input.form-control(name='flags' id='enFlags' placeholder='Additional flags (comma-separated)')
-
-              //- Section 5: Advanced
-              .mb-3
-                a.text-muted(data-bs-toggle='collapse' href='#editAdvanced' role='button') Advanced options...
-                #editAdvanced.collapse
-                  .row.mt-2
+                //- Tab 3: Legacy
+                #editLegacyPane.tab-pane.fade(role='tabpanel')
+                  .row
                     .col-6
                       .mb-3
                         label.form-label Phone
@@ -339,11 +381,8 @@ block content
                         input.form-control(type='number' name='baud' id='enBaud')
                   .mb-3
                     label.form-label Notes
-                    textarea.form-control(name='notes' id='enNotes' rows='2')
+                    textarea.form-control(name='notes' id='enNotes' rows='3')
 
-              .form-check
-                input.form-check-input(type='checkbox' name='active' id='enActive' value='true')
-                label.form-check-label(for='enActive') Active
             .modal-footer
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
               button.btn.btn-primary(type='submit') Save
@@ -359,7 +398,6 @@ block content
       function updateField() {
         var checked = [];
         checks.forEach(function(cb) { if (cb.checked) checked.push(cb.value); });
-        // Parse additional text flags
         var textVal = flagsField.value;
         var textFlags = textVal.split(',').map(function(f) { return f.trim(); }).filter(function(f) {
           return f && !commonFlagList.includes(f);
@@ -370,14 +408,12 @@ block content
       checks.forEach(function(cb) { cb.addEventListener('change', updateField); });
     }
 
-    //- Set flag checkboxes from flags array
     function setFlagCheckboxes(flagsArray, checkboxSelector) {
       document.querySelectorAll(checkboxSelector).forEach(function(cb) {
         cb.checked = flagsArray.includes(cb.value);
       });
     }
 
-    //- Get non-common flags as text
     function getNonCommonFlags(flagsArray) {
       return flagsArray.filter(function(f) { return !commonFlagList.includes(f); }).join(', ');
     }
@@ -386,6 +422,10 @@ block content
       if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
         jQuery('#nodeTable').DataTable({ paging: false, order: [] });
       }
+
+      // Initialize Bootstrap tooltips
+      var tooltipEls = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+      tooltipEls.forEach(function(el) { new bootstrap.Tooltip(el); });
 
       // Add modal: sync flag checkboxes
       syncFlagCheckboxes('.flag-check', 'addFlagsField');
@@ -419,15 +459,9 @@ block content
           setFlagCheckboxes(flags, '.edit-flag-check');
           document.getElementById('enFlags').value = getNonCommonFlags(flags);
 
-          // Show advanced section if phone or baud differ from defaults
-          var phone = btn.dataset.phone || '-Unpublished-';
-          var baud = btn.dataset.baud || '300';
-          if (phone !== '-Unpublished-' || baud !== '300' || btn.dataset.notes) {
-            var advPanel = document.getElementById('editAdvanced');
-            if (advPanel && !advPanel.classList.contains('show')) {
-              new bootstrap.Collapse(advPanel, { toggle: true });
-            }
-          }
+          // Reset to Identity tab when opening
+          var identityTab = document.getElementById('editIdentityTab');
+          if (identityTab) bootstrap.Tab.getOrCreateInstance(identityTab).show();
         });
 
         // Edit modal: sync flag checkboxes
