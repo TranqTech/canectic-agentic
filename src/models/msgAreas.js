@@ -137,6 +137,7 @@ async function newArea(formObj) {
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase()
 			: 'username',
+		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true,
 		read_perm_flags: normalizeFlags(formObj.read_perm_flags),
 		read_rest_flags: normalizeFlags(formObj.read_rest_flags),
 		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
@@ -373,6 +374,10 @@ async function updateArea(shortcode, formObj) {
 		if (validPostAs.includes(postAs)) {
 			updateObj.post_as = postAs;
 		}
+	}
+
+	if (formObj.newscan_default !== undefined) {
+		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
 	}
 
 	// QWK conference number

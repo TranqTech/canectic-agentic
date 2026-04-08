@@ -128,6 +128,11 @@ block content
                       class="form-control"
                       value=60
                     )
+                    br
+                    label(for="ng_newscan") Newscan Default:
+                    select#ng_newscan(name='newscan_default').form-select
+                      option(value='false' selected) No
+                      option(value='true') Yes
                 .row.mt-2
                   .col-1
                   .col-5

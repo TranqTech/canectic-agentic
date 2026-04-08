@@ -12,6 +12,7 @@ async function ensureSortOrder() {
 	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
 	await postgres.write("ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
 	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS post_as VARCHAR(16) DEFAULT 'username'");
+	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS newscan_default BOOLEAN DEFAULT false");
 }
 
 
@@ -77,7 +78,8 @@ async function newGroup(formObj) {
 		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
 		post_rest_flags: normalizeFlags(formObj.post_rest_flags),
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
-			? formObj.post_as.trim().toLowerCase() : 'username'
+			? formObj.post_as.trim().toLowerCase() : 'username',
+		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true
 	};
 
 	var dbres = await postgres.insertObject(pgObj, "message_groups");
@@ -174,6 +176,9 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.post_as !== undefined) {
 		var postAs = (formObj.post_as || '').trim().toLowerCase();
 		if (['username', 'realname'].includes(postAs)) updateObj.post_as = postAs;
+	}
+	if (formObj.newscan_default !== undefined) {
+		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
 	}
 
 	if (Object.keys(updateObj).length === 0) {

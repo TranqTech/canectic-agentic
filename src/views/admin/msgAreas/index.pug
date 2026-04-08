@@ -61,6 +61,7 @@ block content
                           data-bs-active=(area.active ? 'true' : 'false')
                           data-bs-threadmode=area.thread_mode || 'standard'
                           data-bs-postas=area.post_as || 'username'
+                          data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
                           data-bs-qwkconfnumber=area.qwk_conf_number || ''
                           data-bs-msgcount=area.msg_count || 0
                           data-bs-lastfrom=area.last_from || ''
@@ -246,8 +247,13 @@ block content
                         option(value='username') Username
                         option(value='realname') Real Name
                       br
+                      label(for='ea_newscan') Newscan Default:
+                      select(id='ea_newscan' name='newscan_default' class='form-control' tabindex='10')
+                        option(value='true') Yes
+                        option(value='false') No
+                      br
                       label(for='ea_qwk_conf_number') QWK Conference #:
-                      input(type='number' id='ea_qwk_conf_number' name='qwk_conf_number' class='form-control' min=1 tabindex='10')
+                      input(type='number' id='ea_qwk_conf_number' name='qwk_conf_number' class='form-control' min=1 tabindex='11')
                   .row
                     .col-1
                     .col-5
@@ -387,6 +393,11 @@ block content
                       select#na_post_as(name='post_as').form-select
                         option(value='username' selected) Username
                         option(value='realname') Real Name
+                      br
+                      label(for='na_newscan') Newscan Default:
+                      select#na_newscan(name='newscan_default').form-select
+                        option(value='false' selected) No
+                        option(value='true') Yes
                   .row
                     .col-1
                     .col-5
@@ -609,6 +620,7 @@ block content
         document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
         document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
         document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
+        document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
         document.getElementById('ea_qwk_conf_number').value = d.bsQwkconfnumber || '';
 
         renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
@@ -670,6 +682,8 @@ block content
             var data = await resp.json();
             document.getElementById('na_readsecurity').value = data.read_security || 50;
             document.getElementById('na_postsecurity').value = data.post_security || 60;
+            document.getElementById('na_post_as').value = data.post_as || 'username';
+            document.getElementById('na_newscan').value = data.newscan_default ? 'true' : 'false';
             renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');
             renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(data.read_rest_flags)), allRestrs, 'bg-danger');
             renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(data.post_perm_flags)), allPerms, 'bg-success');

@@ -349,7 +349,8 @@ router.get('/msgGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 		read_rest_flags: group.read_rest_flags || [],
 		post_perm_flags: group.post_perm_flags || [],
 		post_rest_flags: group.post_rest_flags || [],
-		post_as: group.post_as || 'username'
+		post_as: group.post_as || 'username',
+		newscan_default: group.newscan_default === true
 	});
 });
 
@@ -3092,6 +3093,7 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 			readsecurity:    req.body.read_security,
 			postsecurity:    req.body.post_security,
 			post_as:         req.body.post_as || 'realname',
+			newscan_default: req.body.newscan_default,
 			read_perm_flags: req.body.read_perm_flags,
 			read_rest_flags: req.body.read_rest_flags,
 			post_perm_flags: req.body.post_perm_flags,
