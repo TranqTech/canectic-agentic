@@ -83,6 +83,12 @@ async function getCustomUserListByNumber(filterObj) {
 // --- Uniqueness checks ---
 
 async function checkUsernameAvailable(pusername) {
+	var name = pusername.trim().toLowerCase();
+
+	// Reject honeypot usernames — prevent registration with names that trigger security logging
+	var honeypotList = (appConfig.get('honeypot_usernames', '') || '').toLowerCase().split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+	if (honeypotList.includes(name)) return false;
+
 	var isUnique = await postgres.checkValueUnique("username", pusername.trim(), "users");
 	return isUnique;
 }

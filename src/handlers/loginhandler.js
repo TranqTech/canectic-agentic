@@ -354,6 +354,11 @@ class LoginHandler extends BaseHandler {
         checkUserPass(this.username, this.password, { ip: clientIp })
             .then(result => {
                 if (!this.active) return;
+                if (result.honeypot) {
+                    // Immediate disconnect for honeypot usernames
+                    this.call.hangUpCall();
+                    return;
+                }
                 if (result.isvalid) {
                     this._loginSuccess(result.useraccount);
                 } else {
