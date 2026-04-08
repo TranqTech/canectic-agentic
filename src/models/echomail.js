@@ -20,6 +20,7 @@ const maxOutbound     = 1000;
 const default_tzutc   = "-0600";
 
 var threadUpdateArray = [];
+var importedMsgIds = [];
 
 function buildMessageTree(messages) {
 	const messageMap   = new Map();
@@ -219,6 +220,18 @@ function drainThreadUpdateArray() {
 	return items;
 }
 
+// Track imported message IDs for post-batch orphan reconciliation.
+function pushImportedMsgId(msgId, shortcode) {
+	if (!msgId || !shortcode) return;
+	importedMsgIds.push({ msgId: msgId, shortcode: shortcode });
+}
+
+function drainImportedMsgIds() {
+	var items = importedMsgIds.slice();
+	importedMsgIds.length = 0;
+	return items;
+}
+
 async function getExistingThreadBySubject(message, threadtable, subject, strippedre, maxAgeDays) {
 	var uselike  = !!strippedre;
 	var currtime = new Date();
@@ -252,6 +265,7 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 	var existingthread;
 	var querytext;
 
+	// Step A: Pre-assigned threadid (used by rethreadAreas)
 	if (message.threadid) {
 		querytext = "SELECT * FROM " + threadtable + " WHERE threadid = $1";
 		existingthread = await postgres.queryOne(querytext, [message.threadid]);
@@ -262,104 +276,68 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 		return message;
 	}
 
-	if (!message.reply_to) {
-		var checksubject = message.subject;
-		var isReply = message.subject.toUpperCase().startsWith('RE:');
-		if (isReply) {
-			var i = 0;
-			while (checksubject.toUpperCase().startsWith('RE:')) {
-				checksubject = checksubject.substring(3).trim();
-				i++;
-				if (i > 10) break;
-			}
-		}
-
-		// Messages with "Re:" in subject but no reply_to kludge are clearly replies;
-		// use a wider time window (365 days) to find the parent thread
-		var subjectAgeDays = isReply ? 365 : 30;
-
-		existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, subjectAgeDays);
-		if (!existingthread && checksubject !== message.subject) {
-			existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, subjectAgeDays);
-		}
-
-		if (existingthread) {
-			message.threadid  = existingthread.threadid;
-			message.thread_id = existingthread.id;
-		} else {
-			// Create new thread
-			var threadid     = message.msg_id;
-			var uniqueThread = await postgres.checkValueUnique("threadid", threadid, threadtable);
-			if (uniqueThread) {
-				var uuid = uuidv4();
-				var threadObj = {
-					uuid: uuid,
-					subject: message.subject,
-					threadid: message.msg_id,
-					started_at: message.system_time,
-					started_by: message.from_user,
-					message_count: 1,
-					last_message: message.system_time
-				};
-				var result = await postgres.insertObject(threadObj, threadtable);
-				if (result.status === true && result.insertId) {
-					message.thread_id = result.insertId;
-					message.threadid  = threadid;
-				} else {
-					alogger.writeAlog(3, "threadMessage: could not save thread for " + message.msg_id, "redbright");
-				}
-			} else {
-				// Thread already exists — find and attach
-				querytext = "SELECT * FROM " + threadtable + " WHERE UPPER(threadid) LIKE UPPER($1)";
-				var dbthread = await postgres.queryOne(querytext, [threadid]);
-				if (dbthread) {
-					message.threadid  = dbthread.threadid;
-					message.thread_id = dbthread.id;
-					await pushThreadIdToUpdateQueue(dbthread.id, shortcode);
-				}
-			}
-		}
-	} else {
-		querytext = "SELECT threadid, thread_id FROM " + messagetable + " WHERE UPPER(msg_id) LIKE UPPER($1)";
+	// Step B: reply_to lookup (case-insensitive MSGID match)
+	if (message.reply_to) {
+		querytext = "SELECT threadid, thread_id FROM " + messagetable + " WHERE UPPER(msg_id) = UPPER($1)";
 		var upstreammsg = await postgres.queryOne(querytext, [message.reply_to]);
-		if (upstreammsg) {
-			var hasthread = false;
-			if (upstreammsg.threadid) {
-				message.threadid = upstreammsg.threadid;
-				hasthread = true;
-			}
-			if (upstreammsg.thread_id) {
-				message.thread_id = upstreammsg.thread_id;
-				hasthread = true;
-			}
-			if (hasthread) {
-				await pushThreadIdToUpdateQueue(upstreammsg.thread_id, shortcode);
-			}
+		if (upstreammsg && (upstreammsg.threadid || upstreammsg.thread_id)) {
+			if (upstreammsg.threadid) message.threadid = upstreammsg.threadid;
+			if (upstreammsg.thread_id) message.thread_id = upstreammsg.thread_id;
+			await pushThreadIdToUpdateQueue(upstreammsg.thread_id, shortcode);
+			return message;
+		}
+		// Parent not found or has no thread -- fall through to subject matching
+	}
+
+	// Step C: Subject matching
+	var isReply = !!(message.reply_to) || message.subject.toUpperCase().startsWith('RE:');
+	var checksubject = message.subject;
+	if (checksubject.toUpperCase().startsWith('RE:')) {
+		var i = 0;
+		while (checksubject.toUpperCase().startsWith('RE:')) {
+			checksubject = checksubject.substring(3).trim();
+			i++;
+			if (i > 10) break;
+		}
+	}
+	var subjectAgeDays = isReply ? 365 : 30;
+
+	existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, subjectAgeDays);
+	if (!existingthread && checksubject !== message.subject) {
+		existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, subjectAgeDays);
+	}
+
+	if (existingthread) {
+		message.threadid  = existingthread.threadid;
+		message.thread_id = existingthread.id;
+		await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+		return message;
+	}
+
+	// Step D: Create new thread (guaranteed -- never leave message threadless)
+	var threadidStr = message.msg_id;
+	var tResult = await createThreadRow(threadtable, threadidStr, message.subject, message.system_time, message.from_user);
+	if (tResult) {
+		message.thread_id = tResult.threadId;
+		message.threadid  = tResult.threadidStr;
+	} else {
+		// Race condition: another process created a thread with the same threadid.
+		// Look it up and attach.
+		querytext = "SELECT * FROM " + threadtable + " WHERE UPPER(threadid) = UPPER($1)";
+		var dbthread = await postgres.queryOne(querytext, [threadidStr]);
+		if (dbthread) {
+			message.threadid  = dbthread.threadid;
+			message.thread_id = dbthread.id;
+			await pushThreadIdToUpdateQueue(dbthread.id, shortcode);
 		} else {
-			// Parent message not found (deleted or not imported).
-			// Fall back to subject matching so the reply joins an existing thread
-			// rather than becoming an orphan.
-			var checksubject = message.subject;
-			if (checksubject.toUpperCase().startsWith('RE:')) {
-				var j = 0;
-				while (checksubject.toUpperCase().startsWith('RE:')) {
-					checksubject = checksubject.substring(3).trim();
-					j++;
-					if (j > 10) break;
-				}
-			}
-
-			// Use a wider time window (365 days) since the parent is missing and
-			// the reply could be months after the original thread started
-			existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, 365);
-			if (!existingthread && checksubject !== message.subject) {
-				existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, 365);
-			}
-
-			if (existingthread) {
-				message.threadid  = existingthread.threadid;
-				message.thread_id = existingthread.id;
-				await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+			// Absolute last resort: create with a unique threadid
+			var fallbackId = threadidStr + '_' + Date.now();
+			var fallback = await createThreadRow(threadtable, fallbackId, message.subject, message.system_time, message.from_user);
+			if (fallback) {
+				message.thread_id = fallback.threadId;
+				message.threadid  = fallback.threadidStr;
+			} else {
+				alogger.writeAlog(1, "threadMessage: FAILED to create thread for " + message.msg_id, "redbright");
 			}
 		}
 	}
@@ -597,37 +575,95 @@ async function updateAreaThreads(shortcode) {
 	}
 }
 
+/**
+ * Fix orphaned messages (threadid IS NULL) in an area by re-running threadMessage().
+ * Returns the number of messages fixed.
+ */
 async function applyThreadingForArea(shortcode) {
-	var shorty       = shortcode.toLowerCase();
-	var msgtablename = "mb_" + shorty + "_msgs";
-	var idarray      = [];
-	var noupstreamarray = [];
-	var utarray      = [];
+	var shorty          = shortcode.toLowerCase();
+	var msgtablename    = "mb_" + shorty + "_msgs";
+	var threadtablename = "mb_" + shorty + "_threads";
+	var fixed = 0;
 
-	var idlist = await postgres.query("SELECT msg_id FROM " + msgtablename, []);
-	if (idlist && idlist.length > 0) {
-		for (var mi of idlist) {
-			idarray.push(mi.msg_id);
-		}
-	}
-
-	var unthreadedlist = await postgres.query(
-		"SELECT id, uuid, msg_id, thread_id, threadid, reply_to, subject, system_time FROM " +
-		msgtablename + " WHERE threadid is null AND reply_to is not null",
+	var orphans = await postgres.query(
+		"SELECT id, msg_id, reply_to, subject, system_time, from_user, threadid, thread_id FROM " +
+		msgtablename + " WHERE threadid IS NULL OR thread_id IS NULL ORDER BY system_time ASC",
 		[]
 	);
-	if (!unthreadedlist || unthreadedlist.length === 0) return;
+	if (!orphans || orphans.length === 0) return 0;
 
-	for (var msg of unthreadedlist) {
-		if (!idarray.includes(msg.reply_to)) {
-			noupstreamarray.push(msg.msg_id);
-		}
-		if (!utarray.includes(msg.msg_id)) {
-			utarray.push(msg.msg_id);
+	alogger.writeAlog(3, '[Threading] Found ' + orphans.length + ' orphaned message(s) in ' + shortcode, 'yellow');
+
+	for (var msg of orphans) {
+		msg.threadid = null;
+		msg.thread_id = null;
+		var threaded = await threadMessage(msg, msgtablename, threadtablename, shorty);
+		if (threaded.threadid && threaded.thread_id) {
+			await postgres.write(
+				'UPDATE ' + msgtablename + ' SET threadid = $1, thread_id = $2 WHERE id = $3',
+				[threaded.threadid, threaded.thread_id, msg.id]
+			);
+			fixed++;
 		}
 	}
 
-	// TODO: implement full upstream matching and threading pass
+	// Drain any queued thread updates from the re-threading pass
+	var pending = drainThreadUpdateArray();
+	if (pending.length > 0) await updateThreadArray(pending);
+
+	if (fixed > 0) {
+		alogger.writeAlog(2, '[Threading] Fixed ' + fixed + ' orphaned message(s) in ' + shortcode, 'greenbright');
+	}
+	return fixed;
+}
+
+/**
+ * Post-batch orphan reconciliation. For each msg_id that was just imported,
+ * find messages whose reply_to matches it and whose thread differs from the
+ * parent's thread. Re-link them to the correct thread.
+ */
+async function reconcileOrphans(shortcode, msgIds) {
+	if (!msgIds || msgIds.length === 0) return 0;
+	var shorty          = shortcode.toLowerCase();
+	var msgtablename    = "mb_" + shorty + "_msgs";
+	var fixed = 0;
+
+	for (var msgId of msgIds) {
+		// Find the parent message's thread info
+		var parent = await postgres.queryOne(
+			'SELECT threadid, thread_id FROM ' + msgtablename + ' WHERE UPPER(msg_id) = UPPER($1)',
+			[msgId]
+		);
+		if (!parent || !parent.thread_id) continue;
+
+		// Find children that reference this parent but have wrong/missing thread
+		var children = await postgres.query(
+			'SELECT id, threadid, thread_id FROM ' + msgtablename +
+			' WHERE UPPER(reply_to) = UPPER($1) AND (thread_id IS NULL OR thread_id != $2)',
+			[msgId, parent.thread_id]
+		);
+		if (!children || children.length === 0) continue;
+
+		for (var child of children) {
+			var oldThreadId = child.thread_id;
+			await postgres.write(
+				'UPDATE ' + msgtablename + ' SET threadid = $1, thread_id = $2 WHERE id = $3',
+				[parent.threadid, parent.thread_id, child.id]
+			);
+			fixed++;
+
+			// Queue stats updates for both old and new threads
+			if (oldThreadId && oldThreadId !== parent.thread_id) {
+				await pushThreadIdToUpdateQueue(oldThreadId, shortcode);
+			}
+			await pushThreadIdToUpdateQueue(parent.thread_id, shortcode);
+		}
+	}
+
+	if (fixed > 0) {
+		alogger.writeAlog(3, '[Threading] Reconciled ' + fixed + ' orphan(s) in ' + shortcode, 'greenbright');
+	}
+	return fixed;
 }
 
 async function updateSeenbyArray(sbArray) {
@@ -1255,5 +1291,9 @@ export {
 	threadMessage,
 	createThreadRow,
 	updateThreadStats,
-	rollbackThread
+	rollbackThread,
+	// Orphan reconciliation
+	reconcileOrphans,
+	pushImportedMsgId,
+	drainImportedMsgIds
 };

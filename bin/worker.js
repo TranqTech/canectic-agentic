@@ -103,6 +103,27 @@ async function postTossMaint() {
 		alogger.writeAlog(3, `[Worker] Updating ${updatearray.length} thread(s)`, "cyan");
 		await echomail.updateThreadArray(updatearray);
 	}
+
+	// Post-batch orphan reconciliation: re-link replies whose parents
+	// arrived in the same batch (out-of-order delivery).
+	var importedIds = echomail.drainImportedMsgIds();
+	if (importedIds.length > 0) {
+		// Group by shortcode
+		var byArea = {};
+		for (var item of importedIds) {
+			if (!byArea[item.shortcode]) byArea[item.shortcode] = [];
+			byArea[item.shortcode].push(item.msgId);
+		}
+		for (var sc in byArea) {
+			await echomail.reconcileOrphans(sc, byArea[sc]);
+		}
+		// Drain any thread updates queued by reconciliation
+		var reconUpdates = echomail.drainThreadUpdateArray();
+		if (reconUpdates.length > 0) {
+			await echomail.updateThreadArray(reconUpdates);
+		}
+	}
+
 	await msgAreas.updateAreaStats();
 }
 

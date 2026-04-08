@@ -23,7 +23,7 @@ import * as alogger from '../../utils/alogger.js';
 import * as peerConnections from '../../models/peerConnections.js';
 import * as systemAddresses from '../../models/systemAddresses.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
-import { createThreadRow, updateThreadStats, rollbackThread } from '../../models/echomail.js';
+import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/echomail.js';
 import { makeTransport } from '../../models/qwkTransport.js';
 import * as privateMessages from '../../models/privateMessages.js';
 import {
@@ -61,48 +61,6 @@ function parseQwkDateTime(dateStr, timeStr) {
 
 	var d = new Date(year, mm - 1, dd, hh, mi, 0);
 	return isNaN(d.getTime()) ? new Date() : d;
-}
-
-// Find an existing thread by subject within a recent window (±30 days).
-// Strips leading "Re:" prefixes for matching. Returns thread row or null.
-async function findThreadBySubject(subject, systemTime, threadtable) {
-	if (!subject) return null;
-
-	var stripped = subject;
-	var i = 0;
-	while (stripped.toUpperCase().startsWith('RE:')) {
-		stripped = stripped.substring(3).trim();
-		i++;
-		if (i > 10) break;
-	}
-	if (!stripped) stripped = subject;
-
-	var startDate = new Date(systemTime);
-	var endDate   = new Date(systemTime);
-	startDate.setDate(startDate.getDate() - 30);
-	endDate.setDate(endDate.getDate() + 14);
-
-	// Try exact match on stripped subject first
-	var thread = await postgres.queryOne(
-		'SELECT * FROM ' + threadtable +
-		' WHERE UPPER(subject) LIKE UPPER($1)' +
-		' AND started_at BETWEEN $2 AND $3' +
-		' ORDER BY last_message DESC LIMIT 1',
-		[stripped, startDate, endDate]
-	);
-	if (thread) return thread;
-
-	// Try with the original subject if different
-	if (stripped !== subject) {
-		thread = await postgres.queryOne(
-			'SELECT * FROM ' + threadtable +
-			' WHERE UPPER(subject) LIKE UPPER($1)' +
-			' AND started_at BETWEEN $2 AND $3' +
-			' ORDER BY last_message DESC LIMIT 1',
-			[subject, startDate, endDate]
-		);
-	}
-	return thread || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,58 +127,15 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		}
 	}
 
-	// Threading — subject-based, same approach as FTN echomail.
-	// If we have @REPLY, also try to find parent by msg_id for better threading.
-	var threadId    = null;
-	var threadidStr = null;
-
-	if (replyTo) {
-		// Try to find the parent message and its thread by @REPLY msg_id
-		var parentMsg = await postgres.queryOne(
-			'SELECT threadid, thread_id FROM ' + msgtable + ' WHERE msg_id = $1',
-			[replyTo]
-		);
-		if (parentMsg && parentMsg.thread_id) {
-			threadId    = parentMsg.thread_id;
-			threadidStr = parentMsg.threadid;
-		}
-	}
-
-	if (!threadId) {
-		var existingThread = await findThreadBySubject(subject, systemTime, threadtable);
-		if (existingThread) {
-			threadId    = existingThread.id;
-			threadidStr = existingThread.threadid;
-		}
-	}
-
-	var isNewThread = false;
-	if (!threadId) {
-		// Create new thread — use msgId as the threadid
-		var tResult = await createThreadRow(threadtable, msgId, subject, systemTime, fromUser);
-		if (!tResult) {
-			alogger.writeClog(3,
-				'importQwkMessage: could not create thread for ' + dupeId, 'tosser',
-				'redbright'
-			, false, false);
-			returnObj.errormessages.push('Failed to create thread');
-			return returnObj;
-		}
-		threadId    = tResult.threadId;
-		threadidStr = tResult.threadidStr;
-		isNewThread = true;
-	}
-
 	// Pre-format body as HTML for display (non-fatal)
 	var displayText = qwkMsg.utf8 || qwkMsg.bodyText || '';
 	var bodyHtml = await formatBodyHtml(displayText);
 
+	// Build message object and let unified threadMessage() handle threading
 	var dbObj = {
 		uuid:              uuid,
 		msg_id:            msgId,
 		qwk_msg_id:        dupeId,
-		threadid:          threadidStr,
-		thread_id:         threadId,
 		reply_to:          replyTo,
 		from_user:         fromUser,
 		to_user:           toUser,
@@ -243,11 +158,15 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		source_network_id: networkId
 	};
 
+	// Unified threading: reply_to lookup -> subject match -> create new thread
+	var threadedBefore = dbObj.threadid;
+	dbObj = await threadMessage(dbObj, msgtable, threadtable, shorty);
+
 	var mres = await postgres.insertObject(dbObj, msgtable);
 	if (!mres.status) {
-		// Roll back thread if we just created it
-		if (isNewThread) {
-			await rollbackThread(threadtable, msgId);
+		// Roll back thread if threadMessage created a new one
+		if (!threadedBefore && dbObj.threadid) {
+			await rollbackThread(threadtable, dbObj.threadid);
 		}
 		alogger.writeClog(3,
 			'importQwkMessage: failed to insert message ' + dupeId +
@@ -258,11 +177,7 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		return returnObj;
 	}
 
-	// Update thread stats if this was a reply into an existing thread
-	if (!isNewThread) {
-		await updateThreadStats(threadtable, threadId, systemTime, fromUser);
-	}
-
+	pushImportedMsgId(msgId, shorty);
 	returnObj.status   = true;
 	returnObj.imported = true;
 	return returnObj;

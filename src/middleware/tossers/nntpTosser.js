@@ -18,7 +18,7 @@ import * as peerConnections from '../../models/peerConnections.js';
 import * as networkAreas from '../../models/networkAreas.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
 import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
-import { createThreadRow, updateThreadStats, rollbackThread } from '../../models/echomail.js';
+import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/echomail.js';
 
 
 // ---------------------------------------------------------------------------
@@ -357,31 +357,6 @@ function parseImmediateParent(referencesHeader) {
 	return last || null;
 }
 
-// Finds an existing thread in the area's thread table by looking up whether
-// any of the References Message-IDs are already stored as msg_ids.
-// Returns the thread row, or null if not found.
-async function findThreadByReferences(references, msgtable, threadtable) {
-	if (!references || !references.trim()) return null;
-	var refs = references.trim().split(/\s+/).filter(Boolean);
-	if (refs.length === 0) return null;
-
-	// Walk from most recent (last) to oldest (first) to find nearest ancestor
-	for (var i = refs.length - 1; i >= 0; i--) {
-		var ancestorMsg = await postgres.queryOne(
-			'SELECT threadid, thread_id FROM ' + msgtable + ' WHERE msg_id = $1',
-			[refs[i]]
-		);
-		if (ancestorMsg && ancestorMsg.thread_id) {
-			var thread = await postgres.queryOne(
-				'SELECT * FROM ' + threadtable + ' WHERE id = $1',
-				[ancestorMsg.thread_id]
-			);
-			if (thread) return thread;
-		}
-	}
-	return null;
-}
-
 // Imports a single NNTP article into the message tables for the given area.
 // Returns { status, imported, duplicate, errormessages[] }
 async function importNntpArticle(articleData, area, peerConnectionId, networkId) {
@@ -444,45 +419,14 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 	var uuid       = uuidv4();
 	var replyTo    = parseImmediateParent(references) || null;
 
-	// Determine thread membership
-	var threadId   = null;
-	var threadidStr = null;
-
-	if (references && references.trim()) {
-		var existingThread = await findThreadByReferences(references, msgtable, threadtable);
-		if (existingThread) {
-			threadId    = existingThread.id;
-			threadidStr = existingThread.threadid;
-		}
-	}
-
-	var isNewThread = false;
-	if (!threadId) {
-		// No existing thread found — start a new one. The root Message-ID
-		// of this thread is the article's own Message-ID.
-		var tResult = await createThreadRow(threadtable, messageId, subject, systemTime, fromUser);
-		if (!tResult) {
-			alogger.writeAlog(3,
-				'importNntpArticle: could not create thread for ' + messageId,
-				'redbright'
-			);
-			returnObj.errormessages.push('Failed to create thread');
-			return returnObj;
-		}
-		threadId    = tResult.threadId;
-		threadidStr = tResult.threadidStr;
-		isNewThread = true;
-	}
-
 	// Pre-format body as HTML for display (non-fatal)
 	var displayText = utf8Text || bodyText || '';
 	var bodyHtml = await formatBodyHtml(displayText);
 
+	// Build message object and let unified threadMessage() handle threading
 	var dbObj = {
 		uuid:             uuid,
 		msg_id:           messageId,
-		threadid:         threadidStr,
-		thread_id:        threadId,
 		reply_to:         replyTo,
 		from_user:        fromUser,
 		to_user:          'All',
@@ -499,10 +443,15 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 		source_network_id: networkId
 	};
 
+	// Unified threading: reply_to lookup -> subject match -> create new thread
+	var threadedBefore = dbObj.threadid;
+	dbObj = await threadMessage(dbObj, msgtable, threadtable, shorty);
+
 	var mres = await postgres.insertObject(dbObj, msgtable);
 	if (!mres.status) {
-		if (isNewThread) {
-			await rollbackThread(threadtable, messageId);
+		// Roll back thread if threadMessage created a new one
+		if (!threadedBefore && dbObj.threadid) {
+			await rollbackThread(threadtable, dbObj.threadid);
 		}
 		alogger.writeAlog(3,
 			'importNntpArticle: failed to insert message ' + messageId +
@@ -513,11 +462,7 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 		return returnObj;
 	}
 
-	// Update thread stats if this was a reply into an existing thread
-	if (!isNewThread) {
-		await updateThreadStats(threadtable, threadId, systemTime, fromUser);
-	}
-
+	pushImportedMsgId(messageId, shorty);
 	returnObj.status   = true;
 	returnObj.imported = true;
 	return returnObj;

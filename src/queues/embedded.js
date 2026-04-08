@@ -43,6 +43,24 @@ export async function startEmbeddedWorkers(opts = {}) {
 		if (updatearray.length > 0) {
 			await echomail.updateThreadArray(updatearray);
 		}
+
+		// Post-batch orphan reconciliation
+		var importedIds = echomail.drainImportedMsgIds();
+		if (importedIds.length > 0) {
+			var byArea = {};
+			for (var item of importedIds) {
+				if (!byArea[item.shortcode]) byArea[item.shortcode] = [];
+				byArea[item.shortcode].push(item.msgId);
+			}
+			for (var sc in byArea) {
+				await echomail.reconcileOrphans(sc, byArea[sc]);
+			}
+			var reconUpdates = echomail.drainThreadUpdateArray();
+			if (reconUpdates.length > 0) {
+				await echomail.updateThreadArray(reconUpdates);
+			}
+		}
+
 		await msgAreas.updateAreaStats();
 	}
 

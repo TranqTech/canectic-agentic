@@ -271,20 +271,7 @@ async function TossInbound(inboundDir){
 	console.log("Duplicate:", dupecount)
 	console.log("Skipped:", skipcount)
 	console.log("\r\nTotal Processed:", processcount)
-	var updatearray = []
-	for await (var thread of echomail.threadUpdateArray){
-		var uObj = {
-			id: thread.split("[")[0],
-			shortcode: thread.split("[")[1]
-		}
-		updatearray.push(uObj)		
-	}
-	if (updatearray.length > 0){
-		console.log("Updating", updatearray.length, "threads")
-		await echomail.updateThreadArray(updatearray)
-	}else{
-		console.log("No threads to update")
-	}
+	// Thread updates are handled by postTossMaint() after the toss job completes
 }
 
 
@@ -571,6 +558,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 					returnObj.pktdupecount ++
 				}else if (result.imported){
 					returnObj.pktimportcount ++
+					if (message.MsgId) echomail.pushImportedMsgId(message.MsgId, (message.AreaTag || '').toLowerCase());
 				}
 				returnObj.pktsuccesscount ++
 			}else{
@@ -675,6 +663,7 @@ async function OldTossInbound(inboundDir){
 						pktdupecount ++
 					}else if (result.imported){
 						pktimportcount ++
+						if (message.MsgId) echomail.pushImportedMsgId(message.MsgId, (message.AreaTag || '').toLowerCase());
 					}
 					pktsuccesscount ++
 				}else{
@@ -713,20 +702,7 @@ async function OldTossInbound(inboundDir){
 	console.log("Duplicate:", dupecount)
 	console.log("Skipped:", skipcount)
 	console.log("\r\nTotal Processed:", processcount)
-	var updatearray = []
-	for await (var thread of echomail.threadUpdateArray){
-		var uObj = {
-			id: thread.split("[")[0],
-			shortcode: thread.split("[")[1]
-		}
-		updatearray.push(uObj)		
-	}
-	if (updatearray.length > 0){
-		console.log("Updating", updatearray.length, "threads")
-		await echomail.updateThreadArray(updatearray)
-	}else{
-		console.log("No threads to update")
-	}
+	// Thread updates are handled by postTossMaint() after the toss job completes
 }
 
 function WritePktToNode(messageArray, conn, systemaddress){
