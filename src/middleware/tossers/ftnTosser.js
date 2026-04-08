@@ -525,7 +525,18 @@ async function TossInboundFile(pktfilepath, movepktpath){
 	if (!pkt){
 		return null;
 	}
-	//Todo: validate pkt src/dest and pass, etc
+
+	// Look up who sent us this file (from inbound file log)
+	var _senderInfo = {};
+	try {
+		var inboundFileLog = (await import('../../models/inboundFileLog.js'));
+		var pktFilename = path.basename(pktfilepath);
+		var sender = await inboundFileLog.lookupSender(pktFilename);
+		if (sender) {
+			_senderInfo = { address: sender.peer_address, connectionId: sender.peer_connection_id };
+		}
+	} catch (_) {}
+
 	var targetsuccess = pkt.Messages.length
 	//pkt.Messages.forEach(message =>{
 	for await (var message of pkt.Messages){			
@@ -566,7 +577,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 				// Unknown areatag or toss error — store in bad echomail holding table
 				try {
 					var badEchomail = (await import('../../models/badEchomail.js'));
-					await badEchomail.storeBadMessage(message, returnObj._connectionInfo || {});
+					await badEchomail.storeBadMessage(message, _senderInfo);
 				} catch (badErr) {
 					alogger.writeClog(3, 'Failed to store bad echomail: ' + badErr.message, 'tosser', 'yellow');
 				}
@@ -614,7 +625,17 @@ async function OldTossInbound(inboundDir){
 		if (!pkt){
 			break;
 		}
-		//Todo: validate pkt src/dest and pass, etc
+
+		// Look up who sent us this file
+		var _senderInfo2 = {};
+		try {
+			var inboundFileLog2 = (await import('../../models/inboundFileLog.js'));
+			var sender2 = await inboundFileLog2.lookupSender(file);
+			if (sender2) {
+				_senderInfo2 = { address: sender2.peer_address, connectionId: sender2.peer_connection_id };
+			}
+		} catch (_) {}
+
 		var targetsuccess = pkt.Messages.length
 		var pktsuccesscount = 0
 		var pktdupecount = 0
@@ -660,7 +681,7 @@ async function OldTossInbound(inboundDir){
 					// Unknown areatag or toss error — store in bad echomail holding table
 					try {
 						var badEchomail = (await import('../../models/badEchomail.js'));
-						await badEchomail.storeBadMessage(message, {});
+						await badEchomail.storeBadMessage(message, _senderInfo2);
 					} catch (badErr) {
 						alogger.writeClog(3, 'Failed to store bad echomail: ' + badErr.message, 'tosser', 'yellow');
 					}

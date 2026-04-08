@@ -21,6 +21,7 @@ import * as systemAddresses from '../models/systemAddresses.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
 import { resolveFileboxPath } from '../utils/fileboxPath.js';
+import * as inboundFileLog from '../models/inboundFileLog.js';
 
 class SessionController extends EventEmitter {
 	constructor(transport, role, options) {
@@ -350,6 +351,15 @@ class SessionController extends EventEmitter {
 				alogger.writeClog(5, 'Session ' + this.uuid + ': received ' + info.name + ' (' + info.size + ' bytes)' +
 					(info.wildcardMatch ? ' [wildcard: ' + info.wildcardMatch + ']' : ''), 'mailer', 'green');
 
+				// Log inbound file with peer info for tosser traceability
+				var cd = this.peerConnection ? (this.peerConnection.connection_data || {}) : {};
+				inboundFileLog.logFile(info.name, info.path, info.size, {
+					address: cd.address || (this.peerAddresses[0] || '').split('@')[0],
+					connectionId: this.peerConnection ? this.peerConnection.id : null,
+					peerName: this.peerName,
+					sessionUuid: this.uuid
+				}).catch(function() {});
+
 				// FREQ: if we received a .req file, process it
 				if (info.name && info.name.toLowerCase().endsWith('.req') && info.path) {
 					this._processFreqRequest(info.path);
@@ -441,6 +451,14 @@ class SessionController extends EventEmitter {
 			this.bytesReceived += info.size;
 			alogger.writeClog(5, 'Session ' + this.uuid + ': Wazoo received ' + info.name +
 				' (' + info.size + ' bytes)', 'mailer', 'green');
+
+			var cd = this.peerConnection ? (this.peerConnection.connection_data || {}) : {};
+			inboundFileLog.logFile(info.name, info.path, info.size, {
+				address: cd.address || (this.peerAddresses[0] || '').split('@')[0],
+				connectionId: this.peerConnection ? this.peerConnection.id : null,
+				peerName: this.peerName,
+				sessionUuid: this.uuid
+			}).catch(function() {});
 		});
 
 		var result = await wazoo.run();
