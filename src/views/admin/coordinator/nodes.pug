@@ -117,15 +117,19 @@ block content
     -
       var flagDescs = {
         'CM': 'Continuous Mail -- system is always available',
-        'MO': 'Mailer Only -- no BBS, mail transfers only',
+        'MO': 'Modem Only -- no internet connectivity',
         'LO': 'Listed Only -- accepts calls only from listed nodes',
         'MN': 'Mailer Not Running -- no mailer software active',
-        'IBN': 'Binkp capable -- supports binkp protocol',
-        'ITN': 'Telnet capable -- supports telnet connections',
-        'IFC': 'IFCico capable -- supports ifcico protocol',
+        'IBN': 'Binkp -- supports binkp protocol (port 24554)',
+        'ITN': 'Telnet -- supports telnet connections (port 23)',
+        'IFC': 'IFCico -- supports ifcico protocol',
+        'ISSH': 'SSH -- supports secure shell connections',
+        'IVM': 'VModem -- supports VModem protocol',
+        'IEM': 'Email -- email gateway capability',
         'IP': 'IP connectivity -- reachable via internet',
-        'PING': 'Responds to ICMP ping',
-        'IPv6': 'Has IPv6 connectivity'
+        'INO4': 'IPv6 Only -- no IPv4 connectivity',
+        'IPv6': 'Has IPv6 connectivity',
+        'PING': 'Responds to ICMP ping'
       }
 
     //- Add Node Modal

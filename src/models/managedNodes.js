@@ -19,9 +19,13 @@ var COMMON_FLAGS = [
 	'IBN',      // Binkp capable
 	'ITN',      // Telnet capable
 	'IFC',      // IFCico capable
+	'ISSH',     // SSH capable
+	'IVM',      // VModem capable
+	'IEM',      // Email gateway
 	'IP',       // Has IP connectivity
-	'PING',     // Responds to ICMP ping
+	'INO4',     // IPv6-only (no IPv4)
 	'IPv6',     // Has IPv6 connectivity
+	'PING',     // Responds to ICMP ping
 ];
 
 // ---------------------------------------------------------------------------
