@@ -62,8 +62,12 @@ block content
                           span.me-1= (idx + 1) + '.'
                           = stageLabel ? stageLabel.label : stageName
                           if stageArg
-                            small.ms-1.text-muted (#{stageArg})
+                            small.ms-1.text-muted.stage-arg-display (#{stageArg})
+                          else if stageLabel && stageLabel.needsArg
+                            small.ms-1.text-warning.stage-arg-display (no arg)
                           |
+                          span.edit-stage-arg.ms-1(style='cursor:pointer;opacity:0.6' title='Edit argument')
+                            i.bi.bi-pencil-fill(style='font-size:0.7rem')
                           span.remove-stage(style='cursor:pointer;opacity:0.6' title='Remove') &times;
                     .mt-2
                       .input-group.input-group-sm(style='max-width:400px')
@@ -328,6 +332,34 @@ block content
           var stages = collectStages(stageList);
           saveStages(flowId, stages, stageList);
         }
+      });
+
+      // Edit stage argument
+      document.addEventListener('click', function(e) {
+        var editBtn = e.target.closest('.edit-stage-arg');
+        if (!editBtn) return;
+        var badge = editBtn.closest('.stage-badge');
+        var currentArg = badge.dataset.arg || '';
+        var stageName = badge.dataset.stage;
+        var newArg = window.prompt('Argument for ' + stageName + ':', currentArg);
+        if (newArg === null) return; // cancelled
+        badge.dataset.arg = newArg.trim();
+        // Update display text
+        var argDisplay = badge.querySelector('.stage-arg-display');
+        if (argDisplay) {
+          argDisplay.textContent = newArg.trim() ? '(' + newArg.trim() + ')' : '(no arg)';
+          argDisplay.className = newArg.trim() ? 'ms-1 text-muted stage-arg-display' : 'ms-1 text-warning stage-arg-display';
+        } else if (newArg.trim()) {
+          var small = document.createElement('small');
+          small.className = 'ms-1 text-muted stage-arg-display';
+          small.textContent = '(' + newArg.trim() + ')';
+          editBtn.parentElement.insertBefore(small, editBtn);
+        }
+        // Save
+        var stageList = badge.closest('.stage-list');
+        var flowId = stageList.dataset.flowId;
+        var stages = collectStages(stageList);
+        saveStages(flowId, stages, stageList);
       });
 
       // Drag-to-reorder stages
