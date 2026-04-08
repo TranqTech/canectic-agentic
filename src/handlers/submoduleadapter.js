@@ -15,16 +15,19 @@ import * as alogger from "../utils/alogger.js";
  * This eliminates the cascading/orphan timeout problem.
  */
 class SubModuleAdapter extends BaseHandler {
-	constructor(call, SubModuleClass, handlerType) {
+	constructor(call, SubModuleClass, handlerType, options) {
 		super(call, handlerType || "SubModuleAdapter");
 		this.SubModuleClass = SubModuleClass;
+		this._options = options || null;
 		this.module = null;
 	}
 
 	startStage() {
 		if (!this.call) return;
 		try {
-			this.module = new this.SubModuleClass(this.call);
+			this.module = this._options
+				? new this.SubModuleClass(this.call, this._options)
+				: new this.SubModuleClass(this.call);
 
 			this.module.emitter.on("ModuleReturn", () => {
 				this._onModuleReturn();

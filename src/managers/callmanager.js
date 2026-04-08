@@ -33,6 +33,7 @@ import { pmCheck } from "../handlers/menucommands/pmCheck.js";
 import { fileBatchCheck } from "../handlers/menucommands/fileBatchCheck.js";
 import { whosOnlineCheck } from "../handlers/menucommands/whosOnlineCheck.js";
 import { mailVerifyCheck } from "../handlers/menucommands/mailVerifyCheck.js";
+import { DisplayScreen } from "../handlers/menucommands/displayScreen.js";
 
 //models
 import {getDoorConfig} from "../models/doors.js"
@@ -66,46 +67,48 @@ const handlerRegistry = {
 	"sysinfo":       (call) => new SubModuleAdapter(call, SysInfo, "SysInfo"),
 	"bulletins":     (call) => new SubModuleAdapter(call, BulletinViewer, "Bulletins"),
 	"verify_mail":   (call) => new SubModuleAdapter(call, mailVerifyCheck, "MailVerifyCheck"),
+	"displayScreen": (call, args) => new SubModuleAdapter(call, DisplayScreen, "DisplayScreen", { arg: args && args.arg || '' }),
 	//"main_menu":    (call) => new MainMenuHandler(call),
 	//"top":          (call) => new TopMenuHandler(call),
 	//"logoff":       (call) => new LogoffHandler(call),
 };
 
 // --- Call flow definitions ---
-// Ordered arrays of stage names. "goodbye" is a reserved name that triggers hangup.
-// Handlers that emit a specific next stage (e.g. doors returning to a menu) override the flow.
-// Handlers that emit ModuleReturn without a next stage advance to the next flow entry.
-const callFlows = {
+// DB-backed via call_flows table. Hardcoded fallbacks used if DB is empty.
+// Flows are arrays of stage entries: strings or { stage, arg } objects.
+// "goodbye" is a reserved name that triggers hangup.
+var callFlows = {
 	"Standard": [
-		"negotiate",
-		"logon",
-		"last_callers",
-		"check_online",
-		"announcements",
-		"wall",
-		"verify_mail",
-		"check_email",
-		"check_batch",
-		"menu",
-		"goodbye",
+		"negotiate", "logon", "last_callers", "check_online",
+		"announcements", "wall", "verify_mail", "check_email",
+		"check_batch", "menu", "goodbye",
 	],
-	"Doorserver": [
-		"door_auth",
-		"door_launch",
-		"goodbye",
-	],
-	"WebDoor": [
-		"webdoor_auth",
-		"door_launch",
-		"goodbye",
-	],
-	"Test": [
-		"negotiate",
-		//"set_test_user",
-		//"main_menu",
-		"goodbye",
-	],
+	"Doorserver": ["door_auth", "door_launch", "goodbye"],
+	"WebDoor": ["webdoor_auth", "door_launch", "goodbye"],
+	"Test": ["negotiate", "goodbye"],
 };
+
+// Load flows from DB, overriding hardcoded defaults
+async function loadFlowsFromDB() {
+	try {
+		var callFlowsModel = (await import('../models/callFlows.js'));
+		var dbFlows = await callFlowsModel.getActiveFlows();
+		if (dbFlows && dbFlows.length > 0) {
+			for (var row of dbFlows) {
+				var stages = row.stages;
+				if (typeof stages === 'string') {
+					try { stages = JSON.parse(stages); } catch (_) { stages = []; }
+				}
+				if (Array.isArray(stages) && stages.length > 0) {
+					callFlows[row.name] = stages;
+				}
+			}
+			alogger.writeAlog(5, 'Loaded ' + dbFlows.length + ' call flow(s) from DB', 'cyan');
+		}
+	} catch (err) {
+		alogger.writeAlog(3, 'Failed to load call flows from DB, using defaults: ' + err.message, 'yellow');
+	}
+}
 
 // --- Resolve the flow name, with fallback ---
 function getCallFlow(floworder) {
@@ -325,7 +328,7 @@ class IncomingCall{
 	}
 
 	// --- Handler lifecycle ---
-	loadHandler(stageName){
+	loadHandler(stageName, stageArgs){
 		// "goodbye" is a reserved directive — always triggers hangup
 		if (stageName === "goodbye") {
 			this.hangUpCall();
@@ -350,7 +353,7 @@ class IncomingCall{
 		}
 
 		try{
-			const handler = factory(this);
+			const handler = factory(this, stageArgs);
 			this.currentHandler = handler;
 			this.call_status = stageName;
 
@@ -476,7 +479,7 @@ class IncomingCall{
 
 		var logmsg = this.loggingId + "\n  Stage complete. Loading: " + resolved.stage;
 		alogger.writeAlog(5, logmsg, "greenbright");
-		this.loadHandler(resolved.stage);
+		this.loadHandler(resolved.stage, resolved.args);
 	}
 
 	_onHandlerReturn(fromStage){
@@ -500,7 +503,7 @@ class IncomingCall{
 
 		var logmsg = this.loggingId + "\n  Handler returned from: " + fromStage + ". Advancing to: " + resolved.stage;
 		alogger.writeAlog(4, logmsg, "cyanbright");
-		this.loadHandler(resolved.stage);
+		this.loadHandler(resolved.stage, resolved.args);
 	}
 
 	// --- Data routing ---
@@ -854,4 +857,4 @@ class CallManager{
 	}
 }
 
-export{CallManager, CallPool}
+export{CallManager, CallPool, loadFlowsFromDB}

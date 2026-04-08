@@ -234,6 +234,7 @@ Last updated: 2026-04-06
 | 41 | Inbound file wildcards | [x] | Sysop-configurable glob pattern rules route inbound files to specific directories. Skip toss by default, still_toss flag. Admin CRUD with drag-to-reorder and test tool. |
 | 42 | File area retention limits | [x] | Optional max_age_days and max_files on file areas and file groups. Daily file-maintenance job enforces limits (DB + disk cleanup). |
 | 43 | Timed events | [x] | Sysop-configurable scheduled commands (door maintenance, backups). NativeCommand + Dosemu launch types, cron scheduling, %X variables, timeout, output capture. Admin CRUD. |
+| 44 | Call flow editor | [x] | DB-backed call flows and pools. Admin stage editor with drag-to-reorder, pool-to-flow assignment. Replaces hardcoded arrays. |
 
 ---
 

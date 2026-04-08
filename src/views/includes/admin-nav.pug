@@ -151,6 +151,17 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'nodespy'
               span.visually-hidden  (current)
 
+        //- Call Flows
+        li.nav-item
+          a.nav-link(
+            href='/admin/callflows'
+            class=activenav === 'callflows' ? 'active' : ''
+          )
+            i.bi.bi-diagram-2.me-1
+            | Flows
+            if activenav === 'callflows'
+              span.visually-hidden  (current)
+
         //- Timed Events
         li.nav-item
           a.nav-link(

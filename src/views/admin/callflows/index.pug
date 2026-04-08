@@ -1,0 +1,384 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-diagram-2.me-2
+          | Call Flows &amp; Pools
+
+        //- Call Flows
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Call Flows
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addFlowModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Flow
+          .card-body
+            if flows && flows.length > 0
+              each flow in flows
+                .card.mb-3
+                  .card-header.bg-dark.d-flex.justify-content-between.align-items-center
+                    div
+                      strong= flow.title || flow.name
+                      |
+                      code.ms-2= flow.name
+                      if flow.is_system
+                        span.badge.bg-secondary.ms-2 System
+                      if !flow.active
+                        span.badge.bg-danger.ms-2 Inactive
+                    div
+                      button.btn.btn-sm.btn-primary.me-1.edit-flow-btn(
+                        data-bs-toggle='modal' data-bs-target='#editFlowModal'
+                        data-id=flow.id
+                        data-name=flow.name
+                        data-title=flow.title || ''
+                        data-description=flow.description || ''
+                        data-active=(flow.active ? 'true' : 'false')
+                        data-system=(flow.is_system ? 'true' : 'false')
+                      )
+                        i.bi.bi-pencil
+                      if !flow.is_system
+                        form.d-inline(method='POST' action='/admin/callflows/' + flow.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this flow?")')
+                            i.bi.bi-trash
+                  .card-body
+                    - var stages = Array.isArray(flow.stages) ? flow.stages : (typeof flow.stages === 'string' ? JSON.parse(flow.stages) : [])
+                    .stage-list(data-flow-id=flow.id)
+                      each stg, idx in stages
+                        - var stageName = typeof stg === 'string' ? stg : (stg.stage || '')
+                        - var stageArg = typeof stg === 'object' && stg.arg ? stg.arg : ''
+                        - var stageLabel = availableStages.find(function(s) { return s.name === stageName; })
+                        .badge.bg-info.text-dark.me-1.mb-1.stage-badge.p-2(
+                          draggable='true'
+                          data-stage=stageName
+                          data-arg=stageArg
+                          data-idx=idx
+                          style='cursor:grab;font-size:0.85rem'
+                        )
+                          span.me-1= (idx + 1) + '.'
+                          = stageLabel ? stageLabel.label : stageName
+                          if stageArg
+                            small.ms-1.text-muted (#{stageArg})
+                          |
+                          span.remove-stage(style='cursor:pointer;opacity:0.6' title='Remove') &times;
+                    .mt-2
+                      .input-group.input-group-sm(style='max-width:400px')
+                        select.form-select.form-select-sm.add-stage-select
+                          option(value='') + Add Stage...
+                          each s in availableStages
+                            option(value=s.name data-needsarg=s.needsArg || false)= s.label
+                        input.form-control.form-control-sm.add-stage-arg(type='text' placeholder='arg' style='display:none;max-width:150px')
+                        button.btn.btn-sm.btn-success.add-stage-btn(type='button') Add
+            else
+              p.text-muted No call flows configured.
+
+        //- Call Pools
+        .card.mb-4
+          .card-header.bg-secondary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Call Pools
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addPoolModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Pool
+          .card-body
+            if pools && pools.length > 0
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Pool Name
+                    th Flow
+                    th WebSocket Paths
+                    th Status
+                    th(style='width:100px')
+                tbody
+                  each pool in pools
+                    - var wsPaths = Array.isArray(pool.ws_paths) ? pool.ws_paths : (typeof pool.ws_paths === 'string' ? JSON.parse(pool.ws_paths) : [])
+                    tr
+                      td
+                        strong= pool.name
+                        if pool.is_system
+                          span.badge.bg-secondary.ms-2 System
+                        if pool.description
+                          br
+                          small.text-muted= pool.description
+                      td: code= pool.flow_name
+                      td
+                        each wp in wsPaths
+                          code.me-1= wp
+                      td
+                        if pool.active
+                          span.badge.bg-success Active
+                        else
+                          span.badge.bg-danger Inactive
+                      td
+                        button.btn.btn-sm.btn-primary.me-1(
+                          data-bs-toggle='modal' data-bs-target='#editPoolModal'
+                          data-id=pool.id
+                          data-name=pool.name
+                          data-flowname=pool.flow_name
+                          data-wspaths=JSON.stringify(wsPaths)
+                          data-description=pool.description || ''
+                          data-active=(pool.active ? 'true' : 'false')
+                          data-system=(pool.is_system ? 'true' : 'false')
+                        )
+                          i.bi.bi-pencil
+                        if !pool.is_system
+                          form.d-inline(method='POST' action='/admin/callpools/' + pool.id + '/delete')
+                            button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this pool?")')
+                              i.bi.bi-trash
+            else
+              p.text-muted No call pools configured.
+
+        .alert.alert-info
+          i.bi.bi-info-circle.me-2
+          | Changes to call flows and pools take effect on the next gateway restart.
+
+    //- Add Flow Modal
+    .modal.fade#addFlowModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Call Flow
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/callflows/new')
+            .modal-body
+              .mb-3
+                label.form-label Name (slug)
+                input.form-control(name='name' required placeholder='e.g. CustomLogin')
+              .mb-3
+                label.form-label Title
+                input.form-control(name='title' placeholder='Display title')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description')
+              .mb-3
+                label.form-label Initial Stages (JSON)
+                textarea.form-control(name='stages' rows='4' placeholder='[{"stage":"negotiate"},{"stage":"logon"},{"stage":"menu"},{"stage":"goodbye"}]')
+                .form-text Add stages after creation using the drag-and-drop editor.
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addFlowActive' checked value='true')
+                label.form-check-label(for='addFlowActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Flow Modal
+    .modal.fade#editFlowModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Call Flow
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editFlowForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Title
+                input.form-control(name='title' id='efTitle')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='efDescription')
+              .form-check.mb-3
+                input.form-check-input(type='checkbox' name='active' id='efActive' value='true')
+                label.form-check-label(for='efActive') Active
+              #efSystemNote.alert.alert-warning(style='display:none')
+                i.bi.bi-lock.me-1
+                | System flow: name cannot be changed. Edit stages using the inline editor.
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    //- Add Pool Modal
+    .modal.fade#addPoolModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Call Pool
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/callpools/new')
+            .modal-body
+              .mb-3
+                label.form-label Pool Name
+                input.form-control(name='name' required placeholder='e.g. CustomPool')
+              .mb-3
+                label.form-label Call Flow
+                select.form-select(name='flow_name' required)
+                  each flow in flows
+                    option(value=flow.name)= (flow.title || flow.name) + ' (' + flow.name + ')'
+              .mb-3
+                label.form-label WebSocket Paths (comma-separated)
+                input.form-control(name='ws_paths' placeholder='/ws/custom, /ws/alt')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addPoolActive' checked value='true')
+                label.form-check-label(for='addPoolActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Pool Modal
+    .modal.fade#editPoolModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Call Pool
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editPoolForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Call Flow
+                select.form-select(name='flow_name' id='epFlowName')
+                  each flow in flows
+                    option(value=flow.name)= (flow.title || flow.name) + ' (' + flow.name + ')'
+              .mb-3
+                label.form-label WebSocket Paths (comma-separated)
+                input.form-control(name='ws_paths' id='epWsPaths')
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='epDescription')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='epActive' value='true')
+                label.form-check-label(for='epActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      // Edit Flow modal
+      var editFlowModal = document.getElementById('editFlowModal');
+      if (editFlowModal) {
+        editFlowModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editFlowForm').action = '/admin/callflows/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('efTitle').value = btn.getAttribute('data-title') || '';
+          document.getElementById('efDescription').value = btn.getAttribute('data-description') || '';
+          document.getElementById('efActive').checked = btn.getAttribute('data-active') === 'true';
+          document.getElementById('efSystemNote').style.display = btn.getAttribute('data-system') === 'true' ? '' : 'none';
+        });
+      }
+
+      // Edit Pool modal
+      var editPoolModal = document.getElementById('editPoolModal');
+      if (editPoolModal) {
+        editPoolModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editPoolForm').action = '/admin/callpools/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('epFlowName').value = btn.getAttribute('data-flowname') || '';
+          var wsPaths = [];
+          try { wsPaths = JSON.parse(btn.getAttribute('data-wspaths') || '[]'); } catch(_) {}
+          document.getElementById('epWsPaths').value = wsPaths.join(', ');
+          document.getElementById('epDescription').value = btn.getAttribute('data-description') || '';
+          document.getElementById('epActive').checked = btn.getAttribute('data-active') === 'true';
+        });
+      }
+
+      // Stage management — add/remove/reorder stages inline
+      document.querySelectorAll('.add-stage-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var wrapper = btn.closest('.mt-2');
+          var sel = wrapper.querySelector('.add-stage-select');
+          var argInput = wrapper.querySelector('.add-stage-arg');
+          var stageName = sel.value;
+          if (!stageName) return;
+
+          var stageArg = argInput.style.display !== 'none' ? argInput.value.trim() : '';
+          var flowId = btn.closest('.card-body').querySelector('.stage-list').dataset.flowId;
+
+          // Collect current stages
+          var stageList = btn.closest('.card-body').querySelector('.stage-list');
+          var stages = collectStages(stageList);
+          var newStage = stageArg ? { stage: stageName, arg: stageArg } : { stage: stageName };
+          stages.push(newStage);
+
+          saveStages(flowId, stages, stageList);
+          sel.value = '';
+          argInput.value = '';
+          argInput.style.display = 'none';
+        });
+      });
+
+      // Show/hide arg input based on stage selection
+      document.querySelectorAll('.add-stage-select').forEach(function(sel) {
+        sel.addEventListener('change', function() {
+          var argInput = sel.closest('.input-group').querySelector('.add-stage-arg');
+          var opt = sel.options[sel.selectedIndex];
+          if (opt && opt.dataset.needsarg === 'true') {
+            argInput.style.display = '';
+          } else {
+            argInput.style.display = 'none';
+            argInput.value = '';
+          }
+        });
+      });
+
+      // Remove stage
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('remove-stage')) {
+          var badge = e.target.closest('.stage-badge');
+          var stageList = badge.closest('.stage-list');
+          var flowId = stageList.dataset.flowId;
+          badge.remove();
+          var stages = collectStages(stageList);
+          saveStages(flowId, stages, stageList);
+        }
+      });
+
+      // Drag-to-reorder stages
+      var dragBadge = null;
+      document.addEventListener('dragstart', function(e) {
+        if (e.target.classList.contains('stage-badge')) {
+          dragBadge = e.target;
+          e.dataTransfer.effectAllowed = 'move';
+        }
+      });
+      document.addEventListener('dragover', function(e) {
+        if (!dragBadge) return;
+        var target = e.target.closest('.stage-badge');
+        if (target && target !== dragBadge && target.parentElement === dragBadge.parentElement) {
+          e.preventDefault();
+          var rect = target.getBoundingClientRect();
+          var mid = rect.left + rect.width / 2;
+          if (e.clientX < mid) {
+            target.parentElement.insertBefore(dragBadge, target);
+          } else {
+            target.parentElement.insertBefore(dragBadge, target.nextSibling);
+          }
+        }
+      });
+      document.addEventListener('dragend', function() {
+        if (!dragBadge) return;
+        var stageList = dragBadge.closest('.stage-list');
+        var flowId = stageList.dataset.flowId;
+        dragBadge = null;
+        var stages = collectStages(stageList);
+        saveStages(flowId, stages, stageList);
+      });
+
+      function collectStages(stageList) {
+        var badges = stageList.querySelectorAll('.stage-badge');
+        var stages = [];
+        badges.forEach(function(b) {
+          var s = { stage: b.dataset.stage };
+          if (b.dataset.arg) s.arg = b.dataset.arg;
+          stages.push(s);
+        });
+        return stages;
+      }
+
+      function saveStages(flowId, stages, stageList) {
+        fetch('/admin/callflows/' + flowId + '/stages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stages: stages })
+        }).then(function() {
+          // Refresh the badge display
+          location.reload();
+        });
+      }

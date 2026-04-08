@@ -15,7 +15,7 @@ import { PresenceServer } from "../src/servers/presenceSocket.js"
 import * as dotenv from 'dotenv';
 import * as systeminfo from "../src/utils/systeminfo.js"
 import * as http from "http"
-import {CallManager, CallPool} from "../src/managers/callmanager.js"
+import {CallManager, CallPool, loadFlowsFromDB} from "../src/managers/callmanager.js"
 import {nodeManager} from "../src/managers/nodemanager.js"
 import { SocatManager } from "../src/managers/socatmanager.js";
 import {webserver} from "../src/servers/webserver.js"
@@ -26,6 +26,7 @@ import * as userAreaSubs from '../src/models/userAreaSubs.js';
 import * as userFilePointers from '../src/models/userFilePointers.js';
 import * as userFileSubs from '../src/models/userFileSubs.js';
 import { ensureQwkConfNumbers } from '../src/models/msgAreas.js';
+import * as callFlowsModel from '../src/models/callFlows.js';
 import { seedDefaultTheme } from '../src/models/themes.js';
 
 // --- Queue infrastructure ---
@@ -70,18 +71,23 @@ var mailerManager     // only used in embedded mode
 
 // --- Configuration ---
 
-var wspaths = [
+// Hardcoded fallbacks (used if DB is empty)
+var fallbackWsPaths = [
 	{name: "Doorserver", path: "/ws/doorserver", callpool: "Doorserver"},
 	{name: "WebDoor",    path: "/ws/webdoor",    callpool: "WebDoor"},
 	{name: "Catchall",   path: "/",             callpool: "PrimaryBBS"},
 	{name: "BBS",        path: "/ws/bbs",       callpool: "PrimaryBBS"},
 ]
 
-var callpools = [
+var fallbackCallPools = [
 	{name: "PrimaryBBS",  floworder: "Standard"},
 	{name: "Doorserver",  floworder: "Doorserver"},
 	{name: "WebDoor",     floworder: "WebDoor"},
 ]
+
+// Runtime pools/paths (populated from DB or fallbacks)
+var callpools = [];
+var wspaths = [];
 
 // --- Runtime lookups (populated during startup) ---
 var callPoolMap = {}   // name -> CallPool instance
@@ -161,6 +167,40 @@ async function prerunMaint(){
 	try {
 		await pgpool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_callflow_at TIMESTAMP");
 	} catch (_) {}
+
+	// Seed and load call flows/pools from DB
+	await callFlowsModel.seedDefaults();
+	await loadFlowsFromDB();
+
+	// Build runtime pool/path arrays from DB (fallback to hardcoded)
+	try {
+		var dbPools = await callFlowsModel.getActivePools();
+		if (dbPools && dbPools.length > 0) {
+			callpools = dbPools.map(function(p) {
+				return { name: p.name, floworder: p.flow_name };
+			});
+			// Build WS paths from pool ws_paths JSONB
+			wspaths = [];
+			for (var p of dbPools) {
+				var paths = p.ws_paths;
+				if (typeof paths === 'string') { try { paths = JSON.parse(paths); } catch(_) { paths = []; } }
+				if (!Array.isArray(paths)) paths = [];
+				for (var wsPath of paths) {
+					wspaths.push({ name: p.name, path: wsPath, callpool: p.name });
+				}
+			}
+			alogger.writeAlog(5, '  Loaded ' + dbPools.length + ' call pool(s) from DB', 'cyan');
+		}
+	} catch (err) {
+		alogger.writeAlog(3, '  Failed to load call pools from DB: ' + err.message, 'yellow');
+	}
+
+	// Fallback to hardcoded if DB returned nothing
+	if (callpools.length === 0) {
+		callpools = fallbackCallPools;
+		wspaths = fallbackWsPaths;
+		alogger.writeAlog(5, '  Using fallback call pools (DB empty)', 'yellow');
+	}
 }
 
 async function startSocatManager(){

@@ -27,6 +27,7 @@ import * as seasonalArt from '../models/seasonalArt.js';
 import * as freqModel from '../models/freq.js';
 import * as fileWildcards from '../models/fileWildcards.js';
 import * as timedEvents from '../models/timedEvents.js';
+import * as callFlowsModel from '../models/callFlows.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -4710,6 +4711,60 @@ router.post('/wildcards/test', express.json(), requireAdmin, async (req, res) =>
 	} else {
 		res.json({ match: false, message: 'No match -- file would go to default inbound directory' });
 	}
+});
+
+// -------------------------------------------------------
+// Call Flows
+// -------------------------------------------------------
+
+router.get('/callflows', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var flows = await callFlowsModel.getAllFlows();
+	var pools = await callFlowsModel.getAllPools();
+	var availableStages = callFlowsModel.getAvailableStages();
+	res.render('admin/callflows/index', {
+		sufficientAccess, title: 'Call Flows', activelink: 'callflows', activenav: 'system',
+		currentuser, flows, pools, availableStages
+	});
+});
+
+router.post('/callflows/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await callFlowsModel.createFlow(req.body);
+	res.redirect('/admin/callflows');
+});
+
+router.post('/callflows/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await callFlowsModel.updateFlow(parseInt(req.params.id), req.body);
+	res.redirect('/admin/callflows');
+});
+
+router.post('/callflows/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await callFlowsModel.deleteFlow(parseInt(req.params.id));
+	res.redirect('/admin/callflows');
+});
+
+router.post('/callflows/:id/stages', express.json(), requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	if (req.body && Array.isArray(req.body.stages)) {
+		await callFlowsModel.updateFlow(id, { stages: req.body.stages });
+	}
+	res.json({ status: true });
+});
+
+router.post('/callpools/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await callFlowsModel.createPool(req.body);
+	res.redirect('/admin/callflows');
+});
+
+router.post('/callpools/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await callFlowsModel.updatePool(parseInt(req.params.id), req.body);
+	res.redirect('/admin/callflows');
+});
+
+router.post('/callpools/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await callFlowsModel.deletePool(parseInt(req.params.id));
+	res.redirect('/admin/callflows');
 });
 
 // -------------------------------------------------------

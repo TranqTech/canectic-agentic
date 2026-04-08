@@ -93,6 +93,9 @@
 - Fix: TIC outbound delivery broken -- staged TIC descriptors and attached files had no .flo flow file entries, so the mailer never discovered or sent them. Now creates .flo entries with zone-aware directories.
 - Timed events system: sysop-configurable scheduled commands for door maintenance, backups, etc. Launch types: Native Command (shell) and Dosemu (headless). Cron scheduling via BullMQ, %X variable substitution, timeout enforcement, output capture. Admin CRUD at /admin/timed-events with run-now button.
 - Update script: txtfiles/ now completely skipped during updates (was copying new files which could still interfere with custom art). Use --include-art to merge art files explicitly.
+- Call flow editor: DB-backed call flows and call pools, replacing hardcoded arrays. Admin UI at /admin/callflows with drag-to-reorder stage editor, add/remove stages, pool-to-flow assignment, WS path config. System flows (Standard, Doorserver, WebDoor) seeded on first run, protected from deletion.
+- displayScreen menu command: display art files from menus and call flow stages with type:Welcome/Goodbye random selection or specific subdir/filename targeting
+- Missing menu commands added to admin dropdown: QWK Transfer, News Viewer, Notifications
 
 ## v0.9.5a (2026-04-04)
 
