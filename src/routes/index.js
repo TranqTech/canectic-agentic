@@ -181,7 +181,7 @@ router.get('/', async function(req, res, next) {
 // Message Routes
 // -------------------------------------------------------
 
-// Message Groups listing
+// Message area browser — combined grouped view with subscriptions
 router.get('/messages', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) {
@@ -189,41 +189,52 @@ router.get('/messages', async (req, res) => {
 			title: 'Messages',
 			activelink: 'messages',
 			currentuser: null,
-			grouplist: []
+			groupedAreas: []
 		});
 	}
 
 	var userSecurity = parseInt(currentuser.security) || 0;
 	var userId = await resolveUserId(currentuser);
 	var grouplist = await messages.listMsgGroups(userSecurity);
-
-	// Filter groups by read flags (DB already filtered by read_security level)
 	grouplist = grouplist.filter(function(g) { return checkAreaReadAccess(currentuser, g); });
 
-	// Attach unread counts per group (sum of unread across accessible areas)
-	if (userId) {
-		for (var group of grouplist) {
-			var areas = await messages.getAreasInGroup(group.shortcode, userSecurity);
-			// Filter areas by read flags
-			areas = areas.filter(function(a) { return checkAreaReadAccess(currentuser, a); });
-			var groupUnread = 0;
-			for (var area of areas) {
-				var unread = await userMsgPointers.getUnreadCount(userId, area.shortcode);
-				groupUnread += unread;
-			}
-			group.unread_count = groupUnread;
-			group._areaCount = areas.length;
+	// Build combined list: groups with their areas, subscriptions, and unread counts
+	var groupedAreas = [];
+	for (var group of grouplist) {
+		var areas = await messages.getAreasInGroup(group.shortcode, userSecurity);
+		areas = areas.filter(function(a) { return checkAreaReadAccess(currentuser, a); });
+		if (areas.length === 0) continue;
+
+		// Get subscription map and unread counts
+		var subMap = userId ? await userAreaSubs.getSubscriptionMap(userId, areas) : {};
+		for (var area of areas) {
+			area.subscribed = subMap[area.shortcode] !== undefined ? subMap[area.shortcode] : (area.newscan_default !== false);
+			area.unread_count = userId ? await userMsgPointers.getUnreadCount(userId, area.shortcode) : 0;
 		}
-		// Remove groups with no accessible areas
-		grouplist = grouplist.filter(function(g) { return g._areaCount > 0; });
+
+		groupedAreas.push({
+			group: group,
+			areas: areas
+		});
 	}
 
 	res.render('messages/index', {
 		title: 'Messages',
 		activelink: 'messages',
 		currentuser: currentuser,
-		grouplist: grouplist
+		groupedAreas: groupedAreas
 	});
+});
+
+// AJAX: toggle message area subscription
+router.post('/messages/area/:shortcode/subscribe', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.status(401).json({ error: 'Not authenticated' });
+	var userId = await resolveUserId(currentuser);
+	if (!userId) return res.status(401).json({ error: 'No user' });
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var newState = await userAreaSubs.toggleSubscription(userId, shortcode);
+	res.json({ subscribed: newState });
 });
 
 // Areas in a group

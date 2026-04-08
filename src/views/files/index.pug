@@ -16,50 +16,111 @@ block content
         .col-10
           .card
             .card-header.bg-darkblue.text-white
-              .row
-                .col-8
-                  h2
-                    i.bi.bi-folder
-                    |  File Groups
-                .col-4
-                  .text-end
-                    a.btn.btn-sm.btn-outline-light(href='/files/search')
+              .d-flex.justify-content-between.align-items-center
+                h2.mb-0
+                  i.bi.bi-folder.me-2
+                  | File Areas
+                .d-flex.align-items-center
+                  a.btn.btn-sm.btn-outline-light.me-3(href='/files/search')
+                    i.bi.bi-search.me-1
+                    | Search
+                  .input-group.input-group-sm.me-3(style='width:220px')
+                    span.input-group-text
                       i.bi.bi-search
-                      |  Search Files
+                    input#areaSearch.form-control(type='text' placeholder='Filter areas...')
+                  .btn-group.btn-group-sm
+                    button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
+                    button.btn.btn-outline-light.view-toggle(data-view='all') All
             .card-body
-              if grouplist && grouplist.length > 0
-                table#groupTable.table.table-hover
-                  thead
-                    tr
-                      th(scope='col') Group
-                      th(scope='col') Description
-                      th.text-center(scope='col') Areas
-                      th.text-center(scope='col') Files
-                      th.text-center(scope='col') New
-                  tbody
-                    for group of grouplist
-                      tr.clickable-row(data-href=`/files/group/${group.shortcode}`)
-                        td
-                          strong= group.name
-                        td= group.description
-                        td.text-center= group._areaCount || 0
-                        td.text-center= group.total_file_count || 0
-                        td.text-center
-                          if group.new_count && group.new_count > 0
-                            span.badge.bg-info= group.new_count
-                          else
-                            span.text-muted —
+              if groupedAreas && groupedAreas.length > 0
+                each entry in groupedAreas
+                  .group-section.mb-3(data-group=entry.group.shortcode)
+                    h5.text-info.mb-2
+                      i.bi.bi-folder2-open.me-1
+                      = entry.group.name
+                      if entry.group.description
+                        small.text-muted.ms-2= entry.group.description
+                    table.table.table-sm.table-hover.mb-0.area-table
+                      tbody
+                        each area in entry.areas
+                          tr.area-row(
+                            data-subscribed=(area.subscribed ? 'true' : 'false')
+                            data-name=area.name.toLowerCase()
+                            data-desc=(area.description || '').toLowerCase()
+                            data-shortcode=area.shortcode
+                          )
+                            td(style='width:30px')
+                              button.btn.btn-sm.sub-toggle(
+                                data-shortcode=area.shortcode
+                                title=(area.subscribed ? 'Unsubscribe' : 'Subscribe')
+                                class=(area.subscribed ? 'btn-success' : 'btn-outline-secondary')
+                              )
+                                i.bi(class=(area.subscribed ? 'bi-check-circle-fill' : 'bi-circle'))
+                            td
+                              a.text-decoration-none(href='/files/area/' + area.shortcode)
+                                strong= area.name
+                            td= area.description || ''
+                            td.text-center(style='width:80px')= area.file_count || 0
+                            td.text-center(style='width:80px')
+                              if area.new_count && area.new_count > 0
+                                span.badge.bg-info= area.new_count
               else
                 .text-center.py-4
-                  h5.text-muted No file groups available
+                  h5.text-muted No file areas available
 
-  script.
-    document.addEventListener('DOMContentLoaded', function() {
-      document.querySelectorAll('.clickable-row').forEach(function(row) {
-        row.style.cursor = 'pointer';
-        row.addEventListener('click', function() {
-          var href = this.getAttribute('data-href');
-          if (href) window.location.href = href;
+    script.
+      document.addEventListener('DOMContentLoaded', function() {
+        var currentView = 'subscribed';
+
+        document.querySelectorAll('.view-toggle').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            document.querySelectorAll('.view-toggle').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            currentView = btn.dataset.view;
+            filterAreas();
+          });
         });
+
+        var searchInput = document.getElementById('areaSearch');
+        if (searchInput) {
+          searchInput.addEventListener('input', function() { filterAreas(); });
+        }
+
+        function filterAreas() {
+          var query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+          document.querySelectorAll('.area-row').forEach(function(row) {
+            var isSubscribed = row.dataset.subscribed === 'true';
+            var matchesView = currentView === 'all' || isSubscribed;
+            var matchesSearch = !query || row.dataset.name.includes(query) || row.dataset.desc.includes(query) || row.dataset.shortcode.toLowerCase().includes(query);
+            row.style.display = (matchesView && matchesSearch) ? '' : 'none';
+          });
+          document.querySelectorAll('.group-section').forEach(function(section) {
+            var hasVisible = false;
+            section.querySelectorAll('.area-row').forEach(function(r) {
+              if (r.style.display !== 'none') hasVisible = true;
+            });
+            section.style.display = hasVisible ? '' : 'none';
+          });
+        }
+
+        document.querySelectorAll('.sub-toggle').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var shortcode = btn.dataset.shortcode;
+            fetch('/files/area/' + shortcode + '/subscribe', { method: 'POST' })
+              .then(function(r) { return r.json(); })
+              .then(function(data) {
+                var row = btn.closest('.area-row');
+                row.dataset.subscribed = data.subscribed ? 'true' : 'false';
+                btn.className = 'btn btn-sm sub-toggle ' + (data.subscribed ? 'btn-success' : 'btn-outline-secondary');
+                btn.title = data.subscribed ? 'Unsubscribe' : 'Subscribe';
+                var icon = btn.querySelector('i');
+                icon.className = 'bi ' + (data.subscribed ? 'bi-check-circle-fill' : 'bi-circle');
+                filterAreas();
+              });
+          });
+        });
+
+        filterAreas();
       });
-    });

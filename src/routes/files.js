@@ -21,6 +21,7 @@ import * as userAccounts from '../models/useraccounts.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 import * as fileNetworkAreas from '../models/fileNetworkAreas.js';
+import * as userFileSubs from '../models/userFileSubs.js';
 import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
 import * as fileDistribution from '../models/fileDistribution.js';
 import * as jobs from '../queues/jobs.js';
@@ -246,49 +247,55 @@ router.get('/search', async (req, res) => {
 // File Routes
 // -------------------------------------------------------
 
-// File Groups listing
+// File area browser -- combined grouped view with subscriptions
 router.get('/', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) {
 		return res.render('files/index', {
 			title: 'Files',
 			currentuser: null,
-			grouplist: []
+			groupedAreas: []
 		});
 	}
 
 	var userId = await resolveUserId(currentuser);
 	var grouplist = await fileGroups.getActiveGroups();
-
-	// Filter groups by read access
 	grouplist = grouplist.filter(function(g) { return checkFileAreaBrowseAccess(currentuser, g); });
 
-	// Attach new file counts per group and filter out groups with zero accessible areas
+	var groupedAreas = [];
 	for (var group of grouplist) {
 		var areas = await fileAreas.getAreasInGroup(group.shortcode);
 		areas = areas.filter(function(a) { return a.active && checkFileAreaBrowseAccess(currentuser, a); });
-		var groupNewCount = 0;
-		var groupFileCount = 0;
-		for (var area of areas) {
-			groupFileCount += parseInt(area.file_count) || 0;
-			if (userId) {
-				var nc = await userFilePointers.getNewCount(userId, area.shortcode, area.id);
-				groupNewCount += nc;
-			}
-		}
-		group.new_count = groupNewCount;
-		group.total_file_count = groupFileCount;
-		group._areaCount = areas.length;
-	}
+		if (areas.length === 0) continue;
 
-	// Remove groups with no accessible areas
-	grouplist = grouplist.filter(function(g) { return g._areaCount > 0; });
+		var subMap = userId ? await userFileSubs.getSubscriptionMap(userId, areas) : {};
+		for (var area of areas) {
+			area.subscribed = subMap[area.shortcode] !== undefined ? subMap[area.shortcode] : (area.newscan_default !== false);
+			area.new_count = userId ? await userFilePointers.getNewCount(userId, area.shortcode, area.id) : 0;
+		}
+
+		groupedAreas.push({
+			group: group,
+			areas: areas
+		});
+	}
 
 	res.render('files/index', {
 		title: 'Files',
 		currentuser: currentuser,
-		grouplist: grouplist
+		groupedAreas: groupedAreas
 	});
+});
+
+// AJAX: toggle file area subscription
+router.post('/area/:shortcode/subscribe', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.status(401).json({ error: 'Not authenticated' });
+	var userId = await resolveUserId(currentuser);
+	if (!userId) return res.status(401).json({ error: 'No user' });
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+	var newState = await userFileSubs.toggleSubscription(userId, shortcode);
+	res.json({ subscribed: newState });
 });
 
 // Areas in a group
