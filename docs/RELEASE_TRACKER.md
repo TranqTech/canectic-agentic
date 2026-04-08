@@ -237,6 +237,8 @@ Last updated: 2026-04-06
 | 44 | Call flow editor | [x] | DB-backed call flows and pools. Admin stage editor with drag-to-reorder, pool-to-flow assignment. Replaces hardcoded arrays. |
 | 45 | Honeypot + fail2ban integration | [x] | Honeypot login detection, security.log for fail2ban, immediate disconnect, registration block. trust_proxy for reverse proxies. |
 | 46 | displayScreen menu command | [x] | Art file display from menus/call flow. Random by type or specific subdir/filename. |
+| 47 | Bad echomail handling | [x] | Holding table for unknown areatags with recovery, tracking, and auto-purge. Inbound file log for peer traceability. |
+| 48 | Combined area browser | [x] | Single-page grouped view with Subscribed/All toggle, search, AJAX subscribe/unsubscribe for both messages and files. |
 
 ---
 

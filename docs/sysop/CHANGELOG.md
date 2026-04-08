@@ -100,7 +100,10 @@
 - Reverse proxy support: trust_proxy config key for correct client IP resolution behind nginx/Caddy/HAProxy (X-Forwarded-For headers)
 - Fix: Terminal login and registration now accept special characters in passwords (was restricted to alphanumeric only)
 - Bad echomail handling: messages received for unknown areatags are stored in a holding table instead of being silently lost. Tracked per-areatag with first/last seen, counts, and source addresses. Admin UI at /admin/bad-echomail with per-tag message browser, recover (import to area when created), and purge. Daily auto-purge via bad_echo_retention_days config (default 30). Fixes packets retrying endlessly when they contain messages for areas we don't carry.
-- Combined area browser for messages and files: single page grouped by group with Subscribed/All toggle, instant search, and AJAX subscribe/unsubscribe buttons. Replaces two-page group list + area list navigation.
+- Inbound file log: tracks every file received via binkp/EMSI sessions with peer connection info. Tosser uses it to populate received_from on bad echomail entries. Config: inbound_log_retention_days (default 90 days).
+- Newscan default on message groups and areas: new column (default false) on groups and areas, admin UI on all group/area create/edit forms and echolist subscribe modal. Groups inherit to new areas.
+- Combined area browser for messages and files: single page grouped by group with Subscribed/All toggle, instant search, AJAX subscribe/unsubscribe buttons, and help modal. Replaces two-page group list + area list navigation.
+- Fix: Message body_html with unclosed tags (del/s) no longer cascades strikethrough to subsequent messages (CSS containment on .msg-card)
 
 ## v0.9.5a (2026-04-04)
 

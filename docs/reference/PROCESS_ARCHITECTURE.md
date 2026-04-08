@@ -201,6 +201,8 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `scan-echolists` | Scheduler (daily 4:15AM), Admin | Worker | `{}` | Auto-scan network infopack/echolist/filebone areas for updated list files |
 | `reconcile-echolists` | Scheduler (daily 4:30AM), Admin | Worker | `{}` | Reconcile echolist/filebone local_area_id with network area mappings |
 | `timed-event` | Scheduler (cron per event), Admin | Worker | `{ eventId }` | Execute a sysop-configured timed event (door maintenance, backups, etc.) |
+| `purge-bad-echomail` | Scheduler (daily 3:45AM) | Worker | `{ days? }` | Purge bad echomail older than `bad_echo_retention_days` (default 30) |
+| `purge-inbound-log` | Scheduler (daily 3:50AM) | Worker | `{ days? }` | Purge inbound file log entries older than `inbound_log_retention_days` (default 90) |
 
 ### Concurrency and deduplication
 
