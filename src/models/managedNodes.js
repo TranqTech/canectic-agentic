@@ -28,23 +28,33 @@ var COMMON_FLAGS = [
 // CRUD
 // ---------------------------------------------------------------------------
 
+var NODE_ORDER = `CASE keyword WHEN 'Zone' THEN 0 WHEN 'Region' THEN 1 WHEN 'Host' THEN 2 WHEN 'Hub' THEN 3 ELSE 4 END, hub_node ASC, node ASC`;
+
 async function getByNetwork(networkId) {
 	return await postgres.query(
-		`SELECT * FROM managed_nodes WHERE network_id = $1
-		 ORDER BY
-		   CASE keyword WHEN 'Zone' THEN 0 WHEN 'Region' THEN 1 WHEN 'Host' THEN 2 WHEN 'Hub' THEN 3 ELSE 4 END,
-		   hub_node ASC, node ASC`,
+		'SELECT * FROM managed_nodes WHERE network_id = $1 ORDER BY ' + NODE_ORDER,
 		[parseInt(networkId)]
+	) || [];
+}
+
+async function getBySegment(segmentId) {
+	return await postgres.query(
+		'SELECT * FROM managed_nodes WHERE segment_id = $1 ORDER BY ' + NODE_ORDER,
+		[parseInt(segmentId)]
 	) || [];
 }
 
 async function getActiveByNetwork(networkId) {
 	return await postgres.query(
-		`SELECT * FROM managed_nodes WHERE network_id = $1 AND active = true
-		 ORDER BY
-		   CASE keyword WHEN 'Zone' THEN 0 WHEN 'Region' THEN 1 WHEN 'Host' THEN 2 WHEN 'Hub' THEN 3 ELSE 4 END,
-		   hub_node ASC, node ASC`,
+		'SELECT * FROM managed_nodes WHERE network_id = $1 AND active = true ORDER BY ' + NODE_ORDER,
 		[parseInt(networkId)]
+	) || [];
+}
+
+async function getActiveBySegment(segmentId) {
+	return await postgres.query(
+		'SELECT * FROM managed_nodes WHERE segment_id = $1 AND active = true ORDER BY ' + NODE_ORDER,
+		[parseInt(segmentId)]
 	) || [];
 }
 
@@ -81,6 +91,7 @@ async function create(formObj) {
 
 	var dbObj = {
 		network_id:  parseInt(formObj.network_id),
+		segment_id:  formObj.segment_id ? parseInt(formObj.segment_id) : null,
 		zone:        parseInt(formObj.zone) || 1,
 		region:      parseInt(formObj.region) || 0,
 		net:         parseInt(formObj.net),
@@ -121,6 +132,7 @@ async function update(id, formObj) {
 
 	var updateObj = { updated_at: new Date() };
 
+	if (formObj.segment_id !== undefined) updateObj.segment_id = formObj.segment_id ? parseInt(formObj.segment_id) : null;
 	if (formObj.zone !== undefined) updateObj.zone = parseInt(formObj.zone);
 	if (formObj.region !== undefined) updateObj.region = parseInt(formObj.region) || 0;
 	if (formObj.net !== undefined) updateObj.net = parseInt(formObj.net);
@@ -176,8 +188,8 @@ async function remove(id) {
  * Generate a nodelist segment/stub in standard FTN format.
  * Returns the segment as a string.
  */
-async function generateStub(networkId) {
-	var nodes = await getActiveByNetwork(networkId);
+async function generateStub(networkId, segmentId) {
+	var nodes = segmentId ? await getActiveBySegment(segmentId) : await getActiveByNetwork(networkId);
 	if (!nodes || nodes.length === 0) return '';
 
 	var lines = [];
@@ -256,15 +268,17 @@ async function generateStub(networkId) {
 // Stats
 // ---------------------------------------------------------------------------
 
-async function getStats(networkId) {
+async function getStats(networkId, segmentId) {
+	var where = segmentId ? 'segment_id = $1' : 'network_id = $1';
+	var param = segmentId ? parseInt(segmentId) : parseInt(networkId);
 	var row = await postgres.queryOne(
 		`SELECT COUNT(*) AS total,
 		        COUNT(*) FILTER (WHERE active = true) AS active_count,
 		        COUNT(*) FILTER (WHERE keyword = 'Hub') AS hub_count,
 		        COUNT(*) FILTER (WHERE keyword = 'Down') AS down_count,
 		        COUNT(*) FILTER (WHERE keyword = 'Hold') AS hold_count
-		 FROM managed_nodes WHERE network_id = $1`,
-		[parseInt(networkId)]
+		 FROM managed_nodes WHERE ${where}`,
+		[param]
 	);
 	return row || { total: 0, active_count: 0, hub_count: 0, down_count: 0, hold_count: 0 };
 }
@@ -273,7 +287,9 @@ export {
 	VALID_KEYWORDS,
 	COMMON_FLAGS,
 	getByNetwork,
+	getBySegment,
 	getActiveByNetwork,
+	getActiveBySegment,
 	getById,
 	create,
 	update,

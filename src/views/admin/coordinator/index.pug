@@ -1,0 +1,223 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        .d-flex.justify-content-between.align-items-center.mb-3
+          h2
+            i.bi.bi-diagram-3.me-2
+            | Network Coordinator
+            if network
+              small.text-muted.ms-2= network.name
+          div
+            button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addSegmentModal')
+              i.bi.bi-plus-circle.me-1
+              | Add Segment
+            a.btn.btn-sm.btn-outline-light.ms-2(href='/admin/network/' + network.uuid)
+              i.bi.bi-arrow-left.me-1
+              | Network
+
+        if segments && segments.length > 0
+          each seg in segments
+            .card.mb-3
+              .card-header.bg-darkblue.text-white.d-flex.justify-content-between.align-items-center
+                div
+                  strong= seg.name
+                  span.badge.bg-primary.ms-2= seg.role
+                  code.ms-2= seg.zone + ':' + seg.net + (seg.hub_node ? '/' + seg.hub_node : '')
+                  if !seg.active
+                    span.badge.bg-danger.ms-2 Inactive
+                div
+                  a.btn.btn-sm.btn-outline-light.me-1(href='/admin/coordinator/segment/' + seg.id + '/nodes')
+                    i.bi.bi-people.me-1
+                    | Nodes
+                    if seg._stats && seg._stats.active_count > 0
+                      span.badge.bg-info.ms-1= seg._stats.active_count
+                  a.btn.btn-sm.btn-outline-info.me-1(href='/admin/coordinator/segment/' + seg.id + '/stub' target='_blank' title='Preview stub')
+                    i.bi.bi-eye
+                  a.btn.btn-sm.btn-outline-success.me-1(href='/admin/coordinator/segment/' + seg.id + '/stub/download' title='Download stub')
+                    i.bi.bi-download
+                  button.btn.btn-sm.btn-outline-warning.me-1.edit-seg-btn(
+                    data-bs-toggle='modal' data-bs-target='#editSegmentModal'
+                    data-id=seg.id
+                    data-name=seg.name
+                    data-role=seg.role
+                    data-zone=seg.zone
+                    data-region=seg.region || 0
+                    data-net=seg.net || 0
+                    data-hubnode=seg.hub_node || 0
+                    data-upstream=seg.upstream_address || ''
+                    data-upstreamconn=seg.upstream_connection_id || ''
+                    data-stubfilename=seg.stub_filename || ''
+                    data-distribution=seg.distribution_method || 'manual'
+                    data-schedule=seg.schedule || 'manual'
+                    data-description=seg.description || ''
+                    data-active=(seg.active ? 'true' : 'false')
+                  )
+                    i.bi.bi-pencil
+                  form.d-inline(method='POST' action='/admin/coordinator/segments/' + seg.id + '/delete')
+                    button.btn.btn-sm.btn-outline-danger(type='submit' onclick='return confirm("Delete this segment and unlink its nodes?")')
+                      i.bi.bi-trash
+              .card-body
+                .row
+                  .col-4
+                    if seg.description
+                      p.text-muted= seg.description
+                    if seg.upstream_address
+                      p
+                        strong Upstream:
+                        |
+                        code= seg.upstream_address
+                  .col-4
+                    p
+                      strong Distribution:
+                      |  #{seg.distribution_method || 'manual'}
+                    p
+                      strong Schedule:
+                      |  #{seg.schedule || 'manual'}
+                    if seg.stub_filename
+                      p
+                        strong Stub filename:
+                        |
+                        code= seg.stub_filename
+                  .col-4
+                    if seg._stats
+                      p
+                        span.badge.bg-info.me-1= seg._stats.total + ' total'
+                        span.badge.bg-success.me-1= seg._stats.active_count + ' active'
+                        if seg._stats.hub_count > 0
+                          span.badge.bg-primary.me-1= seg._stats.hub_count + ' hub(s)'
+                        if seg._stats.down_count > 0
+                          span.badge.bg-danger.me-1= seg._stats.down_count + ' down'
+                    if seg.last_generated_at
+                      p.small.text-muted Last generated: #{new Date(seg.last_generated_at).toLocaleString()}
+        else
+          .card
+            .card-body
+              p.text-muted No coordinator segments defined. Create a segment to start managing nodes for this network.
+
+    //- Add Segment Modal
+    .modal.fade#addSegmentModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Add Coordinator Segment
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/coordinator/' + network.id + '/segments/new')
+            .modal-body
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Name
+                    input.form-control(name='name' required placeholder='e.g. Net 134')
+                  .mb-3
+                    label.form-label Role
+                    select.form-select(name='role')
+                      each label, key in roleLabels
+                        option(value=key)= label
+                  .mb-3
+                    label.form-label Zone
+                    input.form-control(type='number' name='zone' value='1' required)
+                  .mb-3
+                    label.form-label Net
+                    input.form-control(type='number' name='net' placeholder='134')
+                .col-6
+                  .mb-3
+                    label.form-label Upstream Address
+                    input.form-control(name='upstream_address' placeholder='1:1/21')
+                  .mb-3
+                    label.form-label Stub Filename
+                    input.form-control(name='stub_filename' placeholder='NET134')
+                  .mb-3
+                    label.form-label Distribution
+                    select.form-select(name='distribution_method')
+                      each dm in distributionMethods
+                        option(value=dm)= dm
+                  .mb-3
+                    label.form-label Schedule
+                    select.form-select(name='schedule')
+                      each s in schedules
+                        option(value=s)= s
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addSegActive' checked value='true')
+                label.form-check-label(for='addSegActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add
+
+    //- Edit Segment Modal
+    .modal.fade#editSegmentModal(tabindex='-1')
+      .modal-dialog
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Segment
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editSegForm(method='POST')
+            .modal-body
+              .row
+                .col-6
+                  .mb-3
+                    label.form-label Name
+                    input.form-control(name='name' id='esName' required)
+                  .mb-3
+                    label.form-label Role
+                    select.form-select(name='role' id='esRole')
+                      each label, key in roleLabels
+                        option(value=key)= label
+                  .mb-3
+                    label.form-label Zone
+                    input.form-control(type='number' name='zone' id='esZone')
+                  .mb-3
+                    label.form-label Net
+                    input.form-control(type='number' name='net' id='esNet')
+                .col-6
+                  .mb-3
+                    label.form-label Upstream Address
+                    input.form-control(name='upstream_address' id='esUpstream')
+                  .mb-3
+                    label.form-label Stub Filename
+                    input.form-control(name='stub_filename' id='esStubFilename')
+                  .mb-3
+                    label.form-label Distribution
+                    select.form-select(name='distribution_method' id='esDistribution')
+                      each dm in distributionMethods
+                        option(value=dm)= dm
+                  .mb-3
+                    label.form-label Schedule
+                    select.form-select(name='schedule' id='esSchedule')
+                      each s in schedules
+                        option(value=s)= s
+              .mb-3
+                label.form-label Description
+                input.form-control(name='description' id='esDescription')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='esActive' value='true')
+                label.form-check-label(for='esActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      var editModal = document.getElementById('editSegmentModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editSegForm').action = '/admin/coordinator/segments/' + btn.dataset.id + '/update';
+          document.getElementById('esName').value = btn.dataset.name || '';
+          document.getElementById('esRole').value = btn.dataset.role || 'NC';
+          document.getElementById('esZone').value = btn.dataset.zone || '1';
+          document.getElementById('esNet').value = btn.dataset.net || '';
+          document.getElementById('esUpstream').value = btn.dataset.upstream || '';
+          document.getElementById('esStubFilename').value = btn.dataset.stubfilename || '';
+          document.getElementById('esDistribution').value = btn.dataset.distribution || 'manual';
+          document.getElementById('esSchedule').value = btn.dataset.schedule || 'manual';
+          document.getElementById('esDescription').value = btn.dataset.description || '';
+          document.getElementById('esActive').checked = btn.dataset.active === 'true';
+        });
+      }

@@ -5,17 +5,25 @@ block content
     br
     .row
       .col-lg-10.offset-lg-1.col-12
+        - var segId = segment ? segment.id : null
+        - var baseUrl = segId ? '/admin/coordinator/segment/' + segId : '/admin/coordinator/' + network.id
         .d-flex.justify-content-between.align-items-center.mb-3
           h2
             i.bi.bi-diagram-3.me-2
             | Managed Nodes
-            if network
+            if segment
+              small.text-muted.ms-2= segment.name
+              span.badge.bg-primary.ms-2= segment.role
+            else if network
               small.text-muted.ms-2= network.name
           .d-flex
-            a.btn.btn-sm.btn-outline-info.me-2(href='/admin/coordinator/' + network.id + '/stub' target='_blank' title='Preview stub')
+            a.btn.btn-sm.btn-outline-light.me-2(href='/admin/coordinator/' + network.id)
+              i.bi.bi-arrow-left.me-1
+              | Segments
+            a.btn.btn-sm.btn-outline-info.me-2(href=baseUrl + '/stub' target='_blank' title='Preview stub')
               i.bi.bi-eye.me-1
               | Preview
-            a.btn.btn-sm.btn-outline-success.me-2(href='/admin/coordinator/' + network.id + '/stub/download' title='Download stub file')
+            a.btn.btn-sm.btn-outline-success.me-2(href=baseUrl + '/stub/download' title='Download stub file')
               i.bi.bi-download.me-1
               | Download Stub
             button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addNodeModal')
@@ -112,7 +120,7 @@ block content
           .modal-header
             h5.modal-title Add Node
             button.btn-close(type='button' data-bs-dismiss='modal')
-          form(method='POST' action='/admin/coordinator/' + network.id + '/nodes/new')
+          form(method='POST' action=baseUrl + '/nodes/new')
             .modal-body
               .row
                 .col-4

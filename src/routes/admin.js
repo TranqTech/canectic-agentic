@@ -31,6 +31,7 @@ import * as callFlowsModel from '../models/callFlows.js';
 import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as managedNodes from '../models/managedNodes.js';
+import * as coordinatorSegments from '../models/coordinatorSegments.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -4766,57 +4767,116 @@ router.post('/bad-echomail/:areatag/purge', urlencodedParser, requireAdmin, asyn
 // Network Coordinator — Managed Nodes
 // -------------------------------------------------------
 
-router.get('/coordinator/:networkId/nodes', requireAdmin, async (req, res) => {
+// Segments overview for a network
+router.get('/coordinator/:networkId', requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var networkId = parseInt(req.params.networkId);
 	var network = await msgNetworks.getNetworkById(networkId);
-	var nodes = await managedNodes.getByNetwork(networkId);
-	var stats = await managedNodes.getStats(networkId);
+	var segments = await coordinatorSegments.getByNetwork(networkId);
+
+	// Attach node counts per segment
+	for (var seg of segments) {
+		seg._stats = await managedNodes.getStats(null, seg.id);
+	}
+
+	var connections = await peerConnections.getConnectionsByNetwork(networkId);
+	res.render('admin/coordinator/index', {
+		sufficientAccess, title: 'Network Coordinator', activelink: 'coordinator',
+		activenav: 'networks', currentuser, network, segments, connections,
+		validRoles: coordinatorSegments.VALID_ROLES,
+		roleLabels: coordinatorSegments.ROLE_LABELS,
+		distributionMethods: coordinatorSegments.DISTRIBUTION_METHODS,
+		schedules: coordinatorSegments.SCHEDULES
+	});
+});
+
+router.post('/coordinator/:networkId/segments/new', urlencodedParser, requireAdmin, async (req, res) => {
+	req.body.network_id = parseInt(req.params.networkId);
+	await coordinatorSegments.create(req.body);
+	res.redirect('/admin/coordinator/' + req.params.networkId);
+});
+
+router.post('/coordinator/segments/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var seg = await coordinatorSegments.getById(id);
+	await coordinatorSegments.update(id, req.body);
+	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
+});
+
+router.post('/coordinator/segments/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var seg = await coordinatorSegments.getById(id);
+	await coordinatorSegments.remove(id);
+	res.redirect('/admin/coordinator/' + (seg ? seg.network_id : 0));
+});
+
+// Nodes within a segment
+router.get('/coordinator/segment/:segmentId/nodes', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var segmentId = parseInt(req.params.segmentId);
+	var segment = await coordinatorSegments.getById(segmentId);
+	if (!segment) return res.redirect('/admin/networks');
+	var network = await msgNetworks.getNetworkById(segment.network_id);
+	var nodes = await managedNodes.getBySegment(segmentId);
+	var stats = await managedNodes.getStats(null, segmentId);
 	res.render('admin/coordinator/nodes', {
 		sufficientAccess, title: 'Managed Nodes', activelink: 'coordinator',
-		activenav: 'networks', currentuser, network, nodes, stats,
+		activenav: 'networks', currentuser, network, segment, nodes, stats,
 		validKeywords: managedNodes.VALID_KEYWORDS,
 		commonFlags: managedNodes.COMMON_FLAGS
 	});
 });
 
-router.post('/coordinator/:networkId/nodes/new', urlencodedParser, requireAdmin, async (req, res) => {
-	req.body.network_id = parseInt(req.params.networkId);
+router.post('/coordinator/segment/:segmentId/nodes/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var segmentId = parseInt(req.params.segmentId);
+	var segment = await coordinatorSegments.getById(segmentId);
+	if (segment) {
+		req.body.network_id = segment.network_id;
+		req.body.segment_id = segmentId;
+	}
 	await managedNodes.create(req.body);
-	res.redirect('/admin/coordinator/' + req.params.networkId + '/nodes');
+	res.redirect('/admin/coordinator/segment/' + segmentId + '/nodes');
 });
 
 router.post('/coordinator/nodes/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
 	var id = parseInt(req.params.id);
 	var node = await managedNodes.getById(id);
 	await managedNodes.update(id, req.body);
-	res.redirect('/admin/coordinator/' + (node ? node.network_id : 0) + '/nodes');
+	var redirectTo = node && node.segment_id
+		? '/admin/coordinator/segment/' + node.segment_id + '/nodes'
+		: '/admin/coordinator/' + (node ? node.network_id : 0);
+	res.redirect(redirectTo);
 });
 
 router.post('/coordinator/nodes/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
 	var id = parseInt(req.params.id);
 	var node = await managedNodes.getById(id);
 	await managedNodes.remove(id);
-	res.redirect('/admin/coordinator/' + (node ? node.network_id : 0) + '/nodes');
+	var redirectTo = node && node.segment_id
+		? '/admin/coordinator/segment/' + node.segment_id + '/nodes'
+		: '/admin/coordinator/' + (node ? node.network_id : 0);
+	res.redirect(redirectTo);
 });
 
-router.get('/coordinator/:networkId/stub', requireAdmin, async (req, res) => {
-	var networkId = parseInt(req.params.networkId);
-	var stub = await managedNodes.generateStub(networkId);
-	var network = await msgNetworks.getNetworkById(networkId);
+// Stub preview and download (per-segment)
+router.get('/coordinator/segment/:segmentId/stub', requireAdmin, async (req, res) => {
+	var segmentId = parseInt(req.params.segmentId);
+	var segment = await coordinatorSegments.getById(segmentId);
+	var stub = await managedNodes.generateStub(segment ? segment.network_id : 0, segmentId);
 	res.setHeader('Content-Type', 'text/plain');
-	res.setHeader('Content-Disposition', 'inline; filename="' + (network ? network.name : 'segment') + '.txt"');
+	res.setHeader('Content-Disposition', 'inline; filename="' + (segment ? segment.name : 'segment') + '.txt"');
 	res.send(stub);
 });
 
-router.get('/coordinator/:networkId/stub/download', requireAdmin, async (req, res) => {
-	var networkId = parseInt(req.params.networkId);
-	var network = await msgNetworks.getNetworkById(networkId);
-	var stub = await managedNodes.generateStub(networkId);
+router.get('/coordinator/segment/:segmentId/stub/download', requireAdmin, async (req, res) => {
+	var segmentId = parseInt(req.params.segmentId);
+	var segment = await coordinatorSegments.getById(segmentId);
+	var stub = await managedNodes.generateStub(segment ? segment.network_id : 0, segmentId);
 	var now = new Date();
 	var dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
-	var filename = (network ? network.name.replace(/\s+/g, '').toUpperCase().substring(0, 8) : 'SEGMENT') + '.' + String(dayOfYear).padStart(3, '0');
+	var filename = (segment && segment.stub_filename ? segment.stub_filename : 'SEGMENT') + '.' + String(dayOfYear).padStart(3, '0');
 	res.setHeader('Content-Type', 'application/octet-stream');
 	res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
 	res.send(stub);

@@ -42,9 +42,9 @@ block content
                     .col-4
                       .text-end
                         if network.network_type === 'FTN'
-                          a.btn.btn-lg.btn-outline-warning.me-2(href='/admin/coordinator/' + network.id + '/nodes')
+                          a.btn.btn-lg.btn-outline-warning.me-2(href='/admin/coordinator/' + network.id)
                             i.bi.bi-diagram-3.me-1
-                            | Managed Nodes
+                            | Coordinator
                         a.button.btn.btn-lg.btn-info(href='/admin/networks')
                           | Exit
                 .card-body
