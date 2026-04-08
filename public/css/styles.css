@@ -390,6 +390,11 @@ span[style*="color: rgb(1, 1, 1)"] {
 	line-height: 1.1;
 }
 
+/* Prevent unclosed HTML tags in message body_html from leaking styles to siblings */
+.msg-card {
+	text-decoration: none !important;
+}
+
 .ansi{
 	line-height: 1.0;
 }
