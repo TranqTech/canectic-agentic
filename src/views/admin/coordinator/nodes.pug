@@ -1,0 +1,279 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        .d-flex.justify-content-between.align-items-center.mb-3
+          h2
+            i.bi.bi-diagram-3.me-2
+            | Managed Nodes
+            if network
+              small.text-muted.ms-2= network.name
+          .d-flex
+            a.btn.btn-sm.btn-outline-info.me-2(href='/admin/coordinator/' + network.id + '/stub' target='_blank' title='Preview stub')
+              i.bi.bi-eye.me-1
+              | Preview
+            a.btn.btn-sm.btn-outline-success.me-2(href='/admin/coordinator/' + network.id + '/stub/download' title='Download stub file')
+              i.bi.bi-download.me-1
+              | Download Stub
+            button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addNodeModal')
+              i.bi.bi-plus-circle.me-1
+              | Add Node
+
+        //- Stats bar
+        if stats
+          .row.mb-3
+            .col
+              .d-flex.gap-3
+                span.badge.bg-info.p-2= stats.total + ' total'
+                span.badge.bg-success.p-2= stats.active_count + ' active'
+                span.badge.bg-primary.p-2= stats.hub_count + ' hub(s)'
+                if stats.down_count > 0
+                  span.badge.bg-danger.p-2= stats.down_count + ' down'
+                if stats.hold_count > 0
+                  span.badge.bg-warning.text-dark.p-2= stats.hold_count + ' hold'
+
+        //- Node table
+        .card
+          .card-body
+            if nodes && nodes.length > 0
+              table#nodeTable.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Address
+                    th Keyword
+                    th System Name
+                    th Location
+                    th Sysop
+                    th Hostname
+                    th Flags
+                    th Status
+                    th(style='width:100px')
+                tbody
+                  each node in nodes
+                    - var flags = Array.isArray(node.flags) ? node.flags : (typeof node.flags === 'string' ? JSON.parse(node.flags || '[]') : [])
+                    tr(class=(node.keyword === 'Down' ? 'table-danger' : node.keyword === 'Hold' ? 'table-warning' : node.keyword === 'Hub' || node.keyword === 'Host' ? 'table-info' : ''))
+                      td
+                        code= node.zone + ':' + node.net + '/' + node.node
+                      td
+                        if node.keyword
+                          span.badge(class=node.keyword === 'Hub' || node.keyword === 'Host' ? 'bg-primary' : node.keyword === 'Down' ? 'bg-danger' : node.keyword === 'Hold' ? 'bg-warning text-dark' : 'bg-secondary')= node.keyword
+                      td= node.system_name
+                      td= node.location
+                      td= node.sysop_name
+                      td
+                        if node.hostname
+                          small.text-muted= node.hostname
+                          if node.binkp_port && node.binkp_port !== 24554
+                            small.text-muted= ':' + node.binkp_port
+                      td
+                        each f in flags
+                          span.badge.bg-dark.me-1= f
+                      td
+                        if node.active
+                          span.badge.bg-success Active
+                        else
+                          span.badge.bg-secondary Inactive
+                      td
+                        button.btn.btn-sm.btn-primary.me-1.edit-node-btn(
+                          data-bs-toggle='modal' data-bs-target='#editNodeModal'
+                          data-id=node.id
+                          data-zone=node.zone
+                          data-region=node.region
+                          data-net=node.net
+                          data-node=node.node
+                          data-keyword=node.keyword || ''
+                          data-hubnode=node.hub_node || 0
+                          data-systemname=node.system_name
+                          data-location=node.location
+                          data-sysopname=node.sysop_name
+                          data-phone=node.phone || '-Unpublished-'
+                          data-baud=node.baud || 300
+                          data-hostname=node.hostname || ''
+                          data-binkpport=node.binkp_port || ''
+                          data-telnetport=node.telnet_port || ''
+                          data-flags=JSON.stringify(flags)
+                          data-notes=node.notes || ''
+                          data-active=(node.active ? 'true' : 'false')
+                        )
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/coordinator/nodes/' + node.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Remove this node?")')
+                            i.bi.bi-trash
+            else
+              p.text-muted No managed nodes. Add nodes to build your network segment.
+
+    //- Add Node Modal
+    .modal.fade#addNodeModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title Add Node
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/coordinator/' + network.id + '/nodes/new')
+            .modal-body
+              .row
+                .col-4
+                  .mb-3
+                    label.form-label Zone
+                    input.form-control(type='number' name='zone' value='1' required)
+                  .mb-3
+                    label.form-label Net
+                    input.form-control(type='number' name='net' required)
+                  .mb-3
+                    label.form-label Node
+                    input.form-control(type='number' name='node' required)
+                  .mb-3
+                    label.form-label Keyword
+                    select.form-select(name='keyword')
+                      each kw in validKeywords
+                        option(value=kw)= kw || '(normal)'
+                  .mb-3
+                    label.form-label Hub Node
+                    input.form-control(type='number' name='hub_node' value='0')
+                    .form-text Node number of the hub this node routes through (0 = direct)
+                .col-4
+                  .mb-3
+                    label.form-label System Name
+                    input.form-control(name='system_name' required)
+                  .mb-3
+                    label.form-label Location
+                    input.form-control(name='location' placeholder='City, Province')
+                  .mb-3
+                    label.form-label Sysop Name
+                    input.form-control(name='sysop_name' required)
+                  .mb-3
+                    label.form-label Phone
+                    input.form-control(name='phone' value='-Unpublished-')
+                  .mb-3
+                    label.form-label Baud
+                    input.form-control(type='number' name='baud' value='300')
+                .col-4
+                  .mb-3
+                    label.form-label Hostname / IP
+                    input.form-control(name='hostname' placeholder='bbs.example.com')
+                  .mb-3
+                    label.form-label Binkp Port
+                    input.form-control(type='number' name='binkp_port' placeholder='24554')
+                  .mb-3
+                    label.form-label Telnet Port
+                    input.form-control(type='number' name='telnet_port' placeholder='23')
+                  .mb-3
+                    label.form-label Flags (comma-separated)
+                    input.form-control(name='flags' placeholder='CM,IBN')
+                    .form-text
+                      | Common:
+                      each f in commonFlags
+                        code.me-1= f
+                  .mb-3
+                    label.form-label Notes (internal)
+                    textarea.form-control(name='notes' rows='2')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
+                label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add Node
+
+    //- Edit Node Modal
+    .modal.fade#editNodeModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Node
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editNodeForm(method='POST')
+            .modal-body
+              .row
+                .col-4
+                  .mb-3
+                    label.form-label Zone
+                    input.form-control(type='number' name='zone' id='enZone' required)
+                  .mb-3
+                    label.form-label Net
+                    input.form-control(type='number' name='net' id='enNet' required)
+                  .mb-3
+                    label.form-label Node
+                    input.form-control(type='number' name='node' id='enNode' required)
+                  .mb-3
+                    label.form-label Keyword
+                    select.form-select(name='keyword' id='enKeyword')
+                      each kw in validKeywords
+                        option(value=kw)= kw || '(normal)'
+                  .mb-3
+                    label.form-label Hub Node
+                    input.form-control(type='number' name='hub_node' id='enHubNode')
+                .col-4
+                  .mb-3
+                    label.form-label System Name
+                    input.form-control(name='system_name' id='enSystemName' required)
+                  .mb-3
+                    label.form-label Location
+                    input.form-control(name='location' id='enLocation')
+                  .mb-3
+                    label.form-label Sysop Name
+                    input.form-control(name='sysop_name' id='enSysopName' required)
+                  .mb-3
+                    label.form-label Phone
+                    input.form-control(name='phone' id='enPhone')
+                  .mb-3
+                    label.form-label Baud
+                    input.form-control(type='number' name='baud' id='enBaud')
+                .col-4
+                  .mb-3
+                    label.form-label Hostname / IP
+                    input.form-control(name='hostname' id='enHostname')
+                  .mb-3
+                    label.form-label Binkp Port
+                    input.form-control(type='number' name='binkp_port' id='enBinkpPort')
+                  .mb-3
+                    label.form-label Telnet Port
+                    input.form-control(type='number' name='telnet_port' id='enTelnetPort')
+                  .mb-3
+                    label.form-label Flags (comma-separated)
+                    input.form-control(name='flags' id='enFlags')
+                  .mb-3
+                    label.form-label Notes
+                    textarea.form-control(name='notes' id='enNotes' rows='2')
+              .form-check
+                input.form-check-input(type='checkbox' name='active' id='enActive' value='true')
+                label.form-check-label(for='enActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      document.addEventListener('DOMContentLoaded', function() {
+        if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+          jQuery('#nodeTable').DataTable({ paging: false, order: [] });
+        }
+
+        var editModal = document.getElementById('editNodeModal');
+        if (editModal) {
+          editModal.addEventListener('show.bs.modal', function(e) {
+            var btn = e.relatedTarget;
+            if (!btn) return;
+            document.getElementById('editNodeForm').action = '/admin/coordinator/nodes/' + btn.dataset.id + '/update';
+            document.getElementById('enZone').value = btn.dataset.zone || '1';
+            document.getElementById('enNet').value = btn.dataset.net || '';
+            document.getElementById('enNode').value = btn.dataset.node || '';
+            document.getElementById('enKeyword').value = btn.dataset.keyword || '';
+            document.getElementById('enHubNode').value = btn.dataset.hubnode || '0';
+            document.getElementById('enSystemName').value = btn.dataset.systemname || '';
+            document.getElementById('enLocation').value = btn.dataset.location || '';
+            document.getElementById('enSysopName').value = btn.dataset.sysopname || '';
+            document.getElementById('enPhone').value = btn.dataset.phone || '-Unpublished-';
+            document.getElementById('enBaud').value = btn.dataset.baud || '300';
+            document.getElementById('enHostname').value = btn.dataset.hostname || '';
+            document.getElementById('enBinkpPort').value = btn.dataset.binkpport || '';
+            document.getElementById('enTelnetPort').value = btn.dataset.telnetport || '';
+            var flags = [];
+            try { flags = JSON.parse(btn.dataset.flags || '[]'); } catch(_) {}
+            document.getElementById('enFlags').value = flags.join(', ');
+            document.getElementById('enNotes').value = btn.dataset.notes || '';
+            document.getElementById('enActive').checked = btn.dataset.active === 'true';
+          });
+        }
+      });

@@ -30,6 +30,7 @@ import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
 import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
+import * as managedNodes from '../models/managedNodes.js';
 import * as menus from '../models/menus.js';
 import * as themes from '../models/themes.js';
 import * as peerConnections from '../models/peerConnections.js';
@@ -4759,6 +4760,66 @@ router.post('/bad-echomail/:areatag/purge', urlencodedParser, requireAdmin, asyn
 	var purged = await badEchomail.purgeTag(areatag);
 	await flash.setOne(req, 'info', 'Purged ' + purged + ' message(s) for ' + areatag);
 	res.redirect('/admin/bad-echomail');
+});
+
+// -------------------------------------------------------
+// Network Coordinator — Managed Nodes
+// -------------------------------------------------------
+
+router.get('/coordinator/:networkId/nodes', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId = parseInt(req.params.networkId);
+	var network = await msgNetworks.getNetworkById(networkId);
+	var nodes = await managedNodes.getByNetwork(networkId);
+	var stats = await managedNodes.getStats(networkId);
+	res.render('admin/coordinator/nodes', {
+		sufficientAccess, title: 'Managed Nodes', activelink: 'coordinator',
+		activenav: 'networks', currentuser, network, nodes, stats,
+		validKeywords: managedNodes.VALID_KEYWORDS,
+		commonFlags: managedNodes.COMMON_FLAGS
+	});
+});
+
+router.post('/coordinator/:networkId/nodes/new', urlencodedParser, requireAdmin, async (req, res) => {
+	req.body.network_id = parseInt(req.params.networkId);
+	await managedNodes.create(req.body);
+	res.redirect('/admin/coordinator/' + req.params.networkId + '/nodes');
+});
+
+router.post('/coordinator/nodes/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var node = await managedNodes.getById(id);
+	await managedNodes.update(id, req.body);
+	res.redirect('/admin/coordinator/' + (node ? node.network_id : 0) + '/nodes');
+});
+
+router.post('/coordinator/nodes/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var node = await managedNodes.getById(id);
+	await managedNodes.remove(id);
+	res.redirect('/admin/coordinator/' + (node ? node.network_id : 0) + '/nodes');
+});
+
+router.get('/coordinator/:networkId/stub', requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var stub = await managedNodes.generateStub(networkId);
+	var network = await msgNetworks.getNetworkById(networkId);
+	res.setHeader('Content-Type', 'text/plain');
+	res.setHeader('Content-Disposition', 'inline; filename="' + (network ? network.name : 'segment') + '.txt"');
+	res.send(stub);
+});
+
+router.get('/coordinator/:networkId/stub/download', requireAdmin, async (req, res) => {
+	var networkId = parseInt(req.params.networkId);
+	var network = await msgNetworks.getNetworkById(networkId);
+	var stub = await managedNodes.generateStub(networkId);
+	var now = new Date();
+	var dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
+	var filename = (network ? network.name.replace(/\s+/g, '').toUpperCase().substring(0, 8) : 'SEGMENT') + '.' + String(dayOfYear).padStart(3, '0');
+	res.setHeader('Content-Type', 'application/octet-stream');
+	res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+	res.send(stub);
 });
 
 // -------------------------------------------------------

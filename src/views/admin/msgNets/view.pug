@@ -37,10 +37,14 @@ block content
                   .row
                     .col-8
                       h2= title
-                        |  — 
+                        |  —
                         = network.name
                     .col-4
                       .text-end
+                        if network.network_type === 'FTN'
+                          a.btn.btn-lg.btn-outline-warning.me-2(href='/admin/coordinator/' + network.id + '/nodes')
+                            i.bi.bi-diagram-3.me-1
+                            | Managed Nodes
                         a.button.btn.btn-lg.btn-info(href='/admin/networks')
                           | Exit
                 .card-body
