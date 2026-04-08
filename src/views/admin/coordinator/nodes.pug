@@ -384,11 +384,11 @@ block content
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
               button.btn.btn-primary(type='submit') Save
 
+  //- Flatten grouped flags for script interpolation
+  - var allFlagDefs = []; validCategories.forEach(function(c) { (flagsGrouped[c] || []).forEach(function(fd) { allFlagDefs.push({ code: fd.code, has_argument: fd.has_argument }); }); });
   script.
     //- Flag definitions from DB (for JS logic)
-    //- Flatten grouped flags for JS logic
-    - var allFlagDefs = []; validCategories.forEach(function(c) { (flagsGrouped[c] || []).forEach(function(fd) { allFlagDefs.push(fd); }); });
-    var flagDefs = !{JSON.stringify(allFlagDefs.map(function(fd) { return { code: fd.code, has_argument: fd.has_argument }; }))};
+    var flagDefs = !{JSON.stringify(allFlagDefs)};
     var knownCodes = flagDefs.map(function(fd) { return fd.code; });
 
     //- Show/hide argument input when flag checkbox toggled
