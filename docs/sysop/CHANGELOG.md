@@ -111,10 +111,15 @@
 - Push defaults for file groups: new Push Defaults button and modal with security, flags, newscan_default, and retention options. Mirrors existing message group push defaults.
 - Newscan default added to message group push defaults modal.
 - Seed sync tool: `node src/tools/seedSync.js` upserts seed data from JSON files into database tables. Compares by match key, inserts new records, updates changed columns. Supports --dry-run preview and --seed <name> targeting.
-- Fix: Unified message threading across all three tossers (FTN, QWK, NNTP). All now call shared echomail.threadMessage() instead of maintaining separate implementations. Algorithm guarantees every message gets a thread (reply_to lookup -> subject match -> create new thread). No message can be inserted with NULL threadid.
+- Fix: Unified message threading across all three tossers (FTN, QWK, NNTP). All now call shared messages.threadMessage() instead of maintaining separate implementations. Algorithm guarantees every message gets a thread (reply_to lookup -> subject match -> create new thread). No message can be inserted with NULL threadid.
 - Fix: Post-batch orphan reconciliation: after each toss job, re-checks messages whose parents arrived in the same batch and re-links them to the correct thread. Fixes out-of-order FTN delivery where replies arrived before their parent.
 - Fix: applyThreadingForArea() implemented (was a TODO stub). Scans orphaned messages and re-runs threading. Used by rethread maintenance and available for manual repair.
 - Fix: Removed duplicate threading code from QWK tosser (~105 lines) and NNTP tosser (~75 lines).
+- Refactor: Consolidated echomail.js + messages.js. All message reads, posting, threading helpers, thread maintenance, and inbound handling moved into messages.js as the single canonical model. echomail.js reduced to FTN protocol helpers only (ftnToDb, dbToFtn, getOutboundForConnection). Eliminates 8 duplicate function definitions that had caused recurring bugs where fixes got applied to one path and missed on the other. Net reduction of ~385 lines while guaranteeing a single source of truth.
+- Fix: Origin line format now uses parentheses everywhere. Previously the messages.js posting path (web/admin) still used the old "BoardName 1:2/3" format while only the echomail.js path had been updated. Both paths now produce "BoardName (1:2/3)" and append the address in parentheses to custom origin lines if not already present.
+- Fix: formatBodyHtml divergence resolved. messages.js no longer has its own simpler copy -- it now uses the canonical version from terminalText.js which does paragraph reflow, ANSI art detection, and noWrap mode. Web message rendering now matches import-time rendering.
+- Fix: FTN inbound messages were getting duplicate line breaks. processMessageText() split on \\r but joined with \\r\\n, leaving orphaned \\n chars from \\r\\n pairs. Normalised to \\r before splitting.
+- Fix: FTN toss crash from syntax error when passing network areatag (e.g. FSX_GEN) to reconcileOrphans instead of local shortcode. Moved pushImportedMsgId into handleInboundEchoMessage where the correct shortcode is already resolved.
 
 ## v0.9.5a (2026-04-04)
 

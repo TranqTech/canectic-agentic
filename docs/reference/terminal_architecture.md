@@ -1188,7 +1188,7 @@ Several pieces of logic are shared across the message modules:
 
 **HTML body formatting** (`terminalText.js`) — `formatBodyHtml(displayText, forceWidth)` is the consolidated single source for all tossers and the maintenance tool. Pipeline: reflow → ANSI art detection → VirtualTerminal routing. `VirtualTerminal` noWrap mode: single spaces between words are regular ` ` (browser word-wrap), leading/multi-spaces use `&nbsp;`.
 
-**Thread helpers** (`echomail.js`) — `createThreadRow`, `updateThreadStats`, `rollbackThread` shared by QWK and NNTP tossers.
+**Thread helpers** (`messages.js`) — `threadMessage`, `createThreadRow`, `updateThreadStats`, `rollbackThread` shared by all three tossers (FTN, QWK, NNTP). FTN tosser uses the `handleInboundEchoMessage` orchestrator which calls `threadMessage` internally.
 
 **Message header formatting** — Consistent header block rendering (From/To/Subject/Date/Area) used by both readers and the lister detail view.
 
@@ -1432,7 +1432,8 @@ Terminal menu command for offline QWK packet download and REP upload. Menu comma
 | `fileAreas.js` | models | File area CRUD, directory resolution, stats |
 | `fileEntries.js` | models | File entry CRUD, search, dupe checking, download counts |
 | `userFilePointers.js` | models | Per-user per-area file scan pointers |
-| `echomail.js` | models | FTN echomail import/export, threading. Shared thread helpers: `createThreadRow`, `updateThreadStats`, `rollbackThread` |
+| `echomail.js` | models | FTN protocol helpers: `ftnToDb`, `dbToFtn`, `getOutboundForConnection` |
+| `messages.js` | models | Canonical message model. All CRUD, posting, unified threading (`threadMessage`, `createThreadRow`, `updateThreadStats`, `rollbackThread`), inbound dispatcher (`handleInboundEchoMessage`), orphan reconciliation, sanitization, deletion |
 | `qwkUser.js` | models | User QWK packet generation (`buildQwkForUser`) and REP import (`importRepForUser`) |
 | `areaAccess.js` | utils | Shared area read/write access checks (`checkAreaReadAccess`, `checkAreaPostAccess`) |
 | `terminalText.js` | utils | VirtualTerminal, `formatTerminalText`, `formatBodyHtml` (consolidated single source for all tossers) |

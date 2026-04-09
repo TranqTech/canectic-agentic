@@ -27,7 +27,7 @@ Two access paths:
 | `buildRepPacket()` | `qwkClasses.js` | Build REP ZIP from message items |
 | `userMsgPointers` | `userMsgPointers.js` | Per-user per-area scan pointers (area floor + thread pointers) |
 | `userAreaSubs` | `userAreaSubs.js` | User subscription resolution (override > area default) |
-| `startNewThread()` / `replyToThread()` | `echomail.js` | Standard message posting path |
+| `startNewThread()` / `replyToThread()` | `messages.js` | Standard message posting path |
 | `privateMessages` | `privateMessages.js` | PM inbox/outbox, delivery, unread counts |
 | Access control | `index.js` | `checkAreaReadAccess()` pattern: security level + perm flags + restriction flags |
 
@@ -109,7 +109,7 @@ Steps:
         - If `msg.replyTo` or HEADERS.DAT `Reply-ID` is present, find parent thread
         - If subject starts with "Re:", search for matching thread by subject (same `findThreadBySubject()` pattern as the QWK tosser)
         - Otherwise, start new thread
-     d. Post via `echomail.replyToThread()` or `echomail.startNewThread()` with the user's ID, bypassing the normal web/terminal form pipeline but using the same underlying posting functions
+     d. Post via `messages.replyToThread()` or `messages.startNewThread()` with the user's ID, bypassing the normal web/terminal form pipeline but using the same underlying posting functions
 7. **Clean up**: Remove extracted files and temp directory
 
 ### REP Message Field Mapping

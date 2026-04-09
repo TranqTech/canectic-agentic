@@ -249,3 +249,149 @@ describe('src/models/doors.js exports', function() {
 		assertExportedFn(mod, 'getDoorConfig', 'src/models/doors.js');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// messages.js -- canonical message model
+// ---------------------------------------------------------------------------
+describe('src/models/messages.js exports', function() {
+	var mod;
+
+	before(async function() {
+		try {
+			mod = await import('../src/models/messages.js');
+		} catch (err) {
+			mod = null;
+			this.skip();
+		}
+	});
+
+	var expectedFns = [
+		// Reads
+		'listMsgGroups',
+		'getAreasInGroup',
+		'getMessage',
+		'getMessageById',
+		'getMessageCount',
+		'countMessagesBefore',
+		'getMessages',
+		'getMessagesForThread',
+		'getMessagesForArea',
+		'getThreadsForArea',
+		'getRecentThreadsForArea',
+		'getThreadByUUID',
+		'getThreadUUIDMap',
+		'getThreadsPage',
+		'getThreadCount',
+		'buildMessageTree',
+		// Posting
+		'saveMessage',
+		'startNewThread',
+		'replyToThread',
+		'resolveAreaAddress',
+		// Inbound orchestrator
+		'handleInboundEchoMessage',
+		// Threading helpers
+		'threadMessage',
+		'createThreadRow',
+		'updateThreadStats',
+		'rollbackThread',
+		'getExistingThreadBySubject',
+		// Thread update queue
+		'drainThreadUpdateArray',
+		'pushThreadIdToUpdateQueue',
+		// Orphan reconciliation
+		'pushImportedMsgId',
+		'drainImportedMsgIds',
+		'reconcileOrphans',
+		'applyThreadingForArea',
+		// Thread maintenance
+		'updateThread',
+		'updateThreadArray',
+		'updateDailyThreads',
+		'updateAreaThreads',
+		'mergeThreads',
+		'mergeRecentThreads',
+		// Deletion
+		'deleteMessageByUUID',
+		'deleteThreadByUUID',
+		// Utilities
+		'formatBodyHtml',
+		'sanitizeMessageFields'
+	];
+
+	for (var fnName of expectedFns) {
+		(function(name) {
+			it('exports ' + name + ' as a function', function() {
+				if (!mod) return this.skip();
+				assertExportedFn(mod, name, 'src/models/messages.js');
+			});
+		})(fnName);
+	}
+
+	it('exports threadUpdateArray as an array', function() {
+		if (!mod) return this.skip();
+		assert.ok(Array.isArray(mod.threadUpdateArray),
+			'src/models/messages.js threadUpdateArray should be an array');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// echomail.js -- FTN protocol helpers only (post-consolidation)
+// ---------------------------------------------------------------------------
+describe('src/models/echomail.js exports', function() {
+	var mod;
+
+	before(async function() {
+		try {
+			mod = await import('../src/models/echomail.js');
+		} catch (err) {
+			mod = null;
+			this.skip();
+		}
+	});
+
+	var expectedFns = [
+		'ftnToDb',
+		'dbToFtn',
+		'getOutboundForConnection'
+	];
+
+	for (var fnName of expectedFns) {
+		(function(name) {
+			it('exports ' + name + ' as a function', function() {
+				if (!mod) return this.skip();
+				assertExportedFn(mod, name, 'src/models/echomail.js');
+			});
+		})(fnName);
+	}
+
+	// Guard against regressions: these were moved to messages.js and must NOT
+	// be re-added to echomail.js. If any of these come back, it means someone
+	// restored duplicate definitions.
+	var shouldNotExportFns = [
+		'threadMessage',
+		'handleInboundEchoMessage',
+		'startNewThread',
+		'replyToThread',
+		'createThreadRow',
+		'updateThreadStats',
+		'rollbackThread',
+		'reconcileOrphans',
+		'applyThreadingForArea',
+		'deleteMessageByUUID',
+		'getMessagesForArea',
+		'getThreadsForArea'
+	];
+
+	for (var fnName of shouldNotExportFns) {
+		(function(name) {
+			it('does NOT export ' + name + ' (moved to messages.js)', function() {
+				if (!mod) return this.skip();
+				assert.ok(
+					!Object.prototype.hasOwnProperty.call(mod, name),
+					'src/models/echomail.js should NOT export "' + name + '" -- it was moved to messages.js during the April 2026 consolidation. Restoring a duplicate definition reintroduces the divergence bugs this refactor fixed.'
+				);
+			});
+		})(fnName);
+	}
+});

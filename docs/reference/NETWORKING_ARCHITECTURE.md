@@ -28,10 +28,10 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | `ftnNetmailAdapter.js` | FTN netmail processor routing. Routes inbound netmail by `ToUser` field to AreaFix ('areafix'/'areamgr'), FileFix ('filefix'/'filemgr'/'tic'), or standard PM delivery. Queues response netmail as outbound packets. |
 | `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
-| `qwkTosser.js` | _(Located in `src/middleware/tossers/`)_ QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
+| `qwkTosser.js` | _(Located in `src/middleware/tossers/`)_ QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `threadMessage`/`rollbackThread`/`pushImportedMsgId` from `messages.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
 | `qwkPacketBuilder.js` | QWK packet generation module. Builds complete `.qwk` packets (CONTROL.DAT + MESSAGES.DAT + HEADERS.DAT + NETFLAGS.DAT) for hub-mode delivery to nodes. Designed with low-level reusable functions and a high-level `buildQwkForNode()` entry point. |
 | `qwkTransport.js` | Transport abstraction layer. FTP (`basic-ftp`), SFTP (`ssh2-sftp-client`), Directory (local filesystem copy), and Hub (inbound, no transport needed). Factory function `makeTransport(cd)` selects the right class. |
-| `nntpTosser.js` | _(Located in `src/middleware/tossers/`)_ NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. Uses `createThreadRow`/`updateThreadStats`/`rollbackThread` from `echomail.js` for thread management. Imports `formatBodyHtml` from `terminalText.js` for body_html pre-rendering. |
+| `nntpTosser.js` | _(Located in `src/middleware/tossers/`)_ NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. Uses `threadMessage`/`rollbackThread`/`pushImportedMsgId` from `messages.js` for unified thread management. Imports `formatBodyHtml` from `terminalText.js` for body_html pre-rendering. |
 | `peerConnections.js` | Peer connection CRUD. Manages connection records, connection_data JSONB (transport settings, HWM, credentials), subscription management. `buildConnectionData()` handles form→JSONB for all network types. `getConnectionByUUIDWithNetwork()` joins with network metadata for tosser use. `getActiveConnectionsByNetworkType()` returns all active connections for a given protocol. |
 | `peers.js` | Peer (remote system) CRUD. Parent entity above connections. Handles cascading deletion (peer → connections → subscriptions). Fields: name, sysop_name, contact, notes. |
 | `peerAreaSubscriptions.js` | Manages per-area subscription state for each connection. `syncConnectionToNetwork()` bootstraps rows when connections or areas are created. `setSubscriptions()` bulk-toggles `allowed` or `enabled` flags. `allowAllNetworkAreas()` marks all active network areas as allowed for a connection (called on new connection creation). `syncNetworkAreaToConnections()` syncs a newly added area to all connections on a network with optional allow/enable. `removeSubscriptionsForNetworkArea()` cleans up subscription rows when an area is removed from a network. `resetOutboundIdx(peerConnectionUUID, areaId)` zeroes `msg_idx` for a connection (all areas or one area) so the next toss cycle rescans from the beginning — used by admin HWM reset routes, replacing the protocol-specific reset functions previously in the tossers. Lazy-imports peerConnections to avoid circular dependency. |
@@ -243,7 +243,7 @@ Remote system sends type-2 FTN packet → inbound directory
   → TossInbound() reads .pkt files
   → ReadPkt() parses packet header + messages
   → Per message: ProcessMessage() extracts kludge lines, body, origin
-  → Echomail → echomail.handleInboundEchoMessage(message)
+  → Echomail → messages.handleInboundEchoMessage(message)
     → ftnToDb() converts FTN fields to DB columns
     → formatBodyHtml() generates body_html
     → threadMessage() resolves/creates thread
@@ -457,7 +457,7 @@ Outbound flow: `newOutboundNetmail()` validates the destination FTN address and 
 
 ### Echomail
 
-FTN echomail (public networked messages) flows through `echomail.handleInboundEchoMessage()` which is shared with any import path that provides an FTN-style message object. Key fields mapped by `ftnToDb()`:
+FTN echomail (public networked messages) flows through `messages.handleInboundEchoMessage()` which is shared with any import path that provides an FTN-style message object. The orchestrator delegates FTN-specific field conversion to `echomail.ftnToDb()` then runs unified threading via `messages.threadMessage()`. Key fields mapped by `ftnToDb()`:
 
 | FTN Field | DB Column | Notes |
 |-----------|-----------|-------|
@@ -721,7 +721,7 @@ _Networking-specific decisions. For message platform decisions (read tracking, b
 
 8. **CP437 handling**: QWK packets are CP437. Shared `codepageConversions.js` handles CP437↔UTF-8. Control characters 0x00-0x1F are preserved (for ANSI escape codes, pipe codes, etc.).
 
-9. **body_html pre-rendering**: All tossers import `formatBodyHtml()` from `terminalText.js`. Thread helpers shared from `echomail.js`. See `message_architecture.md` for the full pipeline details.
+9. **body_html pre-rendering**: All tossers import `formatBodyHtml()` from `terminalText.js`. Thread helpers shared from `messages.js`. See `message_architecture.md` for the full pipeline details.
 
 10. **Subscription auto-allow from network**: New connections auto-allow all areas currently on the network (not copied from sibling connections, which could be incomplete). New areas added to a network sync subscription rows to all existing connections, with admin checkboxes controlling allow/enable defaults. Removing an area from a network cleans up all associated subscription rows.
 
@@ -738,7 +738,7 @@ Separate from the network-level QWK tosser, the user QWK system (`src/models/qwk
 - **Reuses the same low-level functions**: `buildControlDat()`, `buildMessagesDat()`, `buildHeadersDatText()`, `assembleQwkPacket()` from `qwkPacketBuilder.js` and `parseMessagesDAT()`, `parseHeadersDat()`, `applyHeadersDat()`, `unzipQwkPacket()` from `qwkClasses.js`.
 - **Different conference numbering**: Network QWK uses areatags from `network_areas` as conference numbers. User QWK uses `message_areas.qwk_conf_number` — a system-wide column that defaults to the area's database `id`, sysop-editable. These are independent; a sysop may choose to align them manually.
 - **Different pointer system**: Network QWK tracks HWM via `peer_area_subscriptions.msg_idx`. User QWK uses the same `user_msg_pointers.scan_pointer` as web and terminal newscan.
-- **Different posting path**: Network QWK imports via the tosser (`importQwkMessage()`). User REP imports via the standard posting path (`echomail.startNewThread()`/`replyToThread()`), which enforces access control, user attribution, and body_html generation.
+- **Different posting path**: Network QWK imports via the tosser (`importQwkMessage()`). User REP imports via the standard posting path (`messages.startNewThread()`/`replyToThread()`), which enforces access control, user attribution, and body_html generation.
 - **No NETFLAGS.DAT**: User packets don't participate in message routing.
 - **Conference 0 = PMs**: Unread PMs are included in the download; conference 0 replies in REP are delivered as new PMs.
 
@@ -885,7 +885,7 @@ _Networking-specific items. For message platform items (web newscan, rich editor
 - **HEADERS.DAT on inbound FTN**: The parser infrastructure exists — could be extended to generate HEADERS.DAT-equivalent metadata from FTN kludge lines.
 - **HWM split for hub mode**: Return HWM data from `buildQwkForNode()` without advancing, let the caller confirm delivery before advancing.
 - **Voting/polls**: VOTING.DAT support in QWK packets (Synchronet generates empty VOTING.DAT).
-- **Tosser sanitization integration**: Wire `sanitizeMessageFields()` calls into echomail.js, nntpTosser.js, and qwkTosser.js inbound paths (see `message_architecture.md` Input Sanitization section).
+- **Tosser sanitization integration**: Wire `sanitizeMessageFields()` calls into the `handleInboundEchoMessage` orchestrator in messages.js, plus nntpTosser.js and qwkTosser.js inbound paths (see `message_architecture.md` Input Sanitization section).
 
 ---
 

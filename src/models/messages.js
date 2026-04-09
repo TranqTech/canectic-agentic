@@ -65,7 +65,7 @@ function escapeHtml(text) {
 //   - ANSI escape sequences, pipe codes, Ctrl-A codes (byte sequences, not HTML)
 //   - &entities; (handled at render time)
 //
-// Exported so echomail.js, nntpTosser.js, qwkTosser.js can call on inbound.
+// Exported so handleInboundEchoMessage, nntpTosser.js, and qwkTosser.js can call on inbound.
 // ---------------------------------------------------------------------------
 
 function sanitizeMessageFields(formObj) {
