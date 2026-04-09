@@ -401,7 +401,9 @@ function readNullTerminatedString(buffer, offset) {
 }
 
 function processMessageText(message) {
-	const lines = message.RawText.split(/\r/);
+	// Normalise line endings before splitting: \r\n -> \r, lone \n -> \r
+	var normalised = message.RawText.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+	const lines = normalised.split(/\r/);
 	//message.utf8 = codepageConversions.cp437ToUtf8(message.TextBuffer)  //message.TextBuffer
 	const bodyLines = [];
 	
@@ -486,9 +488,7 @@ function processMessageText(message) {
 		}
 	}
 	
-	//Optional to maintain lack of \n from packed message. Should handle stripping \n on export in liklihood.
-	//message.BodyText = bodyLines.join('\r').replace(/\x8D/g, '').replace(/\n/g, ''); //remove newline and reverse cr chars	
-	message.BodyText = bodyLines.join('\r\n').replace(/\x8D/g, ''); //remove any reverse cr chars
+	message.BodyText = bodyLines.join('\r').replace(/\x8D/g, ''); //remove any reverse cr chars
 	if (!message.Source){
 		//console.log("Creating Source")
 		message.Source = defaultZone + ":" + message.SourceNet + "/" + message.SourceNode
