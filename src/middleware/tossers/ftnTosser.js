@@ -14,6 +14,7 @@ import * as ftnNetmailAdapter from '../../models/ftnNetmailAdapter.js'
 import * as privateMessages from '../../models/privateMessages.js'
 import * as systemAddresses from '../../models/systemAddresses.js'
 import * as echomail from '../../models/echomail.js'
+import * as messages from '../../models/messages.js'
 import * as ftnUtils from "../../utils/ftnUtils.js"
 import * as peerConnections from '../../models/peerConnections.js'
 import * as codepageConversions from "../../utils/codepageConversions.js"
@@ -552,7 +553,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 				//
 			}
 		}else if (message.Type === "Echomail"){
-			var result = await echomail.handleInboundEchoMessage(message)
+			var result = await messages.handleInboundEchoMessage(message)
 			if (result.status === true){
 				if (result.duplicate){
 					returnObj.pktdupecount ++
@@ -657,7 +658,7 @@ async function OldTossInbound(inboundDir){
 					//
 				}
 			}else if (message.Type === "Echomail"){
-				var result = await echomail.handleInboundEchoMessage(message)
+				var result = await messages.handleInboundEchoMessage(message)
 				if (result.status === true){
 					if (result.duplicate){
 						pktdupecount ++

@@ -18,7 +18,7 @@ import * as peerConnections from '../../models/peerConnections.js';
 import * as networkAreas from '../../models/networkAreas.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
 import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
-import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/echomail.js';
+import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
 
 
 // ---------------------------------------------------------------------------

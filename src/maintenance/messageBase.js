@@ -370,7 +370,7 @@ async function regeneratePmTableBodyHtml(tableName, options) {
 
 async function rethreadAreas(options) {
 	var opts = options || {};
-	var echomail = await import('../models/echomail.js');
+	var messages = await import('../models/messages.js');
 
 	var areaRows;
 	if (opts.areas && opts.areas.length > 0) {
@@ -430,7 +430,7 @@ async function rethreadAreas(options) {
 				thread_id: null
 			};
 
-			msgObj = await echomail.threadMessage(msgObj, msgtable, threadtable, shorty);
+			msgObj = await messages.threadMessage(msgObj, msgtable, threadtable, shorty);
 
 			// Update the message row with thread assignment
 			var updateFields = {};
@@ -447,8 +447,8 @@ async function rethreadAreas(options) {
 
 			// Flush thread stats periodically
 			if (processed % 10 === 0) {
-				var pending = echomail.drainThreadUpdateArray();
-				if (pending.length > 0) await echomail.updateThreadArray(pending);
+				var pending = messages.drainThreadUpdateArray();
+				if (pending.length > 0) await messages.updateThreadArray(pending);
 			}
 
 			if (processed % 100 === 0) {
@@ -457,8 +457,8 @@ async function rethreadAreas(options) {
 		}
 
 		// Final flush
-		var remaining = echomail.drainThreadUpdateArray();
-		if (remaining.length > 0) await echomail.updateThreadArray(remaining);
+		var remaining = messages.drainThreadUpdateArray();
+		if (remaining.length > 0) await messages.updateThreadArray(remaining);
 
 		// Update area stats
 		try {

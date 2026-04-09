@@ -32,20 +32,20 @@ export async function startEmbeddedWorkers(opts = {}) {
 	const ftnTosser = await import("../middleware/tossers/ftnTosser.js");
 	const nntpTosser = await import("../middleware/tossers/nntpTosser.js");
 	const qwkTosser = await import("../middleware/tossers/qwkTosser.js");
-	const echomail = await import("../models/echomail.js");
+	const messages = await import("../models/messages.js");
 	const msgAreas = await import("../models/msgAreas.js");
 	const messageBase = await import("../maintenance/messageBase.js");
 	const privateMessages = await import("../models/privateMessages.js");
 
 	// --- Post-toss maintenance (same as standalone worker) ---
 	async function postTossMaint() {
-		var updatearray = echomail.drainThreadUpdateArray();
+		var updatearray = messages.drainThreadUpdateArray();
 		if (updatearray.length > 0) {
-			await echomail.updateThreadArray(updatearray);
+			await messages.updateThreadArray(updatearray);
 		}
 
 		// Post-batch orphan reconciliation
-		var importedIds = echomail.drainImportedMsgIds();
+		var importedIds = messages.drainImportedMsgIds();
 		if (importedIds.length > 0) {
 			var byArea = {};
 			for (var item of importedIds) {
@@ -53,11 +53,11 @@ export async function startEmbeddedWorkers(opts = {}) {
 				byArea[item.shortcode].push(item.msgId);
 			}
 			for (var sc in byArea) {
-				await echomail.reconcileOrphans(sc, byArea[sc]);
+				await messages.reconcileOrphans(sc, byArea[sc]);
 			}
-			var reconUpdates = echomail.drainThreadUpdateArray();
+			var reconUpdates = messages.drainThreadUpdateArray();
 			if (reconUpdates.length > 0) {
-				await echomail.updateThreadArray(reconUpdates);
+				await messages.updateThreadArray(reconUpdates);
 			}
 		}
 

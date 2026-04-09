@@ -1,7 +1,7 @@
-// messages.js — Message viewing and posting model.
-// Owns all view-facing and user-posting logic. echomail.js retains only
-// network import/export (handleInboundEchoMessage, ftnToDb/dbToFtn,
-// threadMessage, formatBodyHtml for import-time, outbound delivery).
+// messages.js — Canonical message model.
+// All message CRUD, threading, posting, sanitization, and read operations
+// live here. echomail.js is now reduced to FTN-specific tosser helpers
+// (ftnToDb/dbToFtn, getOutboundForConnection).
 
 //imports
 import { v4 as uuidv4 } from 'uuid';
@@ -15,11 +15,20 @@ import * as systemAddresses from './systemAddresses.js';
 import * as ftnUtils from '../utils/ftnUtils.js';
 import * as codepageConversions from '../utils/codepageConversions.js';
 import * as terminalText from '../utils/terminalText.js';
+import { formatBodyHtml } from '../utils/terminalText.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from "../config/appConfig.js";
 
 
 const default_tzutc   = "-0600";
+
+// Thread update queue: tracks threads that need stats recalculation after batch toss.
+// Format: array of "threadId[shortcode" pseudo-IDs (deduped).
+var threadUpdateArray = [];
+
+// Imported msg_id queue: tracks msg_ids inserted during a batch toss for
+// post-batch orphan reconciliation.
+var importedMsgIds = [];
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -81,35 +90,9 @@ function sanitizeMessageFields(formObj) {
 }
 
 // ---------------------------------------------------------------------------
-// formatBodyHtml — view-layer copy.
-// Detects ANSI/pipe/Ctrl-A codes and routes to the appropriate formatter.
-// Non-fatal — returns null on failure so callers always get a usable value.
-// echomail.js keeps its own identical copy for import-time pre-rendering.
+// formatBodyHtml is imported from ../utils/terminalText.js (canonical version
+// with reflow + ANSI art detection + noWrap mode). Re-exported for callers.
 // ---------------------------------------------------------------------------
-
-async function formatBodyHtml(displayText) {
-	if (!displayText) return null;
-	try {
-		if (displayText.includes("\x1b[") ||
-			/\|\d{2}/.test(displayText) ||
-			displayText.includes("\x01")) {
-			return await terminalText.formatTerminalText(displayText, {
-				terminalWidth: 80,
-				replaceAllSpaces: true,
-				handlePipeCodes: true,
-				handleAnsiCodes: true,
-				handleCtrlACodes: true,
-				resetOnNewline: true
-			});
-		}
-		if (displayText.includes("   ")) {
-			return codepageConversions.formatTextForHtml(displayText);
-		}
-		return escapeHtml(displayText).replace(/\r?\n/g, '<br>').replace(/\r/g, '<br>');
-	} catch (_) {
-		return null;
-	}
-}
 
 // ---------------------------------------------------------------------------
 // detectIsAnsi — check raw body text for terminal codes
@@ -778,6 +761,513 @@ async function updateThread(id, shortcode) {
 }
 
 // ---------------------------------------------------------------------------
+// Thread update queue management
+// ---------------------------------------------------------------------------
+
+async function pushThreadIdToUpdateQueue(id, shortcode) {
+	if (!id || !shortcode) return;
+	var psuedoid = id + "[" + shortcode;
+	if (!threadUpdateArray.includes(psuedoid)) {
+		threadUpdateArray.push(psuedoid);
+	}
+}
+
+// Return the current contents of threadUpdateArray (parsed) and clear it.
+// This is the safe way for long-lived processes (worker, embedded mode) to
+// consume the queue — no window between read and clear where items could
+// be lost. Short-lived CLI processes can still read threadUpdateArray
+// directly since they exit after one run.
+function drainThreadUpdateArray() {
+	var items = [];
+	for (var entry of threadUpdateArray) {
+		items.push({
+			id: entry.split("[")[0],
+			shortcode: entry.split("[")[1]
+		});
+	}
+	threadUpdateArray.length = 0;
+	return items;
+}
+
+// Track imported message IDs for post-batch orphan reconciliation.
+function pushImportedMsgId(msgId, shortcode) {
+	if (!msgId || !shortcode) return;
+	importedMsgIds.push({ msgId: msgId, shortcode: shortcode });
+}
+
+function drainImportedMsgIds() {
+	var items = importedMsgIds.slice();
+	importedMsgIds.length = 0;
+	return items;
+}
+
+// ---------------------------------------------------------------------------
+// Thread row helpers (low-level, used by threadMessage and tossers)
+// ---------------------------------------------------------------------------
+
+// Create a new thread row. Returns { threadId, threadidStr } on success, null on failure.
+async function createThreadRow(threadtable, threadidStr, subject, systemTime, fromUser) {
+	var uuid = uuidv4();
+	var threadObj = {
+		uuid:              uuid,
+		threadid:          threadidStr,
+		subject:           subject,
+		started_at:        systemTime,
+		started_by:        fromUser,
+		message_count:     1,
+		last_message:      systemTime,
+		last_message_from: fromUser
+	};
+	var result = await postgres.insertObject(threadObj, threadtable);
+	if (result.status && result.insertId) {
+		return { threadId: result.insertId, threadidStr: threadidStr };
+	}
+	return null;
+}
+
+// Update thread stats after inserting a reply. Bumps message_count and
+// advances last_message / last_message_from if this message is newer.
+async function updateThreadStats(threadtable, threadId, systemTime, fromUser) {
+	await postgres.write(
+		'UPDATE ' + threadtable +
+		' SET message_count = message_count + 1,' +
+		' last_message = GREATEST(last_message, $1),' +
+		' last_message_from = $2' +
+		' WHERE id = $3',
+		[systemTime, fromUser, threadId]
+	);
+}
+
+// Roll back a thread row when the message insert that created it fails.
+// Only removes threads matching the given threadid string (the message's
+// canonical ID) so we don't accidentally delete pre-existing threads.
+async function rollbackThread(threadtable, threadidStr) {
+	await postgres.write(
+		'DELETE FROM ' + threadtable + ' WHERE threadid = $1',
+		[threadidStr]
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Subject-based thread matching
+// ---------------------------------------------------------------------------
+
+async function getExistingThreadBySubject(message, threadtable, subject, strippedre, maxAgeDays) {
+	var uselike  = !!strippedre;
+	var currtime = new Date();
+	var existingthread;
+	var ageDays = maxAgeDays || 30;
+
+	var starttime  = new Date(message.system_time);
+	var moderntime = new Date(message.system_time);
+	starttime.setDate(starttime.getDate() - ageDays);
+	moderntime.setDate(moderntime.getDate() + 14);
+
+	var querytext;
+	if (moderntime >= currtime) {
+		// Current message
+		querytext = uselike
+			? "SELECT * FROM " + threadtable + " WHERE subject LIKE $1 AND last_message >= $2 ORDER BY last_message DESC"
+			: "SELECT * FROM " + threadtable + " WHERE subject = $1 AND last_message >= $2 ORDER BY last_message DESC";
+		existingthread = await postgres.queryOne(querytext, [subject, starttime]);
+	} else {
+		// Archival message
+		querytext = uselike
+			? "SELECT * FROM " + threadtable + " WHERE subject LIKE $1 AND started_at >= $2 AND started_at <= $3 ORDER BY started_at DESC"
+			: "SELECT * FROM " + threadtable + " WHERE subject = $1 AND started_at >= $2 AND started_at <= $3 ORDER BY started_at DESC";
+		existingthread = await postgres.queryOne(querytext, [subject, starttime, message.system_time]);
+	}
+
+	return existingthread;
+}
+
+// ---------------------------------------------------------------------------
+// Unified threading: called by all tossers (FTN, QWK, NNTP) and importers
+// ---------------------------------------------------------------------------
+
+async function threadMessage(message, messagetable, threadtable, shortcode) {
+	var existingthread;
+	var querytext;
+
+	// Step A: Pre-assigned threadid (used by rethreadAreas)
+	if (message.threadid) {
+		querytext = "SELECT * FROM " + threadtable + " WHERE threadid = $1";
+		existingthread = await postgres.queryOne(querytext, [message.threadid]);
+		if (existingthread) {
+			message.thread_id = existingthread.id;
+			await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+		}
+		return message;
+	}
+
+	// Step B: reply_to lookup (case-insensitive MSGID match)
+	if (message.reply_to) {
+		querytext = "SELECT threadid, thread_id FROM " + messagetable + " WHERE UPPER(msg_id) = UPPER($1)";
+		var upstreammsg = await postgres.queryOne(querytext, [message.reply_to]);
+		if (upstreammsg && (upstreammsg.threadid || upstreammsg.thread_id)) {
+			if (upstreammsg.threadid) message.threadid = upstreammsg.threadid;
+			if (upstreammsg.thread_id) message.thread_id = upstreammsg.thread_id;
+			await pushThreadIdToUpdateQueue(upstreammsg.thread_id, shortcode);
+			return message;
+		}
+		// Parent not found or has no thread -- fall through to subject matching
+	}
+
+	// Step C: Subject matching
+	var isReply = !!(message.reply_to) || message.subject.toUpperCase().startsWith('RE:');
+	var checksubject = message.subject;
+	if (checksubject.toUpperCase().startsWith('RE:')) {
+		var i = 0;
+		while (checksubject.toUpperCase().startsWith('RE:')) {
+			checksubject = checksubject.substring(3).trim();
+			i++;
+			if (i > 10) break;
+		}
+	}
+	var subjectAgeDays = isReply ? 365 : 30;
+
+	existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, subjectAgeDays);
+	if (!existingthread && checksubject !== message.subject) {
+		existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, subjectAgeDays);
+	}
+
+	if (existingthread) {
+		message.threadid  = existingthread.threadid;
+		message.thread_id = existingthread.id;
+		await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+		return message;
+	}
+
+	// Step D: Create new thread (guaranteed -- never leave message threadless)
+	var threadidStr = message.msg_id;
+	var tResult = await createThreadRow(threadtable, threadidStr, message.subject, message.system_time, message.from_user);
+	if (tResult) {
+		message.thread_id = tResult.threadId;
+		message.threadid  = tResult.threadidStr;
+	} else {
+		// Race condition: another process created a thread with the same threadid.
+		// Look it up and attach.
+		querytext = "SELECT * FROM " + threadtable + " WHERE UPPER(threadid) = UPPER($1)";
+		var dbthread = await postgres.queryOne(querytext, [threadidStr]);
+		if (dbthread) {
+			message.threadid  = dbthread.threadid;
+			message.thread_id = dbthread.id;
+			await pushThreadIdToUpdateQueue(dbthread.id, shortcode);
+		} else {
+			// Absolute last resort: create with a unique threadid
+			var fallbackId = threadidStr + '_' + Date.now();
+			var fallback = await createThreadRow(threadtable, fallbackId, message.subject, message.system_time, message.from_user);
+			if (fallback) {
+				message.thread_id = fallback.threadId;
+				message.threadid  = fallback.threadidStr;
+			} else {
+				alogger.writeAlog(1, "threadMessage: FAILED to create thread for " + message.msg_id, "redbright");
+			}
+		}
+	}
+
+	return message;
+}
+
+// ---------------------------------------------------------------------------
+// Inbound echomail orchestrator (called by FTN tosser)
+// ---------------------------------------------------------------------------
+
+async function handleInboundEchoMessage(message) {
+	var returnObj = {
+		status: false,
+		imported: false,
+		duplicate: false,
+		bad: false,
+		errormessages: []
+	};
+
+	if (!message) {
+		returnObj.errormessages.push("Invalid Message!");
+		return returnObj;
+	}
+	if (!message.AreaTag) {
+		returnObj.errormessages.push("Invalid Area Tag.");
+		return returnObj;
+	}
+
+	var msgArea = await msgAreas.getAreaByAreatag(message.AreaTag);
+	if (!msgArea) {
+		alogger.writeAlog(4, "handleInboundEchoMessage: no area found for tag " + message.AreaTag, "yellow");
+		returnObj.errormessages.push("No Area with that AreaTag.");
+		return returnObj;
+	}
+
+	var shorty = msgArea.shortcode.toLowerCase();
+	var msgtablename = "mb_" + shorty + "_msgs";
+
+	// Check for duplicate
+	var isUnique = await postgres.checkValueUnique("msg_id", message.MsgId, msgtablename);
+	if (!isUnique) {
+		returnObj.status    = true;
+		returnObj.duplicate = true;
+		return returnObj;
+	}
+
+	var threadtablename = "mb_" + shorty + "_threads";
+	// Convert FTN message to DB format -- delegated to echomail.js (FTN-specific)
+	var echomailModule = await import('./echomail.js');
+	var dbObj = await echomailModule.ftnToDb(message);
+	if (message.utf8) {
+		dbObj.utf8 = message.utf8;
+	}
+
+	// Pre-format body as HTML for display (non-fatal)
+	var displayText = dbObj.utf8 || dbObj.body_text || '';
+	dbObj.body_html = await formatBodyHtml(displayText);
+
+	// Resolve source_network_id so outbound delivery can suppress re-sending
+	// a message back to the network it arrived from
+	var netRows = await networkAreas.getNetworksByArea(msgArea.id);
+	if (netRows && netRows.length > 0) {
+		// For FTN inbound, use the network whose areatag matches the message AreaTag
+		var matchingNet = netRows.find(nr =>
+			nr.areatag && nr.areatag.toUpperCase() === message.AreaTag.toUpperCase()
+		);
+		if (matchingNet) {
+			dbObj.source_network_id = matchingNet.network_id;
+		}
+	}
+
+	dbObj = await threadMessage(dbObj, msgtablename, threadtablename, shorty);
+
+	var dbres = await postgres.insertObject(dbObj, msgtablename);
+	if (dbres.status === true) {
+		returnObj.status   = true;
+		returnObj.imported = true;
+		// Track for post-batch orphan reconciliation (use correct local shortcode)
+		if (dbObj.msg_id) pushImportedMsgId(dbObj.msg_id, shorty);
+	} else {
+		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
+	}
+
+	return returnObj;
+}
+
+// ---------------------------------------------------------------------------
+// Thread maintenance (batch updates and rebuilds)
+// ---------------------------------------------------------------------------
+
+async function updateThreadArray(threadArray) {
+	if (!threadArray) return null;
+	for (var thread of threadArray) {
+		await updateThread(thread.id, thread.shortcode);
+	}
+}
+
+async function updateDailyThreads(shortcode) {
+	var shorty       = shortcode.toLowerCase();
+	var msgtablename = "mb_" + shorty + "_msgs";
+	var threadArray  = [];
+
+	var msgarray = await postgres.query(
+		"SELECT thread_id FROM " + msgtablename + " WHERE system_time >= NOW() - INTERVAL '24 HOURS' ORDER BY system_time DESC",
+		[]
+	);
+	if (!msgarray || msgarray.length === 0) return;
+
+	for (var msg of msgarray) {
+		if (!threadArray.includes(msg.thread_id)) {
+			threadArray.push(msg.thread_id);
+		}
+	}
+	for (var threadId of threadArray) {
+		await updateThread(threadId, shortcode);
+	}
+}
+
+async function updateAreaThreads(shortcode) {
+	var shorty          = shortcode.toLowerCase();
+	var threadtablename = "mb_" + shorty + "_threads";
+
+	var dbthreads = await postgres.query(
+		"SELECT id FROM " + threadtablename + " ORDER BY last_message DESC",
+		[]
+	);
+	if (!dbthreads || dbthreads.length === 0) return;
+
+	for (var thread of dbthreads) {
+		await updateThread(thread.id, shortcode);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Thread merging (deduplication of threads with matching subjects)
+// ---------------------------------------------------------------------------
+
+async function mergeThreads(parent, child, shortcode) {
+	var shorty      = shortcode.toLowerCase();
+	var msgtable    = "mb_" + shorty + "_msgs";
+	var threadtable = "mb_" + shorty + "_threads";
+
+	var messageArray = await postgres.query(
+		"SELECT id FROM " + msgtable + " WHERE thread_id = $1",
+		[parent.id]
+	);
+	if (!messageArray || messageArray.length === 0) return;
+
+	var scount = 0;
+	for (var msg of messageArray) {
+		try {
+			await postgres.write(
+				"UPDATE " + msgtable + " SET threadid = $1, thread_id = $2 WHERE id = $3",
+				[parent.threadid, parent.id, msg.id]
+			);
+			scount++;
+		} catch (error) {
+			alogger.writeAlog(3, "mergeThreads: error updating msg " + msg.id + ": " + error.message, "redbright");
+		}
+	}
+
+	if (scount === messageArray.length) {
+		await postgres.write(
+			"DELETE FROM " + threadtable + " WHERE id = $1",
+			[child.id]
+		);
+	}
+}
+
+async function mergeRecentThreads(shortcode) {
+	var shorty      = shortcode.toLowerCase();
+	var threadtable = "mb_" + shorty + "_threads";
+
+	var threadArray = await postgres.query(
+		"SELECT id, threadid, subject, started_at, last_message FROM " + threadtable +
+		" WHERE last_message >= NOW() - INTERVAL '60 DAYS' ORDER BY last_message DESC",
+		[]
+	);
+	if (!threadArray || threadArray.length === 0) return;
+
+	for (var thread of threadArray) {
+		thread.subject = thread.subject.trim();
+		var checksubject = thread.subject;
+
+		if (thread.subject.toUpperCase().startsWith('RE:')) {
+			var i = 0;
+			while (checksubject.toUpperCase().startsWith('RE:')) {
+				checksubject = checksubject.substring(3).trim();
+				i++;
+				if (i > 10) break;
+			}
+		}
+
+		var starttime = new Date(thread.started_at);
+		starttime.setDate(starttime.getDate() - 30);
+
+		var querytext   = "SELECT * FROM " + threadtable + " WHERE subject LIKE $1 AND id != $2 AND last_message >= $3 ORDER BY last_message DESC";
+		var existingthread = await postgres.queryOne(querytext, [checksubject, thread.id, starttime]);
+		if (!existingthread && checksubject !== thread.subject) {
+			existingthread = await postgres.queryOne(querytext, [thread.subject, thread.id, starttime]);
+		}
+
+		if (existingthread) {
+			await mergeThreads(existingthread, thread, shortcode);
+			await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Orphan reconciliation
+// ---------------------------------------------------------------------------
+
+/**
+ * Fix orphaned messages (threadid IS NULL) in an area by re-running threadMessage().
+ * Returns the number of messages fixed.
+ */
+async function applyThreadingForArea(shortcode) {
+	var shorty          = shortcode.toLowerCase();
+	var msgtablename    = "mb_" + shorty + "_msgs";
+	var threadtablename = "mb_" + shorty + "_threads";
+	var fixed = 0;
+
+	var orphans = await postgres.query(
+		"SELECT id, msg_id, reply_to, subject, system_time, from_user, threadid, thread_id FROM " +
+		msgtablename + " WHERE threadid IS NULL OR thread_id IS NULL ORDER BY system_time ASC",
+		[]
+	);
+	if (!orphans || orphans.length === 0) return 0;
+
+	alogger.writeAlog(3, '[Threading] Found ' + orphans.length + ' orphaned message(s) in ' + shortcode, 'yellow');
+
+	for (var msg of orphans) {
+		msg.threadid = null;
+		msg.thread_id = null;
+		var threaded = await threadMessage(msg, msgtablename, threadtablename, shorty);
+		if (threaded.threadid && threaded.thread_id) {
+			await postgres.write(
+				'UPDATE ' + msgtablename + ' SET threadid = $1, thread_id = $2 WHERE id = $3',
+				[threaded.threadid, threaded.thread_id, msg.id]
+			);
+			fixed++;
+		}
+	}
+
+	// Drain any queued thread updates from the re-threading pass
+	var pending = drainThreadUpdateArray();
+	if (pending.length > 0) await updateThreadArray(pending);
+
+	if (fixed > 0) {
+		alogger.writeAlog(2, '[Threading] Fixed ' + fixed + ' orphaned message(s) in ' + shortcode, 'greenbright');
+	}
+	return fixed;
+}
+
+/**
+ * Post-batch orphan reconciliation. For each msg_id that was just imported,
+ * find messages whose reply_to matches it and whose thread differs from the
+ * parent's thread. Re-link them to the correct thread.
+ */
+async function reconcileOrphans(shortcode, msgIds) {
+	if (!msgIds || msgIds.length === 0) return 0;
+	var shorty          = shortcode.toLowerCase();
+	var msgtablename    = "mb_" + shorty + "_msgs";
+	var fixed = 0;
+
+	for (var msgId of msgIds) {
+		// Find the parent message's thread info
+		var parent = await postgres.queryOne(
+			'SELECT threadid, thread_id FROM ' + msgtablename + ' WHERE UPPER(msg_id) = UPPER($1)',
+			[msgId]
+		);
+		if (!parent || !parent.thread_id) continue;
+
+		// Find children that reference this parent but have wrong/missing thread
+		var children = await postgres.query(
+			'SELECT id, threadid, thread_id FROM ' + msgtablename +
+			' WHERE UPPER(reply_to) = UPPER($1) AND (thread_id IS NULL OR thread_id != $2)',
+			[msgId, parent.thread_id]
+		);
+		if (!children || children.length === 0) continue;
+
+		for (var child of children) {
+			var oldThreadId = child.thread_id;
+			await postgres.write(
+				'UPDATE ' + msgtablename + ' SET threadid = $1, thread_id = $2 WHERE id = $3',
+				[parent.threadid, parent.thread_id, child.id]
+			);
+			fixed++;
+
+			// Queue stats updates for both old and new threads
+			if (oldThreadId && oldThreadId !== parent.thread_id) {
+				await pushThreadIdToUpdateQueue(oldThreadId, shortcode);
+			}
+			await pushThreadIdToUpdateQueue(parent.thread_id, shortcode);
+		}
+	}
+
+	if (fixed > 0) {
+		alogger.writeAlog(3, '[Threading] Reconciled ' + fixed + ' orphan(s) in ' + shortcode, 'greenbright');
+	}
+	return fixed;
+}
+
+// ---------------------------------------------------------------------------
 // Message deletion
 // ---------------------------------------------------------------------------
 
@@ -863,22 +1353,15 @@ async function deleteThreadByUUID(uuid, shortcode) {
 // ---------------------------------------------------------------------------
 
 export {
-	// Group/area listing (new)
+	// Group/area listing
 	listMsgGroups,
 	getAreasInGroup,
 
-	// Message retrieval (new)
+	// Message retrieval
 	getMessage,
 	getMessageCount,
 	countMessagesBefore,
 	getMessages,
-
-	// Message posting (new unified + migrated originals)
-	saveMessage,
-	startNewThread,
-	replyToThread,
-
-	// Migrated view methods
 	getMessagesForThread,
 	getThreadsForArea,
 	getRecentThreadsForArea,
@@ -890,12 +1373,46 @@ export {
 	getThreadCount,
 	buildMessageTree,
 
-	// Message deletion (migrated)
+	// User posting
+	saveMessage,
+	startNewThread,
+	replyToThread,
+	resolveAreaAddress,
+
+	// Inbound message handling (called by tossers)
+	handleInboundEchoMessage,
+
+	// Threading helpers (used by all tossers and importers)
+	threadMessage,
+	createThreadRow,
+	updateThreadStats,
+	rollbackThread,
+	getExistingThreadBySubject,
+
+	// Thread update queue
+	threadUpdateArray,
+	drainThreadUpdateArray,
+	pushThreadIdToUpdateQueue,
+
+	// Imported msg_id tracking and orphan reconciliation
+	pushImportedMsgId,
+	drainImportedMsgIds,
+	reconcileOrphans,
+	applyThreadingForArea,
+
+	// Thread maintenance
+	updateThread,
+	updateThreadArray,
+	updateDailyThreads,
+	updateAreaThreads,
+	mergeThreads,
+	mergeRecentThreads,
+
+	// Message deletion
 	deleteMessageByUUID,
 	deleteThreadByUUID,
 
-	// Utilities (view-layer copies)
+	// Utilities
 	formatBodyHtml,
-	updateThread,
 	sanitizeMessageFields
 };

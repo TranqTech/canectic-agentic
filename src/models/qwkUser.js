@@ -3,7 +3,7 @@
 // Generates personal .qwk packets for offline reading and imports .rep
 // packets containing user replies. Uses the low-level packet building
 // functions from qwkPacketBuilder.js and the standard posting path from
-// echomail.js.
+// messages.js.
 //
 // Conference 0 = private messages (PMs).
 // Conference N = message area with message_areas.qwk_conf_number = N.
@@ -18,7 +18,7 @@ import * as msgAreas from './msgAreas.js';
 import * as userMsgPointers from './userMsgPointers.js';
 import * as userAreaSubs from './userAreaSubs.js';
 import * as privateMessages from './privateMessages.js';
-import * as echomail from './echomail.js';
+import * as messages from './messages.js';
 import { checkAreaReadAccess, checkAreaPostAccess } from '../utils/areaAccess.js';
 import {
 	buildControlDat,
@@ -486,7 +486,7 @@ async function importRepMessage(user, msg, area) {
 
 		if (thread) {
 			formObj.reply_to = thread.threadid;
-			var result = await echomail.replyToThread(formObj, area.shortcode, thread.uuid);
+			var result = await messages.replyToThread(formObj, area.shortcode, thread.uuid);
 			if (result.status) return { status: true };
 			return { status: false, error: result.errormessages.join(', ') };
 		}
@@ -495,7 +495,7 @@ async function importRepMessage(user, msg, area) {
 	}
 
 	// New thread
-	var result = await echomail.startNewThread(formObj, area.shortcode);
+	var result = await messages.startNewThread(formObj, area.shortcode);
 	if (result.status) return { status: true };
 	return { status: false, error: result.errormessages.join(', ') };
 }

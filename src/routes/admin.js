@@ -4762,8 +4762,8 @@ router.get('/bad-echomail/:areatag', requireAdmin, async (req, res) => {
 
 router.post('/bad-echomail/:areatag/recover', urlencodedParser, requireAdmin, async (req, res) => {
 	var areatag = req.params.areatag.toUpperCase().trim();
-	var echomail = await import('../models/echomail.js');
-	var result = await badEchomail.recoverMessages(areatag, echomail);
+	var messagesModule = await import('../models/messages.js');
+	var result = await badEchomail.recoverMessages(areatag, messagesModule);
 	await flash.setOne(req, 'success',
 		'Recovered ' + result.recovered + ' message(s), ' + result.dupes + ' dupe(s), ' + result.remaining + ' remaining.'
 	);

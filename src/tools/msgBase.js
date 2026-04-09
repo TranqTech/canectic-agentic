@@ -1,6 +1,6 @@
 import * as msgAreas from "../models/msgAreas.js";
 import * as msgGroups from "../models/msgGroups.js";
-import * as echomail from "../models/echomail.js";
+import * as messages from "../models/messages.js";
 import * as postgres from "../middleware/db/postgres.js";
 import * as alogger from "../utils/alogger.js";
 
@@ -36,7 +36,7 @@ async function testDate() {
 
 async function finalThreadUpdates() {
 	var updatearray = [];
-	for (var thread of echomail.threadUpdateArray) {
+	for (var thread of messages.threadUpdateArray) {
 		var uObj = {
 			id:        thread.split("[")[0],
 			shortcode: thread.split("[")[1]
@@ -45,7 +45,7 @@ async function finalThreadUpdates() {
 	}
 	if (updatearray.length > 0) {
 		alogger.writeAlog(5, "finalThreadUpdates: updating " + updatearray.length + " threads", "cyan");
-		await echomail.updateThreadArray(updatearray);
+		await messages.updateThreadArray(updatearray);
 	} else {
 		alogger.writeAlog(5, "finalThreadUpdates: no threads to update", "cyan");
 	}
@@ -54,10 +54,10 @@ async function finalThreadUpdates() {
 async function doMaint() {
 	var shortcodeArray = await msgAreas.GetShortcodeList();
 	for (var sc of shortcodeArray) {
-		//await echomail.applyThreadingForArea(sc)
-		//await echomail.updateAreaThreads(sc)
-		await echomail.updateDailyThreads(sc);
-		await echomail.mergeRecentThreads(sc);
+		//await messages.applyThreadingForArea(sc)
+		//await messages.updateAreaThreads(sc)
+		await messages.updateDailyThreads(sc);
+		await messages.mergeRecentThreads(sc);
 	}
 	await finalThreadUpdates();
 	await msgAreas.updateAreaStats();

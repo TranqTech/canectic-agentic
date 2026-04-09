@@ -23,7 +23,7 @@ import * as alogger from '../../utils/alogger.js';
 import * as peerConnections from '../../models/peerConnections.js';
 import * as systemAddresses from '../../models/systemAddresses.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
-import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/echomail.js';
+import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
 import { makeTransport } from '../../models/qwkTransport.js';
 import * as privateMessages from '../../models/privateMessages.js';
 import {

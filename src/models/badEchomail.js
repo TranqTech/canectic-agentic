@@ -102,19 +102,19 @@ async function getCountForTag(areatag) {
 // Recovery — import bad echomail into a real area
 // ---------------------------------------------------------------------------
 
-async function recoverMessages(areatag, echomail) {
+async function recoverMessages(areatag, messagesModule) {
 	var tag = areatag.toUpperCase().trim();
-	var messages = await postgres.query(
+	var rows = await postgres.query(
 		'SELECT * FROM echomail_bad WHERE areatag = $1 ORDER BY received_at ASC',
 		[tag]
 	);
 
-	if (!messages || messages.length === 0) return { recovered: 0 };
+	if (!rows || rows.length === 0) return { recovered: 0 };
 
 	var recovered = 0;
 	var dupes = 0;
 
-	for (var msg of messages) {
+	for (var msg of rows) {
 		// Reconstruct an FTN-style message object for handleInboundEchoMessage
 		var kludges = [];
 		try { kludges = JSON.parse(msg.kludges || '[]'); } catch (_) {}
@@ -148,7 +148,7 @@ async function recoverMessages(areatag, echomail) {
 			}
 		}
 
-		var result = await echomail.handleInboundEchoMessage(ftnMsg);
+		var result = await messagesModule.handleInboundEchoMessage(ftnMsg);
 		if (result.status) {
 			if (result.duplicate) {
 				dupes++;

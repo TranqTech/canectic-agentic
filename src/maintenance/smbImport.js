@@ -5,7 +5,7 @@
 
 import { parseSMB, previewSMB } from '../utils/smbParser.js';
 import * as postgres from '../middleware/db/postgres.js';
-import * as echomail from '../models/echomail.js';
+import * as messages from '../models/messages.js';
 import * as msgAreas from '../models/msgAreas.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
 import { cp437ToUtf8 as convertCP437toUTF8 } from '../utils/codepageConversions.js';
@@ -164,7 +164,7 @@ async function importSMB(shdPath, sdtPath, sidPath, areaShortcode, options) {
 			}
 
 			// Thread the message
-			dbObj = await echomail.threadMessage(dbObj, msgtable, threadtable, shorty);
+			dbObj = await messages.threadMessage(dbObj, msgtable, threadtable, shorty);
 
 			// Insert
 			var dbres = await postgres.insertObject(dbObj, msgtable);
@@ -182,9 +182,9 @@ async function importSMB(shdPath, sdtPath, sidPath, areaShortcode, options) {
 		// Flush thread stats frequently so subject matching and thread linking
 		// see accurate last_message timestamps during the import
 		if ((i + 1) % 10 === 0) {
-			var pending = echomail.drainThreadUpdateArray();
+			var pending = messages.drainThreadUpdateArray();
 			if (pending.length > 0) {
-				await echomail.updateThreadArray(pending);
+				await messages.updateThreadArray(pending);
 			}
 		}
 
@@ -195,9 +195,9 @@ async function importSMB(shdPath, sdtPath, sidPath, areaShortcode, options) {
 	}
 
 	// Final flush of any remaining thread updates
-	var updatearray = echomail.drainThreadUpdateArray();
+	var updatearray = messages.drainThreadUpdateArray();
 	if (updatearray.length > 0) {
-		await echomail.updateThreadArray(updatearray);
+		await messages.updateThreadArray(updatearray);
 	}
 
 	// Update area stats

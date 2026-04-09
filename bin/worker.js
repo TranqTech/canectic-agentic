@@ -40,7 +40,7 @@ import * as ticTosser from "../src/middleware/tossers/ticTosser.js";
 import * as emailTosser from "../src/middleware/tossers/emailTosser.js";
 
 // Shared post-toss helpers (thread finalization, area stats)
-import * as echomail from "../src/models/echomail.js";
+import * as messages from "../src/models/messages.js";
 import * as msgAreas from "../src/models/msgAreas.js";
 import * as peerConnections from "../src/models/peerConnections.js";
 
@@ -98,15 +98,15 @@ async function postTossMaint() {
 	// Drain and finalize any threads queued during import.
 	// drainThreadUpdateArray() returns parsed entries and clears the queue
 	// atomically — safe for long-lived processes.
-	var updatearray = echomail.drainThreadUpdateArray();
+	var updatearray = messages.drainThreadUpdateArray();
 	if (updatearray.length > 0) {
 		alogger.writeAlog(3, `[Worker] Updating ${updatearray.length} thread(s)`, "cyan");
-		await echomail.updateThreadArray(updatearray);
+		await messages.updateThreadArray(updatearray);
 	}
 
 	// Post-batch orphan reconciliation: re-link replies whose parents
 	// arrived in the same batch (out-of-order delivery).
-	var importedIds = echomail.drainImportedMsgIds();
+	var importedIds = messages.drainImportedMsgIds();
 	if (importedIds.length > 0) {
 		// Group by shortcode
 		var byArea = {};
@@ -115,12 +115,12 @@ async function postTossMaint() {
 			byArea[item.shortcode].push(item.msgId);
 		}
 		for (var sc in byArea) {
-			await echomail.reconcileOrphans(sc, byArea[sc]);
+			await messages.reconcileOrphans(sc, byArea[sc]);
 		}
 		// Drain any thread updates queued by reconciliation
-		var reconUpdates = echomail.drainThreadUpdateArray();
+		var reconUpdates = messages.drainThreadUpdateArray();
 		if (reconUpdates.length > 0) {
-			await echomail.updateThreadArray(reconUpdates);
+			await messages.updateThreadArray(reconUpdates);
 		}
 	}
 
