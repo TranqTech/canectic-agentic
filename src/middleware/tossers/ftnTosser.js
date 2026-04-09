@@ -910,15 +910,19 @@ function WritePktToNode(messageArray, conn, systemaddress){
 		// Body text (join with \r)
 		const bodyLines = (msg.BodyText || '').split('\r\n');
 		rawText += bodyLines.join('\r');
-		var originsplit = "\r\r---"
-		if (msg.SignatureString){
-			originsplit += "\r" + msg.SignatureString + "\r"
+		// Tear line, optional tagline, origin line (FTS-0004 format)
+		rawText += "\r"
+		if (msg.SignatureString) {
+			// Tagline present: bare tear line, then tagline on its own line
+			rawText += "\r---"
+			rawText += "\r" + msg.SignatureString
+			if (msg.ProductLine) rawText += "\r--- " + msg.ProductLine
+		} else if (msg.ProductLine) {
+			// No tagline: tear line with product identifier
+			rawText += "\r--- " + msg.ProductLine
+		} else {
+			rawText += "\r---"
 		}
-		if (msg.ProductLine){
-			originsplit += " " + msg.ProductLine
-		}
-		rawText += originsplit
-		//only apply origin line to echomail?
 		if (msg.Type === "Echomail"){
 			if (msg.OriginLine){
 				rawText += "\r * Origin: " + msg.OriginLine

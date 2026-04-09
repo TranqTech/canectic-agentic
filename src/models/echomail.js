@@ -964,6 +964,48 @@ async function updateMsgIndexes(idxUpdateArray) {
 		}
 	}
 }
+/**
+ * Resolve FTN address, path, and origin line for outbound messages in an area.
+ * Origin line format per FTS: "Custom Text (zone:net/node)" or "BoardName (zone:net/node)".
+ * If a custom origin_line is set on the address and doesn't already contain the address
+ * in parentheses, it is appended.
+ */
+async function resolveAreaOrigin(areaId) {
+	var boardname = appConfig.get('boardname', 'Canectic BBS');
+	var address = null;
+	var path = null;
+	var origin_line = boardname;
+
+	var areaNetworks = await networkAreas.getNetworksByArea(areaId);
+	var ftnNet = areaNetworks.find(an => an.network_type === "FTN" && an.network_active);
+	if (ftnNet) {
+		var defaultAddr = await systemAddresses.getDefaultAddress(ftnNet.network_id);
+		if (!defaultAddr) {
+			var addrs = await systemAddresses.getAddressesForDomain(ftnNet.domain);
+			if (addrs && addrs.length > 0) defaultAddr = addrs[0];
+		}
+		if (defaultAddr) {
+			address = defaultAddr.address;
+			if (defaultAddr.origin_line) {
+				// Custom origin -- append address in parentheses if not already present
+				origin_line = defaultAddr.origin_line;
+				if (address && !origin_line.includes('(' + address + ')')) {
+					origin_line += ' (' + address + ')';
+				}
+			} else {
+				// Default: boardname (address)
+				origin_line = boardname + ' (' + address + ')';
+			}
+		}
+	}
+	if (!origin_line) origin_line = boardname;
+	if (address) {
+		path = address.split(":")[1];
+	}
+
+	return { address: address, path: path, origin_line: origin_line };
+}
+
 async function startNewThread(formObj, shortcode) {
 	var shorty      = shortcode.toLowerCase().trim();
 	var msgtable    = "mb_" + shorty + "_msgs";
@@ -996,33 +1038,10 @@ async function startNewThread(formObj, shortcode) {
 		return returnObj;
 	}
 
-	// Resolve system FTN address for this area via network_areas + system_addresses.
-	// Uses the default address for the network if set, otherwise first active address.
-	// origin_line: use address's custom origin_line if set, else "boardname address".
-	var boardname = appConfig.get('boardname', 'Canectic BBS');
-	var address = null;
-	var path    = null;
-	var origin_line = boardname;
-
-	var areaNetworks = await networkAreas.getNetworksByArea(area.id);
-	var ftnNet = areaNetworks.find(an => an.network_type === "FTN" && an.network_active);
-	if (ftnNet) {
-		var defaultAddr = await systemAddresses.getDefaultAddress(ftnNet.network_id);
-		if (!defaultAddr) {
-			var addrs = await systemAddresses.getAddressesForDomain(ftnNet.domain);
-			if (addrs && addrs.length > 0) defaultAddr = addrs[0];
-		}
-		if (defaultAddr) {
-			address = defaultAddr.address;
-			origin_line = defaultAddr.origin_line
-				? defaultAddr.origin_line
-				: boardname + " " + address;
-		}
-	}
-	if (!origin_line) origin_line = boardname;
-	if (address) {
-		path = address.split(":")[1];
-	}
+	var ftnOrigin = await resolveAreaOrigin(area.id);
+	var address = ftnOrigin.address;
+	var path = ftnOrigin.path;
+	var origin_line = ftnOrigin.origin_line;
 
 	var millihex       = ftnUtils.getMilliHex();
 	var datetimestring = await ftnUtils.getDateTimeString();
@@ -1125,33 +1144,10 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 	var thread_id = dbthread.id;
 	var replyto   = formObj.reply_to || dbthread.threadid;
 
-	// Resolve system FTN address for this area via network_areas + system_addresses.
-	// Uses the default address for the network if set, otherwise first active address.
-	// origin_line: use address's custom origin_line if set, else "boardname address".
-	var boardname = appConfig.get('boardname', 'Canectic BBS');
-	var address = null;
-	var path    = null;
-	var origin_line = boardname;
-
-	var areaNetworks = await networkAreas.getNetworksByArea(area.id);
-	var ftnNet = areaNetworks.find(an => an.network_type === "FTN" && an.network_active);
-	if (ftnNet) {
-		var defaultAddr = await systemAddresses.getDefaultAddress(ftnNet.network_id);
-		if (!defaultAddr) {
-			var addrs = await systemAddresses.getAddressesForDomain(ftnNet.domain);
-			if (addrs && addrs.length > 0) defaultAddr = addrs[0];
-		}
-		if (defaultAddr) {
-			address = defaultAddr.address;
-			origin_line = defaultAddr.origin_line
-				? defaultAddr.origin_line
-				: boardname + " " + address;
-		}
-	}
-	if (!origin_line) origin_line = boardname;
-	if (address) {
-		path = address.split(":")[1];
-	}
+	var ftnOrigin = await resolveAreaOrigin(area.id);
+	var address = ftnOrigin.address;
+	var path = ftnOrigin.path;
+	var origin_line = ftnOrigin.origin_line;
 
 	var millihex       = ftnUtils.getMilliHex();
 	var datetimestring = await ftnUtils.getDateTimeString();
