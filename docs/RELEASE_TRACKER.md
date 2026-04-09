@@ -247,7 +247,7 @@ Last updated: 2026-04-06
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | 1 | JS Door SDK (dorkit-style) | [ ] | Library for writing JS doors that integrate with Canectic. Provide terminal I/O helpers, user context, drop file parsing, colour/cursor utilities, input handling. Similar to Synchronet's dorkit. Publish as standalone npm package. |
-| 2 | Hub / Network Coordinator tools | [ ] | Managed nodes table, stub/segment generation, upstream distribution, nodelist compilation (ZC). Four phases: node management, stub generation, distribution, compilation. See `HUB_COORDINATOR_DESIGN.md`. |
+| 2 | Hub / Network Coordinator tools | [x] | Nested segment hierarchy with internal/external sources, per-network role configuration, managed flag definitions, tree-walk compilation, post-batch orphan reconciliation. See `HUB_COORDINATOR_DESIGN.md`. |
 
 ## Post-Release (Beta+)
 
