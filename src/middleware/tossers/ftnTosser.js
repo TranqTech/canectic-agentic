@@ -558,7 +558,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 					returnObj.pktdupecount ++
 				}else if (result.imported){
 					returnObj.pktimportcount ++
-					if (message.MsgId) echomail.pushImportedMsgId(message.MsgId, (message.AreaTag || '').toLowerCase());
+
 				}
 				returnObj.pktsuccesscount ++
 			}else{
@@ -663,7 +663,7 @@ async function OldTossInbound(inboundDir){
 						pktdupecount ++
 					}else if (result.imported){
 						pktimportcount ++
-						if (message.MsgId) echomail.pushImportedMsgId(message.MsgId, (message.AreaTag || '').toLowerCase());
+	
 					}
 					pktsuccesscount ++
 				}else{

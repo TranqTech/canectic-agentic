@@ -188,6 +188,8 @@ async function handleInboundEchoMessage(message) {
 	if (dbres.status === true) {
 		returnObj.status   = true;
 		returnObj.imported = true;
+		// Track for post-batch orphan reconciliation (use correct local shortcode)
+		if (dbObj.msg_id) pushImportedMsgId(dbObj.msg_id, shorty);
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
