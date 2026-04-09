@@ -498,6 +498,8 @@ async function getAreasInGroup(groupShortcode, userSecurity) {
 
 // Resolve the FTN system address and origin line for a given area.
 // Used by both startNewThread and replyToThread to stamp outgoing messages.
+// Origin line format per FTS: "BoardName (zone:net/node)". Custom origin lines
+// have the address appended in parentheses if not already present.
 async function resolveAreaAddress(areaId) {
 	var boardname = appConfig.get('boardname', 'Canectic BBS');
 	var result = { address: null, path: null, origin_line: boardname };
@@ -512,9 +514,16 @@ async function resolveAreaAddress(areaId) {
 		}
 		if (defaultAddr) {
 			result.address = defaultAddr.address;
-			result.origin_line = defaultAddr.origin_line
-				? defaultAddr.origin_line
-				: boardname + " " + defaultAddr.address;
+			if (defaultAddr.origin_line) {
+				// Custom origin -- append address in parentheses if not already present
+				result.origin_line = defaultAddr.origin_line;
+				if (result.address && !result.origin_line.includes('(' + result.address + ')')) {
+					result.origin_line += ' (' + result.address + ')';
+				}
+			} else {
+				// Default: boardname (address)
+				result.origin_line = boardname + ' (' + result.address + ')';
+			}
 		}
 	}
 	if (!result.origin_line) result.origin_line = boardname;
