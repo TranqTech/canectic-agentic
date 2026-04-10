@@ -105,6 +105,7 @@ Last updated: 2026-04-09
 - [x] Push file group defaults to areas (security, flags, newscan, retention)
 - [x] Nodelist flag definitions (DB-backed, category, argument metadata, auto_managed, FTS-5001 seed)
 - [x] Seed sync tool (`node src/tools/seedSync.js` -- upsert JSON seed data to DB)
+- [x] Message templates (event-triggered sysop-authored messages with PM/email/netmail delivery, built-in + custom events, admin CRUD, manual fire, CLI, menu command, timed event integration)
 - [ ] JAM message base import
 
 ### Message Networking
