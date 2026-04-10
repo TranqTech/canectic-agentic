@@ -330,9 +330,14 @@ class SmtpSession {
 	// there's no harvesting risk from random spammers.
 	//
 	// Accepted argument forms:
-	//   VRFY username
+	//   VRFY username           -- matches users.username
+	//   VRFY first.last         -- matches users.fullname via dot-to-space fallback
 	//   VRFY username@domain
+	//   VRFY first.last@domain
 	//   VRFY <username@domain>
+	//
+	// Lookup cascade lives in privateMessages.resolveRecipient:
+	// exact username > exact fullname > dotted-local fallback > sysop alias.
 	async _cmdVrfy(line) {
 		if (!this.trustedMode) {
 			// RFC 5321 allows 252 ("cannot VRFY, but will accept and attempt

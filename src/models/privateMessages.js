@@ -180,6 +180,25 @@ function getAllowedTransports(userSession) {
 // Resolution
 // ============================================================
 
+// Generate an additional fullname lookup candidate from a dot-separated
+// local-part. "kostie.muirhead" → "kostie muirhead" (matched
+// case-insensitively against users.fullname in the DB layer).
+//
+// This mirrors imapAdapter.networkEmailAddress() which slugifies a
+// user's display name as `lowercase + whitespace → dots` for the SMTP
+// local-part on outbound. Applying the reverse transformation here
+// makes the convention round-trip so VRFY and RCPT TO probes arriving
+// from external mailers with <first.last@domain> can verify against
+// the same users whose outbound mail uses that form.
+//
+// Returns null if there are no dots to transform (caller should just
+// use the original string).
+function _dottedLocalToFullname(input) {
+  if (!input || input.indexOf('.') < 0) return null;
+  var candidate = input.replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+  return candidate || null;
+}
+
 // Resolve a to_user display name to a local user account.
 // Returns { resolved: true, userId, username } or { resolved: false, reason }
 async function resolveRecipient(toUser) {
@@ -189,13 +208,18 @@ async function resolveRecipient(toUser) {
 
   var trimmed = toUser.trim();
 
-  // 1. Exact username match (case-insensitive)
+  // 1. Exact username match (case-insensitive). Handles "kostie" and
+  //    also legitimate dotted usernames like "dr.smith" before the
+  //    dotted-realname fallback kicks in, so the latter can't shadow
+  //    a real username that happens to contain a dot.
   var userByName = await userAccounts.getUserRecord(trimmed);
   if (userByName) {
     return { resolved: true, userId: userByName.id, username: userByName.username };
   }
 
-  // 2. Realname match — check for ambiguity first
+  // 2. Realname match — check for ambiguity first. Matches on the
+  //    as-typed form so "Kostie Muirhead" works for terminal/web
+  //    compose where the user types their real name directly.
   var realnameMatches = await userAccounts.getUsersByRealname(trimmed);
   if (realnameMatches.length === 1) {
     return { resolved: true, userId: realnameMatches[0].id, username: realnameMatches[0].username };
@@ -204,7 +228,22 @@ async function resolveRecipient(toUser) {
     return { resolved: false, reason: 'ambiguous_match' };
   }
 
-  // 3. Sysop alias fallback
+  // 3. Dotted-local-part realname fallback. "first.last" → "first last"
+  //    so external mailers using the imap convention can verify and
+  //    deliver to local users by realname. Only fires if the input
+  //    actually contains a dot, so plain-username lookups are unaffected.
+  var dottedCandidate = _dottedLocalToFullname(trimmed);
+  if (dottedCandidate && dottedCandidate !== trimmed) {
+    var dottedMatches = await userAccounts.getUsersByRealname(dottedCandidate);
+    if (dottedMatches.length === 1) {
+      return { resolved: true, userId: dottedMatches[0].id, username: dottedMatches[0].username };
+    }
+    if (dottedMatches.length > 1) {
+      return { resolved: false, reason: 'ambiguous_match' };
+    }
+  }
+
+  // 4. Sysop alias fallback
   var sysopAliases = ['sysop', 'system operator', 'sysadmin'];
   if (sysopAliases.includes(trimmed.toLowerCase())) {
     var sysopUsers = await userAccounts.getUsersByPermissionFlag('Sysop');
@@ -967,6 +1006,7 @@ export {
   // Resolution
   resolveRecipient,
   isAutomatedProcessor,
+  _dottedLocalToFullname,
   // Inbox
   deliverMessage,
   getInbox,

@@ -423,7 +423,34 @@ describe('SmtpSession VRFY command', function () {
 		var all = ctx.written.join('');
 		assert.ok(/^501/.test(all));
 	});
+
+	it('passes first.last@domain through to _resolveAddress unchanged', async function () {
+		// The dot-to-space realname fallback happens inside
+		// resolveRecipient(), not in the SMTP layer. The SMTP layer
+		// should simply hand the literal local-part through so the
+		// resolver can decide.
+		var ctx = createCapturingSession({ trusted: true });
+		var probed = null;
+		ctx.session._resolveAddress = async function (addr) {
+			probed = addr;
+			return { username: 'Kostie', toUser: 'Kostie' };
+		};
+		await ctx.session._cmdVrfy('VRFY kostie.muirhead@mybbs.example.com');
+		assert.strictEqual(probed, 'kostie.muirhead@mybbs.example.com');
+	});
+
+	it('auto-appends mail domain to bare first.last forms', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		var probed = null;
+		ctx.session._resolveAddress = async function (addr) {
+			probed = addr;
+			return { username: 'Kostie', toUser: 'Kostie' };
+		};
+		await ctx.session._cmdVrfy('VRFY kostie.muirhead');
+		assert.strictEqual(probed, 'kostie.muirhead@mybbs.example.com');
+	});
 });
+
 
 // ============================================================
 // RCPT TO — enhanced status codes in trusted mode
@@ -470,6 +497,52 @@ try {
 } catch (err) {
 	pmModule = null;
 }
+
+describe('privateMessages._dottedLocalToFullname', function () {
+	if (!pmModule) {
+		it.skip('skipped — privateMessages module not loadable', function () {});
+		return;
+	}
+
+	it('transforms first.last to "first last"', function () {
+		assert.strictEqual(pmModule._dottedLocalToFullname('kostie.muirhead'), 'kostie muirhead');
+		assert.strictEqual(pmModule._dottedLocalToFullname('first.middle.last'), 'first middle last');
+	});
+
+	it('returns null for inputs with no dots (no fallback needed)', function () {
+		assert.strictEqual(pmModule._dottedLocalToFullname('kostie'), null);
+		assert.strictEqual(pmModule._dottedLocalToFullname('username'), null);
+	});
+
+	it('returns null for empty or null input', function () {
+		assert.strictEqual(pmModule._dottedLocalToFullname(''), null);
+		assert.strictEqual(pmModule._dottedLocalToFullname(null), null);
+		assert.strictEqual(pmModule._dottedLocalToFullname(undefined), null);
+	});
+
+	it('collapses runs of dots into a single space', function () {
+		assert.strictEqual(pmModule._dottedLocalToFullname('a..b'), 'a b');
+		assert.strictEqual(pmModule._dottedLocalToFullname('a...b'), 'a b');
+	});
+
+	it('trims leading and trailing dots', function () {
+		assert.strictEqual(pmModule._dottedLocalToFullname('.kostie.muirhead'), 'kostie muirhead');
+		assert.strictEqual(pmModule._dottedLocalToFullname('kostie.muirhead.'), 'kostie muirhead');
+		assert.strictEqual(pmModule._dottedLocalToFullname('.a.b.'), 'a b');
+	});
+
+	it('returns null when input is only dots', function () {
+		assert.strictEqual(pmModule._dottedLocalToFullname('.'), null);
+		assert.strictEqual(pmModule._dottedLocalToFullname('...'), null);
+	});
+
+	it('is case-preserving (DB lookup handles case-insensitivity)', function () {
+		// Preserve the input case so the resolver can log what came in.
+		// The actual realname match is case-insensitive at the SQL layer.
+		assert.strictEqual(pmModule._dottedLocalToFullname('Kostie.Muirhead'), 'Kostie Muirhead');
+		assert.strictEqual(pmModule._dottedLocalToFullname('KOSTIE.MUIRHEAD'), 'KOSTIE MUIRHEAD');
+	});
+});
 
 describe('Transport access control — EMAIL', function () {
 	if (!pmModule) {
