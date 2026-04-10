@@ -123,6 +123,37 @@ function _isSystemMessage(pm, transportData) {
 	return false;
 }
 
+// Pure function: pick (senderUsername, displayName) from a DB user row
+// and the pm_outbox record, following the authority rules:
+//
+//   senderUsername — users.username (unique)  > pm.from_user  > 'user'
+//   displayName    — users.fullname           > users.username > pm.from_user > 'User'
+//
+// Called by _resolveSender after the users row lookup. Broken out so
+// it's testable without a database.
+function _pickSenderIdentity(userRow, pm) {
+	var senderUsername = null;
+	var displayName = null;
+
+	if (userRow) {
+		if (userRow.username) senderUsername = userRow.username;
+		if (userRow.fullname && String(userRow.fullname).trim()) {
+			displayName = String(userRow.fullname).trim();
+		} else if (userRow.username) {
+			displayName = userRow.username;
+		}
+	}
+
+	// Fallback chain for each field. pm.from_user is last-resort only --
+	// it might be the fullname if the user posted under their real name,
+	// in which case using it as the local-part is wrong but it's the
+	// best we have if the DB lookup failed.
+	if (!senderUsername) senderUsername = (pm && pm.from_user) || 'user';
+	if (!displayName)    displayName    = (pm && pm.from_user) || 'User';
+
+	return { senderUsername: senderUsername, displayName: displayName };
+}
+
 // Build the From header value for an outbound PM.
 //
 // Returns { from, replyTo, envelopeFrom } where:
@@ -133,7 +164,7 @@ function _isSystemMessage(pm, transportData) {
 // Strategy:
 //   - System-generated messages always use the configured email_from_*.
 //   - User-generated messages build <username>@<mail_domain> and use the
-//     user's realname (or username) for the display name. If mail_domain
+//     user's fullname (or username) for the display name. If mail_domain
 //     is not configured, we fall back to the system from-address but log
 //     a warning so the sysop knows the configuration is incomplete.
 async function _resolveSender(pm, transportData, sysFromAddress, sysFromName) {
@@ -159,31 +190,38 @@ async function _resolveSender(pm, transportData, sysFromAddress, sysFromName) {
 		};
 	}
 
-	// Resolve display name: prefer users.fullname > pm.from_user > username.
-	// The column is `fullname` in the schema (users.fullname) -- the
-	// userAccounts helpers `getUserByRealname` etc. are named after the
-	// concept but query the fullname column.
-	var displayName = pm.from_user || 'User';
+	// The email LOCAL-PART must always come from users.username because
+	// it's the only uniqueness guarantee we have -- two users can share
+	// a fullname, but usernames are unique at the schema level. The
+	// DISPLAY NAME prefers fullname because that's the human-readable
+	// form we want external recipients to see. These come from the same
+	// DB row so one query covers both.
+	//
+	// pm.from_user is NOT safe for the local-part: validateFromUser in
+	// routes/pm.js allows it to be either currentuser.username OR
+	// currentuser.fullname depending on the group's post_as setting, so
+	// for a user posting under their real name it would produce a
+	// collision-prone address.
+	var userRow = null;
 	if (pm.user_id) {
 		try {
-			var userRow = await postgres.queryOne(
+			userRow = await postgres.queryOne(
 				'SELECT username, fullname FROM users WHERE id = $1',
 				[pm.user_id]
 			);
-			if (userRow) {
-				if (userRow.fullname && String(userRow.fullname).trim()) {
-					displayName = String(userRow.fullname).trim();
-				} else if (userRow.username) {
-					displayName = userRow.username;
-				}
-			}
-		} catch (_) {
-			// Non-fatal — use pm.from_user already set
+		} catch (err) {
+			alogger.writeAlog(3,
+				'[EmailTosser] sender lookup failed for PM id=' + pm.id +
+				' user_id=' + pm.user_id + ': ' + err.message +
+				' -- falling back to pm.from_user',
+				'yellow');
 		}
 	}
 
-	var localPart = _usernameToLocal(pm.from_user);
+	var identity = _pickSenderIdentity(userRow, pm);
+	var localPart = _usernameToLocal(identity.senderUsername);
 	var userAddress = localPart + '@' + mailDomain;
+	var displayName = identity.displayName;
 
 	return {
 		from: '"' + _escapeDisplayName(displayName) + '" <' + userAddress + '>',
@@ -325,5 +363,6 @@ export {
 	_isTlsMismatchError,
 	_isSystemMessage,
 	_usernameToLocal,
+	_pickSenderIdentity,
 	_resolveSender
 };

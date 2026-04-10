@@ -968,6 +968,80 @@ describe('Email tosser — system vs user sender detection', function () {
 	});
 });
 
+describe('Email tosser — sender identity (address vs display name)', function () {
+	if (!emailTosser) {
+		it.skip('skipped — emailTosser module not loadable', function () {});
+		return;
+	}
+
+	it('uses users.username for the address and users.fullname for display', function () {
+		var row = { username: 'Kostie', fullname: 'Kostie Muirhead' };
+		var pm = { from_user: 'Kostie Muirhead' };  // posted under realname
+		var id = emailTosser._pickSenderIdentity(row, pm);
+		assert.strictEqual(id.senderUsername, 'Kostie', 'address must come from users.username');
+		assert.strictEqual(id.displayName, 'Kostie Muirhead', 'display name should be the fullname');
+	});
+
+	it('falls back to users.username for display when fullname is blank', function () {
+		var row = { username: 'Kostie', fullname: '' };
+		var id = emailTosser._pickSenderIdentity(row, { from_user: 'Kostie' });
+		assert.strictEqual(id.senderUsername, 'Kostie');
+		assert.strictEqual(id.displayName, 'Kostie');
+	});
+
+	it('falls back to users.username for display when fullname is whitespace only', function () {
+		var row = { username: 'Kostie', fullname: '   ' };
+		var id = emailTosser._pickSenderIdentity(row, { from_user: 'Kostie' });
+		assert.strictEqual(id.displayName, 'Kostie');
+	});
+
+	it('trims fullname before using it as display name', function () {
+		var row = { username: 'Kostie', fullname: '  Kostie Muirhead  ' };
+		var id = emailTosser._pickSenderIdentity(row, { from_user: 'x' });
+		assert.strictEqual(id.displayName, 'Kostie Muirhead');
+	});
+
+	it('critical: username takes precedence over pm.from_user for address', function () {
+		// The whole point of the DB lookup: pm.from_user is potentially
+		// the fullname (when the user posted under their realname), which
+		// is not unique. users.username is the only guaranteed-unique
+		// identifier and must win for the local-part regardless of what
+		// pm.from_user contains.
+		var row = { username: 'kmuirhead', fullname: 'Kostie Muirhead' };
+		var pmWithFullname = { from_user: 'Kostie Muirhead' };
+		var id = emailTosser._pickSenderIdentity(row, pmWithFullname);
+		assert.strictEqual(id.senderUsername, 'kmuirhead');
+		assert.strictEqual(id.displayName, 'Kostie Muirhead');
+	});
+
+	it('falls back to pm.from_user when DB lookup returned null', function () {
+		// Deleted account, DB error, user_id 0 — the best we can do is
+		// use whatever identity was stamped on the pm row at compose time.
+		var id = emailTosser._pickSenderIdentity(null, { from_user: 'kostie' });
+		assert.strictEqual(id.senderUsername, 'kostie');
+		assert.strictEqual(id.displayName, 'kostie');
+	});
+
+	it('last-resort fallback when both row and pm.from_user are absent', function () {
+		var id = emailTosser._pickSenderIdentity(null, {});
+		assert.strictEqual(id.senderUsername, 'user');
+		assert.strictEqual(id.displayName, 'User');
+	});
+
+	it('handles a null pm defensively', function () {
+		var id = emailTosser._pickSenderIdentity(null, null);
+		assert.strictEqual(id.senderUsername, 'user');
+		assert.strictEqual(id.displayName, 'User');
+	});
+
+	it('handles a row with username but no fullname field at all', function () {
+		var row = { username: 'Kostie' };  // no fullname key
+		var id = emailTosser._pickSenderIdentity(row, { from_user: 'Kostie' });
+		assert.strictEqual(id.senderUsername, 'Kostie');
+		assert.strictEqual(id.displayName, 'Kostie');
+	});
+});
+
 describe('Email tosser — username to local-part slugification', function () {
 	if (!emailTosser) {
 		it.skip('skipped — emailTosser module not loadable', function () {});
