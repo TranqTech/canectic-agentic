@@ -4552,6 +4552,76 @@ router.post('/templates/:id/delete', urlencodedParser, requireAdmin, async (req,
 	res.redirect('/admin/templates');
 });
 
+// Manual event fire: send an event to specific user(s) or all users
+router.get('/templates/fire', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var events = await messageTemplates.getAllEvents();
+	res.render('admin/templates/fire', {
+		sufficientAccess, title: 'Fire Template Event', activelink: 'templates',
+		activenav: 'content', currentuser, events
+	});
+});
+
+router.post('/templates/fire', urlencodedParser, requireAdmin, async (req, res) => {
+	var eventCode = (req.body.event_code || '').trim();
+	var target = req.body.target || 'user';
+	var username = (req.body.username || '').trim();
+	var extraJson = (req.body.extra_vars || '').trim();
+
+	var extraVars = {};
+	if (extraJson) {
+		try {
+			extraVars = JSON.parse(extraJson);
+		} catch (e) {
+			await flash.setOne(req, 'danger', 'Invalid JSON in extra vars: ' + e.message);
+			return res.redirect('/admin/templates/fire');
+		}
+	}
+
+	if (!eventCode) {
+		await flash.setOne(req, 'danger', 'Event code is required');
+		return res.redirect('/admin/templates/fire');
+	}
+
+	var userIds = [];
+	if (target === 'user') {
+		if (!username) {
+			await flash.setOne(req, 'danger', 'Username is required');
+			return res.redirect('/admin/templates/fire');
+		}
+		var user = await postgres.queryOne(
+			'SELECT id FROM users WHERE UPPER(username) = UPPER($1)',
+			[username]
+		);
+		if (!user) {
+			await flash.setOne(req, 'danger', 'User not found: ' + username);
+			return res.redirect('/admin/templates/fire');
+		}
+		userIds = [user.id];
+	} else if (target === 'all_active') {
+		var allRows = await postgres.query('SELECT id FROM users WHERE active = true');
+		userIds = (allRows || []).map(function(r) { return r.id; });
+	} else if (target === 'all_verified') {
+		var vRows = await postgres.query('SELECT id FROM users WHERE active = true AND mailverified = true');
+		userIds = (vRows || []).map(function(r) { return r.id; });
+	}
+
+	if (userIds.length === 0) {
+		await flash.setOne(req, 'warning', 'No users matched the target');
+		return res.redirect('/admin/templates/fire');
+	}
+
+	var result = await messageTemplates.fireEventForMany(eventCode, userIds, extraVars);
+	await flash.setOne(req,
+		result.errors.length > 0 ? 'warning' : 'success',
+		'Event fired: ' + result.fired + ' delivered across ' + result.usersProcessed + ' user(s), ' +
+		result.skipped + ' skipped' +
+		(result.errors.length ? ', ' + result.errors.length + ' errors' : '')
+	);
+	res.redirect('/admin/templates/fire');
+});
+
 // Test-fire a template to the current admin user
 router.post('/templates/:id/test', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);

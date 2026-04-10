@@ -8,12 +8,13 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 
-// Valid launch types for timed events (subset of door launch types)
-var VALID_LAUNCH_TYPES = ['NativeCommand', 'Dosemu'];
+// Valid launch types for timed events
+var VALID_LAUNCH_TYPES = ['NativeCommand', 'Dosemu', 'FireEvent'];
 
 var LAUNCH_TYPE_LABELS = {
 	'NativeCommand': 'Native Command (shell)',
-	'Dosemu':        'Dosemu (DOS, headless)'
+	'Dosemu':        'Dosemu (DOS, headless)',
+	'FireEvent':     'Fire Template Event'
 };
 
 // ---------------------------------------------------------------------------
@@ -52,15 +53,22 @@ async function create(formObj) {
 	if (!formObj.name || !formObj.name.trim()) {
 		returnObj.errormessages.push('Name is required');
 	}
-	if (!formObj.command || !formObj.command.trim()) {
-		returnObj.errormessages.push('Command is required');
-	}
 	if (!formObj.cron_pattern || !formObj.cron_pattern.trim()) {
 		returnObj.errormessages.push('Cron pattern is required');
 	}
 	var launchType = (formObj.launch_type || 'NativeCommand').trim();
 	if (!VALID_LAUNCH_TYPES.includes(launchType)) {
 		returnObj.errormessages.push('Invalid launch type: ' + launchType);
+	}
+	// Command/fire_event validation depends on launch type
+	if (launchType === 'FireEvent') {
+		if (!formObj.fire_event_code || !formObj.fire_event_code.trim()) {
+			returnObj.errormessages.push('Event code is required for FireEvent type');
+		}
+	} else {
+		if (!formObj.command || !formObj.command.trim()) {
+			returnObj.errormessages.push('Command is required');
+		}
 	}
 	if (returnObj.errormessages.length > 0) return returnObj;
 
@@ -72,12 +80,14 @@ async function create(formObj) {
 		name:            formObj.name.trim(),
 		description:     formObj.description ? formObj.description.trim() : null,
 		launch_type:     launchType,
-		command:         formObj.command.trim(),
+		command:         formObj.command ? formObj.command.trim() : null,
 		working_dir:     formObj.working_dir ? formObj.working_dir.trim() : null,
 		cron_pattern:    formObj.cron_pattern.trim(),
 		timeout_seconds: formObj.timeout_seconds ? parseInt(formObj.timeout_seconds) : 300,
 		active:          formObj.active !== 'false' && formObj.active !== false,
 		sort_order:      formObj.sort_order !== undefined ? parseInt(formObj.sort_order) : nextSort,
+		fire_event_code: formObj.fire_event_code ? formObj.fire_event_code.trim() : null,
+		fire_event_query: formObj.fire_event_query ? formObj.fire_event_query.trim() : null,
 		created_at:      new Date()
 	};
 
@@ -110,11 +120,13 @@ async function update(id, formObj) {
 		var lt = formObj.launch_type.trim();
 		if (VALID_LAUNCH_TYPES.includes(lt)) updateObj.launch_type = lt;
 	}
-	if (formObj.command !== undefined) updateObj.command = formObj.command.trim();
+	if (formObj.command !== undefined) updateObj.command = formObj.command ? formObj.command.trim() : null;
 	if (formObj.working_dir !== undefined) updateObj.working_dir = formObj.working_dir ? formObj.working_dir.trim() : null;
 	if (formObj.cron_pattern !== undefined) updateObj.cron_pattern = formObj.cron_pattern.trim();
 	if (formObj.timeout_seconds !== undefined) updateObj.timeout_seconds = formObj.timeout_seconds ? parseInt(formObj.timeout_seconds) : 300;
 	if (formObj.active !== undefined) updateObj.active = formObj.active !== 'false' && formObj.active !== false;
+	if (formObj.fire_event_code !== undefined) updateObj.fire_event_code = formObj.fire_event_code ? formObj.fire_event_code.trim() : null;
+	if (formObj.fire_event_query !== undefined) updateObj.fire_event_query = formObj.fire_event_query ? formObj.fire_event_query.trim() : null;
 
 	var count = await postgres.updateById(parseInt(id), updateObj, 'timed_events');
 	if (count === 0) {

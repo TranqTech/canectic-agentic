@@ -37,8 +37,18 @@ block content
                         if evt.description
                           br
                           small.text-muted= evt.description
-                      td: span.badge(class=evt.launch_type === 'Dosemu' ? 'bg-warning text-dark' : 'bg-info')= launchTypes[evt.launch_type] || evt.launch_type
-                      td: code.small= evt.command.length > 40 ? evt.command.substring(0, 40) + '...' : evt.command
+                      td
+                        - var badgeClass = 'bg-info'
+                        if evt.launch_type === 'Dosemu'
+                          - badgeClass = 'bg-warning text-dark'
+                        else if evt.launch_type === 'FireEvent'
+                          - badgeClass = 'bg-success'
+                        span.badge(class=badgeClass)= launchTypes[evt.launch_type] || evt.launch_type
+                      td
+                        if evt.launch_type === 'FireEvent'
+                          code.small= evt.fire_event_code || '(no event)'
+                        else if evt.command
+                          code.small= evt.command.length > 40 ? evt.command.substring(0, 40) + '...' : evt.command
                       td: code= evt.cron_pattern
                       td
                         if evt.last_run_at
@@ -61,7 +71,9 @@ block content
                           data-name=evt.name
                           data-description=evt.description || ''
                           data-launchtype=evt.launch_type
-                          data-command=evt.command
+                          data-command=evt.command || ''
+                          data-fireeventcode=evt.fire_event_code || ''
+                          data-fireeventquery=evt.fire_event_query || ''
                           data-workingdir=evt.working_dir || ''
                           data-cronpattern=evt.cron_pattern
                           data-timeout=evt.timeout_seconds || 300
@@ -145,16 +157,24 @@ block content
                     input.form-control(name='description' placeholder='What this event does')
                   .mb-3
                     label.form-label Launch Type
-                    select.form-select(name='launch_type')
+                    select.form-select.add-launch-type(name='launch_type')
                       each label, key in launchTypes
                         option(value=key selected=(key === 'NativeCommand'))= label
                 .col-6
-                  .mb-3
+                  .mb-3.add-cmd-field
                     label.form-label Command
-                    input.form-control(name='command' required placeholder='e.g. %M/lord/MAINT.BAT or /opt/scripts/cleanup.sh')
-                  .mb-3
+                    input.form-control(name='command' placeholder='e.g. %M/lord/MAINT.BAT or /opt/scripts/cleanup.sh')
+                  .mb-3.add-cmd-field
                     label.form-label Working Directory
                     input.form-control(name='working_dir' placeholder='e.g. %M/lord or /opt/game')
+                  .mb-3.add-fire-field(style='display:none')
+                    label.form-label Event Code
+                    input.form-control(name='fire_event_code' placeholder='user_birthday')
+                    small.text-muted Template event code to fire.
+                  .mb-3.add-fire-field(style='display:none')
+                    label.form-label User Filter (SQL WHERE, optional)
+                    input.form-control(name='fire_event_query' placeholder="security >= 50 AND mailverified = true")
+                    small.text-muted Restricted to safe columns; no DELETE/DROP/UPDATE/etc.
                   .mb-3
                     label.form-label Cron Schedule
                     input.form-control(name='cron_pattern' required placeholder='e.g. 0 2 * * *')
@@ -190,16 +210,22 @@ block content
                     input.form-control(name='description' id='editDescription')
                   .mb-3
                     label.form-label Launch Type
-                    select.form-select(name='launch_type' id='editLaunchType')
+                    select.form-select.edit-launch-type(name='launch_type' id='editLaunchType')
                       each label, key in launchTypes
                         option(value=key)= label
                 .col-6
-                  .mb-3
+                  .mb-3.edit-cmd-field
                     label.form-label Command
-                    input.form-control(name='command' id='editCommand' required)
-                  .mb-3
+                    input.form-control(name='command' id='editCommand')
+                  .mb-3.edit-cmd-field
                     label.form-label Working Directory
                     input.form-control(name='working_dir' id='editWorkingDir')
+                  .mb-3.edit-fire-field(style='display:none')
+                    label.form-label Event Code
+                    input.form-control(name='fire_event_code' id='editFireEventCode')
+                  .mb-3.edit-fire-field(style='display:none')
+                    label.form-label User Filter (SQL WHERE, optional)
+                    input.form-control(name='fire_event_query' id='editFireEventQuery')
                   .mb-3
                     label.form-label Cron Schedule
                     input.form-control(name='cron_pattern' id='editCronPattern' required)
@@ -235,6 +261,11 @@ block content
           document.getElementById('editCronPattern').value = btn.getAttribute('data-cronpattern') || '';
           document.getElementById('editTimeout').value = btn.getAttribute('data-timeout') || '300';
           document.getElementById('editActive').checked = btn.getAttribute('data-active') === 'true';
+          document.getElementById('editFireEventCode').value = btn.getAttribute('data-fireeventcode') || '';
+          document.getElementById('editFireEventQuery').value = btn.getAttribute('data-fireeventquery') || '';
+
+          // Toggle fields based on launch type
+          toggleFieldsByLaunchType('edit', btn.getAttribute('data-launchtype') || 'NativeCommand');
 
           var lastResult = btn.getAttribute('data-lastresult') || '';
           var resultSection = document.getElementById('editLastResult');
@@ -246,3 +277,24 @@ block content
           }
         });
       }
+
+      // Toggle command vs fire_event fields based on launch type selection
+      function toggleFieldsByLaunchType(prefix, launchType) {
+        var cmdFields = document.querySelectorAll('.' + prefix + '-cmd-field');
+        var fireFields = document.querySelectorAll('.' + prefix + '-fire-field');
+        var isFire = launchType === 'FireEvent';
+        cmdFields.forEach(function(el) { el.style.display = isFire ? 'none' : ''; });
+        fireFields.forEach(function(el) { el.style.display = isFire ? '' : 'none'; });
+      }
+
+      // Attach change listeners to both modal launch-type selects
+      document.querySelectorAll('.add-launch-type, .edit-launch-type').forEach(function(el) {
+        var prefix = el.classList.contains('add-launch-type') ? 'add' : 'edit';
+        el.addEventListener('change', function() {
+          toggleFieldsByLaunchType(prefix, el.value);
+        });
+      });
+
+      // Set initial visibility on add modal
+      var addLaunchType = document.querySelector('.add-launch-type');
+      if (addLaunchType) toggleFieldsByLaunchType('add', addLaunchType.value);

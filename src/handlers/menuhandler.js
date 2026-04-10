@@ -31,6 +31,7 @@ import { NewsViewer } from "./menucommands/newsViewer.js";
 import { NotificationReader } from "./menucommands/notificationReader.js";
 import { FileNewscan } from "./menucommands/fileNewscan.js";
 import { DisplayScreen } from "./menucommands/displayScreen.js";
+import { FireEvent } from "./menucommands/fireEvent.js";
 
 // Models
 import { getMenu, menuExists } from "../models/menus.js";
@@ -1091,6 +1092,10 @@ class MenuHandler extends BaseHandler {
 
 			case "displayScreen":
 				this._runSubModule(new DisplayScreen(this.call, { arg: entry.command_arg }));
+				return;
+
+			case "fireEvent":
+				this._runSubModule(new FireEvent(this.call, { arg: entry.command_arg }));
 				return;
 
 			case "notifications":

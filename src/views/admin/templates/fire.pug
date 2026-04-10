@@ -1,0 +1,86 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-lg-8.offset-lg-2.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-send.me-2
+                    | Fire Template Event
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-light(href='/admin/templates')
+                      i.bi.bi-arrow-left.me-1
+                      | Back to Templates
+
+            .card-body
+              p.text-muted
+                | Manually fire a template event to a user or group of users. All active templates attached to the selected event will fire (subject to their individual conditions). Useful for one-off greetings, announcements, or testing custom events.
+
+              form(method='POST' action='/admin/templates/fire')
+                .mb-3
+                  label.form-label Event
+                  select.form-select(name='event_code' required)
+                    option(value='') -- Select an event --
+                    each evt in events
+                      option(value=evt.code title=evt.description || '')
+                        = evt.label + ' (' + evt.code + ')'
+                  small.text-muted Templates attached to this event will fire for each target user.
+
+                .mb-3
+                  label.form-label Target
+                  .form-check
+                    input.form-check-input(type='radio' name='target' id='target_user' value='user' checked)
+                    label.form-check-label(for='target_user') Single user
+                  .form-check
+                    input.form-check-input(type='radio' name='target' id='target_active' value='all_active')
+                    label.form-check-label(for='target_active') All active users
+                  .form-check
+                    input.form-check-input(type='radio' name='target' id='target_verified' value='all_verified')
+                    label.form-check-label(for='target_verified') All active + verified users
+
+                .mb-3#usernameGroup
+                  label.form-label Username
+                  input.form-control(type='text' name='username' placeholder='bob')
+
+                .mb-3
+                  label.form-label Extra event variables (optional JSON)
+                  input.form-control(type='text' name='extra_vars' placeholder='{"event": {"holiday_name": "Christmas"}}')
+                  small.text-muted Additional vars exposed to templates. Typically an #[code {"event": {...}}] object.
+
+                .alert.alert-warning
+                  i.bi.bi-exclamation-triangle.me-2
+                  | Firing to all users can send many messages at once. Confirm your templates are correct before selecting a broad target.
+
+                .text-end
+                  a.btn.btn-secondary.me-2(href='/admin/templates') Cancel
+                  button.btn.btn-primary(type='submit' onclick='return confirm("Fire this event now?")')
+                    i.bi.bi-send.me-1
+                    | Fire Event
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var radios = document.querySelectorAll('input[name="target"]');
+      var usernameGroup = document.getElementById('usernameGroup');
+      function updateVisibility() {
+        var selected = document.querySelector('input[name="target"]:checked');
+        usernameGroup.style.display = (selected && selected.value === 'user') ? '' : 'none';
+      }
+      radios.forEach(function(r) { r.addEventListener('change', updateVisibility); });
+      updateVisibility();
+    });
