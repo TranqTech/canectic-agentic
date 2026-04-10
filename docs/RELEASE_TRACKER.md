@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-04-06
+Last updated: 2026-04-09
 
 ---
 
@@ -101,11 +101,16 @@ Last updated: 2026-04-06
 - [x] Admin message/thread deletion (per-message and per-thread with confirmation modals)
 - [x] Queue status panel (view active/waiting/delayed/failed jobs, remove/retry/drain)
 - [x] Thread rebuild maintenance tool (--rethread CLI, admin button)
-- [x] Push group defaults to areas (security, flags, post_as)
+- [x] Push group defaults to areas (security, flags, post_as, newscan)
+- [x] Push file group defaults to areas (security, flags, newscan, retention)
+- [x] Nodelist flag definitions (DB-backed, category, argument metadata, auto_managed, FTS-5001 seed)
+- [x] Seed sync tool (`node src/tools/seedSync.js` -- upsert JSON seed data to DB)
 - [ ] JAM message base import
 
 ### Message Networking
 - [x] FTN tosser (inbound/outbound, type-2 packets, REPLY kludge)
+- [x] Unified message threading across all tossers (messages.threadMessage, guaranteed thread creation, orphan reconciliation)
+- [x] echomail.js/messages.js consolidation (single canonical model, no duplicate function definitions)
 - [x] FTN binkp mailer (TCP + WebSocket transports)
 - [x] BSO outbound scanner
 - [x] QWK tosser (client pull/push, hub mode)
@@ -177,7 +182,7 @@ Last updated: 2026-04-06
 - [x] .env.example template (examples/env.example)
 
 ### Testing
-- [x] 2,016 tests passing (mocha)
+- [x] 2,127 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
