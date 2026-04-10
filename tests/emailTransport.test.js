@@ -139,6 +139,25 @@ function createSession(options) {
 	return new smtpModule.SmtpSession(socket, 'mybbs.example.com', options);
 }
 
+// Capture every _send() call on a session so we can assert on EHLO /
+// VRFY / RCPT TO replies without a real socket. The greeting fires in
+// the constructor, so we install the spy before the constructor runs
+// by pre-creating the socket and capturing the first writes there.
+function createCapturingSession(options) {
+	var written = [];
+	var socket = {
+		write: function (data) { written.push(String(data)); },
+		on: function () {},
+		end: function () {},
+		destroyed: false,
+		remoteAddress: '127.0.0.1'
+	};
+	var session = new smtpModule.SmtpSession(socket, 'mybbs.example.com', options);
+	// Clear the greeting so tests see only what they trigger
+	written.length = 0;
+	return { session: session, written: written };
+}
+
 describe('SMTP address resolution — EMAIL transport', function () {
 	if (!smtpModule) {
 		it('skip: smtpServer could not be imported');
@@ -265,6 +284,176 @@ describe('SmtpServer trusted host configuration', function () {
 	it('should not create trustedHosts for non-trusted servers', function () {
 		var server = new smtpModule.SmtpServer(0, 'mybbs.example.com');
 		assert.strictEqual(server._trustedHosts, undefined);
+	});
+});
+
+// ============================================================
+// EHLO capability advertisement (submission vs trusted mode)
+// ============================================================
+
+describe('SmtpSession EHLO capability advertisement', function () {
+	if (!smtpModule) {
+		it.skip('skipped — smtpServer module not loadable', function () {});
+		return;
+	}
+
+	it('advertises AUTH but NOT VRFY in submission mode', function () {
+		var ctx = createCapturingSession({});
+		ctx.session._cmdEhlo('client.example.com');
+		var all = ctx.written.join('');
+		assert.ok(/AUTH PLAIN LOGIN/.test(all), 'submission mode should advertise AUTH');
+		assert.ok(!/^250.VRFY/m.test(all), 'submission mode should not advertise VRFY');
+	});
+
+	it('advertises VRFY but NOT AUTH in trusted mode', function () {
+		var ctx = createCapturingSession({ trusted: true });
+		ctx.session._cmdEhlo('mg.example.com');
+		var all = ctx.written.join('');
+		assert.ok(/VRFY/.test(all), 'trusted mode should advertise VRFY');
+		assert.ok(!/AUTH/.test(all), 'trusted mode should not advertise AUTH');
+	});
+
+	it('always advertises PIPELINING, 8BITMIME, and SIZE', function () {
+		var sub = createCapturingSession({});
+		sub.session._cmdEhlo('x');
+		var subStr = sub.written.join('');
+		assert.ok(/PIPELINING/.test(subStr));
+		assert.ok(/8BITMIME/.test(subStr));
+		assert.ok(/SIZE/.test(subStr));
+
+		var trusted = createCapturingSession({ trusted: true });
+		trusted.session._cmdEhlo('x');
+		var trustedStr = trusted.written.join('');
+		assert.ok(/PIPELINING/.test(trustedStr));
+		assert.ok(/8BITMIME/.test(trustedStr));
+		assert.ok(/SIZE/.test(trustedStr));
+	});
+
+	it('opens the response with the mail domain', function () {
+		var ctx = createCapturingSession({ trusted: true });
+		ctx.session._cmdEhlo('x');
+		assert.ok(ctx.written[0].indexOf('250-mybbs.example.com') === 0);
+	});
+
+	it('terminates with a single 250 line (not 250-)', function () {
+		var ctx = createCapturingSession({});
+		ctx.session._cmdEhlo('x');
+		// Find the last written 250 line and confirm it uses "250 " not "250-"
+		var last = ctx.written[ctx.written.length - 1];
+		assert.ok(/^250 /.test(last), 'last EHLO line must start with "250 " (end of multiline)');
+	});
+});
+
+// ============================================================
+// VRFY command — trusted mode only
+// ============================================================
+
+describe('SmtpSession VRFY command', function () {
+	if (!smtpModule) {
+		it.skip('skipped — smtpServer module not loadable', function () {});
+		return;
+	}
+
+	it('returns 252 in submission mode (RFC 5321 3.5.3)', async function () {
+		var ctx = createCapturingSession({});
+		await ctx.session._cmdVrfy('VRFY sysop');
+		var all = ctx.written.join('');
+		assert.ok(/^252/.test(all), 'submission mode should return 252');
+		assert.ok(/Cannot VRFY/i.test(all));
+	});
+
+	it('returns 550 5.1.1 for unknown user in trusted mode', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		// Stub _resolveAddress so we don't hit the DB
+		ctx.session._resolveAddress = async function () { return null; };
+		await ctx.session._cmdVrfy('VRFY nosuchuser@mybbs.example.com');
+		var all = ctx.written.join('');
+		assert.ok(/^550 5\.1\.1/.test(all));
+		assert.ok(/User unknown/i.test(all));
+	});
+
+	it('returns 250 with canonical address for known user in trusted mode', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		ctx.session._resolveAddress = async function (addr) {
+			return {
+				address: addr,
+				username: 'Kostie',
+				toUser: 'Kostie',
+				transportType: 'LOCAL'
+			};
+		};
+		await ctx.session._cmdVrfy('VRFY kostie@mybbs.example.com');
+		var all = ctx.written.join('');
+		assert.ok(/^250 /.test(all));
+		assert.ok(/kostie@mybbs\.example\.com/.test(all));
+	});
+
+	it('accepts bare username and auto-appends mail domain', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		var probed = null;
+		ctx.session._resolveAddress = async function (addr) {
+			probed = addr;
+			return { username: 'Kostie', toUser: 'Kostie', transportType: 'LOCAL' };
+		};
+		await ctx.session._cmdVrfy('VRFY kostie');
+		assert.strictEqual(probed, 'kostie@mybbs.example.com');
+	});
+
+	it('accepts angle-bracketed addresses: VRFY <user@domain>', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		var probed = null;
+		ctx.session._resolveAddress = async function (addr) {
+			probed = addr;
+			return { username: 'Kostie', toUser: 'Kostie' };
+		};
+		await ctx.session._cmdVrfy('VRFY <kostie@mybbs.example.com>');
+		assert.strictEqual(probed, 'kostie@mybbs.example.com');
+	});
+
+	it('rejects empty VRFY argument with 501', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		await ctx.session._cmdVrfy('VRFY');
+		var all = ctx.written.join('');
+		assert.ok(/^501/.test(all));
+	});
+
+	it('rejects angle-bracket-only VRFY argument with 501', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		await ctx.session._cmdVrfy('VRFY <>');
+		var all = ctx.written.join('');
+		assert.ok(/^501/.test(all));
+	});
+});
+
+// ============================================================
+// RCPT TO — enhanced status codes in trusted mode
+// ============================================================
+
+describe('SmtpSession RCPT TO verification probe responses', function () {
+	if (!smtpModule) {
+		it.skip('skipped — smtpServer module not loadable', function () {});
+		return;
+	}
+
+	it('returns 550 5.1.1 for unknown recipient', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		ctx.session.mailFrom = '';  // verification probe style
+		ctx.session._resolveAddress = async function () { return null; };
+		await ctx.session._cmdRcptTo('RCPT TO:<nosuchuser@mybbs.example.com>');
+		var all = ctx.written.join('');
+		assert.ok(/^550 5\.1\.1/.test(all));
+		assert.ok(/Recipient address unknown/i.test(all));
+	});
+
+	it('returns 250 2.1.5 for known recipient', async function () {
+		var ctx = createCapturingSession({ trusted: true });
+		ctx.session.mailFrom = '';
+		ctx.session._resolveAddress = async function () {
+			return { username: 'Kostie', toUser: 'Kostie', transportType: 'LOCAL' };
+		};
+		await ctx.session._cmdRcptTo('RCPT TO:<kostie@mybbs.example.com>');
+		var all = ctx.written.join('');
+		assert.ok(/^250 2\.1\.5/.test(all));
 	});
 });
 

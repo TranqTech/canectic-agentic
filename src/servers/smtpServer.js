@@ -114,6 +114,9 @@ class SmtpSession {
 			case 'DATA':
 				this._cmdData();
 				break;
+			case 'VRFY':
+				await this._cmdVrfy(line);
+				break;
 			case 'QUIT':
 				this._send('221 Bye');
 				this.close();
@@ -133,9 +136,24 @@ class SmtpSession {
 
 	// --- EHLO ---
 
+	// Capability advertisement differs between modes:
+	//
+	// Submission mode  (authenticated, port 10587):
+	//   - AUTH PLAIN LOGIN  (users must auth before sending)
+	//   - 8BITMIME, SIZE, PIPELINING
+	//
+	// Trusted mode  (IP-allowlisted, port 1026):
+	//   - NO AUTH (allowlist is the auth)
+	//   - VRFY (relays doing recipient verification need this)
+	//   - 8BITMIME, SIZE, PIPELINING
 	_cmdEhlo(clientName) {
 		this._send('250-' + this.mailDomain);
-		this._send('250-AUTH PLAIN LOGIN');
+		if (this.trustedMode) {
+			this._send('250-VRFY');
+		} else {
+			this._send('250-AUTH PLAIN LOGIN');
+		}
+		this._send('250-PIPELINING');
 		this._send('250-8BITMIME');
 		this._send('250 SIZE 10485760');
 	}
@@ -230,13 +248,25 @@ class SmtpSession {
 
 		var match = line.match(/MAIL\s+FROM:\s*<([^>]*)>/i);
 		if (!match) {
-			this._send('501 Syntax error in MAIL FROM');
+			this._send('501 5.5.2 Syntax error in MAIL FROM');
 			return;
 		}
 
 		this.mailFrom = match[1];
 		this.rcptTo = [];
-		this._send('250 OK');
+
+		// Empty sender from a trusted relay is almost certainly the start
+		// of a recipient verification probe (MAIL FROM: <> / RCPT TO / RSET).
+		// Log at level 4 so it's visible with mild verbosity but doesn't
+		// drown out regular delivery.
+		if (this.trustedMode && this.mailFrom === '') {
+			alogger.writeAlog(4,
+				'SMTP inbound: verify probe started (MAIL FROM: <>) from ' +
+				(this.socket.remoteAddress || 'unknown'),
+				'cyan');
+		}
+
+		this._send('250 2.1.0 OK');
 	}
 
 	// --- RCPT TO ---
@@ -246,7 +276,10 @@ class SmtpSession {
 			this._send('530 Authentication required');
 			return;
 		}
-		if (!this.mailFrom) {
+		// Must be === null specifically. An empty-string mailFrom is a
+		// legitimate bounce / verification probe sender ("MAIL FROM: <>")
+		// and should be allowed to proceed.
+		if (this.mailFrom === null) {
 			this._send('503 Need MAIL FROM first');
 			return;
 		}
@@ -259,13 +292,95 @@ class SmtpSession {
 
 		var address = match[1];
 		var resolved = await this._resolveAddress(address);
+
+		// In trusted mode, log every RCPT TO so sysops can see verification
+		// probes in the log stream. MG-style recipient verification is
+		// "MAIL FROM: <> / RCPT TO: <addr> / RSET" so the empty-sender case
+		// is explicitly flagged as a probe.
+		if (this.trustedMode) {
+			var isProbe = (this.mailFrom === '');
+			var verdict = resolved ? 'accepted' : 'unknown';
+			alogger.writeAlog(3,
+				'SMTP inbound: ' + (isProbe ? 'verify probe' : 'RCPT') +
+				' <' + address + '> ' + verdict +
+				(isProbe ? ' (empty sender)' : ' from <' + this.mailFrom + '>'),
+				resolved ? 'cyan' : 'yellow');
+		}
+
 		if (!resolved) {
-			this._send('550 Recipient not found or relay denied: ' + address);
+			// Enhanced status code 5.1.1 (bad destination mailbox address)
+			// so downstream log lines show "user unknown" rather than the
+			// generic 550 text. Postfix-style verify probes use this to
+			// cache permanent negative results correctly.
+			this._send('550 5.1.1 <' + address + '> Recipient address unknown');
 			return;
 		}
 
 		this.rcptTo.push(resolved);
-		this._send('250 OK');
+		this._send('250 2.1.5 OK');
+	}
+
+	// --- VRFY ---
+	//
+	// RFC 5321 section 3.5.1. Used by some relays (Postfix with
+	// reject_unverified_recipient, Exchange, GroupWise) as an alternative
+	// to the MAIL FROM / RCPT TO probe. Only enabled in trusted mode --
+	// enabling VRFY on a public submission server is an address-harvesting
+	// vector. In trusted mode the IP allowlist already gates access so
+	// there's no harvesting risk from random spammers.
+	//
+	// Accepted argument forms:
+	//   VRFY username
+	//   VRFY username@domain
+	//   VRFY <username@domain>
+	async _cmdVrfy(line) {
+		if (!this.trustedMode) {
+			// RFC 5321 allows 252 ("cannot VRFY, but will accept and attempt
+			// delivery") as a permitted response when VRFY is disabled.
+			this._send('252 2.5.2 Cannot VRFY user, but will accept message');
+			return;
+		}
+
+		var match = line.match(/VRFY\s+(.+?)\s*$/i);
+		if (!match) {
+			this._send('501 5.5.2 Syntax error in VRFY');
+			return;
+		}
+
+		var arg = match[1].trim();
+		// Strip optional angle brackets: VRFY <user@domain>
+		if (arg.length >= 2 && arg[0] === '<' && arg[arg.length - 1] === '>') {
+			arg = arg.substring(1, arg.length - 1);
+		}
+		if (!arg) {
+			this._send('501 5.5.2 Empty VRFY argument');
+			return;
+		}
+
+		// If no @ in arg, assume local mail domain so _resolveAddress has
+		// the shape it expects. Bare-username VRFY is normal for gateways
+		// that verify by local-part only.
+		var probeAddress = arg.indexOf('@') >= 0 ? arg : (arg + '@' + this.mailDomain);
+
+		var resolved = await this._resolveAddress(probeAddress);
+
+		alogger.writeAlog(3,
+			'SMTP inbound: VRFY <' + arg + '> ' + (resolved ? 'accepted' : 'unknown'),
+			resolved ? 'cyan' : 'yellow');
+
+		if (!resolved) {
+			this._send('550 5.1.1 <' + arg + '> User unknown');
+			return;
+		}
+
+		// RFC 5321: 250 response to VRFY should include the full mailbox
+		// (optionally with a display name). Return <local@domain> with a
+		// lowercase local part so it canonicalises regardless of how the
+		// client asked.
+		var local = (resolved.username || resolved.toUser || arg)
+			.toLowerCase()
+			.replace(/\s+/g, '.');
+		this._send('250 <' + local + '@' + this.mailDomain + '>');
 	}
 
 	// --- DATA ---
