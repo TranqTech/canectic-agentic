@@ -120,6 +120,18 @@ function isMailBundleFilename(filename) {
 	return /^(mo|tu|we|th|fr|sa|su)[0-9a-z]$/.test(ext);
 }
 
+// FTS-0004 kludge line format. Most kludges use "KEYWORD: value" with a
+// colon-space separator. A handful of legacy routing/addressing kludges
+// (INTL, TOPT, FMPT, Via) use a bare space separator with no colon per
+// FTS-0001 / FTS-4001. Returns the full control-A line without trailing CR.
+const SPACE_SEPARATED_KLUDGES = new Set(['INTL', 'TOPT', 'FMPT', 'Via', 'VIA']);
+function formatKludge(attribute, value) {
+	if (attribute && SPACE_SEPARATED_KLUDGES.has(attribute)) {
+		return '\x01' + attribute + ' ' + (value == null ? '' : value);
+	}
+	return '\x01' + attribute + ': ' + (value == null ? '' : value);
+}
+
 async function FindAndExtractArchives(inboundDir){
 	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
@@ -938,7 +950,7 @@ function WritePktToNode(messageArray, conn, systemaddress){
 			rawText += `AREA:${msg.AreaTag}\r`;
 		}
 		for (const attr of msg.OptionalAttributes || []) {
-			rawText += `\x01${attr.attribute}:${attr.value}\r`;
+			rawText += formatKludge(attr.attribute, attr.value) + '\r';
 		}
 		// Body text (join with \r)
 		const bodyLines = (msg.BodyText || '').split('\r\n');
@@ -1284,7 +1296,7 @@ function WritePkts(messageArray){
 					rawText += `AREA:${msg.AreaTag}\r`;
 				}
 				for (const attr of msg.OptionalAttributes || []) {
-					rawText += `\x01${attr.attribute}:${attr.value}\r`;
+					rawText += formatKludge(attr.attribute, attr.value) + '\r';
 				}
 				if (msg.SeenBy) {
 					rawText += `\x01SEEN-BY: ${msg.SeenBy}\r`;
@@ -1551,5 +1563,6 @@ export {
 	FindAndExtractArchives,
 	TossInboundFile,
 	processMessageText,
-	isMailBundleFilename
+	isMailBundleFilename,
+	formatKludge
 }

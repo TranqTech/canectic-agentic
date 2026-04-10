@@ -7,7 +7,7 @@
 // Run: npx mocha tests/ftnTosser.test.js
 
 import assert from 'assert';
-import { isMailBundleFilename } from '../src/middleware/tossers/ftnTosser.js';
+import { isMailBundleFilename, formatKludge } from '../src/middleware/tossers/ftnTosser.js';
 
 describe('isMailBundleFilename', function () {
 
@@ -77,5 +77,47 @@ describe('isMailBundleFilename', function () {
 		assert.strictEqual(isMailBundleFilename('/some/dir/00010001.mo0'), true);
 		assert.strictEqual(isMailBundleFilename('ftn/in/abcd1234.tu5'), true);
 		assert.strictEqual(isMailBundleFilename('some.mo0/not_a_bundle.zip'), false);
+	});
+});
+
+describe('formatKludge', function () {
+
+	it('emits colon-space separator for standard kludges', function () {
+		assert.strictEqual(formatKludge('MSGID', '1:2/3 abcdef01'), '\x01MSGID: 1:2/3 abcdef01');
+		assert.strictEqual(formatKludge('REPLY', '1:2/3 abcdef01'), '\x01REPLY: 1:2/3 abcdef01');
+		assert.strictEqual(formatKludge('PID', 'Canectic 0.9'), '\x01PID: Canectic 0.9');
+		assert.strictEqual(formatKludge('TID', 'Canectic Tosser 0.1'), '\x01TID: Canectic Tosser 0.1');
+		assert.strictEqual(formatKludge('TZUTC', '-0600'), '\x01TZUTC: -0600');
+		assert.strictEqual(formatKludge('CHRS', 'UTF-8 4'), '\x01CHRS: UTF-8 4');
+		assert.strictEqual(formatKludge('CODEPAGE', '437'), '\x01CODEPAGE: 437');
+		assert.strictEqual(formatKludge('FLAGS', 'CFM'), '\x01FLAGS: CFM');
+	});
+
+	it('always inserts a space after the colon (regression guard)', function () {
+		var out = formatKludge('MSGID', '1:2/3 abcdef01');
+		// Character after the colon must be a space, not a digit
+		var colonIdx = out.indexOf(':');
+		assert.ok(colonIdx > 0);
+		assert.strictEqual(out[colonIdx + 1], ' ',
+			'Expected space after colon in kludge output, got: ' + JSON.stringify(out));
+	});
+
+	it('emits bare space separator for INTL/TOPT/FMPT/Via', function () {
+		assert.strictEqual(formatKludge('INTL', '2:250/1 1:134/107'), '\x01INTL 2:250/1 1:134/107');
+		assert.strictEqual(formatKludge('TOPT', '5'), '\x01TOPT 5');
+		assert.strictEqual(formatKludge('FMPT', '3'), '\x01FMPT 3');
+		assert.strictEqual(formatKludge('Via', '1:2/3 @20260410.123456 Canectic'), '\x01Via 1:2/3 @20260410.123456 Canectic');
+		assert.strictEqual(formatKludge('VIA', '1:2/3 @20260410.123456 Canectic'), '\x01VIA 1:2/3 @20260410.123456 Canectic');
+	});
+
+	it('handles empty or null values safely', function () {
+		assert.strictEqual(formatKludge('MSGID', ''), '\x01MSGID: ');
+		assert.strictEqual(formatKludge('MSGID', null), '\x01MSGID: ');
+		assert.strictEqual(formatKludge('MSGID', undefined), '\x01MSGID: ');
+	});
+
+	it('starts with the control-A byte', function () {
+		assert.strictEqual(formatKludge('MSGID', 'x')[0], '\x01');
+		assert.strictEqual(formatKludge('INTL', 'x')[0], '\x01');
 	});
 });

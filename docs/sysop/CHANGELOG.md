@@ -3,6 +3,7 @@
 ## Pending (since v0.9.5a)
 
 ### Bugfixes
+- Fix: FTN tosser kludge lines were missing the space after the colon (e.g. `^AMSGID:1:2/3 abcdef01` instead of the standard `^AMSGID: 1:2/3 abcdef01`). Standard FTS-0004 colon-space separator is now inserted for all kludges except INTL/TOPT/FMPT/Via, which correctly use the bare-space separator per FTS-0001. New `formatKludge()` helper centralises the rule and has regression tests.
 - Fix: FTN tosser no longer unzips non-mail-bundle ZIP files in the inbound directory. Previously it detected ZIPs by magic bytes and extracted anything it found, which destroyed TIC-attached ZIPs (and nodelist/infopack bundles) before the TIC tosser could process them. The extractor now gates on the FTN BSO arcmail bundle filename pattern (`.mo0`, `.tu5`, `.su9`, etc. per FTS-5000) and leaves all other archives untouched for their respective processors.
 - Fix: Notification dropdown populated with recent unread notifications on connect (#1)
 - Fix: Sysop notifications create one row per sysop (not shared broadcast rows) for correct per-user read state (#1)
