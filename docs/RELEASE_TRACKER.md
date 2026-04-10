@@ -143,11 +143,16 @@ Last updated: 2026-04-09
 
 ### Email Transport
 - [x] Outbound via SMTP smart relay (nodemailer)
-- [x] Inbound via trusted gateway (IP allowlist)
+- [x] Inbound via trusted gateway (IP allowlist with IPv4 CIDR support)
 - [x] SMTP submission accepts external addresses
 - [x] IMAP rendering with real email addresses
 - [x] Web compose with email validation
 - [x] Config keys (relay, inbound port, trusted hosts)
+- [x] Port/secure reconciliation (auto-correct for 465/587/25 mismatches, `requireTLS` on 587, TLS mismatch diagnostics)
+- [x] Per-user sender identity on user-generated PMs (`<username>@<mail_domain>` address, `users.fullname` display name) while system messages use `email_from_address`/`email_from_name`
+- [x] Inbound recipient verification for upstream mail gateways (VRFY command in trusted mode, empty-sender MAIL FROM / RCPT TO probe support, enhanced status codes on accept/reject, level-2 rejection logging)
+- [x] Mode-aware EHLO (submission advertises AUTH, trusted advertises VRFY, both advertise PIPELINING/8BITMIME/SIZE)
+- [x] Dotted-local-part fallback in `resolveRecipient` (matches `first.last` local-parts against `users.fullname` via dot-to-space transformation, round-tripping the IMAP adapter's outbound slugification convention)
 
 ### Mail Client Access
 - [x] IMAP4rev1 server (INBOX, Sent, Trash, network addressing)
