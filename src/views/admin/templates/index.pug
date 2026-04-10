@@ -1,0 +1,295 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-lg-10.offset-lg-1.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-envelope-open-text.me-2
+                    | Message Templates
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-info.me-2(href='/admin/template-events')
+                      i.bi.bi-tags.me-1
+                      | Events
+                    a.btn.btn-sm.btn-outline-light.me-2(href='/admin') Exit
+                    button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newTemplateModal')
+                      i.bi.bi-plus-circle.me-1
+                      | Add Template
+
+            .card-body
+              p.text-muted
+                | Templates are sent to users automatically on various events. Use #[code {user.username}], #[code {boardname}], etc. for substitution. Multiple templates can be attached to the same event and they all fire.
+
+              if templates && templates.length > 0
+                each group, evtCode in byEvent
+                  if group.templates && group.templates.length > 0
+                    h5.mt-4
+                      span.badge.bg-info.me-2= group.event.label
+                      small.text-muted= evtCode
+                    table.table.table-sm.table-hover
+                      thead
+                        tr
+                          th Name
+                          th Subject
+                          th Delivery
+                          th Active
+                          th Fires
+                          th(style='width:200px') Actions
+                      tbody
+                        each tmpl in group.templates
+                          tr
+                            td
+                              strong= tmpl.name
+                              if tmpl.description
+                                br
+                                small.text-muted= tmpl.description
+                            td= tmpl.subject
+                            td
+                              if tmpl.deliver_pm
+                                span.badge.bg-primary.me-1 PM
+                              if tmpl.deliver_email
+                                span.badge.bg-info.me-1 Email
+                              if tmpl.deliver_netmail
+                                span.badge.bg-warning.text-dark.me-1 Netmail
+                            td
+                              if tmpl.active
+                                span.badge.bg-success Active
+                              else
+                                span.badge.bg-secondary Inactive
+                            td.small.text-muted
+                              = tmpl.fire_count
+                              if tmpl.last_fired_at
+                                br
+                                small= new Date(tmpl.last_fired_at).toLocaleDateString()
+                            td
+                              button.btn.btn-sm.btn-primary.me-1.edit-tmpl-btn(
+                                data-bs-toggle='modal' data-bs-target='#editTemplateModal'
+                                data-id=tmpl.id
+                                data-name=tmpl.name
+                                data-description=tmpl.description || ''
+                                data-event_code=tmpl.event_code
+                                data-from_user=tmpl.from_user || ''
+                                data-subject=tmpl.subject
+                                data-deliver_pm=(tmpl.deliver_pm ? 'true' : 'false')
+                                data-deliver_email=(tmpl.deliver_email ? 'true' : 'false')
+                                data-deliver_netmail=(tmpl.deliver_netmail ? 'true' : 'false')
+                                data-active=(tmpl.active ? 'true' : 'false')
+                                data-sort_order=tmpl.sort_order || 0
+                              )
+                                i.bi.bi-pencil
+                              form.d-inline(method='POST' action='/admin/templates/' + tmpl.id + '/test' title='Test fire to you')
+                                button.btn.btn-sm.btn-outline-info.me-1(type='submit')
+                                  i.bi.bi-send
+                              form.d-inline(method='POST' action='/admin/templates/' + tmpl.id + '/delete')
+                                button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this template?")')
+                                  i.bi.bi-trash
+                              //- Hidden body_text and body_html in textareas for edit modal population (avoids data-attr HTML mangling)
+                              textarea.d-none(id='tmpl_body_text_' + tmpl.id)= tmpl.body_text || ''
+                              textarea.d-none(id='tmpl_body_html_' + tmpl.id)= tmpl.body_html || ''
+                              textarea.d-none(id='tmpl_conditions_' + tmpl.id)= tmpl.conditions ? (typeof tmpl.conditions === 'string' ? tmpl.conditions : JSON.stringify(tmpl.conditions)) : ''
+
+                //- Show events with no templates in a separate "available events" section
+                - var emptyEvents = []
+                each group, code in byEvent
+                  if !group.templates || group.templates.length === 0
+                    - emptyEvents.push(group.event)
+                if emptyEvents.length > 0
+                  h5.mt-5.text-muted Events with no templates
+                  .d-flex.flex-wrap.gap-2
+                    each evt in emptyEvents
+                      span.badge.bg-dark.p-2= evt.label
+              else
+                .alert.alert-info.mt-3
+                  h5
+                    i.bi.bi-info-circle.me-2
+                    | No templates yet
+                  p Create your first template with the button above. Built-in events (user registration, verification, birthday, etc.) are already registered -- just add a template targeting the event you want to customise.
+
+    //- New Template Modal
+    #newTemplateModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title New Message Template
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form(method='POST' action='/admin/templates/new')
+              .row
+                .col-8
+                  label.form-label Name
+                  input.form-control.mb-2(type='text' name='name' required placeholder='Welcome New User')
+                .col-4
+                  label.form-label Sort Order
+                  input.form-control.mb-2(type='number' name='sort_order' value='0')
+
+              label.form-label Description (sysop notes)
+              input.form-control.mb-2(type='text' name='description')
+
+              .row
+                .col-6
+                  label.form-label Event
+                  select.form-select.mb-2(name='event_code' required)
+                    each evt in events
+                      option(value=evt.code title=evt.description || '')= evt.label + ' (' + evt.code + ')'
+                .col-6
+                  label.form-label From (sender name, defaults to board name)
+                  input.form-control.mb-2(type='text' name='from_user' placeholder='Sysop, System, BBS Name')
+
+              label.form-label Subject
+              input.form-control.mb-2(type='text' name='subject' required placeholder='Welcome to {boardname}!')
+
+              label.form-label Body (plain text -- used for PM, netmail, email fallback)
+              textarea.form-control.mb-2(name='body_text' rows='8' required placeholder='Hello {user.username},\n\nWelcome to {boardname}!\n\n- {sysopname}')
+
+              label.form-label Body HTML (optional -- used for email/web when available)
+              textarea.form-control.mb-2(name='body_html' rows='4' placeholder='<p>Hello {user.username}...</p>')
+
+              label.form-label Conditions (optional JSON filter)
+              input.form-control.mb-2(type='text' name='conditions' placeholder='{"security_min": 50}')
+              small.text-muted.d-block.mb-3
+                | Examples: #[code {"security_min": 50}], #[code {"verified": true}], #[code {"nth_count": [1, 10, 100]}]
+
+              h6.mt-3 Delivery Methods
+              .row
+                .col-4
+                  .form-check
+                    input.form-check-input(type='checkbox' name='deliver_pm' id='new_deliver_pm' value='true' checked)
+                    label.form-check-label(for='new_deliver_pm') PM (local inbox)
+                .col-4
+                  .form-check
+                    input.form-check-input(type='checkbox' name='deliver_email' id='new_deliver_email' value='true')
+                    label.form-check-label(for='new_deliver_email') Email (if on file)
+                .col-4
+                  .form-check
+                    input.form-check-input(type='checkbox' name='deliver_netmail' id='new_deliver_netmail' value='true')
+                    label.form-check-label(for='new_deliver_netmail') Netmail (if on file)
+
+              .form-check.mt-3
+                input.form-check-input(type='checkbox' name='active' id='new_active' value='true' checked)
+                label.form-check-label(for='new_active') Active
+
+              .mt-3.p-3.bg-dark.rounded
+                small.text-muted
+                  strong Available variables:
+                  br
+                  | #[code {boardname}], #[code {sysopname}], #[code {date}], #[code {time}], #[code {year}]
+                  br
+                  | #[code {user.username}], #[code {user.fullname}], #[code {user.firstname}], #[code {user.email}], #[code {user.location}], #[code {user.logoncount}]
+                  br
+                  | Event-specific: see event details on the Events page (e.g. #[code {event.verify_code}], #[code {event.days_until_purge}], #[code {event.login_number}])
+
+              .text-end.mt-3
+                button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+                input.btn.btn-success(type='submit' value='Create Template')
+
+    //- Edit Template Modal
+    #editTemplateModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Edit Template
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form#editTemplateForm(method='POST')
+              .row
+                .col-8
+                  label.form-label Name
+                  input#ed_name.form-control.mb-2(type='text' name='name' required)
+                .col-4
+                  label.form-label Sort Order
+                  input#ed_sort_order.form-control.mb-2(type='number' name='sort_order')
+
+              label.form-label Description
+              input#ed_description.form-control.mb-2(type='text' name='description')
+
+              .row
+                .col-6
+                  label.form-label Event
+                  select#ed_event_code.form-select.mb-2(name='event_code' required)
+                    each evt in events
+                      option(value=evt.code)= evt.label + ' (' + evt.code + ')'
+                .col-6
+                  label.form-label From
+                  input#ed_from_user.form-control.mb-2(type='text' name='from_user')
+
+              label.form-label Subject
+              input#ed_subject.form-control.mb-2(type='text' name='subject' required)
+
+              label.form-label Body (plain text)
+              textarea#ed_body_text.form-control.mb-2(name='body_text' rows='8' required)
+
+              label.form-label Body HTML (optional)
+              textarea#ed_body_html.form-control.mb-2(name='body_html' rows='4')
+
+              label.form-label Conditions (optional JSON filter)
+              input#ed_conditions.form-control.mb-2(type='text' name='conditions')
+
+              h6.mt-3 Delivery Methods
+              .row
+                .col-4
+                  .form-check
+                    input#ed_deliver_pm.form-check-input(type='checkbox' name='deliver_pm' value='true')
+                    label.form-check-label(for='ed_deliver_pm') PM
+                .col-4
+                  .form-check
+                    input#ed_deliver_email.form-check-input(type='checkbox' name='deliver_email' value='true')
+                    label.form-check-label(for='ed_deliver_email') Email
+                .col-4
+                  .form-check
+                    input#ed_deliver_netmail.form-check-input(type='checkbox' name='deliver_netmail' value='true')
+                    label.form-check-label(for='ed_deliver_netmail') Netmail
+
+              .form-check.mt-3
+                input#ed_active.form-check-input(type='checkbox' name='active' value='true')
+                label.form-check-label(for='ed_active') Active
+
+              .text-end.mt-3
+                button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+                input.btn.btn-success(type='submit' value='Save Changes')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var editModal = document.getElementById('editTemplateModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          var id = btn.dataset.id;
+          document.getElementById('editTemplateForm').action = '/admin/templates/' + id + '/update';
+          document.getElementById('ed_name').value = btn.dataset.name || '';
+          document.getElementById('ed_description').value = btn.dataset.description || '';
+          document.getElementById('ed_event_code').value = btn.dataset.event_code || '';
+          document.getElementById('ed_from_user').value = btn.dataset.from_user || '';
+          document.getElementById('ed_subject').value = btn.dataset.subject || '';
+          document.getElementById('ed_sort_order').value = btn.dataset.sort_order || '0';
+          document.getElementById('ed_deliver_pm').checked = btn.dataset.deliver_pm === 'true';
+          document.getElementById('ed_deliver_email').checked = btn.dataset.deliver_email === 'true';
+          document.getElementById('ed_deliver_netmail').checked = btn.dataset.deliver_netmail === 'true';
+          document.getElementById('ed_active').checked = btn.dataset.active === 'true';
+
+          // Load body text/html/conditions from hidden textareas
+          var btEl = document.getElementById('tmpl_body_text_' + id);
+          var bhEl = document.getElementById('tmpl_body_html_' + id);
+          var ceEl = document.getElementById('tmpl_conditions_' + id);
+          document.getElementById('ed_body_text').value = btEl ? btEl.value : '';
+          document.getElementById('ed_body_html').value = bhEl ? bhEl.value : '';
+          document.getElementById('ed_conditions').value = ceEl ? ceEl.value : '';
+        });
+      }
+    });

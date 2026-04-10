@@ -86,14 +86,16 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             role='button'
             aria-haspopup='true'
             aria-expanded='false'
-            class=(activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins' || activenav === 'newsfiles' || activenav === 'seasonalart') ? 'active' : ''
+            class=(activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins' || activenav === 'newsfiles' || activenav === 'seasonalart' || activenav === 'content') ? 'active' : ''
           )
             | Content
-            if activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins'
+            if activenav === 'announcements' || activenav === 'wall' || activenav === 'bulletins' || activenav === 'content'
               span.visually-hidden  (current)
           .dropdown-menu
             a.dropdown-item(href='/admin/announcements') Announcements
             a.dropdown-item(href='/admin/bulletins') Bulletins
+            a.dropdown-item(href='/admin/templates') Message Templates
+            a.dropdown-item(href='/admin/template-events') Template Events
             a.dropdown-item(href='/admin/newsfiles') News Files
             a.dropdown-item(href='/admin/seasonal-art') Seasonal Art
             a.dropdown-item(href='/admin/wall') Wall Messages

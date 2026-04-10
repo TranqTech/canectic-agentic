@@ -1,0 +1,159 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-lg-10.offset-lg-1.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-tags.me-2
+                    | Template Events
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-info.me-2(href='/admin/templates')
+                      i.bi.bi-envelope-open-text.me-1
+                      | Templates
+                    a.btn.btn-sm.btn-outline-light.me-2(href='/admin') Exit
+                    button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newEventModal')
+                      i.bi.bi-plus-circle.me-1
+                      | Add Custom Event
+
+            .card-body
+              p.text-muted
+                | Events are the triggers that cause templates to fire. Built-in events (marked #[span.badge.bg-info Built-in]) are seeded on install and cannot be deleted. You can add custom events that can be fired from the admin UI, a menu command, a timed event, or the CLI.
+
+              if events && events.length > 0
+                table#eventTable.table.table-sm.table-hover
+                  thead
+                    tr
+                      th Code
+                      th Label
+                      th Description
+                      th Type
+                      th Variables
+                      th(style='width:130px') Actions
+                  tbody
+                    each evt in events
+                      tr
+                        td
+                          code= evt.code
+                        td= evt.label
+                        td
+                          small= evt.description || ''
+                        td
+                          if evt.is_builtin
+                            span.badge.bg-info Built-in
+                          else
+                            span.badge.bg-secondary Custom
+                        td
+                          - var schema = evt.context_schema
+                          - if (typeof schema === 'string') { try { schema = JSON.parse(schema); } catch(_) { schema = []; } }
+                          if schema && schema.length > 0
+                            small.text-muted= '{' + schema.join('} {') + '}'
+                        td
+                          button.btn.btn-sm.btn-primary.me-1.edit-evt-btn(
+                            data-bs-toggle='modal' data-bs-target='#editEventModal'
+                            data-id=evt.id
+                            data-code=evt.code
+                            data-label=evt.label
+                            data-description=evt.description || ''
+                            data-is_builtin=(evt.is_builtin ? 'true' : 'false')
+                            data-context_schema=schema && schema.length ? schema.join(',') : ''
+                          )
+                            i.bi.bi-pencil
+                          if !evt.is_builtin
+                            form.d-inline(method='POST' action='/admin/template-events/' + evt.id + '/delete')
+                              button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this custom event? Templates using it must be removed first.")')
+                                i.bi.bi-trash
+              else
+                p.text-muted No events registered. Built-ins should seed on first run.
+
+    //- New Custom Event Modal
+    #newEventModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Add Custom Event
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form(method='POST' action='/admin/template-events/new')
+              label.form-label Code (lowercase, underscores)
+              input.form-control.mb-2(type='text' name='code' required placeholder='custom_xmas_2026' pattern='[a-z][a-z0-9_]*')
+              small.text-muted Must start with a letter; lowercase letters, digits, and underscores only.
+
+              label.form-label.mt-3 Label
+              input.form-control.mb-2(type='text' name='label' required placeholder='Christmas 2026 Greeting')
+
+              label.form-label Description
+              textarea.form-control.mb-2(name='description' rows='2' placeholder='Holiday greeting fired manually from admin UI on Dec 25.')
+
+              label.form-label Available variables (comma-separated dot paths)
+              input.form-control.mb-2(type='text' name='context_schema' placeholder='user.username,user.fullname,event.holiday_name')
+              small.text-muted These document to sysops which vars are available when templates fire. Standard user.* vars are always available.
+
+              .text-end.mt-3
+                button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+                input.btn.btn-success(type='submit' value='Create Event')
+
+    //- Edit Event Modal
+    #editEventModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Edit Event
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form#editEventForm(method='POST')
+              label.form-label Code
+              input#ed_code.form-control.mb-2(type='text' name='code')
+              small#builtinCodeWarning.text-warning.d-none Built-in event codes cannot be changed.
+
+              label.form-label.mt-3 Label
+              input#ed_label.form-control.mb-2(type='text' name='label' required)
+
+              label.form-label Description
+              textarea#ed_description.form-control.mb-2(name='description' rows='2')
+
+              label.form-label Available variables (comma-separated)
+              input#ed_context_schema.form-control.mb-2(type='text' name='context_schema')
+              small#builtinSchemaWarning.text-warning.d-none Built-in event variables cannot be changed.
+
+              .text-end.mt-3
+                button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+                input.btn.btn-success(type='submit' value='Save Changes')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      var editModal = document.getElementById('editEventModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editEventForm').action = '/admin/template-events/' + btn.dataset.id + '/update';
+          document.getElementById('ed_code').value = btn.dataset.code || '';
+          document.getElementById('ed_label').value = btn.dataset.label || '';
+          document.getElementById('ed_description').value = btn.dataset.description || '';
+          document.getElementById('ed_context_schema').value = btn.dataset.context_schema || '';
+
+          var isBuiltin = btn.dataset.is_builtin === 'true';
+          document.getElementById('ed_code').disabled = isBuiltin;
+          document.getElementById('ed_context_schema').disabled = isBuiltin;
+          document.getElementById('builtinCodeWarning').classList.toggle('d-none', !isBuiltin);
+          document.getElementById('builtinSchemaWarning').classList.toggle('d-none', !isBuiltin);
+        });
+      }
+    });

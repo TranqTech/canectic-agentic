@@ -20,6 +20,7 @@ import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
+import * as messageTemplates from '../models/messageTemplates.js';
 import * as wall from '../models/wall.js';
 import * as bulletins from '../models/bulletins.js';
 import * as newsFiles from '../models/newsFiles.js';
@@ -4486,6 +4487,150 @@ router.post('/announcements/reorder', express.json(), requireAdmin, async (req, 
 		await announcements.updateSortOrder(ids);
 	}
 	res.json({ status: true });
+});
+
+// -------------------------------------------------------
+// Message Templates
+// -------------------------------------------------------
+
+router.get('/templates', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var templates = await messageTemplates.getAllTemplates();
+	var events = await messageTemplates.getAllEvents();
+	// Group templates by event_code for display
+	var byEvent = {};
+	for (var evt of events) {
+		byEvent[evt.code] = { event: evt, templates: [] };
+	}
+	for (var t of templates) {
+		if (byEvent[t.event_code]) byEvent[t.event_code].templates.push(t);
+	}
+	res.render('admin/templates/index', {
+		sufficientAccess, title: 'Message Templates', activelink: 'templates',
+		activenav: 'content', currentuser,
+		templates, events, byEvent
+	});
+});
+
+router.post('/templates/new', urlencodedParser, requireAdmin, async (req, res) => {
+	// Parse checkbox values: unchecked checkboxes are absent from form data
+	req.body.deliver_pm = req.body.deliver_pm === 'true' || req.body.deliver_pm === 'on';
+	req.body.deliver_email = req.body.deliver_email === 'true' || req.body.deliver_email === 'on';
+	req.body.deliver_netmail = req.body.deliver_netmail === 'true' || req.body.deliver_netmail === 'on';
+	req.body.active = req.body.active === 'true' || req.body.active === 'on';
+	var result = await messageTemplates.createTemplate(req.body);
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Template created');
+	}
+	res.redirect('/admin/templates');
+});
+
+router.post('/templates/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	req.body.deliver_pm = req.body.deliver_pm === 'true' || req.body.deliver_pm === 'on';
+	req.body.deliver_email = req.body.deliver_email === 'true' || req.body.deliver_email === 'on';
+	req.body.deliver_netmail = req.body.deliver_netmail === 'true' || req.body.deliver_netmail === 'on';
+	req.body.active = req.body.active === 'true' || req.body.active === 'on';
+	var result = await messageTemplates.updateTemplate(parseInt(req.params.id), req.body);
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Template updated');
+	}
+	res.redirect('/admin/templates');
+});
+
+router.post('/templates/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await messageTemplates.deleteTemplate(parseInt(req.params.id));
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Template deleted');
+	}
+	res.redirect('/admin/templates');
+});
+
+// Test-fire a template to the current admin user
+router.post('/templates/:id/test', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser || !currentuser.id) {
+		await flash.setOne(req, 'danger', 'Could not resolve current user');
+		return res.redirect('/admin/templates');
+	}
+	var tmpl = await messageTemplates.getTemplateById(parseInt(req.params.id));
+	if (!tmpl) {
+		await flash.setOne(req, 'danger', 'Template not found');
+		return res.redirect('/admin/templates');
+	}
+	// Fire this specific template to the admin user. Use the event_code so
+	// other templates on the same event may also fire -- if the sysop only
+	// wants this one, they can temporarily disable the others. For a true
+	// single-template test, we pass extraVars with a marker the template
+	// could use, but for now we just fire the event.
+	var result = await messageTemplates.fireEvent(tmpl.event_code, currentuser.id, {
+		event: { test_fire: true }
+	});
+	await flash.setOne(req, result.fired > 0 ? 'success' : 'warning',
+		'Test fire: ' + result.fired + ' delivered, ' + result.skipped + ' skipped' +
+		(result.errors.length ? ', errors: ' + result.errors.join('; ') : ''));
+	res.redirect('/admin/templates');
+});
+
+// -------------------------------------------------------
+// Message Template Events (event registry CRUD)
+// -------------------------------------------------------
+
+router.get('/template-events', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var events = await messageTemplates.getAllEvents();
+	res.render('admin/templateEvents/index', {
+		sufficientAccess, title: 'Template Events', activelink: 'template-events',
+		activenav: 'content', currentuser, events
+	});
+});
+
+router.post('/template-events/new', urlencodedParser, requireAdmin, async (req, res) => {
+	// Parse context_schema as comma-separated list into JSON array
+	if (typeof req.body.context_schema === 'string' && req.body.context_schema.trim()) {
+		req.body.context_schema = req.body.context_schema.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+	} else {
+		req.body.context_schema = null;
+	}
+	var result = await messageTemplates.createEvent(req.body);
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Event created');
+	}
+	res.redirect('/admin/template-events');
+});
+
+router.post('/template-events/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	if (typeof req.body.context_schema === 'string' && req.body.context_schema.trim()) {
+		req.body.context_schema = req.body.context_schema.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+	} else if (req.body.context_schema === '') {
+		req.body.context_schema = null;
+	}
+	var result = await messageTemplates.updateEvent(parseInt(req.params.id), req.body);
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Event updated');
+	}
+	res.redirect('/admin/template-events');
+});
+
+router.post('/template-events/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await messageTemplates.deleteEvent(parseInt(req.params.id));
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Event deleted');
+	}
+	res.redirect('/admin/template-events');
 });
 
 // -------------------------------------------------------
