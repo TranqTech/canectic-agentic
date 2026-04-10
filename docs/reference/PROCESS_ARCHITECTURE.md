@@ -149,6 +149,36 @@ Stateless batch processor. Runs toss cycles, maintenance tasks, TIC processing, 
 
 No process writes to another process's output directory. The mailer writes to inbound; the worker reads from inbound. The worker writes to outbound; the mailer reads from outbound. Filesystem is the boundary — same convention as the existing "mailer does not toss" design principle.
 
+### Timezone propagation (PM2 + alogger)
+
+`ecosystem.config.cjs` loads `.env` at config-eval time and resolves an
+IANA timezone in this precedence order:
+
+1. `process.env.TZ` (from `.env` or the invoking shell)
+2. `Intl.DateTimeFormat().resolvedOptions().timeZone` (Node reads `/etc/localtime`)
+3. Unset — Node defaults to UTC
+
+The resolved value is spread into every app's `env` block so each child
+process has the same TZ at startup. `alogger.writeAlog` and
+`alogger.writeClog` both use Luxon `DateTime.now().toLocaleString()` which
+honours `process.env.TZ`, so application logs render in the configured
+zone regardless of OS defaults.
+
+**Gotcha**: PM2's own `log_date_format: 'YYYY-MM-DD HH:mm:ss'` prefix on
+captured stdout is stamped by the **PM2 daemon**, not by the child
+process. Setting TZ in `baseEnv` fixes alogger's own timestamps but does
+NOT change PM2's prefix — that inherits from whatever env the daemon was
+started with. If PM2 logs show UTC after the child processes are on local
+time, restart the daemon itself:
+
+```bash
+pm2 kill
+TZ=America/Edmonton pm2 start ecosystem.config.cjs
+```
+
+Or set `TZ` in `/etc/environment` / shell rc before `pm2 start` so the
+daemon inherits it on first launch.
+
 ---
 
 ## Queue Topology

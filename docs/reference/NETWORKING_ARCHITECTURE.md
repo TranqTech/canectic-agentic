@@ -240,7 +240,16 @@ See `message_architecture.md` for full schema. Key networking-relevant columns: 
 **Inbound:**
 ```
 Remote system sends type-2 FTN packet → inbound directory
-  → TossInbound() reads .pkt files
+  → TossInbound() scans inbound dir
+    → file-type magic byte detection per file
+    → ZIP/ARJ detected + filename matches mail bundle pattern (isMailBundleFilename)
+      → extractMailBundle() via adm-zip (in-process, no shell)
+      → .pkt entries written to inbound, bundle unlinked on success
+    → ZIP/ARJ detected but NOT a bundle filename
+      → logged as "ZIP not a mail bundle, leaving for TIC/other processors"
+      → left untouched so TIC tosser / wildcard router / echolist scanner
+        can handle it
+    → .pkt files queued for processing
   → ReadPkt() parses packet header + messages
   → Per message: ProcessMessage() extracts kludge lines, body, origin
   → Echomail → messages.handleInboundEchoMessage(message)
@@ -252,6 +261,25 @@ Remote system sends type-2 FTN packet → inbound directory
     → ftnToDb() → postgres.insertObject() → netmail_in
   → Move processed .pkt to processed directory
 ```
+
+**Mail bundle filename gating** (`isMailBundleFilename()` in `ftnTosser.js`)
+uses the FTS-5000 / FSC-0057 arcmail bundle convention: day-of-week
+prefix (`mo`/`tu`/`we`/`th`/`fr`/`sa`/`su`) plus a single hex-like
+counter character `0-9` or `a-z`. So `00010001.mo0`, `abcd1234.su9`,
+`xxxxxxxx.tuz` are all recognised as bundles. Everything else with
+ZIP magic bytes — TIC-attached archives, nodelist distributions,
+infopacks, random downloads delivered via FREQ — is left in the
+inbound directory for its rightful processor. Without this gate the
+tosser used to blindly `unzip -o` every archive it found, destroying
+TIC attachments before the TIC tosser could see them.
+
+**Bundle extraction** (`extractMailBundle()` in `ftnTosser.js`) uses
+`adm-zip` in-process rather than shelling out to `unzip`. Benefits:
+no shell injection surface from odd filenames, deterministic
+behaviour across OS installs, inspectable in unit tests, and every
+entry in a legitimate bundle is extracted faithfully (no content
+filtering — stray non-pkt files inside a bundle are still written
+out so nothing gets silently lost).
 
 **Outbound:**
 ```
@@ -397,14 +425,36 @@ Type-2 FTN packets (`.pkt` files) contain a binary header followed by one or mor
 - **Messages** — each has a binary header (type, source/dest node/net, attribute, cost, datetime) followed by null-terminated strings (to, from, subject, body text)
 - **Packet terminator** — two null bytes
 
-Messages are CP437 encoded. Body text uses `\r` line endings. Kludge lines appear at the start of the body prefixed with `\x01` (SOH character):
-- `\x01MSGID:` — unique message identifier
-- `\x01REPLY:` — parent message ID for threading
-- `\x01TZUTC:` — timezone offset
-- `\x01PID:` — product/tosser identifier
-- `\x01VIA:` — routing path trace
+Messages are CP437 encoded. Body text uses `\r` line endings. Kludge lines appear at the start of the body prefixed with `\x01` (SOH character).
 
-After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace).
+**FTS-0004 kludge format** uses a colon-space separator for most
+keywords, but a handful of legacy addressing/routing kludges
+(`INTL`, `TOPT`, `FMPT`, `Via`) use a bare-space separator with no
+colon per FTS-0001 / FTS-4001. `formatKludge(attribute, value)` in
+`ftnTosser.js` centralises the rule so outbound packets always
+match whatever convention the keyword requires:
+
+```
+\x01MSGID: 1:2/3 abcdef01      — colon-space (FTS-0004 standard)
+\x01REPLY: 1:2/3 abcdef02
+\x01PID: Canectic 0.9
+\x01TID: Canectic Tosser 0.1
+\x01TZUTC: -0600
+\x01CHRS: UTF-8 4
+\x01PATH: 1:134/101 1:134/100
+\x01INTL 2:250/1 1:134/107     — bare space (INTL/TOPT/FMPT/Via)
+\x01TOPT 5
+\x01FMPT 3
+\x01Via 1:2/3 @20260410.123456 Canectic
+```
+
+The space-separated keywords are tracked in a `Set` at module scope:
+`SPACE_SEPARATED_KLUDGES = {INTL, TOPT, FMPT, Via, VIA}`. Adding a
+new keyword to one convention or the other is a single-line change
+at the top of `ftnTosser.js` and is pinned by tests in
+`tests/ftnTosser.test.js`.
+
+After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace) — both use colon-space.
 
 The `ftnClasses.js` `Packet` and `Message` classes model these structures. `ftnTosser.js` `ReadPkt()` handles the binary parsing.
 

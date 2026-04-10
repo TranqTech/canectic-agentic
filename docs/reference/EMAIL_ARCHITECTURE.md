@@ -37,20 +37,21 @@ All keys are in the `email` category in `configDefaults.js`, managed via Admin U
 | Key | Default | Description |
 |-----|---------|-------------|
 | `email_relay_host` | _(empty)_ | SMTP relay hostname. Empty = outbound email disabled. |
-| `email_relay_port` | `587` | Relay port. 587 = STARTTLS, 465 = implicit TLS. |
-| `email_relay_secure` | `false` | `true` = implicit TLS (port 465), `false` = STARTTLS (port 587). |
+| `email_relay_port` | `587` | Relay port. 587 = STARTTLS, 465 = implicit TLS, 25 = plain/STARTTLS. |
+| `email_relay_secure` | `false` | `true` = implicit TLS (port 465), `false` = STARTTLS (ports 587/25). The tosser auto-reconciles obvious mismatches — see "Port/secure reconciliation" below. |
 | `email_relay_user` | _(empty)_ | Relay auth username. |
 | `email_relay_password` | _(empty)_ | Relay auth password. |
-| `email_from_address` | _(empty)_ | Envelope From address (e.g. `bbs@mybbs.com`). Required for outbound. |
-| `email_from_name` | _(empty)_ | Display name in From header. Falls back to `boardname`. |
+| `email_from_address` | _(empty)_ | Envelope From address for **system-generated** email (verification, password reset, templates, sysop broadcasts). Required for outbound. User-generated PMs use a per-user address instead (see "Sender identity"). |
+| `email_from_name` | _(empty)_ | Display name for **system-generated** email. Falls back to `boardname`. |
 | `email_max_outbound_batch` | `50` | Maximum emails sent per toss cycle. Prevents relay rate-limit issues. |
+| `mail_domain` | _(empty)_ | IANA domain name the BBS uses for all mail addressing. Required for user-generated outbound to build `<username>@<mail_domain>` sender addresses. |
 
 ### Inbound Gateway
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `email_inbound_port` | `0` | Trusted inbound SMTP port (e.g. 1026). `0` = disabled. Requires restart. |
-| `email_trusted_hosts` | `127.0.0.1` | Comma-separated IPs allowed to inject without authentication. |
+| `email_trusted_hosts` | `127.0.0.1` | Comma-separated mix of IPv4 addresses and IPv4 CIDR blocks allowed to inject without authentication. E.g. `127.0.0.1, 10.0.0.0/8, 192.168.1.5`. IPv6 still requires exact addresses. |
 
 ---
 
@@ -67,13 +68,21 @@ User composes EMAIL PM (web, terminal, or mail client)
       → enqueueEmailOutbound() on toss queue
         → worker picks up email:outbound job
           → emailTosser.tossOutbound()
+            → getTransporter() with port/secure reconciliation
             → getPendingByTransport('EMAIL')
             → for each PM (up to email_max_outbound_batch):
+              → _isSystemMessage(pm, transportData) classifies sender
+                → system → email_from_address / email_from_name
+                → user   → _resolveSender() looks up users row by pm.user_id
+                           → _pickSenderIdentity(userRow, pm) picks
+                             address (users.username) + display (users.fullname)
+                           → builds <username>@<mail_domain> envelope
               → load pm_attachments if has_attachments=true
-              → nodemailer.sendMail() to configured relay (attachments passed through as nodemailer attachment objects)
+              → nodemailer.sendMail() to configured relay
               → success: markSent(id, 'EmailTosser')
               → 5xx permanent: markOutboxUndeliverable(id, reason)
                 → notifySenderUndeliverable() — bounce to sender inbox
+              → TLS mismatch: diagnostic log + resetTransporter()
               → transient: markSendError(id, errorText) — retry next cycle
 ```
 
@@ -143,27 +152,150 @@ The `email_address` field holds the real internet email address in both directio
 
 ## SMTP Server Modes
 
-`SmtpServer` and `SmtpSession` support two modes controlled by constructor options:
+`SmtpServer` and `SmtpSession` support two modes controlled by constructor options. EHLO capabilities, authentication requirements, and VRFY support all differ between the two.
 
 ### Submission Mode (default)
 
+- Listens on the authenticated submission port (default 10587)
 - Requires authentication (AUTH PLAIN or AUTH LOGIN)
+- EHLO advertises: `AUTH PLAIN LOGIN`, `PIPELINING`, `8BITMIME`, `SIZE`
 - Resolves addresses across all transport types (LOCAL, FTN, QWK, EMAIL)
 - External domains → EMAIL transport (new behavior)
+- VRFY returns `252 2.5.2 Cannot VRFY user, but will accept message` per
+  RFC 5321 §3.5.3. Enabling VRFY on a public submission port would be an
+  address-harvesting vector; the 252 response keeps the handshake RFC-compliant
+  without leaking user existence.
 - Access control enforced via `queueMessage(messageObj, session)`
 
 ### Trusted Inbound Mode
 
 - Enabled by `SmtpServer(port, domain, { trusted: true, trustedHosts: '...' })`
-- Connecting IP verified against `_trustedHosts` Set — rejected if not trusted
+- Typically port 1026, fronted by an external MTA that handles MX/TLS/spam
+- Connecting IP verified against parsed allowlist — rejected if not matched
 - Authentication skipped — `SmtpSession.authenticated` defaults to `true`
+- EHLO advertises: `VRFY`, `PIPELINING`, `8BITMIME`, `SIZE` (no AUTH — the
+  IP allowlist is the authentication)
 - `_resolveAddress()` short-circuits: only resolves local users on `mail_domain`
 - Rejects all external domains, `.ftn`, `.qwk` (no outbound relay from trusted port)
 - `_processInboundData()` delivers directly via `deliverMessage()` (not `queueMessage()`)
 
+### Trusted Host Allowlist (CIDR support)
+
+`email_trusted_hosts` accepts a comma-separated mix of IPv4 addresses and
+IPv4 CIDR blocks:
+
+```
+127.0.0.1, 10.0.0.0/8, 192.168.1.0/24, 172.16.0.0/12
+```
+
+Parsing is handled by `_parseTrustedHostList()` which splits into:
+
+- `exact: Set<string>` — literal IPv4 matches for the hot path
+- `cidrs: Array<{base, mask, text}>` — base and mask as 32-bit integers
+  for fast bitwise matching
+
+`_matchesTrustedHost(normalizedAddr, parsed)` tries the exact-match Set first
+(O(1)) and falls back to iterating CIDRs only if no exact match. `_ipv4ToInt()`
+is the shared parser; returns `null` for malformed input.
+
+CIDR entries with non-zero host bits (`10.0.0.1/8`) are normalised by masking
+the base against the prefix length — the stored `cidrs[].base` is always the
+canonical network address. Invalid CIDR entries log a warning and are skipped
+so a typo in one entry can't kill the whole allowlist. `/0` matches any IPv4;
+`/32` is equivalent to an exact match. IPv6 is not yet supported — operators
+wanting IPv6 allowlisting should list exact addresses.
+
+On rejection the server logs at level 2 (visible in default logs) with the
+full allowlist in the message, and responds with an enhanced-status 5.7.1:
+
+```
+554 5.7.1 Access denied: 10.0.30.50 is not in this host's SMTP allowlist
+```
+
+The enhanced status code means downstream postfix logs show "access denied"
+rather than a generic "connection refused".
+
+### Recipient Verification Probes (VRFY + RCPT TO)
+
+Upstream mail gateways doing recipient address verification
+(Postfix `reject_unverified_recipient`, Proxmox MG, Exchange, GroupWise)
+can verify a local user exists without actually sending mail. Trusted mode
+supports both probe styles:
+
+**VRFY** (`_cmdVrfy()`) accepts:
+```
+VRFY username                   — matches users.username
+VRFY first.last                 — matches users.fullname via dot-to-space fallback
+VRFY username@domain
+VRFY first.last@domain
+VRFY <username@domain>
+```
+
+Bare usernames get the mail domain auto-appended. Angle brackets are stripped.
+The resolver (`privateMessages.resolveRecipient()`) is the single source of
+truth for "does this recipient exist" — see "Recipient resolution" below.
+
+Responses:
+- **Found**: `250 <kmuirhead@bbs.undermine.ca>` — canonical, lowercase local part
+- **Not found**: `550 5.1.1 <addr> User unknown`
+- **Empty arg**: `501 5.5.2 Empty VRFY argument`
+
+**MAIL FROM / RCPT TO probe** is the "MAIL FROM: <> / RCPT TO: <addr> / RSET"
+pattern Postfix uses by default. Empty sender is explicitly supported (the
+earlier truthy check on `mailFrom` was tightened to a strict null check so
+`""` doesn't trigger "503 Need MAIL FROM first"). Trusted-mode sessions log
+every RCPT TO at level 3 on the tosser channel with `verify probe` vs `RCPT`
+distinction so sysops can watch verification activity live:
+
+```
+SMTP inbound: verify probe started (MAIL FROM: <>) from 10.0.30.X
+SMTP inbound: verify probe <underminer@bbs.undermine.ca> accepted (empty sender)
+```
+
+Unknown-recipient probes return `550 5.1.1 <addr> Recipient address unknown`
+so downstream relays cache the correct verdict. Enhanced status codes
+(`250 2.1.5` for accepted, `550 5.1.1` for unknown) match the VRFY response
+shape.
+
 ### IPv6 Handling
 
-Trusted host verification normalizes `::ffff:127.0.0.1` to `127.0.0.1` for IPv4-mapped IPv6 addresses.
+Trusted host verification normalizes `::ffff:127.0.0.1` to `127.0.0.1` for IPv4-mapped IPv6 addresses. Bare IPv6 addresses in the allowlist are stored as literals in the `exact` Set (no CIDR support yet).
+
+### Recipient Resolution
+
+`privateMessages.resolveRecipient(toUser)` is the single source of truth
+for "does this local recipient exist" across every delivery path (SMTP
+RCPT TO, VRFY, FTN netmail local delivery, PM compose by name, IMAP
+address lookup). Lookup cascade:
+
+| Step | Matches against | Example input |
+|---|---|---|
+| 1 | `users.username` (case-insensitive) | `kostie`, `KOSTIE`, `dr.smith` (if literally that username) |
+| 2 | `users.fullname` (exact, case-insensitive) | `Kostie Muirhead` — terminal/web compose |
+| 3 | `users.fullname` with dot→space | `kostie.muirhead`, `first.last`, `KOSTIE.MUIRHEAD` |
+| 4 | Sysop alias list | `sysop`, `sysadmin`, `system operator` |
+
+Step 1 firing first means a legitimate dotted username like `dr.smith`
+is resolved directly, not shadowed by the step-3 fallback.
+
+**Dotted-local-part fallback** (`_dottedLocalToFullname()`) handles
+the reverse of `imapAdapter.networkEmailAddress`'s outbound slugification
+(`"Kostie Muirhead"` → `"kostie.muirhead"`): if steps 1 and 2 miss AND
+the input contains a dot, it tries `input.replace(/\./g, ' ')` as an
+additional `users.fullname` lookup. Normalisation collapses runs of
+dots, trims leading/trailing dots, and returns `null` for dot-only
+inputs so the resolver doesn't issue empty-string queries.
+
+This makes the outbound `<first.last@mail_domain>` convention
+round-trip correctly through upstream relay verification (VRFY or
+RCPT TO) — critical for gateways like Postfix's
+`reject_unverified_recipient` which cache recipient validity across
+delivery attempts.
+
+Ambiguous matches (same fullname for multiple users) return
+`{ resolved: false, reason: 'ambiguous_match' }` at either step 2 or
+step 3 so the caller can ask the sender to use the unique username
+instead.
 
 ---
 
@@ -175,7 +307,83 @@ Trusted host verification normalizes `::ffff:127.0.0.1` to `127.0.0.1` for IPv4-
 
 - Lazy-initialized nodemailer transporter from appConfig values
 - `resetTransporter()` called on `CONFIG_CHANGED` events (worker subscribes)
+- `resetTransporter()` also called automatically on TLS mismatch errors so
+  a sysop's config fix takes effect on the next cycle without a worker restart
 - Returns `null` (skip) if `email_relay_host` is empty
+
+### Port/Secure Reconciliation
+
+OpenSSL's "wrong version number" handshake error is almost always caused by
+`email_relay_port` and `email_relay_secure` disagreeing on convention. The
+tosser auto-reconciles well-known ports in `_reconcileSecure(port, configured)`:
+
+| Port | Convention | Action if misconfigured |
+|---|---|---|
+| 465 | Implicit TLS | Warn + override `secure` to `true` for this cycle |
+| 587 | STARTTLS (submission) | Warn + override `secure` to `false` + set `requireTLS: true` |
+| 25 | Plain + optional STARTTLS | Warn + override `secure` to `false` |
+| anything else | Sysop intent | Left alone |
+
+The warning log points at the exact config field to edit so the sysop can
+silence it permanently. `requireTLS: true` on port 587 means nodemailer
+refuses to fall back to plaintext even if the relay stops advertising
+STARTTLS — defence in depth.
+
+`_isTlsMismatchError(err)` detects OpenSSL errors by message pattern
+(`wrong version number`, `tls_validate_record_header`, `unsupported protocol`,
+`ssl3_get_record`) and triggers a diagnostic hint plus `resetTransporter()`.
+
+### Sender Identity (system vs user)
+
+System-generated email (verification, password reset, template notifications,
+sysop broadcasts) and user-generated PMs use different sender addresses.
+`_isSystemMessage(pm, transportData)` classifies each outbound PM:
+
+- `transport_data.system_notification === true` → system
+- `pm.from_user === 'SYSTEM'` → system
+- `pm.user_id` null/0/undefined → system
+- anything else → user-generated
+
+System messages use `email_from_address` / `email_from_name` verbatim.
+User messages go through `_pickSenderIdentity(userRow, pm)` which applies
+two separate rules:
+
+**Address** (envelope MAIL FROM, header From local-part, Reply-To) —
+must always be `users.username`. It's the only schema-unique identifier;
+`pm.from_user` is NOT safe because per-group `post_as` settings let it
+be either `username` OR `fullname` (the `post_as` feature exists for
+FTN netmail / QWK / NNTP where the protocol has one "from" slot). Email
+has a proper separate display-name field, so the address stays canonical
+regardless of what `post_as` allowed at compose time.
+
+**Display name** (header From quoted portion) — prefers `users.fullname`
+because that's the human-readable form recipients see in their inbox
+list. Falls back to `users.username` when fullname is blank.
+
+Fallback chains if the DB lookup failed (deleted account, DB error):
+
+```
+senderUsername: users.username > pm.from_user > 'user'
+displayName:    users.fullname > users.username > pm.from_user > 'User'
+```
+
+Local-part slugification (`_usernameToLocal()`) matches the convention in
+`imapAdapter.networkEmailAddress`: lowercase + whitespace → dots. This
+ensures the outbound address round-trips correctly when external mailers
+verify it via VRFY or RCPT TO (the resolver's dotted-local-part fallback,
+see "Recipient resolution" below, handles the reverse transformation).
+
+Produced headers for a user `kmuirhead` with fullname `Kostie Muirhead`:
+
+```
+MAIL FROM:<kmuirhead@bbs.undermine.ca>
+From: "Kostie Muirhead" <kmuirhead@bbs.undermine.ca>
+Reply-To: "Kostie Muirhead" <kmuirhead@bbs.undermine.ca>
+```
+
+If `mail_domain` isn't configured, user-generated email falls back to the
+system `email_from_address` with a warning so the tosser keeps making
+forward progress rather than blocking on an incomplete config.
 
 ### Failure Handling
 
