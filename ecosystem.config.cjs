@@ -22,6 +22,28 @@
  * even when the project uses ESM.
  */
 
+// Load .env so TZ (and anything else we want to propagate to child
+// processes) is available at config-eval time. Without this, PM2's
+// log_date_format falls back to UTC on servers where the OS timezone
+// isn't set (e.g. minimal container images or shells that strip TZ).
+try { require('dotenv').config(); } catch (_) {}
+
+// Resolve the effective timezone once so every child process inherits
+// the same value. Precedence:
+//   1. TZ in process.env (from .env or the invoking shell)
+//   2. The host's resolved timezone via Intl (reads /etc/localtime)
+// If both are missing we leave TZ unset and Node will default to UTC.
+// Set TZ in your .env (e.g. TZ=America/Edmonton) to guarantee local
+// timestamps in PM2 logs.
+var resolvedTZ = process.env.TZ;
+if (!resolvedTZ) {
+	try {
+		var ianaTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		if (ianaTZ && ianaTZ !== 'UTC') resolvedTZ = ianaTZ;
+	} catch (_) {}
+}
+var baseEnv = resolvedTZ ? { TZ: resolvedTZ } : {};
+
 module.exports = {
 	apps: [
 		{
@@ -29,6 +51,7 @@ module.exports = {
 			script: './bin/gateway.js',
 			node_args: '--experimental-vm-modules',
 			env: {
+				...baseEnv,
 				NODE_ENV: 'production',
 				PROCESS_MODE: 'separate',
 			},
@@ -47,6 +70,7 @@ module.exports = {
 			script: './bin/mail.js',
 			node_args: '--experimental-vm-modules',
 			env: {
+				...baseEnv,
 				NODE_ENV: 'production',
 			},
 			// Mail servers are stateless per-connection — safe to restart
@@ -64,6 +88,7 @@ module.exports = {
 			script: './bin/mailer.js',
 			node_args: '--experimental-vm-modules',
 			env: {
+				...baseEnv,
 				NODE_ENV: 'production',
 				MAILER_ENABLED: 'true',
 			},
@@ -83,6 +108,7 @@ module.exports = {
 			script: './bin/worker.js',
 			node_args: '--experimental-vm-modules',
 			env: {
+				...baseEnv,
 				NODE_ENV: 'production',
 				WORKER_CONCURRENCY: '3',
 			},

@@ -295,10 +295,10 @@ async function writeAlog(level, message, chalkcolour, bold, filename){
 	if (filename){
 		alogfile = logpath + '/' + filename + ".log";
 	}
-	// attach timestamp to log message
-	var currenttime = await DateTime.now();
+	// attach timestamp to log message (Luxon DateTime honours process.env.TZ)
+	var currenttime = DateTime.now();
 	//Luxon sometimes puts a slim nbsp into time string. Replace with standard space for logging
-	var prettytime = await currenttime.toLocaleString(DateTime.DATETIME_MED).replace(/\u202f/g, ' ')
+	var prettytime = currenttime.toLocaleString(DateTime.DATETIME_MED).replace(/\u202f/g, ' ')
 	var messagewtime = '\n' + prettytime + ':\n- ' + message;
 
 	if (nodeenv.toLowerCase() == "development"){
@@ -364,9 +364,11 @@ async function writeAlog(level, message, chalkcolour, bold, filename){
 
 //for writing to specific log file
 async function writeClog(level, message, filename, chalkcolour, bold, noconsole){
-	// attach timestamp to log message
-	var currenttime = await new Date();
-	var prettytime = await currenttime.toLocaleString(DateTime.DATETIME_MED).replace(/\u202f/g, ' ')
+	// attach timestamp to log message (Luxon DateTime honours process.env.TZ
+	// for local formatting; native Date.toLocaleString does NOT accept a
+	// Luxon preset object and silently fell back to default locale)
+	var currenttime = DateTime.now();
+	var prettytime = currenttime.toLocaleString(DateTime.DATETIME_MED).replace(/\u202f/g, ' ')
 	var messagewtime = '\n' + prettytime + ':\n- ' + message + '\n';
 
 	// set custom logfile
