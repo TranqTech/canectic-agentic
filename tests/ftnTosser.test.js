@@ -7,7 +7,11 @@
 // Run: npx mocha tests/ftnTosser.test.js
 
 import assert from 'assert';
-import { isMailBundleFilename, formatKludge } from '../src/middleware/tossers/ftnTosser.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import AdmZip from 'adm-zip';
+import { isMailBundleFilename, formatKludge, extractMailBundle } from '../src/middleware/tossers/ftnTosser.js';
 
 describe('isMailBundleFilename', function () {
 
@@ -119,5 +123,120 @@ describe('formatKludge', function () {
 	it('starts with the control-A byte', function () {
 		assert.strictEqual(formatKludge('MSGID', 'x')[0], '\x01');
 		assert.strictEqual(formatKludge('INTL', 'x')[0], '\x01');
+	});
+});
+
+describe('extractMailBundle', function () {
+	var workDir;
+
+	function makeTestZip(zipName, entries) {
+		var zip = new AdmZip();
+		for (var entryName in entries) {
+			zip.addFile(entryName, Buffer.from(entries[entryName]));
+		}
+		var zipPath = path.join(workDir, zipName);
+		zip.writeZip(zipPath);
+		return zipPath;
+	}
+
+	beforeEach(function () {
+		workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-extract-test-'));
+	});
+
+	afterEach(function () {
+		try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (_) {}
+	});
+
+	it('extracts .pkt entries and removes the bundle', function () {
+		var zipPath = makeTestZip('00010001.mo0', {
+			'abcd1234.pkt': 'FAKE PKT CONTENTS'
+		});
+
+		var res = extractMailBundle(zipPath, workDir);
+
+		assert.strictEqual(res.err, null);
+		assert.strictEqual(res.extracted, 1);
+		assert.strictEqual(fs.existsSync(zipPath), false, 'bundle should be removed after extraction');
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'abcd1234.pkt')), true);
+		assert.strictEqual(fs.readFileSync(path.join(workDir, 'abcd1234.pkt'), 'utf8'), 'FAKE PKT CONTENTS');
+	});
+
+	it('extracts multiple .pkt entries in a single bundle', function () {
+		var zipPath = makeTestZip('00010001.tu5', {
+			'00000001.pkt': 'PKT ONE',
+			'00000002.pkt': 'PKT TWO',
+			'00000003.pkt': 'PKT THREE'
+		});
+
+		var res = extractMailBundle(zipPath, workDir);
+
+		assert.strictEqual(res.extracted, 3);
+		assert.strictEqual(fs.existsSync(path.join(workDir, '00000001.pkt')), true);
+		assert.strictEqual(fs.existsSync(path.join(workDir, '00000002.pkt')), true);
+		assert.strictEqual(fs.existsSync(path.join(workDir, '00000003.pkt')), true);
+	});
+
+	it('refuses to extract non-pkt entries even from a valid bundle filename', function () {
+		// Stray files inside a "mail bundle" zip must not leak into the inbound dir
+		var zipPath = makeTestZip('00010001.mo0', {
+			'valid.pkt':     'OK',
+			'MINBINKD.Z00':  'BINARY JUNK',
+			'readme.txt':    'not a packet',
+			'nested/evil.exe': 'also not a packet'
+		});
+
+		var res = extractMailBundle(zipPath, workDir);
+
+		assert.strictEqual(res.extracted, 1, 'only the .pkt entry should be extracted');
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'valid.pkt')), true);
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'MINBINKD.Z00')), false);
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'readme.txt')), false);
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'evil.exe')), false);
+	});
+
+	it('case-insensitively recognises .pkt (PKT, Pkt)', function () {
+		var zipPath = makeTestZip('00010001.we0', {
+			'upper.PKT': 'UPPER',
+			'mixed.Pkt': 'MIXED'
+		});
+
+		var res = extractMailBundle(zipPath, workDir);
+
+		assert.strictEqual(res.extracted, 2);
+	});
+
+	it('does not remove the bundle when no entries match', function () {
+		var zipPath = makeTestZip('00010001.fr0', {
+			'not_a_packet.txt': 'nope'
+		});
+
+		var res = extractMailBundle(zipPath, workDir);
+
+		assert.strictEqual(res.extracted, 0);
+		assert.strictEqual(fs.existsSync(zipPath), true, 'bundle must stay put when nothing was extracted');
+	});
+
+	it('flattens directory entries so basename is used for output path', function () {
+		var zipPath = makeTestZip('00010001.sa9', {
+			'subdir/inside.pkt': 'FLAT'
+		});
+
+		var res = extractMailBundle(zipPath, workDir);
+
+		assert.strictEqual(res.extracted, 1);
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'inside.pkt')), true);
+		// No subdir should be created in the inbound dir
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'subdir')), false);
+	});
+
+	it('returns an error when the file is not a valid zip', function () {
+		var badPath = path.join(workDir, '00010001.mo0');
+		fs.writeFileSync(badPath, 'NOT A ZIP FILE');
+
+		var res = extractMailBundle(badPath, workDir);
+
+		assert.ok(res.err, 'expected an error on non-zip input');
+		assert.strictEqual(res.extracted, 0);
+		assert.strictEqual(fs.existsSync(badPath), true, 'bad bundle should be left in place for investigation');
 	});
 });

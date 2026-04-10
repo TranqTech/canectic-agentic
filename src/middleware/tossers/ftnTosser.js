@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import * as  util  from 'util';
+import AdmZip from 'adm-zip';
 
 const pexec = util.promisify(exec);
 
@@ -19,6 +20,7 @@ import * as ftnUtils from "../../utils/ftnUtils.js"
 import * as peerConnections from '../../models/peerConnections.js'
 import * as codepageConversions from "../../utils/codepageConversions.js"
 import appConfig from "../../config/appConfig.js"
+import * as alogger from "../../utils/alogger.js"
 
 
 //setup and variables
@@ -132,6 +134,42 @@ function formatKludge(attribute, value) {
 	return '\x01' + attribute + ': ' + (value == null ? '' : value);
 }
 
+// Extract an FTN arcmail bundle (zip) and pull only the .pkt entries out
+// into the destination directory. Returns { extracted: N, err: null|Error }.
+// Using adm-zip in-process (rather than shelling out to unzip) means:
+//  - No shell injection risk from odd filenames
+//  - We can filter entries and only drop .pkt files into the inbound dir
+//    so stray files inside a malformed "bundle" cannot contaminate the tree
+//  - Extraction is deterministic and inspectable in tests
+// The bundle file is removed after a successful extraction.
+function extractMailBundle(filepath, destDir) {
+	var result = { extracted: 0, err: null };
+	try {
+		var zip = new AdmZip(filepath);
+		var entries = zip.getEntries();
+		for (var entry of entries) {
+			if (entry.isDirectory) continue;
+			var entryName = path.basename(entry.entryName || '');
+			if (!entryName) continue;
+			// Only extract .pkt files -- anything else in a bundle is stray
+			if (!/\.pkt$/i.test(entryName)) {
+				alogger.writeClog(4, '[FTN] mail bundle ' + path.basename(filepath) +
+					': skipping non-pkt entry ' + entryName, 'tosser', 'yellow');
+				continue;
+			}
+			var outPath = path.join(destDir, entryName);
+			fs.writeFileSync(outPath, entry.getData());
+			result.extracted++;
+		}
+		if (result.extracted > 0) {
+			try { fs.unlinkSync(filepath); } catch (_) {}
+		}
+	} catch (err) {
+		result.err = err;
+	}
+	return result;
+}
+
 async function FindAndExtractArchives(inboundDir){
 	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
@@ -150,17 +188,17 @@ async function FindAndExtractArchives(inboundDir){
 			switch(ftype){
 				case "zip":
 					if (isMailBundleFilename(file)) {
-						console.log(file, "is a mail bundle (ZIP)")
+						alogger.writeClog(3, '[FTN] bundle queued: ' + file, 'tosser', 'cyan')
 						zipArray.push(filepath)
 					} else {
-						console.log(file, "is a ZIP but not a mail bundle -- skipping")
+						alogger.writeClog(3, '[FTN] ZIP not a mail bundle, leaving untouched: ' + file, 'tosser', 'yellow')
 					}
 					break;
 				case "arj":
 					if (isMailBundleFilename(file)) {
-						console.log(file, "is a mail bundle (ARJ)")
+						alogger.writeClog(3, '[FTN] ARJ bundle (handler TBD): ' + file, 'tosser', 'cyan')
 					} else {
-						console.log(file, "is an ARJ but not a mail bundle -- skipping")
+						alogger.writeClog(3, '[FTN] ARJ not a mail bundle, leaving untouched: ' + file, 'tosser', 'yellow')
 					}
 					break;
 				default:
@@ -169,17 +207,13 @@ async function FindAndExtractArchives(inboundDir){
 		}
 	}
 	if (zipArray.length > 0){
-		console.log("There are", zipArray.length, "Zip files to process")
+		alogger.writeClog(3, '[FTN] FindAndExtractArchives: extracting ' + zipArray.length + ' mail bundle(s)', 'tosser', 'cyan')
 		for await (var filepath of zipArray){
-			//start
-			try{
-				const { stdout, stderr } = await pexec(`unzip -o ${filepath} && rm ${filepath}`)
-				console.log(stdout);
-				if (stderr){
-					console.error('stderr:', stderr);
-				}				
-			}catch(error){
-				console.log(error)
+			var bundleRes = extractMailBundle(filepath, inDir)
+			if (bundleRes.err) {
+				alogger.writeClog(3, '[FTN] bundle extract failed for ' + path.basename(filepath) + ': ' + bundleRes.err.message, 'tosser', 'redbright')
+			} else {
+				alogger.writeClog(3, '[FTN] bundle extracted ' + bundleRes.extracted + ' pkt(s) from ' + path.basename(filepath), 'tosser', 'greenbright')
 			}
 		}
 	}
@@ -222,22 +256,21 @@ async function TossInbound(inboundDir){
 					// TIC attachments, nodelist archives, or infopacks and must be
 					// left untouched for their respective processors.
 					if (isMailBundleFilename(file)) {
-						console.log(file, "is a mail bundle (ZIP)")
+						alogger.writeClog(3, '[FTN] bundle queued: ' + file, 'tosser', 'cyan')
 						zipArray.push(filepath)
 					} else {
-						console.log(file, "is a ZIP but not a mail bundle -- leaving for TIC/other processors")
+						alogger.writeClog(3, '[FTN] ZIP not a mail bundle, leaving for TIC/other processors: ' + file, 'tosser', 'yellow')
 					}
 					break;
 				case "arj":
 					if (isMailBundleFilename(file)) {
-						console.log(file, "is a mail bundle (ARJ)")
+						alogger.writeClog(3, '[FTN] ARJ bundle queued: ' + file, 'tosser', 'cyan')
 						arjArray.push(filepath)
 					} else {
-						console.log(file, "is an ARJ but not a mail bundle -- leaving for TIC/other processors")
+						alogger.writeClog(3, '[FTN] ARJ not a mail bundle, leaving for TIC/other processors: ' + file, 'tosser', 'yellow')
 					}
 					break;
 				default:
-					console.log(ftype)
 					//TODO:
 					//do another call to a second switch function based on extension
 					//then we can call this both here and under the other else
@@ -245,13 +278,16 @@ async function TossInbound(inboundDir){
 					if (path.extname(file).toUpperCase() === ".PKT"){
 						var fileobj = {filepath: filepath, movepath: appConfig.get('ftntossed', 'ftn/tossed') + "/" + file}
 						pktArray.push(fileobj)
+					} else {
+						alogger.writeClog(5, '[FTN] non-pkt, non-bundle file left in inbound: ' + file + ' (detected as ' + ftype + ')', 'tosser', 'cyan')
 					}
 			}
 		}else{
-			console.log("Unknown file type", file)
 			if (path.extname(file).toUpperCase() === ".PKT"){
 				var fileobj = {filepath: filepath, movepath: appConfig.get('ftntossed', 'ftn/tossed') + "/" + file}
 				pktArray.push(fileobj)
+			} else {
+				alogger.writeClog(5, '[FTN] unknown file type, left in inbound: ' + file, 'tosser', 'cyan')
 			}
 		}
 	}
@@ -269,18 +305,13 @@ async function TossInbound(inboundDir){
 		}
 	}
 	if (zipArray.length > 0){
-		console.log("There are", zipArray.length, "Zip files to process")
+		alogger.writeClog(3, '[FTN] TossInbound: extracting ' + zipArray.length + ' mail bundle(s)', 'tosser', 'cyan')
 		for await (var filepath of zipArray){
-			//start
-			try{
-				//const { stdout, stderr } = await pexec(`unzip -o ${filepath} && rm ${filepath}`)
-				const { stdout, stderr } = await pexec(`unzip -o ${filepath} -d ${inDir} && rm ${filepath}`)
-				console.log(stdout);
-				if (stderr){
-					console.error('stderr:', stderr);
-				}				
-			}catch(error){
-				console.log(error)
+			var bundleRes = extractMailBundle(filepath, inDir)
+			if (bundleRes.err) {
+				alogger.writeClog(3, '[FTN] bundle extract failed for ' + path.basename(filepath) + ': ' + bundleRes.err.message, 'tosser', 'redbright')
+			} else {
+				alogger.writeClog(3, '[FTN] bundle extracted ' + bundleRes.extracted + ' pkt(s) from ' + path.basename(filepath), 'tosser', 'greenbright')
 			}
 		}
 	}
@@ -1564,5 +1595,6 @@ export {
 	TossInboundFile,
 	processMessageText,
 	isMailBundleFilename,
-	formatKludge
+	formatKludge,
+	extractMailBundle
 }
