@@ -106,6 +106,7 @@ Last updated: 2026-04-09
 - [x] Nodelist flag definitions (DB-backed, category, argument metadata, auto_managed, FTS-5001 seed)
 - [x] Seed sync tool (`node src/tools/seedSync.js` -- upsert JSON seed data to DB)
 - [x] Message templates (event-triggered sysop-authored messages with PM/email/netmail delivery, built-in + custom events, admin CRUD, manual fire, CLI, menu command, timed event integration)
+- [x] API tokens (admin audit + revoke at /admin/api-tokens, per-user CRUD on profile page, Bearer auth, scopes, bcrypt hashing, one-time plaintext reveal)
 - [ ] JAM message base import
 
 ### Message Networking
@@ -245,6 +246,7 @@ Last updated: 2026-04-09
 | 46 | displayScreen menu command | [x] | Art file display from menus/call flow. Random by type or specific subdir/filename. |
 | 47 | Bad echomail handling | [x] | Holding table for unknown areatags with recovery, tracking, and auto-purge. Inbound file log for peer traceability. |
 | 48 | Combined area browser | [x] | Single-page grouped view with Subscribed/All toggle, search, AJAX subscribe/unsubscribe for both messages and files. |
+| 49 | REST API v1 (QWK download/upload) | [x] | `/api/v1` Bearer token auth, user + admin token CRUD, `/qwk/download` + `/qwk/upload`, throttled logoncount via `api_call_count_interval_hours`, caller log entries, `user_qwk_fetched` template event. Scopes: qwk, qwk_rw. |
 
 ---
 
@@ -295,5 +297,6 @@ Last updated: 2026-04-09
 | `WEB_CHAT_DESIGN.md` | [x] |
 | `WEB_CALLFLOW_DESIGN.md` | [x] |
 | `FILEBOX_WILDCARD_DESIGN.md` | [x] |
+| `API_DESIGN.md` | [x] |
 | `INSTALL.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |
