@@ -159,17 +159,20 @@ async function _resolveSender(pm, transportData, sysFromAddress, sysFromName) {
 		};
 	}
 
-	// Resolve display name: prefer realname > from_user > username
+	// Resolve display name: prefer users.fullname > pm.from_user > username.
+	// The column is `fullname` in the schema (users.fullname) -- the
+	// userAccounts helpers `getUserByRealname` etc. are named after the
+	// concept but query the fullname column.
 	var displayName = pm.from_user || 'User';
 	if (pm.user_id) {
 		try {
 			var userRow = await postgres.queryOne(
-				'SELECT username, realname FROM users WHERE id = $1',
+				'SELECT username, fullname FROM users WHERE id = $1',
 				[pm.user_id]
 			);
 			if (userRow) {
-				if (userRow.realname && String(userRow.realname).trim()) {
-					displayName = String(userRow.realname).trim();
+				if (userRow.fullname && String(userRow.fullname).trim()) {
+					displayName = String(userRow.fullname).trim();
 				} else if (userRow.username) {
 					displayName = userRow.username;
 				}
