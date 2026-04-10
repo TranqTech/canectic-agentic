@@ -120,6 +120,7 @@
 - Fix: formatBodyHtml divergence resolved. messages.js no longer has its own simpler copy -- it now uses the canonical version from terminalText.js which does paragraph reflow, ANSI art detection, and noWrap mode. Web message rendering now matches import-time rendering.
 - Fix: FTN inbound messages were getting duplicate line breaks. processMessageText() split on \\r but joined with \\r\\n, leaving orphaned \\n chars from \\r\\n pairs. Normalised to \\r before splitting.
 - Fix: FTN toss crash from syntax error when passing network areatag (e.g. FSX_GEN) to reconcileOrphans instead of local shortcode. Moved pushImportedMsgId into handleInboundEchoMessage where the correct shortcode is already resolved.
+- Fix: %D (door directory) and %F (dropfile directory) variables now correctly resolve nested %X tokens. Previously, setting dropfile_dir to %D in a door config returned the raw, unsubstituted doorDir string (e.g. "%!/lord") because %D resolved to the pre-substitution value. Door dropfiles were landing in invalid paths instead of the configured door directory. substitute() now recursively re-expands resolved values that still contain %X tokens, capped at 8 levels to prevent infinite loops.
 
 ## v0.9.5a (2026-04-04)
 

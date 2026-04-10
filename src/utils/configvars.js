@@ -92,15 +92,23 @@ function _getTokenMap() {
 /**
  * Replace all %X tokens in a template string with runtime values.
  *
+ * Handles nested substitution: if a resolver returns a value that itself
+ * contains %X tokens (e.g. %D -> doorConfig.doorDir which is "%!/lord"),
+ * the result is recursively re-substituted up to MAX_DEPTH times.
+ *
  * @param {string} template  - The string containing %X variable tokens
  * @param {object} [call]    - The IncomingCall object (node, user, terminal data)
  * @param {object} [doorConfig] - The normalized door config object
+ * @param {number} [_depth]  - Internal recursion depth (do not pass manually)
  * @returns {string} The expanded string with all tokens replaced
  */
-function substitute(template, call, doorConfig) {
+var MAX_SUBSTITUTE_DEPTH = 8;
+
+function substitute(template, call, doorConfig, _depth) {
 	if (!template || typeof template !== 'string') return template || '';
 	if (template.indexOf('%') === -1) return template;  // fast path
 
+	var depth = _depth || 0;
 	var map = _getTokenMap();
 
 	// Walk the string, looking for % followed by one or more token characters
@@ -115,7 +123,14 @@ function substitute(template, call, doorConfig) {
 			var resolver = map.get(tok2);
 			if (resolver) {
 				var val = resolver(call, doorConfig);
-				result += val !== null && val !== undefined ? String(val) : '';
+				var valStr = val !== null && val !== undefined ? String(val) : '';
+				// Recursively substitute if the resolved value still contains %X tokens.
+				// This handles cases where a token resolves to another template string
+				// (e.g. %D -> doorConfig.doorDir which may be "%!/lord").
+				if (valStr.indexOf('%') !== -1 && depth < MAX_SUBSTITUTE_DEPTH) {
+					valStr = substitute(valStr, call, doorConfig, depth + 1);
+				}
+				result += valStr;
 				i += 2;
 				matched = true;
 			}

@@ -206,6 +206,46 @@ describe('substitute', function () {
 			var r = substitute('%D', makeCall(), null);
 			assert.strictEqual(r, '');
 		});
+
+		// Regression test for the %D dropfile bug: if doorConfig.doorDir itself
+		// contains %X tokens (e.g. "%!/lord"), resolving %D must recursively
+		// substitute those nested tokens. Before the fix, %D would return the
+		// raw template string "%!/lord" which the caller then could not use.
+		it('should recursively substitute nested %X in %D resolver', function () {
+			// Mock appConfig by using %! which resolves via appConfig.get('doordir').
+			// We can't mock appConfig here, so use a door-token that is resolvable
+			// without external config: set doorDir to a string containing %G (slug).
+			var r = substitute('%D', makeCall(), makeDoor({
+				doorDir: '/opt/doors/%G',
+				slug: 'lord'
+			}));
+			assert.strictEqual(r, '/opt/doors/lord');
+		});
+
+		it('should recursively substitute %D when used as part of a larger path', function () {
+			var r = substitute('%D/data', makeCall(), makeDoor({
+				doorDir: '/opt/doors/%G',
+				slug: 'tw'
+			}));
+			assert.strictEqual(r, '/opt/doors/tw/data');
+		});
+
+		it('should recursively substitute %F (dropfile dir) with nested tokens', function () {
+			var r = substitute('%F', makeCall({ nodenum: 2 }), makeDoor({
+				dropfileDir: '/drop/%G/node%N',
+				slug: 'lord'
+			}));
+			assert.strictEqual(r, '/drop/lord/node2');
+		});
+
+		it('should cap recursion depth to prevent infinite loops', function () {
+			// Self-referential: %D -> contains %D -> would loop forever without a cap.
+			// After MAX_SUBSTITUTE_DEPTH (8), the innermost %D passes through unchanged.
+			var r = substitute('%D', makeCall(), makeDoor({ doorDir: '%D' }));
+			// The exact output depends on the recursion cap behaviour, but it must
+			// not crash and must terminate. A literal %D or empty string is acceptable.
+			assert.ok(typeof r === 'string', 'should return a string, not crash');
+		});
 	});
 
 	describe('%% — literal percent', function () {
