@@ -1,0 +1,135 @@
+[
+  {
+    "code": "user_registered",
+    "label": "User Registered",
+    "description": "Fires when a new user account is created. Good for welcome messages.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.firstname", "user.lastname",
+      "user.email", "user.location", "user.security"
+    ]
+  },
+  {
+    "code": "user_verified",
+    "label": "User Verified",
+    "description": "Fires when a user successfully verifies their email or netmail address.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.email", "user.mailtype"
+    ]
+  },
+  {
+    "code": "password_reset_completed",
+    "label": "Password Reset Completed",
+    "description": "Fires when a user successfully changes their password via the reset flow.",
+    "is_builtin": true,
+    "context_schema": ["user.username", "user.fullname", "user.email"]
+  },
+  {
+    "code": "user_purge_warning",
+    "label": "Unverified Purge Warning",
+    "description": "Fires N days before an unverified account is auto-purged. Days configurable.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.email", "user.mailtype",
+      "event.days_until_purge"
+    ]
+  },
+  {
+    "code": "user_first_login",
+    "label": "First Login",
+    "description": "Fires on a user's first successful login (logoncount increments to 1).",
+    "is_builtin": true,
+    "context_schema": ["user.username", "user.fullname", "user.firstlogon"]
+  },
+  {
+    "code": "user_nth_login",
+    "label": "Nth Login Milestone",
+    "description": "Fires when login count hits a milestone (10, 100, 1000, etc). Template conditions can specify which counts.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.logoncount",
+      "event.login_number"
+    ]
+  },
+  {
+    "code": "user_login_anniversary",
+    "label": "Login Anniversary",
+    "description": "Fires daily for users whose firstlogon date matches today (1 year, 2 years, etc).",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.firstlogon",
+      "event.anniversary_years"
+    ]
+  },
+  {
+    "code": "user_account_anniversary",
+    "label": "Account Anniversary",
+    "description": "Fires daily for users whose created_at date matches today.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.created_at",
+      "event.anniversary_years"
+    ]
+  },
+  {
+    "code": "user_birthday",
+    "label": "Birthday",
+    "description": "Fires daily for users whose birthdate matches today. Requires birthdate on file.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.firstname", "user.birthdate",
+      "event.age"
+    ]
+  },
+  {
+    "code": "user_dormant",
+    "label": "Dormant User",
+    "description": "Fires daily for users who haven't logged in within N days. Days configurable per template via conditions.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname", "user.lastlogon",
+      "event.days_inactive"
+    ]
+  },
+  {
+    "code": "user_first_message_post",
+    "label": "First Message Post",
+    "description": "Fires the first time a user posts a message to any area.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname",
+      "event.area_shortcode", "event.subject"
+    ]
+  },
+  {
+    "code": "user_nth_post",
+    "label": "Nth Message Post Milestone",
+    "description": "Fires when a user's post count hits a milestone (100, 500, 1000, etc). Counts configurable via template conditions.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname",
+      "event.post_count"
+    ]
+  },
+  {
+    "code": "user_first_file_upload",
+    "label": "First File Upload",
+    "description": "Fires the first time a user uploads a file.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname",
+      "event.filename", "event.area_shortcode"
+    ]
+  },
+  {
+    "code": "user_nth_upload",
+    "label": "Nth File Upload Milestone",
+    "description": "Fires when a user's upload count hits a milestone. Counts configurable via template conditions.",
+    "is_builtin": true,
+    "context_schema": [
+      "user.username", "user.fullname",
+      "event.upload_count"
+    ]
+  }
+]

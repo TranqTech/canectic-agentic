@@ -30,9 +30,14 @@ var SEEDS = [
 		table:       'nodelist_flag_definitions',
 		matchKey:    'code',
 		skipColumns: []   // overwrite everything from seed
+	},
+	{
+		name:        'message-template-events',
+		file:        'config/default/message-template-events.json',
+		table:       'message_template_events',
+		matchKey:    'code',
+		skipColumns: ['context_schema']  // schema column is JSONB and managed separately
 	}
-	// Add future seeds here:
-	// { name: 'call-flows', file: 'config/default/call-flows.json', table: 'call_flows', matchKey: 'slug', skipColumns: ['description'] },
 ];
 
 // ---------------------------------------------------------------------------
