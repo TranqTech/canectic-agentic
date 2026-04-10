@@ -490,6 +490,71 @@ describe('Email tosser — port/secure reconciliation', function () {
 	});
 });
 
+describe('Email tosser — system vs user sender detection', function () {
+	if (!emailTosser) {
+		it.skip('skipped — emailTosser module not loadable', function () {});
+		return;
+	}
+
+	it('treats transport_data.system_notification=true as system', function () {
+		var pm = { from_user: 'Kostie', user_id: 42 };
+		assert.strictEqual(emailTosser._isSystemMessage(pm, { system_notification: true }), true);
+	});
+
+	it('treats from_user=SYSTEM as system', function () {
+		var pm = { from_user: 'SYSTEM', user_id: 0 };
+		assert.strictEqual(emailTosser._isSystemMessage(pm, {}), true);
+	});
+
+	it('treats user_id=0 as system (mailVerification et al. pattern)', function () {
+		var pm = { from_user: 'My BBS', user_id: 0 };
+		assert.strictEqual(emailTosser._isSystemMessage(pm, {}), true);
+	});
+
+	it('treats user_id=null as system', function () {
+		var pm = { from_user: 'My BBS', user_id: null };
+		assert.strictEqual(emailTosser._isSystemMessage(pm, null), true);
+	});
+
+	it('treats a real user with no system flag as user-generated', function () {
+		var pm = { from_user: 'Kostie', user_id: 42 };
+		assert.strictEqual(emailTosser._isSystemMessage(pm, {}), false);
+	});
+
+	it('treats a real user even if from_user contains BBS-ish text', function () {
+		var pm = { from_user: 'Kostie Muirhead', user_id: 42 };
+		assert.strictEqual(emailTosser._isSystemMessage(pm, { email_address: 'x@y.com' }), false);
+	});
+});
+
+describe('Email tosser — username to local-part slugification', function () {
+	if (!emailTosser) {
+		it.skip('skipped — emailTosser module not loadable', function () {});
+		return;
+	}
+
+	it('lowercases simple usernames', function () {
+		assert.strictEqual(emailTosser._usernameToLocal('Kostie'), 'kostie');
+		assert.strictEqual(emailTosser._usernameToLocal('ADMIN'), 'admin');
+	});
+
+	it('replaces spaces with dots', function () {
+		assert.strictEqual(emailTosser._usernameToLocal('Kostie Muirhead'), 'kostie.muirhead');
+		assert.strictEqual(emailTosser._usernameToLocal('First Middle Last'), 'first.middle.last');
+	});
+
+	it('collapses runs of whitespace', function () {
+		assert.strictEqual(emailTosser._usernameToLocal('Kostie   Muirhead'), 'kostie.muirhead');
+		assert.strictEqual(emailTosser._usernameToLocal('A\tB'), 'a.b');
+	});
+
+	it('returns "unknown" for empty / null input', function () {
+		assert.strictEqual(emailTosser._usernameToLocal(''), 'unknown');
+		assert.strictEqual(emailTosser._usernameToLocal(null), 'unknown');
+		assert.strictEqual(emailTosser._usernameToLocal(undefined), 'unknown');
+	});
+});
+
 describe('Email tosser — TLS mismatch error detection', function () {
 	if (!emailTosser) {
 		it.skip('skipped — emailTosser module not loadable', function () {});

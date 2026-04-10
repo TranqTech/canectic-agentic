@@ -6,9 +6,17 @@
 // Success → markSent()
 // Permanent failure (5xx) → markOutboxUndeliverable() (bounce to sender)
 // Transient failure → markSendError() (retried next cycle)
+//
+// Sender identity:
+//   System-generated messages (verification, password reset, templates,
+//   notifications) use email_from_address / email_from_name.
+//   User-generated PMs use <username>@<mail_domain> with the sender's
+//   realname (or username) as the display name so external recipients
+//   can reply-to the actual BBS user.
 
 import * as nodemailer from 'nodemailer';
 import * as privateMessages from '../../models/privateMessages.js';
+import * as postgres from '../../middleware/db/postgres.js';
 import * as alogger from '../../utils/alogger.js';
 import appConfig from '../../config/appConfig.js';
 
@@ -87,6 +95,101 @@ function _isTlsMismatchError(err) {
 		|| /ssl3_get_record/i.test(m);
 }
 
+// Slugify a BBS username into the local-part of an email address.
+// Matches the imapAdapter.networkEmailAddress convention so the same user
+// looks consistent whether they're speaking IMAP or receiving an outbound
+// email the system sent on their behalf: lowercase + whitespace → dots.
+function _usernameToLocal(username) {
+	if (!username) return 'unknown';
+	return String(username).toLowerCase().replace(/\s+/g, '.');
+}
+
+// Escape a display name for RFC 5322 quoted-string so embedded quotes or
+// backslashes don't truncate the header.
+function _escapeDisplayName(name) {
+	return String(name || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+// A message is "system-generated" when the system composed it on behalf of
+// the BBS itself (verification code, password reset, template notification,
+// sysop broadcast) rather than a user deliberately sending a PM via EMAIL
+// transport. These should use the configured email_from_address.
+function _isSystemMessage(pm, transportData) {
+	if (transportData && transportData.system_notification === true) return true;
+	if (pm.from_user === 'SYSTEM') return true;
+	// user_id 0/null signals the system as sender (mailVerification etc.
+	// write user_id: 0 explicitly to mark internal origin)
+	if (pm.user_id === 0 || pm.user_id === null || pm.user_id === undefined) return true;
+	return false;
+}
+
+// Build the From header value for an outbound PM.
+//
+// Returns { from, replyTo, envelopeFrom } where:
+//   from          — "Display Name" <address>  (RFC 5322 header)
+//   replyTo       — same format, or undefined
+//   envelopeFrom  — bare address for SMTP MAIL FROM
+//
+// Strategy:
+//   - System-generated messages always use the configured email_from_*.
+//   - User-generated messages build <username>@<mail_domain> and use the
+//     user's realname (or username) for the display name. If mail_domain
+//     is not configured, we fall back to the system from-address but log
+//     a warning so the sysop knows the configuration is incomplete.
+async function _resolveSender(pm, transportData, sysFromAddress, sysFromName) {
+	if (_isSystemMessage(pm, transportData)) {
+		return {
+			from: '"' + _escapeDisplayName(sysFromName) + '" <' + sysFromAddress + '>',
+			replyTo: undefined,
+			envelopeFrom: sysFromAddress
+		};
+	}
+
+	var mailDomain = appConfig.get('mail_domain', '');
+	if (!mailDomain) {
+		alogger.writeAlog(3,
+			'[EmailTosser] mail_domain not configured -- user PM id=' + pm.id +
+			' will be sent with system from-address. Set mail_domain in ' +
+			'/admin/config network category to route replies back to the sender.',
+			'yellow');
+		return {
+			from: '"' + _escapeDisplayName(sysFromName) + '" <' + sysFromAddress + '>',
+			replyTo: undefined,
+			envelopeFrom: sysFromAddress
+		};
+	}
+
+	// Resolve display name: prefer realname > from_user > username
+	var displayName = pm.from_user || 'User';
+	if (pm.user_id) {
+		try {
+			var userRow = await postgres.queryOne(
+				'SELECT username, realname FROM users WHERE id = $1',
+				[pm.user_id]
+			);
+			if (userRow) {
+				if (userRow.realname && String(userRow.realname).trim()) {
+					displayName = String(userRow.realname).trim();
+				} else if (userRow.username) {
+					displayName = userRow.username;
+				}
+			}
+		} catch (_) {
+			// Non-fatal — use pm.from_user already set
+		}
+	}
+
+	var localPart = _usernameToLocal(pm.from_user);
+	var userAddress = localPart + '@' + mailDomain;
+
+	return {
+		from: '"' + _escapeDisplayName(displayName) + '" <' + userAddress + '>',
+		// Reply-To matches From so external recipients hit a reply-able address
+		replyTo: '"' + _escapeDisplayName(displayName) + '" <' + userAddress + '>',
+		envelopeFrom: userAddress
+	};
+}
+
 async function tossOutbound() {
 	var relayHost = appConfig.get('email_relay_host', '');
 	if (!relayHost) {
@@ -106,12 +209,12 @@ async function tossOutbound() {
 	var maxBatch = appConfig.getNumber('email_max_outbound_batch', 50);
 	var batch = pending.slice(0, maxBatch);
 
-	var fromAddress = appConfig.get('email_from_address', '');
-	if (!fromAddress) {
+	var sysFromAddress = appConfig.get('email_from_address', '');
+	if (!sysFromAddress) {
 		alogger.writeAlog(2, '[EmailTosser] email_from_address not configured — cannot send', 'redbright');
 		return { sent: 0, errors: 0 };
 	}
-	var fromName = appConfig.get('email_from_name', '') || appConfig.get('boardname', 'BBS');
+	var sysFromName = appConfig.get('email_from_name', '') || appConfig.get('boardname', 'BBS');
 
 	var sentCount = 0;
 	var errorCount = 0;
@@ -129,12 +232,18 @@ async function tossOutbound() {
 			continue;
 		}
 
+		var sender = await _resolveSender(pm, transportData, sysFromAddress, sysFromName);
+
 		var mailOptions = {
-			from: '"' + fromName.replace(/"/g, '\\"') + '" <' + fromAddress + '>',
+			from: sender.from,
+			envelope: { from: sender.envelopeFrom, to: emailAddress },
 			to: emailAddress,
 			subject: pm.subject || '(no subject)',
 			text: pm.utf8 || pm.body_text || '',
 		};
+		if (sender.replyTo) {
+			mailOptions.replyTo = sender.replyTo;
+		}
 
 		// Include HTML body if available
 		if (pm.body_html) {
@@ -206,4 +315,12 @@ async function tossOutbound() {
 	return { sent: sentCount, errors: errorCount };
 }
 
-export { tossOutbound, resetTransporter, _reconcileSecure, _isTlsMismatchError };
+export {
+	tossOutbound,
+	resetTransporter,
+	_reconcileSecure,
+	_isTlsMismatchError,
+	_isSystemMessage,
+	_usernameToLocal,
+	_resolveSender
+};
