@@ -101,7 +101,7 @@ Example condition for "fire this template only on 10th, 100th, and 1000th login"
 Per-transport skip semantics: each enabled delivery method is independent.
 
 - **PM**: always delivers if enabled. The message goes to the user's local inbox and fires a `pm_received` notification.
-- **Email**: only delivers if the user has `mailtype=email` and a mailaddress on file, AND the email relay is configured in admin. Otherwise skipped with a log warning.
+- **Email**: only delivers if the user has `mailtype=email` and a mailaddress on file, AND the email relay is configured in admin. Otherwise skipped with a log warning. See [MAIL.md](MAIL.md) for the full outbound relay setup.
 - **Netmail**: only delivers if the user has `mailtype=netmail` and a parseable FTN address. Queued via the standard PM outbox for the next binkp session.
 
 A template can enable all three safely -- users with only an email address will get PM + email; users with only netmail will get PM + netmail; users with neither will get PM only.
@@ -159,7 +159,7 @@ On `/admin/templates`, each template row has a **send** (paper plane) icon. Clic
 ## Troubleshooting
 
 - **Template doesn't fire**: check that the event code is correct, the template is active, and conditions (if any) match the target user. The main log shows `[Template] Event X fired for user Y: N delivered, M skipped` on every fire.
-- **Email skipped**: user may not have an email address on file, mailtype may be set to netmail, or the email relay isn't configured (admin > config > email category).
+- **Email skipped**: user may not have an email address on file, mailtype may be set to netmail, or the email relay isn't configured (admin > config > email category). Full email troubleshooting is in [MAIL.md](MAIL.md#troubleshooting).
 - **Netmail skipped**: user may not have a parseable FTN address.
 - **Unresolved tokens in delivered message**: you typo'd a variable name; tokens that don't resolve are left in place with their braces so you can see what broke.
 - **Built-in event hook doesn't fire**: the hook runs in try/catch so it won't block the host operation. Check the worker/gateway logs for `[Template]` messages. Birthday/anniversary/dormant events require the `user-maintenance` daily job to be running.

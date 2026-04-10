@@ -145,10 +145,10 @@ dbpass=YOUR_PASSWORD      # Password (from step 3)
 ```ini
 boardname=My BBS          # Displayed in nav bar, origin lines, mailer
 SYSOP_USERNAME=YourName   # Sysop username for PM system notifications
-mail_domain=mybbs.example.com  # Required for IMAP/SMTP mail servers
+mail_domain=mybbs.example.com  # Required for IMAP/SMTP and internet email
 ```
 
-All other configuration is managed through the Admin UI at `/admin/config` after first login.
+All other configuration is managed through the Admin UI at `/admin/config` after first login. For a full walkthrough of the mail subsystem (outbound SMTP relay, inbound gateway, mail client access, user verification), see [MAIL.md](MAIL.md).
 
 ### 5. Install Dependencies
 
