@@ -14,6 +14,7 @@ import { router as pmRouter } from '../routes/pm.js';
 import { router as adminLogRouter, registerLogWebSocket } from "../routes/adminLogs.js";
 import { router as filesRouter } from '../routes/files.js';
 import { router as callflowRouter } from '../routes/callflow.js';
+import { router as apiV1Router } from '../routes/api.js';
 import { pgpool } from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
 import { activityMiddleware } from '../middleware/webActivity.js';
@@ -54,6 +55,11 @@ webserver.use(function(req, res, next) {
 	// Allow health check and other safe internal endpoints
 	if (req.path === '/health') return next();
 
+	// /api/* routes use bearer token auth and are exempt from cookie-CSRF.
+	// Tokens are not sent automatically by browsers, so there's no XSRF
+	// attack surface to defend against at this layer.
+	if (req.path.startsWith('/api/')) return next();
+
 	var origin = req.headers['origin'];
 	var referer = req.headers['referer'];
 
@@ -91,6 +97,10 @@ webserver.use(function(req, res, next) {
 
 // --- Web activity tracking (call logging on idle resume) ---
 webserver.use(activityMiddleware);
+
+// API routes use bearer-token auth and JSON responses. Mount before the
+// catch-all / route so /api/v1 is checked first.
+webserver.use('/api/v1', apiV1Router);
 
 webserver.use('/', indexRouter);
 webserver.use('/admin', adminRouter);

@@ -93,6 +93,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'unverified_retention_days', defaultValue: '14',  type: 'number',  category: 'security',    description: 'Days to keep unverified accounts before deletion (0 = never delete)' },
 	{ key: 'username_change_cooldown', defaultValue: '90',  type: 'number',  category: 'security',    description: 'Days between username changes (0 = no limit)' },
 	{ key: 'web_idle_threshold',       defaultValue: '120', type: 'number',  category: 'network',     description: 'Minutes of web inactivity before a new call record is logged on next request' },
+	{ key: 'api_call_count_interval_hours', defaultValue: '4', type: 'number',  category: 'network',     description: 'Hours between logoncount bumps for API callers (e.g. QWK readers). A user pulling via API more often than this has each pull logged but only the first in the window increments their call count. Set to 0 to count every API call, or 24 for daily.' },
 
 	// -----------------------------------------------------------------------
 	// Performance
