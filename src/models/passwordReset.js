@@ -290,6 +290,15 @@ async function completeReset(userId, newPassword) {
 	);
 
 	alogger.writeAlog(3, 'Password reset completed for user ' + user.username, 'greenbright');
+
+	// Fire password_reset_completed template event (non-blocking)
+	try {
+		var tmplMod = await import('./messageTemplates.js');
+		await tmplMod.fireEvent('password_reset_completed', userId, {});
+	} catch (e) {
+		alogger.writeAlog(3, 'completeReset: password_reset_completed template fire failed: ' + (e.message || e), 'yellow');
+	}
+
 	result.status = true;
 	return result;
 }

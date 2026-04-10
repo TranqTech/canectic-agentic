@@ -247,6 +247,15 @@ async function verifyCode(userId, submittedCode) {
 	}
 
 	alogger.writeAlog(3, 'Mail address verified for user ' + user.username + ' (' + user.mailaddress + ')', 'greenbright');
+
+	// Fire user_verified template event (non-blocking)
+	try {
+		var tmplMod = await import('./messageTemplates.js');
+		await tmplMod.fireEvent('user_verified', userId, {});
+	} catch (e) {
+		alogger.writeAlog(3, 'verifyCode: user_verified template fire failed: ' + (e.message || e), 'yellow');
+	}
+
 	result.status = true;
 	return result;
 }

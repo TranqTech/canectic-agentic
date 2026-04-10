@@ -490,6 +490,12 @@ function createMaintenanceProcessor() {
 				var userMaint = await import("../src/models/useraccounts.js");
 				await userMaint.reconcileMailTypes();
 				await userMaint.purgeUnverifiedUsers();
+				// Fire daily template events: birthdays, anniversaries, dormant users
+				try {
+					await userMaint.runDailyTemplateEvents();
+				} catch (e) {
+					alogger.writeAlog(3, '[Worker] Daily template events failed: ' + e.message, 'yellow');
+				}
 				break;
 			}
 

@@ -218,6 +218,14 @@ async function createNewUser(newrecord) {
 				);
 			} catch (_) {}
 
+			// Fire user_registered template event (non-blocking)
+			try {
+				var tmplMod = await import('./messageTemplates.js');
+				await tmplMod.fireEvent('user_registered', dbres.insertId, {});
+			} catch (e) {
+				alogger.writeAlog(3, "createNewUser: user_registered template fire failed: " + (e.message || e), "yellow");
+			}
+
 			// Send email/netmail verification code (non-blocking)
 			if (recmail) {
 				try {
@@ -473,6 +481,25 @@ async function updateUserCalls(userrecord) {
 		'UPDATE users SET logoncount = $1, lastlogon = $2, updated_at = $3 WHERE UPPER(username) = UPPER($4)',
 		[newcount, currtime, currtime, userrecord.username]
 	);
+
+	// Fire login milestone template events (non-blocking)
+	if (userrecord.id) {
+		try {
+			var tmplMod = await import('./messageTemplates.js');
+			// First login
+			if (newcount === 1) {
+				await tmplMod.fireEvent('user_first_login', userrecord.id, {
+					event: { login_number: 1 }
+				});
+			}
+			// Nth login milestone (templates define which counts via conditions.nth_count)
+			await tmplMod.fireEvent('user_nth_login', userrecord.id, {
+				event: { login_number: newcount }
+			});
+		} catch (e) {
+			alogger.writeAlog(3, 'updateUserCalls: login template fire failed: ' + (e.message || e), 'yellow');
+		}
+	}
 }
 
 async function updateUserMsgGroup(username, groupname) {
@@ -588,6 +615,29 @@ async function purgeUnverifiedUsers() {
 	var days = appConfig.getNumber('unverified_retention_days', 14);
 	if (days <= 0) return { purged: 0 };
 
+	// Before purging, fire user_purge_warning for users in their last 1-3 days
+	// so sysops can send a "your account will be deleted in N days" message.
+	try {
+		var warnRows = await postgres.query(
+			"SELECT id, username, EXTRACT(DAY FROM (created_at + ($1 || ' days')::interval - NOW()))::int AS days_until_purge " +
+			"FROM users WHERE mailverified = false AND (permissionflags IS NULL OR NOT permissionflags @> '[\"Sysop\"]') " +
+			"AND created_at + ($1 || ' days')::interval > NOW() AND created_at + (($1::int - 3) || ' days')::interval <= NOW()",
+			[days.toString()]
+		);
+		if (warnRows && warnRows.length > 0) {
+			var tmplMod = await import('./messageTemplates.js');
+			for (var wrow of warnRows) {
+				try {
+					await tmplMod.fireEvent('user_purge_warning', wrow.id, {
+						event: { days_until_purge: wrow.days_until_purge }
+					});
+				} catch (_) {}
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'purgeUnverifiedUsers: warning fire failed: ' + (e.message || e), 'yellow');
+	}
+
 	var rows = await postgres.query(
 		"DELETE FROM users WHERE mailverified = false AND created_at < NOW() - ($1 || ' days')::interval AND (permissionflags IS NULL OR NOT permissionflags @> '[\"Sysop\"]') RETURNING id, username",
 		[days.toString()]
@@ -601,6 +651,129 @@ async function purgeUnverifiedUsers() {
 		alogger.writeAlog(2, 'purgeUnverifiedUsers: removed ' + purged + ' account(s) older than ' + days + ' days', 'cyan');
 	}
 	return { purged: purged };
+}
+
+// --- Daily template event checks ---
+// Scans users for birthday, dormant, and anniversary events and fires
+// matching templates. Called from the user-maintenance-daily job.
+async function runDailyTemplateEvents() {
+	var results = { birthdays: 0, anniversaries: 0, loginAnniversaries: 0, dormant: 0, errors: 0 };
+	var tmplMod;
+	try {
+		tmplMod = await import('./messageTemplates.js');
+	} catch (e) {
+		alogger.writeAlog(3, 'runDailyTemplateEvents: could not load messageTemplates: ' + e.message, 'yellow');
+		return results;
+	}
+
+	// --- Birthdays ---
+	try {
+		var bdayUsers = await postgres.query(
+			"SELECT id, birthdate FROM users WHERE active = true AND birthdate IS NOT NULL " +
+			"AND EXTRACT(MONTH FROM birthdate) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+			"AND EXTRACT(DAY FROM birthdate) = EXTRACT(DAY FROM CURRENT_DATE)"
+		);
+		if (bdayUsers && bdayUsers.length > 0) {
+			for (var u of bdayUsers) {
+				try {
+					var age = null;
+					if (u.birthdate) {
+						var bd = new Date(u.birthdate);
+						var today = new Date();
+						age = today.getFullYear() - bd.getFullYear();
+					}
+					var res = await tmplMod.fireEvent('user_birthday', u.id, { event: { age: age } });
+					if (res.fired > 0) results.birthdays++;
+				} catch (_) { results.errors++; }
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'runDailyTemplateEvents: birthday scan failed: ' + e.message, 'yellow');
+	}
+
+	// --- Account anniversaries ---
+	try {
+		var annivUsers = await postgres.query(
+			"SELECT id, created_at FROM users WHERE active = true AND created_at IS NOT NULL " +
+			"AND EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+			"AND EXTRACT(DAY FROM created_at) = EXTRACT(DAY FROM CURRENT_DATE) " +
+			"AND created_at < CURRENT_DATE"
+		);
+		if (annivUsers && annivUsers.length > 0) {
+			for (var au of annivUsers) {
+				try {
+					var years = new Date().getFullYear() - new Date(au.created_at).getFullYear();
+					if (years < 1) continue;
+					var res = await tmplMod.fireEvent('user_account_anniversary', au.id, {
+						event: { anniversary_years: years }
+					});
+					if (res.fired > 0) results.anniversaries++;
+				} catch (_) { results.errors++; }
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'runDailyTemplateEvents: anniversary scan failed: ' + e.message, 'yellow');
+	}
+
+	// --- Login anniversaries ---
+	try {
+		var loginAnnivUsers = await postgres.query(
+			"SELECT id, firstlogon FROM users WHERE active = true AND firstlogon IS NOT NULL " +
+			"AND EXTRACT(MONTH FROM firstlogon) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+			"AND EXTRACT(DAY FROM firstlogon) = EXTRACT(DAY FROM CURRENT_DATE) " +
+			"AND firstlogon < CURRENT_DATE"
+		);
+		if (loginAnnivUsers && loginAnnivUsers.length > 0) {
+			for (var lu of loginAnnivUsers) {
+				try {
+					var ly = new Date().getFullYear() - new Date(lu.firstlogon).getFullYear();
+					if (ly < 1) continue;
+					var res = await tmplMod.fireEvent('user_login_anniversary', lu.id, {
+						event: { anniversary_years: ly }
+					});
+					if (res.fired > 0) results.loginAnniversaries++;
+				} catch (_) { results.errors++; }
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'runDailyTemplateEvents: login anniversary scan failed: ' + e.message, 'yellow');
+	}
+
+	// --- Dormant users ---
+	// Check against any active user_dormant templates to see what days_inactive
+	// thresholds they want, then scan users matching those thresholds.
+	try {
+		var dormantTemplates = await tmplMod.getTemplatesForEvent('user_dormant');
+		if (dormantTemplates && dormantTemplates.length > 0) {
+			// Get dormant users once -- we'll filter by each template's conditions
+			// inside fireEvent via evaluateConditions. Pick a conservative floor
+			// (30 days) as the initial query, then fireEvent handles per-template
+			// filtering via days_inactive condition.
+			var dormantUsers = await postgres.query(
+				"SELECT id FROM users WHERE active = true AND lastlogon IS NOT NULL " +
+				"AND lastlogon < NOW() - INTERVAL '30 days'"
+			);
+			if (dormantUsers && dormantUsers.length > 0) {
+				for (var du of dormantUsers) {
+					try {
+						var res = await tmplMod.fireEvent('user_dormant', du.id, {});
+						if (res.fired > 0) results.dormant++;
+					} catch (_) { results.errors++; }
+				}
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'runDailyTemplateEvents: dormant scan failed: ' + e.message, 'yellow');
+	}
+
+	var totalFired = results.birthdays + results.anniversaries + results.loginAnniversaries + results.dormant;
+	if (totalFired > 0 || results.errors > 0) {
+		alogger.writeAlog(3, '[Template] Daily events: ' + results.birthdays + ' birthdays, ' +
+			results.anniversaries + ' anniversaries, ' + results.loginAnniversaries + ' login anniversaries, ' +
+			results.dormant + ' dormant' + (results.errors ? ', ' + results.errors + ' errors' : ''),
+			totalFired > 0 ? 'cyan' : 'yellow');
+	}
+	return results;
 }
 
 // --- Admin user update ---
@@ -824,6 +997,7 @@ export {
 	detectMailType,
 	reconcileMailTypes,
 	purgeUnverifiedUsers,
+	runDailyTemplateEvents,
 	getLastCallflowAt
 };
 
