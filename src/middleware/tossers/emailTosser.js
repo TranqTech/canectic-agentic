@@ -124,13 +124,34 @@ function _isSystemMessage(pm, transportData) {
 }
 
 // Pure function: pick (senderUsername, displayName) from a DB user row
-// and the pm_outbox record, following the authority rules:
+// and the pm_outbox record for an outbound email.
 //
-//   senderUsername — users.username (unique)  > pm.from_user  > 'user'
-//   displayName    — users.fullname           > users.username > pm.from_user > 'User'
+// Two separate concerns with two separate rules:
 //
-// Called by _resolveSender after the users row lookup. Broken out so
-// it's testable without a database.
+//   ADDRESS (envelope from, header from local-part, reply-to):
+//     MUST always be users.username. It's the only schema-unique
+//     identifier -- two users can share a fullname but not a username,
+//     so anything else would produce a collision-prone address.
+//     pm.from_user is NOT safe here: validateFromUser in routes/pm.js
+//     allows it to be either currentuser.username OR currentuser.
+//     fullname depending on the group's post_as setting. post_as
+//     exists for FTN netmail (and QWK/NNTP) where the protocol has
+//     ONE "from" slot -- those transports legitimately need the
+//     realname option. Email has a proper display-name field, so
+//     the address stays canonical regardless.
+//
+//   DISPLAY NAME (header from quoted portion):
+//     PREFERS users.fullname because that's the human-readable form
+//     we want external recipients to see in their inbox list. Falls
+//     back to users.username when fullname is blank, and to
+//     pm.from_user as last-resort if the DB lookup failed.
+//
+// Fallback chain if the DB lookup failed (deleted account, DB error):
+//   senderUsername: users.username > pm.from_user > 'user'
+//   displayName:    users.fullname > users.username > pm.from_user > 'User'
+//
+// Broken out as a pure function so the rules are pinned by unit tests
+// without mocking postgres.
 function _pickSenderIdentity(userRow, pm) {
 	var senderUsername = null;
 	var displayName = null;
