@@ -14,29 +14,77 @@ import appConfig from '../../config/appConfig.js';
 
 var _transporter = null;
 
+// SMTP port convention cheat sheet:
+//   25  — plaintext with optional STARTTLS
+//   465 — implicit TLS (SMTPS) — secure must be true
+//   587 — submission with STARTTLS — secure must be false
+// Reconcile the sysop-configured secure flag against the port. Mismatched
+// combinations produce the infamous OpenSSL "wrong version number" error,
+// so we warn and override rather than silently attempting a bad handshake.
+function _reconcileSecure(port, configuredSecure) {
+	if (port === 465 && configuredSecure !== true) {
+		alogger.writeAlog(2,
+			'[EmailTosser] Port 465 implies implicit TLS but email_relay_secure is false. ' +
+			'Overriding to true for this cycle -- update admin config to silence this warning.',
+			'yellow');
+		return true;
+	}
+	if ((port === 587 || port === 25) && configuredSecure === true) {
+		alogger.writeAlog(2,
+			'[EmailTosser] Port ' + port + ' expects STARTTLS (plaintext upgrade) but ' +
+			'email_relay_secure is true. Overriding to false for this cycle -- update ' +
+			'admin config to silence this warning.',
+			'yellow');
+		return false;
+	}
+	return configuredSecure;
+}
+
 function getTransporter() {
 	var host = appConfig.get('email_relay_host', '');
 	if (!host) return null;
 
 	if (!_transporter) {
-		_transporter = nodemailer.createTransport({
+		var port = appConfig.getNumber('email_relay_port', 587);
+		var secure = _reconcileSecure(port, appConfig.getBoolean('email_relay_secure', false));
+
+		var opts = {
 			host: host,
-			port: appConfig.getNumber('email_relay_port', 587),
-			secure: appConfig.getBoolean('email_relay_secure', false),
+			port: port,
+			secure: secure,
 			auth: {
 				user: appConfig.get('email_relay_user', ''),
 				pass: appConfig.get('email_relay_password', ''),
 			},
-		});
+		};
+
+		// On submission port 587, require the STARTTLS upgrade so nodemailer
+		// refuses to fall back to plaintext if the relay stops advertising it.
+		if (port === 587 && !secure) {
+			opts.requireTLS = true;
+		}
+
+		_transporter = nodemailer.createTransport(opts);
 	}
 	return _transporter;
 }
 
 function resetTransporter() {
 	if (_transporter) {
-		_transporter.close();
+		try { _transporter.close(); } catch (_) {}
 		_transporter = null;
 	}
+}
+
+// OpenSSL "wrong version number" is the classic port/secure mismatch symptom.
+// Also catch a few adjacent TLS errors that point at the same diagnosis.
+function _isTlsMismatchError(err) {
+	if (!err || !err.message) return false;
+	var m = err.message;
+	return /wrong version number/i.test(m)
+		|| /ssl routines.*tls_validate_record_header/i.test(m)
+		|| /unsupported protocol/i.test(m)
+		|| /ssl3_get_record/i.test(m);
 }
 
 async function tossOutbound() {
@@ -119,6 +167,8 @@ async function tossOutbound() {
 			sentCount++;
 		} catch (err) {
 			var code = err.responseCode || 0;
+			var tlsMismatch = _isTlsMismatchError(err);
+
 			if (code >= 500 && code < 600) {
 				// Permanent failure — bounce
 				alogger.writeAlog(2, '[EmailTosser] Permanent failure for PM id=' + pm.id +
@@ -131,6 +181,19 @@ async function tossOutbound() {
 					' to ' + emailAddress + ': ' + err.message, 'yellow');
 				await privateMessages.markSendError(pm.id, err.message);
 			}
+
+			if (tlsMismatch) {
+				alogger.writeAlog(2,
+					'[EmailTosser] TLS handshake mismatch detected. This almost always means ' +
+					'email_relay_port and email_relay_secure disagree: port 465 needs ' +
+					'secure=true (implicit TLS); ports 587 and 25 need secure=false (STARTTLS). ' +
+					'Fix via /admin/config email category and retry.',
+					'redbright');
+				// Bad SSL state sticks to the cached transporter -- force a rebuild
+				// next cycle so the retry starts clean (picks up config changes too).
+				resetTransporter();
+			}
+
 			errorCount++;
 		}
 	}
@@ -143,4 +206,4 @@ async function tossOutbound() {
 	return { sent: sentCount, errors: errorCount };
 }
 
-export { tossOutbound, resetTransporter };
+export { tossOutbound, resetTransporter, _reconcileSecure, _isTlsMismatchError };

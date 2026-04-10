@@ -441,3 +441,99 @@ describe('Config defaults — email category', function () {
 		assert.strictEqual(def.defaultValue, '127.0.0.1');
 	});
 });
+
+// ============================================================
+// Email tosser — SMTP port/secure reconciliation + TLS error detection
+// ============================================================
+
+var emailTosser;
+try {
+	emailTosser = await import('../src/middleware/tossers/emailTosser.js');
+} catch (err) {
+	emailTosser = null;
+}
+
+describe('Email tosser — port/secure reconciliation', function () {
+	if (!emailTosser) {
+		it.skip('skipped — emailTosser module not loadable', function () {});
+		return;
+	}
+
+	it('leaves port 465 + secure=true alone (implicit TLS, matches convention)', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(465, true), true);
+	});
+
+	it('overrides port 465 + secure=false to true (would fail handshake otherwise)', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(465, false), true);
+	});
+
+	it('leaves port 587 + secure=false alone (STARTTLS submission, matches convention)', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(587, false), false);
+	});
+
+	it('overrides port 587 + secure=true to false (the AWS SES misconfig case)', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(587, true), false);
+	});
+
+	it('overrides port 25 + secure=true to false (plain SMTP with STARTTLS)', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(25, true), false);
+	});
+
+	it('leaves port 25 + secure=false alone', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(25, false), false);
+	});
+
+	it('does not touch non-standard ports — trusts the sysop', function () {
+		assert.strictEqual(emailTosser._reconcileSecure(2525, true), true);
+		assert.strictEqual(emailTosser._reconcileSecure(2525, false), false);
+		assert.strictEqual(emailTosser._reconcileSecure(1025, true), true);
+	});
+});
+
+describe('Email tosser — TLS mismatch error detection', function () {
+	if (!emailTosser) {
+		it.skip('skipped — emailTosser module not loadable', function () {});
+		return;
+	}
+
+	it('recognises OpenSSL "wrong version number"', function () {
+		var err = new Error('009D0B57677A0000:error:0A00010B:SSL routines:tls_validate_record_header:wrong version number');
+		assert.strictEqual(emailTosser._isTlsMismatchError(err), true);
+	});
+
+	it('recognises the tls_validate_record_header prefix on its own', function () {
+		var err = new Error('SSL routines tls_validate_record_header failure');
+		assert.strictEqual(emailTosser._isTlsMismatchError(err), true);
+	});
+
+	it('recognises "unsupported protocol"', function () {
+		var err = new Error('SSL alert: unsupported protocol');
+		assert.strictEqual(emailTosser._isTlsMismatchError(err), true);
+	});
+
+	it('recognises legacy ssl3_get_record errors', function () {
+		var err = new Error('ssl3_get_record: wrong version number');
+		assert.strictEqual(emailTosser._isTlsMismatchError(err), true);
+	});
+
+	it('does not false-positive on unrelated SMTP errors', function () {
+		assert.strictEqual(
+			emailTosser._isTlsMismatchError(new Error('550 5.1.1 User unknown')),
+			false
+		);
+		assert.strictEqual(
+			emailTosser._isTlsMismatchError(new Error('Connection timed out')),
+			false
+		);
+		assert.strictEqual(
+			emailTosser._isTlsMismatchError(new Error('Authentication failed')),
+			false
+		);
+	});
+
+	it('handles null / undefined / empty errors safely', function () {
+		assert.strictEqual(emailTosser._isTlsMismatchError(null), false);
+		assert.strictEqual(emailTosser._isTlsMismatchError(undefined), false);
+		assert.strictEqual(emailTosser._isTlsMismatchError({}), false);
+	});
+});
