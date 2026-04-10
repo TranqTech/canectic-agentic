@@ -1,0 +1,122 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-lg-10.offset-lg-1.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-key.me-2
+                    | API Tokens
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-light.me-2(href='/admin') Exit
+                    button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newTokenModal')
+                      i.bi.bi-plus-circle.me-1
+                      | Issue Token
+            .card-body
+              p.text-muted
+                | API tokens authorise scripted access to #[code /api/v1] endpoints using #[code Authorization: Bearer <token>]. Tokens are shown exactly once at creation. Use this page to audit all tokens system-wide and revoke compromised ones. Users can manage their own tokens from their profile page.
+
+              if tokens && tokens.length > 0
+                table#tokensTable.table.table-sm.table-hover
+                  thead
+                    tr
+                      th User
+                      th Label
+                      th Scope
+                      th Last Used
+                      th Created
+                      th Expires
+                      th Status
+                      th(style='width:140px') Actions
+                  tbody
+                    each t in tokens
+                      tr(class=!t.active ? 'table-secondary' : '')
+                        td
+                          code= t.username
+                        td= t.label
+                        td
+                          span.badge.bg-info= scopeLabels[t.scope] || t.scope
+                        td
+                          if t.last_used_at
+                            small= new Date(t.last_used_at).toLocaleString()
+                          else
+                            small.text-muted never
+                        td
+                          small= new Date(t.created_at).toLocaleDateString()
+                        td
+                          if t.expires_at
+                            small= new Date(t.expires_at).toLocaleDateString()
+                          else
+                            small.text-muted no expiry
+                        td
+                          if t.active
+                            span.badge.bg-success Active
+                          else
+                            span.badge.bg-secondary Revoked
+                        td
+                          if t.active
+                            form.d-inline(method='POST' action='/admin/api-tokens/' + t.id + '/revoke')
+                              button.btn.btn-sm.btn-warning.me-1(type='submit' onclick='return confirm("Revoke this token? Clients using it will stop working immediately.")')
+                                i.bi.bi-slash-circle
+                          form.d-inline(method='POST' action='/admin/api-tokens/' + t.id + '/delete')
+                            button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Permanently delete this token row?")')
+                              i.bi.bi-trash
+              else
+                p.text-muted No API tokens issued yet.
+
+    //- New Token Modal
+    #newTokenModal.modal.fade(tabindex='-1')
+      .modal-dialog.modal-dialog-centered
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h3.modal-title Issue API Token
+            button.btn.btn-lg.btn-close.btn-close-white(data-bs-dismiss='modal')
+          .modal-body
+            form(method='POST' action='/admin/api-tokens/new')
+              label.form-label For User (username)
+              input.form-control.mb-2(type='text' name='username' required placeholder='bob')
+              small.text-muted.d-block.mb-3 Token will be issued on this user's behalf.
+
+              label.form-label Label
+              input.form-control.mb-2(type='text' name='label' required placeholder='iPhone QWK reader')
+              small.text-muted.d-block.mb-3 Human-readable label to identify the client using this token.
+
+              label.form-label Scope
+              select.form-select.mb-3(name='scope')
+                each s in validScopes
+                  option(value=s)= scopeLabels[s] || s
+
+              label.form-label Expires (optional)
+              input.form-control.mb-2(type='datetime-local' name='expires_at')
+              small.text-muted.d-block.mb-3 Leave blank for no expiry.
+
+              .alert.alert-warning
+                i.bi.bi-exclamation-triangle.me-2
+                | The token value will be shown exactly once on the next page. Copy it immediately to a secure location.
+
+              .text-end
+                button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+                input.btn.btn-success(type='submit' value='Issue Token')
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable) {
+        jQuery('#tokensTable').DataTable({ paging: false, order: [[3, 'desc']] });
+      }
+    });

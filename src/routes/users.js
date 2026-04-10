@@ -11,6 +11,7 @@ import * as userAccounts from '../models/useraccounts.js';
 import * as sessionStore from '../middleware/db/sessionstore.js';
 import * as callers from '../models/callers.js';
 import * as alogger from '../utils/alogger.js';
+import * as apiTokens from '../models/apiTokens.js';
 import appConfig from "../config/appConfig.js";
 
 //setup
@@ -503,6 +504,9 @@ router.get('/profile', async (req, res) => {
 		}
 	}
 
+	// Load user's API tokens for the Tokens section
+	var userTokens = await apiTokens.getByUser(userRecord.id);
+
 	res.render('users/profile', {
 		title:             'My Profile',
 		activelink:        '',
@@ -511,9 +515,67 @@ router.get('/profile', async (req, res) => {
 		usernameNextChange: usernameNextChange,
 		cooldownDays:      cooldownDays,
 		pwmin:             appConfig.getNumber('pwmin', 12),
+		apiTokenList:      userTokens,
+		apiTokenScopes:    apiTokens.VALID_SCOPES,
+		apiScopeLabels:    apiTokens.SCOPE_LABELS,
+		newApiTokenValue:  req.query.new_token || null,
 		message:           req.query.message || null,
 		error:             req.query.error || null
 	});
+});
+
+/* -----------------------------------------------
+   User-managed API tokens
+----------------------------------------------- */
+router.post('/profile/api-tokens/new', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session || !session.id) return res.redirect('/users/login');
+
+	var result = await apiTokens.createToken(parseInt(session.id), req.body);
+	if (!result.status) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent(result.errormessages.join('. ')));
+	}
+	// Pass the new token via query string once (user copies and it's gone)
+	return res.redirect('/users/profile?new_token=' + encodeURIComponent(result.plaintext));
+});
+
+router.post('/profile/api-tokens/:id/revoke', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session || !session.id) return res.redirect('/users/login');
+
+	// Verify the token belongs to this user before revoking
+	var token = await apiTokens.getById(parseInt(req.params.id));
+	if (!token || token.user_id !== parseInt(session.id)) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('Token not found'));
+	}
+
+	var result = await apiTokens.revokeToken(token.id);
+	if (!result.status) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent(result.errormessages.join('. ')));
+	}
+	return res.redirect('/users/profile?message=' + encodeURIComponent('Token revoked'));
+});
+
+router.post('/profile/api-tokens/:id/delete', urlencodedParser, async (req, res) => {
+	var sessionid = req.cookies.sessionid;
+	if (!sessionid) return res.redirect('/users/login');
+	var session = await sessionStore.sessionGet(sessionid);
+	if (!session || !session.id) return res.redirect('/users/login');
+
+	var token = await apiTokens.getById(parseInt(req.params.id));
+	if (!token || token.user_id !== parseInt(session.id)) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent('Token not found'));
+	}
+
+	var result = await apiTokens.deleteToken(token.id);
+	if (!result.status) {
+		return res.redirect('/users/profile?error=' + encodeURIComponent(result.errormessages.join('. ')));
+	}
+	return res.redirect('/users/profile?message=' + encodeURIComponent('Token deleted'));
 });
 
 /* -----------------------------------------------

@@ -162,3 +162,93 @@ block content
 									button.btn.btn-outline-danger.btn-sm(type='submit')
 										i.bi.bi-box-arrow-right.me-1
 										| Log Out All Other Sessions
+
+				//- API tokens section
+				.card.mt-3
+					.card-header.text-white.bg-dark
+						.d-flex.justify-content-between.align-items-center
+							span
+								i.bi.bi-key.me-2
+								| API Tokens
+							button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newApiTokenModal')
+								i.bi.bi-plus-circle.me-1
+								| New Token
+					.card-body
+						if newApiTokenValue
+							.alert.alert-success
+								.fw-bold
+									i.bi.bi-check-circle.me-2
+									| Token created -- copy it now:
+								code.d-block.mt-2.p-2.bg-dark.text-light.rounded.user-select-all(style='word-break:break-all')= newApiTokenValue
+								br
+								small.text-muted This value will not be shown again. Store it somewhere safe.
+
+						p.text-muted.small
+							| API tokens authorise external clients (QWK readers, scripts, automation) to access
+							| #[code /api/v1] endpoints on your behalf. Tokens are shown exactly once at creation
+							| and must be stored by the client. Revoke a token to immediately stop it from working.
+
+						if apiTokenList && apiTokenList.length > 0
+							table.table.table-sm
+								thead
+									tr
+										th Label
+										th Scope
+										th Last Used
+										th Created
+										th Status
+										th(style='width:100px')
+								tbody
+									each t in apiTokenList
+										tr(class=!t.active ? 'table-secondary' : '')
+											td= t.label
+											td
+												span.badge.bg-info= apiScopeLabels[t.scope] || t.scope
+											td
+												if t.last_used_at
+													small= new Date(t.last_used_at).toLocaleDateString()
+												else
+													small.text-muted never
+											td
+												small= new Date(t.created_at).toLocaleDateString()
+											td
+												if t.active
+													span.badge.bg-success Active
+												else
+													span.badge.bg-secondary Revoked
+											td
+												if t.active
+													form.d-inline(action='/users/profile/api-tokens/' + t.id + '/revoke' method='POST')
+														button.btn.btn-sm.btn-warning(type='submit' title='Revoke' onclick='return confirm("Revoke this token?")')
+															i.bi.bi-slash-circle
+												form.d-inline(action='/users/profile/api-tokens/' + t.id + '/delete' method='POST')
+													button.btn.btn-sm.btn-danger.ms-1(type='submit' title='Delete' onclick='return confirm("Permanently delete this token?")')
+														i.bi.bi-trash
+						else
+							p.text-muted.small No tokens yet.
+
+				//- New API Token Modal
+				#newApiTokenModal.modal.fade(tabindex='-1')
+					.modal-dialog.modal-dialog-centered
+						.modal-content
+							.modal-header.bg-dark.text-white
+								h5.modal-title Create API Token
+								button.btn-close.btn-close-white(type='button' data-bs-dismiss='modal')
+							.modal-body
+								form(action='/users/profile/api-tokens/new' method='POST')
+									label.form-label Label
+									input.form-control.mb-2(type='text' name='label' required placeholder='iPhone QWK reader')
+									small.text-muted.d-block.mb-3 Something descriptive so you can identify this token later.
+
+									label.form-label Scope
+									select.form-select.mb-3(name='scope')
+										each s in apiTokenScopes
+											option(value=s)= apiScopeLabels[s] || s
+
+									.alert.alert-warning.small
+										i.bi.bi-exclamation-triangle.me-2
+										| The token value will be shown exactly once after creation. Copy it immediately.
+
+									.text-end
+										button.btn.btn-secondary.me-2(type='button' data-bs-dismiss='modal') Cancel
+										input.btn.btn-success(type='submit' value='Create Token')

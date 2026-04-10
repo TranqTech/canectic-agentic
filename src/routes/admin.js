@@ -21,6 +21,7 @@ import * as doors from '../models/doors.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as messageTemplates from '../models/messageTemplates.js';
+import * as apiTokens from '../models/apiTokens.js';
 import * as wall from '../models/wall.js';
 import * as bulletins from '../models/bulletins.js';
 import * as newsFiles from '../models/newsFiles.js';
@@ -5620,6 +5621,68 @@ router.get('/nodespy/:nodenum', async (req, res) => {
 		returnUrl: '/admin/nodespy',
 		ismobile: mobile({ ua: req.headers['user-agent'] })
 	});
+});
+
+// -------------------------------------------------------
+// API Tokens (system-wide view / admin issuance)
+// -------------------------------------------------------
+
+router.get('/api-tokens', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var tokens = await apiTokens.getAllForAdmin();
+	res.render('admin/apiTokens/index', {
+		sufficientAccess, title: 'API Tokens', activelink: 'api-tokens',
+		activenav: 'users', currentuser, tokens,
+		validScopes: apiTokens.VALID_SCOPES,
+		scopeLabels: apiTokens.SCOPE_LABELS
+	});
+});
+
+router.post('/api-tokens/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var username = (req.body.username || '').trim();
+	if (!username) {
+		await flash.setOne(req, 'danger', 'Username is required');
+		return res.redirect('/admin/api-tokens');
+	}
+	var user = await postgres.queryOne(
+		'SELECT id FROM users WHERE UPPER(username) = UPPER($1)',
+		[username]
+	);
+	if (!user) {
+		await flash.setOne(req, 'danger', 'User not found: ' + username);
+		return res.redirect('/admin/api-tokens');
+	}
+	var result = await apiTokens.createToken(user.id, req.body);
+	if (!result.status) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+		return res.redirect('/admin/api-tokens');
+	}
+	// Show the plaintext token once via flash
+	await flash.setOne(req, 'success',
+		'Token created for ' + username + '. Copy this now -- it will not be shown again: ' + result.plaintext
+	);
+	res.redirect('/admin/api-tokens');
+});
+
+router.post('/api-tokens/:id/revoke', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await apiTokens.revokeToken(parseInt(req.params.id));
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Token revoked');
+	}
+	res.redirect('/admin/api-tokens');
+});
+
+router.post('/api-tokens/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var result = await apiTokens.deleteToken(parseInt(req.params.id));
+	if (!result.status && result.errormessages.length > 0) {
+		await flash.setOne(req, 'danger', result.errormessages.join(', '));
+	} else {
+		await flash.setOne(req, 'success', 'Token deleted');
+	}
+	res.redirect('/admin/api-tokens');
 });
 
 export { router };
