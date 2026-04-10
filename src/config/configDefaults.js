@@ -193,7 +193,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'email_from_name',           defaultValue: '',               type: 'string',  category: 'email',       description: 'Display name for outbound email (falls back to boardname)' },
 	{ key: 'email_max_outbound_batch',  defaultValue: '50',             type: 'number',  category: 'email',       description: 'Maximum emails per outbound toss cycle' },
 	{ key: 'email_inbound_port',        defaultValue: '0',              type: 'number',  category: 'email',       description: 'Trusted inbound SMTP port for gateway injection (e.g. 1026, 0 = disabled, requires restart)', restart: true },
-	{ key: 'email_trusted_hosts',       defaultValue: '127.0.0.1',     type: 'string',  category: 'email',       description: 'Comma-separated IPs allowed to inject inbound email without auth' },
+	{ key: 'email_trusted_hosts',       defaultValue: '127.0.0.1',     type: 'string',  category: 'email',       description: 'Comma-separated IPs or IPv4 CIDR blocks allowed to inject inbound email without auth (e.g. 127.0.0.1, 10.0.0.0/8)' },
 
 	// -----------------------------------------------------------------------
 	// QWK (user offline mail)

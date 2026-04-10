@@ -725,6 +725,92 @@ class SmtpSession {
 }
 
 // ---------------------------------------------------------------------------
+// Trusted-host allowlist parsing
+// ---------------------------------------------------------------------------
+//
+// email_trusted_hosts accepts a comma-separated mix of:
+//   - bare IPv4 addresses       (e.g. 127.0.0.1)
+//   - IPv4 CIDR blocks          (e.g. 10.0.0.0/8, 192.168.1.0/24)
+//
+// CIDR entries with non-zero host bits (e.g. 10.0.0.1/8) are accepted and
+// normalised by masking the base against the prefix length. IPv6 is not yet
+// supported -- operators wanting IPv6 should list exact addresses for now.
+
+function _ipv4ToInt(ip) {
+	if (!ip) return null;
+	var parts = ip.split('.');
+	if (parts.length !== 4) return null;
+	var result = 0;
+	for (var i = 0; i < 4; i++) {
+		var n = parseInt(parts[i], 10);
+		if (isNaN(n) || n < 0 || n > 255 || String(n) !== parts[i].replace(/^0+(?=\d)/, '')) {
+			// Reject non-numeric, out of range, or weird padded forms like "01"
+			// (the replace lets "0" itself through)
+			if (String(n) !== parts[i]) return null;
+		}
+		if (isNaN(n) || n < 0 || n > 255) return null;
+		result = ((result * 256) + n) >>> 0;
+	}
+	return result;
+}
+
+function _parseTrustedHostList(hostStr) {
+	var exact = new Set();
+	var cidrs = [];
+	var parts = (hostStr || '').split(',').map(function(h) { return h.trim(); }).filter(Boolean);
+
+	for (var p of parts) {
+		var slashIdx = p.indexOf('/');
+		if (slashIdx >= 0) {
+			var baseStr = p.substring(0, slashIdx);
+			var prefixLen = parseInt(p.substring(slashIdx + 1), 10);
+			var baseInt = _ipv4ToInt(baseStr);
+			if (baseInt === null || isNaN(prefixLen) || prefixLen < 0 || prefixLen > 32) {
+				alogger.writeAlog(2,
+					'SMTP inbound: invalid CIDR in email_trusted_hosts: "' + p +
+					'" -- expected IPv4 with prefix 0-32',
+					'yellow');
+				continue;
+			}
+			var mask = prefixLen === 0 ? 0 : (0xFFFFFFFF << (32 - prefixLen)) >>> 0;
+			cidrs.push({
+				base: (baseInt & mask) >>> 0,
+				mask: mask,
+				text: p
+			});
+		} else {
+			exact.add(p);
+		}
+	}
+
+	return { exact: exact, cidrs: cidrs };
+}
+
+function _matchesTrustedHost(normalizedAddr, parsed) {
+	if (!parsed) return false;
+	if (parsed.exact && parsed.exact.has(normalizedAddr)) return true;
+	if (!parsed.cidrs || parsed.cidrs.length === 0) return false;
+	var addrInt = _ipv4ToInt(normalizedAddr);
+	if (addrInt === null) return false;
+	for (var cidr of parsed.cidrs) {
+		if (((addrInt & cidr.mask) >>> 0) === cidr.base) return true;
+	}
+	return false;
+}
+
+function _trustedHostListToString(parsed) {
+	if (!parsed) return '(none)';
+	var out = [];
+	if (parsed.exact) {
+		for (var e of parsed.exact) out.push(e);
+	}
+	if (parsed.cidrs) {
+		for (var c of parsed.cidrs) out.push(c.text);
+	}
+	return out.length > 0 ? out.join(', ') : '(none)';
+}
+
+// ---------------------------------------------------------------------------
 // SmtpServer
 // ---------------------------------------------------------------------------
 
@@ -736,10 +822,10 @@ class SmtpServer {
 		this.server = null;
 		this.sessions = new Set();
 
-		// Trusted mode: parse allowed hosts into a Set for fast lookup
+		// Trusted mode: parse allowed hosts into exact-match Set + CIDR list
 		if (this.options.trusted) {
 			var hostStr = this.options.trustedHosts || '127.0.0.1';
-			this._trustedHosts = new Set(hostStr.split(',').map(function(h) { return h.trim(); }));
+			this._trustedHosts = _parseTrustedHostList(hostStr);
 		}
 	}
 
@@ -751,9 +837,21 @@ class SmtpServer {
 				var remoteAddr = socket.remoteAddress || '';
 				// Normalize IPv6-mapped IPv4 (::ffff:127.0.0.1 → 127.0.0.1)
 				var normalizedAddr = remoteAddr.replace(/^::ffff:/, '');
-				if (!self._trustedHosts.has(normalizedAddr)) {
-					alogger.writeAlog(3, 'SMTP inbound: rejected untrusted host ' + remoteAddr, 'yellow');
-					socket.write('554 Connection refused\r\n');
+				if (!_matchesTrustedHost(normalizedAddr, self._trustedHosts)) {
+					// Level 2 so sysops see this in default logs -- a blocked
+					// gateway usually looks like a mystery "undeliverable" on
+					// the sending side and nothing obvious on the receiving
+					// side if this line is hidden behind verbose logging.
+					alogger.writeAlog(2,
+						'SMTP inbound: rejected untrusted host ' + normalizedAddr +
+						' (allowlist has ' + _trustedHostListToString(self._trustedHosts) +
+						'). Add this IP or a containing CIDR block to ' +
+						'email_trusted_hosts in /admin/config if the sender is legitimate.',
+						'yellow');
+					// More informative 5.7.1 reply so the remote postfix log
+					// shows "access denied" rather than just "connection refused".
+					socket.write('554 5.7.1 Access denied: ' + normalizedAddr +
+						' is not in this host\'s SMTP allowlist\r\n');
 					socket.end();
 					return;
 				}
@@ -783,4 +881,10 @@ class SmtpServer {
 	}
 }
 
-export { SmtpServer, SmtpSession };
+export {
+	SmtpServer,
+	SmtpSession,
+	_parseTrustedHostList,
+	_matchesTrustedHost,
+	_ipv4ToInt
+};

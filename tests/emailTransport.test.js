@@ -239,20 +239,30 @@ describe('SmtpServer trusted host configuration', function () {
 			trusted: true,
 			trustedHosts: '127.0.0.1, 10.0.0.1, 192.168.1.100'
 		});
-		assert.ok(server._trustedHosts.has('127.0.0.1'));
-		assert.ok(server._trustedHosts.has('10.0.0.1'));
-		assert.ok(server._trustedHosts.has('192.168.1.100'));
-		assert.strictEqual(server._trustedHosts.size, 3);
+		assert.ok(server._trustedHosts.exact.has('127.0.0.1'));
+		assert.ok(server._trustedHosts.exact.has('10.0.0.1'));
+		assert.ok(server._trustedHosts.exact.has('192.168.1.100'));
+		assert.strictEqual(server._trustedHosts.exact.size, 3);
+		assert.strictEqual(server._trustedHosts.cidrs.length, 0);
+	});
+
+	it('should parse CIDR blocks alongside exact hosts', function () {
+		var server = new smtpModule.SmtpServer(0, 'mybbs.example.com', {
+			trusted: true,
+			trustedHosts: '127.0.0.1, 10.0.0.0/8, 192.168.1.0/24'
+		});
+		assert.strictEqual(server._trustedHosts.exact.size, 1);
+		assert.strictEqual(server._trustedHosts.cidrs.length, 2);
 	});
 
 	it('should default to 127.0.0.1 when trustedHosts is empty', function () {
 		var server = new smtpModule.SmtpServer(0, 'mybbs.example.com', {
 			trusted: true
 		});
-		assert.ok(server._trustedHosts.has('127.0.0.1'));
+		assert.ok(server._trustedHosts.exact.has('127.0.0.1'));
 	});
 
-	it('should not create trustedHosts set for non-trusted servers', function () {
+	it('should not create trustedHosts for non-trusted servers', function () {
 		var server = new smtpModule.SmtpServer(0, 'mybbs.example.com');
 		assert.strictEqual(server._trustedHosts, undefined);
 	});
@@ -487,6 +497,175 @@ describe('Email tosser — port/secure reconciliation', function () {
 		assert.strictEqual(emailTosser._reconcileSecure(2525, true), true);
 		assert.strictEqual(emailTosser._reconcileSecure(2525, false), false);
 		assert.strictEqual(emailTosser._reconcileSecure(1025, true), true);
+	});
+});
+
+// ============================================================
+// SMTP trusted-host allowlist (CIDR + exact match)
+// ============================================================
+
+var smtpServer;
+try {
+	smtpServer = await import('../src/servers/smtpServer.js');
+} catch (err) {
+	smtpServer = null;
+}
+
+describe('SMTP trusted-host allowlist', function () {
+	if (!smtpServer) {
+		it.skip('skipped — smtpServer module not loadable', function () {});
+		return;
+	}
+
+	describe('_ipv4ToInt', function () {
+		it('parses valid IPv4 addresses to 32-bit ints', function () {
+			assert.strictEqual(smtpServer._ipv4ToInt('0.0.0.0'), 0);
+			assert.strictEqual(smtpServer._ipv4ToInt('127.0.0.1'), 0x7F000001);
+			assert.strictEqual(smtpServer._ipv4ToInt('10.0.0.1'), 0x0A000001);
+			assert.strictEqual(smtpServer._ipv4ToInt('192.168.1.1'), 0xC0A80101);
+			assert.strictEqual(smtpServer._ipv4ToInt('255.255.255.255'), 0xFFFFFFFF);
+		});
+
+		it('rejects malformed IPv4 addresses', function () {
+			assert.strictEqual(smtpServer._ipv4ToInt('256.0.0.1'), null);
+			assert.strictEqual(smtpServer._ipv4ToInt('10.0.0'), null);
+			assert.strictEqual(smtpServer._ipv4ToInt('10.0.0.1.2'), null);
+			assert.strictEqual(smtpServer._ipv4ToInt('not.an.ip.addr'), null);
+			assert.strictEqual(smtpServer._ipv4ToInt(''), null);
+			assert.strictEqual(smtpServer._ipv4ToInt(null), null);
+			assert.strictEqual(smtpServer._ipv4ToInt('10.0.0.-1'), null);
+		});
+	});
+
+	describe('_parseTrustedHostList', function () {
+		it('parses a plain IP list into exact matches', function () {
+			var parsed = smtpServer._parseTrustedHostList('127.0.0.1,192.168.1.5');
+			assert.strictEqual(parsed.exact.size, 2);
+			assert.strictEqual(parsed.exact.has('127.0.0.1'), true);
+			assert.strictEqual(parsed.exact.has('192.168.1.5'), true);
+			assert.strictEqual(parsed.cidrs.length, 0);
+		});
+
+		it('parses CIDR notation into base/mask pairs', function () {
+			var parsed = smtpServer._parseTrustedHostList('10.0.0.0/8');
+			assert.strictEqual(parsed.cidrs.length, 1);
+			assert.strictEqual(parsed.cidrs[0].base, 0x0A000000);
+			assert.strictEqual(parsed.cidrs[0].mask, 0xFF000000);
+		});
+
+		it('mixes exact IPs and CIDR blocks', function () {
+			var parsed = smtpServer._parseTrustedHostList('127.0.0.1, 10.0.0.0/8, 192.168.1.5');
+			assert.strictEqual(parsed.exact.size, 2);
+			assert.strictEqual(parsed.cidrs.length, 1);
+		});
+
+		it('canonicalises CIDR base IPs with non-zero host bits (e.g. 10.0.0.1/8)', function () {
+			// 10.0.0.1/8 → base should mask to 10.0.0.0
+			var parsed = smtpServer._parseTrustedHostList('10.0.0.1/8');
+			assert.strictEqual(parsed.cidrs.length, 1);
+			assert.strictEqual(parsed.cidrs[0].base, 0x0A000000);
+		});
+
+		it('handles /32 (single host) and /0 (any host)', function () {
+			var parsed32 = smtpServer._parseTrustedHostList('10.0.0.5/32');
+			assert.strictEqual(parsed32.cidrs[0].base, 0x0A000005);
+			assert.strictEqual(parsed32.cidrs[0].mask, 0xFFFFFFFF);
+
+			var parsed0 = smtpServer._parseTrustedHostList('0.0.0.0/0');
+			assert.strictEqual(parsed0.cidrs[0].base, 0);
+			assert.strictEqual(parsed0.cidrs[0].mask, 0);
+		});
+
+		it('rejects malformed CIDR (invalid prefix)', function () {
+			var parsed = smtpServer._parseTrustedHostList('10.0.0.0/33, 127.0.0.1');
+			assert.strictEqual(parsed.cidrs.length, 0);
+			// exact-match entry still parsed
+			assert.strictEqual(parsed.exact.has('127.0.0.1'), true);
+		});
+
+		it('rejects malformed CIDR (invalid base IP)', function () {
+			var parsed = smtpServer._parseTrustedHostList('not.an.ip/24, 127.0.0.1');
+			assert.strictEqual(parsed.cidrs.length, 0);
+			assert.strictEqual(parsed.exact.has('127.0.0.1'), true);
+		});
+
+		it('handles empty / whitespace-only input', function () {
+			var empty = smtpServer._parseTrustedHostList('');
+			assert.strictEqual(empty.exact.size, 0);
+			assert.strictEqual(empty.cidrs.length, 0);
+
+			var ws = smtpServer._parseTrustedHostList('   ,  ,  ');
+			assert.strictEqual(ws.exact.size, 0);
+			assert.strictEqual(ws.cidrs.length, 0);
+		});
+
+		it('trims whitespace around entries', function () {
+			var parsed = smtpServer._parseTrustedHostList('  127.0.0.1  ,  10.0.0.0/8  ');
+			assert.strictEqual(parsed.exact.has('127.0.0.1'), true);
+			assert.strictEqual(parsed.cidrs.length, 1);
+		});
+	});
+
+	describe('_matchesTrustedHost', function () {
+		it('matches exact IPs', function () {
+			var parsed = smtpServer._parseTrustedHostList('127.0.0.1,192.168.1.5');
+			assert.strictEqual(smtpServer._matchesTrustedHost('127.0.0.1', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.1.5', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.1.6', parsed), false);
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.0.0.1', parsed), false);
+		});
+
+		it('matches IPs inside /8 CIDR', function () {
+			var parsed = smtpServer._parseTrustedHostList('10.0.0.0/8');
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.0.0.1', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.255.255.254', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('11.0.0.1', parsed), false);
+			assert.strictEqual(smtpServer._matchesTrustedHost('127.0.0.1', parsed), false);
+		});
+
+		it('matches IPs inside /24 CIDR', function () {
+			var parsed = smtpServer._parseTrustedHostList('192.168.1.0/24');
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.1.1', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.1.254', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.2.1', parsed), false);
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.0.1', parsed), false);
+		});
+
+		it('matches IPs inside /16 CIDR', function () {
+			var parsed = smtpServer._parseTrustedHostList('172.16.0.0/12');
+			// Private range: 172.16.0.0 - 172.31.255.255
+			assert.strictEqual(smtpServer._matchesTrustedHost('172.16.0.1', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('172.20.50.100', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('172.31.255.254', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('172.32.0.1', parsed), false);
+			assert.strictEqual(smtpServer._matchesTrustedHost('172.15.255.254', parsed), false);
+		});
+
+		it('mixes exact and CIDR matching', function () {
+			var parsed = smtpServer._parseTrustedHostList('127.0.0.1, 10.0.0.0/8');
+			assert.strictEqual(smtpServer._matchesTrustedHost('127.0.0.1', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.50.100.200', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('192.168.1.1', parsed), false);
+		});
+
+		it('matches the AWS-sized user example: 10.0.30.X in 10.0.0.0/8', function () {
+			var parsed = smtpServer._parseTrustedHostList('10.0.0.0/8');
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.0.30.50', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.0.30.1', parsed), true);
+		});
+
+		it('returns false for malformed remote address', function () {
+			var parsed = smtpServer._parseTrustedHostList('10.0.0.0/8');
+			assert.strictEqual(smtpServer._matchesTrustedHost('not.an.ip', parsed), false);
+			assert.strictEqual(smtpServer._matchesTrustedHost('', parsed), false);
+		});
+
+		it('/0 matches any IPv4', function () {
+			var parsed = smtpServer._parseTrustedHostList('0.0.0.0/0');
+			assert.strictEqual(smtpServer._matchesTrustedHost('1.2.3.4', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('10.0.30.50', parsed), true);
+			assert.strictEqual(smtpServer._matchesTrustedHost('255.255.255.255', parsed), true);
+		});
 	});
 });
 
