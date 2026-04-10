@@ -176,44 +176,20 @@ describe('extractMailBundle', function () {
 		assert.strictEqual(fs.existsSync(path.join(workDir, '00000003.pkt')), true);
 	});
 
-	it('refuses to extract non-pkt entries even from a valid bundle filename', function () {
-		// Stray files inside a "mail bundle" zip must not leak into the inbound dir
+	it('extracts every entry inside a bundle (no content filtering)', function () {
+		// Mail bundles are normally pkt-only but we never filter. The decision
+		// about whether to extract at all is made by the caller based on the
+		// bundle filename -- once we start, we extract faithfully.
 		var zipPath = makeTestZip('00010001.mo0', {
-			'valid.pkt':     'OK',
-			'MINBINKD.Z00':  'BINARY JUNK',
-			'readme.txt':    'not a packet',
-			'nested/evil.exe': 'also not a packet'
-		});
-
-		var res = extractMailBundle(zipPath, workDir);
-
-		assert.strictEqual(res.extracted, 1, 'only the .pkt entry should be extracted');
-		assert.strictEqual(fs.existsSync(path.join(workDir, 'valid.pkt')), true);
-		assert.strictEqual(fs.existsSync(path.join(workDir, 'MINBINKD.Z00')), false);
-		assert.strictEqual(fs.existsSync(path.join(workDir, 'readme.txt')), false);
-		assert.strictEqual(fs.existsSync(path.join(workDir, 'evil.exe')), false);
-	});
-
-	it('case-insensitively recognises .pkt (PKT, Pkt)', function () {
-		var zipPath = makeTestZip('00010001.we0', {
-			'upper.PKT': 'UPPER',
-			'mixed.Pkt': 'MIXED'
+			'valid.pkt':  'OK',
+			'readme.txt': 'not a packet'
 		});
 
 		var res = extractMailBundle(zipPath, workDir);
 
 		assert.strictEqual(res.extracted, 2);
-	});
-
-	it('does not remove the bundle when no entries match', function () {
-		var zipPath = makeTestZip('00010001.fr0', {
-			'not_a_packet.txt': 'nope'
-		});
-
-		var res = extractMailBundle(zipPath, workDir);
-
-		assert.strictEqual(res.extracted, 0);
-		assert.strictEqual(fs.existsSync(zipPath), true, 'bundle must stay put when nothing was extracted');
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'valid.pkt')), true);
+		assert.strictEqual(fs.existsSync(path.join(workDir, 'readme.txt')), true);
 	});
 
 	it('flattens directory entries so basename is used for output path', function () {

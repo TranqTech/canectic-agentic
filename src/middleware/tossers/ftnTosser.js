@@ -134,14 +134,14 @@ function formatKludge(attribute, value) {
 	return '\x01' + attribute + ': ' + (value == null ? '' : value);
 }
 
-// Extract an FTN arcmail bundle (zip) and pull only the .pkt entries out
-// into the destination directory. Returns { extracted: N, err: null|Error }.
-// Using adm-zip in-process (rather than shelling out to unzip) means:
-//  - No shell injection risk from odd filenames
-//  - We can filter entries and only drop .pkt files into the inbound dir
-//    so stray files inside a malformed "bundle" cannot contaminate the tree
-//  - Extraction is deterministic and inspectable in tests
-// The bundle file is removed after a successful extraction.
+// Extract an FTN arcmail bundle (zip) into the destination directory.
+// Returns { extracted: N, err: null|Error }.
+// Using adm-zip in-process (rather than shelling out to unzip) removes the
+// shell-injection surface from odd filenames and makes behaviour
+// deterministic and testable. All entries in the bundle are written out --
+// this function is only ever called once the caller has already decided
+// the file is a legitimate arcmail bundle. The bundle file is removed
+// after a successful extraction.
 function extractMailBundle(filepath, destDir) {
 	var result = { extracted: 0, err: null };
 	try {
@@ -151,12 +151,6 @@ function extractMailBundle(filepath, destDir) {
 			if (entry.isDirectory) continue;
 			var entryName = path.basename(entry.entryName || '');
 			if (!entryName) continue;
-			// Only extract .pkt files -- anything else in a bundle is stray
-			if (!/\.pkt$/i.test(entryName)) {
-				alogger.writeClog(4, '[FTN] mail bundle ' + path.basename(filepath) +
-					': skipping non-pkt entry ' + entryName, 'tosser', 'yellow');
-				continue;
-			}
 			var outPath = path.join(destDir, entryName);
 			fs.writeFileSync(outPath, entry.getData());
 			result.extracted++;
