@@ -108,6 +108,18 @@ async function getFileType(filePath) {
   }
 }
 
+// FTN BSO arcmail bundle extensions per FTS-5000 / FSC-0057.
+// Day-of-week prefix (mo/tu/we/th/fr/sa/su) plus a single hex-like counter
+// character 0-9 or a-z. Matching bundles are archived (ZIP/ARJ/LHA) containers
+// of .pkt files and should be extracted in the inbound directory.
+// Non-matching archives (e.g. TIC-attached ZIPs, nodelist bundles, infopacks)
+// must NOT be touched here -- TIC processing and other scanners handle them.
+function isMailBundleFilename(filename) {
+	if (!filename) return false;
+	var ext = path.extname(filename).toLowerCase().replace(/^\./, '');
+	return /^(mo|tu|we|th|fr|sa|su)[0-9a-z]$/.test(ext);
+}
+
 async function FindAndExtractArchives(inboundDir){
 	var inDir = appConfig.get('ftninbound', 'ftn/in')
 	if (inboundDir){
@@ -118,18 +130,26 @@ async function FindAndExtractArchives(inboundDir){
 	var pktArray = []
 	const filelist = fs.readdirSync(inDir);
 	
-	//filelist.forEach(file => {	
+	//filelist.forEach(file => {
 	for await (var file of filelist){
 		var filepath = inDir + "/" + file
 		var ftype = await getFileType(filepath)
 		if (ftype){
 			switch(ftype){
 				case "zip":
-					console.log(file, "is a zip file")
-					zipArray.push(filepath)
+					if (isMailBundleFilename(file)) {
+						console.log(file, "is a mail bundle (ZIP)")
+						zipArray.push(filepath)
+					} else {
+						console.log(file, "is a ZIP but not a mail bundle -- skipping")
+					}
 					break;
 				case "arj":
-					console.log(file, "is an ARJ file")
+					if (isMailBundleFilename(file)) {
+						console.log(file, "is a mail bundle (ARJ)")
+					} else {
+						console.log(file, "is an ARJ but not a mail bundle -- skipping")
+					}
 					break;
 				default:
 					pktArray.push(file)
@@ -178,19 +198,31 @@ async function TossInbound(inboundDir){
 	}
 	const filelist = await fs.readdirSync(inDir);
 
-	//filelist.forEach(file => {	
+	//filelist.forEach(file => {
 	for await (var file of filelist){
 		var filepath = inDir + "/" + file
 		var ftype = await getFileType(filepath)
 		if (ftype){
 			switch(ftype){
 				case "zip":
-					console.log(file, "is a zip file")
-					zipArray.push(filepath)
+					// Only extract if the filename matches the FTN BSO arcmail bundle
+					// extension pattern (.mo0, .tu5, .su9, etc.). Other ZIPs are
+					// TIC attachments, nodelist archives, or infopacks and must be
+					// left untouched for their respective processors.
+					if (isMailBundleFilename(file)) {
+						console.log(file, "is a mail bundle (ZIP)")
+						zipArray.push(filepath)
+					} else {
+						console.log(file, "is a ZIP but not a mail bundle -- leaving for TIC/other processors")
+					}
 					break;
 				case "arj":
-					console.log(file, "is an ARJ file")
-					arjArray.push(filePath)
+					if (isMailBundleFilename(file)) {
+						console.log(file, "is a mail bundle (ARJ)")
+						arjArray.push(filepath)
+					} else {
+						console.log(file, "is an ARJ but not a mail bundle -- leaving for TIC/other processors")
+					}
 					break;
 				default:
 					console.log(ftype)
@@ -1518,5 +1550,6 @@ export {
 	WritePktsToNode,
 	FindAndExtractArchives,
 	TossInboundFile,
-	processMessageText
+	processMessageText,
+	isMailBundleFilename
 }

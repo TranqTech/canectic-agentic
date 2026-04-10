@@ -3,6 +3,7 @@
 ## Pending (since v0.9.5a)
 
 ### Bugfixes
+- Fix: FTN tosser no longer unzips non-mail-bundle ZIP files in the inbound directory. Previously it detected ZIPs by magic bytes and extracted anything it found, which destroyed TIC-attached ZIPs (and nodelist/infopack bundles) before the TIC tosser could process them. The extractor now gates on the FTN BSO arcmail bundle filename pattern (`.mo0`, `.tu5`, `.su9`, etc. per FTS-5000) and leaves all other archives untouched for their respective processors.
 - Fix: Notification dropdown populated with recent unread notifications on connect (#1)
 - Fix: Sysop notifications create one row per sysop (not shared broadcast rows) for correct per-user read state (#1)
 - Fix: Menu JSON import NaN error from null colour values (#2)
