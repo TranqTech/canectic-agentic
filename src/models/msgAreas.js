@@ -598,29 +598,32 @@ async function recalculateAreaCounts() {
 // QWK conference number management
 // ---------------------------------------------------------------------------
 
-// Ensure the qwk_conf_number column is populated and the UNIQUE constraint
-// exists. Called at startup from gateway/worker init. The column itself
-// is now declared in db/schema/tablecolumns/message_areas.conf so the
-// standard auto-migrator handles creation -- this function manages the
-// constraint (which the .conf format can't express) and the data-side
-// migration from the legacy "qwk_conf_number = id" default into the new
-// "id + RESERVED_CONF_COUNT" scheme.
+// Startup-time invariants for the qwk_conf_number column. This function
+// does NOT migrate data -- the upgrade-path data migration (shifting
+// existing rows into id + RESERVED_CONF_COUNT form) lives in the
+// standalone tool src/tools/qwkConfRenumber.js and is run explicitly
+// by the sysop at upgrade time, per the changelog instructions.
 //
-// Four passes:
-//   1. Ensure UNIQUE constraint exists (idempotent).
-//   2. Backfill NULL rows to (id + RESERVED_CONF_COUNT). Fresh installs
-//      and any newly-added column end up here.
-//   3. Shift legacy default rows (qwk_conf_number = id) up by
-//      RESERVED_CONF_COUNT. Processed row-by-row in DESCENDING id order
-//      to avoid transient unique-constraint violations -- see the pass 3
-//      comment block for the reasoning.
-//   4. Scan for sysop-customised rows sitting inside the reserved range
-//      and log a level-1 warning naming each conflicting shortcode. Do
-//      NOT auto-move them -- they're explicit assignments and silent
-//      changes would be worse than the warning.
+// What this function DOES do at every startup:
+//   1. Ensure the UNIQUE constraint exists on qwk_conf_number. The
+//      column itself is declared in db/schema/tablecolumns/message_areas.conf
+//      and the auto-migrator creates it; the .conf format can't
+//      express constraints so we add the UNIQUE here.
+//   2. Scan for any rows whose qwk_conf_number sits inside the reserved
+//      range [1..RESERVED_CONF_COUNT] and log a level-1 warning naming
+//      each one. These are explicit sysop customisations -- we do not
+//      touch them, but the sysop should know they collide with the
+//      system conference range and may produce duplicate entries in
+//      user QWK downloads.
+//
+// Pre-existing installs upgrading to this release need to run
+//   node src/tools/qwkConfRenumber.js
+// once, before normal operation, to shift existing areas into the
+// reserved-range-compatible scheme. Subsequent runs of that tool are
+// idempotent (setting qwk_conf_number = id + RESERVED_CONF_COUNT on a
+// row that already has that value is a no-op).
 async function ensureQwkConfNumbers() {
-	// Pass 1: Add unique constraint if missing. The column itself is in
-	// the schema .conf now, so the auto-migrator handles creation.
+	// Ensure the UNIQUE constraint exists. Idempotent.
 	try {
 		await postgres.write(
 			`DO $$ BEGIN
@@ -635,185 +638,10 @@ async function ensureQwkConfNumbers() {
 			'redbright');
 	}
 
-	// Pass 1.5: Recover rows corrupted by an earlier broken migration.
-	//
-	// An earlier version of this function did `lr.id + RESERVED_CONF_COUNT`
-	// in JavaScript to compute the legacy-shift target. The pg driver
-	// returns BIGSERIAL columns as strings, so the addition was actually
-	// string concatenation: id=1 shifted to "1" + 100 = "1100" instead
-	// of 1 + 100 = 101. Every affected row ended up at a value that
-	// matches the pattern `parseInt(id.toString() + "100")`. This pass
-	// detects rows that still look like that and resets them to the
-	// correct `id + 100` value.
-	//
-	// Detection is exact: a row is only fixed if its current
-	// qwk_conf_number equals (id::text || '100')::integer -- i.e. the
-	// stringified id with "100" tacked on. A legitimate customisation
-	// that happens to match this pattern would be auto-fixed, but the
-	// chance of a sysop deliberately setting an area with id=42 to
-	// conference 42100 is low enough that we accept the risk rather
-	// than ship a broken install with no recovery path.
-	//
-	// Processed in DESCENDING id order to avoid transient collisions
-	// (same reasoning as pass 3). Each row's target is computed by
-	// Postgres so there's no chance of re-introducing the original
-	// string-concat bug. Idempotent: once a row has been fixed its
-	// qwk_conf_number no longer matches the wacky pattern and
-	// subsequent runs skip it.
-	var recovered = 0;
-	var recoveryFailures = [];
-	try {
-		var brokenRows = await postgres.query(
-			"SELECT id, shortcode, qwk_conf_number FROM message_areas " +
-			"WHERE qwk_conf_number = (id::text || '100')::integer " +
-			"ORDER BY id DESC",
-			[]
-		);
-		for (var br of (brokenRows || [])) {
-			var newConf = parseInt(br.id, 10) + RESERVED_CONF_COUNT;
-			try {
-				await postgres.pgpool.query(
-					"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE id = $2",
-					[RESERVED_CONF_COUNT, br.id]
-				);
-				// Per-row audit log so a sysop who had customisations can
-				// see exactly what moved and restore anything the detection
-				// incorrectly flagged. The pattern is unique per id so
-				// false positives are only possible if a sysop deliberately
-				// set an area's conference number to (id || "100")::int,
-				// which is unusual enough that we accept the risk.
-				alogger.writeAlog(1,
-					'ensureQwkConfNumbers: RECOVERY -- area "' + br.shortcode +
-					'" (id=' + br.id + ') qwk_conf_number ' + br.qwk_conf_number +
-					' -> ' + newConf,
-					'yellowbright', true);
-				recovered++;
-			} catch (rowErr) {
-				recoveryFailures.push({
-					shortcode: br.shortcode,
-					id: br.id,
-					wackyValue: br.qwk_conf_number,
-					error: rowErr.message || String(rowErr)
-				});
-			}
-		}
-		if (recovered > 0) {
-			alogger.writeAlog(1,
-				'ensureQwkConfNumbers: RECOVERY reset ' + recovered + ' row(s) ' +
-				'that matched the broken string-concat migration pattern. If any ' +
-				'of the above moves clobbered a legitimate customisation, restore ' +
-				'it manually via /admin/msgAreas.',
-				'yellowbright', true);
-		}
-		if (recoveryFailures.length > 0) {
-			for (var rf of recoveryFailures) {
-				alogger.writeAlog(1,
-					'ensureQwkConfNumbers: recovery failed for area "' + rf.shortcode +
-					'" (id=' + rf.id + ', current qwk_conf_number=' + rf.wackyValue +
-					') -- target slot is taken by another row (' + rf.error +
-					'). Resolve manually via /admin/msgAreas.',
-					'redbright', true);
-			}
-		}
-	} catch (e) {
-		alogger.writeAlog(2,
-			'ensureQwkConfNumbers: recovery pass failed: ' + (e.message || e),
-			'redbright');
-	}
-
-	// Pass 2: NULL backfill. Uses pgpool directly to read rowCount so
-	// the summary log is meaningful.
-	var nullFilled = 0;
-	try {
-		var nullResult = await postgres.pgpool.query(
-			"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE qwk_conf_number IS NULL",
-			[RESERVED_CONF_COUNT]
-		);
-		nullFilled = (nullResult && nullResult.rowCount) || 0;
-	} catch (e) {
-		alogger.writeAlog(2,
-			'ensureQwkConfNumbers: NULL backfill failed: ' + (e.message || e),
-			'redbright');
-	}
-
-	// Pass 3: Shift legacy default rows (qwk_conf_number = id) up by
-	// RESERVED_CONF_COUNT. Every row moves by exactly +100 -- same
-	// offset as the default for new areas, same for every row, no
-	// exceptions.
-	//
-	// ORDERING MATTERS. A single multi-row UPDATE would trip the UNIQUE
-	// constraint on the very first row: PostgreSQL checks uniqueness
-	// per-row as each modification happens, not at end of statement.
-	// If an install has more areas than RESERVED_CONF_COUNT (say 150
-	// areas, all legacy), shifting row id=1 from 1 to 101 collides with
-	// row id=101 which is still at qwk_conf_number=101 because it hasn't
-	// been touched yet inside the same statement.
-	//
-	// Fix: walk descending by id and UPDATE one row at a time. Each
-	// row's shift target is (id + RESERVED_CONF_COUNT). Descending
-	// order guarantees the target is free: by the time we process a
-	// row with id=N, every row with a larger id has already moved to
-	// its own target and vacated whatever slot it was holding. In
-	// particular, any row that had been holding the value N+100 (the
-	// target for row N) has moved on, because such a row's id must
-	// have been > N.
-	//
-	// Genuine collisions with sysop-customised rows (e.g. row id=200
-	// with qwk_conf_number=130 blocking legacy row 30's shift to 130)
-	// fail individually; we log and continue so one bad row doesn't
-	// block the whole migration.
-	//
-	// Idempotent -- once a row has been shifted, its qwk_conf_number
-	// no longer equals its id, so subsequent runs skip it.
-	var legacyShifted = 0;
-	var legacyFailures = [];
-	try {
-		var legacyRows = await postgres.query(
-			"SELECT id, shortcode FROM message_areas WHERE qwk_conf_number = id ORDER BY id DESC",
-			[]
-		);
-		for (var lr of (legacyRows || [])) {
-			try {
-				// Compute the target in SQL -- NOT in JavaScript. The pg
-				// driver returns BIGSERIAL columns as strings to preserve
-				// precision, so `lr.id + RESERVED_CONF_COUNT` in JS would
-				// string-concat ('1' + 100 = '1100') instead of
-				// integer-adding (1 + 100 = 101). Doing the addition
-				// inside the UPDATE's SET clause lets Postgres handle it
-				// as BIGINT arithmetic.
-				//
-				// Double-bind on id AND qwk_conf_number = id to avoid
-				// clobbering a row that raced out from under us.
-				await postgres.pgpool.query(
-					"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE id = $2 AND qwk_conf_number = $2",
-					[RESERVED_CONF_COUNT, lr.id]
-				);
-				legacyShifted++;
-			} catch (rowErr) {
-				legacyFailures.push({
-					shortcode: lr.shortcode,
-					id: lr.id,
-					error: rowErr.message || String(rowErr)
-				});
-			}
-		}
-		if (legacyFailures.length > 0) {
-			for (var f of legacyFailures) {
-				alogger.writeAlog(1,
-					'ensureQwkConfNumbers: legacy shift failed for area "' + f.shortcode +
-					'" (id=' + f.id + ') -- target slot is taken by another row. ' +
-					'Resolve via /admin/msgAreas by renumbering one of the conflicting ' +
-					'areas to a value > ' + RESERVED_CONF_COUNT + ' that is not already in use.',
-					'yellowbright', true);
-			}
-		}
-	} catch (e) {
-		alogger.writeAlog(2,
-			'ensureQwkConfNumbers: legacy shift scan failed: ' + (e.message || e),
-			'redbright');
-	}
-
-	// Pass 4: Warn about sysop-customised rows in the reserved range.
+	// Warn about any rows currently holding a value inside the reserved
+	// range. These are sysop assignments (or legacy data from before the
+	// reserved-range scheme was introduced) and need manual resolution:
+	// the tool won't auto-move them because the intent isn't clear.
 	try {
 		var conflicts = await postgres.query(
 			"SELECT id, shortcode, qwk_conf_number FROM message_areas " +
@@ -828,7 +656,8 @@ async function ensureQwkConfNumbers() {
 					'qwk_conf_number=' + c.qwk_conf_number + ' which is inside the reserved ' +
 					'range (1-' + RESERVED_CONF_COUNT + '). System conferences may emit with ' +
 					'the same number, creating duplicates in downloaded QWK packets. ' +
-					'Fix via /admin/msgAreas -- set a value > ' + RESERVED_CONF_COUNT + '.',
+					'Run `node src/tools/qwkConfRenumber.js` if this is an upgrade, or ' +
+					'renumber manually via /admin/msgAreas to a value > ' + RESERVED_CONF_COUNT + '.',
 					'yellowbright', true);
 			}
 		}
@@ -836,15 +665,6 @@ async function ensureQwkConfNumbers() {
 		alogger.writeAlog(2,
 			'ensureQwkConfNumbers: reserved-range scan failed: ' + (e.message || e),
 			'yellow');
-	}
-
-	// Summary log
-	if (nullFilled > 0 || legacyShifted > 0) {
-		alogger.writeAlog(1,
-			'ensureQwkConfNumbers: ' + nullFilled + ' null row(s) backfilled, ' +
-			legacyShifted + ' legacy row(s) shifted into the post-reserved range ' +
-			'(offset +' + RESERVED_CONF_COUNT + ')',
-			'cyan');
 	}
 }
 

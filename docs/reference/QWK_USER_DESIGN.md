@@ -88,12 +88,23 @@ Each message area carries a `qwk_conf_number` column (INTEGER, UNIQUE). This is 
 - **Stable across all users and downloads**: every user's QWK packet uses the same conference numbers, so any QWK reader's conference list is consistent.
 - **Independent of QWK network areatags**: network areatags (the conference numbers used for peer-to-peer QWK networking) are a property of the network mapping, not the local area. The local `qwk_conf_number` is for user-facing packets only. A sysop may choose to align them manually, but there is no automatic coupling.
 
-**Startup migration (`msgAreas.ensureQwkConfNumbers`)** runs four passes:
+**Startup invariants** (`msgAreas.ensureQwkConfNumbers`):
 
 1. Ensure the `message_areas_qwk_conf_number_key` UNIQUE constraint exists (idempotent).
-2. NULL backfill: rows with `qwk_conf_number IS NULL` get `(id + RESERVED_CONF_COUNT)`.
-3. Legacy default shift: rows where `qwk_conf_number = id` (the pre-reserved-range default) are shifted up by RESERVED_CONF_COUNT. Collision-safe because `id` is unique so `id + 100` is unique too. Idempotent on subsequent startups.
-4. Reserved-range scan: any row with `qwk_conf_number` in `[1..100]` is logged at level 1 with its shortcode, warning the sysop to renumber it. These are explicit sysop assignments, not defaults, so the migration does not auto-move them — silent mutation of explicit values would be worse than the warning.
+2. Reserved-range scan: any row with `qwk_conf_number` in `[1..100]` is logged at level 1 with its shortcode, warning the sysop to renumber it. These are explicit sysop assignments (or legacy data from before the reserved-range scheme); we do not auto-move them, since silent mutation of explicit values would be worse than the warning. The sysop resolves via `/admin/msgAreas` or by running the upgrade tool described below.
+
+The startup function deliberately does **no data migration**. It only enforces schema-level invariants and surfaces warnings. Upgrade-path data migration is the responsibility of the explicit tool below.
+
+**Upgrade tool** (`src/tools/qwkConfRenumber.js`):
+
+A standalone Node CLI that walks `message_areas` in descending-id order and sets `qwk_conf_number = id + RESERVED_CONF_COUNT` for every row, via SQL integer arithmetic inside the UPDATE statement (not JavaScript — the pg driver returns BIGSERIAL columns as strings, so `row.id + 100` in JS would string-concatenate to `'1100'` instead of integer-adding to `101`).
+
+```bash
+node src/tools/qwkConfRenumber.js            # renumber in place
+node src/tools/qwkConfRenumber.js --dry-run  # preview without writing
+```
+
+Run the tool once when upgrading an install to the release that adopted the reserved range. The descending-id walk is collision-safe for any number of areas: by the time the tool processes row N, every row with a larger id has already moved to its own target, so row N's target slot is guaranteed free. After the tool completes, start the gateway/worker processes normally. Subsequent runs are idempotent — UPDATE-ing a row that's already at `id + 100` is a no-op.
 
 ## 1.5. Reserved System Conferences
 
