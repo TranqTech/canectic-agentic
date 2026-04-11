@@ -1,0 +1,56 @@
+//- Move Area Modal -- used from both msgAreas/index.pug and
+//- msgGroups/view.pug via `include ./_moveAreaModal` or
+//- `include ../msgAreas/_moveAreaModal`.
+//-
+//- Expects the including template's scope to provide a `grouplist`
+//- local (array of { shortcode, name }) for populating the target
+//- group dropdown. The current group is filtered out client-side
+//- on modal open based on the area being moved.
+//-
+//- The modal is populated by JS when the "Move" button is clicked in
+//- the area info modal. The JS reads the currently-selected area's
+//- shortcode and group from the table row's data attributes, fills
+//- the modal's hidden fields, and opens it.
+
+#moveAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
+  .modal-dialog.modal-dialog-centered
+    .modal-content
+      .modal-header.bg-dark.text-white
+        h3.modal-title
+          i.bi.bi-arrow-right-circle.me-2
+          | Move Area
+        button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+      .modal-body.bg-dark.text-white
+        form#moveAreaForm(method='POST')
+          .mb-3
+            label.form-label Area
+            .form-control-plaintext.fg-yellow#maArea
+          .mb-3
+            label.form-label Current group
+            .form-control-plaintext.fg-cyan#maCurrentGroup
+          .mb-3
+            label.form-label(for='ma_target_group') Move to group
+            select.form-select(id='ma_target_group' name='target_group_shortcode' required)
+              option(value='') — Select a target group —
+              if grouplist && grouplist.length > 0
+                for group of grouplist
+                  option(value=group.shortcode data-shortcode=group.shortcode)= group.name + ' (' + group.shortcode + ')'
+          .form-check.mb-3
+            input.form-check-input(type='checkbox' id='ma_apply_defaults' name='apply_defaults' value='true')
+            label.form-check-label(for='ma_apply_defaults')
+              | Apply new group's default settings to this area
+            .form-text.text-muted
+              | When checked, the area's security levels, age limits, permission/restriction flags, post-as, and newscan default are all replaced with the values from the destination group. Any per-area customisations you've made will be lost.
+          .alert.alert-info.small.mb-0
+            strong What moves:
+            |  only the area's group assignment. Message content, user read pointers, network mappings, peer subscriptions, QWK conference number, and all statistics are preserved.
+            br
+            strong Note:
+            |  network mapping stays with the area. Change networking separately via the
+            |  #[a(href='/admin/networks') Network Management]
+            |  page if you need to.
+      .modal-footer.bg-dark
+        button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+        button.btn.btn-warning(type='submit' form='moveAreaForm')
+          i.bi.bi-arrow-right-circle.me-1
+          | Move Area

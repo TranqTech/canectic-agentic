@@ -259,6 +259,7 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 				}
 			}
 			var networklist = await msgNetworks.getActiveNetworks();
+			var grouplist   = await msgGroups.getAllGroups();
 		res.render('admin/msgGroups/view', {
 			sufficientAccess: sufficientAccess,
 			title: msgGroup ? msgGroup.name : shortcode,
@@ -267,6 +268,7 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 			msgGroup: msgGroup,
 			arealist: arealist,
 			networklist: networklist,
+			grouplist: grouplist,
 			errormessages: result.errormessages,
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions(),
@@ -311,6 +313,7 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 				}
 			}
 			var networklist = await msgNetworks.getActiveNetworks();
+			var grouplist   = await msgGroups.getAllGroups();
 		res.render('admin/msgGroups/view', {
 			sufficientAccess: true,
 			title: msgGroup ? msgGroup.name : shortcode,
@@ -319,6 +322,7 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 			msgGroup: msgGroup,
 			arealist: arealist,
 			networklist: networklist,
+			grouplist: grouplist,
 			errormessages: result.errormessages,
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions(),
@@ -380,6 +384,7 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 		}
 	}
 	var networklist = await msgNetworks.getActiveNetworks();
+	var grouplist   = await msgGroups.getAllGroups();
 	res.render('admin/msgGroups/view', {
 		sufficientAccess: sufficientAccess,
 		title: title,
@@ -388,6 +393,7 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 		msgGroup: msgGroup,
 		arealist: arealist,
 		networklist: networklist,
+		grouplist: grouplist,
 		availablePermissions: getAvailablePermissions(),
 		availableRestrictions: getAvailableRestrictions(),
 		DateTime: DateTime
@@ -1247,6 +1253,62 @@ router.post('/msgArea/:shortcode/update', urlencodedParser, requireAdmin, async 
 			errormessages: result.errormessages,
 			DateTime: DateTime
 		});
+	}
+});
+
+// Move a message area from one group to another. Body:
+//   target_group_shortcode  -- the destination group (required)
+//   apply_defaults          -- 'true' to also copy the target group's
+//                              security / flags / post_as / newscan_default /
+//                              min_age / max_age onto the area after the move.
+//                              Defaults unchecked; checked means existing
+//                              per-area customisations are overwritten.
+//
+// On success redirects back to the source page (or the destination group
+// if the sysop moved from the global areas table). No-op moves (area
+// already in the target group) flash a friendly info message rather
+// than an error.
+router.post('/msgArea/:shortcode/move', urlencodedParser, requireAdmin, async (req, res) => {
+	var shortcode             = req.params.shortcode.toUpperCase().trim();
+	var targetGroupShortcode  = (req.body.target_group_shortcode || '').toUpperCase().trim();
+	var applyDefaults         = req.body.apply_defaults === 'true' || req.body.apply_defaults === 'on';
+
+	if (!targetGroupShortcode) {
+		await flash.setOne(req, 'danger', 'No target group selected');
+		return res.redirect(req.get('Referer') || '/admin/msgAreas');
+	}
+
+	var dbarea = await msgAreas.getAreaByShortcode(shortcode);
+	var sourceGroupShortcode = dbarea ? dbarea.group_shortcode : null;
+
+	var result = await msgAreas.moveArea(shortcode, targetGroupShortcode, {
+		applyDefaults: applyDefaults
+	});
+
+	if (!result.status) {
+		await flash.setOne(req, 'danger',
+			'Move failed: ' + (result.errormessages || []).join(', '));
+		return res.redirect(req.get('Referer') ||
+			(sourceGroupShortcode ? '/admin/msgGroup/' + sourceGroupShortcode : '/admin/msgAreas'));
+	}
+
+	if (result.noop) {
+		await flash.setOne(req, 'info',
+			'Area "' + shortcode + '" is already in group "' + targetGroupShortcode + '" — nothing to do');
+	} else {
+		await flash.setOne(req, 'success',
+			'Area "' + shortcode + '" moved to group "' + result.newGroupShortcode + '"' +
+			(applyDefaults ? ' with group defaults applied' : ''));
+	}
+
+	// Redirect to the destination group's view so the sysop sees the area
+	// in its new home. If they came from the global /admin/msgAreas
+	// listing, send them back there instead.
+	var referer = req.get('Referer') || '';
+	if (referer.includes('/admin/msgAreas')) {
+		res.redirect('/admin/msgAreas');
+	} else {
+		res.redirect('/admin/msgGroup/' + result.newGroupShortcode);
 	}
 });
 

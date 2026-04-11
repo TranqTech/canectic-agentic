@@ -463,6 +463,156 @@ async function updateArea(shortcode, formObj) {
 	return returnObj;
 }
 
+// Move a message area from its current group to a target group.
+//
+// What moves:
+//   - message_areas.group_id, group_uuid, group_shortcode
+//   - If opts.applyDefaults: also the target group's security / flags /
+//     post_as / newscan_default / min_age / max_age are copied onto the
+//     area, overwriting any per-area customisations
+//
+// What stays put (all keyed by shortcode or area id, not group):
+//   - Backing tables mb_<shortcode>_msgs / _threads
+//   - user_msg_pointers (read tracking)
+//   - user_msg_subscriptions
+//   - peer_area_subscriptions
+//   - network_areas (network mappings)
+//   - qwk_conf_number
+//   - last_* and msg_count stats
+//
+// Behaviour:
+//   - Returns { status: true, newGroupShortcode, noop: true } if the
+//     area is already in the target group (caller surfaces a friendly
+//     message rather than an error)
+//   - Returns { status: false, errormessages } if the target group or
+//     source area cannot be found
+//   - On successful move, decrements the old group's area_count and
+//     increments the new group's (via direct UPDATEs; the
+//     recalculateAreaCounts() drift fix is available if needed)
+//
+// opts: { applyDefaults: bool }
+async function moveArea(shortcode, targetGroupShortcode, opts) {
+	var options = opts || {};
+	var returnObj = {
+		status: false,
+		errormessages: [],
+		noop: false,
+		newGroupShortcode: null
+	};
+
+	var shorty = (shortcode || '').toLowerCase().trim();
+	var targetShorty = (targetGroupShortcode || '').trim();
+	if (!shorty) {
+		returnObj.errormessages.push('No shortcode provided');
+		return returnObj;
+	}
+	if (!targetShorty) {
+		returnObj.errormessages.push('No target group provided');
+		return returnObj;
+	}
+
+	var dbarea = await getAreaByShortcode(shorty);
+	if (!dbarea) {
+		returnObj.errormessages.push('Area "' + shorty + '" not found');
+		return returnObj;
+	}
+
+	var targetGroup = await msgGroups.getGroupByShortcode(targetShorty);
+	if (!targetGroup) {
+		returnObj.errormessages.push('Target group "' + targetShorty + '" not found');
+		return returnObj;
+	}
+
+	// No-op if the area is already in the target group. Surface as
+	// success with noop: true so the route can flash a friendly
+	// "already in that group" message rather than an error.
+	if (dbarea.group_shortcode === targetGroup.shortcode) {
+		returnObj.status = true;
+		returnObj.noop = true;
+		returnObj.newGroupShortcode = targetGroup.shortcode;
+		return returnObj;
+	}
+
+	var oldGroupShortcode = dbarea.group_shortcode;
+	var oldGroupId = dbarea.group_id;
+
+	// Build the update set. Always moves the group FKs; optionally
+	// overwrites the per-area settings with the target group's defaults.
+	var updateObj = {
+		group_id: targetGroup.id,
+		group_uuid: targetGroup.uuid,
+		group_shortcode: targetGroup.shortcode,
+		updated_at: new Date()
+	};
+
+	if (options.applyDefaults) {
+		if (targetGroup.read_security !== undefined && targetGroup.read_security !== null) {
+			updateObj.read_security = targetGroup.read_security;
+		}
+		if (targetGroup.post_security !== undefined && targetGroup.post_security !== null) {
+			updateObj.post_security = targetGroup.post_security;
+		}
+		if (targetGroup.post_as) {
+			updateObj.post_as = targetGroup.post_as;
+		}
+		if (targetGroup.newscan_default !== undefined && targetGroup.newscan_default !== null) {
+			updateObj.newscan_default = targetGroup.newscan_default === true;
+		}
+		if (targetGroup.min_age !== undefined && targetGroup.min_age !== null) {
+			updateObj.min_age = targetGroup.min_age;
+		}
+		if (targetGroup.max_age !== undefined && targetGroup.max_age !== null) {
+			updateObj.max_age = targetGroup.max_age;
+		}
+		// Flag columns -- copy the target group's arrays verbatim. The
+		// DB column type is JSONB so we serialise to a JSON string.
+		updateObj.read_perm_flags = JSON.stringify(targetGroup.read_perm_flags || []);
+		updateObj.read_rest_flags = JSON.stringify(targetGroup.read_rest_flags || []);
+		updateObj.post_perm_flags = JSON.stringify(targetGroup.post_perm_flags || []);
+		updateObj.post_rest_flags = JSON.stringify(targetGroup.post_rest_flags || []);
+	}
+
+	var count = await postgres.updateById(dbarea.id, updateObj, 'message_areas');
+	if (!count || count < 1) {
+		returnObj.errormessages.push('Failed to move area "' + shorty + '"');
+		return returnObj;
+	}
+
+	// Adjust area_count on both groups. Use direct UPDATEs rather than
+	// recalculateAreaCounts() because it's cheaper for a single move and
+	// the counts can't go stale from this one operation. If the counts
+	// are ever observed to drift, recalculateAreaCounts() exists as a
+	// safety net.
+	try {
+		if (oldGroupId) {
+			await postgres.write(
+				'UPDATE message_groups SET area_count = GREATEST(0, COALESCE(area_count, 0) - 1), updated_at = NOW() WHERE id = $1',
+				[oldGroupId]
+			);
+		}
+		await postgres.write(
+			'UPDATE message_groups SET area_count = COALESCE(area_count, 0) + 1, updated_at = NOW() WHERE id = $1',
+			[targetGroup.id]
+		);
+	} catch (countErr) {
+		alogger.writeAlog(3,
+			'moveArea: area_count update failed after move (' + oldGroupShortcode +
+			' -> ' + targetGroup.shortcode + '): ' + (countErr.message || countErr) +
+			' -- run recalculateAreaCounts() to fix drift',
+			'yellow');
+	}
+
+	alogger.writeAlog(5,
+		'Message area moved: ' + shorty + ' from ' + oldGroupShortcode +
+		' to ' + targetGroup.shortcode +
+		(options.applyDefaults ? ' (with group defaults applied)' : ''),
+		'greenbright');
+
+	returnObj.status = true;
+	returnObj.newGroupShortcode = targetGroup.shortcode;
+	return returnObj;
+}
+
 async function removeArea(shortcode, deleteTables) {
 	var returnObj = {
 		status: false,
@@ -681,6 +831,7 @@ export {
 	RESERVED_CONF_COUNT,
 	newArea,
 	updateArea,
+	moveArea,
 	removeArea,
 	getAreaByShortcode,
 	getAreaByAreatag,

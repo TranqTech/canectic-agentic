@@ -180,6 +180,8 @@ block content
                       |  
                       button.btn.btn-sm.btn-warning#areaEditBtn Edit
                       |  
+                      button.btn.btn-sm.btn-secondary#areaMoveBtn Move
+                      |  
                       button.btn.btn-sm.btn-danger#areaDeleteBtn Delete
                       |  
                       button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
@@ -316,6 +318,9 @@ block content
                       value='Delete Area'
                       class='btn btn-danger'
                     )
+
+          //- Move Area Modal (shared partial)
+          include ../msgAreas/_moveAreaModal
 
           // New Area Modal
           #newAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
@@ -588,6 +593,7 @@ block content
         const areaInfoModal   = new bootstrap.Modal(document.getElementById('areaInfoModal'));
         const editAreaModal   = new bootstrap.Modal(document.getElementById('editAreaModal'));
         const deleteAreaModal = new bootstrap.Modal(document.getElementById('deleteAreaModal'));
+        const moveAreaModal   = new bootstrap.Modal(document.getElementById('moveAreaModal'));
 
         var currentAreaShortcode = '';
 
@@ -797,6 +803,42 @@ block content
 
           areaInfoModal.hide();
           editAreaModal.show();
+        });
+
+        // Move button -- opens the shared moveAreaModal, pre-populates
+        // the area + current-group display, filters the current group
+        // out of the target dropdown, and wires the form action.
+        document.getElementById('areaMoveBtn').addEventListener('click', function() {
+          if (!currentAreaShortcode) return;
+          const row = document.querySelector(`tr[data-bs-shortcode="${currentAreaShortcode}"]`);
+          if (!row) return;
+          const d = row.dataset;
+          // In the group view, the current group is always the page's
+          // msgGroup shortcode. Fall back to the row's data-bs-
+          // groupshortcode if present for safety. JSON-encode the
+          // shortcode so any special characters (unlikely given
+          // validation rules, but defensive) are properly quoted.
+          const currentGroup = d.bsGroupshortcode || !{JSON.stringify(msgGroup ? msgGroup.shortcode : '')};
+
+          document.getElementById('maArea').textContent         = d.bsName + ' (' + d.bsShortcode + ')';
+          document.getElementById('maCurrentGroup').textContent = currentGroup || '(unknown)';
+
+          const targetSelect = document.getElementById('ma_target_group');
+          for (const opt of targetSelect.options) {
+            if (opt.value === currentGroup) {
+              opt.hidden = true;
+              opt.disabled = true;
+            } else {
+              opt.hidden = false;
+              opt.disabled = false;
+            }
+          }
+          targetSelect.value = '';
+          document.getElementById('ma_apply_defaults').checked = false;
+          document.getElementById('moveAreaForm').action = `/admin/msgArea/${currentAreaShortcode}/move`;
+
+          areaInfoModal.hide();
+          moveAreaModal.show();
         });
 
         // Delete button

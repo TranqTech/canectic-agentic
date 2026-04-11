@@ -110,6 +110,7 @@ block content
                 .ms-auto.d-flex.gap-2
                   button.btn.btn-sm.btn-info#areaViewBtn View
                   button.btn.btn-sm.btn-warning#areaEditBtn Edit
+                  button.btn.btn-sm.btn-secondary#areaMoveBtn Move
                   button.btn.btn-sm.btn-danger#areaDeleteBtn Delete
                   button.btn.btn-sm.btn-close(data-bs-dismiss='modal')
               .modal-body.bg-dark.text-white
@@ -246,6 +247,9 @@ block content
                   |  
                   input(type='submit' value='Delete Area' class='btn btn-danger')
 
+        //- Move Area Modal (shared partial)
+        include ./_moveAreaModal
+
         //- New Area Modal (with group selector)
         #newAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
           .modal-dialog.modal-dialog-centered.modal-lg
@@ -292,6 +296,7 @@ block content
       var areaInfoModal   = new bootstrap.Modal(document.getElementById('areaInfoModal'));
       var editAreaModal   = new bootstrap.Modal(document.getElementById('editAreaModal'));
       var deleteAreaModal = new bootstrap.Modal(document.getElementById('deleteAreaModal'));
+      var moveAreaModal   = new bootstrap.Modal(document.getElementById('moveAreaModal'));
       var currentAreaShortcode = '';
 
       var allPerms  = !{JSON.stringify(availablePermissions)};
@@ -459,6 +464,42 @@ block content
 
         areaInfoModal.hide();
         editAreaModal.show();
+      });
+
+      // Move
+      document.getElementById('areaMoveBtn').addEventListener('click', function() {
+        if (!currentAreaShortcode) return;
+        var row = document.querySelector('tr[data-bs-shortcode="' + currentAreaShortcode + '"]');
+        if (!row) return;
+        var d = row.dataset;
+        var currentGroup = d.bsGroupshortcode || '';
+
+        // Populate the modal's read-only area + current group display
+        document.getElementById('maArea').textContent         = d.bsName + ' (' + d.bsShortcode + ')';
+        document.getElementById('maCurrentGroup').textContent = currentGroup || '(unknown)';
+
+        // Filter the target group dropdown: hide the current group so
+        // the sysop can't select a no-op. Also reset the selection.
+        var targetSelect = document.getElementById('ma_target_group');
+        for (var opt of targetSelect.options) {
+          if (opt.value === currentGroup) {
+            opt.hidden = true;
+            opt.disabled = true;
+          } else {
+            opt.hidden = false;
+            opt.disabled = false;
+          }
+        }
+        targetSelect.value = '';
+
+        // Reset the apply-defaults checkbox (unchecked per the design)
+        document.getElementById('ma_apply_defaults').checked = false;
+
+        // Wire the form action to the current area's move endpoint
+        document.getElementById('moveAreaForm').action = '/admin/msgArea/' + currentAreaShortcode + '/move';
+
+        areaInfoModal.hide();
+        moveAreaModal.show();
       });
 
       // Delete
