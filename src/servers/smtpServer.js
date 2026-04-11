@@ -62,19 +62,30 @@ class SmtpSession {
 
 	_onData(data) {
 		if (this.state === 'data') {
-			// Collecting message body
-			this.dataBuffer += data.toString('utf8');
+			// Collecting message body. We use latin1 for byte fidelity: SMTP
+			// with 8BITMIME can carry any 0-255 byte value in the body, and
+			// latin1 is the only Node string encoding that maps 1:1 onto raw
+			// bytes. utf8 would mangle high-bit bytes into U+FFFD and wreck
+			// base64 slicing for attachment parts and charset conversion for
+			// text parts later in _parseMessage.
+			this.dataBuffer += data.toString('latin1');
 			// Check for end-of-data marker
 			if (this.dataBuffer.includes('\r\n.\r\n')) {
 				var body = this.dataBuffer.split('\r\n.\r\n')[0];
 				this.dataBuffer = '';
 				this.state = 'ready';
+				// RFC 5321 section 4.5.2 -- transparency: the client prefixes
+				// any body line starting with "." with an extra "." so the
+				// dot doesn't look like the end-of-data marker. The receiver
+				// MUST strip that extra dot before processing the message.
+				body = body.replace(/\r\n\.\./g, '\r\n.');
+				if (body.startsWith('..')) body = body.substring(1);
 				this._processData(body);
 			}
 			return;
 		}
 
-		this._buffer += data.toString('utf8');
+		this._buffer += data.toString('latin1');
 		var lines = this._buffer.split('\r\n');
 		this._buffer = lines.pop();
 
@@ -874,13 +885,19 @@ class SmtpSession {
 
 			var mimeType = partCt.split(';')[0].trim() || 'application/octet-stream';
 
+			// partBody is a latin1 string (byte-faithful). For base64 we
+			// feed the ASCII-only text to Buffer's base64 decoder. For
+			// quoted-printable we decode =XX escapes (each producing a
+			// single char code) and reinterpret the result as raw bytes
+			// -- NOT utf8, which would corrupt any byte > 0x7F. For
+			// unencoded 8bit/binary parts latin1 already is the raw bytes.
 			var data;
 			if (partEncoding === 'base64') {
 				data = Buffer.from(partBody.replace(/\s/g, ''), 'base64');
 			} else if (partEncoding === 'quoted-printable') {
-				data = Buffer.from(this._decodeQP(partBody));
+				data = Buffer.from(this._decodeQP(partBody), 'latin1');
 			} else {
-				data = Buffer.from(partBody, 'binary');
+				data = Buffer.from(partBody, 'latin1');
 			}
 
 			result.attachments.push({
@@ -891,14 +908,23 @@ class SmtpSession {
 		}
 	}
 
+	// Decode a text/* part body into a JavaScript UTF-8 string.
+	//
+	// The raw body is held as a latin1 string at this point (see _onData)
+	// so every character code is the literal byte value. We reinterpret
+	// those bytes as UTF-8 because modern mail is overwhelmingly UTF-8;
+	// messages in another charset will Mojibake but attachment integrity
+	// (the priority here) is preserved.
 	_decodePart(body, encoding) {
 		if (encoding === 'base64') {
 			return Buffer.from(body.replace(/\s/g, ''), 'base64').toString('utf8');
 		}
 		if (encoding === 'quoted-printable') {
-			return this._decodeQP(body);
+			var qpBytes = this._decodeQP(body);
+			return Buffer.from(qpBytes, 'latin1').toString('utf8');
 		}
-		return body;
+		// 7bit, 8bit, binary -- body is already the raw bytes held in latin1
+		return Buffer.from(body, 'latin1').toString('utf8');
 	}
 
 	_decodeQP(str) {
