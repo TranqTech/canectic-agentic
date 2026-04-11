@@ -598,9 +598,10 @@ async function recalculateAreaCounts() {
 //   1. Ensure UNIQUE constraint exists (idempotent).
 //   2. Backfill NULL rows to (id + RESERVED_CONF_COUNT). Fresh installs
 //      and any newly-added column end up here.
-//   3. Shift legacy default rows (where qwk_conf_number = id) up by
-//      RESERVED_CONF_COUNT. One-time migration for pre-existing installs.
-//      Collision-safe because id is unique so (id + 100) is unique too.
+//   3. Shift legacy default rows (qwk_conf_number = id) up by
+//      RESERVED_CONF_COUNT. Processed row-by-row in DESCENDING id order
+//      to avoid transient unique-constraint violations -- see the pass 3
+//      comment block for the reasoning.
 //   4. Scan for sysop-customised rows sitting inside the reserved range
 //      and log a level-1 warning naming each conflicting shortcode. Do
 //      NOT auto-move them -- they're explicit assignments and silent
@@ -637,23 +638,77 @@ async function ensureQwkConfNumbers() {
 			'redbright');
 	}
 
-	// Pass 3: Shift legacy default rows (qwk_conf_number = id). This is
-	// the one-time migration for installs that existed before the
-	// reserved-range rework. Idempotent -- once a row has been shifted
-	// its qwk_conf_number != id and subsequent runs skip it.
+	// Pass 3: Shift legacy default rows (qwk_conf_number = id) up by
+	// RESERVED_CONF_COUNT. One-time migration for installs that existed
+	// before the reserved-range rework. Every row shifts by exactly
+	// +RESERVED_CONF_COUNT (same as the default for new areas) -- no
+	// extra buffer, no double-shifting.
+	//
+	// ORDERING MATTERS. A single multi-row UPDATE would trip the UNIQUE
+	// constraint on the very first row: PostgreSQL checks uniqueness
+	// per-row as each modification happens, not at end of statement.
+	// If an install has more areas than RESERVED_CONF_COUNT (say 150
+	// areas, all legacy), shifting row id=1 from 1 to 101 collides with
+	// row id=101 which is still at qwk_conf_number=101 because it hasn't
+	// been touched yet inside the same statement.
+	//
+	// Fix: walk descending by id and UPDATE one row at a time. When we
+	// get to row id=N, any row with a larger id has already been
+	// processed and vacated its old slot. Specifically: if there was
+	// a row at id=N+100 sitting at qwk_conf_number=N+100, it was
+	// processed earlier in the loop (larger id), moved to its own
+	// shift target (N+200 -- its own +100), and the qwk_conf_number=N+100
+	// slot is now free for row N to move into. The "N+200" isn't an
+	// extra buffer for row N; it's the legitimate shift target of the
+	// row that happened to have id=N+100.
+	//
+	// Genuine collisions with sysop-customised rows (e.g. row id=200
+	// with qwk_conf_number=130 blocking legacy row 30's shift to 130)
+	// fail individually; we log and continue so one bad row doesn't
+	// block the whole migration.
+	//
+	// Idempotent -- once a row has been shifted, its qwk_conf_number
+	// no longer equals its id, so subsequent runs skip it.
 	var legacyShifted = 0;
+	var legacyFailures = [];
 	try {
-		var shiftResult = await postgres.pgpool.query(
-			"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE qwk_conf_number = id",
-			[RESERVED_CONF_COUNT]
+		var legacyRows = await postgres.query(
+			"SELECT id, shortcode FROM message_areas WHERE qwk_conf_number = id ORDER BY id DESC",
+			[]
 		);
-		legacyShifted = (shiftResult && shiftResult.rowCount) || 0;
+		for (var lr of (legacyRows || [])) {
+			var target = lr.id + RESERVED_CONF_COUNT;
+			try {
+				// Double-bind on id AND qwk_conf_number = id to avoid
+				// clobbering a row that raced out from under us.
+				await postgres.pgpool.query(
+					"UPDATE message_areas SET qwk_conf_number = $1 WHERE id = $2 AND qwk_conf_number = $2",
+					[target, lr.id]
+				);
+				legacyShifted++;
+			} catch (rowErr) {
+				legacyFailures.push({
+					shortcode: lr.shortcode,
+					id: lr.id,
+					target: target,
+					error: rowErr.message || String(rowErr)
+				});
+			}
+		}
+		if (legacyFailures.length > 0) {
+			for (var f of legacyFailures) {
+				alogger.writeAlog(1,
+					'ensureQwkConfNumbers: legacy shift failed for area "' + f.shortcode +
+					'" (id=' + f.id + ') -- target qwk_conf_number=' + f.target +
+					' is taken by another row. Resolve via /admin/msgAreas by renumbering ' +
+					'one of the conflicting areas to a value > ' + RESERVED_CONF_COUNT +
+					' that is not already in use.',
+					'yellowbright', true);
+			}
+		}
 	} catch (e) {
 		alogger.writeAlog(2,
-			'ensureQwkConfNumbers: legacy shift failed: ' + (e.message || e) +
-			' -- may indicate a collision with a sysop-customised row. Manual ' +
-			'cleanup may be required; areas with qwk_conf_number <= ' + RESERVED_CONF_COUNT +
-			' should be renumbered via /admin/msgAreas.',
+			'ensureQwkConfNumbers: legacy shift scan failed: ' + (e.message || e),
 			'redbright');
 	}
 
