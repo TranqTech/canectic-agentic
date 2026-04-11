@@ -117,6 +117,7 @@ block content
                       th(style='width:24px;')
                       th From
                       th Subject
+                      th(style='width:24px;')
                       th(style='width:100px;') Date
                   tbody
                     if messages && messages.length > 0
@@ -134,6 +135,9 @@ block content
                             if msg.from_address && msg.from_address !== msg.from_user
                               span.fg-cyan.small.ms-1 (#{msg.from_address})
                           td.text-truncate(style='max-width:0;')= msg.subject || '(no subject)'
+                          td.text-center
+                            if msg.has_attachments
+                              i.bi.bi-paperclip.text-info(title='Has attachments')
                           td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;')
                             if msg.system_time
                               - var mdate = Date.parse(msg.system_time)
@@ -148,6 +152,7 @@ block content
                       th(style='width:24px;')
                       th To
                       th Subject
+                      th(style='width:24px;')
                       th(style='width:100px;') Date
                   tbody
                     if sentMessages && sentMessages.length > 0
@@ -168,6 +173,9 @@ block content
                             if msg.to_address && msg.to_address !== msg.to_user
                               span.fg-cyan.small.ms-1 (#{msg.to_address})
                           td.text-truncate(style='max-width:0;')= msg.subject || '(no subject)'
+                          td.text-center
+                            if msg.has_attachments
+                              i.bi.bi-paperclip.text-info(title='Has attachments')
                           td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;')
                             if msg.system_time
                               - var mdate = Date.parse(msg.system_time)
@@ -182,6 +190,7 @@ block content
                       th(style='width:50px;') Type
                       th From/To
                       th Subject
+                      th(style='width:24px;')
                       th(style='width:100px;') Deleted
                   tbody
                     if trashMessages && trashMessages.length > 0
@@ -204,6 +213,9 @@ block content
                               span.text-muted From: 
                               span.fg-yellow= msg.from_user
                           td.text-truncate(style='max-width:0;')= msg.subject || '(no subject)'
+                          td.text-center
+                            if msg.has_attachments
+                              i.bi.bi-paperclip.text-info(title='Has attachments')
                           td.small.text-muted(style='white-space:nowrap;')
                             if msg.deleted_at
                               - var ddate = Date.parse(msg.deleted_at)
@@ -243,6 +255,13 @@ block content
 
                 .pm-reader-body.px-3.py-2
                   .messagebody.monospace.fg-brightgrey#readerBodyContent
+                  //- Attachments populated by reader JS via the message
+                  //- /json endpoint. Hidden when the message has none.
+                  #readerAttachments.mt-3.pt-2.border-top.border-secondary(style='display:none;')
+                    small.text-muted
+                      i.bi.bi-paperclip.me-1
+                      span#readerAttachmentsHeader
+                    .mt-2#readerAttachmentsList
 
     //- Reply Modal with Quote System
     if currentuser
@@ -480,9 +499,41 @@ block content
       var readerDate        = document.getElementById('readerDate');
       var readerTransport   = document.getElementById('readerTransport');
       var readerBodyContent = document.getElementById('readerBodyContent');
+      var readerAttachments       = document.getElementById('readerAttachments');
+      var readerAttachmentsHeader = document.getElementById('readerAttachmentsHeader');
+      var readerAttachmentsList   = document.getElementById('readerAttachmentsList');
       var readerReplyBtn    = document.getElementById('readerReplyBtn');
       var readerDeleteBtn   = document.getElementById('readerDeleteBtn');
       var readerRestoreBtn  = document.getElementById('readerRestoreBtn');
+
+      function formatAttachmentSize(bytes) {
+        if (!bytes || bytes <= 0) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      function renderAttachments(attachments) {
+        if (!attachments || attachments.length === 0) {
+          readerAttachments.style.display = 'none';
+          readerAttachmentsList.innerHTML = '';
+          return;
+        }
+        readerAttachments.style.display = '';
+        readerAttachmentsHeader.textContent = ' Attachments (' + attachments.length + ')';
+        readerAttachmentsList.innerHTML = '';
+        for (var i = 0; i < attachments.length; i++) {
+          var att = attachments[i];
+          var a = document.createElement('a');
+          a.className = 'btn btn-sm btn-outline-info me-1 mb-1';
+          a.href = '/pm/attachment/' + att.id;
+          a.title = att.filename;
+          a.innerHTML = '<i class="bi bi-download me-1"></i>' +
+            escapeHtml(att.filename) +
+            ' <small class="text-muted ms-1">(' + formatAttachmentSize(att.file_size) + ')</small>';
+          readerAttachmentsList.appendChild(a);
+        }
+      }
 
       var replyModalEl   = document.getElementById('replyModal');
       var replyModal     = replyModalEl ? new bootstrap.Modal(replyModalEl) : null;
@@ -548,6 +599,7 @@ block content
         readerDate.textContent = '';
         readerTransport.innerHTML = '';
         readerBodyContent.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-muted"></div></div>';
+        renderAttachments(null);
         readerReplyBtn.style.display = 'none';
         readerDeleteBtn.style.display = 'none';
         readerRestoreBtn.style.display = 'none';
@@ -582,6 +634,8 @@ block content
             } else {
               readerBodyContent.innerHTML = '<div class="text-muted">(empty message)</div>';
             }
+
+            renderAttachments(msg.attachments);
 
             if (currentIsTrash) {
               readerRestoreBtn.style.display = '';

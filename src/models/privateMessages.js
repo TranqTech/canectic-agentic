@@ -410,7 +410,7 @@ async function getInbox(userId, options) {
   }
 
   var sql = "SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
-    "read, read_at, transport_type, system_time, created_at " +
+    "read, read_at, transport_type, has_attachments, system_time, created_at " +
     "FROM pm_inbox " + whereClause +
     " ORDER BY system_time DESC LIMIT $" + paramIdx + " OFFSET $" + (paramIdx + 1);
   params.push(limit, offset);
@@ -426,11 +426,11 @@ async function getTrash(userId, options) {
 
   // UNION inbox and outbox deleted messages with a source column
   var sql = "(SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
-    "transport_type, system_time, deleted_at, 'inbox' AS source " +
+    "transport_type, has_attachments, system_time, deleted_at, 'inbox' AS source " +
     "FROM pm_inbox WHERE user_id = $1 AND deleted = true) " +
     "UNION ALL " +
     "(SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
-    "transport_type, system_time, deleted_at, 'sent' AS source " +
+    "transport_type, has_attachments, system_time, deleted_at, 'sent' AS source " +
     "FROM pm_outbox WHERE user_id = $1 AND deleted = true) " +
     "ORDER BY deleted_at DESC LIMIT $2 OFFSET $3";
 
@@ -779,7 +779,7 @@ async function getSentMessages(userId, options) {
   var offset = opts.offset || 0;
 
   var sql = "SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
-    "transport_type, queued, sent, sent_at, send_error, system_time, created_at " +
+    "transport_type, queued, sent, sent_at, send_error, has_attachments, system_time, created_at " +
     "FROM pm_outbox WHERE user_id = $1 AND deleted = false " +
     "ORDER BY system_time DESC LIMIT $2 OFFSET $3";
 

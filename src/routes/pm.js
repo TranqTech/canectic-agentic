@@ -613,6 +613,17 @@ router.post('/reply/:uuid', pmUpload.array('attachments', 5), async (req, res) =
 // AJAX JSON Endpoints
 // -------------------------------------------------------
 
+// Trim a pm_attachments row to just the fields the reader pane needs.
+// Hides storage_path / message_table internals from the JSON wire format.
+function _attachmentToJson(att) {
+	return {
+		id: att.id,
+		filename: att.filename,
+		mime_type: att.mime_type || 'application/octet-stream',
+		file_size: parseInt(att.file_size, 10) || 0
+	};
+}
+
 // GET /pm/inbox/:uuid/json — load a single inbox message as JSON (for modal reader)
 router.get('/inbox/:uuid/json', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
@@ -632,6 +643,12 @@ router.get('/inbox/:uuid/json', async (req, res) => {
 	var accessCheck = privateMessages.checkTransportAccess(currentuser, transportType);
 	canReply = accessCheck.allowed;
 
+	// Load attachments. The split-pane reader had no way to surface these
+	// before -- the JSON response simply omitted them. We always query
+	// (cheap) so the reader can show attachments even on rows where the
+	// has_attachments flag wasn't set yet (legacy data, race-fix corner).
+	var attachments = await pmAttachments.getAttachments(req.params.uuid);
+
 	res.json({
 		uuid: message.uuid,
 		from_user: message.from_user,
@@ -644,7 +661,8 @@ router.get('/inbox/:uuid/json', async (req, res) => {
 		transport_type: message.transport_type,
 		system_time: message.system_time,
 		read: message.read,
-		canReply: canReply
+		canReply: canReply,
+		attachments: (attachments || []).map(_attachmentToJson)
 	});
 });
 
@@ -660,6 +678,8 @@ router.get('/sent/:uuid/json', async (req, res) => {
 		return res.status(404).json({ error: 'Message not found' });
 	}
 
+	var attachments = await pmAttachments.getAttachments(req.params.uuid);
+
 	res.json({
 		uuid: message.uuid,
 		from_user: message.from_user,
@@ -673,7 +693,8 @@ router.get('/sent/:uuid/json', async (req, res) => {
 		system_time: message.system_time,
 		sent: message.sent,
 		sent_at: message.sent_at,
-		send_error: message.send_error
+		send_error: message.send_error,
+		attachments: (attachments || []).map(_attachmentToJson)
 	});
 });
 
