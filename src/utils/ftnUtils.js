@@ -6,16 +6,51 @@ async function getDateTimeString(){
 	return timestring
 }
 
-async function genMsgId(){
-	var militime = await Date.now()
-	var msgId = militime.toString(16).padStart(8, '0');
-	return msgId
+// -------------------------------------------------------------------------
+// MSGID serial generation
+//
+// FTS-0009 specifies the MSGID serial as "any eight character hexadecimal
+// string" -- a 32-bit value, written as exactly 8 hex characters. Our
+// previous implementation did `Date.now().toString(16).padStart(8, '0')`
+// which produces 11+ characters in 2026 (epoch milliseconds exceeded 32
+// bits back in 2004) and non-compliantly violates the spec every time.
+// `padStart` only pads UP, it never truncates, so we never actually fit
+// inside 8 chars.
+//
+// Correct layout: pack 16 bits of wall-clock seconds with a 16-bit
+// per-process monotonic counter. The time half gives us natural
+// distribution across sessions; the counter half guarantees uniqueness
+// within the same second even under burst traffic. Wraps roughly every
+// 18 hours on the time side and every 65536 calls on the counter side
+// -- collision requires BOTH to wrap simultaneously, which would take
+// ~18 hours × 65536 calls-per-second to set up.
+//
+// Single 32-bit unsigned value, hex-encoded to exactly 8 characters.
+// -------------------------------------------------------------------------
+
+var _msgIdSeq = 0;
+
+function _nextMsgIdSerial() {
+	_msgIdSeq = (_msgIdSeq + 1) & 0xFFFF;
+	var secondsPart = Math.floor(Date.now() / 1000) & 0xFFFF;
+	var value = ((secondsPart << 16) | _msgIdSeq) >>> 0;
+	return value.toString(16).padStart(8, '0');
 }
 
-function getMilliHex(){
-	var militime = Date.now()
-	var milihex = militime.toString(16).padStart(8, '0');
-	return milihex
+// FTS-0009 MSGID serial: exactly 8 hex characters. Used by
+// `netmail.js` when stamping outbound netmail with an @MSGID kludge.
+// Kept async for backward compatibility with existing callers.
+async function genMsgId() {
+	return _nextMsgIdSerial();
+}
+
+// FTS-0009 MSGID serial: exactly 8 hex characters. Used by
+// `messages.js` when stamping outbound echomail on new threads
+// and replies. Despite the name, this is NOT a raw milli-hex
+// dump of the clock -- see _nextMsgIdSerial() above for why.
+// Sync entry point for convenience.
+function getMilliHex() {
+	return _nextMsgIdSerial();
 }
 
 function getMonthNumberFromDate(monthAbbreviation) {

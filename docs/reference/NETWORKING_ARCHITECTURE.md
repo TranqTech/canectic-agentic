@@ -454,6 +454,15 @@ new keyword to one convention or the other is a single-line change
 at the top of `ftnTosser.js` and is pinned by tests in
 `tests/ftnTosser.test.js`.
 
+**MSGID serial format** (FTS-0009): the portion after the origin
+address must be exactly 8 hex characters — a 32-bit value. Canectic
+generates this via `_nextMsgIdSerial()` in `src/utils/ftnUtils.js`
+which packs 16 bits of wall-clock seconds with a 16-bit per-process
+monotonic counter. Both `genMsgId()` (async, used by netmail) and
+`getMilliHex()` (sync, used by echomail) wrap the same underlying
+helper so they share a single counter and can't produce colliding
+serials across call sites.
+
 After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace) — both use colon-space.
 
 The `ftnClasses.js` `Packet` and `Message` classes model these structures. `ftnTosser.js` `ReadPkt()` handles the binary parsing.

@@ -15,6 +15,11 @@ import {
 
 // ---------------------------------------------------------------------------
 // getMilliHex  (synchronous)
+//
+// FTS-0009 MSGID serial: exactly 8 hex characters. The previous
+// implementation produced 11+ because it hex-encoded Date.now() directly;
+// the tests below pin the fixed-width 8-char output so the regression
+// can't come back silently.
 // ---------------------------------------------------------------------------
 
 describe('getMilliHex', function () {
@@ -24,40 +29,35 @@ describe('getMilliHex', function () {
 		assert.strictEqual(typeof r, 'string');
 	});
 
-	it('should return a hex string at least 8 characters long', function () {
+	it('should return EXACTLY 8 characters (FTS-0009 requirement)', function () {
 		var r = getMilliHex();
-		assert.ok(r.length >= 8, 'Expected at least 8 chars, got: ' + r.length);
-	});
-
-	it('should be zero-padded to at least 8 characters', function () {
-		// Padding ensures consistent length output
-		var r = getMilliHex();
-		assert.strictEqual(r, r.padStart(8, '0'));
+		assert.strictEqual(r.length, 8, 'Expected exactly 8 chars, got: ' + r.length + ' (' + r + ')');
 	});
 
 	it('should contain only lowercase hex digits', function () {
 		var r = getMilliHex();
-		assert.match(r, /^[0-9a-f]+$/);
+		assert.match(r, /^[0-9a-f]{8}$/);
 	});
 
-	it('should increase monotonically between successive calls', function () {
-		var r1 = getMilliHex();
-		var r2 = getMilliHex();
-		// Both are hex representations of timestamps — second should be >= first
-		assert.ok(parseInt(r2, 16) >= parseInt(r1, 16));
-	});
-
-	it('should represent the current millisecond timestamp roughly', function () {
-		var before = Date.now();
+	it('should fit in a 32-bit unsigned integer', function () {
 		var r = getMilliHex();
-		var after = Date.now();
-		var decoded = parseInt(r, 16);
-		assert.ok(decoded >= before && decoded <= after + 1);
+		var n = parseInt(r, 16);
+		assert.ok(n >= 0 && n <= 0xFFFFFFFF);
+	});
+
+	it('should produce distinct values on successive calls (counter guarantees uniqueness)', function () {
+		// Even if two calls happen in the same millisecond, the per-process
+		// counter in the low 16 bits disambiguates them.
+		var seen = new Set();
+		for (var i = 0; i < 100; i++) {
+			seen.add(getMilliHex());
+		}
+		assert.strictEqual(seen.size, 100, 'Expected 100 unique values, got: ' + seen.size);
 	});
 });
 
 // ---------------------------------------------------------------------------
-// genMsgId  (async)
+// genMsgId  (async wrapper over the same serial generator)
 // ---------------------------------------------------------------------------
 
 describe('genMsgId', function () {
@@ -67,27 +67,40 @@ describe('genMsgId', function () {
 		assert.strictEqual(typeof r, 'string');
 	});
 
-	it('should return a hex string at least 8 characters long', async function () {
+	it('should return EXACTLY 8 characters (FTS-0009 requirement)', async function () {
 		var r = await genMsgId();
-		assert.ok(r.length >= 8);
+		assert.strictEqual(r.length, 8);
 	});
 
 	it('should contain only lowercase hex digits', async function () {
 		var r = await genMsgId();
-		assert.match(r, /^[0-9a-f]+$/);
+		assert.match(r, /^[0-9a-f]{8}$/);
 	});
 
-	it('should be zero-padded to at least 8 chars', async function () {
+	it('should fit in a 32-bit unsigned integer', async function () {
 		var r = await genMsgId();
-		assert.strictEqual(r, r.padStart(8, '0'));
+		var n = parseInt(r, 16);
+		assert.ok(n >= 0 && n <= 0xFFFFFFFF);
 	});
 
-	it('should be consistent with getMilliHex format', async function () {
-		// genMsgId and getMilliHex both encode Date.now() as hex — should be same format
+	it('should produce the same format as getMilliHex', async function () {
+		// genMsgId and getMilliHex share the underlying _nextMsgIdSerial
+		// helper, so they must produce the same shape even though one is
+		// async and one is sync.
 		var mid = await genMsgId();
 		var hex = getMilliHex();
-		// Both should be the same length (both pad to 8)
 		assert.strictEqual(mid.length, hex.length);
+		assert.match(mid, /^[0-9a-f]{8}$/);
+		assert.match(hex, /^[0-9a-f]{8}$/);
+	});
+
+	it('should share the counter with getMilliHex (no collisions across the two APIs)', async function () {
+		var seen = new Set();
+		for (var i = 0; i < 50; i++) {
+			seen.add(await genMsgId());
+			seen.add(getMilliHex());
+		}
+		assert.strictEqual(seen.size, 100, 'Expected 100 unique values across both APIs, got: ' + seen.size);
 	});
 });
 
