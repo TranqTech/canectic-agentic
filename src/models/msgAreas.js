@@ -173,10 +173,16 @@ async function newArea(formObj) {
 	// Conference numbers 1-100 are reserved for Canectic system conferences
 	// (announcements, wall, bulletins, room for future growth). Sysops can
 	// override later via the admin form; validation rejects values <= 100.
+	//
+	// Addition happens in SQL rather than JavaScript because `dbres.insertId`
+	// comes back as a STRING from the pg driver (BIGSERIAL columns are
+	// returned as strings to avoid JS Number precision loss). Computing
+	// `areaId + RESERVED_CONF_COUNT` in JS would string-concat to "1100"
+	// instead of integer-adding to 101, producing wildly wrong defaults.
 	try {
 		await postgres.write(
-			"UPDATE message_areas SET qwk_conf_number = $1 WHERE id = $2",
-			[areaId + RESERVED_CONF_COUNT, areaId]
+			"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE id = $2",
+			[RESERVED_CONF_COUNT, areaId]
 		);
 	} catch (e) {
 		alogger.writeAlog(3, "newArea: qwk_conf_number assignment failed for " + shorty + ": " + (e.message || e), "yellow");
@@ -629,6 +635,92 @@ async function ensureQwkConfNumbers() {
 			'redbright');
 	}
 
+	// Pass 1.5: Recover rows corrupted by an earlier broken migration.
+	//
+	// An earlier version of this function did `lr.id + RESERVED_CONF_COUNT`
+	// in JavaScript to compute the legacy-shift target. The pg driver
+	// returns BIGSERIAL columns as strings, so the addition was actually
+	// string concatenation: id=1 shifted to "1" + 100 = "1100" instead
+	// of 1 + 100 = 101. Every affected row ended up at a value that
+	// matches the pattern `parseInt(id.toString() + "100")`. This pass
+	// detects rows that still look like that and resets them to the
+	// correct `id + 100` value.
+	//
+	// Detection is exact: a row is only fixed if its current
+	// qwk_conf_number equals (id::text || '100')::integer -- i.e. the
+	// stringified id with "100" tacked on. A legitimate customisation
+	// that happens to match this pattern would be auto-fixed, but the
+	// chance of a sysop deliberately setting an area with id=42 to
+	// conference 42100 is low enough that we accept the risk rather
+	// than ship a broken install with no recovery path.
+	//
+	// Processed in DESCENDING id order to avoid transient collisions
+	// (same reasoning as pass 3). Each row's target is computed by
+	// Postgres so there's no chance of re-introducing the original
+	// string-concat bug. Idempotent: once a row has been fixed its
+	// qwk_conf_number no longer matches the wacky pattern and
+	// subsequent runs skip it.
+	var recovered = 0;
+	var recoveryFailures = [];
+	try {
+		var brokenRows = await postgres.query(
+			"SELECT id, shortcode, qwk_conf_number FROM message_areas " +
+			"WHERE qwk_conf_number = (id::text || '100')::integer " +
+			"ORDER BY id DESC",
+			[]
+		);
+		for (var br of (brokenRows || [])) {
+			var newConf = parseInt(br.id, 10) + RESERVED_CONF_COUNT;
+			try {
+				await postgres.pgpool.query(
+					"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE id = $2",
+					[RESERVED_CONF_COUNT, br.id]
+				);
+				// Per-row audit log so a sysop who had customisations can
+				// see exactly what moved and restore anything the detection
+				// incorrectly flagged. The pattern is unique per id so
+				// false positives are only possible if a sysop deliberately
+				// set an area's conference number to (id || "100")::int,
+				// which is unusual enough that we accept the risk.
+				alogger.writeAlog(1,
+					'ensureQwkConfNumbers: RECOVERY -- area "' + br.shortcode +
+					'" (id=' + br.id + ') qwk_conf_number ' + br.qwk_conf_number +
+					' -> ' + newConf,
+					'yellowbright', true);
+				recovered++;
+			} catch (rowErr) {
+				recoveryFailures.push({
+					shortcode: br.shortcode,
+					id: br.id,
+					wackyValue: br.qwk_conf_number,
+					error: rowErr.message || String(rowErr)
+				});
+			}
+		}
+		if (recovered > 0) {
+			alogger.writeAlog(1,
+				'ensureQwkConfNumbers: RECOVERY reset ' + recovered + ' row(s) ' +
+				'that matched the broken string-concat migration pattern. If any ' +
+				'of the above moves clobbered a legitimate customisation, restore ' +
+				'it manually via /admin/msgAreas.',
+				'yellowbright', true);
+		}
+		if (recoveryFailures.length > 0) {
+			for (var rf of recoveryFailures) {
+				alogger.writeAlog(1,
+					'ensureQwkConfNumbers: recovery failed for area "' + rf.shortcode +
+					'" (id=' + rf.id + ', current qwk_conf_number=' + rf.wackyValue +
+					') -- target slot is taken by another row (' + rf.error +
+					'). Resolve manually via /admin/msgAreas.',
+					'redbright', true);
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(2,
+			'ensureQwkConfNumbers: recovery pass failed: ' + (e.message || e),
+			'redbright');
+	}
+
 	// Pass 2: NULL backfill. Uses pgpool directly to read rowCount so
 	// the summary log is meaningful.
 	var nullFilled = 0;
@@ -681,20 +773,26 @@ async function ensureQwkConfNumbers() {
 			[]
 		);
 		for (var lr of (legacyRows || [])) {
-			var target = lr.id + RESERVED_CONF_COUNT;
 			try {
+				// Compute the target in SQL -- NOT in JavaScript. The pg
+				// driver returns BIGSERIAL columns as strings to preserve
+				// precision, so `lr.id + RESERVED_CONF_COUNT` in JS would
+				// string-concat ('1' + 100 = '1100') instead of
+				// integer-adding (1 + 100 = 101). Doing the addition
+				// inside the UPDATE's SET clause lets Postgres handle it
+				// as BIGINT arithmetic.
+				//
 				// Double-bind on id AND qwk_conf_number = id to avoid
 				// clobbering a row that raced out from under us.
 				await postgres.pgpool.query(
-					"UPDATE message_areas SET qwk_conf_number = $1 WHERE id = $2 AND qwk_conf_number = $2",
-					[target, lr.id]
+					"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE id = $2 AND qwk_conf_number = $2",
+					[RESERVED_CONF_COUNT, lr.id]
 				);
 				legacyShifted++;
 			} catch (rowErr) {
 				legacyFailures.push({
 					shortcode: lr.shortcode,
 					id: lr.id,
-					target: target,
 					error: rowErr.message || String(rowErr)
 				});
 			}
@@ -703,10 +801,9 @@ async function ensureQwkConfNumbers() {
 			for (var f of legacyFailures) {
 				alogger.writeAlog(1,
 					'ensureQwkConfNumbers: legacy shift failed for area "' + f.shortcode +
-					'" (id=' + f.id + ') -- target qwk_conf_number=' + f.target +
-					' is taken by another row. Resolve via /admin/msgAreas by renumbering ' +
-					'one of the conflicting areas to a value > ' + RESERVED_CONF_COUNT +
-					' that is not already in use.',
+					'" (id=' + f.id + ') -- target slot is taken by another row. ' +
+					'Resolve via /admin/msgAreas by renumbering one of the conflicting ' +
+					'areas to a value > ' + RESERVED_CONF_COUNT + ' that is not already in use.',
 					'yellowbright', true);
 			}
 		}
