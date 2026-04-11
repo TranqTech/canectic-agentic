@@ -552,7 +552,7 @@ async function startNewThread(formObj, shortcode) {
 
 	var addrInfo = await resolveAreaAddress(area.id);
 
-	var millihex       = ftnUtils.getMilliHex();
+	var millihex       = await ftnUtils.getMilliHex();
 	var datetimestring = await ftnUtils.getDateTimeString();
 	var msgid          = (addrInfo.address ? addrInfo.address + " " : "") + millihex;
 	var tuuid          = uuidv4();
@@ -658,7 +658,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 
 	var addrInfo = await resolveAreaAddress(area.id);
 
-	var millihex       = ftnUtils.getMilliHex();
+	var millihex       = await ftnUtils.getMilliHex();
 	var datetimestring = await ftnUtils.getDateTimeString();
 	var msgid          = (addrInfo.address ? addrInfo.address + " " : "") + millihex;
 	var uuid           = uuidv4();
