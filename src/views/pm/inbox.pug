@@ -19,7 +19,12 @@ block content
     .pm-reader-content { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
     .pm-reader-header { flex-shrink: 0; }
     .pm-reader-body { flex-grow: 1; overflow-y: auto; min-height: 0; }
-    .pm-reader-body .messagebody::after { content: ''; display: block; height: 4rem; }
+    /* 4rem trailing breathing room at the bottom of the scroll container.
+       Lives on .pm-reader-body (not .messagebody) so it sits below the
+       attachments block when present, instead of between body and
+       attachments. Without this the attachment download buttons get
+       jammed against the bottom of the viewport at max scroll. */
+    .pm-reader-body::after { content: ''; display: block; height: 4rem; }
     .pm-hidden { display: none !important; }
     .pm-msg-row { cursor: pointer; transition: background 0.1s; }
     .pm-msg-row:hover { background: rgba(255,255,255,0.06) !important; }
