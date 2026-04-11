@@ -135,6 +135,21 @@ block content
                       option(value='true') Yes
                 .row.mt-2
                   .col-1
+                  .col-10
+                    label(for="ng_qwk_conf_start") QWK Conference Start:
+                    input(
+                      type="number"
+                      id="ng_qwk_conf_start"
+                      name="qwk_conf_start"
+                      class="form-control"
+                      min=101
+                      value=nextConfStart || ''
+                    )
+                    .form-text.text-muted
+                      | Start of this group's QWK conference number block. Areas in the group take consecutive offsets within the block. Numbers 1-100 are reserved for system conferences. Pre-filled with the next available block; edit only if you want a specific arrangement.
+                    .small.mt-1#ng_qwk_conf_start_status
+                .row.mt-2
+                  .col-1
                   .col-5
                     #ng_read_perm_inputs
                     #ng_read_rest_inputs
@@ -294,4 +309,32 @@ block content
       renderFlags('ng_read_rest', 'read_rest_flags', [], allRestrs, 'bg-danger');
       renderFlags('ng_post_perm', 'post_perm_flags', [], allPerms, 'bg-success');
       renderFlags('ng_post_rest', 'post_rest_flags', [], allRestrs, 'bg-danger');
+
+      // Live validation of qwk_conf_start in the new-group modal
+      var ngStartInput  = document.getElementById('ng_qwk_conf_start');
+      var ngStartStatus = document.getElementById('ng_qwk_conf_start_status');
+      if (ngStartInput && ngStartStatus) {
+        var ngStartTimer = null;
+        ngStartInput.addEventListener('input', function() {
+          if (ngStartTimer) clearTimeout(ngStartTimer);
+          var v = ngStartInput.value;
+          ngStartStatus.textContent = '';
+          ngStartStatus.className = 'small mt-1';
+          if (!v) return;
+          ngStartTimer = setTimeout(function() {
+            fetch('/admin/msgGroups/check-conf-start?n=' + encodeURIComponent(v))
+              .then(function(r) { return r.json(); })
+              .then(function(j) {
+                if (j.available) {
+                  ngStartStatus.textContent = '✓ available';
+                  ngStartStatus.className = 'small mt-1 text-success';
+                } else {
+                  ngStartStatus.textContent = '✗ ' + (j.message || j.reason || 'invalid');
+                  ngStartStatus.className = 'small mt-1 text-danger';
+                }
+              })
+              .catch(function() {});
+          }, 350);
+        });
+      }
     });

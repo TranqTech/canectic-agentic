@@ -144,6 +144,7 @@ async function prerunMaint(){
 	// Ensure sort_order columns on groups and areas
 	var msgGroupsMod = await import("../src/models/msgGroups.js");
 	await msgGroupsMod.ensureSortOrder();
+	await msgGroupsMod.ensureQwkConfStartConstraint();
 	var fileGroupsMod = await import("../src/models/fileGroups.js");
 	await fileGroupsMod.ensureSortOrder();
 

@@ -601,6 +601,10 @@ async function main() {
 	var msgAreasInit = await import("../src/models/msgAreas.js");
 	await msgAreasInit.ensureQwkConfNumbers();
 
+	// Ensure UNIQUE constraint on message_groups.qwk_conf_start
+	var msgGroupsInit = await import("../src/models/msgGroups.js");
+	await msgGroupsInit.ensureQwkConfStartConstraint();
+
 	// Ensure FTN nodelist table exists for import jobs and router lookups
 	var ftnNodelist = await import("../src/models/ftnNodelist.js");
 	await ftnNodelist.ensureTable();

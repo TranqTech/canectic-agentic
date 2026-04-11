@@ -439,6 +439,22 @@ block content
                         )
                           option(value='false' selected=(msgGroup.newscan_default !== true)) No
                           option(value='true'  selected=(msgGroup.newscan_default === true)) Yes
+                    .row.mt-2
+                      .col-1
+                      .col-10
+                        label(for='edit_qwk_conf_start') QWK Conference Start:
+                        input(
+                          type='number'
+                          id='edit_qwk_conf_start'
+                          name='qwk_conf_start'
+                          class='form-control'
+                          tabindex='8'
+                          min=101
+                          value=msgGroup.qwk_conf_start || ''
+                        )
+                        .form-text.text-muted
+                          | Start of this group's QWK conference number block. Changing this value renumbers all areas in the group, preserving each area's offset within the block. Numbers 1-100 are reserved for system conferences.
+                        .small.mt-1#edit_qwk_conf_start_status
                     .row
                       .col-1
                       .col-5
@@ -966,6 +982,37 @@ block content
           editAreaModalEl.addEventListener('show.bs.modal', function() {
             qwkStatus.style.display = 'none';
             qwkStatus.textContent = '';
+          });
+        }
+
+        // Live validation of qwk_conf_start in the edit-group modal
+        var egStartInput  = document.getElementById('edit_qwk_conf_start');
+        var egStartStatus = document.getElementById('edit_qwk_conf_start_status');
+        var egStartGroupId = !{JSON.stringify(msgGroup ? msgGroup.id : null)};
+        if (egStartInput && egStartStatus) {
+          var egStartTimer = null;
+          egStartInput.addEventListener('input', function() {
+            if (egStartTimer) clearTimeout(egStartTimer);
+            var v = egStartInput.value;
+            egStartStatus.textContent = '';
+            egStartStatus.className = 'small mt-1';
+            if (!v) return;
+            egStartTimer = setTimeout(function() {
+              var url = '/admin/msgGroups/check-conf-start?n=' + encodeURIComponent(v);
+              if (egStartGroupId) url += '&exclude_group_id=' + encodeURIComponent(egStartGroupId);
+              fetch(url)
+                .then(function(r) { return r.json(); })
+                .then(function(j) {
+                  if (j.available) {
+                    egStartStatus.textContent = '\u2713 available';
+                    egStartStatus.className = 'small mt-1 text-success';
+                  } else {
+                    egStartStatus.textContent = '\u2717 ' + (j.message || j.reason || 'invalid');
+                    egStartStatus.className = 'small mt-1 text-danger';
+                  }
+                })
+                .catch(function() {});
+            }, 350);
           });
         }
 

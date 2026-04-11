@@ -7,6 +7,7 @@ import * as tableTools from '../middleware/db/tableTools.js';
 import * as msgGroups from "./msgGroups.js";
 import * as networkAreas from "./networkAreas.js";
 import * as alogger from "../utils/alogger.js";
+import appConfig from "../config/appConfig.js";
 
 // peerConnections imported lazily to avoid circular risk via peerAreaSubscriptions
 async function getPeerConnections() {
@@ -19,16 +20,77 @@ async function getPeerConnections() {
 // Conference 0 is E-mail (personal mail) by QWK convention. Canectic
 // reserves the next 100 conference numbers (1..100) for system content
 // that we emit into user QWK downloads: announcements, the wall,
-// bulletins, and future additions. New message areas get a default
-// qwk_conf_number of (id + RESERVED_CONF_COUNT) so they land safely
-// above the reserved range. Sysops can override the number per area
-// via the admin form, but validation rejects values in [1..100].
+// bulletins, and future additions.
+//
+// Above the reserved range, conference numbers are allocated in
+// per-group blocks of size `qwk_group_stride` (config, default 1000).
+// Each message_group owns a block starting at message_groups.qwk_conf_start
+// and running to qwk_conf_start + stride - 1. Areas in the group are
+// given consecutive offsets within the block, picking the lowest
+// unused slot. The intent is that areas in the same group cluster
+// together in QWK readers' conference list rather than scattering by
+// creation id.
+//
+// Sysops can still override an individual area's qwk_conf_number via
+// the admin form (escape hatch for special cases), and the override
+// is allowed to live outside its group's block as long as it doesn't
+// collide with any other area.
 //
 // Changing this constant after an install has areas is a breaking
-// operation -- existing area numbers won't automatically shift. If
-// we ever need more reserved slots, prefer keeping the constant at
-// 100 and just using more of the existing range.
+// operation -- existing area numbers won't automatically shift.
 const RESERVED_CONF_COUNT = 100;
+
+// Look up the next free conference number inside a group's block.
+// Returns the integer slot, or throws if the block is full.
+//
+// Behaviour:
+//   - Loads existing qwk_conf_numbers in the group within the block
+//     window [start, start + stride - 1]
+//   - Returns start + lowest unused offset
+//   - Throws { code: 'block_full', message } if every slot is taken
+//   - Throws { code: 'no_start', message } if the group has no
+//     qwk_conf_start (shouldn't happen for groups created via the
+//     normal newGroup path; safety net for old groups missing the
+//     value -- run the migration tool)
+async function nextConfNumberInGroup(group) {
+	if (!group || group.qwk_conf_start == null) {
+		var err = new Error('Group "' + (group ? group.shortcode : '?') +
+			'" has no qwk_conf_start. Run `node src/tools/qwkConfRenumber.js` ' +
+			'to assign one.');
+		err.code = 'no_start';
+		throw err;
+	}
+
+	var stride = appConfig.getNumber('qwk_group_stride', 1000);
+	if (stride <= 0) stride = 1000;
+
+	var start = parseInt(group.qwk_conf_start, 10);
+	var end = start + stride - 1;
+
+	var rows = await postgres.query(
+		'SELECT qwk_conf_number FROM message_areas ' +
+		'WHERE group_id = $1 AND qwk_conf_number BETWEEN $2 AND $3 ' +
+		'ORDER BY qwk_conf_number ASC',
+		[group.id, start, end]
+	);
+
+	var taken = new Set();
+	if (rows && rows.length > 0) {
+		for (var r of rows) {
+			if (r.qwk_conf_number != null) taken.add(parseInt(r.qwk_conf_number, 10));
+		}
+	}
+
+	for (var slot = start; slot <= end; slot++) {
+		if (!taken.has(slot)) return slot;
+	}
+
+	var blockErr = new Error('Group "' + group.shortcode + '" conference block is full ' +
+		'(' + start + '-' + end + ', ' + stride + ' slots all in use). ' +
+		'Increase qwk_group_stride or move areas out of this group before adding more.');
+	blockErr.code = 'block_full';
+	throw blockErr;
+}
 
 
 // Normalize flag input from forms — may arrive as a string, an array, or undefined.
@@ -160,6 +222,27 @@ async function newArea(formObj) {
 		post_rest_flags: normalizeFlags(formObj.post_rest_flags)
 	};
 
+	// Pre-assign the qwk_conf_number from the group's block BEFORE
+	// inserting the row, so we can fail-fast if the block is full
+	// without leaving a half-created area record behind. The slot
+	// search reads existing rows in the group; the new row isn't
+	// among them yet, so the slot it picks is guaranteed unused.
+	try {
+		pgObj.qwk_conf_number = await nextConfNumberInGroup(dbgroup);
+	} catch (e) {
+		if (e && e.code === 'block_full') {
+			returnObj.errormessages.push(e.message);
+			return returnObj;
+		}
+		if (e && e.code === 'no_start') {
+			returnObj.errormessages.push(e.message);
+			return returnObj;
+		}
+		alogger.writeAlog(3, "newArea: qwk slot lookup failed for " + shorty + ": " + (e.message || e), "yellow");
+		returnObj.errormessages.push("QWK conference number assignment failed: " + (e.message || e));
+		return returnObj;
+	}
+
 	var dbres = await postgres.insertObject(pgObj, "message_areas");
 	if (dbres.status !== true) {
 		returnObj.errormessages.push("Could not write to DB");
@@ -168,25 +251,6 @@ async function newArea(formObj) {
 	}
 
 	var areaId = dbres.insertId;
-
-	// Set default qwk_conf_number = id + RESERVED_CONF_COUNT (currently 100).
-	// Conference numbers 1-100 are reserved for Canectic system conferences
-	// (announcements, wall, bulletins, room for future growth). Sysops can
-	// override later via the admin form; validation rejects values <= 100.
-	//
-	// Addition happens in SQL rather than JavaScript because `dbres.insertId`
-	// comes back as a STRING from the pg driver (BIGSERIAL columns are
-	// returned as strings to avoid JS Number precision loss). Computing
-	// `areaId + RESERVED_CONF_COUNT` in JS would string-concat to "1100"
-	// instead of integer-adding to 101, producing wildly wrong defaults.
-	try {
-		await postgres.write(
-			"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE id = $2",
-			[RESERVED_CONF_COUNT, areaId]
-		);
-	} catch (e) {
-		alogger.writeAlog(3, "newArea: qwk_conf_number assignment failed for " + shorty + ": " + (e.message || e), "yellow");
-	}
 
 	// Area record written — now create backing tables
 	var tableResult = await createTablesForArea(shorty.toLowerCase());
@@ -405,16 +469,15 @@ async function updateArea(shortcode, formObj) {
 		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
 	}
 
-	// QWK conference number. Must be above the reserved range (1..100 are
-	// reserved for system conferences: announcements/wall/bulletins/...).
-	// Must also be unique across message areas -- enforced at the DB level
-	// by a UNIQUE constraint, surfaced here as a friendlier error.
+	// QWK conference number sysop override. Areas are normally assigned
+	// from their group's block, but a sysop can override an individual
+	// area to any value > RESERVED_CONF_COUNT that isn't in use anywhere
+	// else. The override is allowed to live outside the group's block --
+	// this is the documented escape hatch.
 	//
-	// Empty string is treated as "don't touch this field". The admin form
-	// sends an empty value when the field is blank (e.g. a row whose JS
-	// population didn't set it), and we don't want that to trip validation
-	// and reject an otherwise-valid edit of unrelated fields. Only a
-	// non-empty value goes through validation and into updateObj.
+	// Empty string is treated as "don't touch this field". The admin
+	// form sends an empty value when the field is blank, and we don't
+	// want that to reject an otherwise-valid edit of unrelated fields.
 	if (formObj.qwk_conf_number !== undefined && formObj.qwk_conf_number !== '') {
 		var confNum = parseInt(formObj.qwk_conf_number);
 		if (isNaN(confNum) || confNum <= RESERVED_CONF_COUNT) {
@@ -424,7 +487,7 @@ async function updateArea(shortcode, formObj) {
 			);
 			return returnObj;
 		}
-		// Collision check against other areas
+		// Collision check against any other area (in any group)
 		var existing = await postgres.queryOne(
 			"SELECT shortcode FROM message_areas WHERE qwk_conf_number = $1 AND id != $2",
 			[confNum, dbarea.id]
@@ -467,6 +530,8 @@ async function updateArea(shortcode, formObj) {
 //
 // What moves:
 //   - message_areas.group_id, group_uuid, group_shortcode
+//   - message_areas.qwk_conf_number is reassigned from the target
+//     group's block (lowest unused offset)
 //   - If opts.applyDefaults: also the target group's security / flags /
 //     post_as / newscan_default / min_age / max_age are copied onto the
 //     area, overwriting any per-area customisations
@@ -477,7 +542,6 @@ async function updateArea(shortcode, formObj) {
 //   - user_msg_subscriptions
 //   - peer_area_subscriptions
 //   - network_areas (network mappings)
-//   - qwk_conf_number
 //   - last_* and msg_count stats
 //
 // Behaviour:
@@ -536,12 +600,29 @@ async function moveArea(shortcode, targetGroupShortcode, opts) {
 	var oldGroupShortcode = dbarea.group_shortcode;
 	var oldGroupId = dbarea.group_id;
 
-	// Build the update set. Always moves the group FKs; optionally
-	// overwrites the per-area settings with the target group's defaults.
+	// Reserve the new conference number from the target group's block
+	// BEFORE writing anything. If the block is full, abort cleanly --
+	// nothing has been touched yet so the area stays where it was.
+	var newConfNumber;
+	try {
+		newConfNumber = await nextConfNumberInGroup(targetGroup);
+	} catch (e) {
+		if (e && (e.code === 'block_full' || e.code === 'no_start')) {
+			returnObj.errormessages.push(e.message);
+			return returnObj;
+		}
+		returnObj.errormessages.push('QWK conference assignment failed: ' + (e.message || e));
+		return returnObj;
+	}
+
+	// Build the update set. Always moves the group FKs and reassigns
+	// the conference number. Optionally overwrites the per-area
+	// settings with the target group's defaults.
 	var updateObj = {
 		group_id: targetGroup.id,
 		group_uuid: targetGroup.uuid,
 		group_shortcode: targetGroup.shortcode,
+		qwk_conf_number: newConfNumber,
 		updated_at: new Date()
 	};
 
@@ -844,5 +925,6 @@ export {
 	updateAreaStats,
 	updateStatsForArea,
 	recalculateAreaCounts,
-	ensureQwkConfNumbers
+	ensureQwkConfNumbers,
+	nextConfNumberInGroup
 };

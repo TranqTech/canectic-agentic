@@ -204,6 +204,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'qwk_announcements_conf',   defaultValue: '1',              type: 'number',  category: 'qwk',         description: 'Conference number for system announcements in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
 	{ key: 'qwk_wall_conf',            defaultValue: '2',              type: 'number',  category: 'qwk',         description: 'Conference number for the wall in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
 	{ key: 'qwk_bulletins_conf',       defaultValue: '3',              type: 'number',  category: 'qwk',         description: 'Conference number for bulletins in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
+	{ key: 'qwk_group_stride',         defaultValue: '1000',           type: 'number',  category: 'qwk',         description: 'Conference number block size per message group. Each new group is auto-assigned a start at MAX(existing) + stride; areas in the group take consecutive offsets within [start, start+stride-1]. Larger stride leaves more room for future areas; smaller stride packs groups tighter.' },
 
 	// -----------------------------------------------------------------------
 	// Chat (sysop-to-web-user and future user-to-user)

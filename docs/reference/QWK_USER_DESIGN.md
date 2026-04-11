@@ -78,33 +78,56 @@ Steps:
 
 ### Conference Number Assignment
 
-Each message area carries a `qwk_conf_number` column (INTEGER, UNIQUE). This is a system-wide property of the area, not per-user.
+Conference numbers are allocated in **per-group blocks** so areas in the same message group cluster together in QWK reader conference lists. Each `message_groups` row owns a contiguous block starting at `qwk_conf_start` of size `qwk_group_stride` (config, default 1000). Areas in the group take consecutive offsets within the block at `[qwk_conf_start, qwk_conf_start + stride - 1]`.
 
-**Reserved range 1-100.** Conference numbers 1 through 100 are reserved for Canectic system conferences (see the "Reserved System Conferences" section below). Message areas default to `qwk_conf_number = (id + 100)` on creation so they land safely above the reserved range. `RESERVED_CONF_COUNT = 100` is a hardcoded constant in `src/models/msgAreas.js` and exported for use by other modules.
+**Reserved range 1-100.** Conference numbers 1 through 100 are reserved for Canectic system conferences (see the "Reserved System Conferences" section below). The first message group's block starts at the first stride boundary above 100 (e.g. 1000 for stride=1000, or 200 for stride=100). `RESERVED_CONF_COUNT = 100` is a constant in `src/models/msgAreas.js` and `src/models/msgGroups.js`.
 
-- **Default on create**: `newArea()` does a post-insert UPDATE setting `qwk_conf_number = (id + RESERVED_CONF_COUNT)`. The insert happens first because the id isn't known until the row exists.
-- **Sysop-editable**: admin area editor shows and allows changing the conference number. Validation rejects values ≤ 100 (the reserved range) and values that collide with other areas (also enforced by the DB UNIQUE constraint).
-- **AJAX collision check**: the admin form has a debounced `/admin/msgAreas/check-conf-number?n=X&exclude=shortcode` endpoint wired to the input's `input` event so sysops see inline success/conflict feedback before submitting.
+**Group-level state** (`message_groups.qwk_conf_start`):
+
+- Auto-assigned by `msgGroups.newGroup()` to `MAX(existing) + stride` (or the first stride boundary above 100 for the first group). The admin "Add Group" modal pre-fills the field with this value so the sysop can either accept the default or pick a custom start.
+- Sysop-editable on the group edit modal. Changing the value triggers `renumberGroupAreas(groupId, oldStart, newStart)` which preserves each area's existing offset within the block. The renumber is collision-checked against any area outside the group; if any new number would collide, the entire updateGroup call aborts and the start stays at its old value.
+- UNIQUE-constrained at the DB level (`message_groups_qwk_conf_start_key`). Managed at startup by `msgGroups.ensureQwkConfStartConstraint`.
+
+**Area-level state** (`message_areas.qwk_conf_number`):
+
+- Assigned at create time by `msgAreas.newArea()` via `nextConfNumberInGroup(group)`, which finds the lowest unused offset in the group's block. If the block is full (every slot taken), creation fails with a "block full" error before any DB write -- the sysop must increase `qwk_group_stride` or move areas out of the group.
+- **Move semantics**: `moveArea(shortcode, targetGroupShortcode)` reassigns the conference number from the target group's block (lowest unused offset) before doing any other writes. If the target block is full, the move aborts cleanly with the area unchanged.
+- **Sysop override**: the admin area edit modal still exposes the QWK Conference # field as an escape hatch. The override is allowed to live outside the group's block as long as it doesn't collide with any other area globally. Validation rejects values ≤ 100 (reserved range) and collisions with any other area (also enforced by the DB UNIQUE constraint). Manual overrides survive group renumbers as long as they don't conflict with the new range, and survive moves only if explicitly re-set after the move.
 - **Stable across all users and downloads**: every user's QWK packet uses the same conference numbers, so any QWK reader's conference list is consistent.
 - **Independent of QWK network areatags**: network areatags (the conference numbers used for peer-to-peer QWK networking) are a property of the network mapping, not the local area. The local `qwk_conf_number` is for user-facing packets only. A sysop may choose to align them manually, but there is no automatic coupling.
 
-**Startup invariants** (`msgAreas.ensureQwkConfNumbers`):
+**AJAX collision endpoints**:
+
+- `/admin/msgAreas/check-conf-number?n=X&exclude=shortcode` -- per-area override availability
+- `/admin/msgGroups/check-conf-start?n=X&exclude_group_id=Y` -- group block start availability
+
+Both are debounced from input events on the corresponding modals so sysops get inline feedback before submitting.
+
+**Startup invariants** (`msgAreas.ensureQwkConfNumbers` + `msgGroups.ensureQwkConfStartConstraint`):
 
 1. Ensure the `message_areas_qwk_conf_number_key` UNIQUE constraint exists (idempotent).
-2. Reserved-range scan: any row with `qwk_conf_number` in `[1..100]` is logged at level 1 with its shortcode, warning the sysop to renumber it. These are explicit sysop assignments (or legacy data from before the reserved-range scheme); we do not auto-move them, since silent mutation of explicit values would be worse than the warning. The sysop resolves via `/admin/msgAreas` or by running the upgrade tool described below.
+2. Ensure the `message_groups_qwk_conf_start_key` UNIQUE constraint exists (idempotent).
+3. Reserved-range scan: any row with `qwk_conf_number` in `[1..100]` is logged at level 1 with its shortcode, warning the sysop to renumber it. These are explicit sysop assignments (or legacy data from before the reserved-range scheme); we do not auto-move them, since silent mutation of explicit values would be worse than the warning. Resolve via `/admin/msgAreas` or by running the upgrade tool described below.
 
-The startup function deliberately does **no data migration**. It only enforces schema-level invariants and surfaces warnings. Upgrade-path data migration is the responsibility of the explicit tool below.
+The startup functions deliberately do **no data migration**. They only enforce schema-level invariants and surface warnings.
 
 **Upgrade tool** (`src/tools/qwkConfRenumber.js`):
 
-A standalone Node CLI that walks `message_areas` in descending-id order and sets `qwk_conf_number = id + RESERVED_CONF_COUNT` for every row, via SQL integer arithmetic inside the UPDATE statement (not JavaScript — the pg driver returns BIGSERIAL columns as strings, so `row.id + 100` in JS would string-concatenate to `'1100'` instead of integer-adding to `101`).
+A standalone Node CLI that walks groups and areas to apply the per-group block scheme. Two modes:
+
+- **Default**: preserves any `qwk_conf_start` values already set on groups, only filling in groups that are missing one. Then walks each group's areas in `(sort_order, id)` order and assigns offsets, preserving existing in-block offsets where possible. Use this for an upgrade run where you want to keep any sysop customisations.
+- **`--force`**: discards every existing `qwk_conf_start` and `qwk_conf_number`, packs groups consecutively starting from the first stride boundary above the reserved range, and assigns fresh sequential offsets to every area. Use this when conference numbers have drifted significantly or when you want to compact groups together.
 
 ```bash
-node src/tools/qwkConfRenumber.js            # renumber in place
-node src/tools/qwkConfRenumber.js --dry-run  # preview without writing
+node src/tools/qwkConfRenumber.js              # preserve existing, fill gaps
+node src/tools/qwkConfRenumber.js --dry-run    # preview without writing
+node src/tools/qwkConfRenumber.js --force      # discard and rebuild
+node src/tools/qwkConfRenumber.js --force --dry-run
 ```
 
-Run the tool once when upgrading an install to the release that adopted the reserved range. The descending-id walk is collision-safe for any number of areas: by the time the tool processes row N, every row with a larger id has already moved to its own target, so row N's target slot is guaranteed free. After the tool completes, start the gateway/worker processes normally. Subsequent runs are idempotent — UPDATE-ing a row that's already at `id + 100` is a no-op.
+The tool ensures the schema column and UNIQUE constraint exist before reading (so it can run before the gateway/worker has booted on a fresh upgrade). It uses a two-phase write: first parking every area at its negative id (negatives can't collide with any real conference number), then writing the final values. This dodges UNIQUE-constraint violations when the new range overlaps the old range. Group `qwk_conf_start` values are written in a final pass after all areas are repositioned. If the tool fails after phase 1, the DB is in a parked state -- re-run the tool to recover.
+
+Exit codes: 0 success, 1 stride too small for at least one group, 2 fatal (DB error or bootstrap failure).
 
 ## 1.5. Reserved System Conferences
 
@@ -192,6 +215,19 @@ Security: Always override the `from` field with the authenticated user's usernam
 
 ## 3. Database Schema
 
+### message_groups.qwk_conf_start
+
+Declared in `db/schema/tablecolumns/message_groups.conf`:
+
+```
+qwk_conf_start INTEGER
+```
+
+- **Default on create**: `msgGroups.newGroup()` auto-assigns via `nextGroupConfStart()` which returns `MAX(existing) + qwk_group_stride` (or the first stride boundary above `RESERVED_CONF_COUNT` for the first group).
+- **UNIQUE constraint**: `message_groups_qwk_conf_start_key` enforces uniqueness across groups so two groups can't claim the same block start. Managed at startup by `msgGroups.ensureQwkConfStartConstraint`.
+- **Sysop-editable**: the admin group edit modal exposes the field. Changing it triggers `renumberGroupAreas()` which preserves area offsets within the new block, with full collision checking against areas in other groups.
+- **AJAX validation**: `/admin/msgGroups/check-conf-start?n=X&exclude_group_id=Y` returns JSON `{ available, message }` for live feedback in the create/edit modals.
+
 ### message_areas.qwk_conf_number
 
 Declared in `db/schema/tablecolumns/message_areas.conf`:
@@ -200,11 +236,12 @@ Declared in `db/schema/tablecolumns/message_areas.conf`:
 qwk_conf_number INTEGER
 ```
 
-- **Default on create**: `newArea()` sets `qwk_conf_number = (id + RESERVED_CONF_COUNT)` via a post-insert UPDATE. Values in 1-100 are reserved for system conferences.
-- **UNIQUE constraint**: `message_areas_qwk_conf_number_key` enforces global uniqueness across areas. Managed at startup by `ensureQwkConfNumbers` because the `.conf` format can't express constraints.
-- **Sysop-editable**: the admin area editor exposes the field with min=101, helper text explaining the reserved range, and an AJAX collision check endpoint (`/admin/msgAreas/check-conf-number`).
-- **Validation**: `msgAreas.updateArea()` rejects values ≤ RESERVED_CONF_COUNT with a friendly error, and collision-checks against other areas before the write.
-- **Migration**: handled by `ensureQwkConfNumbers` on startup — see "Conference Number Assignment" in section 1 for the four-pass details.
+- **Default on create**: `newArea()` calls `nextConfNumberInGroup(group)` to find the lowest unused offset in the parent group's block. The number is set in the same INSERT, so there's no two-step write.
+- **UNIQUE constraint**: `message_areas_qwk_conf_number_key` enforces global uniqueness across all areas (not just within a group). Managed at startup by `ensureQwkConfNumbers`.
+- **Sysop-editable override**: the admin area edit modal exposes the field as an escape hatch. The override is allowed to live outside the group's block as long as it remains globally unique and above the reserved range.
+- **Move semantics**: `moveArea()` reassigns the conference number from the target group's block before any other writes. If the block is full, the move aborts cleanly.
+- **Validation**: `msgAreas.updateArea()` rejects values ≤ `RESERVED_CONF_COUNT` and collision-checks against any other area before the write.
+- **Migration**: handled by `src/tools/qwkConfRenumber.js` (standalone CLI) -- see "Conference Number Assignment" in section 1 for the per-group block model details.
 
 ### users.last_qwk_download_at
 
@@ -226,6 +263,7 @@ Advanced to NOW() at the end of each successful `buildQwkForUser()` call. Used t
 | `qwk_announcements_conf` | number | `1` | qwk | Conference number for system announcements. Must be in the reserved range (1-100). `0` disables emission. |
 | `qwk_wall_conf` | number | `2` | qwk | Conference number for the wall. Must be in the reserved range (1-100). `0` disables emission. |
 | `qwk_bulletins_conf` | number | `3` | qwk | Conference number for bulletins. Must be in the reserved range (1-100). `0` disables emission. |
+| `qwk_group_stride` | number | `1000` | qwk | Conference number block size per message group. Each group is auto-assigned a `qwk_conf_start` at `MAX(existing) + stride` and its areas take consecutive offsets within `[start, start+stride-1]`. Larger stride leaves more room for future areas; smaller stride packs groups tighter. Changing this value does NOT renumber existing groups -- run `node src/tools/qwkConfRenumber.js --force` to re-pack. |
 
 ## 5. Terminal Flow
 

@@ -162,15 +162,41 @@ router.get('/msgGroups', async (req, res, next) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var grouplist = await msgGroups.getAllGroups();
+	var nextConfStart = await msgGroups.nextGroupConfStart();
 	res.render('admin/msgGroups', {
 		sufficientAccess: sufficientAccess,
 		title: 'Message Groups',
 		activelink: 'msgGroups',
 		currentuser: currentuser,
 		grouplist: grouplist,
+		nextConfStart: nextConfStart,
 		availablePermissions: getAvailablePermissions(),
 		availableRestrictions: getAvailableRestrictions()
 	});
+});
+
+// AJAX endpoint: check whether a candidate qwk_conf_start value is
+// available (not colliding with another group, above the reserved
+// range). Used by the new/edit group modals for live feedback.
+router.get('/msgGroups/check-conf-start', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!checkAdminAccess(currentuser)) {
+		return res.status(403).json({ error: 'Access denied' });
+	}
+	var n = parseInt(req.query.n, 10);
+	if (isNaN(n) || n <= 0) {
+		return res.json({ available: false, reason: 'invalid_number' });
+	}
+	var excludeGroupId = null;
+	if (req.query.exclude_group_id) {
+		excludeGroupId = parseInt(req.query.exclude_group_id, 10);
+		if (isNaN(excludeGroupId)) excludeGroupId = null;
+	}
+	var err = await msgGroups.validateGroupConfStart(n, excludeGroupId);
+	if (err) {
+		return res.json({ available: false, reason: 'invalid', message: err });
+	}
+	return res.json({ available: true });
 });
 
 // Legacy netmail admin routes removed -- netmail now flows through the PM system.
