@@ -456,12 +456,81 @@ at the top of `ftnTosser.js` and is pinned by tests in
 
 **MSGID serial format** (FTS-0009): the portion after the origin
 address must be exactly 8 hex characters — a 32-bit value. Canectic
-generates this via `_nextMsgIdSerial()` in `src/utils/ftnUtils.js`
-which packs 16 bits of wall-clock seconds with a 16-bit per-process
-monotonic counter. Both `genMsgId()` (async, used by netmail) and
-`getMilliHex()` (sync, used by echomail) wrap the same underlying
-helper so they share a single counter and can't produce colliding
-serials across call sites.
+lays this out as:
+
+```
+bits 31-16 (16)  days since Canectic epoch    179-year horizon
+bits 15-0  (16)  shared per-day counter       65,536/day aggregate
+```
+
+The **Canectic epoch** is `Date.UTC(1980, 11, 8)` — December 8, 1980
+UTC. Deliberately pre-FidoNet (1984) so the day field can represent
+any historical FTN message base that import tools might need to
+synthesize MSGIDs for. Wraps at `2^16` days on 2160-06-07, giving
+135 years of forward runway from 2025.
+
+The counter is a **shared atomic key in Redis** (`msgid:day:<days>`
+with a 48h TTL). All four Canectic processes (gateway, mail, mailer,
+worker) draw from the same pool via `INCR` -- no per-process
+coordination needed. On process startup, `initializeMsgidCounter()`
+short-circuits if Redis already has state for today; on cold start
+or Redis flush, it scans the outbound message tables for the highest
+serial used in today's day bucket and seeds from `max + 100`
+(safety margin) so post-flush regeneration can't collide with
+pre-flush emissions.
+
+If Redis is unreachable at generation time, the path degrades to a
+process-local fallback counter (logged as a warning) rather than
+hard-failing. Cross-process collisions are possible in this narrow
+window until Redis recovers.
+
+`genMsgId()` (async, used by `netmail.js`) and `getMilliHex()`
+(async, used by `messages.js`) both wrap the same
+`_nextMsgIdSerial()` generator so they share the counter pool.
+`parseSerial(hex)` splits an 8-char serial back into
+`{days, counter}`, and `dayBucketForDate(date)` lets import tools
+compute the correct day field for historical message timestamps.
+
+**MSGID tuple storage**: the full "address serial" MSGID string
+is split into two columns at DB write time:
+
+```
+msg_id        VARCHAR(255)    the 8-char serial only
+msg_orig_addr VARCHAR(64)     the origin FTN address
+```
+
+Dupe checks and reply_to lookups compare the tuple with
+`UPPER(COALESCE(msg_orig_addr, '')) = UPPER($2)` so NULL and empty
+string are equivalent. Splits happen in `echomail.ftnToDb`,
+`netmail.ftnToDb`, `privateMessages.deliverMessage/sendLocalMessage`,
+and the QWK/NNTP tossers; joins happen in `echomail.dbToFtn` and
+`netmail.dbToFtn` via `ftnUtils.joinMsgidTuple()`.
+
+The `threadid` column in the per-area thread tables stays in the
+legacy "address serial" full-string format. It's treated as an
+opaque key for threading lookups and rebuilt from the tuple
+columns at insert time via `joinMsgidTuple()`. This avoids
+schema changes to thread tables while keeping threading logic
+human-readable.
+
+`reply_to` is split the same way into `reply_to` (serial) and
+`reply_orig_addr` (origin address) so parent lookups in
+`threadMessage()` compare tuples. QWK/NNTP tossers populate both
+columns; NNTP Message-IDs use empty `msg_orig_addr` because
+RFC 5322 IDs aren't FTN MSGIDs.
+
+**Historical imports**: when import tools synthesize MSGIDs for
+messages without existing kludges (very old SMB bases, legacy
+archives), they should use `dayBucketForDate(originalTimestamp)`
+to place the synthetic serial at the correct chronological
+position within the day field. The counter half can come from
+the shared Redis counter or be pinned explicitly if the import
+needs deterministic ordering. Pre-1980 messages clamp to day 0.
+
+See `docs/reference/CTN_DESIGN.md` for forward-looking notes on a
+base36 MSGID encoding that would use the same epoch and day
+numbering while expanding the burst capacity and removing the
+Redis hot-path dependency. Not currently implemented.
 
 After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace) — both use colon-space.
 

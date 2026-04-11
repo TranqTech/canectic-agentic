@@ -34,7 +34,7 @@ If CTN ever wants to relax the hex constraint (all modern FTN tossers in practic
 Total: 41 bits packed into 8 base36 characters
 
 bits 40-38  (3)  process ID        gateway=0, mail=1, mailer=2, worker=3, + 4 spare
-bits 37-22 (16)  days since Canectic epoch      179 years from 2025-01-01 UTC
+bits 37-22 (16)  days since Canectic epoch      179 years from 1980-12-08 UTC
 bits 21- 5 (17)  seconds within day             0 to 86399 (full wall-clock second)
 bits  4- 0  (5)  per-process per-second counter 32 burst tiebreaker
 ```
@@ -43,7 +43,7 @@ bits  4- 0  (5)  per-process per-second counter 32 burst tiebreaker
 
 | Property | Value |
 |---|---|
-| Horizon | 179 years (2025-01-01 → 2204-12-31) |
+| Horizon | 179 years (1980-12-08 → 2160-06-07), shared with the hex FTN scheme so day numbers match between CTN and FTN-compat MSGIDs |
 | Time resolution | 1 second within day |
 | Burst capacity | 32 MSGIDs per process per wall-clock second |
 | Cross-process safety | Structural (3-bit process ID, no shared state) |
@@ -56,7 +56,11 @@ bits  4- 0  (5)  per-process per-second counter 32 burst tiebreaker
 **Implementation sketch:**
 
 ```js
-var CANECTIC_EPOCH_MS = Date.UTC(2025, 0, 1);
+// 1980-12-08 UTC. Shared with the hex FTN scheme so day numbers are
+// interchangeable between the two MSGID formats. Deliberately pre-FTN
+// (1984) so future import tools can synthesize MSGIDs for historical
+// message bases with their natural chronological position.
+var CANECTIC_EPOCH_MS = Date.UTC(1980, 11, 8);
 var PROCESS_ID = parseInt(process.env.CANECTIC_PROCESS_ID || '0', 10) & 0x7;
 
 var _lastSec = -1;
