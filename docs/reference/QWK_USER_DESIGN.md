@@ -78,14 +78,68 @@ Steps:
 
 ### Conference Number Assignment
 
-Each message area carries a `qwk_conf_number` column (INTEGER, UNIQUE, NOT NULL). This is a system-wide property of the area, not per-user.
+Each message area carries a `qwk_conf_number` column (INTEGER, UNIQUE). This is a system-wide property of the area, not per-user.
 
-- **Defaults to area ID**: `qwk_conf_number = id` on creation unless explicitly set. Area IDs start at 1 and grow sequentially, so they naturally avoid conference 0 (reserved for PMs) and leave plenty of room for sysops to assign custom numbers in typical network ranges (100-999, 14000+).
-- **Sysop-editable**: admin area editor shows and allows changing the conference number (with uniqueness validation)
-- **Stable across all users and downloads**: every user's QWK packet uses the same conference numbers, so any QWK reader's conference list is consistent
+**Reserved range 1-100.** Conference numbers 1 through 100 are reserved for Canectic system conferences (see the "Reserved System Conferences" section below). Message areas default to `qwk_conf_number = (id + 100)` on creation so they land safely above the reserved range. `RESERVED_CONF_COUNT = 100` is a hardcoded constant in `src/models/msgAreas.js` and exported for use by other modules.
+
+- **Default on create**: `newArea()` does a post-insert UPDATE setting `qwk_conf_number = (id + RESERVED_CONF_COUNT)`. The insert happens first because the id isn't known until the row exists.
+- **Sysop-editable**: admin area editor shows and allows changing the conference number. Validation rejects values ≤ 100 (the reserved range) and values that collide with other areas (also enforced by the DB UNIQUE constraint).
+- **AJAX collision check**: the admin form has a debounced `/admin/msgAreas/check-conf-number?n=X&exclude=shortcode` endpoint wired to the input's `input` event so sysops see inline success/conflict feedback before submitting.
+- **Stable across all users and downloads**: every user's QWK packet uses the same conference numbers, so any QWK reader's conference list is consistent.
 - **Independent of QWK network areatags**: network areatags (the conference numbers used for peer-to-peer QWK networking) are a property of the network mapping, not the local area. The local `qwk_conf_number` is for user-facing packets only. A sysop may choose to align them manually, but there is no automatic coupling.
 
-This matches how traditional BBS software handles conference numbering -- Synchronet has internal codes per sub-board, Mystic has conference numbers per message base.
+**Startup migration (`msgAreas.ensureQwkConfNumbers`)** runs four passes:
+
+1. Ensure the `message_areas_qwk_conf_number_key` UNIQUE constraint exists (idempotent).
+2. NULL backfill: rows with `qwk_conf_number IS NULL` get `(id + RESERVED_CONF_COUNT)`.
+3. Legacy default shift: rows where `qwk_conf_number = id` (the pre-reserved-range default) are shifted up by RESERVED_CONF_COUNT. Collision-safe because `id` is unique so `id + 100` is unique too. Idempotent on subsequent startups.
+4. Reserved-range scan: any row with `qwk_conf_number` in `[1..100]` is logged at level 1 with its shortcode, warning the sysop to renumber it. These are explicit sysop assignments, not defaults, so the migration does not auto-move them — silent mutation of explicit values would be worse than the warning.
+
+## 1.5. Reserved System Conferences
+
+Conference 0 is personal mail (PMs) by QWK convention. Conferences 1-100 are reserved by Canectic for system content delivered through user QWK downloads. Three slots are currently used:
+
+| Conf | Name | Source model | Config key | REP import behaviour |
+|---|---|---|---|---|
+| 1 | Announce | `announcements.js` (active, in publish window) | `qwk_announcements_conf` | Rejected (read-only) |
+| 2 | Wall | `wall.js` (last 100, or since last download) | `qwk_wall_conf` | First post accepted, extras rejected |
+| 3 | Bulletin | `bulletins.js` (active, filtered by updated_at) | `qwk_bulletins_conf` | Rejected (read-only) |
+
+All three keys default to the values shown above. Setting a key to `0` disables emission for that source. Sysops can renumber to different values within the reserved range (1-100) via `/admin/config`, though the defaults are the recommended assignment.
+
+### Read tracking: `users.last_qwk_download_at`
+
+A new column on the users table tracks the last successful QWK build for each user. System conference content is filtered against this timestamp so each download only carries new material since the previous fetch. After the packet is fully assembled and about to ship, `last_qwk_download_at` is updated to NOW().
+
+**Known limitation**: users who download QWK to multiple devices will have each sync advance the server-side timestamp, so the second device will miss content the first device already received. This is documented in the sysop docs as a multi-device caveat. Users with this workflow need to sync their offline readers themselves.
+
+### Emission in CONTROL.DAT
+
+System conferences are prepended to the conference list when building CONTROL.DAT, so they appear immediately after conference 0 on mail clients that respect CONTROL.DAT emission order. Mail clients that sort numerically also show them at the top because the reserved range (1-100) is below the message-area range (101+).
+
+### Conference content rendering
+
+- **Announcements**: one QWK message per active announcement newer than `last_qwk_download_at`. From = author name (or `sysopname`), To = the recipient user, Subject = truncated announcement title, Body = `body_text` (already HTML-stripped by `announcements.htmlToPlainText`). Status byte `0x2A` (private unread) so mail clients surface them as personal items. Synthesised Message-ID `<announce-N@canectic.local>`.
+- **Wall**: one QWK message per post, filtered by `created_at > last_qwk_download_at` (or last 100 on first download). From = poster's username, To = `"All"`, Subject = first 25 chars of the post body (preview), Body = full post (up to 160 chars). Status byte `0x20` (public). Synthesised Message-ID `<wall-N@canectic.local>`.
+- **Bulletins**: one QWK message per active bulletin where `updated_at > last_qwk_download_at` (on re-download, only modified bulletins come through; on first download all active bulletins are included). From = `sysopname`, To = the recipient user, Subject = truncated bulletin title, Body = `body_text`. Status byte `0x2A`. Synthesised Message-ID `<bulletin-N@canectic.local>`.
+
+### Wall REP import rules
+
+Wall one-liners are the only system conference that accepts REP uploads, with several constraints enforced in `importRepWall`:
+
+1. **`wall.canPost(user)` must pass.** Users with the `Unverified` restriction flag (or any other configured `wall_post_restricted_flags`) are rejected with `wall posting denied for this user`.
+2. **First-line-only.** The REP message body is split on any newline (CR, LF, or CRLF); only the first non-empty line is taken. Users who accidentally write a multi-line wall post get the first line posted.
+3. **Silent truncation.** Leading/trailing whitespace is stripped; the result is silently truncated to `wall_max_length` (default 78). No error for overlength posts.
+4. **Empty rejection.** If the first line is empty after stripping, reject with `empty wall post body`.
+5. **One per REP.** The first wall-targeted message in a REP is accepted (subject to 1-4 above); subsequent wall-targeted messages in the same REP are rejected with `Wall posts are limited to one per REP upload`.
+
+### Post-import feedback PM
+
+If any messages in a REP were rejected (for any reason — wall overflow, wall access denied, announcements/bulletins read-only, unknown conference, area access denied, etc.), `importRepForUser` composes a LOCAL system PM to the user summarising the failures and delivers it via `privateMessages.deliverMessage`. The PM lands in the user's inbox and shows up in their next QWK download, closing the feedback loop. Most mail clients don't surface per-message rejection details from the upload response JSON, so this is the only realistic feedback path for offline-only users.
+
+### Threading caveat
+
+Mail clients allow users to "reply" to any message they see, including announcements and bulletins. Such replies target the announcements/bulletins conference in the REP file and are rejected by our read-only policy. The user's reply shows up in their mail client's sent folder as "sent" (the client doesn't know) but never reaches Canectic's database. The rejection PM (above) tells the user their reply was dropped, but the sent-folder state in their reader is beyond our control. Worth documenting for sysops so they can pre-answer user confusion.
 
 ## 2. REP Import Pipeline
 
@@ -129,25 +183,38 @@ Security: Always override the `from` field with the authenticated user's usernam
 
 ### message_areas.qwk_conf_number
 
-New column on the existing `message_areas` table:
+Declared in `db/schema/tablecolumns/message_areas.conf`:
 
-```sql
-ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS qwk_conf_number INTEGER UNIQUE;
+```
+qwk_conf_number INTEGER
 ```
 
-- **Defaults to area ID**: on area creation, `qwk_conf_number` is set to the area's `id` unless explicitly specified. Area IDs are sequential from 1, leaving plenty of room in typical conference number ranges (100-999, 14000+) for sysops to assign custom numbers matching a network hub.
-- **Sysop-editable**: shown in the admin area editor with uniqueness validation
-- **Backfill for existing areas**: a migration/bootstrap sets `qwk_conf_number = id` for any areas where `qwk_conf_number IS NULL`
+- **Default on create**: `newArea()` sets `qwk_conf_number = (id + RESERVED_CONF_COUNT)` via a post-insert UPDATE. Values in 1-100 are reserved for system conferences.
+- **UNIQUE constraint**: `message_areas_qwk_conf_number_key` enforces global uniqueness across areas. Managed at startup by `ensureQwkConfNumbers` because the `.conf` format can't express constraints.
+- **Sysop-editable**: the admin area editor exposes the field with min=101, helper text explaining the reserved range, and an AJAX collision check endpoint (`/admin/msgAreas/check-conf-number`).
+- **Validation**: `msgAreas.updateArea()` rejects values ≤ RESERVED_CONF_COUNT with a friendly error, and collision-checks against other areas before the write.
+- **Migration**: handled by `ensureQwkConfNumbers` on startup — see "Conference Number Assignment" in section 1 for the four-pass details.
 
-No new tables needed. The conference mapping is a property of the area, not the user.
+### users.last_qwk_download_at
+
+New column on `users`, declared in `db/schema/tablecolumns/users.conf`:
+
+```
+last_qwk_download_at TIMESTAMPTZ
+```
+
+Advanced to NOW() at the end of each successful `buildQwkForUser()` call. Used to filter system conference content (announcements, wall, bulletins) so each download only carries new material since the previous sync.
 
 ## 4. Config Keys
 
 | Key | Type | Default | Category | Description |
 |-----|------|---------|----------|-------------|
-| `qwk_bbsid` | string | `''` | system | QWK BBS ID (max 8 chars, uppercase). Falls back to first 8 chars of `boardname`. |
-| `qwk_max_msgs_per_area` | number | `500` | system | Maximum messages per area in a user QWK packet |
-| `qwk_enabled` | boolean | `true` | system | Enable/disable user QWK packet download/upload |
+| `qwk_enabled` | boolean | `true` | qwk | Enable/disable user QWK packet download/upload |
+| `qwk_bbsid` | string | `''` | qwk | QWK BBS ID (max 8 chars, uppercase). Falls back to first 8 chars of `boardname`. |
+| `qwk_max_msgs_per_area` | number | `500` | qwk | Maximum messages per area in a user QWK packet |
+| `qwk_announcements_conf` | number | `1` | qwk | Conference number for system announcements. Must be in the reserved range (1-100). `0` disables emission. |
+| `qwk_wall_conf` | number | `2` | qwk | Conference number for the wall. Must be in the reserved range (1-100). `0` disables emission. |
+| `qwk_bulletins_conf` | number | `3` | qwk | Conference number for bulletins. Must be in the reserved range (1-100). `0` disables emission. |
 
 ## 5. Terminal Flow
 
