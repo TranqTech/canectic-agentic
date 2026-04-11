@@ -37,6 +37,14 @@ async function _getJobs() {
   }
 }
 
+// Public wrapper around _triggerOutboundToss for callers that opted into
+// queueMessage's deferOutboundTrigger option. They must invoke this once
+// they've finished post-insert work (storing attachments, etc.) so the
+// worker actually picks up the message and sends it.
+async function triggerOutboundToss(transportType) {
+  return _triggerOutboundToss(transportType);
+}
+
 async function _triggerOutboundToss(transportType) {
   var jobs = await _getJobs();
   if (!jobs) return;
@@ -588,7 +596,18 @@ async function purgeDeleted(retentionDays) {
 // For LOCAL: transport_data should have { recipient_user_id }
 // userSession is optional — when provided (web routes), transport access is enforced.
 // When omitted (system-level calls), access check is skipped.
-async function queueMessage(messageObj, userSession) {
+//
+// options:
+//   deferOutboundTrigger — when true, skip the post-insert _triggerOutboundToss
+//     call so the caller can finish auxiliary work (storing attachments,
+//     updating has_attachments) BEFORE the worker picks up the job. The
+//     caller is then responsible for invoking triggerOutboundToss() once
+//     the row is fully ready. Without this, attachments arrive on disk
+//     after the worker has already sent the email -- so external recipients
+//     get the body but no attachments. Used by smtpServer for submissions
+//     that carry attachments.
+async function queueMessage(messageObj, userSession, options) {
+  var opts = options || {};
   var retObj = {
     status: false,
     outboxId: null,
@@ -670,7 +689,13 @@ async function queueMessage(messageObj, userSession) {
   // For non-LOCAL transports, signal the worker to toss outbound.
   // This triggers the next toss cycle immediately rather than waiting
   // for the scheduled poll.  Works from both web routes and terminal.
-  if (!isLocal) {
+  //
+  // SKIP when caller asked to defer (e.g. SMTP submission with attachments
+  // that still need to be written to disk). Caller must call
+  // triggerOutboundToss() after attachment storage finishes; otherwise the
+  // worker may pick up the row and send the email before attachments are
+  // linked, leaving recipients with body-only emails.
+  if (!isLocal && !opts.deferOutboundTrigger) {
     await _triggerOutboundToss(messageObj.transport_type);
   }
 
@@ -1054,6 +1079,7 @@ export {
   // Outbox
   queueMessage,
   queueOutbound,
+  triggerOutboundToss,
   getSentMessages,
   getSentMessage,
   getPendingByTransport,

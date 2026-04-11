@@ -11,7 +11,7 @@
 import * as net from 'net';
 import * as alogger from '../utils/alogger.js';
 import { checkUserPass, getUserRecord } from '../models/useraccounts.js';
-import { resolveRecipient, queueMessage, deliverMessage } from '../models/privateMessages.js';
+import { resolveRecipient, queueMessage, deliverMessage, triggerOutboundToss } from '../models/privateMessages.js';
 import { storeAttachments } from '../models/pmAttachments.js';
 import appConfig from '../config/appConfig.js';
 
@@ -72,15 +72,45 @@ class SmtpSession {
 			// Check for end-of-data marker
 			if (this.dataBuffer.includes('\r\n.\r\n')) {
 				var body = this.dataBuffer.split('\r\n.\r\n')[0];
+				// Anything past the marker is post-DATA pipelining (RSET,
+				// MAIL FROM for a second transaction, QUIT, etc.). RFC 2920
+				// allows this; previously we silently dropped those bytes
+				// when zeroing dataBuffer. Re-route them through _buffer so
+				// the command queue picks them up after _processData fires.
+				var markerIdx = this.dataBuffer.indexOf('\r\n.\r\n');
+				var trailing = this.dataBuffer.substring(markerIdx + 5);
 				this.dataBuffer = '';
 				this.state = 'ready';
+				if (trailing.length > 0) {
+					this._buffer += trailing;
+				}
 				// RFC 5321 section 4.5.2 -- transparency: the client prefixes
 				// any body line starting with "." with an extra "." so the
 				// dot doesn't look like the end-of-data marker. The receiver
 				// MUST strip that extra dot before processing the message.
 				body = body.replace(/\r\n\.\./g, '\r\n.');
 				if (body.startsWith('..')) body = body.substring(1);
+				// Visible at default loglevel so operators can confirm the
+				// SMTP byte stream actually reached parsing -- the most
+				// useful single line for diagnosing "no trace" reports.
+				if (this.trustedMode) {
+					alogger.writeAlog(2,
+						'SMTP inbound: end-of-data marker received, ' + body.length +
+						' body bytes captured -- entering parse + deliver path',
+						'cyan');
+				}
 				this._processData(body);
+				// Drain any pipelined post-DATA bytes that were just stashed
+				// into _buffer. Without this they'd sit there until the next
+				// TCP frame arrived (which for QUIT/RSET means never).
+				if (trailing.length > 0) {
+					var lines = this._buffer.split('\r\n');
+					this._buffer = lines.pop();
+					for (var line of lines) {
+						if (line.length > 0) this._cmdQueue.push(line);
+					}
+					this._runCmdQueue();
+				}
 			}
 			return;
 		}
@@ -490,6 +520,14 @@ class SmtpSession {
 	}
 
 	async _processSubmissionData(parsed) {
+		// Determine up-front whether this submission has attachments. If so
+		// we MUST defer the outbound toss trigger until after the attachments
+		// are written to disk and linked, otherwise the worker can pick the
+		// row up and send the email before the attachments exist -- the
+		// recipient receives a body-only email and the attachments are lost
+		// from the recipient's perspective even though they're in our DB.
+		var hasAttachments = parsed.attachments && parsed.attachments.length > 0;
+
 		for (var rcpt of this.rcptTo) {
 			var messageObj = {
 				user_id: this.userId,
@@ -514,30 +552,58 @@ class SmtpSession {
 				restrictionflags: this.userRecord.restrictionflags
 			};
 
-			var result = await queueMessage(messageObj, session);
+			// Defer the outbound toss trigger so we can store attachments
+			// before the worker sees the row. Local delivery is unaffected
+			// (no toss is triggered for LOCAL transport).
+			var result = await queueMessage(messageObj, session, {
+				deferOutboundTrigger: hasAttachments
+			});
 			if (!result.status) {
-				alogger.writeAlog(3, 'SMTP delivery failed to ' + rcpt.address +
+				alogger.writeAlog(2, 'SMTP delivery failed to ' + rcpt.address +
 					': ' + result.errormessages.join(', '), 'yellow');
-			} else {
-				// Store attachments on outbox message
-				if (parsed.attachments && parsed.attachments.length > 0 && result.outboxUuid) {
-					var attIds = await storeAttachments(result.outboxUuid, 'outbox', parsed.attachments);
-					if (attIds.length > 0) {
-						try {
-							var pg = await import('../middleware/db/postgres.js');
-							await pg.write('UPDATE pm_outbox SET has_attachments = true WHERE uuid = $1', [result.outboxUuid]);
-							// For LOCAL delivery, copy attachments to inbox
-							if (result.deliveryResult && result.deliveryResult.uuid) {
-								var pmAtt = await import('../models/pmAttachments.js');
-								await pmAtt.copyAttachmentsToInbox(result.outboxUuid, result.deliveryResult.uuid);
-								await pg.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.deliveryResult.uuid]);
-							}
-						} catch (_) {}
+				continue;
+			}
+
+			// Store attachments on outbox message
+			if (hasAttachments && result.outboxUuid) {
+				var attIds = [];
+				try {
+					attIds = await storeAttachments(result.outboxUuid, 'outbox', parsed.attachments);
+				} catch (storeErr) {
+					alogger.writeAlog(2, 'SMTP submission attachment storage failed for ' +
+						rcpt.address + ': ' + storeErr.message, 'redbright');
+				}
+				if (attIds.length > 0) {
+					try {
+						var pg = await import('../middleware/db/postgres.js');
+						await pg.write('UPDATE pm_outbox SET has_attachments = true WHERE uuid = $1', [result.outboxUuid]);
+						// For LOCAL delivery, copy attachments to inbox
+						if (result.deliveryResult && result.deliveryResult.uuid) {
+							var pmAtt = await import('../models/pmAttachments.js');
+							await pmAtt.copyAttachmentsToInbox(result.outboxUuid, result.deliveryResult.uuid);
+							await pg.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.deliveryResult.uuid]);
+						}
+					} catch (markErr) {
+						alogger.writeAlog(2, 'SMTP submission has_attachments mark failed: ' +
+							markErr.message, 'yellow');
 					}
 				}
-				alogger.writeAlog(4, 'SMTP delivered to ' + rcpt.address +
-					' from ' + this.username, 'green');
+				// NOW it's safe for the worker to pick this up. Trigger the
+				// toss explicitly since queueMessage skipped it. Local
+				// delivery doesn't need this -- LOCAL never goes to a worker.
+				if (rcpt.transportType !== 'LOCAL') {
+					try {
+						await triggerOutboundToss(rcpt.transportType);
+					} catch (trigErr) {
+						alogger.writeAlog(2, 'SMTP submission outbound trigger failed: ' +
+							trigErr.message, 'yellow');
+					}
+				}
 			}
+			alogger.writeAlog(2, 'SMTP submission accepted to ' + rcpt.address +
+				' from ' + this.username +
+				(hasAttachments ? ' (' + parsed.attachments.length + ' attachment(s))' : ''),
+				'green');
 		}
 	}
 
@@ -549,7 +615,11 @@ class SmtpSession {
 		// Strip angle brackets if present: "Name <addr>" → use as-is for display
 		var displayFrom = senderName.replace(/<[^>]*>/g, '').trim() || senderAddress;
 
-		alogger.writeAlog(3,
+		// Level 2 so this is visible at default loglevels. Without this line
+		// a successful "delivery" path can be invisible to the operator if
+		// the per-recipient delivery logs are also filtered out, producing
+		// the "swallowed without a trace" symptom.
+		alogger.writeAlog(2,
 			'SMTP inbound: DATA received, processing ' + this.rcptTo.length +
 			' recipient(s) from ' + senderAddress +
 			' (subject: ' + (parsed.subject || '(none)') +
@@ -565,11 +635,15 @@ class SmtpSession {
 		rfcMessageId = rfcMessageId.trim();
 
 		for (var rcpt of this.rcptTo) {
+			// Bumped to level 2 so silent skips are visible. The previous
+			// level-3 hid this from operators with default-or-lower loglevel
+			// and produced the "no trace" symptom when transport data was
+			// missing for a recipient that resolved at RCPT time.
 			if (!rcpt.transportData || !rcpt.transportData.recipient_user_id) {
-				alogger.writeAlog(3,
-					'SMTP inbound: skipping recipient ' + (rcpt.address || '?') +
-					' (no recipient_user_id in transport data)',
-					'yellow');
+				alogger.writeAlog(2,
+					'SMTP inbound: SKIPPING recipient ' + (rcpt.address || '?') +
+					' (no recipient_user_id in transport data) -- delivery aborted for this recipient',
+					'redbright');
 				continue;
 			}
 
@@ -593,25 +667,49 @@ class SmtpSession {
 
 			var result = await deliverMessage(messageObj);
 			if (!result.status) {
-				alogger.writeAlog(3, 'SMTP inbound delivery failed to ' + rcpt.address +
-					': ' + (result.errormessages || []).join(', '), 'yellow');
-			} else {
-				// Store attachments if present
-				if (parsed.attachments && parsed.attachments.length > 0 && result.uuid) {
+				alogger.writeAlog(2, 'SMTP inbound delivery FAILED to ' + rcpt.address +
+					': ' + (result.errormessages || []).join(', '), 'redbright');
+				continue;
+			}
+
+			// status=true with duplicate=true means the dupe check matched
+			// an existing row and we did NOT insert. Surface this explicitly
+			// so the operator can tell genuine delivery from silent dedup
+			// (otherwise both look identical from the outside and a buggy
+			// dupe check produces the "swallowed without a trace" report).
+			if (result.duplicate) {
+				alogger.writeAlog(2, 'SMTP inbound: DUPLICATE detected for ' + rcpt.address +
+					' (Message-ID: ' + (rfcMessageId || '(none)') + ', subject: ' +
+					(parsed.subject || '(none)') + ') -- not re-inserted',
+					'yellow');
+				continue;
+			}
+
+			// Store attachments if present. Wrapped in try/catch so a disk
+			// error or bad attachment doesn't propagate up and 451-bounce
+			// the entire delivery (the message body is already in the DB
+			// at this point -- losing attachments is bad, losing the whole
+			// message is worse).
+			if (parsed.attachments && parsed.attachments.length > 0 && result.uuid) {
+				try {
 					var attIds = await storeAttachments(result.uuid, 'inbox', parsed.attachments);
 					if (attIds.length > 0) {
-						// Mark message as having attachments
-						try {
-							var pg = await import('../middleware/db/postgres.js');
-							await pg.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.uuid]);
-						} catch (_) {}
+						var pg = await import('../middleware/db/postgres.js');
+						await pg.write('UPDATE pm_inbox SET has_attachments = true WHERE uuid = $1', [result.uuid]);
 					}
+				} catch (attErr) {
+					alogger.writeAlog(2,
+						'SMTP inbound attachment storage failed for ' + rcpt.address +
+						': ' + attErr.message + ' -- message body delivered without attachments',
+						'yellow');
 				}
-				alogger.writeAlog(3, 'SMTP inbound delivered to ' + rcpt.address +
-					' from ' + senderAddress +
-					(parsed.attachments.length > 0 ? ' (' + parsed.attachments.length + ' attachment(s))' : ''),
-					'green');
 			}
+			alogger.writeAlog(2, 'SMTP inbound DELIVERED to ' + rcpt.address +
+				' from ' + senderAddress +
+				(parsed.attachments && parsed.attachments.length > 0
+					? ' (' + parsed.attachments.length + ' attachment(s))'
+					: ''),
+				'green');
 		}
 	}
 
