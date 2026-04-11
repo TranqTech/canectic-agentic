@@ -639,10 +639,9 @@ async function ensureQwkConfNumbers() {
 	}
 
 	// Pass 3: Shift legacy default rows (qwk_conf_number = id) up by
-	// RESERVED_CONF_COUNT. One-time migration for installs that existed
-	// before the reserved-range rework. Every row shifts by exactly
-	// +RESERVED_CONF_COUNT (same as the default for new areas) -- no
-	// extra buffer, no double-shifting.
+	// RESERVED_CONF_COUNT. Every row moves by exactly +100 -- same
+	// offset as the default for new areas, same for every row, no
+	// exceptions.
 	//
 	// ORDERING MATTERS. A single multi-row UPDATE would trip the UNIQUE
 	// constraint on the very first row: PostgreSQL checks uniqueness
@@ -652,15 +651,14 @@ async function ensureQwkConfNumbers() {
 	// row id=101 which is still at qwk_conf_number=101 because it hasn't
 	// been touched yet inside the same statement.
 	//
-	// Fix: walk descending by id and UPDATE one row at a time. When we
-	// get to row id=N, any row with a larger id has already been
-	// processed and vacated its old slot. Specifically: if there was
-	// a row at id=N+100 sitting at qwk_conf_number=N+100, it was
-	// processed earlier in the loop (larger id), moved to its own
-	// shift target (N+200 -- its own +100), and the qwk_conf_number=N+100
-	// slot is now free for row N to move into. The "N+200" isn't an
-	// extra buffer for row N; it's the legitimate shift target of the
-	// row that happened to have id=N+100.
+	// Fix: walk descending by id and UPDATE one row at a time. Each
+	// row's shift target is (id + RESERVED_CONF_COUNT). Descending
+	// order guarantees the target is free: by the time we process a
+	// row with id=N, every row with a larger id has already moved to
+	// its own target and vacated whatever slot it was holding. In
+	// particular, any row that had been holding the value N+100 (the
+	// target for row N) has moved on, because such a row's id must
+	// have been > N.
 	//
 	// Genuine collisions with sysop-customised rows (e.g. row id=200
 	// with qwk_conf_number=130 blocking legacy row 30's shift to 130)
