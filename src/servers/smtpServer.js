@@ -610,10 +610,26 @@ class SmtpSession {
 	async _processInboundData(parsed) {
 		// Trusted inbound: deliver each recipient as a LOCAL inbox message
 		// from an external email sender.
-		var senderAddress = this.mailFrom || '';
-		var senderName = parsed.headers['from'] || senderAddress;
-		// Strip angle brackets if present: "Name <addr>" → use as-is for display
-		var displayFrom = senderName.replace(/<[^>]*>/g, '').trim() || senderAddress;
+		//
+		// CRITICAL: prefer the From: header over the SMTP envelope MAIL FROM
+		// for both display and address. The envelope sender is the bounce /
+		// return-path, and major relays (Amazon SES, Mailgun, SendGrid) all
+		// rewrite it to a per-message UUID like
+		//   0100019d7af85989-75ec7d90-...-000000@amazonses.com
+		// which is useless to the recipient. The actual human sender lives
+		// in the From: header. We keep the envelope around in transport_data
+		// for bounce tracing.
+		var envelopeFrom = this.mailFrom || '';
+		var fromHeaderRaw = parsed.headers['from'] || '';
+		var parsedFrom = this._parseAddressHeader(fromHeaderRaw);
+
+		var senderAddress = parsedFrom.address || envelopeFrom;
+		var displayFrom = parsedFrom.name || parsedFrom.address || envelopeFrom;
+
+		// Subject is also commonly RFC 2047 encoded for non-ASCII content.
+		// Decode it once here so the inbox shows readable text instead of
+		// =?UTF-8?Q?...?= gibberish.
+		var subjectDecoded = this._decodeRfc2047(parsed.subject || '');
 
 		// Level 2 so this is visible at default loglevels. Without this line
 		// a successful "delivery" path can be invisible to the operator if
@@ -622,7 +638,10 @@ class SmtpSession {
 		alogger.writeAlog(2,
 			'SMTP inbound: DATA received, processing ' + this.rcptTo.length +
 			' recipient(s) from ' + senderAddress +
-			' (subject: ' + (parsed.subject || '(none)') +
+			(envelopeFrom && envelopeFrom !== senderAddress
+				? ' (envelope: ' + envelopeFrom + ')'
+				: '') +
+			' (subject: ' + (subjectDecoded || '(none)') +
 			', body-bytes: ' + ((parsed.bodyPlain || '').length + (parsed.bodyHtml || '').length) +
 			', attachments: ' + (parsed.attachments ? parsed.attachments.length : 0) + ')',
 			'cyan');
@@ -654,12 +673,13 @@ class SmtpSession {
 				from_address: senderAddress,
 				to_address: '',
 				msg_id: rfcMessageId,
-				subject: parsed.subject || '(no subject)',
+				subject: subjectDecoded || '(no subject)',
 				body_text: parsed.bodyPlain || parsed.bodyHtml || '',
 				utf8: parsed.bodyPlain || '',
 				transport_type: 'EMAIL',
 				transport_data: {
 					email_address: senderAddress,
+					envelope_from: envelopeFrom,
 					inbound: true
 				},
 				system_time: new Date()
@@ -680,7 +700,7 @@ class SmtpSession {
 			if (result.duplicate) {
 				alogger.writeAlog(2, 'SMTP inbound: DUPLICATE detected for ' + rcpt.address +
 					' (Message-ID: ' + (rfcMessageId || '(none)') + ', subject: ' +
-					(parsed.subject || '(none)') + ') -- not re-inserted',
+					(subjectDecoded || '(none)') + ') -- not re-inserted',
 					'yellow');
 				continue;
 			}
@@ -1031,6 +1051,109 @@ class SmtpSession {
 			.replace(/=([0-9A-Fa-f]{2})/g, function(_, hex) {
 				return String.fromCharCode(parseInt(hex, 16));
 			});
+	}
+
+	// Decode an RFC 2047 encoded-word run, e.g.
+	//   =?UTF-8?Q?Hello_World?=
+	//   =?ISO-8859-1?B?SGVsbG8gV29ybGQ=?=
+	//   =?UTF-8?Q?One?= =?UTF-8?Q?Two?=
+	//
+	// Returns the input unchanged if no encoded words are found, or with
+	// each encoded word replaced by its decoded UTF-8 form. Adjacent encoded
+	// words separated only by whitespace have the whitespace removed (per
+	// RFC 2047 section 6.2). Charsets we recognise: utf-8, us-ascii,
+	// iso-8859-1, windows-1252 (treated as latin1). Unknown charsets fall
+	// back to latin1 so the bytes round-trip even if the glyphs are wrong.
+	_decodeRfc2047(str) {
+		if (!str || str.indexOf('=?') === -1) return str;
+		// Collapse whitespace between adjacent encoded words first.
+		var collapsed = str.replace(/\?=\s+=\?/g, '?==?');
+		return collapsed.replace(/=\?([^?]+)\?([QBqb])\?([^?]*)\?=/g, function(_m, charset, enc, text) {
+			var bytes;
+			if (enc.toUpperCase() === 'B') {
+				try {
+					bytes = Buffer.from(text, 'base64');
+				} catch (_) {
+					return text;
+				}
+			} else {
+				// Q encoding: _ -> space, =XX -> byte
+				var qtext = text.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, function(_q, hex) {
+					return String.fromCharCode(parseInt(hex, 16));
+				});
+				bytes = Buffer.from(qtext, 'latin1');
+			}
+			var cs = charset.toLowerCase();
+			if (cs === 'utf-8' || cs === 'utf8') return bytes.toString('utf8');
+			if (cs === 'us-ascii' || cs === 'ascii') return bytes.toString('ascii');
+			// iso-8859-1, windows-1252, others -- treat as latin1.
+			return bytes.toString('latin1');
+		});
+	}
+
+	// Parse an RFC 5322 address header (From, Reply-To, Sender) into
+	// { name, address }. Handles common forms:
+	//
+	//   Foo Bar <foo@bar.com>            -> { name: "Foo Bar",  address: "foo@bar.com" }
+	//   "Foo Bar" <foo@bar.com>          -> { name: "Foo Bar",  address: "foo@bar.com" }
+	//   <foo@bar.com>                    -> { name: "",         address: "foo@bar.com" }
+	//   foo@bar.com                      -> { name: "",         address: "foo@bar.com" }
+	//   foo@bar.com (Foo Bar)            -> { name: "Foo Bar",  address: "foo@bar.com" }
+	//   =?UTF-8?Q?Foo?= <foo@bar.com>    -> { name: "Foo",      address: "foo@bar.com" }
+	//
+	// RFC 2047 encoded display names are decoded. Surrounding quotes and
+	// backslash escapes inside quoted display names are stripped. Callers
+	// should treat both fields as best-effort -- a malformed header that
+	// matches none of the patterns yields { name: trimmed, address: '' }.
+	_parseAddressHeader(headerValue) {
+		if (!headerValue || typeof headerValue !== 'string') {
+			return { name: '', address: '' };
+		}
+		// Decode 2047 encoded-words first so quotes/brackets in the encoded
+		// form don't trip the splitter. The decoded result may itself
+		// contain unquoted commas/spaces but we only need name + address.
+		var decoded = this._decodeRfc2047(headerValue.trim());
+
+		// Some headers contain a list of addresses (From: a@x, b@y). Take
+		// only the first address by stopping at an unquoted comma. We do
+		// this with a simple state machine instead of regex because quoted
+		// names can legitimately contain commas.
+		var firstEnd = decoded.length;
+		var inQuotes = false;
+		var inAngles = false;
+		for (var ci = 0; ci < decoded.length; ci++) {
+			var ch = decoded.charAt(ci);
+			if (ch === '"' && decoded.charAt(ci - 1) !== '\\') inQuotes = !inQuotes;
+			else if (!inQuotes && ch === '<') inAngles = true;
+			else if (!inQuotes && ch === '>') inAngles = false;
+			else if (!inQuotes && !inAngles && ch === ',') { firstEnd = ci; break; }
+		}
+		decoded = decoded.substring(0, firstEnd).trim();
+
+		// Angle-bracket form: optional name + <address>
+		var angleMatch = decoded.match(/^(.*?)<\s*([^>]+?)\s*>\s*$/);
+		if (angleMatch) {
+			var name = angleMatch[1].trim();
+			if (name.length >= 2 && name.charAt(0) === '"' && name.charAt(name.length - 1) === '"') {
+				name = name.substring(1, name.length - 1);
+			}
+			name = name.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+			return { name: name, address: angleMatch[2].trim() };
+		}
+
+		// Parenthesised comment form: address (Display Name)
+		var parenMatch = decoded.match(/^([^\s()]+@[^\s()]+)\s*\(([^)]*)\)\s*$/);
+		if (parenMatch) {
+			return { name: parenMatch[2].trim(), address: parenMatch[1].trim() };
+		}
+
+		// Bare address fallback
+		var trimmed = decoded.trim();
+		if (trimmed.indexOf('@') !== -1) {
+			return { name: '', address: trimmed };
+		}
+
+		return { name: trimmed, address: '' };
 	}
 
 	_extractFilename(disposition, contentType) {
