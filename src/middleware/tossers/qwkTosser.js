@@ -24,6 +24,7 @@ import * as peerConnections from '../../models/peerConnections.js';
 import * as systemAddresses from '../../models/systemAddresses.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
 import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
+import { splitFullMsgid } from '../../utils/ftnUtils.js';
 import { makeTransport } from '../../models/qwkTransport.js';
 import * as privateMessages from '../../models/privateMessages.js';
 import {
@@ -99,9 +100,20 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 
 	// Extract kludge data for FTN-compatible column mapping
 	// @MSGID → msg_id (canonical message ID for threading; dupe check stays on qwk_msg_id)
-	var msgId    = kludges.MSGID || dupeId;
+	// @MSGID is in FTN "address serial" format when present; split into
+	// the tuple columns (msg_id = serial, msg_orig_addr = address). If no
+	// @MSGID kludge is present, fall back to the QWK dupeId as msg_id with
+	// no origin address.
+	var rawMsgId = kludges.MSGID || dupeId;
+	var msgIdSplit = splitFullMsgid(rawMsgId);
+	var msgId        = msgIdSplit.msg_id || rawMsgId;
+	var msgOrigAddr  = msgIdSplit.msg_orig_addr || '';
 	// @REPLY → reply_to (FTN-style parent reference for thread linking)
-	var replyTo  = kludges.REPLY || null;
+	// Same format as @MSGID, same tuple split.
+	var rawReplyTo = kludges.REPLY || null;
+	var replyToSplit = splitFullMsgid(rawReplyTo);
+	var replyTo      = replyToSplit.msg_id || null;
+	var replyOrigAddr = replyToSplit.msg_orig_addr || '';
 	// @TZUTC / @TZ → tz_utc
 	var tzUtc    = kludges.TZUTC || kludges.TZ || null;
 	// @PID → tosser_id / product_string
@@ -135,8 +147,10 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 	var dbObj = {
 		uuid:              uuid,
 		msg_id:            msgId,
+		msg_orig_addr:     msgOrigAddr,
 		qwk_msg_id:        dupeId,
 		reply_to:          replyTo,
+		reply_orig_addr:   replyOrigAddr,
 		from_user:         fromUser,
 		to_user:           toUser,
 		subject:           subject,
@@ -177,7 +191,7 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 		return returnObj;
 	}
 
-	pushImportedMsgId(msgId, shorty);
+	pushImportedMsgId(msgId, shorty, msgOrigAddr);
 	returnObj.status   = true;
 	returnObj.imported = true;
 	return returnObj;

@@ -20,6 +20,8 @@ import {
 	getSystemTime,
 	parseSerial,
 	dayBucketForDate,
+	splitFullMsgid,
+	joinMsgidTuple,
 	CANECTIC_EPOCH_MS
 } from '../src/utils/ftnUtils.js';
 
@@ -96,6 +98,96 @@ describe('dayBucketForDate', function () {
 	it('handles invalid input by returning 0', function () {
 		assert.strictEqual(dayBucketForDate(NaN), 0);
 		assert.strictEqual(dayBucketForDate('not a date'), 0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// splitFullMsgid / joinMsgidTuple
+// ---------------------------------------------------------------------------
+
+describe('splitFullMsgid', function () {
+
+	it('splits a normal "address serial" MSGID', function () {
+		var r = splitFullMsgid('1:134/101 abcdef01');
+		assert.deepStrictEqual(r, { msg_orig_addr: '1:134/101', msg_id: 'abcdef01' });
+	});
+
+	it('handles 5D addresses with network domain', function () {
+		var r = splitFullMsgid('1:134/101@fidonet 6915d1e0');
+		assert.deepStrictEqual(r, { msg_orig_addr: '1:134/101@fidonet', msg_id: '6915d1e0' });
+	});
+
+	it('handles point addresses', function () {
+		var r = splitFullMsgid('21:1/100.5 00010203');
+		assert.deepStrictEqual(r, { msg_orig_addr: '21:1/100.5', msg_id: '00010203' });
+	});
+
+	it('treats input with no space as serial-only', function () {
+		var r = splitFullMsgid('abcdef01');
+		assert.deepStrictEqual(r, { msg_orig_addr: '', msg_id: 'abcdef01' });
+	});
+
+	it('handles empty / null / undefined input', function () {
+		assert.deepStrictEqual(splitFullMsgid(''), { msg_orig_addr: '', msg_id: '' });
+		assert.deepStrictEqual(splitFullMsgid(null), { msg_orig_addr: '', msg_id: '' });
+		assert.deepStrictEqual(splitFullMsgid(undefined), { msg_orig_addr: '', msg_id: '' });
+	});
+
+	it('trims leading and trailing whitespace', function () {
+		var r = splitFullMsgid('  1:134/101 abcdef01  ');
+		assert.deepStrictEqual(r, { msg_orig_addr: '1:134/101', msg_id: 'abcdef01' });
+	});
+
+	it('splits on the first space only', function () {
+		// A malformed MSGID with multiple tokens after the address keeps
+		// the first token as address and joins the rest as serial
+		var r = splitFullMsgid('1:2/3 abcd ef01');
+		assert.strictEqual(r.msg_orig_addr, '1:2/3');
+		assert.strictEqual(r.msg_id, 'abcd ef01');
+	});
+
+	it('ignores non-string input', function () {
+		assert.deepStrictEqual(splitFullMsgid(123), { msg_orig_addr: '', msg_id: '' });
+		assert.deepStrictEqual(splitFullMsgid({}), { msg_orig_addr: '', msg_id: '' });
+	});
+});
+
+describe('joinMsgidTuple', function () {
+
+	it('joins a normal tuple with space separator', function () {
+		assert.strictEqual(joinMsgidTuple('1:134/101', 'abcdef01'), '1:134/101 abcdef01');
+	});
+
+	it('preserves 5D addresses', function () {
+		assert.strictEqual(
+			joinMsgidTuple('1:134/101@fidonet', '6915d1e0'),
+			'1:134/101@fidonet 6915d1e0'
+		);
+	});
+
+	it('returns just the serial if origAddr is missing', function () {
+		assert.strictEqual(joinMsgidTuple('', 'abcdef01'), 'abcdef01');
+		assert.strictEqual(joinMsgidTuple(null, 'abcdef01'), 'abcdef01');
+	});
+
+	it('returns empty string if serial is missing', function () {
+		assert.strictEqual(joinMsgidTuple('1:2/3', ''), '');
+		assert.strictEqual(joinMsgidTuple('1:2/3', null), '');
+	});
+
+	it('returns empty string if both are missing', function () {
+		assert.strictEqual(joinMsgidTuple('', ''), '');
+		assert.strictEqual(joinMsgidTuple(null, null), '');
+	});
+
+	it('round-trips through splitFullMsgid', function () {
+		var full = '1:134/101 abcdef01';
+		var split = splitFullMsgid(full);
+		assert.strictEqual(joinMsgidTuple(split.msg_orig_addr, split.msg_id), full);
+
+		var full2 = '21:1/100.5@fsxnet 00010203';
+		var split2 = splitFullMsgid(full2);
+		assert.strictEqual(joinMsgidTuple(split2.msg_orig_addr, split2.msg_id), full2);
 	});
 });
 

@@ -76,6 +76,51 @@ function _assembleSerial(days, counter) {
 	return value.toString(16).padStart(8, '0');
 }
 
+// Split a full FTS-0009 MSGID string ("address serial") into its two
+// components for the Canectic tuple storage model. The address is
+// everything before the first space; the serial is everything after.
+//
+//   splitFullMsgid("1:134/101 abcdef01")
+//     → { msg_orig_addr: "1:134/101", msg_id: "abcdef01" }
+//
+// Edge cases:
+//   - null/empty input          → { msg_orig_addr: "", msg_id: "" }
+//   - no space (just serial)    → { msg_orig_addr: "", msg_id: <input> }
+//   - multiple spaces           → first token = addr, rest joined = serial
+//     (defensive for malformed inbound; the address portion never has
+//     spaces in valid FTN, so anything weird goes into the serial half)
+function splitFullMsgid(fullMsgid) {
+	if (!fullMsgid || typeof fullMsgid !== 'string') {
+		return { msg_orig_addr: '', msg_id: '' };
+	}
+	var trimmed = fullMsgid.trim();
+	if (!trimmed) return { msg_orig_addr: '', msg_id: '' };
+	var spaceIdx = trimmed.indexOf(' ');
+	if (spaceIdx === -1) {
+		// No address prefix -- treat the whole thing as the serial.
+		return { msg_orig_addr: '', msg_id: trimmed };
+	}
+	return {
+		msg_orig_addr: trimmed.substring(0, spaceIdx),
+		msg_id: trimmed.substring(spaceIdx + 1).trim()
+	};
+}
+
+// Reassemble a full "address serial" MSGID string from the tuple columns.
+// Used when reading from the DB tuple format and producing an output
+// that expects the legacy full string format (FTN kludge lines, in-memory
+// message objects, etc.).
+//
+//   joinMsgidTuple("1:134/101", "abcdef01")  → "1:134/101 abcdef01"
+//   joinMsgidTuple("",           "abcdef01")  → "abcdef01"
+//   joinMsgidTuple("1:134/101", "")          → ""
+//   joinMsgidTuple(null, null)               → ""
+function joinMsgidTuple(origAddr, serial) {
+	if (!serial) return '';
+	if (!origAddr) return serial;
+	return origAddr + ' ' + serial;
+}
+
 // Parse an 8-char hex serial into {days, counter}. Returns null on
 // malformed input. Used by the startup re-check and by import tools
 // that need to interrogate stored serials.
@@ -313,5 +358,7 @@ export{
 	initializeMsgidCounter,
 	parseSerial,
 	dayBucketForDate,
+	splitFullMsgid,
+	joinMsgidTuple,
 	CANECTIC_EPOCH_MS
 }

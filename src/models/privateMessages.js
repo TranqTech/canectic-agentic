@@ -8,6 +8,7 @@ import * as alogger from '../utils/alogger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { formatBodyHtml } from '../utils/terminalText.js';
 import { sanitizeMessageFields } from './messages.js';
+import { splitFullMsgid } from '../utils/ftnUtils.js';
 import appConfig from "../config/appConfig.js";
 import { createEventPublisher, EVENTS } from '../queues/events.js';
 
@@ -287,9 +288,18 @@ async function deliverMessage(messageObj) {
   // still catching true duplicates (identical message delivered twice).
   if (messageObj.msg_id) {
     var bodyLen = (messageObj.body_text || '').length;
+    // Split the incoming msg_id so the dupe check matches the tuple
+    // columns. For PMs whose msg_id isn't an FTN MSGID (EMAIL RFC 822,
+    // NNTP Message-ID, local UUID) the split leaves msg_orig_addr empty
+    // and the comparison still works against other empty-addr rows.
+    var dupeSplit = splitFullMsgid(messageObj.msg_id);
     var existing = await postgres.queryOne(
-      "SELECT id FROM pm_inbox WHERE msg_id = $1 AND transport_type = $2 AND user_id = $3 AND subject = $4 AND LENGTH(COALESCE(body_text, '')) = $5",
-      [messageObj.msg_id, messageObj.transport_type, messageObj.user_id, messageObj.subject || '', bodyLen]
+      "SELECT id FROM pm_inbox WHERE msg_id = $1 " +
+      "AND COALESCE(msg_orig_addr, '') = $2 " +
+      "AND transport_type = $3 AND user_id = $4 AND subject = $5 " +
+      "AND LENGTH(COALESCE(body_text, '')) = $6",
+      [dupeSplit.msg_id, dupeSplit.msg_orig_addr, messageObj.transport_type,
+       messageObj.user_id, messageObj.subject || '', bodyLen]
     );
     if (existing) {
       retObj.status = true;
@@ -321,11 +331,17 @@ async function deliverMessage(messageObj) {
     messageObj.body_html = null;
   }
 
+  // Split msg_id into the tuple columns so dupe checks and cross-store
+  // lookups can reason about (serial, origin_address) instead of a
+  // single opaque string.
+  var msgidTuple = splitFullMsgid(messageObj.msg_id || '');
+
   // Build insert object
   var insertObj = {
     uuid: messageObj.uuid || uuidv4(),
     user_id: messageObj.user_id,
-    msg_id: messageObj.msg_id || null,
+    msg_id: msgidTuple.msg_id || null,
+    msg_orig_addr: msgidTuple.msg_orig_addr || '',
     from_user: messageObj.from_user || '',
     to_user: messageObj.to_user || '',
     from_address: messageObj.from_address || '',
@@ -610,11 +626,17 @@ async function queueMessage(messageObj, userSession) {
   var outboxUuid = messageObj.uuid || uuidv4();
   var isLocal = messageObj.transport_type === 'LOCAL';
 
+  // Split msg_id into the tuple columns. If msg_id is missing a fresh
+  // uuid is used as the opaque identifier with empty orig_addr.
+  var outboxMsgidTuple = splitFullMsgid(messageObj.msg_id || '');
+  var fallbackMsgid    = outboxMsgidTuple.msg_id || uuidv4();
+
   // Insert into outbox
   var outboxObj = {
     uuid: outboxUuid,
     user_id: messageObj.user_id,
-    msg_id: messageObj.msg_id || uuidv4(),
+    msg_id: fallbackMsgid,
+    msg_orig_addr: outboxMsgidTuple.msg_orig_addr || '',
     from_user: messageObj.from_user || '',
     to_user: messageObj.to_user || '',
     from_address: messageObj.from_address || '',
@@ -689,10 +711,12 @@ async function queueMessage(messageObj, userSession) {
 // Used for system-level operations like relay forwarding where there is
 // no local sender user. Inserts directly into pm_outbox as queued.
 async function queueOutbound(messageObj) {
+  var qoTuple = splitFullMsgid(messageObj.msg_id || '');
   var insertObj = {
     uuid: messageObj.uuid || uuidv4(),
     user_id: messageObj.user_id || 0,
-    msg_id: messageObj.msg_id || null,
+    msg_id: qoTuple.msg_id || null,
+    msg_orig_addr: qoTuple.msg_orig_addr || '',
     from_user: messageObj.from_user || '',
     to_user: messageObj.to_user || '',
     from_address: messageObj.from_address || '',
@@ -829,9 +853,11 @@ async function notifySenderUndeliverable(pmRow, reason) {
 
 // Insert a message that couldn't be delivered to a local user
 async function insertUndeliverable(messageObj, reason) {
+  var udTuple = splitFullMsgid(messageObj.msg_id || '');
   var insertObj = {
     uuid: messageObj.uuid || uuidv4(),
-    msg_id: messageObj.msg_id || null,
+    msg_id: udTuple.msg_id || null,
+    msg_orig_addr: udTuple.msg_orig_addr || '',
     from_user: messageObj.from_user || '',
     to_user: messageObj.to_user || '',
     from_address: messageObj.from_address || '',

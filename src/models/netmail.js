@@ -9,13 +9,17 @@ import * as ftnUtils from "../utils/ftnUtils.js";
 import * as systemAddresses from "./systemAddresses.js";
 
 
+// Accepts either the full "address serial" MSGID string or just the
+// 8-char serial. Splits internally so the query uses tuple columns.
 async function getInboundMsgByMsgId(msgId) {
-	var idupper = msgId.toUpperCase().trim();
-	var dbres = await postgres.queryOne(
-		'SELECT * FROM netmail_in WHERE UPPER(msg_id) LIKE UPPER($1)',
-		[idupper]
+	if (!msgId) return null;
+	var split = ftnUtils.splitFullMsgid(msgId);
+	if (!split.msg_id) return null;
+	return await postgres.queryOne(
+		'SELECT * FROM netmail_in WHERE UPPER(msg_id) = UPPER($1) ' +
+		'AND UPPER(COALESCE(msg_orig_addr, \'\')) = UPPER($2)',
+		[split.msg_id, split.msg_orig_addr]
 	);
-	return dbres;
 }
 
 async function getInboundMsgByUUID(uuid) {
@@ -28,12 +32,14 @@ async function getInboundMsgByUUID(uuid) {
 }
 
 async function getOutboundMsgByMsgId(msgId) {
-	var idupper = msgId.toUpperCase().trim();
-	var dbres = await postgres.queryOne(
-		'SELECT * FROM netmail_out WHERE UPPER(msg_id) LIKE UPPER($1)',
-		[idupper]
+	if (!msgId) return null;
+	var split = ftnUtils.splitFullMsgid(msgId);
+	if (!split.msg_id) return null;
+	return await postgres.queryOne(
+		'SELECT * FROM netmail_out WHERE UPPER(msg_id) = UPPER($1) ' +
+		'AND UPPER(COALESCE(msg_orig_addr, \'\')) = UPPER($2)',
+		[split.msg_id, split.msg_orig_addr]
 	);
-	return dbres;
 }
 
 async function getOutboundMsgByUUID(uuid) {
@@ -138,14 +144,13 @@ async function newOutboundNetmail(formObj) {
 	var sourcesplit1 = dSource.split(":");
 	var sourcesplit2 = sourcesplit1[1].split("/");
 
-	var idtag          = await ftnUtils.genMsgId();
+	var serial         = await ftnUtils.genMsgId();
 	var datetimestring = await ftnUtils.getDateTimeString();
 	var uuid           = uuidv4();
 
-	idtag = dSource + " " + idtag;
-
 	var dbObj = {
-		msg_id: idtag,
+		msg_id: serial,
+		msg_orig_addr: dSource || '',
 		uuid: uuid,
 		domain: null,
 		destination: formObj.Destination,
@@ -180,9 +185,19 @@ async function newOutboundNetmail(formObj) {
 	return returnObj;
 }
 
-async function checkMsgUnique(msgId) {
-	var isUnique = await postgres.checkValueUnique("msg_id", msgId, "netmail_in");
-	return isUnique;
+// Check whether an inbound netmail is a duplicate by its MSGID tuple.
+// Accepts the full "address serial" format and splits internally so
+// callers in the FTN tosser can pass through what the parser gave them.
+async function checkMsgUnique(fullMsgId) {
+	if (!fullMsgId) return true;
+	var split = ftnUtils.splitFullMsgid(fullMsgId);
+	if (!split.msg_id) return true;
+	var row = await postgres.queryOne(
+		'SELECT id FROM netmail_in WHERE UPPER(msg_id) = UPPER($1) ' +
+		'AND UPPER(COALESCE(msg_orig_addr, \'\')) = UPPER($2)',
+		[split.msg_id, split.msg_orig_addr]
+	);
+	return !row;
 }
 
 async function getAllInbound() {
@@ -246,7 +261,9 @@ async function dbToFtn(dbObj) {
 	ftnMessage.SourceNode      = dbObj.source_node;
 	ftnMessage.BodyText        = dbObj.body_text;
 	ftnMessage.Subject         = dbObj.subject;
-	ftnMessage.MsgId           = dbObj.msg_id;
+	// Reassemble the full "address serial" MSGID from the tuple columns
+	// for the outbound FTN Message object.
+	ftnMessage.MsgId           = ftnUtils.joinMsgidTuple(dbObj.msg_orig_addr, dbObj.msg_id);
 	ftnMessage.OptionalAttributes = (dbObj.optional_attributes && dbObj.optional_attributes.length > 0)
 		? dbObj.optional_attributes
 		: [];
@@ -262,10 +279,15 @@ async function ftnToDb(ftnMessage) {
 	var systemTime = await ftnUtils.getSystemTime(ftnMessage.DateTime, ftnMessage.TZUTC);
 	var uuid       = uuidv4();
 
+	// Split the full "address serial" MSGID into the tuple columns.
+	// See docs/reference/NETWORKING_ARCHITECTURE.md for the storage model.
+	var msgidSplit = ftnUtils.splitFullMsgid(ftnMessage.MsgId);
+
 	var dbObj = {
 		user_id: 0,
 		uuid: uuid,
-		msg_id: ftnMessage.MsgId,
+		msg_id: msgidSplit.msg_id,
+		msg_orig_addr: msgidSplit.msg_orig_addr,
 		tosser_id: ftnMessage.TosserId,
 		optional_attributes: ftnMessage.OptionalAttributes,
 		source: ftnMessage.Source,

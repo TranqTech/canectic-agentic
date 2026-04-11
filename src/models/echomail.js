@@ -20,11 +20,21 @@ async function ftnToDb(ftnMessage) {
 	var currtime   = new Date();
 	var systemTime = await ftnUtils.getSystemTime(ftnMessage.DateTime, ftnMessage.TZUTC);
 	var uuid       = uuidv4();
+
+	// Split the incoming full-string MSGID ("address serial") into the
+	// tuple storage format: msg_id column holds the 8-char serial only,
+	// msg_orig_addr holds the origin FTN address. Same split for reply_to.
+	// See docs/reference/NETWORKING_ARCHITECTURE.md "MSGID tuple storage".
+	var msgidSplit = ftnUtils.splitFullMsgid(ftnMessage.MsgId);
+	var replySplit = ftnUtils.splitFullMsgid(ftnMessage.ReplyTo);
+
 	var dbObj = {
 		user_id: 0,
 		uuid: uuid,
-		msg_id: ftnMessage.MsgId,
-		reply_to: ftnMessage.ReplyTo,
+		msg_id: msgidSplit.msg_id,
+		msg_orig_addr: msgidSplit.msg_orig_addr,
+		reply_to: replySplit.msg_id,
+		reply_orig_addr: replySplit.msg_orig_addr,
 		tosser_id: ftnMessage.TosserId,
 		optional_attributes: ftnMessage.OptionalAttributes,
 		source: ftnMessage.Source,
@@ -55,11 +65,20 @@ async function ftnToDb(ftnMessage) {
 
 async function dbToFtn(dbMessage) {
 	var optional_attributes = dbMessage.optional_attributes || [];
+
+	// Reassemble the full "address serial" MSGID for the outbound FTN
+	// message object from the tuple columns. Legacy rows where the split
+	// migration hasn't run yet may still have the full string in msg_id
+	// and an empty msg_orig_addr -- joinMsgidTuple handles that case
+	// gracefully (returns msg_id alone when origAddr is empty).
+	var fullMsgId  = ftnUtils.joinMsgidTuple(dbMessage.msg_orig_addr,  dbMessage.msg_id);
+	var fullReplyTo = ftnUtils.joinMsgidTuple(dbMessage.reply_orig_addr, dbMessage.reply_to);
+
 	var ftnMsg = {
 		Type: "Echomail",
 		Id: dbMessage.id,
-		MsgId: dbMessage.msg_id,
-		ReplyTo: dbMessage.reply_to,
+		MsgId: fullMsgId,
+		ReplyTo: fullReplyTo,
 		OptionalAttributes: optional_attributes,
 		Source: dbMessage.source,
 		SourceZone: dbMessage.source_zone,

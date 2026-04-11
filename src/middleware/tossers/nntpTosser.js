@@ -423,11 +423,19 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 	var displayText = utf8Text || bodyText || '';
 	var bodyHtml = await formatBodyHtml(displayText);
 
-	// Build message object and let unified threadMessage() handle threading
+	// Build message object and let unified threadMessage() handle threading.
+	//
+	// NNTP Message-IDs are RFC 5322 format (<uuid@host>) which isn't an
+	// FTN MSGID, so msg_orig_addr stays empty -- the tuple dupe check and
+	// threading reply_to lookups scope NNTP msg_ids to the empty-address
+	// namespace, keeping them separate from FTN messages that happen to
+	// have numerically similar serials.
 	var dbObj = {
 		uuid:             uuid,
 		msg_id:           messageId,
+		msg_orig_addr:    '',
 		reply_to:         replyTo,
+		reply_orig_addr:  '',
 		from_user:        fromUser,
 		to_user:          'All',
 		subject:          subject,
@@ -462,7 +470,10 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 		return returnObj;
 	}
 
-	pushImportedMsgId(messageId, shorty);
+	// NNTP message IDs don't have FTN origin addresses, so the tuple
+	// tracking uses empty origAddr and the reconciler compares against
+	// other empty-addr NNTP messages.
+	pushImportedMsgId(messageId, shorty, '');
 	returnObj.status   = true;
 	returnObj.imported = true;
 	return returnObj;

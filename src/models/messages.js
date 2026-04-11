@@ -552,9 +552,13 @@ async function startNewThread(formObj, shortcode) {
 
 	var addrInfo = await resolveAreaAddress(area.id);
 
-	var millihex       = await ftnUtils.getMilliHex();
+	var serial        = await ftnUtils.getMilliHex();
+	var origAddr      = addrInfo.address || '';
+	// threadid stays in the legacy "address serial" format because thread
+	// tables don't have a tuple split and threading lookups still use the
+	// full string as an opaque key. joinMsgidTuple handles missing address.
+	var threadidStr   = ftnUtils.joinMsgidTuple(origAddr, serial);
 	var datetimestring = await ftnUtils.getDateTimeString();
-	var msgid          = (addrInfo.address ? addrInfo.address + " " : "") + millihex;
 	var tuuid          = uuidv4();
 	var uuid           = uuidv4();
 	var touser         = formObj.to_user || "All";
@@ -562,7 +566,7 @@ async function startNewThread(formObj, shortcode) {
 
 	var threadObj = {
 		uuid: tuuid,
-		threadid: msgid,
+		threadid: threadidStr,
 		subject: formObj.Subject,
 		started_at: currtime,
 		started_by: formObj.from_user,
@@ -580,9 +584,10 @@ async function startNewThread(formObj, shortcode) {
 
 	var dbObj = {
 		uuid: uuid,
-		threadid: msgid,
+		threadid: threadidStr,
 		thread_id: thread_id,
-		msg_id: msgid,
+		msg_id: serial,
+		msg_orig_addr: origAddr,
 		tz_utc: default_tzutc,
 		created_at: currtime,
 		source: addrInfo.address,
@@ -654,13 +659,17 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 
 	var threadid  = dbthread.threadid;
 	var thread_id = dbthread.id;
-	var replyto   = formObj.reply_to || dbthread.threadid;
+	// formObj.reply_to is a full "address serial" MSGID (from the parent
+	// message's threadid or from an explicit form field); fall back to
+	// the thread root's threadid if not set. Split into tuple for storage.
+	var replytoFull = formObj.reply_to || dbthread.threadid;
+	var replyTupled = ftnUtils.splitFullMsgid(replytoFull);
 
 	var addrInfo = await resolveAreaAddress(area.id);
 
-	var millihex       = await ftnUtils.getMilliHex();
+	var serial        = await ftnUtils.getMilliHex();
+	var origAddr      = addrInfo.address || '';
 	var datetimestring = await ftnUtils.getDateTimeString();
-	var msgid          = (addrInfo.address ? addrInfo.address + " " : "") + millihex;
 	var uuid           = uuidv4();
 	var touser         = formObj.to_user || "All";
 	var currtime       = new Date();
@@ -668,9 +677,11 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 	var dbObj = {
 		uuid: uuid,
 		threadid: threadid,
-		reply_to: replyto,
+		reply_to: replyTupled.msg_id,
+		reply_orig_addr: replyTupled.msg_orig_addr,
 		thread_id: thread_id,
-		msg_id: msgid,
+		msg_id: serial,
+		msg_orig_addr: origAddr,
 		tz_utc: default_tzutc,
 		created_at: currtime,
 		source: addrInfo.address,
@@ -790,9 +801,17 @@ function drainThreadUpdateArray() {
 }
 
 // Track imported message IDs for post-batch orphan reconciliation.
-function pushImportedMsgId(msgId, shortcode) {
+// Takes the tuple form (msgId serial, origAddr) so the reconciler can
+// match reply_to tuples correctly. Callers that only have the full
+// "address serial" string can pass it as msgId and leave origAddr
+// undefined -- splitFullMsgid will be applied in reconcileOrphans.
+function pushImportedMsgId(msgId, shortcode, origAddr) {
 	if (!msgId || !shortcode) return;
-	importedMsgIds.push({ msgId: msgId, shortcode: shortcode });
+	importedMsgIds.push({
+		msgId: msgId,
+		origAddr: origAddr == null ? undefined : origAddr,
+		shortcode: shortcode
+	});
 }
 
 function drainImportedMsgIds() {
@@ -900,10 +919,32 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 		return message;
 	}
 
-	// Step B: reply_to lookup (case-insensitive MSGID match)
+	// Step B: reply_to lookup (case-insensitive tuple match)
+	//
+	// message.reply_to may have been split by ftnToDb into (reply_to serial,
+	// reply_orig_addr) or may still be a full "address serial" string from
+	// a tosser that hasn't been migrated. Split defensively so both
+	// formats work during migration, and for QWK/NNTP messages whose
+	// reply_to isn't an FTN MSGID the split leaves orig_addr empty and
+	// the query matches other messages in the same empty-address scope.
 	if (message.reply_to) {
-		querytext = "SELECT threadid, thread_id FROM " + messagetable + " WHERE UPPER(msg_id) = UPPER($1)";
-		var upstreammsg = await postgres.queryOne(querytext, [message.reply_to]);
+		var replyLookup;
+		if (message.reply_orig_addr !== undefined && message.reply_orig_addr !== null) {
+			// Already in tuple format (ftnToDb output)
+			replyLookup = {
+				msg_id: message.reply_to,
+				msg_orig_addr: message.reply_orig_addr || ''
+			};
+		} else {
+			// Legacy full-string format -- split on first space
+			replyLookup = ftnUtils.splitFullMsgid(message.reply_to);
+		}
+		querytext = 'SELECT threadid, thread_id FROM ' + messagetable +
+			' WHERE UPPER(msg_id) = UPPER($1) AND UPPER(COALESCE(msg_orig_addr, \'\')) = UPPER($2)';
+		var upstreammsg = await postgres.queryOne(
+			querytext,
+			[replyLookup.msg_id, replyLookup.msg_orig_addr]
+		);
 		if (upstreammsg && (upstreammsg.threadid || upstreammsg.thread_id)) {
 			if (upstreammsg.threadid) message.threadid = upstreammsg.threadid;
 			if (upstreammsg.thread_id) message.thread_id = upstreammsg.thread_id;
@@ -939,7 +980,13 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 	}
 
 	// Step D: Create new thread (guaranteed -- never leave message threadless)
-	var threadidStr = message.msg_id;
+	//
+	// threadid in the DB stays in the legacy "address serial" full-string
+	// format so it's self-contained as an opaque key. Rebuild from the
+	// tuple columns if we have them; fall back to msg_id alone if the
+	// message hasn't been split yet.
+	var threadidStr = ftnUtils.joinMsgidTuple(message.msg_orig_addr, message.msg_id);
+	if (!threadidStr) threadidStr = message.msg_id;
 	var tResult = await createThreadRow(threadtable, threadidStr, message.subject, message.system_time, message.from_user);
 	if (tResult) {
 		message.thread_id = tResult.threadId;
@@ -1001,9 +1048,21 @@ async function handleInboundEchoMessage(message) {
 	var shorty = msgArea.shortcode.toLowerCase();
 	var msgtablename = "mb_" + shorty + "_msgs";
 
-	// Check for duplicate
-	var isUnique = await postgres.checkValueUnique("msg_id", message.MsgId, msgtablename);
-	if (!isUnique) {
+	// Check for duplicate against the (msg_id serial, msg_orig_addr) tuple.
+	// message.MsgId is the full "address serial" format from the FTN parser;
+	// split it so the DB query matches our tuple storage columns. Two
+	// messages with the same serial from different origin addresses are
+	// NOT duplicates per FTS-0009 (the uniqueness scope is per-origin).
+	var msgidSplit = ftnUtils.splitFullMsgid(message.MsgId);
+	var dupRow = null;
+	if (msgidSplit.msg_id) {
+		dupRow = await postgres.queryOne(
+			'SELECT id FROM ' + msgtablename +
+			' WHERE UPPER(msg_id) = UPPER($1) AND UPPER(COALESCE(msg_orig_addr, \'\')) = UPPER($2)',
+			[msgidSplit.msg_id, msgidSplit.msg_orig_addr]
+		);
+	}
+	if (dupRow) {
 		returnObj.status    = true;
 		returnObj.duplicate = true;
 		return returnObj;
@@ -1041,7 +1100,7 @@ async function handleInboundEchoMessage(message) {
 		returnObj.status   = true;
 		returnObj.imported = true;
 		// Track for post-batch orphan reconciliation (use correct local shortcode)
-		if (dbObj.msg_id) pushImportedMsgId(dbObj.msg_id, shorty);
+		if (dbObj.msg_id) pushImportedMsgId(dbObj.msg_id, shorty, dbObj.msg_orig_addr || '');
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}
@@ -1219,9 +1278,16 @@ async function applyThreadingForArea(shortcode) {
 }
 
 /**
- * Post-batch orphan reconciliation. For each msg_id that was just imported,
- * find messages whose reply_to matches it and whose thread differs from the
- * parent's thread. Re-link them to the correct thread.
+ * Post-batch orphan reconciliation. For each (msg_id, orig_addr) tuple that
+ * was just imported, find messages whose reply_to tuple matches it and
+ * whose thread differs from the parent's thread. Re-link them to the
+ * correct thread.
+ *
+ * Accepts items in two forms for backward compatibility:
+ *   - { msgId, origAddr, shortcode }  -- already split tuple
+ *   - { msgId, shortcode }            -- full "address serial" string;
+ *                                        split via splitFullMsgid
+ *   - plain string                    -- legacy callers that pass raw strings
  */
 async function reconcileOrphans(shortcode, msgIds) {
 	if (!msgIds || msgIds.length === 0) return 0;
@@ -1229,19 +1295,40 @@ async function reconcileOrphans(shortcode, msgIds) {
 	var msgtablename    = "mb_" + shorty + "_msgs";
 	var fixed = 0;
 
-	for (var msgId of msgIds) {
-		// Find the parent message's thread info
+	for (var item of msgIds) {
+		var msgId, origAddr;
+		if (typeof item === 'string') {
+			var s = ftnUtils.splitFullMsgid(item);
+			msgId = s.msg_id;
+			origAddr = s.msg_orig_addr;
+		} else if (item && typeof item === 'object') {
+			if (item.origAddr !== undefined && item.origAddr !== null) {
+				msgId = item.msgId;
+				origAddr = item.origAddr;
+			} else {
+				var s2 = ftnUtils.splitFullMsgid(item.msgId || '');
+				msgId = s2.msg_id;
+				origAddr = s2.msg_orig_addr;
+			}
+		}
+		if (!msgId) continue;
+
+		// Find the parent message's thread info using the tuple
 		var parent = await postgres.queryOne(
-			'SELECT threadid, thread_id FROM ' + msgtablename + ' WHERE UPPER(msg_id) = UPPER($1)',
-			[msgId]
+			'SELECT threadid, thread_id FROM ' + msgtablename +
+			' WHERE UPPER(msg_id) = UPPER($1) AND UPPER(COALESCE(msg_orig_addr, \'\')) = UPPER($2)',
+			[msgId, origAddr || '']
 		);
 		if (!parent || !parent.thread_id) continue;
 
-		// Find children that reference this parent but have wrong/missing thread
+		// Find children that reference this parent via the reply_to tuple
+		// but have wrong/missing thread
 		var children = await postgres.query(
 			'SELECT id, threadid, thread_id FROM ' + msgtablename +
-			' WHERE UPPER(reply_to) = UPPER($1) AND (thread_id IS NULL OR thread_id != $2)',
-			[msgId, parent.thread_id]
+			' WHERE UPPER(reply_to) = UPPER($1) ' +
+			' AND UPPER(COALESCE(reply_orig_addr, \'\')) = UPPER($2) ' +
+			' AND (thread_id IS NULL OR thread_id != $3)',
+			[msgId, origAddr || '', parent.thread_id]
 		);
 		if (!children || children.length === 0) continue;
 
