@@ -143,9 +143,10 @@ async function buildQwkForUser(userId) {
 		pointerUpdates.push({ shortcode: area.shortcode, highestMsgId: highestId });
 	}
 
-	// Gather unread PMs (conference 0)
+	// Gather unread PMs (conference 0). Excludes purged rows tagged for
+	// background hard-delete by the trash purge flow.
 	var unreadPMs = await postgres.query(
-		"SELECT * FROM pm_inbox WHERE user_id = $1 AND read = false AND deleted = false ORDER BY created_at ASC",
+		"SELECT * FROM pm_inbox WHERE user_id = $1 AND read = false AND deleted = false AND purged IS NOT TRUE ORDER BY created_at ASC",
 		[userId]
 	);
 	var pmIds = [];

@@ -394,14 +394,16 @@ async function deliverMessage(messageObj) {
 // Inbox — Reading
 // ============================================================
 
-// Paginated inbox listing. Excludes deleted by default.
+// Paginated inbox listing. Excludes deleted by default. The
+// `purged IS NOT TRUE` filter hides rows that have been tagged for
+// background hard-delete by the trash purge flow -- see purgeMessage.
 // Options: { limit, offset, unreadOnly }
 async function getInbox(userId, options) {
   var opts = options || {};
   var limit = opts.limit || 50;
   var offset = opts.offset || 0;
 
-  var whereClause = "WHERE user_id = $1 AND deleted = false";
+  var whereClause = "WHERE user_id = $1 AND deleted = false AND purged IS NOT TRUE";
   var params = [userId];
   var paramIdx = 2;
 
@@ -418,7 +420,8 @@ async function getInbox(userId, options) {
   return await postgres.query(sql, params);
 }
 
-// Trash listing — soft-deleted messages
+// Trash listing — soft-deleted messages. Hides rows that have been
+// purged (queued for background hard-delete by the cleanup worker).
 async function getTrash(userId, options) {
   var opts = options || {};
   var limit = opts.limit || 50;
@@ -427,20 +430,22 @@ async function getTrash(userId, options) {
   // UNION inbox and outbox deleted messages with a source column
   var sql = "(SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
     "transport_type, has_attachments, system_time, deleted_at, 'inbox' AS source " +
-    "FROM pm_inbox WHERE user_id = $1 AND deleted = true) " +
+    "FROM pm_inbox WHERE user_id = $1 AND deleted = true AND purged IS NOT TRUE) " +
     "UNION ALL " +
     "(SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
     "transport_type, has_attachments, system_time, deleted_at, 'sent' AS source " +
-    "FROM pm_outbox WHERE user_id = $1 AND deleted = true) " +
+    "FROM pm_outbox WHERE user_id = $1 AND deleted = true AND purged IS NOT TRUE) " +
     "ORDER BY deleted_at DESC LIMIT $2 OFFSET $3";
 
   return await postgres.query(sql, [userId, limit, offset]);
 }
 
 // Single message fetch. Validates user_id ownership. Marks read on first access.
+// Excludes purged rows so a stale URL hitting a tagged-for-cleanup message
+// 404s instead of resurrecting it.
 async function getMessage(userId, uuid) {
   var row = await postgres.queryOne(
-    "SELECT * FROM pm_inbox WHERE uuid = $1 AND user_id = $2",
+    "SELECT * FROM pm_inbox WHERE uuid = $1 AND user_id = $2 AND purged IS NOT TRUE",
     [uuid, userId]
   );
   if (!row) return null;
@@ -498,10 +503,10 @@ async function markAllRead(userId) {
   return result;
 }
 
-// Unread count for nav badge (excludes deleted)
+// Unread count for nav badge (excludes deleted and purged)
 async function getUnreadCount(userId) {
   var row = await postgres.queryOne(
-    "SELECT COUNT(*) FROM pm_inbox WHERE user_id = $1 AND read = false AND deleted = false",
+    "SELECT COUNT(*) FROM pm_inbox WHERE user_id = $1 AND read = false AND deleted = false AND purged IS NOT TRUE",
     [userId]
   );
   return row ? parseInt(row.count) : 0;
@@ -518,9 +523,15 @@ async function deleteMessage(userId, uuid) {
   );
 }
 
+// Restore a soft-deleted message back to the inbox. Refuses to touch a row
+// that's been tagged for cleanup (purged=true) -- those are conceptually
+// gone from the user's perspective and the cleanup worker will hard-delete
+// them shortly. Defensive belt; getTrash already filters them out so the
+// user shouldn't be able to reach this path with a purged uuid.
 async function restoreMessage(userId, uuid) {
   return await postgres.write(
-    "UPDATE pm_inbox SET deleted = false, deleted_at = NULL, updated_at = NOW() WHERE uuid = $1 AND user_id = $2",
+    "UPDATE pm_inbox SET deleted = false, deleted_at = NULL, updated_at = NOW() " +
+    "WHERE uuid = $1 AND user_id = $2 AND purged IS NOT TRUE",
     [uuid, userId]
   );
 }
@@ -535,52 +546,206 @@ async function deleteSentMessage(userId, uuid) {
 
 async function restoreSentMessage(userId, uuid) {
   return await postgres.write(
-    "UPDATE pm_outbox SET deleted = false, deleted_at = NULL, updated_at = NOW() WHERE uuid = $1 AND user_id = $2",
+    "UPDATE pm_outbox SET deleted = false, deleted_at = NULL, updated_at = NOW() " +
+    "WHERE uuid = $1 AND user_id = $2 AND purged IS NOT TRUE",
     [uuid, userId]
   );
 }
 
-// Maintenance: hard-delete messages older than retention period from both tables
-async function purgeDeleted(retentionDays) {
-  var days = retentionDays || appConfig.getNumber('pm_trash_retention_days', 30);
+// ============================================================
+// Two-stage hard delete: tag for purge -> background cleanup
+// ============================================================
+//
+// User-facing delete from inbox/sent moves a row to trash (deleted=true)
+// where it can be restored. Deleting from trash (web button or IMAP
+// EXPUNGE while Trash is selected) calls purgeMessage() which only sets
+// purged=true / purged_at=NOW() -- a cheap UPDATE that returns instantly
+// and doesn't touch disk or pm_attachments. The background
+// pm-purged-cleanup job then sweeps tagged rows, runs the actual
+// pmAttachments.deleteAttachments() (which respects the LOCAL refCount
+// shared-file safety), and DELETEs the rows.
+//
+// This decouples user actions from file-system work: a Thunderbird
+// "Empty Trash" against 200 messages stores+expunges in one IMAP command
+// and we respond instantly, even though the file unlinks happen later.
+//
+// Read paths everywhere filter out `purged IS NOT TRUE` so tagged rows
+// are invisible to the user in inbox, trash, sent, IMAP mailboxes, and
+// the attachment download route.
 
-  // Get UUIDs of messages to purge (for attachment cleanup)
-  var inboxUuids = await postgres.query(
-    "SELECT uuid FROM pm_inbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval",
-    [days.toString()]
-  );
-  var outboxUuids = await postgres.query(
-    "SELECT uuid FROM pm_outbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval",
-    [days.toString()]
-  );
-
-  // Clean up attachments before deleting messages
-  var pmAtt = null;
-  try { pmAtt = await import('./pmAttachments.js'); } catch (_) {}
-  if (pmAtt) {
-    for (var row of (inboxUuids || [])) {
-      await pmAtt.deleteAttachments(row.uuid);
+// Tag a single user-owned message for background hard-delete. Looks the
+// row up in pm_inbox first then pm_outbox; only acts on rows that are
+// already in trash (deleted=true) and not already tagged. Returns
+// { tagged, table } so callers can decide whether to enqueue an immediate
+// cleanup job. Uses pgpool directly so we can read rowCount to know
+// which (if either) table actually held the row.
+async function purgeMessage(userId, uuid) {
+  try {
+    var inboxResult = await postgres.pgpool.query(
+      "UPDATE pm_inbox SET purged = true, purged_at = NOW(), updated_at = NOW() " +
+      "WHERE uuid = $1 AND user_id = $2 AND deleted = true AND purged IS NOT TRUE",
+      [uuid, userId]
+    );
+    if (inboxResult && inboxResult.rowCount > 0) {
+      return { tagged: true, table: 'pm_inbox' };
     }
-    for (var row of (outboxUuids || [])) {
-      await pmAtt.deleteAttachments(row.uuid);
+
+    var outboxResult = await postgres.pgpool.query(
+      "UPDATE pm_outbox SET purged = true, purged_at = NOW(), updated_at = NOW() " +
+      "WHERE uuid = $1 AND user_id = $2 AND deleted = true AND purged IS NOT TRUE",
+      [uuid, userId]
+    );
+    if (outboxResult && outboxResult.rowCount > 0) {
+      return { tagged: true, table: 'pm_outbox' };
+    }
+  } catch (err) {
+    alogger.writeAlog(2,
+      'PM purgeMessage UPDATE failed for uuid ' + uuid + ': ' + err.message,
+      'redbright');
+    return { tagged: false, table: null, error: err.message };
+  }
+
+  return { tagged: false, table: null };
+}
+
+// Background worker: hard-delete a batch of rows that have been tagged
+// for cleanup. Cleans up attachments first (refCount-safe -- LOCAL files
+// shared between sender outbox and recipient inbox stay alive until both
+// ends are tagged), then DELETEs the rows.
+//
+// Called by:
+//   - Scheduled job pm-purged-cleanup (hourly)
+//   - Optional on-demand enqueue after each user purge for "feels instant"
+//     reclaim, via the same job name
+//
+// opts: { batchSize?: 500 }
+async function executePurgedCleanup(opts) {
+  var options = opts || {};
+  var batchSize = options.batchSize || 500;
+
+  var inboxRows = await postgres.query(
+    "SELECT uuid FROM pm_inbox WHERE purged = true ORDER BY purged_at ASC NULLS FIRST LIMIT $1",
+    [batchSize]
+  );
+  var outboxRows = await postgres.query(
+    "SELECT uuid FROM pm_outbox WHERE purged = true ORDER BY purged_at ASC NULLS FIRST LIMIT $1",
+    [batchSize]
+  );
+
+  // The dynamic import is wrapped intentionally -- if pmAttachments.js
+  // ever fails to import, we want a loud level-1 log instead of silently
+  // skipping cleanup and orphaning files on disk forever.
+  var pmAtt = null;
+  try {
+    pmAtt = await import('./pmAttachments.js');
+  } catch (err) {
+    alogger.writeAlog(1,
+      'PM cleanup: failed to import pmAttachments.js -- attachment files for ' +
+      ((inboxRows || []).length + (outboxRows || []).length) +
+      ' tagged messages will be orphaned this cycle: ' + err.message,
+      'redbright');
+  }
+
+  var inboxIds = [];
+  var outboxIds = [];
+
+  if (pmAtt) {
+    for (var row of (inboxRows || [])) {
+      try {
+        await pmAtt.deleteAttachments(row.uuid);
+      } catch (err) {
+        alogger.writeAlog(2,
+          'PM cleanup: deleteAttachments failed for inbox uuid ' + row.uuid +
+          ': ' + err.message + ' -- row will be retried next cycle',
+          'yellow');
+        continue;
+      }
+      inboxIds.push(row.uuid);
+    }
+    for (var orow of (outboxRows || [])) {
+      try {
+        await pmAtt.deleteAttachments(orow.uuid);
+      } catch (err) {
+        alogger.writeAlog(2,
+          'PM cleanup: deleteAttachments failed for outbox uuid ' + orow.uuid +
+          ': ' + err.message + ' -- row will be retried next cycle',
+          'yellow');
+        continue;
+      }
+      outboxIds.push(orow.uuid);
     }
   }
 
-  var inboxResult = await postgres.query(
-    "DELETE FROM pm_inbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval RETURNING id",
-    [days.toString()]
-  );
+  // Delete only the rows whose attachment cleanup succeeded.
+  var inboxDeleted = 0;
+  var outboxDeleted = 0;
+  if (inboxIds.length > 0) {
+    var ir = await postgres.query(
+      "DELETE FROM pm_inbox WHERE uuid = ANY($1) RETURNING id",
+      [inboxIds]
+    );
+    inboxDeleted = ir ? ir.length : 0;
+  }
+  if (outboxIds.length > 0) {
+    var or = await postgres.query(
+      "DELETE FROM pm_outbox WHERE uuid = ANY($1) RETURNING id",
+      [outboxIds]
+    );
+    outboxDeleted = or ? or.length : 0;
+  }
 
-  var outboxResult = await postgres.query(
-    "DELETE FROM pm_outbox WHERE deleted = true AND deleted_at < NOW() - ($1 || ' days')::interval RETURNING id",
-    [days.toString()]
-  );
+  if (inboxDeleted > 0 || outboxDeleted > 0) {
+    alogger.writeAlog(2,
+      "PM cleanup: hard-deleted " + inboxDeleted + " inbox + " + outboxDeleted +
+      " outbox tagged messages",
+      "cyan");
+  }
 
-  var inboxCount = inboxResult ? inboxResult.length : 0;
-  var outboxCount = outboxResult ? outboxResult.length : 0;
+  return {
+    inboxDeleted: inboxDeleted,
+    outboxDeleted: outboxDeleted,
+    pendingMore: (inboxRows || []).length === batchSize ||
+                 (outboxRows || []).length === batchSize
+  };
+}
+
+// Daily retention sweep: tag rows that have been in trash longer than
+// the configured retention window for background cleanup. The actual
+// disk + DB work is done by executePurgedCleanup -- this function only
+// flips the purged flag, so it's cheap and safe to run from any
+// scheduled context. Uses pgpool directly so the rowCount is available
+// for the summary log.
+async function purgeDeleted(retentionDays) {
+  var days = retentionDays || appConfig.getNumber('pm_trash_retention_days', 30);
+
+  var inboxCount = 0;
+  var outboxCount = 0;
+  try {
+    var inboxTagged = await postgres.pgpool.query(
+      "UPDATE pm_inbox SET purged = true, purged_at = NOW(), updated_at = NOW() " +
+      "WHERE deleted = true AND purged IS NOT TRUE " +
+      "AND deleted_at < NOW() - ($1 || ' days')::interval",
+      [days.toString()]
+    );
+    var outboxTagged = await postgres.pgpool.query(
+      "UPDATE pm_outbox SET purged = true, purged_at = NOW(), updated_at = NOW() " +
+      "WHERE deleted = true AND purged IS NOT TRUE " +
+      "AND deleted_at < NOW() - ($1 || ' days')::interval",
+      [days.toString()]
+    );
+    inboxCount = (inboxTagged && inboxTagged.rowCount) || 0;
+    outboxCount = (outboxTagged && outboxTagged.rowCount) || 0;
+  } catch (err) {
+    alogger.writeAlog(1,
+      'PM trash retention sweep failed: ' + err.message, 'redbright');
+    return { inboxPurged: 0, outboxPurged: 0, error: err.message };
+  }
 
   if (inboxCount > 0 || outboxCount > 0) {
-    alogger.writeAlog(1, "PM trash purge: " + inboxCount + " inbox, " + outboxCount + " outbox messages removed", "cyan");
+    alogger.writeAlog(1,
+      "PM trash retention sweep: tagged " + inboxCount + " inbox + " +
+      outboxCount + " outbox messages for cleanup (older than " + days + " days)",
+      "cyan");
   }
 
   return { inboxPurged: inboxCount, outboxPurged: outboxCount };
@@ -780,16 +945,17 @@ async function getSentMessages(userId, options) {
 
   var sql = "SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
     "transport_type, queued, sent, sent_at, send_error, has_attachments, system_time, created_at " +
-    "FROM pm_outbox WHERE user_id = $1 AND deleted = false " +
+    "FROM pm_outbox WHERE user_id = $1 AND deleted = false AND purged IS NOT TRUE " +
     "ORDER BY system_time DESC LIMIT $2 OFFSET $3";
 
   return await postgres.query(sql, [userId, limit, offset]);
 }
 
-// View a single sent message
+// View a single sent message. Excludes purged rows so stale URLs 404
+// instead of resurrecting tagged-for-cleanup content.
 async function getSentMessage(userId, uuid) {
   return await postgres.queryOne(
-    "SELECT * FROM pm_outbox WHERE uuid = $1 AND user_id = $2",
+    "SELECT * FROM pm_outbox WHERE uuid = $1 AND user_id = $2 AND purged IS NOT TRUE",
     [uuid, userId]
   );
 }
@@ -1075,6 +1241,8 @@ export {
   restoreMessage,
   deleteSentMessage,
   restoreSentMessage,
+  purgeMessage,
+  executePurgedCleanup,
   purgeDeleted,
   // Outbox
   queueMessage,

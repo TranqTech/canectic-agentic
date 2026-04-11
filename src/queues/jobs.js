@@ -327,7 +327,9 @@ export async function enqueueRegenPmHtml(opts = {}) {
 }
 
 /**
- * Hard-delete soft-deleted PMs older than N days.
+ * Tag soft-deleted PMs older than N days as purged. Two-stage cleanup:
+ * this is the daily retention sweep that flips the purged flag, the
+ * actual file unlink + row DELETE happens in pm-purged-cleanup.
  * Called by: scheduler (daily), admin, CLI.
  */
 export async function enqueuePurgePmTrash(days) {
@@ -335,6 +337,22 @@ export async function enqueuePurgePmTrash(days) {
 		days: days || appConfig.getNumber('pm_trash_retention_days', 30),
 	}, {
 		jobId: 'purge-pm-trash',
+		removeOnComplete: true, removeOnFail: true,
+	});
+}
+
+/**
+ * Background hard-delete of PMs tagged for cleanup. Walks pm_inbox /
+ * pm_outbox where purged=true, calls pmAttachments.deleteAttachments()
+ * for each, then DELETEs the rows. Designed to be cheap and re-runnable.
+ *
+ * Called by: scheduler (hourly), and on-demand after each user-initiated
+ * trash purge (web button or IMAP EXPUNGE-from-Trash) for "feels instant"
+ * disk reclaim.
+ */
+export async function enqueuePmPurgedCleanup() {
+	return maintenanceQueue.add('pm-purged-cleanup', {}, {
+		jobId: 'pm-purged-cleanup',
 		removeOnComplete: true, removeOnFail: true,
 	});
 }

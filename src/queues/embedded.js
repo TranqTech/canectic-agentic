@@ -187,6 +187,18 @@ export async function startEmbeddedWorkers(opts = {}) {
 			case 'purge-pm-trash':
 				await privateMessages.purgeDeleted(job.data.days);
 				break;
+			case 'pm-purged-cleanup': {
+				// Background hard-delete of rows tagged via purgeMessage /
+				// purgeDeleted. Drains in batches until exhausted so a
+				// backlog catches up in one run.
+				var pmCleanupResult;
+				do {
+					pmCleanupResult = await privateMessages.executePurgedCleanup({
+						batchSize: job.data.batchSize || 500,
+					});
+				} while (pmCleanupResult && pmCleanupResult.pendingMore);
+				break;
+			}
 			case 'recalc-area-counts':
 				await msgAreas.recalculateAreaCounts();
 				break;

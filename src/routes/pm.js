@@ -253,14 +253,18 @@ router.get('/attachment/:id', async (req, res) => {
 	var att = await pmAttachments.getAttachmentById(parseInt(req.params.id));
 	if (!att) return res.status(404).send('Attachment not found');
 
-	// Verify the user owns the message this attachment belongs to
+	// Verify the user owns the message this attachment belongs to.
+	// Refuse to serve attachments for purged rows (tagged for background
+	// hard-delete) -- the file may already be unlinked, and even if it
+	// hasn't been yet, the user explicitly purged the message and should
+	// not see its contents anymore.
 	var userId = await resolveUserId(currentuser);
 	var ownsInbox = await postgres.queryOne(
-		'SELECT id FROM pm_inbox WHERE uuid = $1 AND user_id = $2',
+		'SELECT id FROM pm_inbox WHERE uuid = $1 AND user_id = $2 AND purged IS NOT TRUE',
 		[att.message_uuid, userId]
 	);
 	var ownsSent = await postgres.queryOne(
-		'SELECT id FROM pm_outbox WHERE uuid = $1 AND user_id = $2',
+		'SELECT id FROM pm_outbox WHERE uuid = $1 AND user_id = $2 AND purged IS NOT TRUE',
 		[att.message_uuid, userId]
 	);
 	if (!ownsInbox && !ownsSent) return res.status(403).send('Access denied');
@@ -761,6 +765,32 @@ router.post('/trash/:uuid/restore', async (req, res) => {
 	// Try both tables — one will be a no-op
 	await privateMessages.restoreMessage(userId, req.params.uuid);
 	await privateMessages.restoreSentMessage(userId, req.params.uuid);
+
+	res.redirect('/pm/inbox');
+});
+
+// POST /pm/trash/:uuid/delete — delete forever from trash.
+//
+// Two-stage cleanup: this only tags the row (purged=true) which removes
+// it from every read path immediately. The actual disk + DB cleanup is
+// done by the pm-purged-cleanup background job, which we enqueue
+// on-demand here for sub-minute reclaim. Failure to enqueue is non-fatal
+// because the hourly schedule will catch the row anyway.
+router.post('/trash/:uuid/delete', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/users/login');
+
+	var userId = await resolveUserId(currentuser);
+	var result = await privateMessages.purgeMessage(userId, req.params.uuid);
+
+	if (result.tagged) {
+		try {
+			var jobsMod = await import('../queues/jobs.js');
+			await jobsMod.enqueuePmPurgedCleanup();
+		} catch (err) {
+			// Hourly schedule will pick it up; nothing user-visible to do.
+		}
+	}
 
 	res.redirect('/pm/inbox');
 });

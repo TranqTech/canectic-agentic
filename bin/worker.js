@@ -351,6 +351,20 @@ function createMaintenanceProcessor() {
 				await privateMessages.purgeDeleted(job.data.days);
 				break;
 
+			case 'pm-purged-cleanup': {
+				// Hourly + on-demand background cleanup of rows tagged
+				// for hard delete by purgeMessage / purgeDeleted. Drains
+				// in batches until exhausted so a backed-up queue catches
+				// up in one job run rather than waiting for the next tick.
+				var cleanupResult;
+				do {
+					cleanupResult = await privateMessages.executePurgedCleanup({
+						batchSize: job.data.batchSize || 500,
+					});
+				} while (cleanupResult && cleanupResult.pendingMore);
+				break;
+			}
+
 			case 'purge-notifications': {
 				var notifMod = await import("../src/models/notifications.js");
 				await notifMod.purgeOld(job.data.days);

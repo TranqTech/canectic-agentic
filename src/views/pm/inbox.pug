@@ -643,7 +643,11 @@ block content
             renderAttachments(msg.attachments);
 
             if (currentIsTrash) {
+              // In trash mode show both Restore and Delete -- the Delete
+              // button now hard-deletes (tags for background cleanup)
+              // instead of soft-deleting again.
               readerRestoreBtn.style.display = '';
+              readerDeleteBtn.style.display = '';
             } else {
               readerDeleteBtn.style.display = '';
               if (currentMessageType === 'inbox' && msg.canReply) {
@@ -665,10 +669,20 @@ block content
       // --- Delete ---
       readerDeleteBtn.addEventListener('click', function() {
         if (!currentMessageUuid) return;
-        var path = currentMessageType === 'sent' ? '/pm/sent/' : '/pm/inbox/';
+        // From trash: hard-delete (tag for background cleanup, then the
+        // worker reclaims disk shortly after). From inbox/sent: soft-
+        // delete (move to trash, recoverable for the retention window).
+        var action;
+        if (currentIsTrash) {
+          action = '/pm/trash/' + currentMessageUuid + '/delete';
+        } else if (currentMessageType === 'sent') {
+          action = '/pm/sent/' + currentMessageUuid + '/delete';
+        } else {
+          action = '/pm/inbox/' + currentMessageUuid + '/delete';
+        }
         var form = document.createElement('form');
         form.method = 'POST';
-        form.action = path + currentMessageUuid + '/delete';
+        form.action = action;
         document.body.appendChild(form);
         form.submit();
       });

@@ -559,6 +559,7 @@ class ImapSession {
 			}
 		}
 
+		await this._fireOnDemandPurgeCleanup();
 		this._send(tag + ' OK STORE completed');
 	}
 
@@ -675,6 +676,7 @@ class ImapSession {
 
 		// Expunge the moved messages from the current mailbox view
 		await this._doExpunge(uids);
+		await this._fireOnDemandPurgeCleanup();
 		this._send(tag + ' OK MOVE completed');
 	}
 
@@ -992,17 +994,49 @@ class ImapSession {
 		var info = this._resolveTable(uid);
 
 		if (this.selectedMailbox === 'Trash') {
-			// Already in Trash — hard delete (purge)
+			// Already in Trash -- tag for background hard delete via the
+			// shared two-stage cleanup pipeline. This is non-blocking
+			// (a single UPDATE) so even Thunderbird's "Empty Trash"
+			// against hundreds of rows responds instantly. The actual
+			// disk + DB cleanup happens in pm-purged-cleanup, which we
+			// also enqueue on-demand below for sub-minute reclaim.
+			//
+			// Direct UPDATE rather than calling privateMessages.purgeMessage
+			// avoids a uuid lookup -- row.uuid is already in messageMap
+			// from getMailboxMessages. Same effect as purgeMessage().
 			await postgres.write(
-				"DELETE FROM " + info.table + " WHERE id = $1 AND user_id = $2",
+				"UPDATE " + info.table + " SET purged = true, purged_at = NOW(), updated_at = NOW() " +
+				"WHERE id = $1 AND user_id = $2 AND deleted = true AND purged IS NOT TRUE",
 				[row.id, this.userId]
 			);
+			// Track that we tagged at least one row in this expunge cycle
+			// so the on-demand cleanup enqueue at the end of the cycle
+			// fires once per cycle, not once per row.
+			this._purgedDuringSession = true;
 		} else {
 			// Soft-delete (move to Trash)
 			await postgres.write(
 				"UPDATE " + info.table + " SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
 				[row.id, this.userId]
 			);
+		}
+	}
+
+	// Fire a single on-demand pm-purged-cleanup job if any rows were
+	// tagged during this command. Coalesces a multi-row STORE+EXPUNGE
+	// (Thunderbird "Empty Trash" hits hundreds of rows in one command)
+	// into one enqueue. Failure is non-fatal -- the hourly schedule
+	// will sweep tagged rows even if the on-demand job is dropped.
+	async _fireOnDemandPurgeCleanup() {
+		if (!this._purgedDuringSession) return;
+		this._purgedDuringSession = false;
+		try {
+			var jobsMod = await import('../queues/jobs.js');
+			await jobsMod.enqueuePmPurgedCleanup();
+		} catch (err) {
+			alogger.writeAlog(3,
+				'IMAP: failed to enqueue pm-purged-cleanup (hourly schedule will catch it): ' + err.message,
+				'yellow');
 		}
 	}
 

@@ -35,13 +35,29 @@ export async function registerSchedules() {
 
 	try {
 		// -----------------------------------------------------------------
-		// Maintenance: daily PM trash purge
+		// Maintenance: daily PM trash retention sweep (tag-only)
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('purge-pm-trash-daily', {
 			pattern: '0 3 * * *',   // 3:00 AM daily
 		}, {
 			name: 'purge-pm-trash',
 			data: { days: appConfig.getNumber('pm_trash_retention_days', 30) },
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
+		// Maintenance: hourly PM purged-row cleanup (the actual hard-delete
+		// + attachment unlink for rows tagged via purgeMessage or the
+		// retention sweep above). User-initiated trash purges also enqueue
+		// this on-demand for sub-minute cleanup; the hourly schedule is
+		// the safety net so nothing sits tagged forever if a worker missed
+		// an on-demand enqueue.
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('pm-purged-cleanup-hourly', {
+			pattern: '15 * * * *',   // :15 every hour (offset from other top-of-hour jobs)
+		}, {
+			name: 'pm-purged-cleanup',
+			data: {},
 		});
 		scheduleCount++;
 

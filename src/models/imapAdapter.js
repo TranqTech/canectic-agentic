@@ -217,13 +217,16 @@ function renderEnvelope(pmRow, mailDomain) {
 
 // --- Mailbox queries ---
 
+// All mailbox queries filter `purged IS NOT TRUE` so rows tagged for
+// background hard-delete by the trash purge flow are invisible to IMAP
+// clients. See privateMessages.purgeMessage / executePurgedCleanup.
 async function getMailboxMessages(userId, mailbox) {
 	switch (mailbox) {
 		case 'INBOX':
 			return await postgres.query(
 				"SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
 				"read, transport_type, system_time, created_at " +
-				"FROM pm_inbox WHERE user_id = $1 AND deleted = false " +
+				"FROM pm_inbox WHERE user_id = $1 AND deleted = false AND purged IS NOT TRUE " +
 				"ORDER BY id ASC",
 				[userId]
 			);
@@ -231,7 +234,7 @@ async function getMailboxMessages(userId, mailbox) {
 			return await postgres.query(
 				"SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
 				"transport_type, system_time, created_at " +
-				"FROM pm_outbox WHERE user_id = $1 AND deleted = false " +
+				"FROM pm_outbox WHERE user_id = $1 AND deleted = false AND purged IS NOT TRUE " +
 				"ORDER BY id ASC",
 				[userId]
 			);
@@ -240,14 +243,14 @@ async function getMailboxMessages(userId, mailbox) {
 			var inboxTrash = await postgres.query(
 				"SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
 				"read, transport_type, system_time, 'inbox' AS _source " +
-				"FROM pm_inbox WHERE user_id = $1 AND deleted = true " +
+				"FROM pm_inbox WHERE user_id = $1 AND deleted = true AND purged IS NOT TRUE " +
 				"ORDER BY id ASC",
 				[userId]
 			);
 			var outboxTrash = await postgres.query(
 				"SELECT id, uuid, from_user, from_address, to_user, to_address, subject, " +
 				"transport_type, system_time, 'sent' AS _source " +
-				"FROM pm_outbox WHERE user_id = $1 AND deleted = true " +
+				"FROM pm_outbox WHERE user_id = $1 AND deleted = true AND purged IS NOT TRUE " +
 				"ORDER BY id ASC",
 				[userId]
 			);
@@ -260,7 +263,7 @@ async function getMailboxMessages(userId, mailbox) {
 async function getFullMessage(userId, table, id) {
 	var tableName = table === 'sent' ? 'pm_outbox' : 'pm_inbox';
 	return await postgres.queryOne(
-		"SELECT * FROM " + tableName + " WHERE id = $1 AND user_id = $2",
+		"SELECT * FROM " + tableName + " WHERE id = $1 AND user_id = $2 AND purged IS NOT TRUE",
 		[id, userId]
 	);
 }
@@ -269,21 +272,21 @@ async function getMailboxStatus(userId, mailbox) {
 	switch (mailbox) {
 		case 'INBOX': {
 			var total = await postgres.queryOne(
-				"SELECT COUNT(*) AS cnt FROM pm_inbox WHERE user_id = $1 AND deleted = false", [userId]);
+				"SELECT COUNT(*) AS cnt FROM pm_inbox WHERE user_id = $1 AND deleted = false AND purged IS NOT TRUE", [userId]);
 			var unseen = await postgres.queryOne(
-				"SELECT COUNT(*) AS cnt FROM pm_inbox WHERE user_id = $1 AND deleted = false AND read = false", [userId]);
+				"SELECT COUNT(*) AS cnt FROM pm_inbox WHERE user_id = $1 AND deleted = false AND read = false AND purged IS NOT TRUE", [userId]);
 			return { messages: parseInt(total.cnt), unseen: parseInt(unseen.cnt) };
 		}
 		case 'Sent': {
 			var total = await postgres.queryOne(
-				"SELECT COUNT(*) AS cnt FROM pm_outbox WHERE user_id = $1 AND deleted = false", [userId]);
+				"SELECT COUNT(*) AS cnt FROM pm_outbox WHERE user_id = $1 AND deleted = false AND purged IS NOT TRUE", [userId]);
 			return { messages: parseInt(total.cnt), unseen: 0 };
 		}
 		case 'Trash': {
 			var inT = await postgres.queryOne(
-				"SELECT COUNT(*) AS cnt FROM pm_inbox WHERE user_id = $1 AND deleted = true", [userId]);
+				"SELECT COUNT(*) AS cnt FROM pm_inbox WHERE user_id = $1 AND deleted = true AND purged IS NOT TRUE", [userId]);
 			var outT = await postgres.queryOne(
-				"SELECT COUNT(*) AS cnt FROM pm_outbox WHERE user_id = $1 AND deleted = true", [userId]);
+				"SELECT COUNT(*) AS cnt FROM pm_outbox WHERE user_id = $1 AND deleted = true AND purged IS NOT TRUE", [userId]);
 			return { messages: parseInt(inT.cnt) + parseInt(outT.cnt), unseen: 0 };
 		}
 		default:
