@@ -35,6 +35,15 @@ class SmtpSession {
 		this._buffer = '';
 		this._closed = false;
 
+		// Serialized command queue. Clients using RFC 2920 PIPELINING send
+		// MAIL/RCPT/DATA in a single TCP write; if we dispatched each line
+		// without awaiting the previous command's async handlers (e.g. the
+		// DB-backed recipient resolve in _cmdRcptTo), DATA could run before
+		// rcptTo was populated and send "503 Need RCPT TO first". The queue
+		// guarantees commands execute strictly in order.
+		this._cmdQueue = [];
+		this._cmdRunning = false;
+
 		socket.on('data', (data) => this._onData(data));
 		socket.on('close', () => { this._closed = true; });
 		socket.on('error', () => { this._closed = true; });
@@ -71,8 +80,40 @@ class SmtpSession {
 
 		for (var line of lines) {
 			if (line.length > 0) {
-				this._processCommand(line);
+				this._cmdQueue.push(line);
 			}
+		}
+		this._runCmdQueue();
+	}
+
+	async _runCmdQueue() {
+		if (this._cmdRunning) return;
+		this._cmdRunning = true;
+		try {
+			while (this._cmdQueue.length > 0 && !this._closed) {
+				var line = this._cmdQueue.shift();
+				// Once DATA has been accepted the state flips to 'data' and
+				// the remainder of the pipelined bytes (if any) are the body,
+				// which _onData routes to dataBuffer directly. Any queued
+				// lines beyond that point are stale and must be dropped.
+				if (this.state === 'data') {
+					this._cmdQueue.length = 0;
+					break;
+				}
+				try {
+					await this._processCommand(line);
+				} catch (err) {
+					alogger.writeAlog(1,
+						'SMTP command dispatch error: ' + err.message +
+						(err.stack ? '\n' + err.stack : ''),
+						'redbright');
+					if (!this._closed) {
+						this._send('451 4.3.0 Temporary server error');
+					}
+				}
+			}
+		} finally {
+			this._cmdRunning = false;
 		}
 	}
 
