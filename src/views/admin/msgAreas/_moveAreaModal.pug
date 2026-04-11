@@ -2,15 +2,29 @@
 //- msgGroups/view.pug via `include ./_moveAreaModal` or
 //- `include ../msgAreas/_moveAreaModal`.
 //-
-//- Expects the including template's scope to provide a `grouplist`
-//- local (array of { shortcode, name }) for populating the target
-//- group dropdown. The current group is filtered out client-side
-//- on modal open based on the area being moved.
+//- The target-group <select> is intentionally empty at render time
+//- (just the placeholder option). The including view is expected to:
 //-
-//- The modal is populated by JS when the "Move" button is clicked in
-//- the area info modal. The JS reads the currently-selected area's
-//- shortcode and group from the table row's data attributes, fills
-//- the modal's hidden fields, and opens it.
+//-   1. Emit a JS constant `allGroupsForMove` in its script block,
+//-      populated from the `grouplist` local, e.g.:
+//-        var allGroupsForMove = !{JSON.stringify(grouplist || [])};
+//-
+//-   2. Wire a click handler on its #areaMoveBtn that rebuilds the
+//-      select from allGroupsForMove each time the modal opens,
+//-      skipping the current group (the one the area is in right
+//-      now) so the sysop can't select a no-op destination.
+//-
+//- This approach -- clearing and rebuilding on each click rather
+//- than rendering all options server-side and hiding the current
+//- one with option.hidden -- avoids a portability footgun:
+//- `<option hidden>` has spotty support inside <select> elements
+//- across browsers (Safari in particular ignores it and shows the
+//- option anyway, while some legacy paths hide everything).
+//- DOM manipulation is boring and universally supported.
+//-
+//- The modal is otherwise populated by the click handler: area
+//- name, current-group display, form action, apply-defaults
+//- checkbox reset.
 
 #moveAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
   .modal-dialog.modal-dialog-centered
@@ -32,9 +46,9 @@
             label.form-label(for='ma_target_group') Move to group
             select.form-select(id='ma_target_group' name='target_group_shortcode' required)
               option(value='') — Select a target group —
-              if grouplist && grouplist.length > 0
-                for group of grouplist
-                  option(value=group.shortcode data-shortcode=group.shortcode)= group.name + ' (' + group.shortcode + ')'
+              //- Real options are injected by the including view's Move
+              //- click handler from its allGroupsForMove JS constant.
+              //- See the header comment in this partial for details.
           .form-check.mb-3
             input.form-check-input(type='checkbox' id='ma_apply_defaults' name='apply_defaults' value='true')
             label.form-check-label(for='ma_apply_defaults')

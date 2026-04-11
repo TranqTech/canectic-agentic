@@ -301,6 +301,11 @@ block content
 
       var allPerms  = !{JSON.stringify(availablePermissions)};
       var allRestrs = !{JSON.stringify(availableRestrictions)};
+      // Full group list for the Move modal's target-group dropdown.
+      // Rebuilt into the <select> on each Move click, minus the
+      // current group, to avoid the cross-browser option.hidden
+      // footgun. See _moveAreaModal.pug for the contract.
+      var allGroupsForMove = !{JSON.stringify((grouplist || []).map(function(g) { return { shortcode: g.shortcode, name: g.name }; }))};
 
       function parseFlags(jsonstr) {
         try {
@@ -478,17 +483,24 @@ block content
         document.getElementById('maArea').textContent         = d.bsName + ' (' + d.bsShortcode + ')';
         document.getElementById('maCurrentGroup').textContent = currentGroup || '(unknown)';
 
-        // Filter the target group dropdown: hide the current group so
-        // the sysop can't select a no-op. Also reset the selection.
+        // Rebuild the target-group dropdown from the authoritative
+        // server-rendered list (allGroupsForMove), skipping the area's
+        // current group. Clearing + re-populating is the portable
+        // approach; option.hidden on <option> elements inside a
+        // <select> has unreliable support across browsers (Safari in
+        // particular), so we manipulate the DOM directly instead.
         var targetSelect = document.getElementById('ma_target_group');
-        for (var opt of targetSelect.options) {
-          if (opt.value === currentGroup) {
-            opt.hidden = true;
-            opt.disabled = true;
-          } else {
-            opt.hidden = false;
-            opt.disabled = false;
-          }
+        targetSelect.innerHTML = '';
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '— Select a target group —';
+        targetSelect.appendChild(placeholder);
+        for (var g of (allGroupsForMove || [])) {
+          if (g.shortcode === currentGroup) continue;
+          var opt = document.createElement('option');
+          opt.value = g.shortcode;
+          opt.textContent = g.name + ' (' + g.shortcode + ')';
+          targetSelect.appendChild(opt);
         }
         targetSelect.value = '';
 

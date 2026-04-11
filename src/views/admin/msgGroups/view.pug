@@ -599,6 +599,11 @@ block content
 
         const allPerms  = !{JSON.stringify(availablePermissions)};
         const allRestrs = !{JSON.stringify(availableRestrictions)};
+        // Full group list for the Move modal's target-group dropdown.
+        // Rebuilt into the <select> on each Move click, minus the
+        // current group, to avoid the cross-browser option.hidden
+        // footgun. See _moveAreaModal.pug for the contract.
+        const allGroupsForMove = !{JSON.stringify((grouplist || []).map(function(g) { return { shortcode: g.shortcode, name: g.name }; }))};
 
         function parseFlags(jsonstr) {
           try {
@@ -806,8 +811,10 @@ block content
         });
 
         // Move button -- opens the shared moveAreaModal, pre-populates
-        // the area + current-group display, filters the current group
-        // out of the target dropdown, and wires the form action.
+        // the area + current-group display, rebuilds the target-group
+        // dropdown from allGroupsForMove minus the current group, and
+        // wires the form action. See _moveAreaModal.pug for the
+        // partial's contract.
         document.getElementById('areaMoveBtn').addEventListener('click', function() {
           if (!currentAreaShortcode) return;
           const row = document.querySelector(`tr[data-bs-shortcode="${currentAreaShortcode}"]`);
@@ -823,17 +830,23 @@ block content
           document.getElementById('maArea').textContent         = d.bsName + ' (' + d.bsShortcode + ')';
           document.getElementById('maCurrentGroup').textContent = currentGroup || '(unknown)';
 
+          // Rebuild the target-group dropdown from the authoritative
+          // server-rendered list, skipping the current group.
           const targetSelect = document.getElementById('ma_target_group');
-          for (const opt of targetSelect.options) {
-            if (opt.value === currentGroup) {
-              opt.hidden = true;
-              opt.disabled = true;
-            } else {
-              opt.hidden = false;
-              opt.disabled = false;
-            }
+          targetSelect.innerHTML = '';
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = '— Select a target group —';
+          targetSelect.appendChild(placeholder);
+          for (const g of (allGroupsForMove || [])) {
+            if (g.shortcode === currentGroup) continue;
+            const opt = document.createElement('option');
+            opt.value = g.shortcode;
+            opt.textContent = g.name + ' (' + g.shortcode + ')';
+            targetSelect.appendChild(opt);
           }
           targetSelect.value = '';
+
           document.getElementById('ma_apply_defaults').checked = false;
           document.getElementById('moveAreaForm').action = `/admin/msgArea/${currentAreaShortcode}/move`;
 
