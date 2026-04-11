@@ -102,6 +102,16 @@ async function main() {
 	var pmAttachments = await import("../src/models/pmAttachments.js");
 	await pmAttachments.ensureTable();
 
+	// Seed the MSGID counter in Redis from DB state for today's day bucket.
+	// Idempotent across processes; mail.js participates because SMTP
+	// submission can stamp new outbound messages with @MSGID kludges.
+	try {
+		var ftnUtilsInit = await import("../src/utils/ftnUtils.js");
+		await ftnUtilsInit.initializeMsgidCounter();
+	} catch (e) {
+		alogger.writeAlog(2, '[Mail] MSGID counter init failed: ' + e.message, 'yellow');
+	}
+
 	var started = 0;
 
 	// IMAP server

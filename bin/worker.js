@@ -591,6 +591,17 @@ async function main() {
 	var ftnNodelist = await import("../src/models/ftnNodelist.js");
 	await ftnNodelist.ensureTable();
 
+	// Seed the MSGID counter in Redis from DB state for today's day bucket.
+	// Idempotent across processes; first one wins, others see the key and
+	// return. Must run after appConfig.load() and after Postgres+Redis are
+	// ready so the DB scan for max existing serial can complete.
+	try {
+		var ftnUtils = await import("../src/utils/ftnUtils.js");
+		await ftnUtils.initializeMsgidCounter();
+	} catch (e) {
+		alogger.writeAlog(2, '[Worker] MSGID counter init failed: ' + e.message, 'yellow');
+	}
+
 	// Event publisher for notifying other processes
 	eventPublisher = createEventPublisher();
 

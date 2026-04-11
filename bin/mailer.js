@@ -92,6 +92,17 @@ async function main() {
 	var freqMod = await import("../src/models/freq.js");
 	await freqMod.ensureTable();
 
+	// Seed the MSGID counter in Redis from DB state for today's day bucket.
+	// Idempotent across processes; the mailer rarely generates new MSGIDs
+	// (that's the worker's job) but participates for consistency and in
+	// case of any edge paths that do.
+	try {
+		var ftnUtilsInit = await import("../src/utils/ftnUtils.js");
+		await ftnUtilsInit.initializeMsgidCounter();
+	} catch (e) {
+		alogger.writeAlog(2, '[Mailer] MSGID counter init failed: ' + e.message, 'yellow');
+	}
+
 	var queueConfig = getQueueConfig();
 	alogger.writeAlog(2, `[Mailer] Redis: ${queueConfig.host}:${queueConfig.port} db=${queueConfig.db}`, "cyan");
 

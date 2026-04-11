@@ -481,6 +481,17 @@ async function main(){
 	await seedNodelistFlags()
 	await seedTemplateEvents()
 	await prerunMaint()
+
+	// Seed the MSGID counter in Redis from DB state for today's day bucket.
+	// Idempotent across processes; first one wins, others see the key and
+	// return. Must run after appConfig.load() so Redis URL is resolved.
+	try {
+		var ftnUtilsInit = await import("../src/utils/ftnUtils.js");
+		await ftnUtilsInit.initializeMsgidCounter();
+	} catch (e) {
+		alogger.writeAlog(2, '[Gateway] MSGID counter init failed: ' + e.message, 'yellow');
+	}
+
 	await startNodeManager()
 	await startSocatManager()
 	await startCallPools()
