@@ -1,5 +1,7 @@
 extends ../../layouts/admin
 
+include ../msgAreas/_areaFormFields
+
 block content
   .container-fluid.main-wrapper
     if !currentuser
@@ -98,6 +100,7 @@ block content
                                 data-bs-threadmode=area.thread_mode || 'standard'
                                 data-bs-postas=area.post_as || 'username'
                                 data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
+                                data-bs-qwkconfnumber=area.qwk_conf_number || ''
                                 data-bs-msgcount=area.msg_count || 0
                                 data-bs-lastfrom=area.last_from || ''
                                 data-bs-lastmessage=area.last_message || ''
@@ -273,157 +276,9 @@ block content
                 .modal-body
                   form#editAreaForm(method='POST' class='form-registration')
                     input(type='hidden' name='groupshortcode' value=msgGroup.shortcode)
-                    .row
-                      .col-1
-                      .col-10
-                        label(for='ea_name') Name:
-                        input(
-                          type='text'
-                          id='ea_name'
-                          name='name'
-                          class='form-control'
-                          tabindex='1'
-                          required
-                        )
-                        br
-                        label(for='ea_description') Description:
-                        input(
-                          type='text'
-                          id='ea_description'
-                          name='description'
-                          class='form-control'
-                          tabindex='2'
-                          required
-                        )
-                        br
-                    .row
-                      .col-1
-                      .col-5
-                        label(for='ea_minage') Min Age:
-                        input(
-                          type='number'
-                          id='ea_minage'
-                          name='minage'
-                          class='form-control'
-                          min=13
-                          max=255
-                          tabindex='3'
-                        )
-                        br
-                        label(for='ea_maxage') Max Age:
-                        input(
-                          type='number'
-                          id='ea_maxage'
-                          name='maxage'
-                          class='form-control'
-                          min=13
-                          max=255
-                          tabindex='4'
-                        )
-                      .col-5
-                        label(for='ea_readsecurity') Read Security:
-                        input(
-                          type='number'
-                          id='ea_readsecurity'
-                          name='readsecurity'
-                          class='form-control'
-                          min=1
-                          max=255
-                          tabindex='5'
-                          required
-                        )
-                        br
-                        label(for='ea_postsecurity') Post Security:
-                        input(
-                          type='number'
-                          id='ea_postsecurity'
-                          name='postsecurity'
-                          class='form-control'
-                          min=1
-                          max=255
-                          tabindex='6'
-                          required
-                        )
-                        br
-                        label(for='ea_active') Status:
-                        select(
-                          id='ea_active'
-                          name='active'
-                          class='form-control'
-                          tabindex='7'
-                        )
-                          option(value='true') Active
-                          option(value='false') Inactive
-                        br
-                        label(for='ea_thread_mode') Thread Mode:
-                        select(
-                          id='ea_thread_mode'
-                          name='thread_mode'
-                          class='form-control'
-                          tabindex='8'
-                        )
-                          option(value='standard') Standard (threaded)
-                          option(value='no_threads') No Threads (flat)
-                          option(value='subscribe_only') Subscribe Only
-                        br
-                        label(for='ea_post_as') Post As:
-                        select(
-                          id='ea_post_as'
-                          name='post_as'
-                          class='form-control'
-                          tabindex='9'
-                        )
-                          option(value='username') Username
-                          option(value='realname') Real Name
-                        br
-                        label(for='ea_newscan') Newscan Default:
-                        select(id='ea_newscan' name='newscan_default' class='form-control' tabindex='10')
-                          option(value='true') Yes
-                          option(value='false') No
-                    .row
-                      .col-1
-                      .col-5
-                        //- Hidden inputs for flags — managed by JS
-                        #ea_read_perm_inputs
-                        #ea_read_rest_inputs
-                        label Read Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#ea_read_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#ea_read_perm_select.form-control
-                          button.btn.btn-sm.btn-success#ea_read_perm_add(type='button') Add
-                        label Read Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#ea_read_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#ea_read_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#ea_read_rest_add(type='button') Add
-                      .col-5
-                        #ea_post_perm_inputs
-                        #ea_post_rest_inputs
-                        label Post Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#ea_post_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#ea_post_perm_select.form-control
-                          button.btn.btn-sm.btn-success#ea_post_perm_add(type='button') Add
-                        label Post Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#ea_post_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#ea_post_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#ea_post_rest_add(type='button') Add
-                    .row
-                      .col-1
-                      .col-10
-                        br
-                        p.text-muted.small
-                          | To change this area's network mapping, use the 
-                          a(href='/admin/networks') Network Management
-                          |  page.
-                        .text-end
-                          input(
-                            type='submit'
-                            value='Save Changes'
-                            class='btn btn-lg btn-warning btn-block'
-                            tabindex='9'
-                          )
+                    +areaFormFields('ea_', 'edit')
+                    .text-end.mt-3
+                      input.btn.btn-lg.btn-warning(type='submit' value='Save Changes')
 
           // Delete Area Modal (dynamically populated)
           #deleteAreaModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
@@ -471,158 +326,23 @@ block content
                   button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
                 .modal-body
                   form(action=`/admin/msgGroup/${msgGroup.shortcode}/newArea` method='POST' class='form-registration')
-                    .row
-                      .col-1
-                      .col-10
-                        label(for='na_name') Name:
-                        input(
-                          type='text'
-                          id='na_name'
-                          name='name'
-                          class='form-control'
-                          required
-                        )
-                        br
-                        label(for='na_description') Description:
-                        input(
-                          type='text'
-                          id='na_description'
-                          name='description'
-                          class='form-control'
-                          required
-                        )
-                        br
-                    .row
-                      .col-1
-                      .col-5
-                        label(for='na_shortcode') Short Code (Internal):
-                        input(
-                          type='text'
-                          id='na_shortcode'
-                          name='shortcode'
-                          class='form-control'
-                          required
-                        )
-                        br
-                        label(for='na_network') Network (optional):
-                        select#na_network(name='network_id').form-select
-                          option(value='') — Local area, no network —
-                          if networklist && networklist.length > 0
-                            for net of networklist
-                              option(value=net.id)
-                                = net.name
-                                |  (
-                                = net.domain
-                                |)
-                        br
-                        label(for='na_areatag') Area Tag (if networked):
-                        input(
-                          type='text'
-                          id='na_areatag'
-                          name='areatag'
-                          class='form-control'
-                          placeholder='FIDONET.GENERAL'
-                        )
-                        br
-                        label(for='na_minage') Minimum Participant Age:
-                        input(
-                          type='number'
-                          id='na_minage'
-                          min=13
-                          max=255
-                          name='minage'
-                          class='form-control'
-                          value=13
-                        )
-                      .col-5
-                        label(for='na_readsecurity') Read Security:
-                        input(
-                          type='number'
-                          id='na_readsecurity'
-                          min=1
-                          max=255
-                          name='readsecurity'
-                          class='form-control'
-                          value=(msgGroup.read_security || 50)
-                          required
-                        )
-                        br
-                        label(for='na_postsecurity') Post Security:
-                        input(
-                          type='number'
-                          id='na_postsecurity'
-                          min=1
-                          max=255
-                          name='postsecurity'
-                          class='form-control'
-                          value=(msgGroup.post_security || 60)
-                          required
-                        )
-                        br
-                        label(for='na_maxage') Maximum Participant Age:
-                        input(
-                          type='number'
-                          id='na_maxage'
-                          min=13
-                          max=255
-                          name='maxage'
-                          class='form-control'
-                          value=255
-                        )
-                        br
-                        label(for='na_thread_mode') Thread Mode:
-                        select#na_thread_mode(name='thread_mode').form-select
-                          option(value='standard' selected) Standard (threaded)
-                          option(value='no_threads') No Threads (flat)
-                          option(value='subscribe_only') Subscribe Only
-                        br
-                        label(for='na_post_as') Post As:
-                        select#na_post_as(name='post_as').form-select
-                          option(value='username' selected=(msgGroup.post_as !== 'realname')) Username
-                          option(value='realname' selected=(msgGroup.post_as === 'realname')) Real Name
-                        br
-                        label(for='na_newscan') Newscan Default:
-                        select#na_newscan(name='newscan_default').form-select
-                          option(value='false' selected=(msgGroup.newscan_default !== true)) No
-                          option(value='true' selected=(msgGroup.newscan_default === true)) Yes
-                    .row
-                      .col-1
-                      .col-5
-                        #na_read_perm_inputs
-                        #na_read_rest_inputs
-                        label Read Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_read_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#na_read_perm_select.form-control
-                          button.btn.btn-sm.btn-success#na_read_perm_add(type='button') Add
-                        label Read Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_read_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#na_read_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#na_read_rest_add(type='button') Add
-                      .col-5
-                        #na_post_perm_inputs
-                        #na_post_rest_inputs
-                        label Post Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_post_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#na_post_perm_select.form-control
-                          button.btn.btn-sm.btn-success#na_post_perm_add(type='button') Add
-                        label Post Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_post_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#na_post_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#na_post_rest_add(type='button') Add
-                    .row
-                      .col-1
-                      .col-10
-                        br
-                        .text-end
-                          input(
-                            type='submit'
-                            value='Submit'
-                            class='btn btn-lg btn-success btn-block'
-                          )
+                    //- Hide the group selector (we're already scoped to msgGroup
+                    //- via the form action) and pre-fill new-area defaults from
+                    //- the current group so sysops don't have to re-specify the
+                    //- security/flags/post-as rules that the group already
+                    //- represents. Flag widgets are populated by the flag
+                    //- renderAreaFlags() JS further down with group defaults.
+                    +areaFormFields('na_', 'new', {
+                      hideGroupSelector: true,
+                      defaults: {
+                        read_security: msgGroup.read_security,
+                        post_security: msgGroup.post_security,
+                        post_as: msgGroup.post_as,
+                        newscan_default: msgGroup.newscan_default
+                      }
+                    })
+                    .text-end.mt-3
+                      input.btn.btn-lg.btn-success(type='submit' value='Submit')
 
           // Edit Group Modal
           #editGroupModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
@@ -1068,6 +788,7 @@ block content
           document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
           document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
           document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
+          document.getElementById('ea_qwk_conf_number').value = d.bsQwkconfnumber || '';
 
           renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
           renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');
@@ -1113,6 +834,83 @@ block content
           deleteSelect.addEventListener('change', function() {
             deleteHidden.value = this.value;
             deleteWarning.style.display = this.value === 'true' ? 'block' : 'none';
+          });
+        }
+
+        // On every modal open, snap back to the Main tab. Bootstrap
+        // otherwise preserves nav-link.active state across open/close
+        // cycles and a user who was last viewing Access or Network would
+        // reopen a different area into the wrong tab. Same pattern as
+        // the global msgAreas/index.pug view.
+        function resetToMainTab(modalEl, prefix) {
+          if (!modalEl) return;
+          modalEl.addEventListener('show.bs.modal', function() {
+            var trigger = modalEl.querySelector('.nav-link[data-bs-target="#' + prefix + 'tab_main"]');
+            if (trigger && typeof bootstrap !== 'undefined' && bootstrap.Tab) {
+              bootstrap.Tab.getOrCreateInstance(trigger).show();
+            }
+          });
+        }
+        resetToMainTab(document.getElementById('editAreaModal'), 'ea_');
+        resetToMainTab(document.getElementById('newAreaModal'), 'na_');
+
+        // QWK conference number debounced AJAX collision check. Same
+        // behaviour as the global msgAreas/index.pug view -- hits the
+        // /admin/msgAreas/check-conf-number endpoint on input and shows
+        // inline availability feedback. Authoritative enforcement is
+        // still the DB UNIQUE constraint + model-side validation.
+        var qwkInput  = document.getElementById('ea_qwk_conf_number');
+        var qwkStatus = document.getElementById('ea_qwk_conf_status');
+        if (qwkInput && qwkStatus) {
+          var qwkDebounce = null;
+          qwkInput.addEventListener('input', function() {
+            clearTimeout(qwkDebounce);
+            qwkDebounce = setTimeout(function() {
+              var v = parseInt(qwkInput.value, 10);
+              if (isNaN(v)) {
+                qwkStatus.style.display = 'none';
+                qwkStatus.textContent = '';
+                return;
+              }
+              if (v <= 100) {
+                qwkStatus.style.display = '';
+                qwkStatus.className = 'form-text text-danger';
+                qwkStatus.textContent = 'Reserved: 1-100 are Canectic system conferences';
+                return;
+              }
+              var excludeParam = currentAreaShortcode
+                ? '&exclude=' + encodeURIComponent(currentAreaShortcode)
+                : '';
+              fetch('/admin/msgAreas/check-conf-number?n=' + v + excludeParam)
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                  if (d && d.available) {
+                    qwkStatus.style.display = '';
+                    qwkStatus.className = 'form-text text-success';
+                    qwkStatus.textContent = '\u2713 Available';
+                  } else if (d && d.conflictsWith) {
+                    qwkStatus.style.display = '';
+                    qwkStatus.className = 'form-text text-danger';
+                    qwkStatus.textContent = 'In use by: ' + d.conflictsWith;
+                  }
+                })
+                .catch(function() {
+                  qwkStatus.style.display = 'none';
+                });
+            }, 300);
+          });
+        }
+
+        // Reset the QWK conference status indicator when the edit modal
+        // opens so stale availability feedback from a previous area
+        // doesn't stick around. The existing Edit button handler above
+        // sets ea_qwk_conf_number.value directly -- we also need to
+        // wipe the status span.
+        var editAreaModalEl = document.getElementById('editAreaModal');
+        if (editAreaModalEl && qwkStatus) {
+          editAreaModalEl.addEventListener('show.bs.modal', function() {
+            qwkStatus.style.display = 'none';
+            qwkStatus.textContent = '';
           });
         }
 

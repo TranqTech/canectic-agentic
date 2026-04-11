@@ -403,7 +403,13 @@ async function updateArea(shortcode, formObj) {
 	// reserved for system conferences: announcements/wall/bulletins/...).
 	// Must also be unique across message areas -- enforced at the DB level
 	// by a UNIQUE constraint, surfaced here as a friendlier error.
-	if (formObj.qwk_conf_number !== undefined) {
+	//
+	// Empty string is treated as "don't touch this field". The admin form
+	// sends an empty value when the field is blank (e.g. a row whose JS
+	// population didn't set it), and we don't want that to trip validation
+	// and reject an otherwise-valid edit of unrelated fields. Only a
+	// non-empty value goes through validation and into updateObj.
+	if (formObj.qwk_conf_number !== undefined && formObj.qwk_conf_number !== '') {
 		var confNum = parseInt(formObj.qwk_conf_number);
 		if (isNaN(confNum) || confNum <= RESERVED_CONF_COUNT) {
 			returnObj.errormessages.push(
