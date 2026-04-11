@@ -22,11 +22,11 @@ CTN is not a break from FTN. It's a carefully negotiated extension set that Cane
 
 ### MSGID encoding: base36 with time-dominant layout
 
-This came out of a discussion about fixing the FTS-0009 MSGID serial implementation in Canectic's core. FTS-0009 specifies the serial as "any eight character hexadecimal string" — exactly 32 bits. That works, but the 32-bit budget forces a design where we have to either shell out to Redis for cross-process counter coordination on the hot path, or sacrifice time resolution in the MSGID to make room for a process-ID tiebreaker.
+This came out of a discussion about fixing the FTS-0009 MSGID serial implementation in Canectic's core. FTS-0009 specifies the serial as "any eight character hexadecimal string" — exactly 32 bits. Canectic's current hex implementation lays that out as `(16 bits day | 16 bits counter)` with the counter backed by a `msgid_day_watermark` Postgres table (atomic UPSERT per allocation; Postgres handles cross-process coordination natively). The 32-bit budget is tight and leaves no room for a sub-day time resolution component or a process-ID tiebreaker — the counter is the only disambiguation mechanism within a day.
 
 If CTN ever wants to relax the hex constraint (all modern FTN tossers in practice treat the serial as an opaque non-whitespace token after the address — none I tested actually validate strict hex), base36 is the natural extension. It uses `0-9a-z`, is case-insensitive, is a strict superset of hex, is accepted by every modern FTN tosser I've looked at, and has native Node.js support via `BigInt.toString(36)` and `parseInt(s, 36)` — no custom encoder.
 
-8 base36 characters hold 36^8 = 2,821,109,907,456 distinct values — about 41.36 bits worth, or 9 more bits than hex's 32. Those 9 bits are exactly what we need to make the MSGID generation code fully process-local with zero Redis dependency, while keeping the same 179-year horizon from a Canectic epoch.
+8 base36 characters hold 36^8 = 2,821,109,907,456 distinct values — about 41.36 bits worth, or 9 more bits than hex's 32. Those 9 bits are exactly what we need to add sub-day time resolution (second-of-day) and a process-ID tiebreaker alongside the existing day-bucket field, making CTN MSGID generation fully process-local without needing any cross-process coordination layer at all (no Redis, no shared Postgres table). The hex FTS-compat scheme has to rely on atomic Postgres upserts for coordination because the 32-bit budget doesn't leave room for a process-ID field; CTN sidesteps that entirely with its larger address space.
 
 #### B36-B layout (preferred for CTN)
 
@@ -48,7 +48,7 @@ bits  4- 0  (5)  per-process per-second counter 32 burst tiebreaker
 | Burst capacity | 32 MSGIDs per process per wall-clock second |
 | Cross-process safety | Structural (3-bit process ID, no shared state) |
 | Runtime state | 2 process-local scalars (`_lastSec`, `_secCounter`) |
-| Redis dependency | None |
+| Cross-process coordination | None (structural via process ID bits; compare to hex FTS-compat which uses atomic Postgres upserts) |
 | Disk I/O | None |
 | Restart race window | ≤1 second (counter resets per second anyway) |
 | Wire compatibility | Non-FTS-0009-compliant (not hex), but universally accepted by modern FTN tossers as opaque strings |

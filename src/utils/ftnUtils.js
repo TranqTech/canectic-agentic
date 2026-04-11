@@ -15,28 +15,33 @@ async function getDateTimeString(){
 // lays out those 32 bits as:
 //
 //   bits 31-16 (16)  days since Canectic epoch   [179-year horizon]
-//   bits 15-0  (16)  shared per-day counter      [65,536/day aggregate]
+//   bits 15-0  (16)  per-day counter             [65,536/day aggregate]
 //
 // The **Canectic epoch** is 1980-12-08 UTC. This is deliberately before
 // FidoNet (1984) so that the day field can represent any historical FTN
-// message base that future import tools might need to synthesize MSGIDs
-// for. The day field wraps at 2^16 days = 2160-06-07 UTC, giving 135
-// years of forward runway from 2025 and ~180 years of total representable
-// span. Also happens to be the project maintainer's birthday, which is
-// as good a reason as any for a long-lived constant.
+// message base that import tools need to synthesize MSGIDs for. The day
+// field wraps at 2^16 days = 2160-06-07 UTC, giving 135 years of forward
+// runway from 2025 and ~180 years of total representable span. Also
+// happens to be the project maintainer's birthday, which is as good a
+// reason as any for a long-lived constant.
 //
-// The counter is a **shared pool** across all Canectic processes, held
-// as an atomic key in Redis (`msgid:day:<days>`) with a 48-hour TTL so
-// old day counters self-expire. INCR is atomic and cross-process-safe,
-// so the gateway, mail, mailer, and worker all draw from the same pool
-// without coordination.
+// The counter is held in the `msgid_day_watermark` Postgres table, one
+// row per day-bucket that has generated messages. Every serial allocation
+// is a single atomic UPSERT:
 //
-// On process startup (cold start, after Redis flush, or fresh install),
-// `initializeMsgidCounter()` scans the outbound message tables for the
-// highest serial already in use for the current day bucket and seeds
-// Redis from that + a safety margin. This makes the counter resilient
-// to Redis state loss without risking collision against already-emitted
-// messages.
+//   INSERT INTO msgid_day_watermark (day_bucket, max_counter, message_count)
+//   VALUES ($1, 1, 1)
+//   ON CONFLICT (day_bucket) DO UPDATE SET
+//     max_counter   = msgid_day_watermark.max_counter + 1,
+//     message_count = msgid_day_watermark.message_count + 1,
+//     updated_at    = NOW()
+//   RETURNING max_counter
+//
+// Postgres handles multi-process atomicity natively, so gateway, mail,
+// mailer, and worker can all allocate concurrently without a separate
+// coordination layer. No Redis dependency in this path; no TTL; no
+// dual-source-of-truth. Historical imports use the exact same allocator
+// with a day-bucket override (see allocateHistoricalSerial below).
 //
 // The serial IS NOT address-scoped. Canectic's storage splits the MSGID
 // into (serial, origin_address) as separate columns at the DB level, so
@@ -135,101 +140,136 @@ function parseSerial(hexString) {
 	};
 }
 
-// In-process fallback state. Used only if Redis is unreachable when
-// `_nextMsgIdSerial()` is called. Normally initializeMsgidCounter()
-// primes Redis at startup and all subsequent calls hit Redis directly.
-var _fallbackCounters = {};  // { <days>: <counter> }
+// Generate the next MSGID serial using the msgid_day_watermark table as
+// the atomic counter. Single Postgres UPSERT per allocation; Postgres
+// handles cross-process coordination natively.
+//
+// dayOverride (optional): force allocation for a specific day bucket,
+// used by allocateHistoricalSerial for historical imports. Omit for
+// normal live allocation on today's day.
+//
+// sourceTag (optional): the `source` column value when creating a new
+// watermark row. Defaults to 'live'. Import tools should pass
+// 'import_<label>' to distinguish imported-day watermarks from live ones.
+async function _nextMsgIdSerial(dayOverride, sourceTag) {
+	var days = (dayOverride !== undefined && dayOverride !== null)
+		? (dayOverride & 0xFFFF)
+		: _currentDayBucket();
+	var source = sourceTag || 'live';
 
-// Generate the next MSGID serial for the current day bucket.
-// Uses Redis INCR on the shared key; falls back to process-local counter
-// (logged as a warning) if Redis is unreachable.
-async function _nextMsgIdSerial() {
-	var days = _currentDayBucket();
-	var key = 'msgid:day:' + days;
-	var counter;
+	var postgres = await import('../middleware/db/postgres.js');
 
+	// Atomic allocation: INSERT-or-UPDATE with RETURNING gives us the
+	// new max_counter value in a single roundtrip. Postgres row-level
+	// locking on the conflict target guarantees no two concurrent
+	// callers get the same counter value.
+	var row;
 	try {
-		var redis = await import('../middleware/db/redis.js');
-		var client = await redis.getClient();
-		counter = await client.incr(key);
-		// First INCR of a new day sets the TTL so the key self-expires.
-		// 48h gives slack for timezone drift and late-night sessions.
-		if (counter === 1) {
-			try { await client.expire(key, 172800); } catch (_) {}
-		}
+		row = await postgres.queryOne(
+			'INSERT INTO msgid_day_watermark (day_bucket, max_counter, message_count, source) ' +
+			'VALUES ($1, 1, 1, $2) ' +
+			'ON CONFLICT (day_bucket) DO UPDATE SET ' +
+			'  max_counter = msgid_day_watermark.max_counter + 1, ' +
+			'  message_count = msgid_day_watermark.message_count + 1, ' +
+			'  updated_at = NOW() ' +
+			'RETURNING max_counter',
+			[days, source]
+		);
 	} catch (err) {
-		// Redis unreachable -- degrade to in-process counter and log once.
-		if (!_fallbackCounters[days]) _fallbackCounters[days] = 0;
-		_fallbackCounters[days]++;
-		counter = _fallbackCounters[days];
-		try {
-			alogger.writeAlog(2,
-				'[ftnUtils] MSGID Redis unreachable, using process-local ' +
-				'fallback counter (day=' + days + ' counter=' + counter + '). ' +
-				'Cross-process collisions possible until Redis recovers.',
-				'yellowbright');
-		} catch (_) {}
+		alogger.writeAlog(1,
+			'[ftnUtils] MSGID allocation failed for day ' + days + ': ' +
+			err.message + '. Falling back to timestamp-only serial (may ' +
+			'not be unique). Database recovery required.',
+			'redbright');
+		// Last-resort fallback: combine day bits with a timestamp-derived
+		// sub-day fraction. This produces an 8-char serial but offers no
+		// uniqueness guarantees. The sysop needs to fix the DB; this just
+		// prevents outbound message composition from hard-failing.
+		var msFraction = Date.now() & 0xFFFF;
+		return _assembleSerial(days, msFraction);
 	}
 
+	var counter = row && row.max_counter ? row.max_counter : 1;
+
 	if (counter > 0xFFFF) {
-		try {
-			alogger.writeAlog(1,
-				'[ftnUtils] MSGID counter wrap on day ' + days +
-				' (count=' + counter + '). Duplicates possible within ' +
-				'this day at downstream systems.',
-				'redbright');
-		} catch (_) {}
+		alogger.writeAlog(1,
+			'[ftnUtils] MSGID counter wrap on day ' + days +
+			' (count=' + counter + '). Duplicates possible within ' +
+			'this day at downstream systems.',
+			'redbright');
 	}
 
 	return _assembleSerial(days, counter & 0xFFFF);
 }
 
-// Initialize the MSGID counter for today's day bucket on process startup.
+// Ensure the msgid_day_watermark table is ready and, on first deployment,
+// backfill it from existing outbound messages.
 //
 // Called once from each bin/*.js entry point after appConfig.load() and
-// after the postgres + redis pools are ready. Idempotent across processes
-// racing each other: whichever INCR-check lands first wins, the others
-// see the existing key and return without scanning.
+// after Postgres is ready. Idempotent: if the table already has rows,
+// returns immediately. If the table is empty but outbound tables contain
+// messages, runs a one-time scan to populate historical day watermarks
+// from the highest serial already used per day.
 //
-// If Redis has no state for today, scans outbound message tables for the
-// highest serial already used in today's day bucket and seeds Redis from
-// (max_found + safety_margin). This protects against Redis flush and
-// fresh-install scenarios where a naive start-from-zero would collide
-// with already-emitted messages.
+// The backfill only considers rows where `msg_id` is exactly 8 hex
+// characters (the current post-Phase-1 format). Legacy 11+ char msg_ids
+// from the pre-e8f6518 buggy scheme are ignored -- they aren't parseable
+// into the Canectic day/counter layout, and historical counts on those
+// days can't be reconstructed meaningfully. In practice there aren't
+// many locally-generated legacy MSGIDs so this loses very little.
 //
-// Safe to call multiple times. Logs a summary line.
+// Returns { seeded, backfilled, days_populated, total_counter } for
+// diagnostics.
 async function initializeMsgidCounter() {
-	var days = _currentDayBucket();
-	var key = 'msgid:day:' + days;
+	var postgres = await import('../middleware/db/postgres.js');
 
-	var client;
+	// Ensure table exists. Normally the migration runner creates it
+	// from the .conf file, but we guard here in case someone runs a
+	// process without having run migrations first.
 	try {
-		var redis = await import('../middleware/db/redis.js');
-		client = await redis.getClient();
+		await postgres.write(
+			'CREATE TABLE IF NOT EXISTS msgid_day_watermark (' +
+			'  id BIGSERIAL PRIMARY KEY, ' +
+			'  day_bucket INTEGER UNIQUE NOT NULL, ' +
+			'  max_counter INTEGER NOT NULL DEFAULT 0, ' +
+			'  message_count INTEGER NOT NULL DEFAULT 0, ' +
+			'  source VARCHAR(32) NOT NULL DEFAULT \'live\', ' +
+			'  first_seen TIMESTAMPTZ DEFAULT NOW(), ' +
+			'  updated_at TIMESTAMPTZ DEFAULT NOW()' +
+			')'
+		);
 	} catch (err) {
 		alogger.writeAlog(2,
-			'[ftnUtils] initializeMsgidCounter: Redis unavailable, ' +
-			'cannot seed. Will use process-local fallback until Redis ' +
-			'recovers. Error: ' + err.message,
+			'[ftnUtils] initializeMsgidCounter: table ensure failed: ' +
+			err.message + ' (may already exist)',
 			'yellow');
-		return { seeded: false, reason: 'redis_unavailable' };
 	}
 
-	var existing = await client.get(key);
-	if (existing !== null) {
+	// Short-circuit if table already has rows -- we're live, no backfill
+	// needed.
+	var countRow;
+	try {
+		countRow = await postgres.queryOne('SELECT COUNT(*) AS c FROM msgid_day_watermark');
+	} catch (err) {
+		alogger.writeAlog(2,
+			'[ftnUtils] initializeMsgidCounter: count query failed: ' +
+			err.message,
+			'yellow');
+		return { seeded: false, reason: 'count_failed' };
+	}
+
+	var existingCount = countRow ? parseInt(countRow.c, 10) : 0;
+	if (existingCount > 0) {
 		alogger.writeAlog(3,
-			'[ftnUtils] MSGID counter already present for day ' + days +
-			' (value=' + existing + '), no seeding needed',
+			'[ftnUtils] msgid_day_watermark has ' + existingCount +
+			' day(s) of history, no backfill needed',
 			'cyan');
-		return { seeded: false, reason: 'already_present', value: parseInt(existing, 10) };
+		return { seeded: false, reason: 'already_populated', days: existingCount };
 	}
 
-	// Redis has no state for today. Scan outbound tables to find the
-	// highest serial already used. We only care about the low 16 bits
-	// (counter half) of serials whose high 16 bits match today's day.
-	var postgres = await import('../middleware/db/postgres.js');
-	var prefixHex = ((days & 0xFFFF)).toString(16).padStart(4, '0');
-
+	// Table is empty. Scan outbound tables for current-format (8-char)
+	// msg_ids grouped by day-prefix, inserting one row per day with the
+	// highest counter found.
 	var tables = ['netmail_out', 'pm_outbox'];
 	try {
 		var msgAreas = await import('../models/msgAreas.js');
@@ -240,58 +280,124 @@ async function initializeMsgidCounter() {
 			}
 		}
 	} catch (_) {
-		// msgAreas not available yet -- skip per-area tables, still
-		// scan the central outbound tables.
+		// Area list not available yet -- backfill from central tables only.
 	}
 
-	var maxCounter = 0;
+	// Aggregate: day_bucket -> { max_counter, message_count }
+	var aggregate = {};
 	var scanned = 0;
 	var errors = 0;
 
 	for (var tbl of tables) {
 		try {
-			// Query the max low-16-bits (counter portion) for rows where
-			// the high 16 bits match today's day prefix. The msg_id column
-			// is stored as an 8-char hex string; we filter with LIKE and
-			// extract the low 4 hex chars as the counter.
-			var row = await postgres.queryOne(
-				'SELECT MAX(SUBSTRING(msg_id FROM 5 FOR 4)) AS maxc ' +
-				'FROM ' + tbl + ' WHERE msg_id LIKE $1',
-				[prefixHex + '%']
+			// Group by high 4 hex chars (day), MAX the low 4 hex chars
+			// (counter), COUNT the rows. Only current-format 8-char rows.
+			var rows = await postgres.query(
+				'SELECT ' +
+				'  SUBSTRING(msg_id FROM 1 FOR 4) AS day_hex, ' +
+				'  MAX(SUBSTRING(msg_id FROM 5 FOR 4)) AS max_counter_hex, ' +
+				'  COUNT(*) AS cnt ' +
+				'FROM ' + tbl + ' ' +
+				'WHERE msg_id ~ \'^[0-9a-fA-F]{8}$\' ' +
+				'GROUP BY SUBSTRING(msg_id FROM 1 FOR 4)'
 			);
-			if (row && row.maxc) {
-				var candidate = parseInt(row.maxc, 16);
-				if (!isNaN(candidate) && candidate > maxCounter) {
-					maxCounter = candidate;
+			for (var r of (rows || [])) {
+				var dayBucket = parseInt(r.day_hex, 16);
+				var maxc = parseInt(r.max_counter_hex, 16);
+				var cnt = parseInt(r.cnt, 10);
+				if (isNaN(dayBucket) || isNaN(maxc)) continue;
+				if (!aggregate[dayBucket]) {
+					aggregate[dayBucket] = { max_counter: 0, message_count: 0 };
 				}
+				if (maxc > aggregate[dayBucket].max_counter) {
+					aggregate[dayBucket].max_counter = maxc;
+				}
+				aggregate[dayBucket].message_count += cnt;
 			}
 			scanned++;
 		} catch (_) {
-			// Table may not exist yet on fresh install, or may have a
-			// non-string msg_id column. Skip and count.
 			errors++;
 		}
 	}
 
-	var seed = maxCounter + 100;  // safety margin
-	try {
-		await client.set(key, seed.toString(), 'EX', 172800);
-	} catch (err) {
-		alogger.writeAlog(2,
-			'[ftnUtils] initializeMsgidCounter: failed to seed Redis ' +
-			'(day=' + days + '): ' + err.message,
-			'redbright');
-		return { seeded: false, reason: 'redis_write_failed' };
+	// Insert one row per aggregated day
+	var inserted = 0;
+	var totalMessages = 0;
+	for (var dayBucket in aggregate) {
+		var agg = aggregate[dayBucket];
+		try {
+			await postgres.write(
+				'INSERT INTO msgid_day_watermark ' +
+				'  (day_bucket, max_counter, message_count, source) ' +
+				'VALUES ($1, $2, $3, $4) ' +
+				'ON CONFLICT (day_bucket) DO UPDATE SET ' +
+				'  max_counter = GREATEST(msgid_day_watermark.max_counter, $2), ' +
+				'  message_count = msgid_day_watermark.message_count + $3, ' +
+				'  updated_at = NOW()',
+				[parseInt(dayBucket, 10), agg.max_counter, agg.message_count, 'backfill']
+			);
+			inserted++;
+			totalMessages += agg.message_count;
+		} catch (err) {
+			alogger.writeAlog(2,
+				'[ftnUtils] backfill: failed to insert day ' + dayBucket +
+				': ' + err.message,
+				'yellow');
+		}
 	}
 
-	alogger.writeAlog(2,
-		'[ftnUtils] MSGID counter seeded from DB scan: day=' + days +
-		' max_found=' + maxCounter + ' seed=' + seed +
-		' tables_scanned=' + scanned +
-		(errors > 0 ? ' tables_errored=' + errors : ''),
-		'greenbright');
+	if (inserted > 0) {
+		alogger.writeAlog(2,
+			'[ftnUtils] MSGID watermark backfilled from ' + scanned +
+			' table(s): ' + inserted + ' day(s), ' + totalMessages +
+			' total messages tracked' +
+			(errors > 0 ? ' (' + errors + ' table(s) errored)' : ''),
+			'greenbright');
+	} else {
+		alogger.writeAlog(3,
+			'[ftnUtils] MSGID watermark: no current-format msg_ids found ' +
+			'to backfill (fresh install or legacy-only data)',
+			'cyan');
+	}
 
-	return { seeded: true, days: days, maxFound: maxCounter, seed: seed, scanned: scanned };
+	return {
+		seeded: inserted > 0,
+		days_populated: inserted,
+		total_messages: totalMessages,
+		tables_scanned: scanned,
+		errors: errors
+	};
+}
+
+// Look up the current high-water counter for a given day bucket.
+// Returns the max_counter or 0 if no row exists. Used by import tools
+// and diagnostics. Does NOT allocate a new serial.
+async function getWatermarkForDay(dayBucket) {
+	var postgres = await import('../middleware/db/postgres.js');
+	var row = await postgres.queryOne(
+		'SELECT max_counter, message_count, source FROM msgid_day_watermark WHERE day_bucket = $1',
+		[dayBucket & 0xFFFF]
+	);
+	if (!row) return { max_counter: 0, message_count: 0, source: null };
+	return {
+		max_counter: row.max_counter,
+		message_count: row.message_count,
+		source: row.source
+	};
+}
+
+// Allocate a MSGID serial for a historical message. Takes the message's
+// original Date (or millisecond timestamp) and an optional source tag
+// to mark the watermark row's provenance. The day bucket is derived
+// from the timestamp via dayBucketForDate, clamping pre-epoch messages
+// to day 0.
+//
+// Returns the 8-character hex serial. Concurrent calls from multiple
+// import processes are serialized by Postgres row-level locking on
+// the watermark upsert.
+async function allocateHistoricalSerial(originalDate, sourceTag) {
+	var days = dayBucketForDate(originalDate);
+	return await _nextMsgIdSerial(days, sourceTag || 'import');
 }
 
 // FTS-0009 MSGID serial: exactly 8 hex characters. Used by `netmail.js`
@@ -356,6 +462,8 @@ export{
 	getMilliHex,
 	getSystemTime,
 	initializeMsgidCounter,
+	getWatermarkForDay,
+	allocateHistoricalSerial,
 	parseSerial,
 	dayBucketForDate,
 	splitFullMsgid,

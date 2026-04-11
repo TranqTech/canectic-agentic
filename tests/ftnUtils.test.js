@@ -18,6 +18,9 @@ import {
 	genMsgId,
 	getMilliHex,
 	getSystemTime,
+	initializeMsgidCounter,
+	getWatermarkForDay,
+	allocateHistoricalSerial,
 	parseSerial,
 	dayBucketForDate,
 	splitFullMsgid,
@@ -253,6 +256,13 @@ describe('parseSerial', function () {
 
 describe('getMilliHex (async)', function () {
 
+	// Ensure the msgid_day_watermark table exists before running any
+	// test that allocates a serial. initializeMsgidCounter is idempotent
+	// and creates the table via CREATE TABLE IF NOT EXISTS.
+	before(async function () {
+		try { await initializeMsgidCounter(); } catch (_) {}
+	});
+
 	it('should return a string', async function () {
 		var r = await getMilliHex();
 		assert.strictEqual(typeof r, 'string');
@@ -315,16 +325,101 @@ describe('genMsgId (async)', function () {
 			'Expected 100 unique values across both APIs, got: ' + seen.size);
 	});
 
-	// Close the Redis connection so mocha can exit cleanly. The MSGID
-	// generator opens a pooled connection the first time it's called;
-	// without this, mocha hangs on "leaked async resources" for several
-	// seconds before timing out.
-	after(async function () {
-		try {
-			var redis = await import('../src/middleware/db/redis.js');
-			if (typeof redis.shutdown === 'function') await redis.shutdown();
-		} catch (_) {}
+});
+
+// ---------------------------------------------------------------------------
+// Watermark table helpers: getWatermarkForDay, allocateHistoricalSerial
+// ---------------------------------------------------------------------------
+
+describe('msgid_day_watermark helpers', function () {
+
+	before(async function () {
+		// Make sure the table exists
+		try { await initializeMsgidCounter(); } catch (_) {}
 	});
+
+	it('getWatermarkForDay returns {max_counter:0} for a day with no history', async function () {
+		// Use a day far from the current one so we're guaranteed no rows
+		var unusedDay = 0xFEED;  // some random day in the middle of nowhere
+		var w = await getWatermarkForDay(unusedDay);
+		assert.strictEqual(w.max_counter, 0);
+		assert.strictEqual(w.message_count, 0);
+	});
+
+	it('allocateHistoricalSerial creates a watermark row for a historical date', async function () {
+		// Use a specific date in 1985 -- way back, won't conflict with live
+		// generation. Allocate a serial and verify the watermark table
+		// records the expected day bucket.
+		var histDate = new Date(Date.UTC(1985, 5, 15));  // 1985-06-15
+		var expectedDay = dayBucketForDate(histDate);
+
+		var serial = await allocateHistoricalSerial(histDate, 'test_import');
+		assert.strictEqual(serial.length, 8);
+		assert.match(serial, /^[0-9a-f]{8}$/);
+
+		// The serial should decode back to the historical day
+		var parsed = parseSerial(serial);
+		assert.strictEqual(parsed.days, expectedDay);
+
+		// The watermark row should exist
+		var w = await getWatermarkForDay(expectedDay);
+		assert.ok(w.max_counter >= 1, 'watermark row should exist after allocation');
+		assert.ok(w.message_count >= 1);
+	});
+
+	it('allocateHistoricalSerial on the same day produces strictly increasing counters', async function () {
+		// Allocate several historical serials for the same day and verify
+		// the counter portion strictly increases.
+		var histDate = new Date(Date.UTC(1992, 2, 10));  // 1992-03-10
+		var counters = [];
+		for (var i = 0; i < 5; i++) {
+			var serial = await allocateHistoricalSerial(histDate, 'test_monotonic');
+			var parsed = parseSerial(serial);
+			counters.push(parsed.counter);
+		}
+		// Each counter should be >= the previous (not necessarily consecutive
+		// because other tests in the same run may have touched this day)
+		for (var j = 1; j < counters.length; j++) {
+			assert.ok(counters[j] > counters[j - 1],
+				'counter regressed: ' + counters[j - 1] + ' -> ' + counters[j]);
+		}
+	});
+
+	it('allocateHistoricalSerial for pre-epoch dates clamps to day 0', async function () {
+		var preEpoch = new Date(Date.UTC(1975, 0, 1));  // 1975
+		var serial = await allocateHistoricalSerial(preEpoch, 'test_pre_epoch');
+		var parsed = parseSerial(serial);
+		assert.strictEqual(parsed.days, 0);
+	});
+
+	it('getWatermarkForDay returns correct values after allocations', async function () {
+		// Allocate twice for a known day, then query
+		var histDate = new Date(Date.UTC(1988, 10, 20));  // 1988-11-20
+		var day = dayBucketForDate(histDate);
+		var initial = await getWatermarkForDay(day);
+
+		await allocateHistoricalSerial(histDate, 'test_query');
+		await allocateHistoricalSerial(histDate, 'test_query');
+
+		var after = await getWatermarkForDay(day);
+		assert.ok(after.max_counter >= initial.max_counter + 2);
+		assert.ok(after.message_count >= initial.message_count + 2);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Postgres pool shutdown — keep last so mocha can exit cleanly after all
+// suites have finished using the pool.
+// ---------------------------------------------------------------------------
+
+after(async function () {
+	try {
+		var postgres = await import('../src/middleware/db/postgres.js');
+		if (typeof postgres.shutdown === 'function') await postgres.shutdown();
+		else if (postgres.pgpool && typeof postgres.pgpool.end === 'function') {
+			await postgres.pgpool.end();
+		}
+	} catch (_) {}
 });
 
 // ---------------------------------------------------------------------------

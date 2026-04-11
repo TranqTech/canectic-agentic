@@ -469,20 +469,51 @@ any historical FTN message base that import tools might need to
 synthesize MSGIDs for. Wraps at `2^16` days on 2160-06-07, giving
 135 years of forward runway from 2025.
 
-The counter is a **shared atomic key in Redis** (`msgid:day:<days>`
-with a 48h TTL). All four Canectic processes (gateway, mail, mailer,
-worker) draw from the same pool via `INCR` -- no per-process
-coordination needed. On process startup, `initializeMsgidCounter()`
-short-circuits if Redis already has state for today; on cold start
-or Redis flush, it scans the outbound message tables for the highest
-serial used in today's day bucket and seeds from `max + 100`
-(safety margin) so post-flush regeneration can't collide with
-pre-flush emissions.
+The counter lives in the **`msgid_day_watermark` Postgres table**, one
+row per day-bucket that has generated messages:
 
-If Redis is unreachable at generation time, the path degrades to a
-process-local fallback counter (logged as a warning) rather than
-hard-failing. Cross-process collisions are possible in this narrow
-window until Redis recovers.
+```
+id            BIGSERIAL PRIMARY KEY
+day_bucket    INTEGER UNIQUE NOT NULL     -- low 16 bits of days-since-epoch
+max_counter   INTEGER NOT NULL            -- highest counter used for this day
+message_count INTEGER NOT NULL            -- total allocations for this day
+source        VARCHAR(32) NOT NULL        -- 'live' / 'import_<label>' / 'backfill'
+first_seen    TIMESTAMPTZ
+updated_at    TIMESTAMPTZ
+```
+
+Every serial allocation is a single atomic Postgres UPSERT:
+
+```sql
+INSERT INTO msgid_day_watermark (day_bucket, max_counter, message_count, source)
+VALUES ($1, 1, 1, 'live')
+ON CONFLICT (day_bucket) DO UPDATE SET
+  max_counter   = msgid_day_watermark.max_counter + 1,
+  message_count = msgid_day_watermark.message_count + 1,
+  updated_at    = NOW()
+RETURNING max_counter
+```
+
+Postgres handles cross-process atomicity natively via row-level locking
+on the conflict target, so gateway, mail, mailer, and worker can all
+allocate concurrently without a separate coordination layer. No Redis
+dependency in this path; no TTL; no dual-source-of-truth. Historical
+imports use the exact same allocator with a day-bucket override.
+
+On process startup, `initializeMsgidCounter()` ensures the table exists
+(via CREATE TABLE IF NOT EXISTS as a defensive guard) and, if the table
+is empty but outbound message tables contain current-format 8-char
+serials, runs a one-time backfill scan that groups messages by day
+prefix and populates watermarks for every day that has history.
+Legacy 11+ char serials from pre-`e8f6518` installs are ignored
+during backfill because they don't follow the Canectic day/counter
+layout and can't be parsed into meaningful `(day, counter)` pairs.
+
+If the table write fails (unlikely but possible during DB recovery),
+the generator falls back to a timestamp-derived sub-day serial that
+has no uniqueness guarantees -- the fallback exists purely to prevent
+message composition from hard-failing during a DB outage, and the
+sysop is expected to fix the DB and restart.
 
 `genMsgId()` (async, used by `netmail.js`) and `getMilliHex()`
 (async, used by `messages.js`) both wrap the same
@@ -490,6 +521,16 @@ window until Redis recovers.
 `parseSerial(hex)` splits an 8-char serial back into
 `{days, counter}`, and `dayBucketForDate(date)` lets import tools
 compute the correct day field for historical message timestamps.
+
+For historical imports specifically:
+`allocateHistoricalSerial(originalDate, sourceTag)` allocates a
+new serial for a message with the given original timestamp. The
+day bucket is computed from the timestamp (pre-1980 clamps to day 0)
+and the counter bumps the row's existing `max_counter`. The
+`source` column records which import run the watermark came from
+so sysops can audit provenance. `getWatermarkForDay(dayBucket)`
+returns `{max_counter, message_count, source}` for diagnostics
+without allocating a new serial.
 
 **MSGID tuple storage**: the full "address serial" MSGID string
 is split into two columns at DB write time:
