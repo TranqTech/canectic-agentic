@@ -905,7 +905,7 @@ Separate from the network-level QWK tosser, the user QWK system (`src/models/qwk
 ### How it relates to the network QWK system
 
 - **Reuses the same low-level functions**: `buildControlDat()`, `buildMessagesDat()`, `buildHeadersDatText()`, `assembleQwkPacket()` from `qwkPacketBuilder.js` and `parseMessagesDAT()`, `parseHeadersDat()`, `applyHeadersDat()`, `unzipQwkPacket()` from `qwkClasses.js`.
-- **Different conference numbering**: Network QWK uses areatags from `network_areas` as conference numbers. User QWK uses `message_areas.qwk_conf_number` — a system-wide column that defaults to the area's database `id`, sysop-editable. These are independent; a sysop may choose to align them manually.
+- **Different conference numbering**: Network QWK uses areatags from `network_areas` as conference numbers. User QWK uses `message_areas.qwk_conf_number` — a system-wide column allocated in per-group blocks via `message_groups.qwk_conf_start` + `qwk_group_stride` (default 1000), with conference numbers 1-100 reserved for system conferences (announcements, wall, bulletins). Per-area sysop overrides are supported as an escape hatch. These are independent of network conference numbers; a sysop may choose to align them manually.
 - **Different pointer system**: Network QWK tracks HWM via `peer_area_subscriptions.msg_idx`. User QWK uses the same `user_msg_pointers.scan_pointer` as web and terminal newscan.
 - **Different posting path**: Network QWK imports via the tosser (`importQwkMessage()`). User REP imports via the standard posting path (`messages.startNewThread()`/`replyToThread()`), which enforces access control, user attribution, and body_html generation.
 - **No NETFLAGS.DAT**: User packets don't participate in message routing.
