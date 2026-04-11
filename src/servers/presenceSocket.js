@@ -500,7 +500,12 @@ class PresenceServer {
 			var count = await notifMod.getUnreadCount(userId, isSysop);
 			this._sendJson(ws, { type: 'notification_count', count: count });
 
-			// On connect, also send recent unread notifications to populate the dropdown
+			// On connect, also send recent unread notifications to populate the
+			// dropdown. Each replay item carries `initial: true` so the client
+			// renders it into the dropdown WITHOUT incrementing the badge --
+			// the authoritative count was already set by the notification_count
+			// message above. Without this flag the badge ends up at 2x the
+			// real count (one from notification_count, one increment per replay).
 			if (includeRecent && count > 0) {
 				var recent = await notifMod.getUnread(userId, isSysop, 10);
 				for (var n of recent) {
@@ -512,7 +517,8 @@ class PresenceServer {
 						body: n.body,
 						link: n.link,
 						icon: n.icon,
-						severity: n.severity
+						severity: n.severity,
+						initial: true
 					});
 				}
 			}

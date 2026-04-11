@@ -155,8 +155,14 @@ html
             }
             if (msg.type === 'notification') {
               addNotifToDropdown(msg);
-              notifUnread++;
-              updateNotifBadge(notifUnread);
+              // Initial replay items (sent on connect to populate the dropdown)
+              // are already accounted for in the preceding notification_count
+              // message. Only increment for genuinely new pushes to avoid
+              // doubling the badge.
+              if (!msg.initial) {
+                notifUnread++;
+                updateNotifBadge(notifUnread);
+              }
             }
           }
 
