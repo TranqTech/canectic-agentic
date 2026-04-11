@@ -406,18 +406,33 @@ class SmtpSession {
 	}
 
 	async _processData(rawMessage) {
-		// Parse RFC 2822 message
-		var parsed = this._parseMessage(rawMessage);
+		// Wrap the whole pipeline in a try/catch so any downstream error
+		// (DB schema mismatch, model exception, anything) logs a clean
+		// line and sends a 451 to the client instead of crashing the
+		// mail process via an unhandled promise rejection -- _onData
+		// calls us fire-and-forget so unhandled rejections would kill
+		// the process, which pm2 would then restart in a loop.
+		try {
+			// Parse RFC 2822 message
+			var parsed = this._parseMessage(rawMessage);
 
-		if (this.trustedMode) {
-			// Trusted inbound: deliver directly as EMAIL transport PM
-			await this._processInboundData(parsed);
-		} else {
-			// Authenticated submission: queue outbound via queueMessage
-			await this._processSubmissionData(parsed);
+			if (this.trustedMode) {
+				// Trusted inbound: deliver directly as EMAIL transport PM
+				await this._processInboundData(parsed);
+			} else {
+				// Authenticated submission: queue outbound via queueMessage
+				await this._processSubmissionData(parsed);
+			}
+
+			this._send('250 OK message queued');
+		} catch (err) {
+			alogger.writeAlog(1,
+				'SMTP ' + (this.trustedMode ? 'inbound' : 'submission') +
+				' data processing FAILED: ' + err.message +
+				(err.stack ? '\n' + err.stack : ''),
+				'redbright');
+			this._send('451 4.3.0 Temporary server error processing message, please retry later');
 		}
-
-		this._send('250 OK message queued');
 		this.mailFrom = null;
 		this.rcptTo = [];
 	}
@@ -482,8 +497,29 @@ class SmtpSession {
 		// Strip angle brackets if present: "Name <addr>" → use as-is for display
 		var displayFrom = senderName.replace(/<[^>]*>/g, '').trim() || senderAddress;
 
+		alogger.writeAlog(3,
+			'SMTP inbound: DATA received, processing ' + this.rcptTo.length +
+			' recipient(s) from ' + senderAddress +
+			' (subject: ' + (parsed.subject || '(none)') +
+			', body-bytes: ' + ((parsed.bodyPlain || '').length + (parsed.bodyHtml || '').length) +
+			', attachments: ' + (parsed.attachments ? parsed.attachments.length : 0) + ')',
+			'cyan');
+
+		// Extract the RFC 5322 Message-ID header if present. It's not an
+		// FTN MSGID but stuffing it into msg_id lets the dupe check match
+		// repeated deliveries of the same message from the upstream MTA,
+		// and makes threading work if we later read this via IMAP.
+		var rfcMessageId = parsed.headers['message-id'] || '';
+		rfcMessageId = rfcMessageId.trim();
+
 		for (var rcpt of this.rcptTo) {
-			if (!rcpt.transportData || !rcpt.transportData.recipient_user_id) continue;
+			if (!rcpt.transportData || !rcpt.transportData.recipient_user_id) {
+				alogger.writeAlog(3,
+					'SMTP inbound: skipping recipient ' + (rcpt.address || '?') +
+					' (no recipient_user_id in transport data)',
+					'yellow');
+				continue;
+			}
 
 			var messageObj = {
 				user_id: rcpt.transportData.recipient_user_id,
@@ -491,6 +527,7 @@ class SmtpSession {
 				to_user: rcpt.username || rcpt.toUser || '',
 				from_address: senderAddress,
 				to_address: '',
+				msg_id: rfcMessageId,
 				subject: parsed.subject || '(no subject)',
 				body_text: parsed.bodyPlain || parsed.bodyHtml || '',
 				utf8: parsed.bodyPlain || '',
