@@ -14,6 +14,22 @@ async function getPeerConnections() {
 	return mod;
 }
 
+// Conference number reservation for user QWK packets.
+//
+// Conference 0 is E-mail (personal mail) by QWK convention. Canectic
+// reserves the next 100 conference numbers (1..100) for system content
+// that we emit into user QWK downloads: announcements, the wall,
+// bulletins, and future additions. New message areas get a default
+// qwk_conf_number of (id + RESERVED_CONF_COUNT) so they land safely
+// above the reserved range. Sysops can override the number per area
+// via the admin form, but validation rejects values in [1..100].
+//
+// Changing this constant after an install has areas is a breaking
+// operation -- existing area numbers won't automatically shift. If
+// we ever need more reserved slots, prefer keeping the constant at
+// 100 and just using more of the existing range.
+const RESERVED_CONF_COUNT = 100;
+
 
 // Normalize flag input from forms — may arrive as a string, an array, or undefined.
 // Always returns a JSON array (or null if empty).
@@ -153,11 +169,14 @@ async function newArea(formObj) {
 
 	var areaId = dbres.insertId;
 
-	// Set qwk_conf_number = area id (default; sysop can override later)
+	// Set default qwk_conf_number = id + RESERVED_CONF_COUNT (currently 100).
+	// Conference numbers 1-100 are reserved for Canectic system conferences
+	// (announcements, wall, bulletins, room for future growth). Sysops can
+	// override later via the admin form; validation rejects values <= 100.
 	try {
 		await postgres.write(
-			"UPDATE message_areas SET qwk_conf_number = $1 WHERE id = $1",
-			[areaId]
+			"UPDATE message_areas SET qwk_conf_number = $1 WHERE id = $2",
+			[areaId + RESERVED_CONF_COUNT, areaId]
 		);
 	} catch (e) {
 		alogger.writeAlog(3, "newArea: qwk_conf_number assignment failed for " + shorty + ": " + (e.message || e), "yellow");
@@ -380,12 +399,32 @@ async function updateArea(shortcode, formObj) {
 		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
 	}
 
-	// QWK conference number
+	// QWK conference number. Must be above the reserved range (1..100 are
+	// reserved for system conferences: announcements/wall/bulletins/...).
+	// Must also be unique across message areas -- enforced at the DB level
+	// by a UNIQUE constraint, surfaced here as a friendlier error.
 	if (formObj.qwk_conf_number !== undefined) {
 		var confNum = parseInt(formObj.qwk_conf_number);
-		if (!isNaN(confNum) && confNum > 0) {
-			updateObj.qwk_conf_number = confNum;
+		if (isNaN(confNum) || confNum <= RESERVED_CONF_COUNT) {
+			returnObj.errormessages.push(
+				"QWK conference number must be greater than " + RESERVED_CONF_COUNT +
+				" (numbers 1-" + RESERVED_CONF_COUNT + " are reserved for system conferences)"
+			);
+			return returnObj;
 		}
+		// Collision check against other areas
+		var existing = await postgres.queryOne(
+			"SELECT shortcode FROM message_areas WHERE qwk_conf_number = $1 AND id != $2",
+			[confNum, dbarea.id]
+		);
+		if (existing) {
+			returnObj.errormessages.push(
+				"QWK conference number " + confNum + " is already in use by area '" +
+				existing.shortcode + "'"
+			);
+			return returnObj;
+		}
+		updateObj.qwk_conf_number = confNum;
 	}
 
 	// Flag columns — always update if present in form (even if empty array)
@@ -547,27 +586,110 @@ async function recalculateAreaCounts() {
 // QWK conference number management
 // ---------------------------------------------------------------------------
 
-// Ensure the qwk_conf_number column exists and backfill any NULL values.
-// Called at startup from gateway/worker init.
+// Ensure the qwk_conf_number column is populated and the UNIQUE constraint
+// exists. Called at startup from gateway/worker init. The column itself
+// is now declared in db/schema/tablecolumns/message_areas.conf so the
+// standard auto-migrator handles creation -- this function manages the
+// constraint (which the .conf format can't express) and the data-side
+// migration from the legacy "qwk_conf_number = id" default into the new
+// "id + RESERVED_CONF_COUNT" scheme.
+//
+// Four passes:
+//   1. Ensure UNIQUE constraint exists (idempotent).
+//   2. Backfill NULL rows to (id + RESERVED_CONF_COUNT). Fresh installs
+//      and any newly-added column end up here.
+//   3. Shift legacy default rows (where qwk_conf_number = id) up by
+//      RESERVED_CONF_COUNT. One-time migration for pre-existing installs.
+//      Collision-safe because id is unique so (id + 100) is unique too.
+//   4. Scan for sysop-customised rows sitting inside the reserved range
+//      and log a level-1 warning naming each conflicting shortcode. Do
+//      NOT auto-move them -- they're explicit assignments and silent
+//      changes would be worse than the warning.
 async function ensureQwkConfNumbers() {
-	// Add column if missing
-	await postgres.write(
-		"ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS qwk_conf_number INTEGER"
-	);
+	// Pass 1: Add unique constraint if missing. The column itself is in
+	// the schema .conf now, so the auto-migrator handles creation.
+	try {
+		await postgres.write(
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'message_areas_qwk_conf_number_key')
+				THEN ALTER TABLE message_areas ADD CONSTRAINT message_areas_qwk_conf_number_key UNIQUE (qwk_conf_number);
+				END IF;
+			END $$`
+		);
+	} catch (e) {
+		alogger.writeAlog(2,
+			'ensureQwkConfNumbers: unique constraint setup failed: ' + (e.message || e),
+			'redbright');
+	}
 
-	// Add unique constraint if missing
-	await postgres.write(
-		`DO $$ BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'message_areas_qwk_conf_number_key')
-			THEN ALTER TABLE message_areas ADD CONSTRAINT message_areas_qwk_conf_number_key UNIQUE (qwk_conf_number);
-			END IF;
-		END $$`
-	);
+	// Pass 2: NULL backfill. Uses pgpool directly to read rowCount so
+	// the summary log is meaningful.
+	var nullFilled = 0;
+	try {
+		var nullResult = await postgres.pgpool.query(
+			"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE qwk_conf_number IS NULL",
+			[RESERVED_CONF_COUNT]
+		);
+		nullFilled = (nullResult && nullResult.rowCount) || 0;
+	} catch (e) {
+		alogger.writeAlog(2,
+			'ensureQwkConfNumbers: NULL backfill failed: ' + (e.message || e),
+			'redbright');
+	}
 
-	// Backfill: set qwk_conf_number = id for any areas that don't have one
-	await postgres.write(
-		"UPDATE message_areas SET qwk_conf_number = id WHERE qwk_conf_number IS NULL"
-	);
+	// Pass 3: Shift legacy default rows (qwk_conf_number = id). This is
+	// the one-time migration for installs that existed before the
+	// reserved-range rework. Idempotent -- once a row has been shifted
+	// its qwk_conf_number != id and subsequent runs skip it.
+	var legacyShifted = 0;
+	try {
+		var shiftResult = await postgres.pgpool.query(
+			"UPDATE message_areas SET qwk_conf_number = id + $1 WHERE qwk_conf_number = id",
+			[RESERVED_CONF_COUNT]
+		);
+		legacyShifted = (shiftResult && shiftResult.rowCount) || 0;
+	} catch (e) {
+		alogger.writeAlog(2,
+			'ensureQwkConfNumbers: legacy shift failed: ' + (e.message || e) +
+			' -- may indicate a collision with a sysop-customised row. Manual ' +
+			'cleanup may be required; areas with qwk_conf_number <= ' + RESERVED_CONF_COUNT +
+			' should be renumbered via /admin/msgAreas.',
+			'redbright');
+	}
+
+	// Pass 4: Warn about sysop-customised rows in the reserved range.
+	try {
+		var conflicts = await postgres.query(
+			"SELECT id, shortcode, qwk_conf_number FROM message_areas " +
+			"WHERE qwk_conf_number IS NOT NULL AND qwk_conf_number BETWEEN 1 AND $1 " +
+			"ORDER BY qwk_conf_number ASC",
+			[RESERVED_CONF_COUNT]
+		);
+		if (conflicts && conflicts.length > 0) {
+			for (var c of conflicts) {
+				alogger.writeAlog(1,
+					'ensureQwkConfNumbers: message area "' + c.shortcode + '" has ' +
+					'qwk_conf_number=' + c.qwk_conf_number + ' which is inside the reserved ' +
+					'range (1-' + RESERVED_CONF_COUNT + '). System conferences may emit with ' +
+					'the same number, creating duplicates in downloaded QWK packets. ' +
+					'Fix via /admin/msgAreas -- set a value > ' + RESERVED_CONF_COUNT + '.',
+					'yellowbright', true);
+			}
+		}
+	} catch (e) {
+		alogger.writeAlog(2,
+			'ensureQwkConfNumbers: reserved-range scan failed: ' + (e.message || e),
+			'yellow');
+	}
+
+	// Summary log
+	if (nullFilled > 0 || legacyShifted > 0) {
+		alogger.writeAlog(1,
+			'ensureQwkConfNumbers: ' + nullFilled + ' null row(s) backfilled, ' +
+			legacyShifted + ' legacy row(s) shifted into the post-reserved range ' +
+			'(offset +' + RESERVED_CONF_COUNT + ')',
+			'cyan');
+	}
 }
 
 // Look up an area by its QWK conference number.
@@ -580,6 +702,7 @@ async function getAreaByConfNumber(confNumber) {
 }
 
 export {
+	RESERVED_CONF_COUNT,
 	newArea,
 	updateArea,
 	removeArea,

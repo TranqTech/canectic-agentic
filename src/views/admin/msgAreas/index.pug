@@ -253,7 +253,9 @@ block content
                         option(value='false') No
                       br
                       label(for='ea_qwk_conf_number') QWK Conference #:
-                      input(type='number' id='ea_qwk_conf_number' name='qwk_conf_number' class='form-control' min=1 tabindex='11')
+                      input(type='number' id='ea_qwk_conf_number' name='qwk_conf_number' class='form-control' min=101 tabindex='11')
+                      small.form-text.text-muted Must be ≥ 101. Numbers 1-100 are reserved for Canectic system conferences (announcements, wall, bulletins).
+                      small.form-text#ea_qwk_conf_status(style='display:none;')
                   .row
                     .col-1
                     .col-5
@@ -622,6 +624,9 @@ block content
         document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
         document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
         document.getElementById('ea_qwk_conf_number').value = d.bsQwkconfnumber || '';
+        // Reset collision-check status when loading a row into the form
+        var qwkStatus = document.getElementById('ea_qwk_conf_status');
+        if (qwkStatus) { qwkStatus.style.display = 'none'; qwkStatus.textContent = ''; }
 
         renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');
         renderAreaFlags('ea_read_rest', 'read_rest_flags', parseFlags(d.bsReadrestflags), allRestrs, 'bg-danger');
@@ -691,6 +696,54 @@ block content
           } catch(e) {
             console.error('Failed to fetch group defaults:', e);
           }
+        });
+      }
+
+      // QWK conference number debounced AJAX collision check.
+      // Called on input of #ea_qwk_conf_number -- queries the server for
+      // whether that number is currently in use by another area or sits
+      // inside the reserved 1-100 range, and shows inline feedback.
+      // The UNIQUE constraint + model-side validation are still the
+      // authoritative enforcement; this is purely UX polish.
+      var qwkInput  = document.getElementById('ea_qwk_conf_number');
+      var qwkStatus = document.getElementById('ea_qwk_conf_status');
+      if (qwkInput && qwkStatus) {
+        var qwkDebounce = null;
+        qwkInput.addEventListener('input', function() {
+          clearTimeout(qwkDebounce);
+          qwkDebounce = setTimeout(function() {
+            var v = parseInt(qwkInput.value, 10);
+            if (isNaN(v)) {
+              qwkStatus.style.display = 'none';
+              qwkStatus.textContent = '';
+              return;
+            }
+            if (v <= 100) {
+              qwkStatus.style.display = '';
+              qwkStatus.className = 'form-text text-danger';
+              qwkStatus.textContent = 'Reserved: 1-100 are Canectic system conferences';
+              return;
+            }
+            var excludeParam = currentAreaShortcode
+              ? '&exclude=' + encodeURIComponent(currentAreaShortcode)
+              : '';
+            fetch('/admin/msgAreas/check-conf-number?n=' + v + excludeParam)
+              .then(function(r) { return r.json(); })
+              .then(function(d) {
+                if (d && d.available) {
+                  qwkStatus.style.display = '';
+                  qwkStatus.className = 'form-text text-success';
+                  qwkStatus.textContent = '\u2713 Available';
+                } else if (d && d.conflictsWith) {
+                  qwkStatus.style.display = '';
+                  qwkStatus.className = 'form-text text-danger';
+                  qwkStatus.textContent = 'In use by: ' + d.conflictsWith;
+                }
+              })
+              .catch(function() {
+                qwkStatus.style.display = 'none';
+              });
+          }, 300);
         });
       }
 

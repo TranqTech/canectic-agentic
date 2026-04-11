@@ -201,6 +201,9 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'qwk_enabled',              defaultValue: 'true',           type: 'boolean', category: 'qwk',         description: 'Enable user QWK packet download and REP upload' },
 	{ key: 'qwk_bbsid',                defaultValue: '',               type: 'string',  category: 'qwk',         description: 'QWK BBS ID (max 8 chars, uppercase). Falls back to first 8 chars of boardname.' },
 	{ key: 'qwk_max_msgs_per_area',    defaultValue: '500',            type: 'number',  category: 'qwk',         description: 'Maximum messages per area in a user QWK packet' },
+	{ key: 'qwk_announcements_conf',   defaultValue: '1',              type: 'number',  category: 'qwk',         description: 'Conference number for system announcements in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
+	{ key: 'qwk_wall_conf',            defaultValue: '2',              type: 'number',  category: 'qwk',         description: 'Conference number for the wall in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
+	{ key: 'qwk_bulletins_conf',       defaultValue: '3',              type: 'number',  category: 'qwk',         description: 'Conference number for bulletins in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
 
 	// -----------------------------------------------------------------------
 	// Chat (sysop-to-web-user and future user-to-user)

@@ -19,6 +19,9 @@ import * as userMsgPointers from './userMsgPointers.js';
 import * as userAreaSubs from './userAreaSubs.js';
 import * as privateMessages from './privateMessages.js';
 import * as messages from './messages.js';
+import * as wall from './wall.js';
+import * as announcements from './announcements.js';
+import * as bulletins from './bulletins.js';
 import { checkAreaReadAccess, checkAreaPostAccess } from '../utils/areaAccess.js';
 import {
 	buildControlDat,
@@ -68,9 +71,11 @@ async function buildQwkForUser(userId) {
 		return returnObj;
 	}
 
-	// Load user record
+	// Load user record. last_qwk_download_at gates the system-conference
+	// content (announcements/wall/bulletins) so each download only carries
+	// new material since the previous successful fetch.
 	var user = await postgres.queryOne(
-		"SELECT id, username, security, permissionflags, restrictionflags FROM users WHERE id = $1",
+		"SELECT id, username, security, permissionflags, restrictionflags, last_qwk_download_at FROM users WHERE id = $1",
 		[userId]
 	);
 	if (!user) {
@@ -172,12 +177,137 @@ async function buildQwkForUser(userId) {
 		}
 	}
 
+	// ---------------------------------------------------------------------
+	// System conferences: announcements, wall, bulletins.
+	//
+	// These use conference numbers from the reserved range (1-100, see
+	// msgAreas.RESERVED_CONF_COUNT). Filtered by users.last_qwk_download_at
+	// so each download only includes content new since the last successful
+	// download. Emitted in CONTROL.DAT immediately after conference 0 so
+	// they appear near the top of mail-client conference lists.
+	// ---------------------------------------------------------------------
+	var systemConfs = [];
+	var lastDl = user.last_qwk_download_at ? new Date(user.last_qwk_download_at) : null;
+
+	// --- Announcements (read-only; REP imports to this conference are rejected) ---
+	var annConf = appConfig.getNumber('qwk_announcements_conf', 1);
+	if (annConf > 0) {
+		var activeAnnouncements = await announcements.getActiveAnnouncements(50);
+		var newAnnouncements = activeAnnouncements.filter(function(a) {
+			if (!lastDl) return true;
+			var created = a.created_at ? new Date(a.created_at) : null;
+			return created && created > lastDl;
+		});
+		if (newAnnouncements.length > 0) {
+			systemConfs.push({ number: annConf, name: 'Announce' });
+			for (var ann of newAnnouncements) {
+				var annBody = (ann.body_text || ann.title || '').trim();
+				messageItems.push({
+					msg: {
+						id: 'ann-' + ann.id,
+						from_user: ann.author_name || appConfig.get('sysopname', 'Sysop'),
+						to_user: user.username,
+						subject: (ann.title || 'Announcement').substring(0, 25),
+						body_text: annBody,
+						utf8: annBody,
+						system_time: ann.created_at || new Date(),
+						msg_id: '<announce-' + ann.id + '@canectic.local>',
+						reply_to: null
+					},
+					conferenceNum: annConf,
+					isPrivate: true
+				});
+			}
+		}
+	}
+
+	// --- Wall ---
+	// No time-based cap: include everything since last_qwk_download_at so
+	// infrequent QWK users still see the full activity since their last
+	// sync. Wall messages are short (max 160 chars) so volume is bounded.
+	var wallConf = appConfig.getNumber('qwk_wall_conf', 2);
+	if (wallConf > 0) {
+		var wallWhere = lastDl
+			? "SELECT * FROM wall_messages WHERE created_at > $1 ORDER BY created_at ASC"
+			: "SELECT * FROM wall_messages ORDER BY created_at ASC LIMIT 100";
+		var wallParams = lastDl ? [lastDl] : [];
+		var newWall = await postgres.query(wallWhere, wallParams) || [];
+		if (newWall.length > 0) {
+			systemConfs.push({ number: wallConf, name: 'Wall' });
+			for (var wm of newWall) {
+				var wmBody = (wm.message || '').trim();
+				// Subject line = first 25 chars of the body as a preview so
+				// the post is readable directly from the reader's message list
+				// without opening it. Full (up to 160-char) post is in the body.
+				var wmSubject = wmBody.substring(0, 25);
+				messageItems.push({
+					msg: {
+						id: 'wall-' + wm.id,
+						from_user: wm.username || 'unknown',
+						to_user: 'All',
+						subject: wmSubject,
+						body_text: wmBody,
+						utf8: wmBody,
+						system_time: wm.created_at || new Date(),
+						msg_id: '<wall-' + wm.id + '@canectic.local>',
+						reply_to: null
+					},
+					conferenceNum: wallConf,
+					isPrivate: false
+				});
+			}
+		}
+	}
+
+	// --- Bulletins (read-only; REP imports to this conference are rejected) ---
+	// Bulletins don't have active windows or created_at filtering -- they're
+	// "evergreen" info pages (rules, help, info). Include everything active
+	// on first download; subsequent downloads only re-include bulletins that
+	// have been updated since the last download.
+	var bulConf = appConfig.getNumber('qwk_bulletins_conf', 3);
+	if (bulConf > 0) {
+		var activeBulletins = await bulletins.getActiveBulletins();
+		var newBulletins = activeBulletins.filter(function(b) {
+			if (!lastDl) return true;
+			var changed = b.updated_at
+				? new Date(b.updated_at)
+				: (b.created_at ? new Date(b.created_at) : null);
+			return changed && changed > lastDl;
+		});
+		if (newBulletins.length > 0) {
+			systemConfs.push({ number: bulConf, name: 'Bulletin' });
+			for (var bul of newBulletins) {
+				var bulBody = (bul.body_text || '').trim() || '(empty)';
+				messageItems.push({
+					msg: {
+						id: 'bul-' + bul.id,
+						from_user: appConfig.get('sysopname', 'Sysop'),
+						to_user: user.username,
+						subject: (bul.title || 'Bulletin').substring(0, 25),
+						body_text: bulBody,
+						utf8: bulBody,
+						system_time: bul.updated_at || bul.created_at || new Date(),
+						msg_id: '<bulletin-' + bul.id + '@canectic.local>',
+						reply_to: null
+					},
+					conferenceNum: bulConf,
+					isPrivate: true
+				});
+			}
+		}
+	}
+
 	if (messageItems.length === 0) {
 		returnObj.status = true;
 		return returnObj;
 	}
 
-	// Build packet components
+	// Build packet components. System conferences (announcements, wall,
+	// bulletins) emit FIRST in CONTROL.DAT so mail clients that respect
+	// emission order show them immediately after conference 0. Readers
+	// that sort numerically also show them near the top because the
+	// reserved range is below the message-area range (1-100 vs 101+).
+	var allConferences = systemConfs.concat(conferences);
 	var controlDat = buildControlDat({
 		bbsName:       appConfig.get('boardname', 'Canectic BBS'),
 		bbsLocation:   appConfig.get('boardlocation', ''),
@@ -185,7 +315,7 @@ async function buildQwkForUser(userId) {
 		sysopName:     appConfig.get('sysopname', 'Sysop'),
 		qwkId:         bbsId,
 		recipientName: user.username,
-		conferences:   conferences,
+		conferences:   allConferences,
 		totalMessages: messageItems.length
 	});
 
@@ -227,10 +357,25 @@ async function buildQwkForUser(userId) {
 		);
 	}
 
+	// Advance the user's QWK download watermark so the next download
+	// only includes system-conference content (announcements, wall,
+	// bulletins) that has appeared since now.
+	try {
+		await postgres.write(
+			"UPDATE users SET last_qwk_download_at = NOW() WHERE id = $1",
+			[userId]
+		);
+	} catch (err) {
+		alogger.writeAlog(3,
+			'buildQwkForUser: last_qwk_download_at update failed for ' + user.username +
+			': ' + (err.message || err),
+			'yellow');
+	}
+
 	returnObj.status = true;
 	returnObj.qwkPath = qwkPath;
 	returnObj.totalMessages = messageItems.length;
-	returnObj.areaCount = conferences.length;
+	returnObj.areaCount = allConferences.length;
 
 	alogger.writeAlog(5,
 		'buildQwkForUser: built ' + path.basename(qwkPath) + ' for ' + user.username +
@@ -323,6 +468,19 @@ async function importRepForUser(userId, repFilePath) {
 		'cyan'
 	);
 
+	// Preload system conference numbers so the per-message dispatch
+	// can match against them without re-reading config on every loop.
+	var annConfNum = appConfig.getNumber('qwk_announcements_conf', 1);
+	var wallConfNum = appConfig.getNumber('qwk_wall_conf', 2);
+	var bulConfNum = appConfig.getNumber('qwk_bulletins_conf', 3);
+
+	// Rejection tracking for the post-import feedback PM. Each entry is
+	// a short string summarising why a message was rejected; these are
+	// assembled into a LOCAL PM delivered to the user's inbox after the
+	// import loop so they see the failures on their next QWK download.
+	var rejectionsForPm = [];
+	var wallAccepted = false;
+
 	// Process each message
 	for (var msg of messages) {
 		if (!msg.isLive) continue;
@@ -336,6 +494,51 @@ async function importRepForUser(userId, repFilePath) {
 			} else {
 				returnObj.totalErrors++;
 				returnObj.details.push('PM to ' + (msg.to || 'Unknown') + ': ' + pmResult.error);
+				rejectionsForPm.push('PM to ' + (msg.to || 'Unknown') + ': ' + pmResult.error);
+			}
+			continue;
+		}
+
+		// Announcements conference -- always read-only, reject
+		if (annConfNum > 0 && msg.conferenceNum === annConfNum) {
+			returnObj.totalErrors++;
+			var annReason = 'Announcements conference is read-only';
+			returnObj.details.push('Conference ' + annConfNum + ' (Announce): ' + annReason);
+			rejectionsForPm.push('Announcement reply (subject "' +
+				(msg.subject || '').substring(0, 40) + '"): ' + annReason);
+			continue;
+		}
+
+		// Bulletins conference -- always read-only, reject
+		if (bulConfNum > 0 && msg.conferenceNum === bulConfNum) {
+			returnObj.totalErrors++;
+			var bulReason = 'Bulletins conference is read-only';
+			returnObj.details.push('Conference ' + bulConfNum + ' (Bulletin): ' + bulReason);
+			rejectionsForPm.push('Bulletin reply (subject "' +
+				(msg.subject || '').substring(0, 40) + '"): ' + bulReason);
+			continue;
+		}
+
+		// Wall conference -- one post per REP, take first and reject rest
+		if (wallConfNum > 0 && msg.conferenceNum === wallConfNum) {
+			if (wallAccepted) {
+				returnObj.totalErrors++;
+				var wallDupReason = 'Wall posts are limited to one per REP upload';
+				returnObj.details.push('Conference ' + wallConfNum + ' (Wall): ' + wallDupReason);
+				rejectionsForPm.push('Wall post (subject "' +
+					(msg.subject || '').substring(0, 40) + '"): ' + wallDupReason);
+				continue;
+			}
+			var wallResult = await importRepWall(user, msg);
+			if (wallResult.status) {
+				wallAccepted = true;
+				returnObj.totalPosted++;
+				returnObj.details.push('Conference ' + wallConfNum + ' (Wall): posted "' +
+					(wallResult.posted || '').substring(0, 40) + '"');
+			} else {
+				returnObj.totalErrors++;
+				returnObj.details.push('Conference ' + wallConfNum + ' (Wall): ' + wallResult.error);
+				rejectionsForPm.push('Wall post: ' + wallResult.error);
 			}
 			continue;
 		}
@@ -344,14 +547,20 @@ async function importRepForUser(userId, repFilePath) {
 		var area = await msgAreas.getAreaByConfNumber(msg.conferenceNum);
 		if (!area) {
 			returnObj.totalErrors++;
-			returnObj.details.push('Conference ' + msg.conferenceNum + ': unknown area');
+			var unknownReason = 'unknown conference';
+			returnObj.details.push('Conference ' + msg.conferenceNum + ': ' + unknownReason);
+			rejectionsForPm.push('Message in conference ' + msg.conferenceNum +
+				' (subject "' + (msg.subject || '').substring(0, 40) + '"): ' + unknownReason);
 			continue;
 		}
 
 		// Check write access
 		if (!checkAreaPostAccess(user, area)) {
 			returnObj.totalErrors++;
-			returnObj.details.push(area.shortcode + ': access denied');
+			var denyReason = 'access denied';
+			returnObj.details.push(area.shortcode + ': ' + denyReason);
+			rejectionsForPm.push(area.shortcode + ' (subject "' +
+				(msg.subject || '').substring(0, 40) + '"): ' + denyReason);
 			continue;
 		}
 
@@ -362,11 +571,29 @@ async function importRepForUser(userId, repFilePath) {
 		} else {
 			returnObj.totalErrors++;
 			returnObj.details.push(area.shortcode + ': ' + postResult.error);
+			rejectionsForPm.push(area.shortcode + ' (subject "' +
+				(msg.subject || '').substring(0, 40) + '"): ' + postResult.error);
 		}
 	}
 
 	// Clean up
 	fs.rmSync(extractDir, { recursive: true, force: true });
+
+	// Post-import feedback PM: if any messages were rejected, deliver a
+	// LOCAL system PM back to the user summarising the failures so they
+	// see them on their next QWK download. Most mail clients don't
+	// surface per-message rejection details from the upload response,
+	// so this is the only realistic feedback loop for offline users.
+	if (rejectionsForPm.length > 0) {
+		try {
+			await deliverRepErrorPm(user, rejectionsForPm);
+		} catch (pmErr) {
+			alogger.writeAlog(3,
+				'importRepForUser: error PM delivery failed for ' + user.username +
+				': ' + (pmErr.message || pmErr),
+				'yellow');
+		}
+	}
 
 	returnObj.status = true;
 
@@ -377,6 +604,68 @@ async function importRepForUser(userId, repFilePath) {
 	);
 
 	return returnObj;
+}
+
+// Wall post handling: take the first line of the body, strip whitespace,
+// truncate to wall_max_length, silently. Honour wall.canPost() for the
+// access check (rejects Unverified etc). Empty bodies are rejected.
+async function importRepWall(user, msg) {
+	if (!wall.canPost(user)) {
+		return { status: false, error: 'wall posting denied for this user' };
+	}
+	var rawBody = (msg.utf8 || msg.bodyText || msg.body || '').toString();
+	// Strip carriage returns, split on first newline of any flavour
+	var firstLine = rawBody.replace(/\r/g, '').split('\n')[0] || '';
+	firstLine = firstLine.replace(/\s+$/, '').replace(/^\s+/, '');
+	if (!firstLine) {
+		return { status: false, error: 'empty wall post body' };
+	}
+	var maxLen = appConfig.getNumber('wall_max_length', 78);
+	if (firstLine.length > maxLen) {
+		firstLine = firstLine.substring(0, maxLen);
+	}
+	var addResult = await wall.addMessage(user.id, user.username, firstLine);
+	if (!addResult || addResult.status !== true) {
+		return { status: false, error: 'wall DB write failed' };
+	}
+	return { status: true, posted: firstLine };
+}
+
+// Compose a LOCAL/SYSTEM PM explaining the rejected messages from a REP
+// import so the user sees them on their next QWK download. Uses the same
+// privateMessages.deliverMessage path as every other system notification.
+async function deliverRepErrorPm(user, rejections) {
+	var bodyLines = [
+		'The following messages from your last REP upload were not processed:',
+		''
+	];
+	for (var r of rejections) {
+		bodyLines.push('  * ' + r);
+	}
+	bodyLines.push('');
+	bodyLines.push('Notes:');
+	bodyLines.push('  - The announcements and bulletins conferences are read-only.');
+	bodyLines.push('  - The wall accepts one post per REP upload; extras are rejected.');
+	bodyLines.push('  - Replies in other conferences must target a valid message area.');
+	var bodyText = bodyLines.join('\r');
+
+	var messageObj = {
+		user_id: user.id,
+		from_user: 'SYSTEM',
+		to_user: user.username,
+		from_address: 'SYSTEM',
+		to_address: user.username,
+		subject: 'REP import — rejected messages',
+		body_text: bodyText,
+		utf8: bodyText,
+		transport_type: 'LOCAL',
+		transport_data: {
+			system_notification: true,
+			source: 'qwk_rep_error_feedback'
+		},
+		system_time: new Date()
+	};
+	return await privateMessages.deliverMessage(messageObj);
 }
 
 // ---------------------------------------------------------------------------

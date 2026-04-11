@@ -394,6 +394,46 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 	});
 });
 
+// AJAX endpoint: check whether a QWK conference number is in use by
+// another message area. Returns { available, conflictsWith }. The
+// admin form's qwk_conf_number input calls this on debounced input
+// so sysops get immediate feedback before submitting. Authoritative
+// enforcement is still at the model layer (updateArea validation)
+// and DB layer (UNIQUE constraint) -- this is purely UX polish.
+router.get('/msgAreas/check-conf-number', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!checkAdminAccess(currentuser)) {
+		return res.status(403).json({ error: 'Access denied' });
+	}
+	var n = parseInt(req.query.n, 10);
+	if (isNaN(n) || n <= 0) {
+		return res.json({ available: false, reason: 'invalid_number' });
+	}
+	if (n <= msgAreas.RESERVED_CONF_COUNT) {
+		return res.json({
+			available: false,
+			reason: 'reserved_range',
+			conflictsWith: 'Canectic system conferences (1-' + msgAreas.RESERVED_CONF_COUNT + ')'
+		});
+	}
+	var excludeShortcode = (req.query.exclude || '').trim();
+	var sql = "SELECT shortcode, name FROM message_areas WHERE qwk_conf_number = $1";
+	var params = [n];
+	if (excludeShortcode) {
+		sql += " AND shortcode != $2";
+		params.push(excludeShortcode);
+	}
+	var existing = await postgres.queryOne(sql, params);
+	if (existing) {
+		return res.json({
+			available: false,
+			reason: 'in_use',
+			conflictsWith: existing.shortcode + (existing.name ? ' (' + existing.name + ')' : '')
+		});
+	}
+	return res.json({ available: true });
+});
+
 router.get('/msgAreas', async (req, res, next) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
