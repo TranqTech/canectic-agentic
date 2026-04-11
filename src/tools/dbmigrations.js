@@ -208,6 +208,103 @@ async function checkOrCreateTable(tablename, summary) {
 
 // --- Targeted migrations ---
 
+// Split the legacy "addr serial" msg_id / reply_to string format into
+// the new tuple storage (msg_id = 8-char serial, msg_orig_addr = origin
+// address). This runs after the column auto-add step so the new columns
+// exist, then scans each affected table and backfills the new columns
+// from the old strings.
+//
+// Rules:
+//   - If msg_id contains a space: split on first space. First token
+//     is the address (goes into msg_orig_addr), second token is the
+//     serial (stays in msg_id).
+//   - If msg_id is already 8 hex chars with no space: assume it's
+//     already in the new format, skip.
+//   - If msg_id is empty or NULL: skip.
+//   - Same rules for reply_to → reply_orig_addr.
+//
+// Idempotent: running on an already-migrated DB finds no rows with
+// spaces in msg_id and does nothing.
+async function migrateMsgidTupleSplit() {
+	// Global tables that have msg_id (and optionally reply_to)
+	var tables = [
+		{ name: 'pm_inbox',         hasReplyTo: false },
+		{ name: 'pm_outbox',        hasReplyTo: false },
+		{ name: 'pm_undeliverable', hasReplyTo: false },
+		{ name: 'netmail_in',       hasReplyTo: false },
+		{ name: 'netmail_out',      hasReplyTo: false },
+		{ name: 'echomail_bad',     hasReplyTo: true  }
+	];
+
+	// Per-area message tables are named mb_<shortcode>_msgs. Enumerate
+	// them by querying message_areas. They all have both msg_id and
+	// reply_to per the template.
+	try {
+		var areas = await pgdb.query(
+			"SELECT shortcode FROM message_areas WHERE active = true",
+			[]
+		);
+		for (var a of (areas || [])) {
+			if (a.shortcode) {
+				tables.push({
+					name: 'mb_' + a.shortcode.toLowerCase() + '_msgs',
+					hasReplyTo: true
+				});
+			}
+		}
+	} catch (_) {
+		// message_areas may not exist on fresh install — skip per-area scan
+	}
+
+	var totalMsgidSplit = 0;
+	var totalReplyToSplit = 0;
+	var tablesSkipped = 0;
+
+	for (var t of tables) {
+		try {
+			// Check that the table exists and has the new columns before touching
+			var hasTable = await checkTable(t.name);
+			if (!hasTable) { tablesSkipped++; continue; }
+			var hasOrigAddr = await checkColumn(t.name, 'msg_orig_addr');
+			if (!hasOrigAddr) { tablesSkipped++; continue; }
+
+			// Split msg_id: where msg_id contains a space AND msg_orig_addr is
+			// currently NULL (haven't migrated this row yet).
+			var msgIdResult = await pgdb.pgpool.query(
+				"UPDATE " + t.name + " SET " +
+				"  msg_orig_addr = SPLIT_PART(msg_id, ' ', 1)," +
+				"  msg_id = SPLIT_PART(msg_id, ' ', 2) " +
+				"WHERE msg_id LIKE '% %' AND msg_orig_addr IS NULL"
+			);
+			totalMsgidSplit += (msgIdResult.rowCount || 0);
+
+			// Split reply_to if the table has it
+			if (t.hasReplyTo) {
+				var hasReplyAddr = await checkColumn(t.name, 'reply_orig_addr');
+				if (hasReplyAddr) {
+					var replyResult = await pgdb.pgpool.query(
+						"UPDATE " + t.name + " SET " +
+						"  reply_orig_addr = SPLIT_PART(reply_to, ' ', 1)," +
+						"  reply_to = SPLIT_PART(reply_to, ' ', 2) " +
+						"WHERE reply_to LIKE '% %' AND reply_orig_addr IS NULL"
+					);
+					totalReplyToSplit += (replyResult.rowCount || 0);
+				}
+			}
+		} catch (err) {
+			console.log("  msgid tuple split: error on " + t.name + ": " + err.message);
+		}
+	}
+
+	if (totalMsgidSplit > 0 || totalReplyToSplit > 0) {
+		console.log("  msgid tuple split: " + totalMsgidSplit + " msg_id rows, " +
+			totalReplyToSplit + " reply_to rows across " +
+			(tables.length - tablesSkipped) + " tables");
+	} else {
+		console.log("  msgid tuple split: no legacy format rows found (already migrated or fresh install)");
+	}
+}
+
 async function migrateMenuLayout() {
 	try {
 		// Step 1: Migrate display_entries from BOOLEAN to VARCHAR(8)
@@ -326,6 +423,12 @@ async function setupTables() {
 	// Apply template-driven schema maintenance to all dynamic message/thread tables
 	console.log("\n--- Message Table Maintenance ---");
 	await maintainAllAreaTables();
+
+	// After both global tables and per-area tables are up to date, backfill
+	// the msg_orig_addr / reply_orig_addr tuple columns from any legacy
+	// "addr serial" msg_id strings still in the DB. Idempotent.
+	console.log("\n--- MSGID tuple split ---");
+	await migrateMsgidTupleSplit();
 }
 
 async function main() {
