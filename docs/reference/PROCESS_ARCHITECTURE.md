@@ -215,7 +215,8 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 |----------|----------|----------|---------|-------|
 | `regen-html` | Admin, Scheduler | Worker | `{ areas?, batchSize?, forceWidth? }` | Regenerate body_html |
 | `regen-pm-html` | Admin, Scheduler | Worker | `{ batchSize?, forceWidth? }` | Regenerate PM body_html |
-| `purge-pm-trash` | Scheduler (repeatable) | Worker | `{ days? }` | Hard-delete old soft-deleted PMs |
+| `purge-pm-trash` | Scheduler (daily 03:00) | Worker | `{ days? }` | Tag-only retention sweep — flips `purged=true` on PMs whose `deleted_at` is past `pm_trash_retention_days`. Actual cleanup happens via `pm-purged-cleanup`. |
+| `pm-purged-cleanup` | Scheduler (hourly :15), web/IMAP on-demand after purge action | Worker | `{ batchSize? }` | Background hard delete for tagged PMs. SELECTs `purged=true` rows, runs `pmAttachments.deleteAttachments()` (refCount-safe), DELETEs the rows. Drains in a `do/while(pendingMore)` loop so a backlog catches up in one run. |
 | `recalc-area-counts` | Admin | Worker | `{}` | Recalculate all area message counts |
 | `import-nodelist` | Admin, CLI | Worker | `{ filePath, networkId }` | Import FTN nodelist file into ftn_nodelist table |
 | `scan-inbound` | Scheduler (repeatable, default 300s) | Worker | `{}` | Backstop scan of FTN inbound dir for unprocessed .pkt/.tic files |
@@ -853,8 +854,22 @@ async function main() {
                 break;
 
             case 'purge-pm-trash':
+                // Daily retention sweep -- tag-only, no disk work
                 await privateMessages.purgeDeleted(job.data.days);
                 break;
+
+            case 'pm-purged-cleanup': {
+                // Hourly + on-demand background cleanup of tagged PM rows.
+                // Drains in batches until exhausted so a backlog catches up
+                // in one run instead of waiting for the next tick.
+                let cleanupResult;
+                do {
+                    cleanupResult = await privateMessages.executePurgedCleanup({
+                        batchSize: job.data.batchSize || 500,
+                    });
+                } while (cleanupResult && cleanupResult.pendingMore);
+                break;
+            }
 
             case 'recalc-area-counts':
                 const msgAreas = await import("../src/models/msgAreas.js");
@@ -986,6 +1001,16 @@ export async function registerSchedules() {
     }, {
         name: 'purge-pm-trash',
         data: { days: parseInt(process.env.pm_trash_retention_days) || 30 },
+    });
+
+    // PM purged-row cleanup runs hourly. Web/IMAP purge actions also
+    // enqueue this on-demand for sub-minute reclaim; the hourly schedule
+    // is the safety net so nothing sits tagged forever.
+    await maintenanceQueue.upsertJobScheduler('pm-purged-cleanup-hourly', {
+        pattern: '15 * * * *',  // :15 every hour
+    }, {
+        name: 'pm-purged-cleanup',
+        data: {},
     });
 
     await maintenanceQueue.upsertJobScheduler('scan-nodelists-daily', {

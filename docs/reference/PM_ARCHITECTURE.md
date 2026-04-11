@@ -96,8 +96,11 @@ Inbound messages delivered to a local user. One row per recipient per message.
 | `raw_text` | TEXT | Raw message text including kludge lines |
 | `read` | BOOLEAN | DEFAULT false |
 | `read_at` | TIMESTAMP | Set on first access |
-| `deleted` | BOOLEAN | DEFAULT false — soft delete |
+| `deleted` | BOOLEAN | DEFAULT false — soft delete (move to trash, recoverable) |
 | `deleted_at` | TIMESTAMP | Set on soft delete |
+| `purged` | BOOLEAN | DEFAULT false — tagged for background hard delete (invisible, not recoverable) |
+| `purged_at` | TIMESTAMP | Set when tagged for cleanup |
+| `has_attachments` | BOOLEAN | DEFAULT false — set after `pm_attachments` rows are linked |
 | `transport_type` | VARCHAR(16) | 'LOCAL', 'FTN', 'QWK', 'EMAIL', 'MESHTASTIC' |
 | `transport_data` | JSONB | Transport-specific metadata (see below) |
 | `system_time` | TIMESTAMP | Message creation time |
@@ -128,8 +131,11 @@ Outbound messages queued for delivery or already sent. One row per sent message.
 | `send_error` | TEXT | Last error message |
 | `undeliverable` | BOOLEAN | DEFAULT false — permanently failed |
 | `undeliverable_reason` | TEXT | Human-readable failure reason |
-| `deleted` | BOOLEAN | DEFAULT false — soft delete |
+| `deleted` | BOOLEAN | DEFAULT false — soft delete (move to trash, recoverable) |
 | `deleted_at` | TIMESTAMP | |
+| `purged` | BOOLEAN | DEFAULT false — tagged for background hard delete |
+| `purged_at` | TIMESTAMP | |
+| `has_attachments` | BOOLEAN | DEFAULT false — set after `pm_attachments` rows are linked |
 | `transport_type` | VARCHAR(16) | |
 | `transport_data` | JSONB | |
 | `system_time` | TIMESTAMP | |
@@ -411,16 +417,60 @@ For QWK inbound: unresolvable recipients go to `pm_undeliverable` for sysop revi
 
 ---
 
-## Soft Delete and Trash
+## Soft Delete, Trash, and Two-Stage Hard Delete
 
-Messages support soft delete with a retention period:
+Messages have a three-stage lifecycle so user actions stay non-blocking even when bulk-purging hundreds of rows with attachments:
 
-- `deleteMessage(userId, uuid)` / `deleteSentMessage(userId, uuid)` — sets `deleted=true`, `deleted_at=NOW()`
-- `restoreMessage(userId, uuid)` / `restoreSentMessage(userId, uuid)` — clears `deleted` and `deleted_at`
-- `getTrash(userId)` — UNIONs both tables with a `source` column ('inbox'/'sent')
-- `purgeDeleted(retentionDays)` — hard-deletes from both tables where `deleted_at < NOW() - N days`
+| State | Visible? | Recoverable? | Files on disk? |
+|---|---|---|---|
+| `deleted=false`, `purged=false` | Yes — inbox/sent listings | n/a (live) | Yes |
+| `deleted=true`, `purged=false` | Yes — trash listing only | Yes (Restore button) | Yes |
+| `purged=true` | No — filtered from every read path | No | Until next cleanup tick |
 
-Default retention: `pm_trash_retention_days` env var or 30 days. CLI: `node src/tools/maintenance.js --purge-pm-trash [--days N]`.
+### Stage 1 — soft delete (move to trash)
+
+- `deleteMessage(userId, uuid)` / `deleteSentMessage(userId, uuid)` — sets `deleted=true`, `deleted_at=NOW()`. Attachments untouched.
+- `restoreMessage(userId, uuid)` / `restoreSentMessage(userId, uuid)` — clears `deleted` / `deleted_at`. Defensive `AND purged IS NOT TRUE` clause refuses to resurrect a row that's already been tagged for cleanup.
+- `getTrash(userId)` — UNIONs both tables with a `source` column ('inbox'/'sent'), filtering `deleted=true AND purged IS NOT TRUE`.
+
+### Stage 2 — purge tagging (instant, non-blocking)
+
+- `purgeMessage(userId, uuid)` — single-row UPDATE that flips `purged=true, purged_at=NOW()` for a row that's owned by the user, in trash, and not already tagged. Returns `{ tagged, table }`. Cheap; doesn't touch disk or `pm_attachments`.
+
+Trigger sites:
+- Web: `POST /pm/trash/:uuid/delete` (the Delete button shown in trash mode in `/pm/inbox`)
+- IMAP: `_markDeleted` in the trash branch (covers STORE `\Deleted` + EXPUNGE, CLOSE, MOVE-out of Trash, UID EXPUNGE, and Thunderbird's "Empty Trash" which fires store-on-all-then-expunge)
+- Daily retention sweep: `purgeDeleted(retentionDays)` (rebadged) tags rows whose `deleted_at < NOW() - pm_trash_retention_days`. No longer touches disk or DELETEs rows itself — purely a tagger now.
+
+After tagging, the trigger site optionally enqueues a `pm-purged-cleanup` BullMQ job for sub-minute reclaim. The IMAP server coalesces multiple tags from a single command into one enqueue via `_purgedDuringSession` + `_fireOnDemandPurgeCleanup()`.
+
+### Stage 3 — background cleanup
+
+- `executePurgedCleanup({ batchSize: 500 })` — BullMQ worker entrypoint. SELECTs tagged rows from both tables, dynamic-imports `pmAttachments.js` (with a level-1 log on import failure rather than the silent catch the old `purgeDeleted` had), calls `pmAttachments.deleteAttachments(uuid)` per row, then DELETEs only the rows whose attachment cleanup succeeded. Per-row failures retry next cycle instead of becoming permanent orphans. Returns `{ inboxDeleted, outboxDeleted, pendingMore }` so the worker can drain the queue in a `do { ... } while (pendingMore)` loop.
+- `pmAttachments.deleteAttachments(uuid)` is refCount-safe: a LOCAL message creates `pm_attachments` rows for both sender (outbox) and recipient (inbox) pointing at the same `storage_path`. The cleanup function only unlinks the disk file when no other row still references it, so the file stays alive until both ends are tagged.
+
+Job wiring:
+
+| Job name | Trigger | Cadence | Purpose |
+|---|---|---|---|
+| `purge-pm-trash` | Scheduler `purge-pm-trash-daily` | Daily 03:00 | Tag-only retention sweep — flips `purged=true` on rows older than `pm_trash_retention_days` |
+| `pm-purged-cleanup` | Scheduler `pm-purged-cleanup-hourly` + on-demand from web/IMAP purge actions | Hourly :15 + on-demand | The actual disk unlink + row DELETE work for tagged rows |
+
+Default retention: `pm_trash_retention_days` config (30 days). CLI: `node src/tools/maintenance.js --purge-pm-trash [--days N]` (the CLI still enqueues the daily sweep which now does tag-only work).
+
+### Read-path filters
+
+Every query that returns user-visible PMs filters `purged IS NOT TRUE`. Sites covered:
+
+- `privateMessages.js`: `getInbox`, `getTrash` (both UNION halves), `getSentMessages`, `getMessage`, `getSentMessage`, `getUnreadCount`
+- `imapAdapter.js`: `getMailboxMessages` (INBOX/Sent/Trash branches), `getFullMessage`, `getMailboxStatus` (5 COUNT queries)
+- `qwkUser.js`: unread-PMs SELECT for QWK packet generation
+- `routes/pm.js`: `/pm/attachment/:id` ownership check (refuses to serve attachment files for purged messages)
+
+Two sites are intentionally not filtered:
+
+- `deliverMessage` dupe-check — a message that comes back after being purged should be re-delivered fresh
+- `getPendingByTransport` (tosser) — already gated by `deleted=false`, which excludes purge-tagged rows by design (purge only happens on already-deleted rows)
 
 ---
 
@@ -685,7 +735,7 @@ PM work items set `utf8: null` so that `buildRepPacket` / `buildMessagesDat` run
 
 ## Maintenance
 
-### Trash Purge
+### Trash Purge (retention sweep)
 
 ```bash
 # Default retention (env pm_trash_retention_days or 30 days)
@@ -695,7 +745,9 @@ node src/tools/maintenance.js --purge-pm-trash
 node src/tools/maintenance.js --purge-pm-trash --days 7
 ```
 
-Hard-deletes from both `pm_inbox` and `pm_outbox` where `deleted = true AND deleted_at < NOW() - N days`.
+Tags rows in both `pm_inbox` and `pm_outbox` where `deleted = true AND deleted_at < NOW() - N days` for background hard delete (sets `purged=true, purged_at=NOW()`). The actual disk + DB cleanup is done by the separate `pm-purged-cleanup` job — the retention sweep itself is now tag-only and cheap.
+
+Forcing cleanup immediately is rarely useful (the hourly schedule and on-demand enqueues from web/IMAP purges keep things current), but the cleanup job can be triggered from the admin Events page if needed.
 
 ### body_html Regeneration
 

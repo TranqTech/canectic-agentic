@@ -291,6 +291,17 @@ Users configure their mail client with:
 
 After authenticating, they see `INBOX`, `Sent`, and `Trash` folders populated from their PM data. Read state syncs both directions (IMAP `\Seen` flag <-> BBS read flag) via a Redis pub/sub event so marking read in the mail client shows read in the web UI and vice versa.
 
+### Trash and disk reclaim
+
+Deleting a message from inbox or sent moves it to Trash where it can be restored. Deleting it from Trash (or hitting "Empty Trash" in the mail client) hard-deletes it. The two stages are:
+
+1. **User action** (web Delete-from-Trash button or IMAP `STORE \Deleted` + `EXPUNGE` while Trash is selected): the row is tagged for cleanup. Instant; no disk work happens here. Tagged rows disappear from every view immediately, even though their attachment files are still on disk.
+2. **Background cleanup** runs hourly (`pm-purged-cleanup-hourly` BullMQ schedule, or on-demand within seconds of the user action). This is the job that actually unlinks the files and removes the rows. Failures here are retried on the next cycle, not surfaced to the user.
+
+This split keeps user actions non-blocking even when a mail client like Thunderbird fires "Empty Trash" against hundreds of messages — the IMAP `EXPUNGE` returns instantly and the file unlinks happen behind the scenes.
+
+The daily 03:00 retention sweep (`pm_trash_retention_days`, default 30) handles trash messages the user *didn't* explicitly purge: rows whose `deleted_at` is older than the retention window get tagged the same way and picked up by the next cleanup tick. Adjust the retention window via `pm_trash_retention_days` in `/admin/config` PM category.
+
 ### TLS for mail client access
 
 Canectic does not terminate TLS on the IMAP/SMTP ports itself. If you expose these to the internet, front them with an nginx/HAProxy TLS terminator or put them behind a VPN. For a personal BBS where you're the only user, plain IMAP on a trusted network is fine.
