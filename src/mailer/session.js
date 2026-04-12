@@ -287,6 +287,19 @@ class SessionController extends EventEmitter {
 				info.addresses.join(', '),
 				'mailer', 'redbright'
 			);
+			// Diagnostic detail -- level 5 so it only appears when the sysop
+			// has cranked verbosity up while hunting a peer auth problem.
+			// Logs lengths and the matched peer so whitespace/typos/wrong-peer
+			// cases surface without printing the actual password.
+			alogger.writeClog(5,
+				'Session ' + this.uuid + ': auth detail -- matched peer addr=' +
+				(cd.address || '?') + ' (conn id ' + (matched.id || '?') + '), ' +
+				'mode=' + (info.isCramMD5 && info.challenge ? 'cram-md5' : 'plain') + ', ' +
+				'received pw length=' + (info.password || '').length + ', ' +
+				'stored pw length=' + expectedPassword.length +
+				(expectedPassword ? '' : ' (no password configured on peer)'),
+				'mailer', 'yellow'
+			);
 			this.protocol.sendERR('Authentication failed — bad password');
 			this._endSession('auth failed');
 			return;
