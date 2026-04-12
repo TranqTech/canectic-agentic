@@ -244,29 +244,80 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 
 	// Second pass: newest ZIP, unzip and match remaining names
 	var newestZip = _findNewestZip(files);
-	if (newestZip) {
-		var zipPath = _resolveFilePath(newestZip, areaPath);
-		if (fs.existsSync(zipPath)) {
-			var tmpDir = _unzipToTemp(zipPath, label);
-			if (tmpDir) {
-				try {
-					var extracted = fs.readdirSync(tmpDir);
-					for (var fname of extracted) {
-						var entry = nameMap.get(fname.toLowerCase());
-						if (!entry) continue;
-						if (!_isNewer(newestZip, entry.echolist.last_imported_at)) continue;
+	if (!newestZip) {
+		alogger.writeAlog(3,
+			'[EcholistScan] ' + label + ': no archive found for unzip pass; ' +
+			'still looking for: ' + Array.from(nameMap.keys()).join(', '),
+			'yellow'
+		);
+		return imported;
+	}
 
-						var result = await _importFile(path.join(tmpDir, fname), entry.echolist.id, entry.echolist.name, entry.model, entry.type);
-						if (result !== null) {
-							nameMap.delete(fname.toLowerCase()); // handled
-							if (!result.unchanged) imported++;
-						}
-					}
-				} finally {
-					_cleanupTemp(tmpDir);
-				}
+	var zipPath = _resolveFilePath(newestZip, areaPath);
+	if (!fs.existsSync(zipPath)) {
+		alogger.writeAlog(2,
+			'[EcholistScan] ' + label + ': archive ' + newestZip.filename +
+			' is in file_entries but missing on disk at ' + zipPath,
+			'redbright'
+		);
+		return imported;
+	}
+
+	var tmpDir = _unzipToTemp(zipPath, label);
+	if (!tmpDir) {
+		// _unzipToTemp already logged the failure at L3
+		return imported;
+	}
+
+	try {
+		var extracted;
+		try {
+			extracted = fs.readdirSync(tmpDir);
+		} catch (e) {
+			alogger.writeAlog(3,
+				'[EcholistScan] ' + label + ': readdir failed on extract dir: ' + e.message,
+				'redbright'
+			);
+			return imported;
+		}
+
+		var matchedAny = false;
+		for (var fname of extracted) {
+			var entry = nameMap.get(fname.toLowerCase());
+			if (!entry) continue;
+			matchedAny = true;
+			if (!_isNewer(newestZip, entry.echolist.last_imported_at)) {
+				alogger.writeAlog(5,
+					'[EcholistScan] ' + label + ': matched ' + fname +
+					' but archive is not newer than last_imported_at -- skipping',
+					'cyan'
+				);
+				continue;
+			}
+
+			var result = await _importFile(path.join(tmpDir, fname), entry.echolist.id, entry.echolist.name, entry.model, entry.type);
+			if (result !== null) {
+				nameMap.delete(fname.toLowerCase()); // handled
+				if (!result.unchanged) imported++;
 			}
 		}
+
+		if (!matchedAny) {
+			// No extracted file matched any configured echolist/filebone
+			// name. This is the most common silent-failure mode -- log
+			// at L2 with the extracted contents and the name list so the
+			// sysop can see exactly what was inside vs what we're hunting
+			// for.
+			alogger.writeAlog(2,
+				'[EcholistScan] ' + label + ': unzipped ' + newestZip.filename +
+				' but NO extracted file matched a configured name. ' +
+				'Extracted: [' + extracted.join(', ') + ']. ' +
+				'Looking for: [' + Array.from(nameMap.keys()).join(', ') + ']',
+				'yellowbright'
+			);
+		}
+	} finally {
+		_cleanupTemp(tmpDir);
 	}
 
 	return imported;

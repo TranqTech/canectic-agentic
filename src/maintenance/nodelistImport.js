@@ -38,6 +38,27 @@ function extractNodelistNumber(filePath) {
 	return null;
 }
 
+// Extensions on this list are never considered as nodelist candidates.
+// Used by both the area-level scanner and the inside-ZIP extractor to
+// filter readmes, FILE_ID.DIZ, configuration files, etc. away from
+// nodelist candidate selection.
+var NODELIST_JUNK_EXT = new Set([
+	'.diz', '.nfo', '.txt', '.md', '.htm', '.html', '.bbs',
+	'.log', '.cfg', '.ini', '.bat', '.sh'
+]);
+
+function _isNodelistCandidate(filename) {
+	if (!filename) return false;
+	var lower = filename.toLowerCase();
+	if (lower === 'file_id.diz') return false;
+	var dot = lower.lastIndexOf('.');
+	if (dot >= 0) {
+		var ext = lower.substring(dot);
+		if (NODELIST_JUNK_EXT.has(ext)) return false;
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // ZIP handling — detect and extract nodelist from ZIP archives
 // ---------------------------------------------------------------------------
@@ -59,23 +80,28 @@ function extractNodelistFromZip(filePath) {
 	var zip = new AdmZip(filePath);
 	var entries = zip.getEntries();
 
-	// Look for NODELIST.* or any .??? file that looks like a nodelist
+	// Pass 1: prefer files literally named NODELIST.* — strongest signal
 	for (var entry of entries) {
+		if (entry.isDirectory) continue;
 		var name = (entry.entryName || '').toUpperCase();
 		var baseName = basename(name);
 		if (baseName.startsWith('NODELIST.')) {
 			var content = entry.getData();
 			if (content && content.length > 0) {
-				alogger.writeAlog(3, '[NodelistImport] Extracted from ZIP: ' + entry.entryName + ' (' + content.length + ' bytes)', 'cyan');
+				alogger.writeAlog(3, '[NodelistImport] Extracted NODELIST.* from ZIP: ' + entry.entryName + ' (' + content.length + ' bytes)', 'cyan');
 				return { text: content.toString('latin1'), filename: entry.entryName };
 			}
 		}
 	}
 
-	// Fallback: try the largest text-like file in the ZIP
+	// Pass 2: largest non-junk file in the ZIP. Nodelists are usually
+	// the biggest text file in an infopack distribution. The junk filter
+	// keeps us from picking up a README or FILE_ID.DIZ that happens to
+	// be larger than expected (or the only entry left after filtering).
 	var largest = null;
 	for (var e of entries) {
 		if (e.isDirectory) continue;
+		if (!_isNodelistCandidate(basename(e.entryName))) continue;
 		if (!largest || e.header.size > largest.header.size) {
 			largest = e;
 		}
@@ -83,7 +109,7 @@ function extractNodelistFromZip(filePath) {
 	if (largest) {
 		var content = largest.getData();
 		if (content && content.length > 0) {
-			alogger.writeAlog(3, '[NodelistImport] Extracted largest file from ZIP: ' + largest.entryName + ' (' + content.length + ' bytes)', 'yellow');
+			alogger.writeAlog(3, '[NodelistImport] Extracted largest non-junk file from ZIP: ' + largest.entryName + ' (' + content.length + ' bytes)', 'yellow');
 			return { text: content.toString('latin1'), filename: largest.entryName };
 		}
 	}
@@ -203,8 +229,31 @@ async function importFromFile(filePath, networkId, opts) {
 
 // ---------------------------------------------------------------------------
 // scanForNewNodelists — scheduled daily task
-// Checks each FTN network's configured nodelist file area for files
-// newer than the last import. Auto-imports the newest one found.
+//
+// Checks each FTN network's configured nodelist file area for a candidate
+// nodelist file uploaded since the last successful import. Imports the
+// candidate via importFromFile (which handles ZIP detection internally).
+//
+// Candidate selection (in priority order):
+//
+//   1. Files literally named NODELIST.* — preferred when present, since
+//      this is the most specific signal that a file IS a nodelist.
+//   2. Otherwise: the newest file in the area whose extension isn't on
+//      the junk list (.diz / .nfo / .txt / .md / .htm / .html). The
+//      nodelist area is dedicated to nodelists by configuration, so any
+//      compressed archive in it is a candidate. Different networks use
+//      different naming conventions (NODELIST.Z**, AGORANET.Z**,
+//      MICRONET.Z**, FSXNET.Z**, etc.) so we don't gate on filename.
+//
+// In both passes, the candidate is gated against the last successful
+// import time (MAX(last_seen) from ftn_nodelist via getImportInfo) so
+// already-imported files aren't re-imported. This is upload_date-based,
+// not day-number-based, which handles year wraparound and the .Z00
+// "current weekly" placeholder convention some networks use.
+//
+// importFromFile validates that the file actually parses as a nodelist
+// (errorRate gate, entry count check) so non-nodelist files in the area
+// surface clear errors rather than corrupting the database.
 // ---------------------------------------------------------------------------
 
 async function scanForNewNodelists() {
@@ -236,44 +285,70 @@ async function scanForNewNodelists() {
 
 		scanned++;
 
-		// Get the current import info for this network
 		var importInfo = await ftnNodelist.getImportInfo(net.id);
-		var currentNumber = importInfo ? (importInfo.nodelist_number || 0) : 0;
+		var lastImport = importInfo && importInfo.last_import ? new Date(importInfo.last_import) : null;
 
-		// Get files in the area, look for NODELIST.nnn pattern
 		var files = await fileEntriesModel.getEntriesForArea(area.id, { limit: 1000, orderBy: 'upload_date DESC' });
 		if (!files || files.length === 0) continue;
 
-		var bestFile = null;
-		var bestNumber = currentNumber;
-
+		// Pass 1: prefer files literally named NODELIST.*. Pick the
+		// newest such file by upload_date. The day-number suffix
+		// (.Z79, .Z00, .A45, etc.) is meaningless for ordering on
+		// many networks (some senders use .Z00 as a placeholder),
+		// so we order by upload_date instead.
+		var bestNamed = null;
 		for (var f of files) {
 			var fname = (f.filename || '').toUpperCase();
-			// Match NODELIST.nnn, NODELIST.Znn, NODELIST.Ann, or zipped versions
 			if (!fname.startsWith('NODELIST.')) continue;
-
-			var num = extractNodelistNumber(f.filename);
-			if (num !== null && num > bestNumber) {
-				bestNumber = num;
-				bestFile = f;
+			if (lastImport && new Date(f.upload_date || 0) <= lastImport) continue;
+			if (!bestNamed || new Date(f.upload_date || 0) > new Date(bestNamed.upload_date || 0)) {
+				bestNamed = f;
 			}
 		}
 
+		// Pass 2: any non-junk file in the area, newest by upload_date.
+		// Used when no NODELIST.* file is present (e.g. AgoraNet ships
+		// agoranet.z00, Micronet ships MICRONET.z00).
+		var bestAny = null;
+		if (!bestNamed) {
+			for (var f of files) {
+				if (!_isNodelistCandidate(f.filename)) continue;
+				if (lastImport && new Date(f.upload_date || 0) <= lastImport) continue;
+				if (!bestAny || new Date(f.upload_date || 0) > new Date(bestAny.upload_date || 0)) {
+					bestAny = f;
+				}
+			}
+		}
+
+		var bestFile = bestNamed || bestAny;
 		if (!bestFile) continue;
 
-		// Found a newer nodelist — resolve its path and import
 		var group = area.group_shortcode ? await fileGroupsModel.getGroupByShortcode(area.group_shortcode) : null;
 		var areaPath = fileAreasModel.resolveAreaPath(group, area);
 		var filePath = pathMod.join(areaPath, bestFile.disk_path || bestFile.filename);
 
-		alogger.writeAlog(2, '[NodelistScan] Found newer nodelist for ' + net.name + ': ' + bestFile.filename + ' (day ' + bestNumber + ', current: ' + currentNumber + ')', 'cyan');
+		alogger.writeAlog(2,
+			'[NodelistScan] Candidate for ' + net.name + ': ' + bestFile.filename +
+			' (uploaded ' + new Date(bestFile.upload_date).toISOString() +
+			', last import ' + (lastImport ? lastImport.toISOString() : 'never') +
+			', tier ' + (bestNamed ? '1: NODELIST.*' : '2: any non-junk') + ')',
+			'cyan'
+		);
 
 		var result = await importFromFile(filePath, net.id, { originalName: bestFile.filename });
 		if (result.status) {
 			imported++;
-			alogger.writeAlog(1, '[NodelistScan] Auto-imported nodelist for ' + net.name + ': ' + result.totalEntries + ' entries', 'greenbright');
+			alogger.writeAlog(1,
+				'[NodelistScan] Auto-imported nodelist for ' + net.name +
+				': ' + result.totalEntries + ' entries from ' + bestFile.filename,
+				'greenbright'
+			);
 		} else {
-			alogger.writeAlog(2, '[NodelistScan] Auto-import failed for ' + net.name + ': ' + (result.error || 'unknown'), 'redbright');
+			alogger.writeAlog(2,
+				'[NodelistScan] Auto-import failed for ' + net.name +
+				' (' + bestFile.filename + '): ' + (result.error || 'unknown'),
+				'redbright'
+			);
 		}
 	}
 

@@ -25,6 +25,10 @@
 // would or would not have imported anything.
 
 import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { execSync } from 'child_process';
 import * as pgdb from '../middleware/db/postgres.js';
 import appConfig from '../config/appConfig.js';
 import * as msgNetworks from '../models/msgNetworks.js';
@@ -34,6 +38,7 @@ import * as fileEntries from '../models/fileEntries.js';
 import * as fileAreas from '../models/fileAreas.js';
 import * as fileGroups from '../models/fileGroups.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
+import { parseAreasBbs } from '../utils/areasBbsParser.js';
 
 dotenv.config();
 
@@ -78,19 +83,131 @@ async function dumpAreaFiles(label, areaShortcode) {
 		console.log('    [!] getAreaByShortcode returned null -- area does not exist');
 		return null;
 	}
+	var group = area.group_shortcode ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
+	var areaPath = fileAreas.resolveAreaPath(group, area);
 	console.log('    area_id=' + area.id + ' group_shortcode=' + area.group_shortcode);
+	console.log('    resolved areaPath=' + areaPath);
 
 	var files = await fileEntries.getEntriesForArea(area.id, { limit: 1000, orderBy: 'upload_date DESC' });
 	console.log('    getEntriesForArea returned ' + (files ? files.length : 0) + ' active row(s)');
 	if (files && files.length > 0) {
 		var show = files.slice(0, 15);
 		for (var f of show) {
+			var diskPath = path.join(areaPath, f.disk_path || f.filename);
+			var existsMark = fs.existsSync(diskPath) ? 'OK' : 'MISSING';
 			console.log('      ' + pad(f.filename, 40) + '  upload_date=' + fmtTs(f.upload_date) +
-				'  active=' + f.active + '  source_type=' + f.source_type);
+				'  source=' + f.source_type + '  disk=' + existsMark);
 		}
 		if (files.length > 15) console.log('      ... (' + (files.length - 15) + ' more)');
 	}
-	return { area: area, files: files || [] };
+	return { area: area, files: files || [], areaPath: areaPath };
+}
+
+// Actually unzip the newest archive in `files` to a temp dir, list the
+// extracted contents, and report which (if any) match the configured
+// echolist/filebone names. Mirrors what _scanNetworkArea does in the
+// real scanner so we can see exactly what it would have seen.
+async function actuallyUnzipAndMatch(areaInfo, lists, label) {
+	var nameMap = new Map();
+	for (var l of lists || []) {
+		if (!l.active) continue;
+		nameMap.set((l.name || '').toLowerCase(), l);
+	}
+	if (nameMap.size === 0) return;
+
+	var zips = areaInfo.files.filter(function(f) {
+		var ext = (f.filename || '').toLowerCase().split('.').pop();
+		return ext === 'zip' || ext === 'lzh' || ext === 'rar' || ext === '7z';
+	});
+	if (zips.length === 0) return;
+
+	var newest = zips[0];
+	for (var z of zips) {
+		if (new Date(z.upload_date || 0) > new Date(newest.upload_date || 0)) newest = z;
+	}
+
+	var zipPath = path.join(areaInfo.areaPath, newest.disk_path || newest.filename);
+	console.log('');
+	console.log('    --- ACTUAL UNZIP TRACE for ' + label + ' ---');
+	console.log('    archive: ' + newest.filename);
+	console.log('    disk path: ' + zipPath);
+	if (!fs.existsSync(zipPath)) {
+		console.log('    [!] DISK FILE MISSING -- this is the bug, file not present at resolved path');
+		return;
+	}
+	console.log('    disk file exists, size=' + fs.statSync(zipPath).size);
+
+	var tmpDir = path.join(os.tmpdir(), 'canectic-diag-unzip-' + Date.now());
+	try {
+		fs.mkdirSync(tmpDir, { recursive: true });
+	} catch (e) {
+		console.log('    [!] mkdirSync failed: ' + e.message);
+		return;
+	}
+
+	try {
+		var ext = path.extname(zipPath).toLowerCase();
+		try {
+			if (ext === '.zip') {
+				execSync('unzip -o -j ' + JSON.stringify(zipPath) + ' -d ' + JSON.stringify(tmpDir),
+					{ stdio: 'pipe', timeout: 30000 });
+			} else if (ext === '.7z') {
+				execSync('7z x -y -o' + JSON.stringify(tmpDir) + ' ' + JSON.stringify(zipPath),
+					{ stdio: 'pipe', timeout: 30000 });
+			} else {
+				console.log('    [!] unsupported archive extension: ' + ext);
+				return;
+			}
+		} catch (e) {
+			console.log('    [!] UNZIP FAILED: ' + e.message);
+			if (e.stderr) console.log('        stderr: ' + e.stderr.toString().trim());
+			return;
+		}
+
+		var extracted;
+		try {
+			extracted = fs.readdirSync(tmpDir);
+		} catch (e) {
+			console.log('    [!] readdirSync failed: ' + e.message);
+			return;
+		}
+
+		console.log('    extracted ' + extracted.length + ' file(s):');
+		var matched = [];
+		for (var fname of extracted) {
+			var lower = fname.toLowerCase();
+			var entry = nameMap.get(lower);
+			var verdict;
+			if (entry) {
+				var newer = isNewer(newest, entry.last_imported_at);
+				verdict = '*** MATCH "' + entry.name + '" (newer=' + newer + ')';
+				matched.push({ fname: fname, entry: entry, newer: newer });
+			} else {
+				verdict = '(no match)';
+			}
+			console.log('      ' + pad(fname, 40) + '  ' + verdict);
+		}
+		console.log('    nameMap was looking for: ' + Array.from(nameMap.keys()).join(', '));
+
+		// Try parsing matched files to verify the import would work
+		for (var m of matched) {
+			var fpath = path.join(tmpDir, m.fname);
+			try {
+				var content = fs.readFileSync(fpath, 'utf8');
+				var parsed = parseAreasBbs(content);
+				console.log('      parse "' + m.fname + '": ' + (parsed ? parsed.length : 0) + ' areas');
+			} catch (e) {
+				console.log('      parse "' + m.fname + '" FAILED: ' + e.message);
+			}
+		}
+
+		if (matched.length === 0) {
+			console.log('    [!] NONE of the extracted files match any configured echolist/filebone name');
+			console.log('        configured names: ' + Array.from(nameMap.keys()).join(', '));
+		}
+	} finally {
+		try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+	}
 }
 
 async function diagnoseNetwork(net) {
@@ -179,12 +296,18 @@ async function diagnoseNetwork(net) {
 	if (config.echolist_area) {
 		console.log('');
 		var elArea = await dumpAreaFiles('echolist_area (tier 2)', config.echolist_area);
-		if (elArea) await traceMatch(elArea, echolists, 'echolist');
+		if (elArea) {
+			await traceMatch(elArea, echolists, 'echolist');
+			await actuallyUnzipAndMatch(elArea, echolists, 'echolist');
+		}
 	}
 	if (config.filebone_area) {
 		console.log('');
 		var fbArea = await dumpAreaFiles('filebone_area (tier 3)', config.filebone_area);
-		if (fbArea) await traceMatch(fbArea, filebones, 'filebone');
+		if (fbArea) {
+			await traceMatch(fbArea, filebones, 'filebone');
+			await actuallyUnzipAndMatch(fbArea, filebones, 'filebone');
+		}
 	}
 	if (config.infopack_area) {
 		console.log('');
@@ -192,6 +315,9 @@ async function diagnoseNetwork(net) {
 		if (ipArea) {
 			await traceMatch(ipArea, echolists, 'echolist (via infopack)');
 			await traceMatch(ipArea, filebones, 'filebone (via infopack)');
+			// Combined nameMap (matches what the real scanner does in tier 4)
+			var combined = (echolists || []).concat(filebones || []);
+			await actuallyUnzipAndMatch(ipArea, combined, 'echolists+filebones combined');
 		}
 	}
 }
