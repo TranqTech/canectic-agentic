@@ -518,9 +518,19 @@ export {
 	removeArea,
 	buildImportDiff,
 	executeImport,
+	touchLastImported,
 	getAreasByEcholist,
 	getEcholistStats,
 	getAreasAcrossNetwork,
 	reconcileLocalAreaIds,
 	syncLocalAreaId
 };
+
+// Bump last_imported_at without doing any other writes. Used by the
+// auto-scanner when it processes a filebone file successfully but the
+// diff comes back empty (no new/changed/removed areas). Without this
+// touch, the next scan run would re-parse and re-diff the same file
+// indefinitely because _isNewer keeps returning true.
+async function touchLastImported(echolistId) {
+	await postgres.updateById(echolistId, { last_imported_at: new Date() }, 'file_echolists');
+}

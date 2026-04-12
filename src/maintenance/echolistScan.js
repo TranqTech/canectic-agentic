@@ -111,7 +111,24 @@ async function _importFile(filePath, echolistId, echolistName, model, type) {
 
 		var diff = await model.buildImportDiff(echolistId, parsed);
 		if (diff.newAreas.length === 0 && diff.changedAreas.length === 0 && diff.removedAreas.length === 0) {
-			alogger.writeAlog(5, '[EcholistScan] No changes in ' + echolistName + ' (' + type + ')', 'cyan');
+			// Bump last_imported_at even though there are no diff changes
+			// so the next scan run skips this file via _isNewer instead of
+			// re-parsing and re-diffing it indefinitely. Without this
+			// touch, every scheduled scan would re-walk the same archives
+			// and reach the same "no changes" verdict, wasting work and
+			// producing no observable signal that the scanner ran.
+			try {
+				if (typeof model.touchLastImported === 'function') {
+					await model.touchLastImported(echolistId);
+				}
+			} catch (touchErr) {
+				alogger.writeAlog(3,
+					'[EcholistScan] Failed to touch last_imported_at for ' + echolistName +
+					': ' + (touchErr.message || touchErr),
+					'yellow'
+				);
+			}
+			alogger.writeAlog(5, '[EcholistScan] No changes in ' + echolistName + ' (' + type + '); last_imported_at touched', 'cyan');
 			return { unchanged: true };
 		}
 
@@ -210,20 +227,19 @@ async function _scanListOverride(echolist, model, type, fileEntriesModel, fileAr
 // ---------------------------------------------------------------------------
 
 async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel, fileAreasModel, fileGroupsModel) {
-	if (!areaShortcode || nameMap.size === 0) return 0;
+	var counts = { updated: 0, verified: 0 };
+	if (!areaShortcode || nameMap.size === 0) return counts;
 
 	var area = await fileAreasModel.getAreaByShortcode(areaShortcode);
 	if (!area) {
 		alogger.writeAlog(5, '[EcholistScan] ' + label + ' area not found: ' + areaShortcode, 'yellow');
-		return 0;
+		return counts;
 	}
 
 	var group = area.group_shortcode ? await fileGroupsModel.getGroupByShortcode(area.group_shortcode) : null;
 	var areaPath = fileAreasModel.resolveAreaPath(group, area);
 	var files = await fileEntriesModel.getEntriesForArea(area.id, { limit: 500, orderBy: 'upload_date DESC' });
-	if (!files || files.length === 0) return 0;
-
-	var imported = 0;
+	if (!files || files.length === 0) return counts;
 
 	// First pass: direct filename matches
 	for (var [lowerName, entry] of nameMap) {
@@ -234,13 +250,14 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 				var result = await _importFile(filePath, entry.echolist.id, entry.echolist.name, entry.model, entry.type);
 				if (result !== null) {
 					nameMap.delete(lowerName); // handled, remove from map
-					if (!result.unchanged) imported++;
+					if (result.unchanged) counts.verified++;
+					else counts.updated++;
 				}
 			}
 		}
 	}
 
-	if (nameMap.size === 0) return imported;
+	if (nameMap.size === 0) return counts;
 
 	// Second pass: newest ZIP, unzip and match remaining names
 	var newestZip = _findNewestZip(files);
@@ -260,13 +277,13 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 			' is in file_entries but missing on disk at ' + zipPath,
 			'redbright'
 		);
-		return imported;
+		return counts;
 	}
 
 	var tmpDir = _unzipToTemp(zipPath, label);
 	if (!tmpDir) {
 		// _unzipToTemp already logged the failure at L3
-		return imported;
+		return counts;
 	}
 
 	try {
@@ -278,7 +295,7 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 				'[EcholistScan] ' + label + ': readdir failed on extract dir: ' + e.message,
 				'redbright'
 			);
-			return imported;
+			return counts;
 		}
 
 		var matchedAny = false;
@@ -298,7 +315,8 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 			var result = await _importFile(path.join(tmpDir, fname), entry.echolist.id, entry.echolist.name, entry.model, entry.type);
 			if (result !== null) {
 				nameMap.delete(fname.toLowerCase()); // handled
-				if (!result.unchanged) imported++;
+				if (result.unchanged) counts.verified++;
+				else counts.updated++;
 			}
 		}
 
@@ -320,7 +338,7 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 		_cleanupTemp(tmpDir);
 	}
 
-	return imported;
+	return counts;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,8 +356,14 @@ async function scanForUpdates() {
 	var networks = await msgNetworks.getActiveNetworks();
 	if (!networks || networks.length === 0) return;
 
-	var totalImported = 0;
+	var totals = { updated: 0, verified: 0 };
 	var networksScanned = 0;
+
+	function rollup(c) {
+		if (!c) return;
+		totals.updated += (c.updated || 0);
+		totals.verified += (c.verified || 0);
+	}
 
 	for (var net of networks) {
 		if (net.network_type !== 'FTN') continue;
@@ -359,14 +383,14 @@ async function scanForUpdates() {
 		for (var el of (echolists || [])) {
 			if (!el.scan_area || !el.active) continue;
 			var handled = await _scanListOverride(el, networkEcholist, 'echolist', fileEntriesModel, fileAreasModel, fileGroupsModel);
-			if (handled) { totalImported++; handledIds.add('e:' + el.id); }
-			else handledIds.add('e:' + el.id); // had override, even if no update found
+			if (handled) totals.updated++;
+			handledIds.add('e:' + el.id); // had override, regardless of result
 		}
 		for (var fb of (filebones || [])) {
 			if (!fb.scan_area || !fb.active) continue;
 			var handled = await _scanListOverride(fb, fileEcholist, 'filebone', fileEntriesModel, fileAreasModel, fileGroupsModel);
-			if (handled) { totalImported++; handledIds.add('f:' + fb.id); }
-			else handledIds.add('f:' + fb.id);
+			if (handled) totals.updated++;
+			handledIds.add('f:' + fb.id);
 		}
 
 		// Phase 2: Network echolist_area (for echolists without scan_area override)
@@ -376,8 +400,7 @@ async function scanForUpdates() {
 				if (handledIds.has('e:' + el.id) || !el.active) continue;
 				echoNameMap.set(el.name.toLowerCase(), { echolist: el, model: networkEcholist, type: 'echolist' });
 			}
-			var echoImported = await _scanNetworkArea(config.echolist_area, echoNameMap, 'echolist_area for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel);
-			totalImported += echoImported;
+			rollup(await _scanNetworkArea(config.echolist_area, echoNameMap, 'echolist_area for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel));
 			// Mark handled items so infopack doesn't re-scan them
 			for (var el of (echolists || [])) {
 				if (!echoNameMap.has(el.name.toLowerCase())) handledIds.add('e:' + el.id);
@@ -391,8 +414,7 @@ async function scanForUpdates() {
 				if (handledIds.has('f:' + fb.id) || !fb.active) continue;
 				fbNameMap.set(fb.name.toLowerCase(), { echolist: fb, model: fileEcholist, type: 'filebone' });
 			}
-			var fbImported = await _scanNetworkArea(config.filebone_area, fbNameMap, 'filebone_area for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel);
-			totalImported += fbImported;
+			rollup(await _scanNetworkArea(config.filebone_area, fbNameMap, 'filebone_area for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel));
 			for (var fb of (filebones || [])) {
 				if (!fbNameMap.has(fb.name.toLowerCase())) handledIds.add('f:' + fb.id);
 			}
@@ -409,15 +431,14 @@ async function scanForUpdates() {
 				if (handledIds.has('f:' + fb.id) || !fb.active) continue;
 				infoNameMap.set(fb.name.toLowerCase(), { echolist: fb, model: fileEcholist, type: 'filebone' });
 			}
-			var infoImported = await _scanNetworkArea(config.infopack_area, infoNameMap, 'infopack for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel);
-			totalImported += infoImported;
+			rollup(await _scanNetworkArea(config.infopack_area, infoNameMap, 'infopack for ' + net.name, fileEntriesModel, fileAreasModel, fileGroupsModel));
 		}
 	}
 
 	alogger.writeAlog(3,
 		'[EcholistScan] Scan complete: ' + networksScanned + ' network(s) checked, ' +
-		totalImported + ' list(s) updated',
-		totalImported > 0 ? 'greenbright' : 'cyan'
+		totals.updated + ' updated, ' + totals.verified + ' verified (no changes)',
+		(totals.updated > 0 || totals.verified > 0) ? 'greenbright' : 'cyan'
 	);
 }
 
