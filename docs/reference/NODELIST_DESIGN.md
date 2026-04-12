@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS ftn_nodelist (
     imported_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ,
     nodelist_date   VARCHAR(20),       -- e.g. 'Friday March 13, 2026' or Julian day
-    nodelist_number INTEGER,           -- Julian day number from filename
+    nodelist_number INTEGER,           -- day number from parsed nodelist (informational; not used for scan gating)
 
     -- Historical tracking
     first_seen      TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when this node first appeared in any import
@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_ftn_nodelist_keyword
 
 **`is_cm` / `is_ip` / `is_ibn`** are denormalized booleans for fast filtering of dialable nodes.
 
-**`nodelist_number`** stores the Julian day from the filename (`NODELIST.074` -> 74) to identify which edition is imported.
+**`nodelist_number`** stores the day number from the parsed nodelist content to identify which edition is imported. This is informational (admin display) -- the scanner gates on `upload_date` from `file_entries`, not the day number, because many networks use `.Z00` placeholder suffixes and different filename conventions.
 
 ### Schema file
 
@@ -186,8 +186,8 @@ If no `INA:` flag is present but the phone field looks like a hostname (contains
 2. **Admin UI upload** — `POST /admin/nodelists/import` (multipart form, file + network selector)
    Saves uploaded file to a temp directory, enqueues the same maintenance job.
 
-3. **Admin UI directory scan** — `POST /admin/nodelists/scan`
-   Scans a configured directory (e.g., `ftn/nodelist/`) for the newest `NODELIST.*` per network, enqueues import jobs for any that are newer than the currently imported `nodelist_number`.
+3. **Automated daily scan** — `scanForNewNodelists()` in `src/maintenance/nodelistImport.js`
+   For each FTN network with a `nodelist_area_shortcode` in its config, scans the configured file area for the newest file uploaded since the last successful import (`MAX(last_seen)` from `ftn_nodelist`). Pass 1 prefers files literally named `NODELIST.*`; pass 2 falls back to the newest non-junk file in the area (filtering `.diz`, `.nfo`, `.txt`, etc.). This handles networks with non-standard naming conventions (AgoraNet ships `agoranet.z00`, FsxNet ships `FSXNET.Z00`, etc.) and the `.Z00` "current weekly" placeholder used by many hubs. `importFromFile()` validates the candidate is actually a parseable nodelist before committing. Can also be triggered manually via `POST /admin/nodelists/scan`.
 
 All imports are processed by the Worker via the existing `maintenance` BullMQ queue.
 
