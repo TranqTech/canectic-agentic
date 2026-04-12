@@ -89,20 +89,13 @@ block content
 									.row
 										.col-6
 											.mb-3
-												label.form-label First Name
-												input.form-control(
-													type='text'
-													name='firstname'
-													value=_user.firstname || ''
-												)
+												label.form-label.text-muted First Name
+												.form-control-plaintext= _user.firstname || '-'
 										.col-6
 											.mb-3
-												label.form-label Last Name
-												input.form-control(
-													type='text'
-													name='lastname'
-													value=_user.lastname || ''
-												)
+												label.form-label.text-muted Last Name
+												.form-control-plaintext= _user.lastname || '-'
+									.form-text.text-muted.mb-3 To change your name, please contact the sysop.
 									.mb-3
 										label.form-label Location
 										input.form-control(

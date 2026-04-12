@@ -453,6 +453,13 @@ router.post('/register', urlencodedParser, async (req, res) => {
 			userAccounts.updateUserCalls(newUser);
 			callers.logCall(newUser, 'Web', regIp, newUser.location || '');
 
+			// Set web activity timestamp so webActivity middleware doesn't double-log
+			try {
+				var redis = await import('../middleware/db/redis.js');
+				var rc = await redis.getClient();
+				await rc.set('web_activity:' + sessionid, String(Date.now()), { EX: appConfig.getNumber('session_ttl', 720) * 60 });
+			} catch (_) {}
+
 			alogger.writeAlog(5, 'Auto-login after registration: ' + username, 'greenbright');
 			if (isAjax) {
 				return res.json({ status: true, redirect: '/users/profile' });
@@ -621,20 +628,7 @@ router.post('/profile', urlencodedParser, async (req, res) => {
 		}
 	}
 
-	// Name fields
-	var firstname = (req.body.firstname || '').trim();
-	var lastname = (req.body.lastname || '').trim();
-	if (firstname && firstname !== (userRecord.firstname || '')) {
-		updateFields.firstname = firstname;
-	}
-	if (lastname && lastname !== (userRecord.lastname || '')) {
-		updateFields.lastname = lastname;
-	}
-	if (updateFields.firstname || updateFields.lastname) {
-		var fn = updateFields.firstname || userRecord.firstname || '';
-		var ln = updateFields.lastname || userRecord.lastname || '';
-		updateFields.fullname = (fn + ' ' + ln).trim();
-	}
+	// Name fields — read-only on profile; changes require sysop action
 
 	// Location
 	var location = (req.body.location || '').trim();

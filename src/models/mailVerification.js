@@ -246,6 +246,24 @@ async function verifyCode(userId, submittedCode) {
 		alogger.writeAlog(4, 'Security level for ' + user.username + ' raised to ' + verifiedSecurity + ' on verification', 'cyan');
 	}
 
+	// Update all active sessions so the new security level and flags take
+	// effect immediately (without requiring the user to log out and back in)
+	try {
+		var sessionStore = await import('../middleware/db/sessionstore.js');
+		var updatedUser = await postgres.queryOne('SELECT * FROM users WHERE id = $1', [userId]);
+		if (updatedUser) {
+			var perms = Array.isArray(updatedUser.permissionflags) ? updatedUser.permissionflags : [];
+			await sessionStore.sessionUpdateUser(user.username, {
+				security: String(updatedUser.security || 0),
+				restrictionflags: JSON.stringify(Array.isArray(updatedUser.restrictionflags) ? updatedUser.restrictionflags : []),
+				permissionflags: JSON.stringify(perms),
+				isSysop: String(perms.includes('Sysop')),
+			});
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'verifyCode: session update after verification failed: ' + (e.message || e), 'yellow');
+	}
+
 	alogger.writeAlog(3, 'Mail address verified for user ' + user.username + ' (' + user.mailaddress + ')', 'greenbright');
 
 	// Fire user_verified template event (non-blocking)
