@@ -632,6 +632,15 @@ async function executePurgedCleanup(opts) {
     [batchSize]
   );
 
+  var inRowCount = (inboxRows || []).length;
+  var outRowCount = (outboxRows || []).length;
+  if (inRowCount > 0 || outRowCount > 0) {
+    alogger.writeAlog(3,
+      "PM cleanup: found " + inRowCount + " inbox + " + outRowCount +
+      " outbox tagged rows to process",
+      "cyan");
+  }
+
   // The dynamic import is wrapped intentionally -- if pmAttachments.js
   // ever fails to import, we want a loud level-1 log instead of silently
   // skipping cleanup and orphaning files on disk forever.

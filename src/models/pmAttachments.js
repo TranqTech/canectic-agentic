@@ -249,6 +249,15 @@ async function copyAttachmentsToInbox(outboxUuid, inboxUuid) {
 async function deleteAttachments(msgUuid) {
 	var atts = await getAttachments(msgUuid);
 
+	if (atts.length === 0) {
+		alogger.writeAlog(4,
+			'PM deleteAttachments(' + msgUuid + '): no attachment rows found',
+			'yellow');
+	}
+
+	var unlinked = 0;
+	var kept = 0;
+
 	for (var att of atts) {
 		// Check if another message references the same file
 		var refs = await postgres.queryOne(
@@ -259,7 +268,15 @@ async function deleteAttachments(msgUuid) {
 
 		if (refCount === 0) {
 			// Safe to delete from disk
-			try { fs.unlinkSync(att.storage_path); } catch (_) {}
+			try {
+				fs.unlinkSync(att.storage_path);
+				unlinked++;
+			} catch (err) {
+				alogger.writeAlog(2,
+					'PM deleteAttachments: unlink failed for ' + att.storage_path +
+					': ' + err.message,
+					'yellow');
+			}
 
 			// Try to remove empty parent directories
 			try {
@@ -267,13 +284,23 @@ async function deleteAttachments(msgUuid) {
 				var contents = fs.readdirSync(dir);
 				if (contents.length === 0) fs.rmdirSync(dir);
 			} catch (_) {}
+		} else {
+			kept++;
 		}
 	}
 
-	await postgres.write(
+	var deleteErr = await postgres.write(
 		'DELETE FROM pm_attachments WHERE message_uuid = $1',
 		[msgUuid]
 	);
+
+	if (atts.length > 0) {
+		alogger.writeAlog(3,
+			'PM deleteAttachments(' + msgUuid + '): ' + atts.length + ' row(s), ' +
+			unlinked + ' file(s) unlinked, ' + kept + ' file(s) kept (still referenced)' +
+			(deleteErr ? ' -- row DELETE error: ' + deleteErr.message : ''),
+			'cyan');
+	}
 }
 
 // ---------------------------------------------------------------------------
