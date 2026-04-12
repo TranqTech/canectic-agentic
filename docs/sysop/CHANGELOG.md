@@ -72,8 +72,12 @@
 - Fix: Cron schedule patterns had minute/hour fields swapped (hour 30 invalid)
 - Fix: File group/area ~ path expansion (Node.js fs treats ~ literally, not as home directory)
 - Fix: Echolist/filebone duplicate creation (same name on same network now re-uses existing entry)
+- Fix: Thread view was advancing the area-level scan pointer, marking all older threads as read (#30). `advanceThreadPointer` now only advances the per-thread pointer. Floor consolidation after each thread view detects when the area pointer can safely advance (all messages below a boundary are covered by thread pointers) and prunes redundant `user_thread_pointers` rows.
+- Fix: New user registration logged two calls -- the registration handler logged a call but didn't set the `web_activity` Redis key, so the webActivity middleware logged a second call on the redirect
+- Fix: Mail verification didn't update the active session, so the new security level and cleared restriction flags only took effect after re-login. Session is now synced immediately after verification (security, permission flags, restriction flags)
 
 ### Features
+- User profile: first/last name fields are now read-only (sysop change only). Users are directed to contact the sysop to change their name.
 - Group and area ordering: drag-to-reorder on message groups, message areas, file groups, file areas with Save Order button (#6)
 - Mocha upgraded to 11.3.0 (fixes diff DoS vulnerability) (#5)
 - sbbsecho.ini import: two-step migration tool to import linked FTN nodes from Synchronet, with network/address resolution, drag-and-drop peer grouping, and per-connection network selection
