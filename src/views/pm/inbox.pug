@@ -424,6 +424,25 @@ block content
                   .text-end
                     input.btn.btn-lg.btn-success(type='submit' value='Send' tabindex='8')
 
+    //- Confirm Permanent Delete Modal (trash hard-delete)
+    if currentuser
+      #confirmDeleteModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-dialog-centered
+          .modal-content.bg-dark.text-white
+            .modal-header.bg-danger
+              h5.modal-title
+                i.bi.bi-exclamation-triangle.me-2
+                | Permanently Delete?
+              button.btn-close.btn-close-white(type='button' data-bs-dismiss='modal' aria-label='Close')
+            .modal-body
+              p This message will be permanently deleted and cannot be recovered.
+              p.mb-0.small.text-muted Any attachments will also be removed.
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-danger#confirmDeleteBtn(type='button')
+                i.bi.bi-trash.me-1
+                | Delete Permanently
+
   script.
     document.addEventListener('DOMContentLoaded', function() {
       // --- DataTables init ---
@@ -667,24 +686,55 @@ block content
       });
 
       // --- Delete ---
-      readerDeleteBtn.addEventListener('click', function() {
-        if (!currentMessageUuid) return;
-        // From trash: hard-delete (tag for background cleanup, then the
-        // worker reclaims disk shortly after). From inbox/sent: soft-
-        // delete (move to trash, recoverable for the retention window).
-        var action;
-        if (currentIsTrash) {
-          action = '/pm/trash/' + currentMessageUuid + '/delete';
-        } else if (currentMessageType === 'sent') {
-          action = '/pm/sent/' + currentMessageUuid + '/delete';
-        } else {
-          action = '/pm/inbox/' + currentMessageUuid + '/delete';
-        }
+      // Helper that actually submits the delete form once confirmed (or for
+      // non-destructive soft-deletes that don't need confirmation).
+      function submitDelete(action) {
         var form = document.createElement('form');
         form.method = 'POST';
         form.action = action;
         document.body.appendChild(form);
         form.submit();
+      }
+
+      var confirmDeleteModalEl = document.getElementById('confirmDeleteModal');
+      var confirmDeleteModal = confirmDeleteModalEl ? new bootstrap.Modal(confirmDeleteModalEl) : null;
+      var confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+      var pendingDeleteAction = null;
+
+      if (confirmDeleteBtn) {
+        confirmDeleteBtn.addEventListener('click', function() {
+          if (pendingDeleteAction) {
+            submitDelete(pendingDeleteAction);
+          }
+        });
+      }
+
+      readerDeleteBtn.addEventListener('click', function() {
+        if (!currentMessageUuid) return;
+        // From trash: hard-delete (tag for background cleanup, then the
+        // worker reclaims disk shortly after) -- confirmation required
+        // since this is irreversible. From inbox/sent: soft-delete (move
+        // to trash, recoverable for the retention window) -- no confirm.
+        if (currentIsTrash) {
+          pendingDeleteAction = '/pm/trash/' + currentMessageUuid + '/delete';
+          if (confirmDeleteModal) {
+            confirmDeleteModal.show();
+          } else {
+            // Fallback if the modal isn't available for some reason
+            if (confirm('Permanently delete this message? This cannot be undone.')) {
+              submitDelete(pendingDeleteAction);
+            }
+          }
+          return;
+        }
+
+        var action;
+        if (currentMessageType === 'sent') {
+          action = '/pm/sent/' + currentMessageUuid + '/delete';
+        } else {
+          action = '/pm/inbox/' + currentMessageUuid + '/delete';
+        }
+        submitDelete(action);
       });
 
       // --- Restore from trash ---
