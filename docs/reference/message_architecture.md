@@ -237,7 +237,7 @@ A message is **unread** if `msg.id > effective_threshold` for its thread.
 
 ### Pointer Advancement
 
-**Viewing a thread**: `advanceThreadPointer(userId, area, threadId, maxMsgId)` — one UPSERT for the thread pointer + one UPDATE for the area pointer, both with `GREATEST()` so they only move forward. Two DB operations total.
+**Viewing a thread**: `advanceThreadPointer(userId, area, threadId, maxMsgId)` — one UPSERT for the thread pointer with `GREATEST()` so it only moves forward. The area pointer is NOT advanced — only the viewed thread is marked read, leaving other threads' unread state intact.
 
 **Viewing flat mode**: `advancePointer(userId, area, maxMsgId)` — one UPDATE with `GREATEST()`. One DB operation.
 

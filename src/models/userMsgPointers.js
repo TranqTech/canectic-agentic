@@ -14,7 +14,7 @@
 // A message is unread if its id exceeds the effective threshold for its thread.
 //
 // Normal reading patterns:
-//   - View a thread → advance that thread's pointer + area pointer if higher
+//   - View a thread → advance that thread's pointer only
 //   - View flat → advance area pointer only
 //   - Mark area read → advance area pointer to max (all threads appear read)
 //
@@ -201,24 +201,17 @@ async function getThreadPointer(userId, areaShortcode, threadId) {
 	return row ? row.scan_pointer : 0;
 }
 
-// Advance a thread pointer AND the area pointer.
-// Called when a user views a thread. One upsert for the thread pointer,
-// one update for the area pointer. Both only move forward.
+// Advance a thread pointer only.
+// Called when a user views a thread. The area pointer is NOT touched —
+// it acts as a floor for all threads and should only advance via
+// advancePointer() (flat view) or markAreaRead().
 async function advanceThreadPointer(userId, areaShortcode, threadId, newPointer) {
-	// Thread pointer — upsert, only advance
 	await postgres.write(
 		`INSERT INTO user_thread_pointers (user_id, area_shortcode, thread_id, scan_pointer, last_read_at)
 		 VALUES ($1, $2, $3, $4, NOW())
 		 ON CONFLICT (user_id, area_shortcode, thread_id)
 		 DO UPDATE SET scan_pointer = GREATEST(user_thread_pointers.scan_pointer, $4), last_read_at = NOW()`,
 		[userId, areaShortcode, threadId, newPointer]
-	);
-
-	// Area pointer — also advance if this thread's highest ID is beyond it
-	await postgres.write(
-		`UPDATE user_msg_pointers SET scan_pointer = GREATEST(scan_pointer, $1), last_read_at = NOW()
-		 WHERE user_id = $2 AND area_shortcode = $3`,
-		[newPointer, userId, areaShortcode]
 	);
 }
 
