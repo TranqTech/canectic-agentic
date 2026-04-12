@@ -14,9 +14,17 @@
 // A message is unread if its id exceeds the effective threshold for its thread.
 //
 // Normal reading patterns:
-//   - View a thread → advance that thread's pointer only
+//   - View a thread → advance thread pointer, then consolidate area floor
 //   - View flat → advance area pointer only
 //   - Mark area read → advance area pointer to max (all threads appear read)
+//
+// Floor consolidation (after each thread view):
+//   Finds the lowest unread message across all threads. If that boundary
+//   is above the current area pointer, the floor advances and thread
+//   pointer rows now below it are pruned. When all threads are read,
+//   the floor jumps to max and all thread pointer rows are deleted.
+//   Cost: one SELECT + conditionally one UPDATE and one DELETE.
+//   Can be moved to a periodic maintenance job if per-view cost is too high.
 //
 // The user_msg_reads exception table is retained for future mark-unread
 // functionality but is not used in normal read tracking.
@@ -201,10 +209,11 @@ async function getThreadPointer(userId, areaShortcode, threadId) {
 	return row ? row.scan_pointer : 0;
 }
 
-// Advance a thread pointer only.
-// Called when a user views a thread. The area pointer is NOT touched —
-// it acts as a floor for all threads and should only advance via
-// advancePointer() (flat view) or markAreaRead().
+// Advance a thread pointer only, then consolidate the area floor.
+// Called when a user views a thread. The thread pointer upsert marks
+// this thread read up to newPointer. Consolidation then checks whether
+// the area floor can advance (i.e. all messages below some point are
+// now covered by thread pointers), and if so prunes redundant rows.
 async function advanceThreadPointer(userId, areaShortcode, threadId, newPointer) {
 	await postgres.write(
 		`INSERT INTO user_thread_pointers (user_id, area_shortcode, thread_id, scan_pointer, last_read_at)
@@ -213,6 +222,57 @@ async function advanceThreadPointer(userId, areaShortcode, threadId, newPointer)
 		 DO UPDATE SET scan_pointer = GREATEST(user_thread_pointers.scan_pointer, $4), last_read_at = NOW()`,
 		[userId, areaShortcode, threadId, newPointer]
 	);
+
+	await consolidateFloor(userId, areaShortcode);
+}
+
+// Consolidate area floor after thread pointer changes.
+// Finds the lowest unread message across all threads (using the same
+// thread-aware join as hasNewMessages/getUnreadCount). If that boundary
+// is above the current area pointer, advance the floor and prune thread
+// pointer rows that are now below it.
+//
+// Cost: one SELECT (same join pattern already used by unread queries),
+// plus conditionally one UPDATE and one DELETE. Can be replaced with a
+// periodic maintenance job if per-view cost proves too high.
+async function consolidateFloor(userId, areaShortcode) {
+	var pointer = await getPointer(userId, areaShortcode);
+	var areaPtr = pointer.scan_pointer;
+	var shorty = areaShortcode.toLowerCase();
+	var msgtable = "mb_" + shorty + "_msgs";
+
+	// Find the lowest unread message ID across all threads
+	var row = await postgres.queryOne(
+		`SELECT MIN(m.id) AS first_unread
+		 FROM ` + msgtable + ` m
+		 LEFT JOIN user_thread_pointers utp
+		   ON utp.user_id = $1 AND utp.area_shortcode = $2 AND utp.thread_id = m.thread_id
+		 WHERE m.id > GREATEST($3, COALESCE(utp.scan_pointer, 0))`,
+		[userId, areaShortcode, areaPtr]
+	);
+
+	var firstUnread = row && row.first_unread ? parseInt(row.first_unread) : null;
+
+	if (firstUnread === null) {
+		// Everything is read — jump floor to area max, prune all thread pointers
+		await markAreaRead(userId, areaShortcode);
+		await postgres.write(
+			"DELETE FROM user_thread_pointers WHERE user_id = $1 AND area_shortcode = $2",
+			[userId, areaShortcode]
+		);
+	} else if (firstUnread - 1 > areaPtr) {
+		// Partial advance — floor moves up, prune thread pointers now below it
+		var newFloor = firstUnread - 1;
+		await postgres.write(
+			"UPDATE user_msg_pointers SET scan_pointer = $1, last_read_at = NOW() WHERE user_id = $2 AND area_shortcode = $3",
+			[newFloor, userId, areaShortcode]
+		);
+		await postgres.write(
+			"DELETE FROM user_thread_pointers WHERE user_id = $1 AND area_shortcode = $2 AND scan_pointer <= $3",
+			[userId, areaShortcode, newFloor]
+		);
+	}
+	// else: floor can't advance (first unread is right above current pointer)
 }
 
 // ---------------------------------------------------------------------------

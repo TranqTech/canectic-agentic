@@ -708,7 +708,7 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 		allMessages.reverse();
 	}
 
-	// Advance thread pointer (and area pointer) to highest message in batch
+	// Advance thread pointer to highest message in batch (+ floor consolidation)
 	if (userId && allMessages.length > 0) {
 		var maxId = allMessages[allMessages.length - 1].id;
 		await userMsgPointers.advanceThreadPointer(userId, msgArea.shortcode, thread.id, maxId);
