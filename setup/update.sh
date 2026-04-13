@@ -6,9 +6,19 @@ set -euo pipefail
 # =============================================================================
 #
 # Updates an existing Canectic BBS installation from a source directory
-# (git clone or extracted release archive). Overwrites code files, prompts
-# before overwriting modified data/config files, installs dependencies,
-# and runs database migrations.
+# (git clone or extracted release archive). Three categories of target
+# directory are handled differently:
+#
+#   CODE_DIRS     - always overwritten (rm -rf then cp -a). bin/, src/,
+#                   db/, docs/, tests/, examples/, setup/. Do not place
+#                   sysop content in these dirs; it will be deleted.
+#   OVERLAY_DIRS  - shipped files overwrite target, but target-only files
+#                   are preserved. Used for public/ which mixes shipped
+#                   assets (TinyMCE, Bootstrap, default icons) with
+#                   sysop-added subdirectories (custom door icons,
+#                   collection images, branding).
+#   DATA_DIRS     - merge with per-file prompt on conflict. config/,
+#                   ftn/, files/, xtrn/, etc.
 #
 # Usage:
 #   ./setup/update.sh                  # interactive -- prompts for target
@@ -36,15 +46,27 @@ warn()  { echo -e "${YELLOW}!${NC} $1"; }
 err()   { echo -e "${RED}x${NC} $1"; }
 
 # --- Code directories (always overwritten) ---
+# Target-only files in these dirs are deleted -- do not put custom
+# sysop content here.
 CODE_DIRS=(
     bin
     db
     docs
     examples
-    public
     setup
     src
     tests
+)
+
+# --- Overlay directories (shipped files overwrite target, but target-only
+# files are preserved) ---
+# Used for directories that mix shipped assets with sysop customisations.
+# public/ holds default images, CSS, JS, plus any custom subdirs a sysop
+# has added (door icons, collection images, custom branding). Full
+# overwrite would wipe the custom content, so we walk source files and
+# copy them in place while leaving anything else alone.
+OVERLAY_DIRS=(
+    public
 )
 
 # --- Code files in project root (always overwritten) ---
@@ -139,6 +161,36 @@ preflight() {
 }
 
 # =============================================================================
+# Overlay copy -- shipped files overwrite target silently, target-only
+# files are preserved. No prompts, no delete. Used for public/.
+# =============================================================================
+
+overlay_dir() {
+    local dir="$1"
+
+    if [[ ! -d "$TARGET_DIR/$dir" ]]; then
+        info "Adding new directory: $dir/"
+        cp -a "$SOURCE_DIR/$dir" "$TARGET_DIR/"
+        return
+    fi
+
+    local src_dir="$SOURCE_DIR/$dir"
+    local copied=0
+
+    while IFS= read -r -d '' src_file; do
+        local rel_path="${src_file#$src_dir/}"
+        local tgt_file="$TARGET_DIR/$dir/$rel_path"
+        local tgt_parent
+        tgt_parent="$(dirname "$tgt_file")"
+        mkdir -p "$tgt_parent"
+        cp -a "$src_file" "$tgt_file"
+        copied=$((copied + 1))
+    done < <(find "$src_dir" -type f -print0 2>/dev/null)
+
+    info "$dir/: $copied shipped file(s) synced (sysop additions preserved)"
+}
+
+# =============================================================================
 # Data directory merge -- prompts for modified files
 # =============================================================================
 
@@ -219,6 +271,13 @@ do_update() {
             info "Updating $dir/"
             rm -rf "$TARGET_DIR/$dir"
             cp -a "$SOURCE_DIR/$dir" "$TARGET_DIR/"
+        fi
+    done
+
+    # Overlay directories (shipped files overwrite, sysop files preserved)
+    for dir in "${OVERLAY_DIRS[@]}"; do
+        if [[ -d "$SOURCE_DIR/$dir" ]]; then
+            overlay_dir "$dir"
         fi
     done
 
