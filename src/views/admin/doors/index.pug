@@ -36,6 +36,16 @@ block content
                   br
 
                 if doorlist && doorlist.length > 0
+                  .row.mb-3.align-items-center
+                    .col-md-6
+                      .input-group.input-group-sm
+                        span.input-group-text
+                          i.bi.bi-search
+                        input#doorSearch.form-control(type='search' placeholder='Filter by name, slug, command, or launch type...' autocomplete='off')
+                        button.btn.btn-outline-secondary#doorSearchClear(type='button' title='Clear')
+                          i.bi.bi-x-lg
+                    .col-md-6.text-end.text-muted.small
+                      span#doorSearchCount= doorlist.length + (doorlist.length === 1 ? ' door' : ' doors')
                   table#doorTable.table.table-hover
                     thead
                       tr
@@ -45,7 +55,7 @@ block content
                         th(scope='col') Command / Script
                         th(scope='col') Max Nodes
                         th(scope='col') Status
-                        th(scope='col' style='width:140px') Actions
+                        th(scope='col' style='width:180px') Actions
                     tbody
                       for door of doorlist
                         tr(
@@ -94,6 +104,9 @@ block content
                           td
                             button.btn.btn-xs.btn-outline-warning.me-1.edit-door-btn(type='button' title='Edit')
                               i.bi.bi-pencil
+                            form.d-inline.me-1(method='POST' action='/admin/doors/' + door.id + '/duplicate')
+                              button.btn.btn-xs.btn-outline-info(type='submit' title='Duplicate (creates inactive copy)' onclick='return confirm("Duplicate this door? An inactive copy will be created.")')
+                                i.bi.bi-files
                             button.btn.btn-xs.btn-outline-danger.delete-door-btn(type='button' title='Delete')
                               i.bi.bi-trash
                 else
@@ -783,4 +796,51 @@ block content
           infoModal.show();
         });
       });
+
+      // ---- Live search filter ----
+      var searchInput = document.getElementById('doorSearch');
+      var searchClear = document.getElementById('doorSearchClear');
+      var searchCount = document.getElementById('doorSearchCount');
+      var doorRows = document.querySelectorAll('#doorTable tbody tr');
+      var totalRows = doorRows.length;
+
+      function applyDoorFilter() {
+        if (!searchInput) return;
+        var q = (searchInput.value || '').trim().toLowerCase();
+        var visible = 0;
+        doorRows.forEach(function(row) {
+          if (!q) {
+            row.style.display = '';
+            visible++;
+            return;
+          }
+          var d = row.dataset;
+          var hay = (d.name + ' ' + d.slug + ' ' + d.cmd + ' ' + d.door_script + ' ' + d.launch_type).toLowerCase();
+          if (hay.indexOf(q) !== -1) {
+            row.style.display = '';
+            visible++;
+          } else {
+            row.style.display = 'none';
+          }
+        });
+        if (searchCount) {
+          if (q) {
+            searchCount.textContent = visible + ' of ' + totalRows + ' shown';
+          } else {
+            searchCount.textContent = totalRows + (totalRows === 1 ? ' door' : ' doors');
+          }
+        }
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener('input', applyDoorFilter);
+      }
+      if (searchClear) {
+        searchClear.addEventListener('click', function() {
+          if (!searchInput) return;
+          searchInput.value = '';
+          applyDoorFilter();
+          searchInput.focus();
+        });
+      }
     });

@@ -226,6 +226,95 @@ async function deleteDoor(id) {
 	return { status: true };
 }
 
+// Duplicate an existing door. Generates a unique slug (`<slug>-copy`,
+// `<slug>-copy-2`, ...) and a "(Copy)" / "(Copy 2)" name. The copy is
+// created inactive so the sysop can review settings before exposing it.
+// All other fields (cmd, dirs, args, launch type, dropfile config, real
+// flags, sort order, descriptions, icon) carry over verbatim.
+async function duplicateDoor(id) {
+	var result = { status: false, errormessages: [], doorId: null };
+
+	var src = await getDoorById(id);
+	if (!src) {
+		result.errormessages.push('Source door not found');
+		return result;
+	}
+
+	var newSlug = await _findUniqueSlug(src.slug);
+	var newName = await _suggestCopyName(src.name);
+
+	var obj = {
+		slug:                newSlug,
+		name:                newName,
+		cmd:                 src.cmd || null,
+		door_script:         src.door_script || null,
+		door_dir:            src.door_dir || null,
+		door_args:           src.door_args ? JSON.stringify(src.door_args) : null,
+		launch_type:         src.launch_type,
+		dropfile_type:       src.dropfile_type || null,
+		dropfile_dir:        src.dropfile_dir || null,
+		db_subdir:           src.db_subdir || null,
+		usereal_local:       !!src.usereal_local,
+		usereal_doorsession: !!src.usereal_doorsession,
+		pause_on_exit:       src.pause_on_exit !== false,
+		fixed_size:          !!src.fixed_size,
+		max_nodes:           parseInt(src.max_nodes) || 0,
+		active:              false, // Copy starts inactive — sysop reviews then enables
+		sort_order:          parseInt(src.sort_order) || 0,
+		description:         src.description || null,
+		long_desc:           src.long_desc || null,
+		long_desc_html:      src.long_desc_html || null,
+		icon_url:            src.icon_url || null,
+		created_at:          new Date(),
+		updated_at:          new Date()
+	};
+
+	var ins = await postgres.insertObject(obj, 'doors');
+	if (!ins.status) {
+		result.errormessages.push('Database insert failed');
+		return result;
+	}
+
+	result.status = true;
+	result.doorId = ins.insertId;
+	result.slug = newSlug;
+	result.name = newName;
+	return result;
+}
+
+// Pick the next free slug derived from base, scanning -copy, -copy-2, ...
+async function _findUniqueSlug(baseSlug) {
+	// Strip an existing -copy / -copy-N suffix so duplicates of a copy
+	// don't accumulate -copy-copy-copy.
+	var stripped = baseSlug.replace(/-copy(-\d+)?$/, '');
+	var candidate = stripped + '-copy';
+	var n = 1;
+	while (await postgres.queryOne('SELECT id FROM doors WHERE slug = $1', [candidate])) {
+		n += 1;
+		candidate = stripped + '-copy-' + n;
+		if (n > 999) break; // sanity
+	}
+	return candidate;
+}
+
+// Suggest a "(Copy)" / "(Copy 2)" suffix on the name, scanning upward
+// until unused. Returns the original name + suffix; doesn't validate
+// uniqueness in the DB (the slug check covers that).
+async function _suggestCopyName(baseName) {
+	var stripped = baseName.replace(/\s*\(Copy(?:\s+\d+)?\)\s*$/, '');
+	var candidate = stripped + ' (Copy)';
+	var existing = await postgres.queryOne('SELECT id FROM doors WHERE name = $1', [candidate]);
+	if (!existing) return candidate;
+	var n = 2;
+	while (true) {
+		candidate = stripped + ' (Copy ' + n + ')';
+		var hit = await postgres.queryOne('SELECT id FROM doors WHERE name = $1', [candidate]);
+		if (!hit) return candidate;
+		n += 1;
+		if (n > 999) return stripped + ' (Copy ' + Date.now() + ')';
+	}
+}
+
 // --- Helpers ---
 
 // Normalize a DB row to the camelCase config shape expected by DoorRunner/SyncJSDoorRunner
@@ -290,6 +379,7 @@ export {
 	createDoor,
 	updateDoor,
 	deleteDoor,
+	duplicateDoor,
 	getValidLaunchTypes,
 	getLaunchTypeLabels,
 	getValidDropfileTypes,

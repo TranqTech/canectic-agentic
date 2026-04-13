@@ -2494,6 +2494,28 @@ router.post('/doors/:id/delete', urlencodedParser, requireAdmin, async (req, res
 	res.redirect('/admin/doors');
 });
 
+// Duplicate an existing door. Creates a new inactive copy with a fresh
+// slug + name and copies all collection memberships from the source so
+// the duplicate appears in the same browse categories.
+router.post('/doors/:id/duplicate', urlencodedParser, requireAdmin, async (req, res) => {
+	var srcId = parseInt(req.params.id);
+	var dup = await doors.duplicateDoor(srcId);
+	if (dup.status && dup.doorId) {
+		try {
+			var srcCollections = await doorCollections.getCollectionsForDoor(srcId);
+			for (var coll of (srcCollections || [])) {
+				await doorCollections.addDoorToCollection(coll.id, dup.doorId);
+			}
+		} catch (err) {
+			alogger.writeAlog(3, 'duplicateDoor: collection copy failed for door ' + srcId + ': ' + err.message, 'yellow');
+		}
+		alogger.writeAlog(4, 'Door duplicated: id=' + srcId + ' -> id=' + dup.doorId + ' (' + dup.slug + ')', 'cyan');
+	} else {
+		alogger.writeAlog(3, 'duplicateDoor failed for id ' + srcId + ': ' + (dup.errormessages || []).join(', '), 'redbright');
+	}
+	res.redirect('/admin/doors');
+});
+
 // -----------------------------------------------------------------------
 // Themes
 // -----------------------------------------------------------------------
