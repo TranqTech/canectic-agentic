@@ -241,6 +241,17 @@ class MailerManager extends EventEmitter {
 			return;
 		}
 
+		// Backoff guard: skip scheduled polls to peers that recently failed.
+		// Manual triggerPoll() bypasses this -- sysop intent wins.
+		if (appConfig.getBoolean('mailer_backoff_enabled', true) && peerConnections.isInBackoff(conn)) {
+			alogger.writeClog(5,
+				'Mailer: skipping poll for ' + (cd.address || connectionUUID) +
+				' — backoff in effect until ' + cd.next_allowed_poll_at +
+				' (consecutive failures: ' + (cd.consecutive_failures || 0) + ')',
+				'mailer', 'yellow');
+			return;
+		}
+
 		// Always connect — polling is for both sending and receiving.
 		// Log whether we have outbound mail for visibility.
 		var hasmail = this._hasOutboundMail(cd.address);
@@ -329,6 +340,12 @@ class MailerManager extends EventEmitter {
 			transport.once('error', (err) => {
 				alogger.writeClog(3, 'Mailer: outbound connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
 				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
+				// Record failure for backoff. Pre-session failures go here;
+				// post-handshake failures are recorded in the sessionEnd
+				// handler below.
+				peerConnections.recordConnectFailure(conn.uuid, 'tcp: ' + err.message, {
+					capHours: appConfig.getNumber('mailer_backoff_max_hours', 24)
+				}).catch(() => {});
 			});
 		} else if (mailerTransport === 'websocket') {
 			var wsUrl = cd.mailer_ws_url;
@@ -346,6 +363,9 @@ class MailerManager extends EventEmitter {
 			wsTransport.once('error', (err) => {
 				alogger.writeClog(3, 'Mailer: outbound WS connect to ' + wsUrl + ' failed: ' + err.message, 'mailer', 'redbright');
 				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
+				peerConnections.recordConnectFailure(conn.uuid, 'ws: ' + err.message, {
+					capHours: appConfig.getNumber('mailer_backoff_max_hours', 24)
+				}).catch(() => {});
 			});
 		}
 	}
@@ -413,6 +433,22 @@ class MailerManager extends EventEmitter {
 				'mailer', 'cyan'
 			);
 			this.emit('sessionEnd', info);
+
+			// Record backoff state for outbound (caller) sessions. Inbound
+			// answerer sessions don't affect our outbound poll schedule.
+			if (session.role === 'caller') {
+				var outConnUUID = session.options.connectionUUID
+					|| (session.peerConnection ? session.peerConnection.uuid : null);
+				if (outConnUUID) {
+					if (info.reason === 'complete') {
+						peerConnections.recordConnectSuccess(outConnUUID).catch(() => {});
+					} else {
+						peerConnections.recordConnectFailure(outConnUUID, 'session: ' + info.reason, {
+							capHours: appConfig.getNumber('mailer_backoff_max_hours', 24)
+						}).catch(() => {});
+					}
+				}
+			}
 
 			// Notify listeners that files arrived and need tossing.
 			// connectionUUID comes from caller options (outbound) or

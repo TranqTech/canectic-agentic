@@ -163,6 +163,8 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'MAILER_BSO_SCAN_INTERVAL', defaultValue: '60',      type: 'number',  category: 'mailer',      description: 'BSO outbound directory scan interval (seconds)' },
 	{ key: 'MAILER_BSO_SCAN_ENABLED',  defaultValue: 'true',    type: 'boolean', category: 'mailer',      description: 'Enable periodic BSO outbound directory scanning' },
 	{ key: 'MAILER_DEFAULT_ZONE',      defaultValue: '1',       type: 'number',  category: 'mailer',      description: 'Default FTN zone for the base outbound directory' },
+	{ key: 'mailer_backoff_enabled',   defaultValue: 'true',    type: 'boolean', category: 'mailer',      description: 'Enable exponential backoff for repeated outbound mailer connect failures' },
+	{ key: 'mailer_backoff_max_hours', defaultValue: '24',      type: 'number',  category: 'mailer',      description: 'Maximum backoff window in hours (cap for exponential growth)' },
 
 	// -----------------------------------------------------------------------
 	// Worker

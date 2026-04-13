@@ -217,6 +217,22 @@ block content
                                   td
                                     small Route To:
                                   td= cd.route_to
+                              if cd.consecutive_failures && cd.consecutive_failures > 0
+                                tr
+                                  td
+                                    small.text-warning Backoff:
+                                  td
+                                    span.badge.bg-warning.text-dark= 'fails: ' + cd.consecutive_failures
+                                    if cd.next_allowed_poll_at
+                                      |
+                                      small.text-muted until #{new Date(cd.next_allowed_poll_at).toLocaleString()}
+                                    if cd.last_failure_reason
+                                      br
+                                      small.text-muted= cd.last_failure_reason
+                                    form.d-inline.ms-2(action='/admin/connection/' + conn.uuid + '/reset-backoff' method='POST')
+                                      button.btn.btn-xs.btn-outline-success(type='submit' title='Clear backoff state' onclick='return confirm("Clear backoff counter and allow immediate polling?")')
+                                        i.bi.bi-arrow-clockwise
+                                        |  Reset
                             else if conn.connection_type === 'NNTP'
                               tr
                                 td

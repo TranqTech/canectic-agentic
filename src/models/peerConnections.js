@@ -445,6 +445,141 @@ async function updateConnectionData(uuid, dataObj, formObj) {
 	return returnObj;
 }
 
+// ---------------------------------------------------------------------------
+// Backoff state tracking for outbound mailer polls
+// ---------------------------------------------------------------------------
+//
+// When a peer's mailer connect fails (TCP error, auth failure, unexpected
+// disconnect), we bump a consecutive-failure counter and stamp a
+// `next_allowed_poll_at` window so the scheduler skips the peer until the
+// backoff expires. A successful session (state === 'done') clears the
+// counter and resets the window.
+//
+// Fields live under connection_data JSONB to avoid a schema change and
+// to surface in existing admin views. Writes use jsonb_set so they
+// don't collide with sysop config edits on the same row.
+
+/**
+ * Compute the next backoff delay in milliseconds.
+ *
+ * delay = min(baseIntervalMin * 2^(failures-1), capHours * 60)  minutes
+ * Jitter: +/- 10% to avoid thundering herd on service recovery.
+ *
+ * failures <= 1 returns a one-base-interval wait (so a single failure
+ * doesn't retry instantly, just delays by one cycle).
+ */
+function computeBackoffDelayMs(failures, baseIntervalMin, capHours) {
+	var base = parseInt(baseIntervalMin) || 60;
+	var cap = (parseInt(capHours) || 24) * 60;
+	var f = Math.max(0, parseInt(failures) - 1);
+	var minutes = base * Math.pow(2, f);
+	if (minutes > cap) minutes = cap;
+	var jitter = 1 + (Math.random() * 0.2 - 0.1);
+	return Math.round(minutes * 60 * 1000 * jitter);
+}
+
+/**
+ * Is this connection currently in a backoff window?
+ * Pure check on the passed-in row, no DB read.
+ */
+function isInBackoff(conn) {
+	if (!conn || !conn.connection_data) return false;
+	var until = conn.connection_data.next_allowed_poll_at;
+	if (!until) return false;
+	var untilDate = new Date(until);
+	if (isNaN(untilDate.getTime())) return false;
+	return untilDate > new Date();
+}
+
+/**
+ * Record a connect/session failure: bump counter, set next_allowed_poll_at.
+ * baseIntervalMin defaults to the peer's configured poll_interval.
+ * capHours defaults to the mailer_backoff_max_hours config (24).
+ */
+async function recordConnectFailure(uuid, reason, opts) {
+	var options = opts || {};
+	var conn = await getConnectionByUUID(uuid);
+	if (!conn) return null;
+
+	var cd = conn.connection_data || {};
+	var failures = (parseInt(cd.consecutive_failures) || 0) + 1;
+	var base = options.baseIntervalMin || parseInt(cd.poll_interval) || 60;
+	var cap  = options.capHours || 24;
+	var delayMs = computeBackoffDelayMs(failures, base, cap);
+	var nextAt  = new Date(Date.now() + delayMs);
+
+	var patch = {
+		consecutive_failures: failures,
+		last_failure_at:      new Date().toISOString(),
+		last_failure_reason:  (reason || 'unknown').substring(0, 200),
+		next_allowed_poll_at: nextAt.toISOString(),
+	};
+
+	await _patchConnectionData(conn.id, patch);
+	alogger.writeAlog(4,
+		'[peer backoff] ' + (cd.address || uuid) + ' failure #' + failures +
+		' -- next poll allowed at ' + nextAt.toISOString() +
+		' (' + Math.round(delayMs / 60000) + ' min delay)',
+		'yellow');
+	return { failures: failures, nextAt: nextAt };
+}
+
+/**
+ * Record a successful session: clear counter and backoff window.
+ */
+async function recordConnectSuccess(uuid) {
+	var conn = await getConnectionByUUID(uuid);
+	if (!conn) return;
+	var cd = conn.connection_data || {};
+	// Only log if there was actually a failure streak to clear
+	var hadFailures = (parseInt(cd.consecutive_failures) || 0) > 0;
+
+	var patch = {
+		consecutive_failures: 0,
+		next_allowed_poll_at: null,
+		last_failure_reason:  null,
+		last_success_at:      new Date().toISOString(),
+	};
+	await _patchConnectionData(conn.id, patch);
+	if (hadFailures) {
+		alogger.writeAlog(3,
+			'[peer backoff] ' + (cd.address || uuid) + ' recovered -- backoff cleared',
+			'greenbright');
+	}
+}
+
+/**
+ * Manually reset backoff (admin override).
+ */
+async function resetBackoff(uuid) {
+	return recordConnectSuccess(uuid);
+}
+
+// Atomic jsonb_set patch: merges the given keys into connection_data
+// without reading-then-writing the whole object. Null values in `patch`
+// are written as JSON null (effectively clearing a key while preserving
+// the rest). Multiple keys are applied in one UPDATE via chained
+// jsonb_set calls.
+async function _patchConnectionData(id, patch) {
+	var keys = Object.keys(patch);
+	if (keys.length === 0) return;
+
+	// Build a chain of jsonb_set() calls. Values are supplied as
+	// separate parameters to keep things parameterised.
+	var expr = 'connection_data';
+	var params = [];
+	for (var i = 0; i < keys.length; i++) {
+		var keyParam = '$' + (params.length + 2); // +2 because $1 is id
+		var valParam = '$' + (params.length + 3);
+		expr = "jsonb_set(" + expr + ", ARRAY[" + keyParam + "]::text[], " + valParam + "::jsonb, true)";
+		params.push(keys[i], JSON.stringify(patch[keys[i]]));
+	}
+
+	var sql = 'UPDATE peer_connections SET connection_data = ' + expr +
+		', updated_at = NOW() WHERE id = $1';
+	await postgres.write(sql, [id].concat(params));
+}
+
 async function removeConnection(uuid) {
 	var returnObj = {
 		status: false,
@@ -628,5 +763,11 @@ export {
 	buildConnectionData,
 	validateConnectionData,
 	clearNntpHwmForArea,
-	clearQwkHwmForArea
+	clearQwkHwmForArea,
+	// Backoff
+	computeBackoffDelayMs,
+	isInBackoff,
+	recordConnectFailure,
+	recordConnectSuccess,
+	resetBackoff
 };

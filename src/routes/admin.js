@@ -926,6 +926,17 @@ router.post('/connection/:uuid/remove', urlencodedParser, requireAdmin, async (r
 	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
 });
 
+// Clear mailer backoff state for a connection (sysop manual override)
+router.post('/connection/:uuid/reset-backoff', urlencodedParser, requireAdmin, async (req, res) => {
+	var uuid = req.params.uuid.toLowerCase().trim();
+	var conn = await peerConnections.getConnectionByUUID(uuid);
+	if (conn) {
+		await peerConnections.resetBackoff(uuid);
+	}
+	var peer = conn ? await peers.getPeerById(conn.peer_id) : null;
+	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
+});
+
 router.post('/connection/:uuid/setallowed', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var uuid        = req.params.uuid.toLowerCase().trim();
