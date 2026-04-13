@@ -2428,13 +2428,15 @@ router.get('/doors', async (req, res) => {
 
 router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 	var result = await doors.createDoor(req.body);
-	if (result.status && result.insertId) {
+	// Model returns the new id as `doorId`; older code here checked
+	// `result.insertId` and silently skipped collection assignment.
+	if (result.status && result.doorId) {
 		// Sync collection membership
 		var collIds = req.body.collections;
 		if (typeof collIds === 'string') collIds = [collIds];
 		if (Array.isArray(collIds)) {
 			for (var cid of collIds) {
-				await doorCollections.addDoorToCollection(parseInt(cid), result.insertId);
+				await doorCollections.addDoorToCollection(parseInt(cid), result.doorId);
 			}
 		}
 		res.redirect('/admin/doors');
