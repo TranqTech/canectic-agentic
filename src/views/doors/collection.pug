@@ -15,7 +15,7 @@ block content
 					div
 						h2.mb-0= collection.name
 						if collection.description
-							p.text-muted.mb-0= collection.description
+							.text-muted.mb-0!= collection.description
 
 				if !currentuser
 					.alert.alert-info You must be logged in to play door games.

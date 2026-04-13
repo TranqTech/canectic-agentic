@@ -28,7 +28,7 @@ block content
 										div
 											h5.card-title.mb-1= col.name
 											if col.description
-												p.card-text.text-muted.small.mb-1= col.description
+												.card-text.text-muted.small.mb-1!= col.description
 											span.badge.bg-info= (doorCounts && doorCounts[col.id]) ? doorCounts[col.id] + ' games' : 'Empty'
 									.card-footer
 										a.btn.btn-primary.btn-sm.w-100(href='/doors/collection/' + col.slug)
