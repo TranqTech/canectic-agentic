@@ -29,6 +29,8 @@ import { createQueueConnection, getQueueConfig } from "../src/queues/connection.
 import { closeQueues } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
 import { createEventPublisher, createEventSubscriber, EVENTS } from "../src/queues/events.js";
+import * as fileWildcards from "../src/models/fileWildcards.js";
+import * as netmailRoutes from "../src/models/netmailRoutes.js";
 import { Worker } from 'bullmq';
 import appConfig from "../src/config/appConfig.js";
 
@@ -653,12 +655,18 @@ async function main() {
 		alogger.writeAlog(2, `[Worker] Maintenance worker error: ${err.message}`, "redbright");
 	});
 
-	// Config reload subscriber
+	// Cross-process invalidation subscriber
 	var eventSubscriber = createEventSubscriber((event) => {
 		if (event.type === EVENTS.CONFIG_CHANGED) {
 			alogger.writeAlog(3, "[Worker] Config changed, reloading", "cyan");
 			appConfig.reload();
 			emailTosser.resetTransporter();
+		} else if (event.type === EVENTS.WILDCARDS_CHANGED) {
+			alogger.writeAlog(4, "[Worker] Wildcard rules changed, invalidating cache", "cyan");
+			fileWildcards.invalidateCache();
+		} else if (event.type === EVENTS.NETMAIL_ROUTES_CHANGED) {
+			alogger.writeAlog(4, "[Worker] Netmail routes changed, invalidating cache", "cyan");
+			netmailRoutes.invalidateCache();
 		}
 	});
 

@@ -148,9 +148,13 @@ In `transfer.js _onFileComplete()`, after the file is fully received and verifie
 
 ### Caching
 
-Wildcard rules are loaded once and cached in memory. Cache invalidated via:
-- `CONFIG_CHANGED` Redis pub/sub event (same mechanism as appConfig)
-- Or a dedicated `WILDCARDS_CHANGED` event published on rule CRUD
+Wildcard rules are loaded once per process and cached in memory. Admin CRUD happens in the gateway, but live matching happens in the mailer's `TransferEngine` (and, for netmail analogues, in the worker's tosser). Without cross-process invalidation, mailer/worker caches go stale whenever a sysop edits rules.
+
+Cache invalidation wiring:
+- CRUD in `fileWildcards.js` calls local `invalidateCache()` and publishes `WILDCARDS_CHANGED` via the Redis pub/sub event bus.
+- Mailer and worker main loops subscribe to `WILDCARDS_CHANGED` and call `invalidateCache()` on receipt.
+- Gateway also subscribes (for embedded mode and its own admin-side reads).
+- Next `matchFilename()` lazy-loads rules from DB.
 
 ### Model
 

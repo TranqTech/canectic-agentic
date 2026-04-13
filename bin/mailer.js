@@ -35,6 +35,7 @@ import { createQueueConnection, getQueueConfig } from "../src/queues/connection.
 import { closeQueues } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
 import { createEventPublisher, createEventSubscriber, EVENTS } from "../src/queues/events.js";
+import * as fileWildcards from "../src/models/fileWildcards.js";
 import { Worker } from 'bullmq';
 import appConfig from "../src/config/appConfig.js";
 
@@ -185,11 +186,14 @@ async function main() {
 		alogger.writeAlog(2, `[Mailer] Worker error: ${err.message}`, "redbright");
 	});
 
-	// Config reload subscriber
+	// Cross-process invalidation subscriber
 	var eventSubscriber = createEventSubscriber((event) => {
 		if (event.type === EVENTS.CONFIG_CHANGED) {
 			alogger.writeAlog(3, "[Mailer] Config changed, reloading", "cyan");
 			appConfig.reload();
+		} else if (event.type === EVENTS.WILDCARDS_CHANGED) {
+			alogger.writeAlog(4, "[Mailer] Wildcard rules changed, invalidating cache", "cyan");
+			fileWildcards.invalidateCache();
 		}
 	});
 

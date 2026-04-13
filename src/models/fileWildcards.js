@@ -2,10 +2,14 @@
 //
 // Sysop-configurable rules that match inbound filenames against glob
 // patterns and route them to specific directories instead of ftn/in/.
-// Rules are cached in memory and invalidated via CONFIG_CHANGED event.
+// Rules are cached in memory (per process). CRUD publishes a
+// WILDCARDS_CHANGED event so other processes (mailer/worker) invalidate
+// their local caches and reload on next lookup. Admin CRUD runs in the
+// gateway; live matching runs in the mailer's TransferEngine.
 
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
+import { createEventPublisher, EVENTS } from '../queues/events.js';
 
 // --- In-memory cache ---
 
@@ -20,6 +24,22 @@ async function _loadCache() {
 function invalidateCache() {
 	_cachedRules = null;
 	_cacheLoaded = false;
+}
+
+// --- Cross-process invalidation publisher ---
+
+var _publisher = null;
+function _getPublisher() {
+	if (!_publisher) _publisher = createEventPublisher();
+	return _publisher;
+}
+
+function _broadcastChanged() {
+	try {
+		_getPublisher().publish(EVENTS.WILDCARDS_CHANGED, {});
+	} catch (err) {
+		alogger.writeAlog(3, '[fileWildcards] Publish error: ' + err.message, 'yellow');
+	}
 }
 
 // --- Glob matching ---
@@ -121,6 +141,7 @@ async function create(data) {
 	}
 
 	invalidateCache();
+	_broadcastChanged();
 	returnObj.status = true;
 	returnObj.insertId = dbres.insertId;
 	alogger.writeAlog(5, 'File wildcard created: ' + dbObj.pattern + ' -> ' + dbObj.target_dir, 'greenbright');
@@ -152,6 +173,7 @@ async function update(id, data) {
 	}
 
 	invalidateCache();
+	_broadcastChanged();
 	returnObj.status = true;
 	alogger.writeAlog(5, 'File wildcard updated: id=' + id, 'greenbright');
 	return returnObj;
@@ -167,6 +189,7 @@ async function remove(id) {
 	}
 
 	invalidateCache();
+	_broadcastChanged();
 	returnObj.status = true;
 	alogger.writeAlog(5, 'File wildcard removed: id=' + id, 'greenbright');
 	return returnObj;
@@ -181,6 +204,7 @@ async function reorder(ids) {
 		);
 	}
 	invalidateCache();
+	_broadcastChanged();
 }
 
 export {

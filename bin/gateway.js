@@ -384,7 +384,7 @@ async function startSmtpServer(){
 // Listens for cross-process events from the worker and mailer
 
 async function startEventSubscriber(){
-	eventSubscriber = createEventSubscriber((event) => {
+	eventSubscriber = createEventSubscriber(async (event) => {
 		switch (event.type) {
 			case EVENTS.MESSAGES_IMPORTED:
 				alogger.writeAlog(3, `[Event] Messages imported: ${JSON.stringify(event.data)}`, "cyan");
@@ -406,6 +406,20 @@ async function startEventSubscriber(){
 				alogger.writeAlog(3, "[Event] Config changed, reloading", "cyan");
 				appConfig.reload();
 				break;
+
+			case EVENTS.WILDCARDS_CHANGED: {
+				alogger.writeAlog(4, "[Event] Wildcard rules changed, invalidating cache", "cyan");
+				var fwMod = await import("../src/models/fileWildcards.js");
+				fwMod.invalidateCache();
+				break;
+			}
+
+			case EVENTS.NETMAIL_ROUTES_CHANGED: {
+				alogger.writeAlog(4, "[Event] Netmail routes changed, invalidating cache", "cyan");
+				var nrMod = await import("../src/models/netmailRoutes.js");
+				nrMod.invalidateCache();
+				break;
+			}
 		}
 	});
 	alogger.writeAlog(2, "  Event subscriber started", "cyan");

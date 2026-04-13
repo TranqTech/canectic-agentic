@@ -43,6 +43,12 @@ export const EVENTS = {
 
 	// Any process → All: config changed in DB, reload appConfig
 	CONFIG_CHANGED: 'config:changed',
+
+	// Gateway → Mailer/Worker: inbound file wildcard rules changed, invalidate caches
+	WILDCARDS_CHANGED: 'wildcards:changed',
+
+	// Gateway → Worker: netmail route rules changed, invalidate caches
+	NETMAIL_ROUTES_CHANGED: 'netmail_routes:changed',
 };
 
 // ---------------------------------------------------------------------------

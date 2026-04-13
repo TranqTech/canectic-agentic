@@ -16,6 +16,7 @@
 
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
+import { createEventPublisher, EVENTS } from '../queues/events.js';
 
 // ---------------------------------------------------------------------------
 // In-memory cache
@@ -32,6 +33,26 @@ async function _loadCache() {
 function invalidateCache() {
 	_cachedRules = null;
 	_cacheLoaded = false;
+}
+
+// --- Cross-process invalidation publisher ---
+// Admin CRUD runs in the gateway; live matching runs in the worker's
+// FTN tosser (via ftnNetmailAdapter). Without cross-process invalidation
+// the worker caches an empty ruleset from startup and never sees rule
+// additions made via the admin UI.
+
+var _publisher = null;
+function _getPublisher() {
+	if (!_publisher) _publisher = createEventPublisher();
+	return _publisher;
+}
+
+function _broadcastChanged() {
+	try {
+		_getPublisher().publish(EVENTS.NETMAIL_ROUTES_CHANGED, {});
+	} catch (err) {
+		alogger.writeAlog(3, '[netmailRoutes] Publish error: ' + err.message, 'yellow');
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +206,7 @@ async function create(data) {
 	}
 
 	invalidateCache();
+	_broadcastChanged();
 	returnObj.status = true;
 	returnObj.insertId = dbres.insertId;
 	alogger.writeAlog(5, 'Netmail route created: ' + dbObj.name + ' (' + dbObj.action + ')', 'greenbright');
@@ -228,6 +250,7 @@ async function update(id, data) {
 	}
 
 	invalidateCache();
+	_broadcastChanged();
 	returnObj.status = true;
 	alogger.writeAlog(5, 'Netmail route updated: id=' + id, 'greenbright');
 	return returnObj;
@@ -243,6 +266,7 @@ async function remove(id) {
 	}
 
 	invalidateCache();
+	_broadcastChanged();
 	returnObj.status = true;
 	alogger.writeAlog(5, 'Netmail route removed: id=' + id, 'greenbright');
 	return returnObj;
@@ -257,6 +281,7 @@ async function reorder(ids) {
 		);
 	}
 	invalidateCache();
+	_broadcastChanged();
 }
 
 export {
