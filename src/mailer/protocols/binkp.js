@@ -248,6 +248,12 @@ class BinkpProtocol extends EventEmitter {
 
 		var cmdId   = payload[0];
 		var cmdData = payload.length > 1 ? payload.subarray(1).toString('utf8') : '';
+		// Per binkp (FTS-1026) command bodies MAY be NUL-terminated. Some
+		// mailers (Argus observed) do include the trailing NUL; others
+		// don't. Strip trailing NULs so string comparisons (M_PWD, M_ADR
+		// matching, etc.) don't silently fail on an invisible byte.
+		// .trim() doesn't strip NUL, only whitespace.
+		cmdData = cmdData.replace(/\0+$/, '');
 		var cmdName = CMD_NAMES[cmdId] || ('CMD_' + cmdId);
 
 		// Debug: log all received command frames (skip M_NUL after handshake to reduce noise)
