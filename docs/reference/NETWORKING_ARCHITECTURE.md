@@ -937,6 +937,8 @@ Inbound netmail is routed by `ftnNetmailAdapter.js` based on the `ToUser` field:
 | `areafix`, `areamgr` | AreaFix | `src/models/areafix.js` |
 | `filefix`, `filemgr`, `tic` | FileFix | `src/models/filefix.js` |
 
+**Custom routes override.** Before the built-in processor check, `ftnNetmailAdapter` consults `netmailRoutes.matchRoute()` (sysop-configured rules at `/admin/netmail-routes`). A matching rule with `action=alias` rewrites `to_user` and falls through to processor dispatch (lets a sysop add their own processor aliases, e.g. `areamanager` → `areafix`). `action=dump` writes the netmail as JSON to a target directory and consumes the message. `action=ignore` drops the message silently (used for IBBS noise). Attached files are not touched by route actions -- they remain in the inbound dir for wildcards/TIC handling. See `src/models/netmailRoutes.js` and `docs/sysop/NETMAIL_ROUTES.md`.
+
 ### Authentication
 
 The password is sent in the **Subject line** of the netmail. The handler looks up the source FTN address in `peer_connections`, then compares the Subject against the `areafix_password` field in `connection_data`. Both AreaFix and FileFix share the same password.

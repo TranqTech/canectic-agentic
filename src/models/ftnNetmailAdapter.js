@@ -13,6 +13,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as postgres from '../middleware/db/postgres.js';
 import { storeAttachments } from './pmAttachments.js';
+import * as netmailRoutes from './netmailRoutes.js';
+import { resolveFileboxPath } from '../utils/fileboxPath.js';
 import appConfig from "../config/appConfig.js";
 
 // ============================================================
@@ -53,6 +55,67 @@ async function importFtnNetmail(ftnMessage) {
       alogger.writeAlog(2, "FTN netmail relay rejected: " + pmObj.from_address + " → " + pmObj.to_address, "yellow");
     }
     return retObj;
+  }
+
+  // --- Step 1.5: Custom sysop-configured routes ---
+  // Matches on to_user (required) with optional from_user / from_addr
+  // filters. First-match-wins by sort_order. Applies one of:
+  //   - alias: rewrite to_user, fall through to Step 2+
+  //   - dump: write as JSON, consume
+  //   - ignore: consume silently (no PM, no undeliverable, no response).
+  // File attachments are NOT touched -- they stay in the inbound dir for
+  // wildcards / TIC / etc to handle independently.
+  var routeMatch = await netmailRoutes.matchRoute({
+    to_user:   ftnMessage.ToUser,
+    from_user: ftnMessage.FromUser,
+    from_addr: pmObj.from_address,
+  });
+
+  if (routeMatch) {
+    if (routeMatch.log_level && routeMatch.log_level > 0) {
+      alogger.writeAlog(routeMatch.log_level,
+        "FTN netmail route '" + routeMatch.name + "' (" + routeMatch.action + ") matched: " +
+        (ftnMessage.FromUser || '?') + " @ " + (pmObj.from_address || '?') +
+        " -> " + (ftnMessage.ToUser || '?'),
+        'cyan');
+    }
+
+    if (routeMatch.action === 'ignore') {
+      retObj.status = true;
+      retObj.routeMatched = routeMatch.name;
+      retObj.routeAction = 'ignore';
+      return retObj;
+    }
+
+    if (routeMatch.action === 'dump') {
+      try {
+        var dumpPath = await _dumpNetmailToJson(ftnMessage, pmObj, routeMatch.target);
+        retObj.status = true;
+        retObj.routeMatched = routeMatch.name;
+        retObj.routeAction = 'dump';
+        retObj.dumpPath = dumpPath;
+      } catch (dumpErr) {
+        alogger.writeAlog(2,
+          "FTN netmail route dump failed for '" + routeMatch.name + "': " + dumpErr.message,
+          'redbright');
+        // Fall through to undeliverable path so the sysop sees it rather
+        // than silently losing the message on a bad dump config.
+        await privateMessages.insertUndeliverable(pmObj, 'dump_failed: ' + dumpErr.message);
+        retObj.status = true;
+        retObj.undeliverable = true;
+      }
+      return retObj;
+    }
+
+    if (routeMatch.action === 'alias' && routeMatch.target) {
+      var aliasedTo = routeMatch.target;
+      ftnMessage.ToUser = aliasedTo;
+      pmObj.to_user = aliasedTo;
+      retObj.routeMatched = routeMatch.name;
+      retObj.routeAction = 'alias';
+      retObj.aliasedTo = aliasedTo;
+      // Fall through to Step 2 (processor) / Step 3 (user resolve)
+    }
   }
 
   // --- Step 2: Is to_user an automated processor? ---
@@ -353,6 +416,56 @@ async function rejectRelay(ftnMessage, pmObj) {
     "Relay is disabled (allow_netmail_relay=false).\n" +
     "Raw message stored in " + badDir + "."
   );
+}
+
+// ============================================================
+// Netmail dump (for custom route action)
+// ============================================================
+
+// Write an inbound netmail to a JSON file in the configured dump directory
+// for an external handler to pick up. Used by custom netmail_routes with
+// action='dump'. File attachments referenced by the netmail are NOT copied
+// -- they stay in the inbound dir for wildcard/TIC handling.
+//
+// Path resolution uses resolveFileboxPath() so the target respects %X
+// substitution and anchors relative paths under filebox_base_dir.
+async function _dumpNetmailToJson(ftnMessage, pmObj, targetDir) {
+  if (!targetDir) throw new Error('no target directory configured for dump route');
+
+  var resolvedDir = resolveFileboxPath(targetDir);
+  await fs.promises.mkdir(resolvedDir, { recursive: true });
+
+  // Filename: <iso-ts>-<fromaddr>-<touser>.json. Sanitise aggressively --
+  // to_user can be anything a remote mailer decides to send.
+  var ts = new Date().toISOString().replace(/[:.]/g, '-');
+  var sanitise = function (s) {
+    return String(s || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').substring(0, 64) || 'unknown';
+  };
+  var fromPart = sanitise(pmObj.from_address);
+  var toPart   = sanitise(ftnMessage.ToUser);
+  // Include the process id + a short random suffix to avoid clobbering on
+  // bursts with sub-ms-identical timestamps.
+  var rand = Math.random().toString(36).substring(2, 8);
+  var filename = ts + '-' + fromPart + '-' + toPart + '-' + rand + '.json';
+
+  var payload = {
+    received_at:    new Date().toISOString(),
+    from_user:      ftnMessage.FromUser || null,
+    from_address:   pmObj.from_address || null,
+    to_user:        ftnMessage.ToUser || null,
+    to_address:     pmObj.to_address || null,
+    subject:        ftnMessage.Subject || null,
+    date_time:      ftnMessage.DateTime || null,
+    msg_id:         pmObj.msg_id || null,
+    msg_orig_addr:  pmObj.msg_orig_addr || null,
+    attribute:      parseInt(ftnMessage.Attribute) || 0,
+    file_attach:    (parseInt(ftnMessage.Attribute) & 0x0010) !== 0,
+    body:           ftnMessage.Message || '',
+  };
+
+  var fullPath = path.join(resolvedDir, filename);
+  await fs.promises.writeFile(fullPath, JSON.stringify(payload, null, 2), 'utf8');
+  return fullPath;
 }
 
 // ============================================================

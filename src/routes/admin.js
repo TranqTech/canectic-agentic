@@ -28,6 +28,7 @@ import * as newsFiles from '../models/newsFiles.js';
 import * as seasonalArt from '../models/seasonalArt.js';
 import * as freqModel from '../models/freq.js';
 import * as fileWildcards from '../models/fileWildcards.js';
+import * as netmailRoutes from '../models/netmailRoutes.js';
 import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
 import * as badEchomail from '../models/badEchomail.js';
@@ -5075,6 +5076,71 @@ router.post('/wildcards/test', express.json(), requireAdmin, async (req, res) =>
 		res.json({ match: true, pattern: match.pattern, target_dir: match.target_dir, still_toss: match.still_toss });
 	} else {
 		res.json({ match: false, message: 'No match -- file would go to default inbound directory' });
+	}
+});
+
+// -------------------------------------------------------
+// Netmail Routes (custom inbound routing / alias / dump / ignore)
+// -------------------------------------------------------
+
+router.get('/netmail-routes', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var rules = await netmailRoutes.getAll();
+	res.render('admin/netmailRoutes/index', {
+		sufficientAccess: sufficientAccess,
+		title: 'Netmail Routes',
+		activelink: 'netmail-routes',
+		activenav: 'networks',
+		currentuser: currentuser,
+		rules: rules
+	});
+});
+
+router.post('/netmail-routes/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await netmailRoutes.create(req.body);
+	res.redirect('/admin/netmail-routes');
+});
+
+router.post('/netmail-routes/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await netmailRoutes.update(parseInt(req.params.id), req.body);
+	res.redirect('/admin/netmail-routes');
+});
+
+router.post('/netmail-routes/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await netmailRoutes.remove(parseInt(req.params.id));
+	res.redirect('/admin/netmail-routes');
+});
+
+router.post('/netmail-routes/reorder', express.json(), requireAdmin, async (req, res) => {
+	if (req.body && Array.isArray(req.body.ids)) {
+		await netmailRoutes.reorder(req.body.ids);
+	}
+	res.json({ status: true });
+});
+
+router.post('/netmail-routes/test', express.json(), requireAdmin, async (req, res) => {
+	var fields = {
+		to_user:   req.body && req.body.to_user,
+		from_user: req.body && req.body.from_user,
+		from_addr: req.body && req.body.from_addr,
+	};
+	if (!fields.to_user) {
+		return res.json({ match: false, message: 'to_user is required for test' });
+	}
+	var rules = await netmailRoutes.getActive();
+	var match = await netmailRoutes.matchRoute(fields, { rules: rules });
+	if (match) {
+		res.json({
+			match: true,
+			name: match.name,
+			action: match.action,
+			target: match.target,
+			match_type: match.match_type,
+			match_to_user: match.match_to_user,
+		});
+	} else {
+		res.json({ match: false, message: 'No route matched -- message would follow default dispatch (processor or user delivery)' });
 	}
 });
 

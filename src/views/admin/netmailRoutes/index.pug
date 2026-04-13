@@ -1,0 +1,364 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-4
+          i.bi.bi-signpost-2.me-2
+          | Netmail Routes
+          small.text-muted.ms-2 Custom routing, aliases, and ignore rules for inbound FTN netmail
+
+        //- Rules Table
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Routing Rules
+              button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#addRouteModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Rule
+          .card-body
+            if rules && rules.length > 0
+              table.table.table-sm.table-hover.mb-0#routesTable
+                thead
+                  tr
+                    th(style='width:30px')
+                    th Name
+                    th Match
+                    th Filters
+                    th Action
+                    th Target
+                    th Log
+                    th Active
+                    th(style='width:100px')
+                tbody
+                  each r in rules
+                    tr(data-id=r.id)
+                      td.drag-handle(style='cursor:grab')
+                        i.bi.bi-grip-vertical.text-muted
+                      td= r.name
+                      td
+                        span.badge.bg-info.me-1= r.match_type
+                        code= r.match_to_user
+                      td
+                        if r.match_from_user
+                          small.d-block from user:
+                            code= r.match_from_user
+                        if r.match_from_addr
+                          small.d-block from addr:
+                            code= r.match_from_addr
+                        if !r.match_from_user && !r.match_from_addr
+                          small.text-muted (any sender)
+                      td
+                        if r.action === 'alias'
+                          span.badge.bg-primary alias
+                        else if r.action === 'dump'
+                          span.badge.bg-warning.text-dark dump
+                        else if r.action === 'ignore'
+                          span.badge.bg-secondary ignore
+                        else
+                          span.badge.bg-dark= r.action
+                      td
+                        if r.target
+                          code= r.target
+                        else
+                          small.text-muted &mdash;
+                      td
+                        if r.log_level && r.log_level > 0
+                          span.badge.bg-info= 'L' + r.log_level
+                        else
+                          small.text-muted silent
+                      td
+                        if r.active
+                          span.badge.bg-success Active
+                        else
+                          span.badge.bg-danger Inactive
+                      td
+                        button.btn.btn-sm.btn-primary.me-1(
+                          data-bs-toggle='modal' data-bs-target='#editRouteModal'
+                          data-id=r.id
+                          data-name=r.name
+                          data-matchtype=r.match_type
+                          data-matchtouser=r.match_to_user
+                          data-matchfromuser=r.match_from_user || ''
+                          data-matchfromaddr=r.match_from_addr || ''
+                          data-action=r.action
+                          data-target=r.target || ''
+                          data-loglevel=r.log_level || 0
+                          data-active=(r.active ? 'true' : 'false')
+                        )
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/netmail-routes/' + r.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' onclick='return confirm("Delete this route?")')
+                            i.bi.bi-trash
+              small.text-muted.mt-2.d-block Drag rows to reorder. Rules evaluate in order -- first match wins.
+            else
+              p.text-muted No custom routes configured. Inbound netmail uses default dispatch (automated processors then local user resolution).
+
+        //- Test Tool
+        .card.mb-4
+          .card-header.bg-secondary
+            h5.mb-0 Test a Netmail
+            small.text-muted.ms-2 Dry-run match against the current ruleset
+          .card-body
+            .row.g-2
+              .col-md-4
+                label.form-label.small to_user (required)
+                input.form-control.form-control-sm#testToUser(type='text' placeholder='e.g. BRE System or sysop')
+              .col-md-4
+                label.form-label.small from_user (optional)
+                input.form-control.form-control-sm#testFromUser(type='text' placeholder='e.g. Bob')
+              .col-md-4
+                label.form-label.small from_addr (optional)
+                input.form-control.form-control-sm#testFromAddr(type='text' placeholder='e.g. 1:234/56')
+            .mt-2
+              button.btn.btn-primary.btn-sm#testBtn(type='button')
+                i.bi.bi-search.me-1
+                | Test
+              span#testResult.ms-3
+
+        //- Action reference
+        .card.mb-4
+          .card-header.bg-dark
+            h5.mb-0 Action Reference
+          .card-body.small
+            dl.row.mb-0
+              dt.col-sm-2 alias
+              dd.col-sm-10 Rewrite <code>to_user</code> to the target value then fall through to normal dispatch. Useful for aliasing names to existing processors (<code>areamanager</code> → <code>areafix</code>) or to a real user.
+              dt.col-sm-2 dump
+              dd.col-sm-10 Write the netmail to the target directory as JSON (one file per message) for an external handler to pick up. The target path supports %X substitution and relative paths resolve under <code>filebox_base_dir</code>. Attached files stay in the inbound dir for wildcards/TIC handling.
+              dt.col-sm-2 ignore
+              dd.col-sm-10 Silently drop the netmail packet. No PM delivery, no undeliverable queue, no response. Use for IBBS noise like <code>BRE System</code>. Attached files are left alone for wildcard rules to handle.
+
+    //- Add Modal
+    .modal.fade#addRouteModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title Add Netmail Route
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form(method='POST' action='/admin/netmail-routes/new')
+            .modal-body
+              .mb-3
+                label.form-label Name
+                input.form-control(name='name' required placeholder='e.g. Ignore BRE spam')
+              .row
+                .col-md-4.mb-3
+                  label.form-label Match Type
+                  select.form-select(name='match_type')
+                    option(value='exact' selected) Exact (case-insensitive)
+                    option(value='glob') Glob (* and ?)
+                .col-md-8.mb-3
+                  label.form-label Match to_user (required)
+                  input.form-control(name='match_to_user' required placeholder='e.g. BRE System or *fix or sysop')
+              .row
+                .col-md-6.mb-3
+                  label.form-label Filter by from_user (optional)
+                  input.form-control(name='match_from_user' placeholder='Narrow by sender name')
+                .col-md-6.mb-3
+                  label.form-label Filter by from_addr (optional)
+                  input.form-control(name='match_from_addr' placeholder='e.g. 1:234/56')
+              .row
+                .col-md-4.mb-3
+                  label.form-label Action
+                  select.form-select#addAction(name='action' required)
+                    option(value='alias') alias
+                    option(value='dump') dump
+                    option(value='ignore') ignore
+                .col-md-8.mb-3
+                  label.form-label#addTargetLabel Target (alias: new to_user; dump: directory)
+                  input.form-control#addTarget(name='target')
+              .row
+                .col-md-6.mb-3
+                  label.form-label Log Level
+                  select.form-select(name='log_level')
+                    option(value='0' selected) 0 – silent (default)
+                    option(value='3') 3 – normal
+                    option(value='4') 4 – verbose
+                    option(value='5') 5 – debug
+                  .form-text Noise-free by default. Bump up to trace a specific rule.
+                .col-md-6.mb-3.pt-4
+                  .form-check
+                    input.form-check-input(type='checkbox' name='active' id='addActive' checked value='true')
+                    label.form-check-label(for='addActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-success(type='submit') Add Route
+
+    //- Edit Modal
+    .modal.fade#editRouteModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title Edit Netmail Route
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#editRouteForm(method='POST')
+            .modal-body
+              .mb-3
+                label.form-label Name
+                input.form-control(name='name' id='erName' required)
+              .row
+                .col-md-4.mb-3
+                  label.form-label Match Type
+                  select.form-select(name='match_type' id='erMatchType')
+                    option(value='exact') Exact (case-insensitive)
+                    option(value='glob') Glob (* and ?)
+                .col-md-8.mb-3
+                  label.form-label Match to_user
+                  input.form-control(name='match_to_user' id='erMatchToUser' required)
+              .row
+                .col-md-6.mb-3
+                  label.form-label Filter by from_user
+                  input.form-control(name='match_from_user' id='erMatchFromUser')
+                .col-md-6.mb-3
+                  label.form-label Filter by from_addr
+                  input.form-control(name='match_from_addr' id='erMatchFromAddr')
+              .row
+                .col-md-4.mb-3
+                  label.form-label Action
+                  select.form-select#erAction(name='action')
+                    option(value='alias') alias
+                    option(value='dump') dump
+                    option(value='ignore') ignore
+                .col-md-8.mb-3
+                  label.form-label Target
+                  input.form-control(name='target' id='erTarget')
+              .row
+                .col-md-6.mb-3
+                  label.form-label Log Level
+                  select.form-select(name='log_level' id='erLogLevel')
+                    option(value='0') 0 – silent
+                    option(value='3') 3 – normal
+                    option(value='4') 4 – verbose
+                    option(value='5') 5 – debug
+                .col-md-6.mb-3.pt-4
+                  .form-check
+                    input.form-check-input(type='checkbox' name='active' id='erActive' value='true')
+                    label.form-check-label(for='erActive') Active
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      // Update target field help text + required attr based on action
+      function updateTargetFor(actionEl, targetEl, labelEl) {
+        if (!actionEl || !targetEl) return;
+        var action = actionEl.value;
+        if (action === 'ignore') {
+          targetEl.disabled = true;
+          targetEl.value = '';
+          targetEl.placeholder = '(not used for ignore)';
+          if (labelEl) labelEl.textContent = 'Target (not used for ignore)';
+        } else if (action === 'alias') {
+          targetEl.disabled = false;
+          targetEl.placeholder = 'new to_user, e.g. areafix';
+          if (labelEl) labelEl.textContent = 'Target (alias: new to_user)';
+        } else if (action === 'dump') {
+          targetEl.disabled = false;
+          targetEl.placeholder = 'directory, e.g. netmail/bbs-link';
+          if (labelEl) labelEl.textContent = 'Target (dump: directory)';
+        }
+      }
+
+      var addAction   = document.getElementById('addAction');
+      var addTarget   = document.getElementById('addTarget');
+      var addLabel    = document.getElementById('addTargetLabel');
+      if (addAction) {
+        addAction.addEventListener('change', function() { updateTargetFor(addAction, addTarget, addLabel); });
+        updateTargetFor(addAction, addTarget, addLabel);
+      }
+
+      var erAction = document.getElementById('erAction');
+      var erTarget = document.getElementById('erTarget');
+      if (erAction) {
+        erAction.addEventListener('change', function() { updateTargetFor(erAction, erTarget, null); });
+      }
+
+      // Edit modal population
+      var editModal = document.getElementById('editRouteModal');
+      if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          if (!btn) return;
+          document.getElementById('editRouteForm').action = '/admin/netmail-routes/' + btn.getAttribute('data-id') + '/update';
+          document.getElementById('erName').value           = btn.getAttribute('data-name') || '';
+          document.getElementById('erMatchType').value      = btn.getAttribute('data-matchtype') || 'exact';
+          document.getElementById('erMatchToUser').value    = btn.getAttribute('data-matchtouser') || '';
+          document.getElementById('erMatchFromUser').value  = btn.getAttribute('data-matchfromuser') || '';
+          document.getElementById('erMatchFromAddr').value  = btn.getAttribute('data-matchfromaddr') || '';
+          document.getElementById('erAction').value         = btn.getAttribute('data-action') || 'alias';
+          document.getElementById('erTarget').value         = btn.getAttribute('data-target') || '';
+          document.getElementById('erLogLevel').value       = btn.getAttribute('data-loglevel') || '0';
+          document.getElementById('erActive').checked       = btn.getAttribute('data-active') === 'true';
+          updateTargetFor(document.getElementById('erAction'), document.getElementById('erTarget'), null);
+        });
+      }
+
+      // Drag-to-reorder
+      var table = document.getElementById('routesTable');
+      if (table) {
+        var tbody = table.querySelector('tbody');
+        var dragRow = null;
+        tbody.addEventListener('dragstart', function(e) {
+          dragRow = e.target.closest('tr');
+          if (dragRow) e.dataTransfer.effectAllowed = 'move';
+        });
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          var target = e.target.closest('tr');
+          if (target && target !== dragRow) {
+            var rect = target.getBoundingClientRect();
+            var mid = rect.top + rect.height / 2;
+            if (e.clientY < mid) {
+              tbody.insertBefore(dragRow, target);
+            } else {
+              tbody.insertBefore(dragRow, target.nextSibling);
+            }
+          }
+        });
+        tbody.addEventListener('dragend', function() {
+          if (!dragRow) return;
+          dragRow = null;
+          var rows = tbody.querySelectorAll('tr');
+          var ids = [];
+          rows.forEach(function(r) { ids.push(r.getAttribute('data-id')); });
+          fetch('/admin/netmail-routes/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          });
+        });
+        tbody.querySelectorAll('tr').forEach(function(r) {
+          r.draggable = true;
+        });
+      }
+
+      // Test tool
+      var testBtn = document.getElementById('testBtn');
+      if (testBtn) {
+        testBtn.addEventListener('click', function() {
+          var payload = {
+            to_user:   document.getElementById('testToUser').value.trim(),
+            from_user: document.getElementById('testFromUser').value.trim(),
+            from_addr: document.getElementById('testFromAddr').value.trim(),
+          };
+          if (!payload.to_user) { document.getElementById('testResult').textContent = 'to_user is required'; return; }
+          fetch('/admin/netmail-routes/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var el = document.getElementById('testResult');
+            if (data.match) {
+              el.innerHTML = '<span class="badge bg-success">Match</span> <strong>' +
+                data.name + '</strong> (' + data.action + ')' +
+                (data.target ? ' &rarr; <code>' + data.target + '</code>' : '');
+            } else {
+              el.innerHTML = '<span class="badge bg-secondary">No match</span> <small class="text-muted">' + (data.message || '') + '</small>';
+            }
+          });
+        });
+      }
