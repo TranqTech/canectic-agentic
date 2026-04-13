@@ -5,9 +5,13 @@ html
     //link(rel='icon' href=faviconlink type='image/x-icon') 
     link(rel='stylesheet', href='/css/darkly/bootstrap.css')
     link(rel='stylesheet', href='/css/bootstrap-icons.css')
-    link(rel='stylesheet', href='/css/styles.css')      
+    link(rel='stylesheet', href='/css/styles.css')
     link(rel='stylesheet', href='/css/dataTables.bootstrap5.min.css')
     link(rel='stylesheet', href='/css/Datatables.custom.css')
+    //- Sysop-managed custom CSS -- loaded last so it wins the cascade.
+    //- Never overwritten by the update script. Ships with a commented
+    //- documentation header on install; edit freely.
+    link(rel='stylesheet', href='/css/custom.css')
     script(src='/js/bootstrap.bundle.js')
     script(src='/js/console.parsers.js')
     script(src='/js/jquery-3.7.0.js')

@@ -69,6 +69,16 @@ OVERLAY_DIRS=(
     public
 )
 
+# --- Overlay skiplist (relative paths under any OVERLAY_DIR that are
+# shipped once at install but never overwritten afterwards) ---
+# public/css/custom.css holds sysop-authored CSS that overrides the
+# shipped styles -- overlay copy would wipe customisations every update.
+# On fresh install the file ships from the repo; on update we leave
+# whatever the sysop has done alone.
+OVERLAY_SKIP=(
+    "public/css/custom.css"
+)
+
 # --- Code files in project root (always overwritten) ---
 CODE_FILES=(
     package.json
@@ -176,10 +186,38 @@ overlay_dir() {
 
     local src_dir="$SOURCE_DIR/$dir"
     local copied=0
+    local skipped=0
+    local seeded=0
 
     while IFS= read -r -d '' src_file; do
         local rel_path="${src_file#$src_dir/}"
+        local full_rel="$dir/$rel_path"
         local tgt_file="$TARGET_DIR/$dir/$rel_path"
+
+        # Skiplist: file is shipped once on install but never overwritten
+        # on update. If it already exists in target, leave it alone.
+        local is_skipped=false
+        for skip in "${OVERLAY_SKIP[@]}"; do
+            if [[ "$full_rel" == "$skip" ]]; then
+                is_skipped=true
+                break
+            fi
+        done
+
+        if [[ "$is_skipped" == true ]]; then
+            if [[ ! -e "$tgt_file" ]]; then
+                # First time seeing this file on the target -- seed it
+                local tgt_parent
+                tgt_parent="$(dirname "$tgt_file")"
+                mkdir -p "$tgt_parent"
+                cp -a "$src_file" "$tgt_file"
+                seeded=$((seeded + 1))
+            else
+                skipped=$((skipped + 1))
+            fi
+            continue
+        fi
+
         local tgt_parent
         tgt_parent="$(dirname "$tgt_file")"
         mkdir -p "$tgt_parent"
@@ -187,7 +225,14 @@ overlay_dir() {
         copied=$((copied + 1))
     done < <(find "$src_dir" -type f -print0 2>/dev/null)
 
-    info "$dir/: $copied shipped file(s) synced (sysop additions preserved)"
+    local summary="$dir/: $copied shipped file(s) synced (sysop additions preserved)"
+    if [[ $seeded -gt 0 ]]; then
+        summary="$summary, $seeded sysop-managed file(s) seeded"
+    fi
+    if [[ $skipped -gt 0 ]]; then
+        summary="$summary, $skipped sysop-managed file(s) left alone"
+    fi
+    info "$summary"
 }
 
 # =============================================================================

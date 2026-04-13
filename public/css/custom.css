@@ -1,0 +1,40 @@
+/*
+ * =============================================================================
+ * Canectic BBS -- Sysop Custom CSS
+ * =============================================================================
+ *
+ * This file is YOURS. Canectic's update script will never overwrite it once
+ * it exists on your installation. Drop any site-specific CSS here to override
+ * the shipped Canectic styles without worrying about it being reset.
+ *
+ * Load order (later rules win):
+ *   1. Bootstrap (Darkly theme)
+ *   2. Bootstrap Icons
+ *   3. Canectic styles.css          (shipped, updated each release)
+ *   4. DataTables stylesheets       (admin + user layouts only)
+ *   5. custom.css                   (this file -- loaded last, overrides all)
+ *
+ * Examples (uncomment and adjust to taste):
+ *
+ * // Change the top navbar background colour site-wide
+ * // .navbar.bg-darkblue { background-color: #2c1b3a !important; }
+ *
+ * // Tune the body text colour on user-facing pages
+ * // body { color: #e8e8e8; }
+ *
+ * // Customise the admin card header palette
+ * // .card-header.bg-darkblue { background-color: #132538 !important; }
+ *
+ * // Override a specific font
+ * // body, .monospace { font-family: 'IBM Plex Mono', monospace; }
+ *
+ * // Site branding: replace the favicon hover colour
+ * // .navbar-brand:hover { color: #ffaa00 !important; }
+ *
+ * =============================================================================
+ * Do NOT place rules that MUST ship with a release in here. Put those in
+ * src/... and let Canectic's styles.css carry them. This file is for things
+ * that are specific to your installation (branding, regional tweaks,
+ * per-BBS colour schemes, etc).
+ * =============================================================================
+ */

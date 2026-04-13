@@ -5,6 +5,9 @@ html
       title= title
       link(rel='stylesheet', href='/css/darkly/bootstrap.css')
       link(rel='stylesheet', href='/css/styles.css')
+      //- Sysop-managed custom CSS -- loaded last so it wins the cascade.
+      //- Never overwritten by the update script.
+      link(rel='stylesheet', href='/css/custom.css')
       script(src='/js/bootstrap.min.js')
       meta(charset='utf-8')
       meta(name='viewport' content='width=device-width, initial-scale=1')
