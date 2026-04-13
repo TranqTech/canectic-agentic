@@ -55,7 +55,14 @@ async function runEvent(eventId) {
 	var runCmd;
 	switch (event.launch_type) {
 		case 'Dosemu':
-			runCmd = 'dosemu -dumb -E ' + command;
+			// DOS paths use backslashes (e.g. c:\bat\battlnet.bat). Because
+			// we launch via exec() with shell:true (bash -c), an unquoted
+			// argument has its backslashes stripped as escape sequences --
+			// c:\bat\battlnet.bat becomes c:batbattlnet.bat, DOSemu can't
+			// find the batch, and the event silently exits 0 in a fraction
+			// of a second. Double-quote the arg to preserve backslashes.
+			// Escape any embedded double-quotes as well for safety.
+			runCmd = 'dosemu -dumb -E "' + command.replace(/"/g, '\\"') + '"';
 			break;
 		case 'NativeCommand':
 		default:
