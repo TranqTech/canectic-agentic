@@ -19,19 +19,18 @@ block content
 						each col in collections
 							.col-md-4.col-sm-6.mb-4
 								a.card.h-100.text-decoration-none.text-reset(href='/doors/collection/' + col.slug style='cursor:pointer')
-									.card-body.d-flex.align-items-center
-										.me-3
-											if col.icon_url
-												img(src=col.icon_url style='width:64px; height:64px; object-fit:contain')
-											else
-												i.bi.bi-controller(style='font-size:3rem; color:#888')
-										div
-											h5.card-title.mb-1= col.name
-											if col.description
-												.card-text.text-muted.small.mb-1!= col.description
-											span.badge.bg-info= (doorCounts && doorCounts[col.id]) ? doorCounts[col.id] + ' games' : 'Empty'
+									.card-img-top.text-center.p-3.d-flex.align-items-center.justify-content-center(style='background:#1a1a2e; min-height:160px')
+										if col.icon_url
+											img(src=col.icon_url style='max-height:140px; max-width:100%; object-fit:contain')
+										else
+											i.bi.bi-controller(style='font-size:5rem; color:#888')
+									.card-body
+										h5.card-title.mb-1= col.name
+										if col.description
+											.card-text.text-muted.small.mb-1!= col.description
+										span.badge.bg-info= (doorCounts && doorCounts[col.id]) ? doorCounts[col.id] + ' games' : 'Empty'
 									.card-footer
-										a.btn.btn-primary.btn-sm.w-100(href='/doors/collection/' + col.slug)
+										.btn.btn-primary.btn-sm.w-100
 											| Browse Collection
 
 				//- Flat door list fallback (no collections configured)
