@@ -343,14 +343,18 @@ async function deliverMessage(messageObj) {
 
   // Split msg_id into the tuple columns so dupe checks and cross-store
   // lookups can reason about (serial, origin_address) instead of a
-  // single opaque string.
+  // single opaque string. Fall back to a uuid when the caller didn't
+  // supply one (system notifications, template events, bounce stubs)
+  // so every pm_inbox row has a non-null msg_id -- matches queueMessage's
+  // convention and keeps IMAP clients that key off Message-ID happy.
   var msgidTuple = splitFullMsgid(messageObj.msg_id || '');
+  var fallbackMsgid = msgidTuple.msg_id || uuidv4();
 
   // Build insert object
   var insertObj = {
     uuid: messageObj.uuid || uuidv4(),
     user_id: messageObj.user_id,
-    msg_id: msgidTuple.msg_id || null,
+    msg_id: fallbackMsgid,
     msg_orig_addr: msgidTuple.msg_orig_addr || '',
     from_user: messageObj.from_user || '',
     to_user: messageObj.to_user || '',
