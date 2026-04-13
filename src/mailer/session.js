@@ -113,6 +113,11 @@ class SessionController extends EventEmitter {
 			this.peerConnections = [conn];
 			var cd = conn.connection_data || {};
 			protocolOpts.sessionPassword = cd.session_password || '';
+			// Per-peer toggle: force plaintext M_PWD even when the answerer
+			// offers CRAM-MD5. Escape hatch for peers whose CRAM-MD5
+			// verifier rejects valid digests.
+			protocolOpts.forcePlainPassword = cd.force_plain_password === true ||
+			                                  cd.force_plain_password === 'true';
 		}
 
 		// ---------------------------------------------------------------

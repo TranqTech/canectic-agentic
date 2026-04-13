@@ -56,6 +56,7 @@ function buildConnectionData(networkType, formObj) {
 			var rawMailerProtocol  = formObj.ftn_mailer_protocol  || formObj.mailer_protocol  || 'binkp';
 			var rawMailerWsUrl     = formObj.ftn_mailer_ws_url    || formObj.mailer_ws_url    || '';
 			var rawOutboxDir       = formObj.ftn_outbox_dir !== undefined ? formObj.ftn_outbox_dir : (formObj.outbox_dir || '');
+			var rawForcePlain      = formObj.ftn_force_plain_password !== undefined ? formObj.ftn_force_plain_password : formObj.force_plain_password;
 			return {
 				address:          rawAddress  ? rawAddress.trim()        : '',
 				direct:           rawDirect !== 'No' && rawDirect !== false ? true : false,
@@ -72,7 +73,8 @@ function buildConnectionData(networkType, formObj) {
 				mailer_transport: rawMailerTransport ? rawMailerTransport.trim().toLowerCase() : 'tcp',
 				mailer_protocol:  rawMailerProtocol  ? rawMailerProtocol.trim().toLowerCase()  : 'binkp',
 				mailer_ws_url:    rawMailerWsUrl     ? rawMailerWsUrl.trim()                   : '',
-				outbox_dir:       rawOutboxDir        ? rawOutboxDir.trim()                     : ''
+				outbox_dir:       rawOutboxDir        ? rawOutboxDir.trim()                     : '',
+				force_plain_password: rawForcePlain === true || rawForcePlain === 'true' || rawForcePlain === 'on'
 			};
 		}
 		case 'NNTP': {

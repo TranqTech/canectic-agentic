@@ -56,6 +56,7 @@ class BinkpProtocol extends EventEmitter {
 		// Handshake data
 		this._localAddresses  = options.localAddresses  || [];
 		this._sessionPassword = options.sessionPassword  || '';
+		this._forcePlainPassword = !!options.forcePlainPassword;
 		this._peerAddresses   = [];
 		this._peerPassword    = '';
 		this._peerOptions     = {};
@@ -498,14 +499,22 @@ class BinkpProtocol extends EventEmitter {
 	// -----------------------------------------------------------------------
 
 	_sendPassword() {
-		if (this._cramChallenge && this._sessionPassword) {
+		// forcePlainPassword (per-peer config toggle) skips the CRAM-MD5 branch
+		// even when the answerer offered a challenge. Useful as an escape
+		// hatch for peers whose verifier rejects valid CRAM-MD5 digests
+		// (seen with some Argus configurations).
+		if (this._cramChallenge && this._sessionPassword && !this._forcePlainPassword) {
 			// CRAM-MD5: HMAC-MD5(password_as_key, challenge_as_bytes)
 			// The challenge is transmitted as hex — decode to raw bytes for the HMAC
-			if (!this._quiet) alogger.writeClog(5, 'binkp tx: M_PWD CRAM-MD5 (challenge: ' + this._cramChallenge.substring(0, 8) + '...)', 'mailer', 'cyan');
 			var challengeBytes = Buffer.from(this._cramChallenge, 'hex');
 			var hmac = crypto.createHmac('md5', this._sessionPassword);
 			hmac.update(challengeBytes);
 			var digest = hmac.digest('hex');
+			if (!this._quiet) alogger.writeClog(5,
+				'binkp tx: M_PWD CRAM-MD5 challenge=' + this._cramChallenge +
+				' pwlen=' + this._sessionPassword.length +
+				' digest=' + digest,
+				'mailer', 'cyan');
 			this._sendCmd(M_PWD, 'CRAM-MD5-' + digest);
 		} else if (this._sessionPassword) {
 			// Plaintext password

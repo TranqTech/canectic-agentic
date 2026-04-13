@@ -966,6 +966,14 @@ block content
                                 span(data-bs-toggle='tooltip' data-bs-placement='right' title='Files in this directory will be sent to this peer. Supports %X variables (e.g. %M for DOSemu drive). Relative paths resolve under filebox base directory.')
                                   i.bi.bi-info-circle.text-muted
                               input(type='text' id='ec_ftn_outbox_dir' name='ftn_outbox_dir' class='form-control' tabindex='9' placeholder='e.g. peer_101 or %M/lord/outbound')
+                              br
+                              .form-check.mt-2
+                                input.form-check-input(type='checkbox' id='ec_ftn_force_plain' name='ftn_force_plain_password' value='true' tabindex='10')
+                                label.form-check-label(for='ec_ftn_force_plain')
+                                  | Force plaintext password
+                                  |
+                                  span(data-bs-toggle='tooltip' data-bs-placement='right' title='Send plaintext M_PWD even when the remote offers CRAM-MD5. Use when a peer advertises CRAM-MD5 but rejects valid digests (some Argus configs). Less secure -- only enable if required.')
+                                    i.bi.bi-info-circle.text-muted.ms-1
                             // NNTP edit fields
                             #ec_fields_nntp(style='display:none')
                               label(for='ec_nntp_host') Host:
@@ -1365,6 +1373,7 @@ block content
             document.getElementById('ec_ftn_mailer_protocol').value  = cd.mailer_protocol || 'binkp';
             document.getElementById('ec_ftn_mailer_ws_url').value    = cd.mailer_ws_url || '';
             document.getElementById('ec_ftn_outbox_dir').value      = cd.outbox_dir || '';
+            document.getElementById('ec_ftn_force_plain').checked   = cd.force_plain_password === true || cd.force_plain_password === 'true';
             toggleFtnRouteField('ec');
             toggleFtnWsUrlField('ec');
           } else if (type === 'NNTP') {
