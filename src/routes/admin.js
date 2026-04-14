@@ -2379,6 +2379,18 @@ router.post('/doorCollections/:id/removeDoor/:doorId', urlencodedParser, require
 	res.redirect('/admin/doorCollections/' + collectionId);
 });
 
+// Reorder the collections themselves (affects /doors and the admin list)
+// Registered BEFORE /doorCollections/:id/reorder so "reorder" isn't
+// interpreted as an :id path param.
+router.post('/doorCollections/reorder', express.json(), requireAdmin, async (req, res) => {
+	var ids = req.body.ids || [];
+	if (Array.isArray(ids) && ids.length > 0) {
+		await doorCollections.updateCollectionSortOrder(ids);
+	}
+	res.json({ status: true });
+});
+
+// Reorder doors within a collection
 router.post('/doorCollections/:id/reorder', express.json(), requireAdmin, async (req, res) => {
 	var collectionId = parseInt(req.params.id);
 	var ids = req.body.ids || [];

@@ -160,6 +160,19 @@ async function updateEntrySortOrder(collectionId, orderedDoorIds) {
 	}
 }
 
+// Reorder the collections themselves. Writes sort_order on the
+// door_collections rows in the supplied sequence so /doors and the
+// admin list respect the drag-to-reorder ordering.
+async function updateCollectionSortOrder(orderedCollectionIds) {
+	if (!orderedCollectionIds || orderedCollectionIds.length === 0) return;
+	for (var i = 0; i < orderedCollectionIds.length; i++) {
+		await postgres.write(
+			'UPDATE door_collections SET sort_order = $1, updated_at = NOW() WHERE id = $2',
+			[i, parseInt(orderedCollectionIds[i])]
+		);
+	}
+}
+
 // --- Utility ---
 
 // Get collections a specific door belongs to
@@ -201,6 +214,7 @@ export {
 	addDoorToCollection,
 	removeDoorFromCollection,
 	updateEntrySortOrder,
+	updateCollectionSortOrder,
 	getCollectionsForDoor,
 	getCollectionCounts
 };

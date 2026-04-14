@@ -24,24 +24,30 @@ block content
                     h2= title
                   .col-4
                     .text-end
+                      button#saveOrderBtn.btn.btn-sm.btn-warning.me-2(style='display:none')
+                        i.bi.bi-arrow-down-up
+                        |  Save Order
                       a.button.btn.btn-sm.btn-info.me-2(href='/admin')
                         | Exit
                       button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newCollectionModal')
                         | New Collection
               .card-body
                 if collections && collections.length > 0
-                  table.table.table-hover
+                  table#collectionsTable.table.table-hover
                     thead
                       tr
+                        th(style='width:30px')
                         th(style='width:60px') Icon
                         th Name
                         th Slug
                         th Doors
                         th Status
                         th(style='width:140px') Actions
-                    tbody
+                    tbody#sortableCollections
                       for col in collections
-                        tr
+                        tr(data-id=col.id)
+                          td.drag-handle(style='cursor:grab; text-align:center; color:#888')
+                            i.bi.bi-grip-vertical
                           td
                             if col.icon_url
                               img(src=col.icon_url style='max-height:32px; max-width:32px')
@@ -227,4 +233,74 @@ block content
           editModal.show();
         });
       });
+
+      // ---- Drag-to-reorder collections ----
+      var tbody = document.getElementById('sortableCollections');
+      var saveBtn = document.getElementById('saveOrderBtn');
+      var dragRow = null;
+      var orderChanged = false;
+
+      if (tbody) {
+        tbody.addEventListener('dragstart', function(e) {
+          var tr = e.target.closest('tr');
+          if (!tr) return;
+          dragRow = tr;
+          tr.style.opacity = '0.4';
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        tbody.addEventListener('dragend', function(e) {
+          var tr = e.target.closest('tr');
+          if (tr) tr.style.opacity = '';
+          dragRow = null;
+          tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; r.style.borderBottom = ''; });
+        });
+        tbody.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          var tr = e.target.closest('tr');
+          if (!tr || tr === dragRow) return;
+          tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; r.style.borderBottom = ''; });
+          var rect = tr.getBoundingClientRect();
+          if (e.clientY < rect.top + rect.height / 2) {
+            tr.style.borderTop = '2px solid #f0ad4e';
+          } else {
+            tr.style.borderBottom = '2px solid #f0ad4e';
+          }
+        });
+        tbody.addEventListener('drop', function(e) {
+          e.preventDefault();
+          var tr = e.target.closest('tr');
+          if (!tr || !dragRow || tr === dragRow) return;
+          var rect = tr.getBoundingClientRect();
+          if (e.clientY < rect.top + rect.height / 2) {
+            tbody.insertBefore(dragRow, tr);
+          } else {
+            tbody.insertBefore(dragRow, tr.nextSibling);
+          }
+          orderChanged = true;
+          if (saveBtn) saveBtn.style.display = 'inline-block';
+          tbody.querySelectorAll('tr').forEach(function(r) { r.style.borderTop = ''; r.style.borderBottom = ''; });
+        });
+        tbody.querySelectorAll('tr').forEach(function(tr) { tr.setAttribute('draggable', 'true'); });
+      }
+
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+          if (!orderChanged) return;
+          var ids = [];
+          tbody.querySelectorAll('tr').forEach(function(r) { ids.push(parseInt(r.dataset.id)); });
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+          fetch('/admin/doorCollections/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+          }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.status) { saveBtn.style.display = 'none'; orderChanged = false; }
+          }).finally(function() {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-arrow-down-up"></i> Save Order';
+          });
+        });
+      }
     });
