@@ -2431,12 +2431,17 @@ router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 	// Model returns the new id as `doorId`; older code here checked
 	// `result.insertId` and silently skipped collection assignment.
 	if (result.status && result.doorId) {
-		// Sync collection membership
+		// Sync collection membership -- append to end of each collection
 		var collIds = req.body.collections;
 		if (typeof collIds === 'string') collIds = [collIds];
 		if (Array.isArray(collIds)) {
 			for (var cid of collIds) {
-				await doorCollections.addDoorToCollection(parseInt(cid), result.doorId);
+				var nextSort = 0;
+				try {
+					var existing = await doorCollections.getAllDoorsInCollection(parseInt(cid));
+					nextSort = Math.max(0, ...(existing || []).map(e => parseInt(e.collection_sort) || 0)) + 1;
+				} catch (_) {}
+				await doorCollections.addDoorToCollection(parseInt(cid), result.doorId, nextSort);
 			}
 		}
 		res.redirect('/admin/doors');
@@ -2474,17 +2479,36 @@ router.post('/doors/:id/update', urlencodedParser, requireAdmin, async (req, res
 		alogger.writeAlog(3, "updateDoor failed for id " + doorId + ": " + result.errormessages.join(", "), "redbright");
 	}
 
-	// Sync collection membership: remove all, re-add selected
+	// Sync collection membership via diff, NOT remove-all-and-re-add.
+	// Collections the door is already in keep their existing sort_order
+	// (which the sysop may have set via drag-to-reorder on the collection
+	// page). Only newly-selected collections get a new entry, and only
+	// deselected collections get removed. New entries go to the end of
+	// their collection (sort_order = max + 1) so they don't stomp on
+	// existing ordering.
 	var currentColls = await doorCollections.getCollectionsForDoor(doorId);
+	var currentIds   = new Set(currentColls.map(c => c.id));
+
+	var rawSelected = req.body.collections;
+	if (typeof rawSelected === 'string') rawSelected = [rawSelected];
+	var selectedIds  = new Set((rawSelected || []).map(v => parseInt(v)).filter(n => !isNaN(n)));
+
+	// Remove collections the door is no longer in
 	for (var cc of currentColls) {
-		await doorCollections.removeDoorFromCollection(cc.id, doorId);
-	}
-	var collIds = req.body.collections;
-	if (typeof collIds === 'string') collIds = [collIds];
-	if (Array.isArray(collIds)) {
-		for (var cid of collIds) {
-			await doorCollections.addDoorToCollection(parseInt(cid), doorId);
+		if (!selectedIds.has(cc.id)) {
+			await doorCollections.removeDoorFromCollection(cc.id, doorId);
 		}
+	}
+
+	// Add collections the door wasn't in yet; append to end of each
+	for (var selId of selectedIds) {
+		if (currentIds.has(selId)) continue;
+		var nextSort = 0;
+		try {
+			var existing = await doorCollections.getAllDoorsInCollection(selId);
+			nextSort = Math.max(0, ...(existing || []).map(e => parseInt(e.collection_sort) || 0)) + 1;
+		} catch (_) {}
+		await doorCollections.addDoorToCollection(selId, doorId, nextSort);
 	}
 
 	res.redirect('/admin/doors');
@@ -2506,7 +2530,14 @@ router.post('/doors/:id/duplicate', urlencodedParser, requireAdmin, async (req, 
 		try {
 			var srcCollections = await doorCollections.getCollectionsForDoor(srcId);
 			for (var coll of (srcCollections || [])) {
-				await doorCollections.addDoorToCollection(coll.id, dup.doorId);
+				// Append to end of the collection so duplicates don't jump
+				// ahead of the original's place in any sysop-set ordering.
+				var nextSort = 0;
+				try {
+					var existing = await doorCollections.getAllDoorsInCollection(coll.id);
+					nextSort = Math.max(0, ...(existing || []).map(e => parseInt(e.collection_sort) || 0)) + 1;
+				} catch (_) {}
+				await doorCollections.addDoorToCollection(coll.id, dup.doorId, nextSort);
 			}
 		} catch (err) {
 			alogger.writeAlog(3, 'duplicateDoor: collection copy failed for door ' + srcId + ': ' + err.message, 'yellow');
