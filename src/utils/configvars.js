@@ -106,7 +106,17 @@ var MAX_SUBSTITUTE_DEPTH = 8;
 
 function substitute(template, call, doorConfig, _depth) {
 	if (!template || typeof template !== 'string') return template || '';
-	if (template.indexOf('%') === -1) return template;  // fast path
+
+	// Fast path: no %X tokens. Still handle ~/ expansion because the
+	// slow path's tilde pass at the end of this function would otherwise
+	// be skipped, leaving a chdir-unfriendly ~/foo in paths that have no
+	// other tokens (e.g. doorConfig.doorDir = "~/doors/mygame").
+	if (template.indexOf('%') === -1) {
+		if (template.startsWith('~/') && process.env.HOME) {
+			return process.env.HOME + template.substring(1);
+		}
+		return template;
+	}
 
 	var depth = _depth || 0;
 	var map = _getTokenMap();

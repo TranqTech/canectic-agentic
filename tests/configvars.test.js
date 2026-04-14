@@ -364,3 +364,50 @@ describe('getVariableList', function () {
 		assert.ok(tokens.includes('%D'));
 	});
 });
+
+describe('configvars.substitute ~/ expansion', function () {
+	it('expands leading ~/ to $HOME when template has no %X tokens (fast path)', function () {
+		// Regression: the fast-path early return skipped ~/ expansion, so
+		// a door directory like "~/doors/mygame" was handed to node-pty
+		// verbatim and chdir() failed with ENOENT while a dropfile path
+		// like "%D" (forcing the slow path) resolved correctly.
+		var origHome = process.env.HOME;
+		process.env.HOME = '/home/testuser';
+		try {
+			assert.strictEqual(
+				substitute('~/doors/mygame'),
+				'/home/testuser/doors/mygame'
+			);
+		} finally {
+			process.env.HOME = origHome;
+		}
+	});
+
+	it('expands leading ~/ on the slow path too', function () {
+		var origHome = process.env.HOME;
+		process.env.HOME = '/home/testuser';
+		try {
+			// %D resolves to doorConfig.doorDir ("~/doors/mygame"),
+			// then the slow path expands ~/ at the end.
+			assert.strictEqual(
+				substitute('%D', makeCall(), { doorDir: '~/doors/mygame' }),
+				'/home/testuser/doors/mygame'
+			);
+		} finally {
+			process.env.HOME = origHome;
+		}
+	});
+
+	it('does not expand ~/ when it is not at the start', function () {
+		var origHome = process.env.HOME;
+		process.env.HOME = '/home/testuser';
+		try {
+			assert.strictEqual(
+				substitute('/tmp/~/foo'),
+				'/tmp/~/foo'
+			);
+		} finally {
+			process.env.HOME = origHome;
+		}
+	});
+});
