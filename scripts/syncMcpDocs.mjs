@@ -151,6 +151,7 @@ var TOPIC_TAGS = {
     'API.md':                       ['api', 'authentication'],
     'MAIL.md':                      ['mail', 'smtp', 'imap'],
     'TEMPLATES.md':                 ['templates', 'notifications'],
+    'NETMAIL_ROUTES.md':            ['netmail', 'ftn', 'routing', 'configuration'],
     'CHANGELOG.md':                 ['changelog']
 };
 
