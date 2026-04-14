@@ -23,6 +23,20 @@ const LAUNCH_TYPES = {
 	DOSEMU_PTY:     "DosemuPty",
 };
 
+// Quote a string for safe inclusion in a /bin/sh command line.
+// Used when appending doorArgs to NativeShell's runCmd so args with
+// spaces or shell metacharacters are preserved. Single-quotes are the
+// safe default in POSIX sh; the only thing that can't appear inside
+// single quotes is a single quote itself, so we close-reopen around any.
+function _shQuote(s) {
+	if (s === null || s === undefined) return "''";
+	var str = String(s);
+	if (str === '') return "''";
+	// Safe identifier characters pass through unquoted for readability in logs
+	if (/^[A-Za-z0-9_./=:+,@%-]+$/.test(str)) return str;
+	return "'" + str.replace(/'/g, "'\\''") + "'";
+}
+
 class DoorRunner extends BaseHandler {
 	constructor(call, doorConfig, socatManager) {
 		super(call, "DoorRunner");
@@ -286,14 +300,23 @@ class DoorRunner extends BaseHandler {
 	}
 
 	_launchNativeShell() {
+		// Route through /bin/sh -c so the sysop's command line is parsed
+		// naturally (args, quoted strings, env var refs all work). node-pty
+		// would otherwise treat the whole `runCmd` as a literal executable
+		// filename -- "./USURPER /N1" fails execvp because that's not a
+		// real path. Matches NativeCommand's exec() behaviour but PTY-wrapped.
 		var runCmd = this.doorCmd;
+		// Append any doorArgs (admin-configured arg list) so /bin/sh parses them
+		if (Array.isArray(this.doorArgs) && this.doorArgs.length > 0) {
+			runCmd = runCmd + ' ' + this.doorArgs.map(_shQuote).join(' ');
+		}
 		var logmsg = this.loggingId + "\n  Launching NativeShell: " + runCmd + "\n  cwd: " + this.doorDir;
 		alogger.writeAlog(4, logmsg, "greenbright");
 
 		this._setupOutputParser();
 
 		try {
-			this._ptySocket = pty.spawn(runCmd, [], {
+			this._ptySocket = pty.spawn('/bin/sh', ['-c', runCmd], {
 				name: 'xterm-color',
 				cols: this.call.term_width || 80,
 				rows: this.call.term_height || 25,
