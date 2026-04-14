@@ -251,6 +251,8 @@ Accept connection → M_NUL (capabilities) → M_ADR (our addresses)
 - Data frames carry file content. Command frames carry control. They share the same stream — the command flag bit in the header distinguishes them.
 - Resume support via M_GET with a byte offset.
 - Passwords are plaintext in basic mode, CRAM-MD5 in MD5 mode (answerer sends a challenge in M_NUL, caller responds with a hash in M_PWD).
+- Per FTS-1026, command bodies MAY be NUL-terminated. `_handleCommand()` strips trailing NULs at payload extraction so string comparisons (M_PWD, M_ADR matching) don't silently fail on an invisible byte. Observed with Argus — their M_PWD bodies end in `\0` and JS `.trim()` doesn't touch NULs, so a correct password compared unequal before the fix.
+- **Force-plaintext toggle**: `connection_data.force_plain_password` (boolean) on an FTN peer connection makes the caller send plaintext M_PWD even when the answerer offered CRAM-MD5. Escape hatch for peers whose CRAM-MD5 verifier rejects valid digests or whose passwords are asymmetric. Surfaced as a checkbox in the admin peer edit form. Diagnostic level-5 log line on caller-side password send includes the challenge, password length, and computed digest so sysops can reproduce the HMAC with `openssl dgst -md5 -mac HMAC` when chasing CRAM-MD5 mismatches.
 
 ### EMSI/Wazoo Protocol (`mailer/protocols/emsi.js`)
 
@@ -455,6 +457,27 @@ Key behaviors:
 - **Route resolution**: uses `ftnRouter.resolveRoute()` for the full 4-step cascade (direct peer, routing rule, nodelist direct, coordinator walk)
 
 BSO filename format: `NNNNNNNN.ext` where first 4 hex chars = net, last 4 = node, zone from directory.
+
+### Outbound Connect Backoff
+
+Repeated outbound connect failures to the same peer are gated by exponential backoff so a misconfigured or offline remote doesn't generate a failed poll every cycle. State lives in the peer's `connection_data` JSONB (no schema change):
+
+- `consecutive_failures` — bumped on each TCP-level or session-level failure, reset to 0 on a successful session (reason=complete)
+- `last_failure_at`, `last_failure_reason` — human-visible diagnostics
+- `next_allowed_poll_at` — backoff window expiry (ISO timestamp)
+- `last_success_at` — last clean session
+
+Formula: `delay = min(poll_interval * 2^(failures - 1), cap) minutes` with ±10% jitter, cap configurable via `mailer_backoff_max_hours` (default 24h). So with a 60-minute base: fail 1 → ~1h, fail 2 → ~2h, fail 3 → ~4h, … capped at 24h.
+
+Failure is recorded in two places:
+- `MailerManager._connectToPeer()` `transport.once('error')` — pre-session failures (TCP refused, DNS, timeout)
+- `MailerManager._createSession()` `session.on('sessionEnd')` — post-handshake failures (`auth failed`, `connection closed unexpectedly`, etc.). Inbound answerer sessions are excluded from this tracking since they don't affect the outbound schedule.
+
+Success clears the counter immediately. `pollConnection()` checks `isInBackoff()` before connecting and skips scheduled polls during the backoff window. `triggerPoll()` (admin manual) bypasses the guard so a sysop can force a retry. Admin peer detail view shows current failure count, next allowed time, last reason, and a Reset button.
+
+Config: `mailer_backoff_enabled` (default `true`) to toggle globally, `mailer_backoff_max_hours` for the cap.
+
+Model helpers: `peerConnections.recordConnectFailure`, `recordConnectSuccess`, `resetBackoff`, `isInBackoff`, `computeBackoffDelayMs`. JSONB writes use `jsonb_set` so concurrent updates don't clobber sysop config edits on the same row.
 
 ### Connection Deduplication
 

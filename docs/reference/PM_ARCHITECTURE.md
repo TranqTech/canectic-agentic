@@ -381,7 +381,7 @@ Returns `{ resolved, userId, username, reason }`.
 
 ## Dupe Checking
 
-`deliverMessage()` checks for duplicates before inserting into `pm_inbox`:
+`deliverMessage()` checks for duplicates before inserting into `pm_inbox` — but only when the caller supplied a `msg_id`:
 
 ```sql
 SELECT id FROM pm_inbox
@@ -390,6 +390,12 @@ WHERE msg_id = $1 AND transport_type = $2 AND user_id = $3
 ```
 
 Subject and body length are included because some FTN implementations (notably SBBSecho areafix) reuse the same MSGID across multiple distinct response messages (split replies, related responses). The five-field check prevents false dupe rejection while still catching true duplicates.
+
+### msg_id fallback convention
+
+`deliverMessage()` generates a UUID fallback (`uuidv4()`) for `msg_id` when the caller doesn't supply one. Callers that provide `msg_id` (FTN/QWK/NNTP/EMAIL import paths) still go through dupe checking against their supplied id; callers that don't (system notification paths like `notifySysops`, template-event delivery, bounce stubs) get a unique synthetic UUID per row, skip dupe checking (still gated by `if (messageObj.msg_id)`), and end up with a non-null `msg_id` column.
+
+Non-null `msg_id` matters for IMAP clients that filter or hide messages lacking a meaningful `Message-ID` header (synthetic or otherwise). The fallback matches what `queueMessage()` has always done for user-to-user PMs, so every `pm_inbox` row carries a non-null `msg_id` regardless of delivery path.
 
 ---
 

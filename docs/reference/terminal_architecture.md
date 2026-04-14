@@ -406,14 +406,16 @@ Extends `BaseHandler`. Manages the full lifecycle of launching an external door 
 
 | Type | Admin Label | Method | I/O | Use Case |
 |------|-------------|--------|-----|----------|
-| `NativeShell` | Native (PTY) | `node-pty` spawn | PTY | Interactive native doors that need a terminal (curses, ncurses) |
+| `NativeShell` | Native (PTY) | `node-pty` spawn via `/bin/sh -c` | PTY | Interactive native doors that need a terminal (curses, ncurses) |
 | `NativeCommand` | Native Commands | `child_process.exec` | stdin/stdout pipe | Simple native commands, scripts, non-interactive tools |
 | `Dosemu` | Dosemu (Console Only) | `exec("dosemu ...")` | stdin/stdout pipe | DOS sysop utilities, non-interactive tools |
 | `DosemuPty` | Dosemu (Full) | socat + SerialPort + exec | Virtual serial pair | DOS door games (recommended for all interactive DOS doors) |
 
 Legacy DB values `ExecNative` and `SpawnNative` are mapped to `NativeCommand` at read time.
 
-**Working directory**: All native launch types (`NativeShell`, `NativeCommand`) set `cwd` to the door's configured directory (`doorDir` with `%X` substitution). Falls back to the global `doordir` config, then `process.cwd()`. The command field (`cmd`) is resolved relative to this directory by the shell/PTY.
+**NativeShell argument parsing**: `NativeShell` launches via `pty.spawn('/bin/sh', ['-c', runCmd], opts)` rather than handing the command string directly to `pty.spawn`. `node-pty` treats the first argument as a literal executable path with no shell parsing, so a configured `cmd` of `./USURPER /N1` would fail `execvp(3)` as a single filename. The `/bin/sh -c` wrapper gives the sysop full shell parsing (args, quoted strings, env-var refs) matching what `NativeCommand`'s `exec()` already does. Admin-configured `doorArgs` (separate array field) are POSIX-quoted and appended to the `runCmd` so args containing spaces survive.
+
+**Working directory**: All native launch types (`NativeShell`, `NativeCommand`) set `cwd` to the door's configured directory (`doorDir` with `%X` substitution). Falls back to the global `doordir` config, then `process.cwd()`. `substitute()` handles `~/` expansion on both the fast path (no `%X` tokens) and slow path, so `~/doors/mygame` expands to `$HOME/doors/mygame` consistently -- earlier versions only expanded on the slow path which caused `chdir(2)` failures when tildes appeared in the raw `doorDir`.
 
 **Dropfile types**: `DOOR.SYS`, `DOOR32.SYS`, `DORINFO.DEF`, `CHAIN.TXT`, `CALLINFO.BBS`, `PCBOARD.SYS`. Created by `dropfile_handler.js` before door launch. Written to the configured `dropfileDir` (or `doorDir` if not set). Supports `usereal_local` / `usereal_doorsession` flags for real name vs handle.
 
@@ -761,6 +763,8 @@ Pointers advance as the user views messages, not on exit. This ensures progress 
 | Mark area read (hotkey) | M key in thread list | `markAreaRead(userId, shortcode)` |
 
 Both pointer functions use `GREATEST()` — they only move forward, so re-viewing an older message is harmless.
+
+`advanceThreadPointer()` only updates the per-thread pointer; it does NOT advance the area-level floor (earlier versions did, which caused viewing one thread to mark every older thread with a lower max-id as read). After the per-thread upsert the function runs floor consolidation: find the lowest unread message across all threads in the area, and if that boundary is above the current area pointer, advance the floor to `first_unread - 1` and prune `user_thread_pointers` rows that are now below it. When every thread is fully read, the floor jumps to the area's max id and all thread pointer rows for that user are deleted. This prevents `user_thread_pointers` from growing unbounded for users who read exclusively in threaded mode.
 
 #### Thread Navigation (] and [)
 
