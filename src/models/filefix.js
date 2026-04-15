@@ -128,7 +128,7 @@ async function _authenticate(fromAddress, password) {
 
 function _parseCommands(bodyText) {
 	var commands = [];
-	var lines = bodyText.split(/\r?\n/);
+	var lines = bodyText.split(/\r\n|\r|\n/);
 
 	for (var line of lines) {
 		var trimmed = line.trim();
