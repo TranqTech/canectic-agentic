@@ -122,6 +122,7 @@ block content
                         button.btn.btn-xs.btn-sm.btn-primary.replybtn.ms-2.flex-shrink-0(
                           data-bs-msgposter=message.from_user
                           data-bs-msgid=message.msg_id
+                          data-bs-msgorigaddr=message.msg_orig_addr || ''
                           data-bs-subject=message.subject
                           data-bs-threaduuid=message.thread_uuid || ''
                         ) Reply
@@ -416,6 +417,7 @@ block content
               ? '<button class="btn btn-xs btn-sm btn-primary replybtn ms-2 flex-shrink-0"'
               +   ' data-bs-msgposter="' + escapeHtml(msg.from_user || '') + '"'
               +   ' data-bs-msgid="' + escapeHtml(msg.msg_id || '') + '"'
+              +   ' data-bs-msgorigaddr="' + escapeHtml(msg.msg_orig_addr || '') + '"'
               +   ' data-bs-subject="' + escapeHtml(msg.subject || '') + '"'
               +   ' data-bs-threaduuid="' + (msg.thread_uuid || '') + '"'
               + '>Reply</button>'
@@ -651,7 +653,9 @@ block content
             replyForm.action = '/messages/area/' + shortcode + '/thread/' + threaduuid + '/reply';
           }
           document.getElementById('r_to').value      = btn.dataset.bsMsgposter || 'All';
-          document.getElementById('r_reply_to').value = btn.dataset.bsMsgid || '';
+          var bsMsgid  = btn.dataset.bsMsgid || '';
+          var bsMsgAddr = btn.dataset.bsMsgorigaddr || '';
+          document.getElementById('r_reply_to').value = bsMsgAddr && bsMsgid ? (bsMsgAddr + ' ' + bsMsgid) : bsMsgid;
           var subj = btn.dataset.bsSubject || '';
           if (subj && !subj.toUpperCase().startsWith('RE:')) subj = 'Re: ' + subj;
           document.getElementById('r_subject').value  = subj;

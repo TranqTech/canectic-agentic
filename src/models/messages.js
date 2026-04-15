@@ -256,7 +256,7 @@ async function getMessagesForThread(shortcode, threadid) {
 	var shorty = shortcode.toLowerCase();
 	var msgtablename = "mb_" + shorty + "_msgs";
 	var msglist = await postgres.query(
-		"SELECT optional_attributes, msg_id, from_user, to_user, system_time, subject, reply_to, id, uuid, body_text, utf8, body_html FROM " +
+		"SELECT optional_attributes, msg_id, msg_orig_addr, from_user, to_user, system_time, subject, reply_to, reply_orig_addr, id, uuid, body_text, utf8, body_html FROM " +
 		msgtablename + " WHERE thread_id = $1 ORDER BY system_time ASC",
 		[threadid]
 	);
@@ -293,7 +293,7 @@ async function getMessagesForArea(shortcode, options) {
 	order = (order.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
 
 	var msglist = await postgres.query(
-		"SELECT optional_attributes, msg_id, from_user, to_user, system_time, subject, reply_to, thread_id, id, uuid, body_text, utf8, body_html " +
+		"SELECT optional_attributes, msg_id, msg_orig_addr, from_user, to_user, system_time, subject, reply_to, reply_orig_addr, thread_id, id, uuid, body_text, utf8, body_html " +
 		"FROM " + msgtablename + " ORDER BY system_time " + order + " LIMIT $1 OFFSET $2",
 		[limit, offset]
 	);
@@ -420,7 +420,7 @@ async function getMessages(shortcode, options) {
 	}
 
 	var queryText =
-		"SELECT optional_attributes, msg_id, from_user, to_user, system_time, subject, reply_to, thread_id, id, uuid, body_text, utf8, body_html " +
+		"SELECT optional_attributes, msg_id, msg_orig_addr, from_user, to_user, system_time, subject, reply_to, reply_orig_addr, thread_id, id, uuid, body_text, utf8, body_html " +
 		"FROM " + msgtablename + whereClause +
 		" ORDER BY id " + order +
 		" LIMIT " + limitParam + offsetParam;

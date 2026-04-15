@@ -2,6 +2,7 @@ import { BaseSubModule } from "../basesubmodule.js";
 import { saveMessage } from "../../models/messages.js";
 import { getAreaByShortcode } from "../../models/msgAreas.js";
 import * as alogger from "../../utils/alogger.js";
+import { joinMsgidTuple } from "../../utils/ftnUtils.js";
 
 // --- Flag helpers ---
 
@@ -944,9 +945,13 @@ class msgEditor extends BaseSubModule {
 			body_text: bodyText,
 		};
 
-		// Set reply_to for FTN @REPLY kludge threading
+		// Set reply_to for FTN @REPLY kludge threading. Pass the full
+		// "address serial" tuple so replyToThread can split it into
+		// reply_to + reply_orig_addr -- passing just the serial loses
+		// the parent's origin address and the outbound @REPLY kludge
+		// ends up missing the address half.
 		if (this._mode === "reply" && this._replyToMsg && this._replyToMsg.msg_id) {
-			formObj.reply_to = this._replyToMsg.msg_id;
+			formObj.reply_to = joinMsgidTuple(this._replyToMsg.msg_orig_addr, this._replyToMsg.msg_id);
 		}
 
 		try {
