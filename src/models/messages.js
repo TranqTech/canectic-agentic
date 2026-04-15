@@ -659,11 +659,28 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 
 	var threadid  = dbthread.threadid;
 	var thread_id = dbthread.id;
-	// formObj.reply_to is a full "address serial" MSGID (from the parent
-	// message's threadid or from an explicit form field); fall back to
-	// the thread root's threadid if not set. Split into tuple for storage.
-	var replytoFull = formObj.reply_to || dbthread.threadid;
-	var replyTupled = ftnUtils.splitFullMsgid(replytoFull);
+
+	// Resolve the parent MSGID tuple (reply_to + reply_orig_addr) from the
+	// authoritative DB row, not from a client-supplied "ADDR SERIAL" string.
+	// Caller should pass formObj.reply_to_uuid (the parent message's DB uuid);
+	// we look up and split msg_id / msg_orig_addr directly.
+	// Fall back to the thread root's threadid (full "ADDR SERIAL") if no
+	// parent uuid was supplied -- happens for first-reply-to-root from
+	// callers that don't know the root msg uuid.
+	var replyTupled = { msg_id: '', msg_orig_addr: '' };
+	if (formObj.reply_to_uuid) {
+		var parentRow = await postgres.queryOne(
+			"SELECT msg_id, msg_orig_addr FROM " + msgtable + " WHERE uuid = $1 AND thread_id = $2",
+			[formObj.reply_to_uuid, thread_id]
+		);
+		if (parentRow) {
+			replyTupled.msg_id         = parentRow.msg_id || '';
+			replyTupled.msg_orig_addr  = parentRow.msg_orig_addr || '';
+		}
+	}
+	if (!replyTupled.msg_id) {
+		replyTupled = ftnUtils.splitFullMsgid(dbthread.threadid);
+	}
 
 	var addrInfo = await resolveAreaAddress(area.id);
 

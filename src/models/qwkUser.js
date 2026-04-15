@@ -775,7 +775,8 @@ async function importRepMessage(user, msg, area) {
 		}
 
 		if (thread) {
-			formObj.reply_to = thread.threadid;
+			// No parent message uuid available from the REP — replyToThread
+			// falls back to the thread root's threadid for the @REPLY tuple.
 			var result = await messages.replyToThread(formObj, area.shortcode, thread.uuid);
 			if (result.status) return { status: true };
 			return { status: false, error: result.errormessages.join(', ') };

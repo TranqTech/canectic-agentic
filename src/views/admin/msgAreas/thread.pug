@@ -64,7 +64,7 @@ block content
                               =message.to_user
                           .col-4
                             .text-end
-                              button.btn.btn-sm.btn-primary.replybtn(data-bs-msgposter=message.from_user data-bs-msgid=message.msg_id data-bs-subject=message.subject)
+                              button.btn.btn-sm.btn-primary.replybtn(data-bs-msgposter=message.from_user data-bs-msguuid=message.uuid data-bs-subject=message.subject)
                                 |Reply
 
                       .card-body
@@ -194,8 +194,8 @@ block content
                     )
                     input(
                       type="hidden"
-                      id="reply_to"
-                      name="reply_to"
+                      id="reply_to_uuid"
+                      name="reply_to_uuid"
                       class="form-control"
                       required
                     )
@@ -253,7 +253,7 @@ block content
       const replybuttons = document.querySelectorAll(".replybtn");
       const replyModal = new bootstrap.Modal(document.getElementById('replyThreadModal'));
       const replyToUser = document.getElementById('to_user');
-      const replyToMsg = document.getElementById('reply_to');
+      const replyToMsg = document.getElementById('reply_to_uuid');
       const subjectfield = document.getElementById('subject');
 
 
@@ -261,8 +261,8 @@ block content
         button.addEventListener('click', function() {
           const msgposter = this.getAttribute('data-bs-msgposter')
           const msgsubject = this.getAttribute('data-bs-subject')
-          const msgid = this.getAttribute('data-bs-msgid')
-          replyToMsg.value = msgid
+          const msguuid = this.getAttribute('data-bs-msguuid')
+          replyToMsg.value = msguuid
           replyToUser.value = msgposter
           subjectfield.value = "Re: " + msgsubject
           replyModal.show();
