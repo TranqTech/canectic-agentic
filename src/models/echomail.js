@@ -16,6 +16,22 @@ import * as alogger from "../utils/alogger.js";
 
 const maxOutbound = 1000;
 
+function toIntOrNull(v) {
+	if (v === null || v === undefined || v === '') return null;
+	var n = parseInt(v, 10);
+	return Number.isFinite(n) ? n : null;
+}
+
+// Extract the zone (left of ':') from a "zone:net/node" address string,
+// falling back to a supplied integer when the string is missing/malformed.
+function parseAddrPart(addrStr, intFallback) {
+	if (addrStr && typeof addrStr === 'string' && addrStr.indexOf(':') > 0) {
+		var n = parseInt(addrStr.split(':')[0], 10);
+		if (Number.isFinite(n)) return n;
+	}
+	return toIntOrNull(intFallback);
+}
+
 async function ftnToDb(ftnMessage) {
 	var currtime   = new Date();
 	var systemTime = await ftnUtils.getSystemTime(ftnMessage.DateTime, ftnMessage.TZUTC);
@@ -28,6 +44,13 @@ async function ftnToDb(ftnMessage) {
 	var msgidSplit = ftnUtils.splitFullMsgid(ftnMessage.MsgId);
 	var replySplit = ftnUtils.splitFullMsgid(ftnMessage.ReplyTo);
 
+	// Parse zone from the Source/Destination address strings; fall back to
+	// the integer Source/DestinationZone fields when the strings are absent
+	// (e.g. bad-echomail recovery rebuilds a partial message object). Always
+	// use null instead of "" so integer columns don't barf on empty strings.
+	var srcZone  = parseAddrPart(ftnMessage.Source,      ftnMessage.SourceZone);
+	var destZone = parseAddrPart(ftnMessage.Destination, ftnMessage.DestinationZone);
+
 	var dbObj = {
 		user_id: 0,
 		uuid: uuid,
@@ -37,15 +60,15 @@ async function ftnToDb(ftnMessage) {
 		reply_orig_addr: replySplit.msg_orig_addr,
 		tosser_id: ftnMessage.TosserId,
 		optional_attributes: ftnMessage.OptionalAttributes,
-		source: ftnMessage.Source,
+		source: ftnMessage.Source || null,
 		domain: "",
-		destination: ftnMessage.Destination,
-		source_zone: ftnMessage.Source ? ftnMessage.Source.split(":")[0] : "",
-		source_net: ftnMessage.SourceNet,
-		source_node: ftnMessage.SourceNode,
-		destination_zone: ftnMessage.Destination ? ftnMessage.Destination.split(":")[0] : "",
-		destination_net: ftnMessage.DestinationNet,
-		destination_node: ftnMessage.DestinationNode,
+		destination: ftnMessage.Destination || null,
+		source_zone: srcZone,
+		source_net: toIntOrNull(ftnMessage.SourceNet),
+		source_node: toIntOrNull(ftnMessage.SourceNode),
+		destination_zone: destZone,
+		destination_net: toIntOrNull(ftnMessage.DestinationNet),
+		destination_node: toIntOrNull(ftnMessage.DestinationNode),
 		to_user: ftnMessage.ToUser,
 		from_user: ftnMessage.FromUser,
 		subject: ftnMessage.Subject     ? ftnMessage.Subject.replace(/\x00/g, '').trim() : "",

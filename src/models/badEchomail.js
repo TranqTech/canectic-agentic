@@ -8,6 +8,22 @@
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 
+// Parse a "zone:net/node" FTN address into Zone/Net/Node integers on target,
+// under the given prefix ('Source' or 'Destination'). Invalid parts are left
+// untouched.
+function parseFtnAddressInto(addr, target, prefix) {
+	if (!addr || typeof addr !== 'string') return;
+	var colon = addr.indexOf(':');
+	var slash = addr.indexOf('/');
+	if (colon <= 0 || slash <= colon) return;
+	var zone = parseInt(addr.substring(0, colon), 10);
+	var net  = parseInt(addr.substring(colon + 1, slash), 10);
+	var node = parseInt(addr.substring(slash + 1).split('.')[0], 10);
+	if (Number.isFinite(zone)) target[prefix + 'Zone'] = zone;
+	if (Number.isFinite(net))  target[prefix + 'Net']  = net;
+	if (Number.isFinite(node)) target[prefix + 'Node'] = node;
+}
+
 // ---------------------------------------------------------------------------
 // Store a bad echomail message and update the tag tracker
 // ---------------------------------------------------------------------------
@@ -32,6 +48,7 @@ async function storeBadMessage(message, connectionInfo) {
 		path:                       message.Path || '',
 		kludges:                    JSON.stringify(message.OptionalAttributes || []),
 		source_address:             message.Source || message.SourceAddress || ((message.SourceZone || '') + ':' + (message.SourceNet || '') + '/' + (message.SourceNode || '')) || '',
+		destination_address:        message.Destination || message.DestinationAddress || ((message.DestinationZone || '') + ':' + (message.DestinationNet || '') + '/' + (message.DestinationNode || '')) || '',
 		received_from_address:      connInfo.address || '',
 		received_from_connection_id: connInfo.connectionId || null,
 		datetime:                   message.DateTime || '',
@@ -133,20 +150,14 @@ async function recoverMessages(areatag, messagesModule) {
 			Path: msg.path,
 			DateTime: msg.datetime,
 			OptionalAttributes: kludges,
+			Source: msg.source_address || null,
+			Destination: msg.destination_address || null,
 			SourceZone: 0, SourceNet: 0, SourceNode: 0,
 			DestinationZone: 0, DestinationNet: 0, DestinationNode: 0
 		};
 
-		// Parse source address back
-		if (msg.source_address) {
-			var parts = msg.source_address.split(':');
-			if (parts.length === 2) {
-				ftnMsg.SourceZone = parseInt(parts[0]) || 0;
-				var nn = parts[1].split('/');
-				ftnMsg.SourceNet = parseInt(nn[0]) || 0;
-				ftnMsg.SourceNode = parseInt(nn[1]) || 0;
-			}
-		}
+		parseFtnAddressInto(msg.source_address, ftnMsg, 'Source');
+		parseFtnAddressInto(msg.destination_address, ftnMsg, 'Destination');
 
 		var result = await messagesModule.handleInboundEchoMessage(ftnMsg);
 		if (result.status) {
