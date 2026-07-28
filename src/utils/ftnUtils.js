@@ -419,41 +419,60 @@ function getMonthNumberFromDate(monthAbbreviation) {
 }
 
 async function getSystemTime(dtstring, TZString){
-	var stString = ""
-	var dtarray = dtstring.split(" ")
-	var yearstring = "20"
-	if (parseInt(dtarray[2]) > 80){
-		yearstring = "19"
+	// FTS-0001 DateTime is "DD MMM YY  HH:MM:SS" (two spaces before time).
+	// Malformed or missing dates from ancient/broken tossers must not abort
+	// the whole packet — fall back to current time (long-standing FTN
+	// practice) so the message imports with a slightly wrong timestamp
+	// instead of poisoning the toss with an Invalid Date that Postgres
+	// then rejects as "0NaN-NaN-NaN...".
+	if (!dtstring || typeof dtstring !== 'string') {
+		return new Date();
 	}
-	yearstring += dtarray[2]
-	var monthnum = getMonthNumberFromDate(dtarray[1])
-	stString += yearstring + "-" + monthnum + "-" + dtarray[0] + "T" + dtarray[4] + ".000Z"
-	var systemTime = new Date(stString)
-	//console.log("Converting", systemTime, "With Offset", TZString)
-	if ((TZString)&&(TZString != "")){
+	var dtarray = dtstring.trim().split(/\s+/);
+	if (dtarray.length < 4) {
+		return new Date();
+	}
+	var day    = dtarray[0];
+	var mon    = dtarray[1];
+	var yy     = dtarray[2];
+	var hms    = dtarray[3];  // trim+split(/\s+/) collapses the double space
+	var yyInt  = parseInt(yy, 10);
+	if (!/^\d{1,2}$/.test(day) || !/^\d{1,2}:\d{2}:\d{2}$/.test(hms) || isNaN(yyInt)) {
+		return new Date();
+	}
+	var yearstring = (yyInt > 80 ? "19" : "20") + yy.padStart(2, '0');
+	var monthnum   = getMonthNumberFromDate(mon);
+	if (monthnum === 'NaN') {
+		return new Date();
+	}
+	var stString   = yearstring + "-" + monthnum + "-" + day.padStart(2, '0') + "T" + hms + ".000Z";
+	var systemTime = new Date(stString);
+	if (isNaN(systemTime.getTime())) {
+		return new Date();
+	}
+	if (TZString && TZString !== "" && /^[+-]?\d{4}$/.test(TZString)) {
 		//adjust systemtime for tzutc
-		var adjustmins = 0
-		var direction = "Subtract"
-		var hourstring = ""
-		var minutestring = ""
+		var direction = "Subtract";
+		var hourstring, minutestring;
 		if (TZString.startsWith("-")){
-			direction = "Add"
-			hourstring = TZString.substring(1,3)
-			minutestring = TZString.substring(3,5)
+			direction = "Add";
+			hourstring   = TZString.substring(1,3);
+			minutestring = TZString.substring(3,5);
 		}else{
-			hourstring = TZString.substring(0,2)
-			minutestring = TZString.substring(2,4)
+			var offset = TZString.startsWith("+") ? TZString.substring(1) : TZString;
+			hourstring   = offset.substring(0,2);
+			minutestring = offset.substring(2,4);
 		}
-		adjustmins += (parseInt(hourstring)*60)
-		adjustmins += (parseInt(minutestring))
-		if (direction == "Add"){
-			systemTime.setMinutes(systemTime.getMinutes() + adjustmins);
-		}else if (direction == "Subtract"){
-			systemTime.setMinutes(systemTime.getMinutes() - adjustmins);
-		}		
+		var adjustmins = (parseInt(hourstring, 10) * 60) + parseInt(minutestring, 10);
+		if (!isNaN(adjustmins)) {
+			if (direction == "Add"){
+				systemTime.setMinutes(systemTime.getMinutes() + adjustmins);
+			}else{
+				systemTime.setMinutes(systemTime.getMinutes() - adjustmins);
+			}
+		}
 	}
-	console.log(systemTime)
-	return systemTime
+	return systemTime;
 }
 
 export{
