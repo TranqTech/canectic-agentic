@@ -888,8 +888,7 @@ async function rollbackThread(threadtable, threadidStr) {
 // Subject-based thread matching
 // ---------------------------------------------------------------------------
 
-async function getExistingThreadBySubject(message, threadtable, subject, strippedre, maxAgeDays) {
-	var uselike  = !!strippedre;
+async function getExistingThreadBySubject(message, threadtable, subject, maxAgeDays) {
 	var currtime = new Date();
 	var existingthread;
 	var ageDays = maxAgeDays || 30;
@@ -902,15 +901,11 @@ async function getExistingThreadBySubject(message, threadtable, subject, strippe
 	var querytext;
 	if (moderntime >= currtime) {
 		// Current message
-		querytext = uselike
-			? "SELECT * FROM " + threadtable + " WHERE subject LIKE $1 AND last_message >= $2 ORDER BY last_message DESC"
-			: "SELECT * FROM " + threadtable + " WHERE subject = $1 AND last_message >= $2 ORDER BY last_message DESC";
+		querytext = "SELECT * FROM " + threadtable + " WHERE subject = $1 AND last_message >= $2 ORDER BY last_message DESC";
 		existingthread = await postgres.queryOne(querytext, [subject, starttime]);
 	} else {
 		// Archival message
-		querytext = uselike
-			? "SELECT * FROM " + threadtable + " WHERE subject LIKE $1 AND started_at >= $2 AND started_at <= $3 ORDER BY started_at DESC"
-			: "SELECT * FROM " + threadtable + " WHERE subject = $1 AND started_at >= $2 AND started_at <= $3 ORDER BY started_at DESC";
+		querytext = "SELECT * FROM " + threadtable + " WHERE subject = $1 AND started_at >= $2 AND started_at <= $3 ORDER BY started_at DESC";
 		existingthread = await postgres.queryOne(querytext, [subject, starttime, message.system_time]);
 	}
 
@@ -984,9 +979,9 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 	}
 	var subjectAgeDays = isReply ? 365 : 30;
 
-	existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, true, subjectAgeDays);
+	existingthread = await getExistingThreadBySubject(message, threadtable, checksubject, subjectAgeDays);
 	if (!existingthread && checksubject !== message.subject) {
-		existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, false, subjectAgeDays);
+		existingthread = await getExistingThreadBySubject(message, threadtable, message.subject, subjectAgeDays);
 	}
 
 	if (existingthread) {
@@ -1235,7 +1230,7 @@ async function mergeRecentThreads(shortcode) {
 		var starttime = new Date(thread.started_at);
 		starttime.setDate(starttime.getDate() - 30);
 
-		var querytext   = "SELECT * FROM " + threadtable + " WHERE subject LIKE $1 AND id != $2 AND last_message >= $3 ORDER BY last_message DESC";
+		var querytext   = "SELECT * FROM " + threadtable + " WHERE subject = $1 AND id != $2 AND last_message >= $3 ORDER BY last_message DESC";
 		var existingthread = await postgres.queryOne(querytext, [checksubject, thread.id, starttime]);
 		if (!existingthread && checksubject !== thread.subject) {
 			existingthread = await postgres.queryOne(querytext, [thread.subject, thread.id, starttime]);

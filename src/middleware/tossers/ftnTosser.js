@@ -105,6 +105,12 @@ async function getFileType(filePath) {
     	return null
     }
   } catch (error) {
+    // ENOENT is a benign race — another processor (ticTosser, wildcard router,
+    // parallel FTN toss job) moved the file out of inbound between our
+    // readdirSync and our readFile. Signal "gone" to the caller quietly.
+    if (error && error.code === 'ENOENT') {
+      return 'GONE';
+    }
     console.error('Error checking file type:', error);
     return false;
   }
@@ -178,6 +184,10 @@ async function FindAndExtractArchives(inboundDir){
 	for await (var file of filelist){
 		var filepath = inDir + "/" + file
 		var ftype = await getFileType(filepath)
+		if (ftype === 'GONE') {
+			// Another processor handled it between readdir and now — nothing to do.
+			continue;
+		}
 		if (ftype){
 			switch(ftype){
 				case "zip":
@@ -242,6 +252,10 @@ async function TossInbound(inboundDir){
 	for await (var file of filelist){
 		var filepath = inDir + "/" + file
 		var ftype = await getFileType(filepath)
+		if (ftype === 'GONE') {
+			// Another processor handled it between readdir and now — nothing to do.
+			continue;
+		}
 		if (ftype){
 			switch(ftype){
 				case "zip":
@@ -349,10 +363,16 @@ function ReadPkt(filepath) {
 	var buffer
 	let offset = 0;
 	try{
-		buffer = fs.readFileSync(filepath);		
+		buffer = fs.readFileSync(filepath);
 	}catch(error){
+		// ENOENT means the pkt was moved/processed by another job between when
+		// the caller scanned the inbound directory and now. Log at info and
+		// return null so the caller skips this file without aborting the toss.
+		if (error && error.code === 'ENOENT') {
+			alogger.writeClog(4, '[FTN] pkt vanished before read (concurrent processor): ' + path.basename(filepath), 'tosser', 'yellow');
+			return null;
+		}
 		throw new Error(`Failed to open pkt file: ${error.message}`);
-		return null
 	}
 	try{
 		const packet = new Packet();
