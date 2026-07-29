@@ -351,7 +351,9 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 
 	if (!tic.area) {
 		alogger.writeAlog(2, '[TIC] ' + ticFilename + ': missing Area field', 'redbright');
-		await moveToBad(ticFilePath, ticFilename, badDir);
+		// Try to move the attached file too if the TIC named one.
+		var orphanPath = tic.file ? path.join(inDir, tic.file) : null;
+		await moveToBad(ticFilePath, ticFilename, badDir, orphanPath, tic.file);
 		return 'error';
 	}
 
@@ -386,7 +388,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		if (expectedPw && tic.pw) {
 			if (expectedPw.toUpperCase() !== tic.pw.toUpperCase()) {
 				alogger.writeAlog(2, '[TIC] ' + ticFilename + ': TIC password mismatch from ' + tic.from, 'redbright');
-				await moveToBad(ticFilePath, ticFilename, badDir);
+				await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 				return 'error';
 			}
 		}
@@ -418,7 +420,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 
 	if (!areaMapping) {
 		alogger.writeAlog(2, '[TIC] ' + ticFilename + ': area tag ' + tic.area + ' not mapped to any file area', 'yellowbright');
-		await moveToBad(ticFilePath, ticFilename, badDir);
+		await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 		return 'skipped';
 	}
 
@@ -451,7 +453,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 				'[TIC] ' + ticFilename + ': CRC mismatch — TIC says ' + tic.crc +
 				', file is ' + hashes.crc32, 'redbright'
 			);
-			await moveToBad(ticFilePath, ticFilename, badDir);
+			await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 			return 'error';
 		}
 	}
@@ -909,15 +911,40 @@ async function moveToTossed(filePath, filename, tossedDir) {
 	}
 }
 
-async function moveToBad(filePath, filename, badDir) {
+async function moveToBad(filePath, filename, badDir, attachedFilePath, attachedFilename) {
 	try {
 		await fs.promises.rename(filePath, path.join(badDir, filename));
 	} catch (err) {
 		alogger.writeAlog(3, '[TIC] Could not move ' + filename + ' to bad: ' + err.message, 'yellow');
 	}
+
+	// Move the attached file alongside its TIC when we know where it is —
+	// otherwise it sits orphaned in ftn/in/ and gets re-scanned forever.
+	var movedAttachment = null;
+	if (attachedFilePath && attachedFilename && fs.existsSync(attachedFilePath)) {
+		var destPath = path.join(badDir, attachedFilename);
+		if (fs.existsSync(destPath)) {
+			var ext = path.extname(attachedFilename);
+			var base = path.basename(attachedFilename, ext);
+			var counter = 1;
+			while (fs.existsSync(destPath)) {
+				destPath = path.join(badDir, base + '_' + counter + ext);
+				counter++;
+			}
+		}
+		try {
+			await fs.promises.rename(attachedFilePath, destPath);
+			movedAttachment = path.basename(destPath);
+		} catch (err) {
+			alogger.writeAlog(3, '[TIC] Could not move attached file ' + attachedFilename + ' to bad: ' + err.message, 'yellow');
+		}
+	}
+
 	try {
 		var notif = await import('../../models/notifications.js');
-		await notif.createSysop('tic_error', 'Bad TIC file: ' + filename, 'Moved to ' + badDir, {
+		var body = 'Moved to ' + badDir;
+		if (movedAttachment) body += ' (with attached file ' + movedAttachment + ')';
+		await notif.createSysop('tic_error', 'Bad TIC file: ' + filename, body, {
 			severity: 'danger', icon: 'exclamation-triangle'
 		});
 	} catch (_) {}
