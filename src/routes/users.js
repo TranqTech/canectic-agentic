@@ -28,14 +28,41 @@ router.use(function(req, res, next) {
 	next();
 });
 
-// Helper: set session cookie
+// Helper: set session cookie.
+//
+// When sitetld changes (or is set for the first time) the browser can end
+// up with both a host-only sessionid and a Domain-scoped one, sent together
+// as "Cookie: sessionid=OLD; sessionid=NEW". cookie-parser picks the first
+// match, which may be the stale value, and the app then reads a session
+// that no longer exists in Redis. Explicitly clear the other variant every
+// time we set the cookie so the browser jar always ends up with a single
+// live entry regardless of how the site's cookie domain has evolved.
 function setSessionCookie(res, sessionid, maxAge) {
+	var domain = appConfig.get('sitetld') || undefined;
+	clearSessionCookieAllVariants(res, domain);
 	res.cookie('sessionid', sessionid, {
 		httpOnly: true,
 		maxAge:   maxAge || cookieMaxAge,
-		domain:   appConfig.get('sitetld') || undefined,
+		domain:   domain,
 		sameSite: 'lax'
 	});
+}
+
+// Emit clearCookie for both the host-only and Domain-scoped variants so a
+// previously-set companion cookie can't stay behind. Safe to call even when
+// only one variant exists — a clearCookie for a non-existent cookie is a
+// no-op on the browser side.
+function clearSessionCookieAllVariants(res, currentDomain) {
+	// Host-only variant (no Domain attribute)
+	res.clearCookie('sessionid', { httpOnly: true, sameSite: 'lax' });
+	// Domain-scoped variant, if we currently use one
+	if (currentDomain) {
+		res.clearCookie('sessionid', {
+			httpOnly: true,
+			domain:   currentDomain,
+			sameSite: 'lax'
+		});
+	}
 }
 
 // Helper: determine if request expects JSON
@@ -178,12 +205,11 @@ router.get('/logout', async (req, res) => {
 	var sessionid = req.cookies.sessionid;
 	if (sessionid) {
 		await sessionStore.sessionDestroy(sessionid);
-		res.clearCookie('sessionid', {
-			httpOnly: true,
-			domain:   appConfig.get('sitetld') || undefined,
-			sameSite: 'lax'
-		});
 	}
+	// Always clear both variants — even if sessionid was undefined the
+	// browser may still be holding a stale cookie left over from a prior
+	// sitetld setting.
+	clearSessionCookieAllVariants(res, appConfig.get('sitetld') || undefined);
 	res.redirect('/users/login');
 });
 
