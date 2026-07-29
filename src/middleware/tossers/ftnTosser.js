@@ -498,9 +498,11 @@ function processMessageText(message) {
 	const bodyLines = [];
 	
 	for (const line of lines) {
-		if (line.startsWith('AREA')){
+		if (line.startsWith('AREA:')){
+			// FTS-0004: AREA:AREATAG (colon, no space). Some legacy tossers
+			// emit "AREA: TAG" with a space, so trim to be safe.
 			message.Type = "Echomail"
-			message.AreaTag = line.split(':')[1].trim()
+			message.AreaTag = line.substring(5).trim()
 		}else if (line.startsWith('\x01')) {
 			// Control line - parse optional attributes
 			const controlLine = line.substring(1);
@@ -570,8 +572,11 @@ function processMessageText(message) {
 				}
 			}
 		}else if (line.startsWith('SEEN-BY')){
-			message.SeenBy = line.split(':')[1].trim()
-
+			// FTS-0004: SEEN-BY is space-separated (SEEN-BY 1/1 2/2 ...) with
+			// no colon. Prior code did line.split(':')[1].trim() which crashed
+			// on the common no-colon case and mis-sliced zone:net addresses
+			// when a colon happened to be present.
+			message.SeenBy = line.substring(7).trim()
 		}else {
 			// Regular message text
 			bodyLines.push(line);
