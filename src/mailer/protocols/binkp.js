@@ -161,10 +161,13 @@ class BinkpProtocol extends EventEmitter {
 	// Acknowledge receipt of a file.
 	sendGOT(name, size, time) {
 		var ts = Math.floor(time / 1000);
-		if (!this._quiet) alogger.writeClog(5, 'binkp tx: M_GOT ' + name + ' ' + size + ' ' + ts, 'mailer', 'cyan');
+		var _t0 = Date.now();
+		alogger.writeClog(2, '[binkp DIAG] sendGOT.enter t=' + _t0 + ' name=' + name + ' size=' + size + ' pendingGOTs=' + this._pendingGOTs + ' localEOB=' + this._localEOB + ' remoteEOB=' + this._remoteEOB, 'mailer', 'magentabright');
 		this._sendCmd(M_GOT, name + ' ' + size + ' ' + ts);
+		alogger.writeClog(2, '[binkp DIAG] sendGOT.wrote t=' + Date.now() + ' dt=' + (Date.now() - _t0) + 'ms name=' + name, 'mailer', 'magentabright');
 		if (this._pendingGOTs > 0) this._pendingGOTs--;
 		this._checkSessionEnd();
+		alogger.writeClog(2, '[binkp DIAG] sendGOT.exit t=' + Date.now() + ' pendingGOTs=' + this._pendingGOTs + ' state=' + this._state, 'mailer', 'magentabright');
 	}
 
 	// Skip a file offered by the remote.
@@ -488,7 +491,7 @@ class BinkpProtocol extends EventEmitter {
 		// Session ends only when both sides sent EOB AND no file receive
 		// is in progress AND no GOTs are pending (async write flush).
 		if (this._localEOB && this._remoteEOB && !this._rxFile && this._pendingGOTs === 0) {
-			if (!this._quiet) alogger.writeClog(5, 'binkp: both sides EOB, no pending receives/GOTs — session complete', 'mailer', 'greenbright');
+			alogger.writeClog(2, '[binkp DIAG] _checkSessionEnd: emitting sessionEnd t=' + Date.now(), 'mailer', 'magentabright');
 			this._state = 'done';
 			this.emit('sessionEnd');
 		}

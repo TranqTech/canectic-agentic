@@ -776,6 +776,8 @@ class SessionController extends EventEmitter {
 	_endSession(reason) {
 		if (this.state === 'done' || this.state === 'error') return; // Already ended
 
+		alogger.writeClog(2, '[binkp DIAG] _endSession.enter t=' + Date.now() + ' reason=' + reason + ' uuid=' + this.uuid + ' sent=' + this.filesSent + ' received=' + this.filesReceived, 'mailer', 'magentabright');
+
 		this.state = reason === 'complete' ? 'done' : 'error';
 
 		// Clear timeout
@@ -791,6 +793,7 @@ class SessionController extends EventEmitter {
 
 		// Close transport
 		if (this.transport && this.transport.isConnected) {
+			alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + this.uuid, 'mailer', 'magentabright');
 			this.transport.close();
 		}
 
