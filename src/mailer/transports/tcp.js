@@ -77,12 +77,11 @@ class TcpTransport extends BaseTransport {
 		});
 
 		this._socket.on('end', () => {
-			// Peer sent FIN (their half-close). Tells us the remote decided
-			// the session was over. Re-emit as 'peerClose' so the session
-			// controller can send its own FIN in response — the "healthy"
-			// ordering under binkp/1.1.
+			// Peer sent FIN (their half-close). Kept as a DIAG log point
+			// only — the session controller no longer reacts to this
+			// event, but seeing peer FIN in the log helps confirm close
+			// ordering on future teardown investigations.
 			alogger.writeClog(2, '[binkp DIAG] socket.end (peer FIN) t=' + Date.now() + ' remote=' + this.remoteAddress, 'mailer', 'magentabright');
-			this.emit('peerClose');
 		});
 
 		this._socket.on('close', (hadError) => {

@@ -793,21 +793,26 @@ class SessionController extends EventEmitter {
 
 		// Close transport.
 		//
-		// On a clean session end (mutual M_EOB + all M_GOTs exchanged), let
-		// the peer close first. If we send FIN before their state machine
-		// reaches "session done", binkd reads an unexpected EOF and logs
-		// the session as failed even though M_GOT was received correctly —
-		// diag logs from 2026-07-29 showed we were closing ~12ms ahead of
-		// the peer's FIN. Waiting for their FIN keeps them happy and only
-		// costs a few ms of held socket. Fallback timeout guards against
-		// misbehaving peers that never close.
+		// On a clean session end, a small delay between our final write
+		// (last M_GOT / M_EOB) and socket.end() prevents the FIN from
+		// racing the peer's read of that write. Diag logs from 2026-07-29
+		// showed peer's binkd could see EOF while its state machine was
+		// still processing the last frame — logged as "connection closed
+		// by foreign host" and the whole session marked failed. Node's
+		// socket.end() already guarantees the FIN goes after buffered
+		// writes are flushed, but that only covers our kernel-side
+		// ordering, not the peer's userspace processing time.
+		//
+		// 100ms is a compromise: long enough for the peer to work through
+		// the last frame on any real-world link, short enough to be
+		// invisible to session tear-down flow.
 		//
 		// Any non-complete reason (error, timeout, auth failure) closes
 		// immediately — the peer is either broken or unauthenticated and
 		// we want the socket gone.
 		if (this.transport && this.transport.isConnected) {
 			if (reason === 'complete') {
-				this._awaitPeerCloseThenEnd();
+				this._delayedClose(100);
 			} else {
 				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + this.uuid + ' (immediate, reason=' + reason + ')', 'mailer', 'magentabright');
 				this.transport.close();
@@ -824,33 +829,17 @@ class SessionController extends EventEmitter {
 		});
 	}
 
-	// Wait for the peer to half-close (FIN) before we send ours. On a
-	// healthy binkp shutdown the peer's state machine reaches "session
-	// done" within a few ms of receiving our final M_GOT/M_EOB and it
-	// closes. We respond by closing our own side, which fully tears the
-	// socket down. Fallback timeout guards against misbehaving peers
-	// that never send FIN.
-	_awaitPeerCloseThenEnd() {
+	// Delay socket close by a short interval so the peer's userspace has
+	// time to process the last frame we wrote before it reads EOF.
+	_delayedClose(ms) {
 		var self = this;
-		var fallbackMs = 5000;
-		var responded = false;
-
-		var closeOurSide = function(via) {
-			if (responded) return;
-			responded = true;
-			if (self._peerCloseTimer) { clearTimeout(self._peerCloseTimer); self._peerCloseTimer = null; }
+		alogger.writeClog(2, '[binkp DIAG] delayed close scheduled t=' + Date.now() + ' uuid=' + this.uuid + ' delay=' + ms + 'ms', 'mailer', 'magentabright');
+		setTimeout(function() {
 			if (self.transport && self.transport.isConnected) {
-				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + self.uuid + ' (via=' + via + ')', 'mailer', 'magentabright');
+				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + self.uuid + ' (via=delayed)', 'mailer', 'magentabright');
 				self.transport.close();
 			}
-		};
-
-		this.transport.once('peerClose', function() { closeOurSide('peer-fin'); });
-		// Also react to full 'close' in case the peer sends RST or the socket
-		// disappears without a graceful FIN — nothing more for us to do then.
-		this.transport.once('close', function() { closeOurSide('socket-closed'); });
-		this._peerCloseTimer = setTimeout(function() { closeOurSide('fallback-timeout'); }, fallbackMs);
-		alogger.writeClog(2, '[binkp DIAG] waiting for peer close t=' + Date.now() + ' uuid=' + this.uuid + ' fallback=' + fallbackMs + 'ms', 'mailer', 'magentabright');
+		}, ms);
 	}
 
 	// -----------------------------------------------------------------------
