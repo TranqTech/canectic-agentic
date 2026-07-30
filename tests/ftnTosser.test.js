@@ -11,7 +11,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import AdmZip from 'adm-zip';
-import { isMailBundleFilename, formatKludge, extractMailBundle } from '../src/middleware/tossers/ftnTosser.js';
+import { isMailBundleFilename, formatKludge, bareFtnAddress, extractMailBundle } from '../src/middleware/tossers/ftnTosser.js';
 
 describe('isMailBundleFilename', function () {
 
@@ -123,6 +123,40 @@ describe('formatKludge', function () {
 	it('starts with the control-A byte', function () {
 		assert.strictEqual(formatKludge('MSGID', 'x')[0], '\x01');
 		assert.strictEqual(formatKludge('INTL', 'x')[0], '\x01');
+	});
+});
+
+describe('bareFtnAddress', function () {
+	it('strips a 5D domain suffix', function () {
+		assert.strictEqual(bareFtnAddress('21:1/100@fsxnet'), '21:1/100');
+		assert.strictEqual(bareFtnAddress('1:134/101@fidonet'), '1:134/101');
+	});
+
+	it('preserves the point when stripping the domain', function () {
+		assert.strictEqual(bareFtnAddress('1:134/101.2@fidonet'), '1:134/101.2');
+		assert.strictEqual(bareFtnAddress('21:1/100.2@fsxnet'), '21:1/100.2');
+	});
+
+	it('leaves bare 4D addresses untouched', function () {
+		assert.strictEqual(bareFtnAddress('1:134/101'), '1:134/101');
+		assert.strictEqual(bareFtnAddress('1:134/101.2'), '1:134/101.2');
+	});
+
+	it('handles empty or null values safely', function () {
+		assert.strictEqual(bareFtnAddress(''), '');
+		assert.strictEqual(bareFtnAddress(null), '');
+		assert.strictEqual(bareFtnAddress(undefined), '');
+	});
+
+	it('trims surrounding whitespace', function () {
+		assert.strictEqual(bareFtnAddress('  1:2/3@net  '), '1:2/3');
+		assert.strictEqual(bareFtnAddress('  1:2/3  '), '1:2/3');
+	});
+
+	it('builds an INTL value free of domain suffixes', function () {
+		var intl = bareFtnAddress('21:1/100@fsxnet') + ' ' + bareFtnAddress('21:1/2@fsxnet');
+		assert.strictEqual(intl, '21:1/100 21:1/2');
+		assert.strictEqual(formatKludge('INTL', intl), '\x01INTL 21:1/100 21:1/2');
 	});
 });
 

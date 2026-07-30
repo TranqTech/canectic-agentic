@@ -133,6 +133,23 @@ function isMailBundleFilename(filename) {
 // (INTL, TOPT, FMPT, Via) use a bare space separator with no colon per
 // FTS-0001 / FTS-4001. Returns the full control-A line without trailing CR.
 const SPACE_SEPARATED_KLUDGES = new Set(['INTL', 'TOPT', 'FMPT', 'Via', 'VIA']);
+
+// Strip a 5D domain suffix from an FTN address, leaving zone:net/node[.point].
+// INTL must carry bare addresses per FTS-0001, but a 5D address
+// (zone:net/node@domain) reaches the outbound path whenever a netmail was
+// submitted through the SMTP pseudo-TLD in its 5D form, e.g.
+// user@21.1.100.fsxnet.ftn parses back to "21:1/100@fsxnet". The domain label
+// must not leak into the kludge -- TossOutboundNetmail's INTL value is also
+// parsed back out to build the packet grouping keys, so a polluted value would
+// split packet groups and overwrite Source/Destination with the 5D string.
+function bareFtnAddress(addr) {
+	if (!addr) return '';
+	var out = String(addr).trim();
+	var atIdx = out.indexOf('@');
+	if (atIdx >= 0) out = out.substring(0, atIdx);
+	return out;
+}
+
 function formatKludge(attribute, value) {
 	if (attribute && SPACE_SEPARATED_KLUDGES.has(attribute)) {
 		return '\x01' + attribute + ' ' + (value == null ? '' : value);
@@ -1494,8 +1511,9 @@ async function TossOutboundNetmail(){
 			continue
 		}
 
-		// Setup INTL attribute
-		var intlval = msg.Destination + " " + msg.Source
+		// Setup INTL attribute. Both halves must be bare 4D-style addresses,
+		// so drop any 5D "@domain" suffix carried in from a pseudo-TLD address.
+		var intlval = bareFtnAddress(msg.Destination) + " " + bareFtnAddress(msg.Source)
 		var hasintl = false
 		for await (var oa of msg.OptionalAttributes){
 			if (oa.attribute == "INTL"){
@@ -1615,5 +1633,6 @@ export {
 	processMessageText,
 	isMailBundleFilename,
 	formatKludge,
+	bareFtnAddress,
 	extractMailBundle
 }

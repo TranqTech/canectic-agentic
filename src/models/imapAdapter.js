@@ -29,8 +29,8 @@ function encodeAddress(displayName, localPart, domain) {
 //
 //   FTN  "1:134/101"           → local: "kostie",  domain: "1.134.101.ftn"
 //   FTN  "1:134/101.2"         → local: "kostie",  domain: "1.134.101.2.ftn"
-//   FTN  "1:134/101@fidonet"   → local: "kostie",  domain: "1.134.101-fidonet.ftn"
-//   FTN  "1:134/101.2@fidonet" → local: "kostie",  domain: "1.134.101.2-fidonet.ftn"
+//   FTN  "1:134/101@fidonet"   → local: "kostie",  domain: "1.134.101.fidonet.ftn"
+//   FTN  "1:134/101.2@fidonet" → local: "kostie",  domain: "1.134.101.2.fidonet.ftn"
 //   QWK  "UNDRMINE"            → local: "kostie",  domain: "undrmine.qwk"
 //   LOCAL / empty               → local: "kostie",  domain: mailDomain
 //
