@@ -791,10 +791,27 @@ class SessionController extends EventEmitter {
 			this.transfer.cleanup();
 		}
 
-		// Close transport
+		// Close transport.
+		//
+		// On a clean session end (mutual M_EOB + all M_GOTs exchanged), let
+		// the peer close first. If we send FIN before their state machine
+		// reaches "session done", binkd reads an unexpected EOF and logs
+		// the session as failed even though M_GOT was received correctly —
+		// diag logs from 2026-07-29 showed we were closing ~12ms ahead of
+		// the peer's FIN. Waiting for their FIN keeps them happy and only
+		// costs a few ms of held socket. Fallback timeout guards against
+		// misbehaving peers that never close.
+		//
+		// Any non-complete reason (error, timeout, auth failure) closes
+		// immediately — the peer is either broken or unauthenticated and
+		// we want the socket gone.
 		if (this.transport && this.transport.isConnected) {
-			alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + this.uuid, 'mailer', 'magentabright');
-			this.transport.close();
+			if (reason === 'complete') {
+				this._awaitPeerCloseThenEnd();
+			} else {
+				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + this.uuid + ' (immediate, reason=' + reason + ')', 'mailer', 'magentabright');
+				this.transport.close();
+			}
 		}
 
 		this.emit('sessionEnd', {
@@ -805,6 +822,35 @@ class SessionController extends EventEmitter {
 			filesToToss:   this.filesToToss,
 			duration:      Math.floor((Date.now() - this.startTime) / 1000)
 		});
+	}
+
+	// Wait for the peer to half-close (FIN) before we send ours. On a
+	// healthy binkp shutdown the peer's state machine reaches "session
+	// done" within a few ms of receiving our final M_GOT/M_EOB and it
+	// closes. We respond by closing our own side, which fully tears the
+	// socket down. Fallback timeout guards against misbehaving peers
+	// that never send FIN.
+	_awaitPeerCloseThenEnd() {
+		var self = this;
+		var fallbackMs = 5000;
+		var responded = false;
+
+		var closeOurSide = function(via) {
+			if (responded) return;
+			responded = true;
+			if (self._peerCloseTimer) { clearTimeout(self._peerCloseTimer); self._peerCloseTimer = null; }
+			if (self.transport && self.transport.isConnected) {
+				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + self.uuid + ' (via=' + via + ')', 'mailer', 'magentabright');
+				self.transport.close();
+			}
+		};
+
+		this.transport.once('peerClose', function() { closeOurSide('peer-fin'); });
+		// Also react to full 'close' in case the peer sends RST or the socket
+		// disappears without a graceful FIN — nothing more for us to do then.
+		this.transport.once('close', function() { closeOurSide('socket-closed'); });
+		this._peerCloseTimer = setTimeout(function() { closeOurSide('fallback-timeout'); }, fallbackMs);
+		alogger.writeClog(2, '[binkp DIAG] waiting for peer close t=' + Date.now() + ' uuid=' + this.uuid + ' fallback=' + fallbackMs + 'ms', 'mailer', 'magentabright');
 	}
 
 	// -----------------------------------------------------------------------

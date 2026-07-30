@@ -490,6 +490,10 @@ class BinkpProtocol extends EventEmitter {
 	_checkSessionEnd() {
 		// Session ends only when both sides sent EOB AND no file receive
 		// is in progress AND no GOTs are pending (async write flush).
+		// Guard against firing sessionEnd twice — the underlying conditions
+		// can be re-checked from several paths (data arrival, EOB, sendGOT)
+		// and the state transition should be one-shot.
+		if (this._state === 'done') return;
 		if (this._localEOB && this._remoteEOB && !this._rxFile && this._pendingGOTs === 0) {
 			alogger.writeClog(2, '[binkp DIAG] _checkSessionEnd: emitting sessionEnd t=' + Date.now(), 'mailer', 'magentabright');
 			this._state = 'done';
