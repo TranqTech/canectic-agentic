@@ -382,9 +382,24 @@ class SessionController extends EventEmitter {
 				if (info.name && info.name.toLowerCase().endsWith('.req') && info.path) {
 					this._processFreqRequest(info.path);
 				}
+
+				// If peer had already sent M_EOB and this M_GOT was the
+				// last one we owed them, our deferred M_EOB can now fire.
+				this._maybeSendLocalEOB();
 			});
 			this.transfer.on('allSent', () => {
-				this.protocol.sendEOB();
+				// Hold M_EOB until the peer has sent theirs. binkd (and
+				// probably some others) appears to ignore an M_EOB that
+				// arrives before it's finished sending its own batch —
+				// diag from 2026-07-29 showed file sessions hanging
+				// waiting for another M_EOB from us that we'd already
+				// sent early, while empty sessions worked fine because
+				// nothing arrived between our M_EOB and the peer's.
+				// Deferring our M_EOB until after the peer's guarantees
+				// the ordering the peer expects.
+				this._allLocalSent = true;
+				alogger.writeClog(2, '[binkp DIAG] allSent t=' + Date.now() + ' uuid=' + this.uuid + ' remoteEOB=' + (this.protocol && this.protocol.remoteEOB) + ' — deferring M_EOB until peer EOB', 'mailer', 'magentabright');
+				this._maybeSendLocalEOB();
 			});
 		}
 
@@ -757,6 +772,27 @@ class SessionController extends EventEmitter {
 
 	_onRemoteEOB() {
 		alogger.writeClog(5, 'Session ' + this.uuid + ': remote sent EOB', 'mailer', 'cyan');
+		this._maybeSendLocalEOB();
+	}
+
+	// Send our M_EOB only after all three are true:
+	//   - we've queued everything we intend to offer (_allLocalSent)
+	//   - the peer has already sent their M_EOB (remoteEOB)
+	//   - all our pending M_GOT acks have been flushed (pendingGOTs === 0)
+	//
+	// This puts our M_EOB after both the transfer phase and every M_GOT
+	// we owe the peer, which is the order binkd expects. Sending it
+	// earlier (right after auth, before the peer's file arrives) caused
+	// binkd to sit waiting for an M_EOB that had already gone by.
+	_maybeSendLocalEOB() {
+		if (!this.protocol || this.protocol.constructor.name !== 'BinkpProtocol') return;
+		if (this._localEobSent) return;
+		if (!this._allLocalSent) return;
+		if (!this.protocol.remoteEOB) return;
+		if (this.protocol.pendingGOTs > 0) return;
+		this._localEobSent = true;
+		alogger.writeClog(2, '[binkp DIAG] sending deferred local M_EOB t=' + Date.now() + ' uuid=' + this.uuid, 'mailer', 'magentabright');
+		this.protocol.sendEOB();
 	}
 
 	_onSessionEnd() {

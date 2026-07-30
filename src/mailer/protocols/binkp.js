@@ -209,6 +209,18 @@ class BinkpProtocol extends EventEmitter {
 		return this._peerAddresses;
 	}
 
+	get remoteEOB() {
+		return this._remoteEOB;
+	}
+
+	get localEOB() {
+		return this._localEOB;
+	}
+
+	get pendingGOTs() {
+		return this._pendingGOTs;
+	}
+
 	get isAuthenticated() {
 		return this._state === 'transfer' || this._state === 'done';
 	}
