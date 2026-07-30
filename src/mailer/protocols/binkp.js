@@ -42,6 +42,15 @@ const BINKP_MAX_FRAME = 32767;
 const PRODUCT_NAME    = 'Canectic BBS Mailer';
 const PRODUCT_VERSION = '0.1';
 
+// binkp/1.1 multi-batch limits — see _checkSessionEnd().
+// MAX_BATCHES is a runaway guard only; a healthy session uses one or two.
+const MAX_BATCHES    = 8;
+// How long to wait for the peer to say something in a freshly opened batch
+// before giving up and closing the session as complete. Only reached by a
+// peer that advertises binkp/1.1, doesn't open a second batch, and doesn't
+// close either — no known mailer does this, but it must not hang us.
+const BATCH_IDLE_MS  = 10000;
+
 class BinkpProtocol extends EventEmitter {
 	constructor(transport, options) {
 		super();
@@ -62,8 +71,25 @@ class BinkpProtocol extends EventEmitter {
 		this._peerOptions     = {};
 
 		// Transfer state
-		this._localEOB   = false;  // We've sent EOB
-		this._remoteEOB  = false;  // Remote sent EOB
+		this._localEOB   = false;  // We've sent EOB for the current batch
+		this._remoteEOB  = false;  // Remote sent EOB for the current batch
+
+		// binkp/1.1 batching. A binkp/1.1 session is a sequence of batches;
+		// each ends with an M_EOB from both sides, and the session ends on a
+		// batch that carried nothing but those two frames. _msgsInBatch counts
+		// command frames in both directions for the current batch (data frames
+		// don't count), which is exactly binkd's msgs_in_batch. See
+		// _checkSessionEnd() for the full rationale.
+		this._msgsInBatch  = 0;
+		this._batchNumber  = 1;
+		this._eobExchanges = 0;    // Completed M_EOB round-trips this session
+		this._batchTimer   = null;
+
+		// Peer's binkp protocol version, from its M_NUL VER line. Defaults to
+		// 1.0, so a peer that sends no parsable version gets binkp/1.0
+		// single-batch treatment.
+		this._peerMajor = 1;
+		this._peerMinor = 0;
 
 		// Current inbound file
 		this._rxFile     = null;   // { name, size, time, offset, received }
@@ -88,9 +114,24 @@ class BinkpProtocol extends EventEmitter {
 			this.emit('error', err);
 		});
 		this._transport.on('close', () => {
-			if (this._state !== 'done' && this._state !== 'error') {
-				this.emit('error', new Error('Connection closed unexpectedly'));
+			this._clearBatchTimer();
+			if (this._state === 'done' || this._state === 'error') return;
+
+			// A peer that has completed at least one full M_EOB exchange and
+			// owes us nothing has finished its side of the session. Several
+			// mailers close right there rather than opening another batch —
+			// binkd does exactly that whenever a batch held nothing but the
+			// two M_EOBs, and BinkIt's close path documents the same case as
+			// benign. Treat it as a clean end, not a transport failure.
+			if (this._eobExchanges > 0 && !this._rxFile && this._pendingGOTs === 0) {
+				if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] peer closed after ' + this._eobExchanges +
+					' EOB exchange(s), nothing pending — treating as complete', 'mailer', 'magentabright');
+				this._state = 'done';
+				this.emit('sessionEnd');
+				return;
 			}
+
+			this.emit('error', new Error('Connection closed unexpectedly'));
 		});
 	}
 
@@ -162,12 +203,12 @@ class BinkpProtocol extends EventEmitter {
 	sendGOT(name, size, time) {
 		var ts = Math.floor(time / 1000);
 		var _t0 = Date.now();
-		alogger.writeClog(2, '[binkp DIAG] sendGOT.enter t=' + _t0 + ' name=' + name + ' size=' + size + ' pendingGOTs=' + this._pendingGOTs + ' localEOB=' + this._localEOB + ' remoteEOB=' + this._remoteEOB, 'mailer', 'magentabright');
+		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] sendGOT.enter t=' + _t0 + ' name=' + name + ' size=' + size + ' pendingGOTs=' + this._pendingGOTs + ' localEOB=' + this._localEOB + ' remoteEOB=' + this._remoteEOB, 'mailer', 'magentabright');
 		this._sendCmd(M_GOT, name + ' ' + size + ' ' + ts);
-		alogger.writeClog(2, '[binkp DIAG] sendGOT.wrote t=' + Date.now() + ' dt=' + (Date.now() - _t0) + 'ms name=' + name, 'mailer', 'magentabright');
+		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] sendGOT.wrote t=' + Date.now() + ' dt=' + (Date.now() - _t0) + 'ms name=' + name, 'mailer', 'magentabright');
 		if (this._pendingGOTs > 0) this._pendingGOTs--;
 		this._checkSessionEnd();
-		alogger.writeClog(2, '[binkp DIAG] sendGOT.exit t=' + Date.now() + ' pendingGOTs=' + this._pendingGOTs + ' state=' + this._state, 'mailer', 'magentabright');
+		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] sendGOT.exit t=' + Date.now() + ' pendingGOTs=' + this._pendingGOTs + ' state=' + this._state, 'mailer', 'magentabright');
 	}
 
 	// Skip a file offered by the remote.
@@ -221,6 +262,22 @@ class BinkpProtocol extends EventEmitter {
 		return this._pendingGOTs;
 	}
 
+	// True when the peer advertised binkp/1.1 or later, i.e. it speaks the
+	// multi-batch dialect. binkd applies the same "> 1.00" test before it
+	// will open a second batch, so gating on this keeps binkp/1.0 and
+	// version-less peers on exactly the single-batch flow they had before.
+	get peerMultiBatch() {
+		return (this._peerMajor * 100 + this._peerMinor) > 100;
+	}
+
+	get peerBinkpVersion() {
+		return this._peerMajor + '.' + this._peerMinor;
+	}
+
+	get batchNumber() {
+		return this._batchNumber;
+	}
+
 	get isAuthenticated() {
 		return this._state === 'transfer' || this._state === 'done';
 	}
@@ -271,6 +328,12 @@ class BinkpProtocol extends EventEmitter {
 		// .trim() doesn't strip NUL, only whitespace.
 		cmdData = cmdData.replace(/\0+$/, '');
 		var cmdName = CMD_NAMES[cmdId] || ('CMD_' + cmdId);
+
+		// Batch accounting: every command frame counts, in both directions,
+		// but only once the batch phase has started. Handshake frames are
+		// excluded (binkd zeroes msgs_in_batch in complete_login for the same
+		// reason). Data frames are never counted.
+		if (this._state === 'transfer') this._msgsInBatch++;
 
 		// Debug: log all received command frames (skip M_NUL after handshake to reduce noise)
 		if (cmdId !== M_NUL || this._state === 'init' || this._state === 'handshake') {
@@ -352,6 +415,10 @@ class BinkpProtocol extends EventEmitter {
 				} else if (opt === 'NR') {
 					this._peerOptions.nonReliable = true;
 				} else if (opt === 'MB') {
+					// Informational only. This is NOT how binkp/1.1 multi-batch
+					// is negotiated — that's implicit in the peer's binkp
+					// version (see peerMultiBatch / _checkSessionEnd), and
+					// binkd never sends an MB option at all.
 					this._peerOptions.multiBatch = true;
 				} else if (opt === 'MD5') {
 					this._peerOptions.md5 = true;
@@ -363,6 +430,7 @@ class BinkpProtocol extends EventEmitter {
 			this._peerOptions.sysopName = data.substring(4).trim();
 		} else if (data.startsWith('VER ')) {
 			this._peerOptions.version = data.substring(4).trim();
+			this._parsePeerVersion(this._peerOptions.version);
 		} else if (data.startsWith('TIME ')) {
 			this._peerOptions.time = data.substring(5).trim();
 		} else if (data.startsWith('LOC ')) {
@@ -402,6 +470,7 @@ class BinkpProtocol extends EventEmitter {
 		if (this._role !== 'caller') return;
 
 		this._state = 'transfer';
+		this._beginFirstBatch();
 		this.emit('authenticated', {
 			addresses: this._peerAddresses,
 			options:   this._peerOptions
@@ -412,6 +481,7 @@ class BinkpProtocol extends EventEmitter {
 	confirmAuth() {
 		this.sendOK();
 		this._state = 'transfer';
+		this._beginFirstBatch();
 		this.emit('authenticated', {
 			addresses: this._peerAddresses,
 			options:   this._peerOptions
@@ -499,18 +569,121 @@ class BinkpProtocol extends EventEmitter {
 		this._checkSessionEnd();
 	}
 
-	_checkSessionEnd() {
-		// Session ends only when both sides sent EOB AND no file receive
-		// is in progress AND no GOTs are pending (async write flush).
-		// Guard against firing sessionEnd twice — the underlying conditions
-		// can be re-checked from several paths (data arrival, EOB, sendGOT)
-		// and the state transition should be one-shot.
-		if (this._state === 'done') return;
-		if (this._localEOB && this._remoteEOB && !this._rxFile && this._pendingGOTs === 0) {
-			alogger.writeClog(2, '[binkp DIAG] _checkSessionEnd: emitting sessionEnd t=' + Date.now(), 'mailer', 'magentabright');
-			this._state = 'done';
-			this.emit('sessionEnd');
+	// Entering the batch phase. Zero the frame counter so handshake traffic
+	// isn't attributed to batch 1 — binkd does the same in complete_login().
+	// The EOB flags are deliberately left alone here: a peer may pipeline its
+	// M_EOB ahead of our auth confirmation, and clearing it would lose it.
+	_beginFirstBatch() {
+		this._msgsInBatch = 0;
+		this._batchNumber = 1;
+	}
+
+	// Start a subsequent batch. Clears both EOB flags and the frame counter so
+	// the next M_EOB pair is judged on its own traffic.
+	_beginBatch(n) {
+		this._msgsInBatch = 0;
+		this._batchNumber = n;
+		this._localEOB    = false;
+		this._remoteEOB   = false;
+	}
+
+	_armBatchTimer() {
+		var self = this;
+		this._clearBatchTimer();
+		this._batchTimer = setTimeout(function() {
+			self._batchTimer = null;
+			if (self._state === 'done' || self._state === 'error') return;
+			alogger.writeClog(3, 'binkp: peer sent nothing in batch ' + self._batchNumber +
+				' within ' + BATCH_IDLE_MS + 'ms — ending session as complete', 'mailer', 'yellow');
+			self._state = 'done';
+			self.emit('sessionEnd');
+		}, BATCH_IDLE_MS);
+		if (this._batchTimer.unref) this._batchTimer.unref();
+	}
+
+	_clearBatchTimer() {
+		if (this._batchTimer) {
+			clearTimeout(this._batchTimer);
+			this._batchTimer = null;
 		}
+	}
+
+	// A batch ends when both sides have sent M_EOB, no file receive is in
+	// progress, and no GOTs are still pending (our writes flush async).
+	//
+	// A *session* ends when a batch closes having carried nothing but those
+	// two M_EOBs. This is binkp/1.1 multi-batch, and it is not optional:
+	// binkd's protocol.c does
+	//
+	//     if (state.msgs_in_batch <= 2 || (state.major*100 + state.minor <= 100))
+	//       break;                      // session over, logged "OK"
+	//     else {
+	//       state.msgs_in_batch = 0;
+	//       state.remote_EOB = state.local_EOB = 0;
+	//       continue;                   // open another batch, send M_EOB again
+	//     }
+	//
+	// so after any batch that moved a file, binkd clears both EOB flags and
+	// sends a second M_EOB. If we close instead of answering it, binkd's
+	// post-loop check sees remote_EOB == 0, logs the session "failed" and
+	// calls create_poll() to re-queue everything it just sent. That is the
+	// redelivery loop. Empty sessions land on exactly msgs_in_batch == 2 and
+	// close after one exchange, which is why only file sessions ever failed.
+	//
+	// Synchronet's BinkIt reaches the same wire behaviour from the other
+	// direction, requiring senteob >= 2 && goteob >= 2 before it will break
+	// out cleanly.
+	//
+	// Guard against firing sessionEnd twice — the conditions get re-checked
+	// from several paths (data arrival, EOB, sendGOT) and the state
+	// transition is one-shot.
+	_checkSessionEnd() {
+		if (this._state === 'done') return;
+		if (!this._localEOB || !this._remoteEOB) return;
+		if (this._rxFile || this._pendingGOTs !== 0) return;
+
+		this._eobExchanges++;
+		this._clearBatchTimer();
+
+		// Only open another batch for a peer that actually speaks binkp/1.1.
+		// Anything older (or that sent no parsable VER) keeps the single-batch
+		// behaviour it has always had with us.
+		var canContinue = this.peerMultiBatch &&
+		                  this._msgsInBatch > 2 &&
+		                  this._batchNumber < MAX_BATCHES;
+
+		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] batch ' + this._batchNumber + ' end t=' + Date.now() +
+			' msgsInBatch=' + this._msgsInBatch + ' peerBinkp=' + this.peerBinkpVersion +
+			' continue=' + canContinue, 'mailer', 'magentabright');
+
+		if (canContinue) {
+			var ended = this._batchNumber;
+			this._beginBatch(ended + 1);
+			this.emit('batchEnd', { batch: ended, next: ended + 1 });
+			// A batch boundary is only ever reached with our own send queue
+			// already drained — that's what made _localEOB true in the first
+			// place — so we have nothing to offer in the new batch and can
+			// answer it with M_EOB straight away, exactly as binkd does at
+			// the top of its loop. Doing it here rather than delegating keeps
+			// the protocol correct for callers that don't watch 'batchEnd'.
+			this.sendEOB();
+			this._armBatchTimer();
+			return;
+		}
+
+		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] _checkSessionEnd: emitting sessionEnd t=' + Date.now() +
+			' batches=' + this._batchNumber, 'mailer', 'magentabright');
+		this._state = 'done';
+		this.emit('sessionEnd');
+	}
+
+	_parsePeerVersion(ver) {
+		// "<product>/<version> binkp/<major>.<minor>" — same shape binkd looks
+		// for when it parses a peer's M_NUL VER line.
+		var m = /binkp\/(\d+)\.(\d+)/i.exec(ver || '');
+		if (!m) return;
+		this._peerMajor = parseInt(m[1], 10) || 0;
+		this._peerMinor = parseInt(m[2], 10) || 0;
 	}
 
 	// -----------------------------------------------------------------------
@@ -559,6 +732,9 @@ class BinkpProtocol extends EventEmitter {
 		frame.writeUInt16BE(0x8000 | len, 0);
 		frame[2] = cmdId;
 		payload.copy(frame, 3);
+
+		// See the matching increment in _handleCommand()
+		if (this._state === 'transfer') this._msgsInBatch++;
 
 		this._transport.write(frame);
 	}

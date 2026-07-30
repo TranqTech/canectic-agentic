@@ -224,6 +224,7 @@ Connect → M_NUL (capabilities) → M_ADR (our addresses)
   → file exchange phase (bidirectional)
   → M_EOB when done sending
   → receive M_EOB
+  → (binkp/1.1: another batch if this one carried traffic — see below)
   → disconnect
 ```
 
@@ -236,15 +237,75 @@ Accept connection → M_NUL (capabilities) → M_ADR (our addresses)
   → file exchange phase (bidirectional)
   → M_EOB when done sending
   → receive M_EOB
+  → (binkp/1.1: another batch if this one carried traffic — see below)
   → disconnect
 ```
 
 **OPT flags** (sent in M_NUL):
 - `NR` — non-reliable mode (file CRC verification)
-- `MB` — multi-batch (multiple EOB rounds)
 - `MD5` — CRAM-MD5 authentication
 - `CRYPT` — link encryption
 - `NDA` — no dupes (file-level dupe prevention)
+
+#### binkp/1.1 multi-batch session termination
+
+A binkp/1.1 session is not one exchange, it is a sequence of **batches**. Each
+batch ends when both sides have sent M_EOB; the *session* ends only on a batch
+that carried nothing but those two M_EOBs. A batch that moved anything is
+followed by another one.
+
+This is not optional, and getting it wrong is silent. binkd's `protocol.c`
+counts every command frame in either direction as `msgs_in_batch` (data frames
+don't count; the counter is zeroed at `complete_login` so handshake traffic is
+excluded) and then does:
+
+```c
+if (state.remote_EOB && state.sent_fls == 0 && state.local_EOB && ...) {
+  if (state.msgs_in_batch <= 2 || (state.major*100 + state.minor <= 100))
+    break;                                     /* session over, logs "OK" */
+  else {
+    state.msgs_in_batch = 0;
+    state.remote_EOB = state.local_EOB = 0;    /* both flags cleared */
+    continue;                                  /* new batch, new M_EOB */
+  }
+}
+```
+
+If we close instead of answering that second M_EOB, binkd's post-loop check
+sees `remote_EOB == 0`, logs the session **`failed`**, and calls `create_poll()`
+to re-queue everything it just sent — a redelivery loop, even though every byte
+arrived and tossed correctly. Empty sessions land on exactly
+`msgs_in_batch == 2` and close after one exchange, which is why only sessions
+containing a file ever failed. Fixed 2026-07-29.
+
+Synchronet's BinkIt reaches the same wire behaviour from the other side: it
+requires `senteob >= 2 && goteob >= 2` before it will break out cleanly, and
+calls `reset_eob()` on every non-M_EOB frame received. That second rule is why
+our M_EOB must stay behind any M_GOT we owe — an M_GOT arriving after our
+M_EOB zeroes BinkIt's `goteob`, and its `close()` then fires
+`M_ERR "Forced Shutdown"`.
+
+Our implementation (`_checkSessionEnd` in `protocols/binkp.js`):
+
+- `_msgsInBatch` counts command frames both ways, reset at the transfer
+  transition and at each batch boundary — identical to binkd's accounting.
+- On a batch boundary with `_msgsInBatch > 2`, the protocol clears both EOB
+  flags, emits `batchEnd`, and sends the new batch's M_EOB itself. A batch
+  boundary is only reachable with our send queue already drained, so there is
+  never anything to offer in the continuation batch.
+- **Version gated.** `peerMultiBatch` parses the peer's `M_NUL VER … binkp/X.Y`
+  and only continues for `> 1.00`, the same test binkd applies. binkp/1.0 and
+  version-less peers (InternetRex and other pre-1.1 mailers) get byte-identical
+  behaviour to the single-batch flow.
+- **Close tolerance.** A peer that closes after at least one completed M_EOB
+  exchange with nothing pending ends the session as `complete`, not `error`.
+  binkd does exactly this whenever a batch held only the two M_EOBs.
+- **Idle guard.** `BATCH_IDLE_MS` (10s) ends the session as complete if a
+  1.1-advertising peer opens no second batch and doesn't close either.
+  `MAX_BATCHES` (8) is a runaway guard; healthy sessions use one or two.
+
+Do not "fix" a peer reporting `failed` by tuning close timing — that was chased
+for four rounds on 2026-07-29 and timing was never the variable.
 
 **Key implementation notes:**
 - binkp is natively full-duplex — both sides can send files simultaneously. The transfer engine handles interleaved send/receive.

@@ -234,6 +234,7 @@ class SessionController extends EventEmitter {
 		// binkp-specific events (EMSI doesn't use these)
 		if (this.protocolType === 'binkp') {
 			this.protocol.on('remoteEOB', () => this._onRemoteEOB());
+			this.protocol.on('batchEnd',  (info) => this._onBatchEnd(info));
 		}
 	}
 
@@ -388,17 +389,8 @@ class SessionController extends EventEmitter {
 				this._maybeSendLocalEOB();
 			});
 			this.transfer.on('allSent', () => {
-				// Hold M_EOB until the peer has sent theirs. binkd (and
-				// probably some others) appears to ignore an M_EOB that
-				// arrives before it's finished sending its own batch —
-				// diag from 2026-07-29 showed file sessions hanging
-				// waiting for another M_EOB from us that we'd already
-				// sent early, while empty sessions worked fine because
-				// nothing arrived between our M_EOB and the peer's.
-				// Deferring our M_EOB until after the peer's guarantees
-				// the ordering the peer expects.
 				this._allLocalSent = true;
-				alogger.writeClog(2, '[binkp DIAG] allSent t=' + Date.now() + ' uuid=' + this.uuid + ' remoteEOB=' + (this.protocol && this.protocol.remoteEOB) + ' — deferring M_EOB until peer EOB', 'mailer', 'magentabright');
+				alogger.writeClog(2, '[binkp DIAG] allSent t=' + Date.now() + ' uuid=' + this.uuid + ' pendingGOTs=' + (this.protocol ? this.protocol.pendingGOTs : '?'), 'mailer', 'magentabright');
 				this._maybeSendLocalEOB();
 			});
 		}
@@ -775,24 +767,41 @@ class SessionController extends EventEmitter {
 		this._maybeSendLocalEOB();
 	}
 
-	// Send our M_EOB only after all three are true:
+	// Send our M_EOB for the current batch once both are true:
 	//   - we've queued everything we intend to offer (_allLocalSent)
-	//   - the peer has already sent their M_EOB (remoteEOB)
-	//   - all our pending M_GOT acks have been flushed (pendingGOTs === 0)
+	//   - every M_GOT we owe the peer has been written (pendingGOTs === 0)
 	//
-	// This puts our M_EOB after both the transfer phase and every M_GOT
-	// we owe the peer, which is the order binkd expects. Sending it
-	// earlier (right after auth, before the peer's file arrives) caused
-	// binkd to sit waiting for an M_EOB that had already gone by.
+	// The pendingGOTs gate keeps our M_EOB behind every M_GOT we owe for the
+	// current batch. That matters to BinkIt, which calls reset_eob() on any
+	// non-M_EOB frame it receives: an M_GOT arriving after our M_EOB zeroes
+	// its goteob counter, and its close() then takes the `if (!this.goteob)`
+	// branch and fires M_ERR "Forced Shutdown". The gate can't cover a file
+	// that arrives after we've already gone idle and sent our M_EOB — what
+	// saves us there is the binkp/1.1 batch that follows, which ends on a
+	// bare M_EOB with nothing after it.
+	//
+	// We deliberately do NOT wait for the peer's M_EOB first. binkd sends its
+	// own the moment its send queue drains, and two mailers that both waited
+	// would sit there until the session timer fired.
 	_maybeSendLocalEOB() {
 		if (!this.protocol || this.protocol.constructor.name !== 'BinkpProtocol') return;
 		if (this._localEobSent) return;
 		if (!this._allLocalSent) return;
-		if (!this.protocol.remoteEOB) return;
 		if (this.protocol.pendingGOTs > 0) return;
 		this._localEobSent = true;
-		alogger.writeClog(2, '[binkp DIAG] sending deferred local M_EOB t=' + Date.now() + ' uuid=' + this.uuid, 'mailer', 'magentabright');
+		alogger.writeClog(2, '[binkp DIAG] sending local M_EOB t=' + Date.now() + ' uuid=' + this.uuid + ' batch=' + this.protocol.batchNumber, 'mailer', 'magentabright');
 		this.protocol.sendEOB();
+	}
+
+	// binkp/1.1 multi-batch: the batch that just closed carried real traffic,
+	// so the peer is opening another one and will send a fresh M_EOB. The
+	// protocol answers it with our M_EOB itself, since a batch boundary is
+	// only reached with our send queue already drained. We just keep our own
+	// bookkeeping in step so _maybeSendLocalEOB() can't emit a duplicate.
+	_onBatchEnd(info) {
+		alogger.writeClog(5, 'Session ' + this.uuid + ': binkp batch ' + info.batch +
+			' complete, opening batch ' + info.next, 'mailer', 'cyan');
+		this._localEobSent = true;
 	}
 
 	_onSessionEnd() {
@@ -829,19 +838,16 @@ class SessionController extends EventEmitter {
 
 		// Close transport.
 		//
-		// On a clean session end, a small delay between our final write
-		// (last M_GOT / M_EOB) and socket.end() prevents the FIN from
-		// racing the peer's read of that write. Diag logs from 2026-07-29
-		// showed peer's binkd could see EOF while its state machine was
-		// still processing the last frame — logged as "connection closed
-		// by foreign host" and the whole session marked failed. Node's
-		// socket.end() already guarantees the FIN goes after buffered
-		// writes are flushed, but that only covers our kernel-side
-		// ordering, not the peer's userspace processing time.
+		// A short delay between our final write and socket.end() gives the
+		// peer's userspace time to work through that last frame before it
+		// reads EOF. Node's socket.end() already orders the FIN after our
+		// buffered writes, so this only covers the peer's processing time,
+		// not our kernel ordering.
 		//
-		// 100ms is a compromise: long enough for the peer to work through
-		// the last frame on any real-world link, short enough to be
-		// invisible to session tear-down flow.
+		// This is courtesy, not correctness: the sessions marked "failed" by
+		// binkd were never a teardown race, they were a missing binkp/1.1
+		// batch (see _checkSessionEnd in protocols/binkp.js). Keeping the
+		// delay costs nothing and removes one variable from the close path.
 		//
 		// Any non-complete reason (error, timeout, auth failure) closes
 		// immediately — the peer is either broken or unauthenticated and
