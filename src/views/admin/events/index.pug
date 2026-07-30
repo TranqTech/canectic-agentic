@@ -127,6 +127,35 @@ block content
 
                   //- Mailer
                   #tab-mailer.tab-pane.fade(role='tabpanel')
+                    .mx-auto(style='max-width:400px')
+                      .card.bg-dark.mb-3
+                        .card-body.p-3
+                          h6.mb-2
+                            i.bi.bi-telephone-outbound.me-1
+                            | Poll a Node
+                          p.small.text-muted.mb-2
+                            | Enter an FTN address or a peer connection UUID. Bypasses
+                            | the poll schedule and connect backoff.
+                          .input-group.input-group-sm
+                            input.form-control#pollTarget(
+                              type='text'
+                              placeholder='1:134/101'
+                              list='pollTargetList'
+                              autocomplete='off'
+                              spellcheck='false')
+                            button.btn.btn-info#pollBtn(type='button')
+                              i.bi.bi-telephone-outbound.me-1
+                              | Poll
+                          if pollTargets && pollTargets.length
+                            datalist#pollTargetList
+                              each t in pollTargets
+                                option(value=t.address)= t.peerName + (t.networkName ? ' / ' + t.networkName : '') + (t.status === 'HOLD' ? ' [HOLD]' : '')
+                            .form-text.small.mt-1
+                              | #{pollTargets.length} active FTN peer#{pollTargets.length === 1 ? '' : 's'} available. Nodelist-only nodes work too.
+                          else
+                            .form-text.small.mt-1.text-warning
+                              | No active FTN peers configured. Nodelist-dialable addresses still work.
+
                     .d-grid.gap-2.mx-auto(style='max-width:400px')
                       button.btn.btn-info.trigger-btn(data-job='bso-scan')
                         i.bi.bi-search.me-1
@@ -152,12 +181,14 @@ block content
     document.addEventListener('DOMContentLoaded', function() {
       var alertEl = document.getElementById('triggerAlert');
 
-      function showAlert(msg, type) {
+      var alertTimer = null;
+      function showAlert(msg, type, ms) {
         alertEl.className = 'alert alert-' + type;
         alertEl.textContent = msg;
-        setTimeout(function() {
+        if (alertTimer) clearTimeout(alertTimer);
+        alertTimer = setTimeout(function() {
           alertEl.className = 'alert d-none';
-        }, 4000);
+        }, ms || 4000);
       }
 
       // Queue status
@@ -250,6 +281,58 @@ block content
       // Auto-load when queue tab is shown
       document.getElementById('tab-queues').closest('.nav-link') ||
         document.querySelector('[data-bs-target="#tab-queues"]').addEventListener('shown.bs.tab', function() { loadQueues(); });
+
+      // Manual mailer poll — takes a target, so it has its own endpoint
+      // rather than riding the parameterless /trigger switch.
+      var pollBtn = document.getElementById('pollBtn');
+      var pollInput = document.getElementById('pollTarget');
+
+      function runPoll() {
+        var target = pollInput.value.trim();
+        if (!target) {
+          showAlert('Enter an FTN address or connection UUID first.', 'warning');
+          pollInput.focus();
+          return;
+        }
+
+        var origText = pollBtn.innerHTML;
+        pollBtn.disabled = true;
+        pollInput.disabled = true;
+        pollBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Resolving...';
+
+        fetch('/admin/events/poll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: target })
+        })
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+          if (data.status) {
+            showAlert(data.triggered + (data.detail ? ' | ' + data.detail : ''), 'success', 8000);
+            pollInput.value = '';
+          } else {
+            showAlert(data.error || 'Unknown error', 'danger');
+          }
+        })
+        .catch(function(err) {
+          showAlert('Request failed: ' + err.message, 'danger');
+        })
+        .finally(function() {
+          pollBtn.disabled = false;
+          pollInput.disabled = false;
+          pollBtn.innerHTML = origText;
+        });
+      }
+
+      if (pollBtn && pollInput) {
+        pollBtn.addEventListener('click', runPoll);
+        pollInput.addEventListener('keydown', function(ev) {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            runPoll();
+          }
+        });
+      }
 
       document.querySelectorAll('.trigger-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {

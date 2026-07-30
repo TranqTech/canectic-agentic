@@ -283,4 +283,16 @@ describe('routes/admin.js', function() {
 	it('registers GET /menus', function() {
 		assert.ok(hasRoute(adminRoutes, 'GET', '/menus'), 'Missing GET /menus');
 	});
+
+	it('registers GET /events', function() {
+		assert.ok(hasRoute(adminRoutes, 'GET', '/events'), 'Missing GET /events');
+	});
+
+	it('registers POST /events/trigger', function() {
+		assert.ok(hasRoute(adminRoutes, 'POST', '/events/trigger'), 'Missing POST /events/trigger');
+	});
+
+	it('registers POST /events/poll', function() {
+		assert.ok(hasRoute(adminRoutes, 'POST', '/events/poll'), 'Missing POST /events/poll');
+	});
 });

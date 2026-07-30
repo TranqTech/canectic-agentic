@@ -60,6 +60,7 @@ import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
 import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
+import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
 import * as fileEcholist from '../models/fileEcholist.js';
 import * as flash from '../middleware/db/flash.js';
@@ -3770,13 +3771,131 @@ router.post('/filebone/:networkId/combined/unmap', urlencodedParser, requireAdmi
 router.get('/events', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
+
+	// Active FTN peers, for the manual-poll picker on the Mailer tab. Only
+	// connections that actually carry an address are offered -- an addressless
+	// connection has nothing for the sysop to poll by.
+	var pollTargets = [];
+	if (sufficientAccess) {
+		try {
+			var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
+			for (var pc of ftnConns) {
+				var pcd = pc.connection_data || {};
+				if (!pcd.address) continue;
+				pollTargets.push({
+					address: pcd.address,
+					peerName: pc.peer_name || '',
+					networkName: pc.network_name || '',
+					status: pcd.status || 'NORMAL'
+				});
+			}
+		} catch (err) {
+			alogger.writeAlog(3, 'admin/events: failed to load poll targets: ' + err.message, 'yellow');
+		}
+	}
+
 	res.render('admin/events/index', {
 		sufficientAccess: sufficientAccess,
 		title: 'Jobs & Maintenance',
 		activelink: 'events',
 		currentuser: currentuser,
+		pollTargets: pollTargets,
 		triggered: req.query.triggered || null
 	});
+});
+
+// Manual mailer poll for a single target. Accepts either an FTN address or a
+// peer connection UUID.
+//
+// An explicit UUID polls that connection directly. An FTN address goes through
+// ftnRouter.resolveRoute, which mirrors what the BSO scanner does: a peer
+// connection is used when one matches, otherwise a nodelist-dialable node is
+// called without needing a peer record at all. Either way the work is handed to
+// the mailer process via the mailer queue, so this returns as soon as the job is
+// queued -- session results land in the mailer log, not here.
+//
+// Both job types bypass the outbound-mail and backoff guards. That is the point
+// of a manual poll: sysop intent wins over the scheduler.
+router.post('/events/poll', express.json(), requireAdmin, async (req, res) => {
+	var target = String(req.body.target || '').trim();
+	if (!target) {
+		return res.json({ status: false, error: 'Enter an FTN address or a peer connection UUID.' });
+	}
+
+	// 5D addresses are accepted so the value can be pasted straight from a
+	// nodelist or peer record; resolveRoute parses the domain off itself.
+	var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+	var FTN_RE  = /^\d+:\d+\/\d+(\.\d+)?(@[A-Za-z0-9._-]+)?$/;
+
+	function describe(conn) {
+		var cd = conn.connection_data || {};
+		var label = cd.address || conn.uuid;
+		if (conn.peer_name) label += ' (' + conn.peer_name + ')';
+		return label;
+	}
+
+	try {
+		if (UUID_RE.test(target)) {
+			var conn = await peerConnections.getConnectionByUUIDWithNetwork(target);
+			if (!conn) {
+				return res.json({ status: false, error: 'No peer connection with UUID ' + target });
+			}
+			await jobs.enqueueMailerTriggerPoll(conn.uuid);
+			alogger.writeAlog(2, 'admin: manual mailer poll queued for ' + describe(conn), 'cyan');
+			return res.json({ status: true, triggered: 'Poll queued for ' + describe(conn) });
+		}
+
+		if (!FTN_RE.test(target)) {
+			return res.json({
+				status: false,
+				error: 'Not a recognised target. Use an FTN address (1:134/101) or a connection UUID.'
+			});
+		}
+
+		var route = await ftnRouter.resolveRoute(target);
+		if (!route) {
+			return res.json({
+				status: false,
+				error: 'No route to ' + target + '. No active peer connection matches it, and it is not binkp-dialable in any imported nodelist.'
+			});
+		}
+
+		if (route.connectionUUID) {
+			var routed = await peerConnections.getConnectionByUUIDWithNetwork(route.connectionUUID);
+			if (!routed) {
+				return res.json({ status: false, error: 'Route resolved to a peer connection that no longer exists.' });
+			}
+			await jobs.enqueueMailerTriggerPoll(route.connectionUUID);
+			alogger.writeAlog(2,
+				'admin: manual mailer poll queued for ' + target + ' via peer ' + describe(routed) +
+				' (' + route.method + ')', 'cyan');
+			return res.json({
+				status: true,
+				triggered: 'Poll queued for ' + target + ' via peer ' + describe(routed),
+				detail: 'Route: ' + route.method + (route.nextHop !== target ? ', next hop ' + route.nextHop : '')
+			});
+		}
+
+		if (route.nodelistData) {
+			var hop = route.nextHop || target;
+			await jobs.enqueueMailerNodelistConnect(route.nodelistData, hop);
+			alogger.writeAlog(2,
+				'admin: manual mailer poll queued for ' + target + ' via nodelist ' +
+				(route.nodelistData.hostname || 'unknown'), 'cyan');
+			return res.json({
+				status: true,
+				triggered: 'Poll queued for ' + hop + ' via nodelist (' +
+					(route.nodelistData.systemName || route.nodelistData.hostname || 'unknown') + ')',
+				detail: 'Route: ' + route.method + ', dialing ' +
+					(route.nodelistData.hostname || '?') + ':' + (route.nodelistData.binkpPort || 24554)
+			});
+		}
+
+		return res.json({ status: false, error: 'Route to ' + target + ' resolved but had no usable peer or nodelist target.' });
+	} catch (err) {
+		alogger.writeAlog(3, 'admin: manual mailer poll failed for ' + target + ': ' + err.message, 'redbright');
+		return res.json({ status: false, error: err.message });
+	}
 });
 
 // Queue status API

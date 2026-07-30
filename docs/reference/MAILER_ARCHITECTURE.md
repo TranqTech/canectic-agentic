@@ -739,11 +739,23 @@ The mailer does not toss — it only moves files. Inter-process signaling uses B
 
 2. **Outbound**: The worker's `ftn:outbound` job writes packets to the outbound directory, then enqueues a `signal-outbound` job on the mailer queue. The mailer picks it up and triggers a poll for CRASH connections.
 
-### Admin Routes (future)
+### Admin Routes
+
+Implemented, on the Jobs & Maintenance page (`/admin/events`, Mailer tab):
+
+- `POST /admin/events/poll` — manual poll for a single target. Body: `{ target }`, accepting
+  either an FTN address (4D or 5D) or a peer connection UUID. A UUID enqueues `trigger-poll`
+  for that connection directly. An address goes through `ftnRouter.resolveRoute()`, so it
+  enqueues `trigger-poll` when a peer connection matches and `nodelist-connect` when the node
+  is only reachable via an imported nodelist. Both job types bypass the outbound-mail and
+  backoff guards, which is the point of a manual poll. Returns as soon as the job is queued;
+  session results appear in the mailer log.
+- `POST /admin/events/trigger` with `{ job: 'bso-scan' }` — on-demand BSO outbound scan.
+
+Still future:
 
 - `GET /admin/mailer` — mailer status, active sessions, recent session log
 - `GET /admin/mailer/sessions` — list of active sessions with transfer progress
-- `POST /admin/mailer/poll/:connectionId` — enqueue a `trigger-poll` job on the mailer queue
 - `POST /admin/mailer/stop` / `POST /admin/mailer/start` — control mailer without restart
 
 ---
