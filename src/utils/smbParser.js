@@ -5,7 +5,7 @@
 //
 // Reference: https://www.synchro.net/docs/smb.html
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'fs';
 
 // --- Constants ---
 
@@ -223,6 +223,42 @@ function extractMessageText(sdtBuf, msgHeader, sdtBlockSize) {
 	return { body: bodyText, tail: tailText };
 }
 
+// Same, but reading from an open .sdt descriptor instead of a resident buffer.
+// Holding the whole data file alongside every decoded message exhausts the
+// heap on large bases, so the streaming path reads only what each message
+// needs. Mirrors extractMessageText's block-versus-byte offset fallback.
+function readMessageText(fd, fileSize, msgHeader, sdtBlockSize) {
+	var bodyText = '';
+	var tailText = '';
+
+	var blockLen = sdtBlockSize || 256;
+	var baseOffset = msgHeader.dataOffset * blockLen;
+	if (baseOffset >= fileSize && msgHeader.dataOffset < fileSize) {
+		baseOffset = msgHeader.dataOffset;
+	}
+
+	for (var df of msgHeader.dfields) {
+		var physOffset = baseOffset + df.offset;
+		if (df.length <= 0) continue;
+		if (physOffset + df.length > fileSize) continue;
+
+		var buf = Buffer.alloc(df.length);
+		var got = readSync(fd, buf, 0, df.length, physOffset);
+		if (got <= 0) continue;
+
+		var text = (got === df.length ? buf : buf.subarray(0, got))
+			.toString('utf8').replace(/\x00/g, '');
+
+		if (df.type === DFIELD.TEXT_BODY) {
+			bodyText += text;
+		} else if (df.type === DFIELD.TEXT_TAIL) {
+			tailText += text;
+		}
+	}
+
+	return { body: bodyText, tail: tailText };
+}
+
 // --- Parse index file (.sid) ---
 
 function parseIndex(sidBuf) {
@@ -246,79 +282,112 @@ function parseIndex(sidBuf) {
 	return records;
 }
 
-// --- Main parse function ---
-// Returns { status, messages[], error }
+// --- Streaming parse ---
+//
+// iterateSMB yields one { header, bodyText, tailText } at a time and never
+// holds more than a single decoded message. The .shd stays resident because
+// headers must be walked or indexed, but the .sdt is read through a file
+// descriptor a message at a time.
+//
+// options.headersOnly skips text reads entirely, for cheap previews.
+//
+// Throws on a missing or invalid header file. Callers that want a result
+// object instead should use parseSMB.
 
-function parseSMB(shdPath, sdtPath, sidPath) {
-	var result = { status: false, messages: [], statusHeader: null, error: null };
+function* iterateSMB(shdPath, sdtPath, sidPath, options) {
+	var opts = options || {};
 
-	if (!existsSync(shdPath)) {
-		result.error = 'Header file not found: ' + shdPath;
-		return result;
-	}
-	if (!existsSync(sdtPath)) {
-		result.error = 'Data file not found: ' + sdtPath;
-		return result;
-	}
+	if (!existsSync(shdPath)) throw new Error('Header file not found: ' + shdPath);
+	if (!existsSync(sdtPath)) throw new Error('Data file not found: ' + sdtPath);
 
 	var shdBuf = readFileSync(shdPath);
-	var sdtBuf = readFileSync(sdtPath);
-
-	// Parse status header
 	var status = parseStatusHeader(shdBuf);
-	if (!status) {
-		result.error = 'Invalid SMB header file (bad magic or too small)';
+	if (!status) throw new Error('Invalid SMB header file (bad magic or too small)');
+
+	var wantText = !opts.headersOnly;
+	var fd = null;
+	var fileSize = 0;
+
+	if (wantText) {
+		fd = openSync(sdtPath, 'r');
+		try {
+			fileSize = fstatSync(fd).size;
+		} catch (err) {
+			closeSync(fd);
+			throw err;
+		}
+	}
+
+	function build(hdr) {
+		var text = wantText
+			? readMessageText(fd, fileSize, hdr, 256)
+			: { body: '', tail: '' };
+		return { header: hdr, bodyText: text.body, tailText: text.tail };
+	}
+
+	try {
+		var indexRecords = null;
+		if (sidPath && existsSync(sidPath)) {
+			indexRecords = parseIndex(readFileSync(sidPath));
+		}
+
+		if (indexRecords && indexRecords.length > 0) {
+			for (var idx of indexRecords) {
+				if (idx.attr & MSG_ATTR.DELETE) continue;
+				var ihdr = parseMsgHeader(shdBuf, idx.offset);
+				if (!ihdr) continue;
+				if (ihdr.attr & MSG_ATTR.DELETE) continue;
+				yield build(ihdr);
+			}
+		} else {
+			var scanPos = status.headerOffset || 256;
+			while (scanPos < shdBuf.length) {
+				var hdr = parseMsgHeader(shdBuf, scanPos);
+				if (!hdr) {
+					scanPos = (Math.floor(scanPos / 256) + 1) * 256;
+					continue;
+				}
+
+				if (!(hdr.attr & MSG_ATTR.DELETE)) {
+					yield build(hdr);
+				}
+
+				var blocksUsed = Math.ceil(hdr.length / 256);
+				scanPos += blocksUsed * 256;
+			}
+		}
+	} finally {
+		// Runs on early return from the consumer too, so an importer that
+		// stops partway does not leak the descriptor.
+		if (fd !== null) {
+			try { closeSync(fd); } catch (_) { /* already closed */ }
+		}
+	}
+}
+
+// Read just the status header, without walking any messages.
+function readStatusHeader(shdPath) {
+	if (!existsSync(shdPath)) return null;
+	return parseStatusHeader(readFileSync(shdPath));
+}
+
+// --- Collecting parse ---
+// Returns { status, messages[], statusHeader, error }
+//
+// Materialises every message, so it is only appropriate for small bases and
+// tests. Importers should use iterateSMB.
+
+function parseSMB(shdPath, sdtPath, sidPath, options) {
+	var result = { status: false, messages: [], statusHeader: null, error: null };
+
+	try {
+		result.statusHeader = readStatusHeader(shdPath);
+		for (var msg of iterateSMB(shdPath, sdtPath, sidPath, options)) {
+			result.messages.push(msg);
+		}
+	} catch (err) {
+		result.error = err.message;
 		return result;
-	}
-	result.statusHeader = status;
-
-	// Use index file if available for faster scanning
-	var indexRecords = null;
-	if (sidPath && existsSync(sidPath)) {
-		var sidBuf = readFileSync(sidPath);
-		indexRecords = parseIndex(sidBuf);
-	}
-
-	if (indexRecords && indexRecords.length > 0) {
-		// Index-guided parse
-		for (var idx of indexRecords) {
-			if (idx.attr & MSG_ATTR.DELETE) continue; // Skip deleted
-			var hdr = parseMsgHeader(shdBuf, idx.offset);
-			if (!hdr) continue;
-			if (hdr.attr & MSG_ATTR.DELETE) continue;
-
-			var text = extractMessageText(sdtBuf, hdr, 256);
-			result.messages.push({
-				header: hdr,
-				bodyText: text.body,
-				tailText: text.tail,
-			});
-		}
-	} else {
-		// Sequential scan from headerOffset
-		var scanPos = status.headerOffset || 256;
-		while (scanPos < shdBuf.length) {
-			var hdr = parseMsgHeader(shdBuf, scanPos);
-			if (!hdr) {
-				// Skip to next 256-byte block
-				scanPos = (Math.floor(scanPos / 256) + 1) * 256;
-				continue;
-			}
-
-			if (!(hdr.attr & MSG_ATTR.DELETE)) {
-				var text = extractMessageText(sdtBuf, hdr, 256);
-				result.messages.push({
-					header: hdr,
-					bodyText: text.body,
-					tailText: text.tail,
-				});
-			}
-
-			// Advance past this header (aligned to 256-byte blocks)
-			var hdrBytes = hdr.length;
-			var blocksUsed = Math.ceil(hdrBytes / 256);
-			scanPos += blocksUsed * 256;
-		}
 	}
 
 	result.status = true;
@@ -357,9 +426,56 @@ function previewSMB(shdPath, sdtPath, sidPath) {
 	return result;
 }
 
+// --- Cheap stat: read only the status header ---
+//
+// previewSMB parses every message, which is far too slow when listing a whole
+// directory of message bases. The status header already carries the totals, so
+// read just the first block.
+
+function statSMB(shdPath) {
+	var result = { status: false, totalMsgs: 0, lastMsg: 0, error: null };
+
+	if (!existsSync(shdPath)) {
+		result.error = 'Header file not found: ' + shdPath;
+		return result;
+	}
+
+	var buf = Buffer.alloc(256);
+	var bytesRead = 0;
+	var fd;
+	try {
+		fd = openSync(shdPath, 'r');
+		bytesRead = readSync(fd, buf, 0, 256, 0);
+	} catch (err) {
+		result.error = 'Could not read header: ' + err.message;
+		return result;
+	} finally {
+		if (fd !== undefined) {
+			try { closeSync(fd); } catch (_) { /* already closed */ }
+		}
+	}
+
+	// Only hand over the bytes actually read. The buffer is pre-zeroed, so
+	// passing the whole allocation would make a truncated file look like a
+	// valid status header with a matching magic and zero counts.
+	var status = parseStatusHeader(buf.subarray(0, bytesRead));
+	if (!status) {
+		result.error = 'Invalid SMB header file (bad magic or too small)';
+		return result;
+	}
+
+	result.status    = true;
+	result.totalMsgs = status.totalMsgs;
+	result.lastMsg   = status.lastMsg;
+	return result;
+}
+
 export {
+	iterateSMB,
 	parseSMB,
+	readStatusHeader,
 	previewSMB,
+	statSMB,
 	parseStatusHeader,
 	parseMsgHeader,
 	extractMessageText,

@@ -384,6 +384,43 @@ export async function enqueueRethread(opts = {}) {
 }
 
 /**
+ * Import a mapped set of message bases discovered by a directory scan.
+ * Runs on the worker because a hub migration can be hundreds of bases and
+ * would never survive an HTTP request timeout.
+ * Called by: admin panel (bulk message base import).
+ */
+export async function enqueueBulkMsgBaseImport(opts = {}) {
+	return maintenanceQueue.add('bulk-msgbase-import', {
+		mappings: opts.mappings || [],
+		seal: opts.seal !== false,
+	}, {
+		// One bulk import at a time. A second submission while one is running
+		// would have both writing to the same areas.
+		jobId: 'bulk-msgbase-import',
+		removeOnComplete: true,
+		removeOnFail: true,
+	});
+}
+
+/**
+ * Repair legacy full-string MSGIDs written by the pre-retrofit SMB importer,
+ * splitting them into the msg_id / msg_orig_addr tuple the tossers use.
+ * Idempotent; realistically a one-time run after upgrading.
+ * Called by: maintenance CLI (--fix-msgids).
+ */
+export async function enqueueFixMsgIds(opts = {}) {
+	return maintenanceQueue.add('fix-msgids', {
+		areas: opts.areas || null,
+		dryRun: opts.dryRun || false,
+		batchSize: opts.batchSize || 500,
+	}, {
+		jobId: 'fix-msgids' + (opts.areas ? '-' + opts.areas.join('-') : '-all'),
+		removeOnComplete: true,
+		removeOnFail: true,
+	});
+}
+
+/**
  * Reconcile echolist/filebone local_area_id with network area mappings.
  * Called by: scheduler (daily), admin panel.
  */

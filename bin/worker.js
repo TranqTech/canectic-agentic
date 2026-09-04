@@ -462,6 +462,24 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'fix-msgids': {
+				var msgBaseFix = await import("../src/maintenance/messageBase.js");
+				await msgBaseFix.fixLegacyMsgIds({
+					areas: job.data.areas || null,
+					dryRun: job.data.dryRun || false,
+					batchSize: job.data.batchSize || 500,
+				});
+				break;
+			}
+
+			case 'bulk-msgbase-import': {
+				var msgBaseBulk = await import("../src/maintenance/msgBaseBulk.js");
+				await msgBaseBulk.importMessageBases(job.data.mappings || [], {
+					seal: job.data.seal !== false,
+				});
+				break;
+			}
+
 			case 'regen-file-desc-html': {
 				var fileEntries = await import("../src/models/fileEntries.js");
 				await fileEntries.regenerateDescHtml({

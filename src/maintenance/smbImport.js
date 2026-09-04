@@ -3,27 +3,20 @@
 // Reads .shd/.sdt/.sid files, converts to our echomail format, and inserts
 // into the target area's backing tables with dupe checking and threading.
 
-import { parseSMB, previewSMB } from '../utils/smbParser.js';
-import * as postgres from '../middleware/db/postgres.js';
-import * as messages from '../models/messages.js';
-import * as msgAreas from '../models/msgAreas.js';
-import { formatBodyHtml } from '../utils/terminalText.js';
-import { cp437ToUtf8 as convertCP437toUTF8 } from '../utils/codepageConversions.js';
+import { iterateSMB, previewSMB, statSMB } from '../utils/smbParser.js';
+import {
+	resolveImportTarget,
+	importParsedMessages,
+	stripNulls,
+	failResult,
+} from './msgBaseImport.js';
+import * as ftnUtils from '../utils/ftnUtils.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as alogger from '../utils/alogger.js';
 
-// --- Helpers ---
-
-// Strip null bytes (0x00) from strings — PostgreSQL rejects them in text columns.
-// SMB data files use nulls as padding/terminators.
-function stripNulls(str) {
-	if (typeof str !== 'string') return str;
-	return str.replace(/\x00/g, '');
-}
-
 // --- Convert SMB message to our DB format ---
 
-function smbToDbObj(msg) {
+function smbToDbObj(msg, target) {
 	var hdr = msg.header;
 	var currtime = new Date();
 
@@ -73,11 +66,20 @@ function smbToDbObj(msg) {
 		}
 	}
 
+	// Store MSGID in the tuple format the rest of the platform uses: msg_id
+	// holds the serial, msg_orig_addr holds the origin address. Matching
+	// ftnToDb here is what lets dupe detection recognise the same message
+	// arriving later over FTN.
+	var msgidSplit = ftnUtils.splitFullMsgid(hdr.msgId || '');
+	var replySplit = ftnUtils.splitFullMsgid(hdr.replyId || '');
+
 	return {
 		user_id: 0,
 		uuid: uuidv4(),
-		msg_id: stripNulls(hdr.msgId || ('smb-' + hdr.number)),
-		reply_to: stripNulls(hdr.replyId || null),
+		msg_id: stripNulls(msgidSplit.msg_id || ('smb-' + hdr.number)),
+		msg_orig_addr: stripNulls(msgidSplit.msg_orig_addr || ''),
+		reply_to: stripNulls(replySplit.msg_id || ''),
+		reply_orig_addr: stripNulls(replySplit.msg_orig_addr || ''),
 		tosser_id: stripNulls(hdr.fidoPid || 'SMB Import'),
 		source: stripNulls(hdr.senderAddr || ''),
 		domain: '',
@@ -99,6 +101,9 @@ function smbToDbObj(msg) {
 		tz_utc: '',
 		seen_by: stripNulls(hdr.fidoSeenBy || ''),
 		path: stripNulls(hdr.fidoPath || ''),
+		// Stamping the origin network stops getOutboundForConnection from
+		// echoing imported history back out to that same network.
+		source_network_id: (target && target.networkId) || null,
 		system_time: systemTime,
 		created_at: currtime,
 		updated_at: null,
@@ -106,108 +111,46 @@ function smbToDbObj(msg) {
 }
 
 // --- Import SMB files into a message area ---
-// Returns { status, imported, duplicates, errors, messages[] }
+// Returns { status, imported, duplicates, skipped, errors, total, lastId }
 
 async function importSMB(shdPath, sdtPath, sidPath, areaShortcode, options) {
 	var opts = options || {};
-	var result = {
-		status: false,
-		imported: 0,
-		duplicates: 0,
-		skipped: 0,
-		errors: [],
-		total: 0,
-	};
 
-	// Validate area exists
-	var area = await msgAreas.getAreaByShortcode(areaShortcode);
-	if (!area) {
-		result.errors.push('Message area not found: ' + areaShortcode);
-		return result;
+	// Validate area before parsing so a bad shortcode fails without reading files
+	var target = await resolveImportTarget(areaShortcode, opts);
+	if (!target) {
+		return failResult(['Message area not found: ' + areaShortcode]);
 	}
 
-	var shorty = areaShortcode.toLowerCase();
-	var msgtable = 'mb_' + shorty + '_msgs';
-	var threadtable = 'mb_' + shorty + '_threads';
+	alogger.writeAlog(3, '[SMB Import] Reading ' + shdPath, 'cyan');
 
-	// Parse SMB files
-	alogger.writeAlog(3, '[SMB Import] Parsing ' + shdPath, 'cyan');
-	var parsed = parseSMB(shdPath, sdtPath, sidPath);
-	if (!parsed.status) {
-		result.errors.push(parsed.error);
-		return result;
+	// Fail on an unreadable base before touching the database. The cheap stat
+	// also gives progress logging a denominator.
+	var stat = statSMB(shdPath);
+	if (!stat.status) {
+		return failResult([stat.error]);
 	}
 
-	result.total = parsed.messages.length;
-	alogger.writeAlog(3, '[SMB Import] Found ' + result.total + ' messages', 'cyan');
-
-	// Import each message
-	for (var i = 0; i < parsed.messages.length; i++) {
-		var msg = parsed.messages[i];
-
-		try {
-			var dbObj = smbToDbObj(msg);
-
-			// Dupe check
-			var isUnique = await postgres.checkValueUnique('msg_id', dbObj.msg_id, msgtable);
-			if (!isUnique) {
-				result.duplicates++;
-				continue;
-			}
-
-			// Generate body_html
-			var displayText = dbObj.utf8 || dbObj.body_text || '';
-			try {
-				dbObj.body_html = await formatBodyHtml(displayText);
-			} catch (e) {
-				dbObj.body_html = null;
-			}
-
-			// Thread the message
-			dbObj = await messages.threadMessage(dbObj, msgtable, threadtable, shorty);
-
-			// Insert
-			var dbres = await postgres.insertObject(dbObj, msgtable);
-			if (dbres.status) {
-				result.imported++;
-			} else {
-				result.errors.push('Insert failed for msg #' + (msg.header.number || i) + ': ' + (dbres.errormessages || []).join(', '));
-				result.skipped++;
-			}
-		} catch (err) {
-			result.errors.push('Error on msg #' + (msg.header.number || i) + ': ' + err.message);
-			result.skipped++;
-		}
-
-		// Flush thread stats frequently so subject matching and thread linking
-		// see accurate last_message timestamps during the import
-		if ((i + 1) % 10 === 0) {
-			var pending = messages.drainThreadUpdateArray();
-			if (pending.length > 0) {
-				await messages.updateThreadArray(pending);
-			}
-		}
-
-		// Progress logging every 100 messages
-		if ((i + 1) % 100 === 0) {
-			alogger.writeAlog(4, '[SMB Import] Progress: ' + (i + 1) + '/' + result.total, 'cyan');
-		}
+	// Streamed, not collected: the importer sees one message at a time so a
+	// large base cannot exhaust the heap.
+	var source;
+	try {
+		source = iterateSMB(shdPath, sdtPath, sidPath);
+	} catch (err) {
+		return failResult([err.message]);
 	}
 
-	// Final flush of any remaining thread updates
-	var updatearray = messages.drainThreadUpdateArray();
-	if (updatearray.length > 0) {
-		await messages.updateThreadArray(updatearray);
-	}
-
-	// Update area stats
-	await msgAreas.updateAreaStats();
-
-	result.status = true;
-	alogger.writeAlog(2, '[SMB Import] Complete: ' + result.imported + ' imported, ' +
-		result.duplicates + ' dupes, ' + result.skipped + ' skipped (of ' + result.total + ')', 'greenbright');
-
-	return result;
+	return await importParsedMessages(source, target, smbToDbObj, {
+		label: opts.label || 'SMB Import',
+		seal: opts.seal,
+		expectedTotal: stat.totalMsgs,
+	});
 }
 
-export { importSMB, previewSMB, smbToDbObj };
+export {
+	importSMB,
+	previewSMB,
+	smbToDbObj,
+	importParsedMessages,
+	resolveImportTarget,
+};

@@ -19,6 +19,8 @@
 //   node src/tools/maintenance.js --purge-pm-trash             Hard-delete expired PM trash
 //   node src/tools/maintenance.js --purge-pm-trash --days 7    Override retention period
 //   node src/tools/maintenance.js --recalc-counts              Recalculate message area counts
+//   node src/tools/maintenance.js --fix-msgids                 Repair legacy full-string MSGIDs
+//   node src/tools/maintenance.js --fix-msgids --dry-run       Report what would be repaired
 //   node src/tools/maintenance.js --help                       Show usage
 
 import * as dotenv from 'dotenv';
@@ -41,9 +43,10 @@ function parseArgs() {
 		console.log('  --purge-pm-trash   Hard-delete PM trash older than retention period');
 		console.log('  --recalc-counts    Recalculate message area counts');
 		console.log('  --rethread         Rebuild thread assignments for message areas');
+		console.log('  --fix-msgids       Split legacy full-string MSGIDs into the msg_id/msg_orig_addr tuple');
 		console.log('');
 		console.log('Options:');
-		console.log('  --area SHORTCODE   Limit regen-html to specific area(s) (repeatable)');
+		console.log('  --area SHORTCODE   Limit regen-html, rethread or fix-msgids to specific area(s) (repeatable)');
 		console.log('  --dry-run          Preview without writing changes');
 		console.log('  --width N          Force column width for HTML generation');
 		console.log('  --batch N          Batch size (default: 100)');
@@ -61,6 +64,7 @@ function parseArgs() {
 	var purgePmTrash = args.includes('--purge-pm-trash');
 	var recalcCounts = args.includes('--recalc-counts');
 	var rethread = args.includes('--rethread');
+	var fixMsgIds = args.includes('--fix-msgids');
 	var width = null;
 	var batchSize = 100;
 	var days = null;
@@ -81,7 +85,7 @@ function parseArgs() {
 		}
 	}
 
-	return { regenHtml, regenPmHtml, purgePmTrash, recalcCounts, rethread, areas, dryRun, width, batchSize, days };
+	return { regenHtml, regenPmHtml, purgePmTrash, recalcCounts, rethread, fixMsgIds, areas, dryRun, width, batchSize, days };
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +157,7 @@ async function waitForJobs(enqueuedJobs, timeoutMs) {
 async function main() {
 	var opts = parseArgs();
 
-	if (!opts.regenHtml && !opts.regenPmHtml && !opts.purgePmTrash && !opts.recalcCounts && !opts.rethread) {
+	if (!opts.regenHtml && !opts.regenPmHtml && !opts.purgePmTrash && !opts.recalcCounts && !opts.rethread && !opts.fixMsgIds) {
 		console.log('No task specified. Use --help for usage.');
 		process.exit(1);
 	}
@@ -202,6 +206,17 @@ async function main() {
 			});
 			enqueuedJobs.push(job);
 			console.log('  + rethread' + (opts.areas.length > 0 ? ' (areas: ' + opts.areas.join(', ') + ')' : ' (all areas)'));
+		}
+
+		if (opts.fixMsgIds) {
+			var job = await jobs.enqueueFixMsgIds({
+				areas: opts.areas.length > 0 ? opts.areas : null,
+				dryRun: opts.dryRun,
+				batchSize: opts.batchSize,
+			});
+			enqueuedJobs.push(job);
+			console.log('  + fix-msgids' + (opts.areas.length > 0 ? ' (areas: ' + opts.areas.join(', ') + ')' : ' (all areas)') + (opts.dryRun ? ' [dry run]' : ''));
+			console.log('    Progress is logged by the worker. Check: pm2 logs worker');
 		}
 
 		if (enqueuedJobs.length === 0) {

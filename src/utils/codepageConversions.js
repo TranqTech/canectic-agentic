@@ -285,8 +285,44 @@ function replaceMultipleSpaces(str) {
     return str.replace(/ {2,}/g, match => '&nbsp;'.repeat(match.length));
 }
 
+/**
+ * Fast CP437 -> UTF-8 decode for a whole buffer.
+ *
+ * cp437ToUtf8() appends one character at a time, which is fine for short
+ * strings but allocation-heavy when decoding millions of message bodies during
+ * a message base import. This maps bytes through a lookup table and joins once.
+ *
+ * The table is built from cp437ToUtf8() itself, so output is identical by
+ * construction and the two can never drift apart.
+ *
+ * @param {Uint8Array|Buffer|Array} bytes - CP437 encoded bytes
+ * @returns {string} UTF-8 string
+ */
+var CP437_CHAR_TABLE = null;
+
+function cp437CharTable() {
+    if (!CP437_CHAR_TABLE) {
+        CP437_CHAR_TABLE = new Array(256);
+        for (var i = 0; i < 256; i++) {
+            CP437_CHAR_TABLE[i] = cp437ToUtf8([i]);
+        }
+    }
+    return CP437_CHAR_TABLE;
+}
+
+function cp437BufferToUtf8(bytes) {
+    if (!bytes || bytes.length === 0) return '';
+    var table = cp437CharTable();
+    var out = new Array(bytes.length);
+    for (var i = 0; i < bytes.length; i++) {
+        out[i] = table[bytes[i]];
+    }
+    return out.join('');
+}
+
 export{
     cp437ToUtf8,
+    cp437BufferToUtf8,
     utf8ToCp437,
     cp437ToUtf8StringConv,
     replaceEdgeSpaces,

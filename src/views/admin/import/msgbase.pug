@@ -23,6 +23,7 @@ block content
                     h2= title
                   .col-4
                     .text-end
+                      a.button.btn.btn-sm.btn-secondary.me-1(href='/admin/import/msgbase/bulk') Bulk Import
                       a.button.btn.btn-sm.btn-info(href='/admin') Exit
               .card-body
 
@@ -32,6 +33,14 @@ block content
                     .alert.alert-success
                       h5 Import Complete
                       p Imported: #[strong= result.imported] | Duplicates: #[strong= result.duplicates] | Skipped: #[strong= result.skipped] | Total: #[strong= result.total]
+                      if result.sealed !== null && result.sealed !== undefined
+                        p.mb-0
+                          small.text-muted
+                            i.bi.bi-shield-check.me-1
+                            if result.sealed > 0
+                              | Marked as already distributed for #{result.sealed} peer subscription#{result.sealed === 1 ? '' : 's'} on this area.
+                            else
+                              | No peer subscriptions on this area needed their outbound pointer advanced.
                     if result.errors && result.errors.length > 0
                       .alert.alert-warning
                         h6 Warnings:
@@ -58,6 +67,9 @@ block content
                       table.table.table-sm.table-dark.mb-3
                         tbody
                           tr
+                            td.text-muted Format
+                            td= format === 'jam' ? 'JAM' : 'Synchronet (SMB)'
+                          tr
                             td.text-muted Messages found
                             td= preview.totalMsgs
                           if preview.dateRange
@@ -76,9 +88,10 @@ block content
 
                     //- Import form (after preview)
                     form(action='/admin/import/msgbase/run' method='POST')
-                      input(type='hidden' name='shd_path' value=shdPath)
-                      input(type='hidden' name='sdt_path' value=sdtPath)
-                      input(type='hidden' name='sid_path' value=sidPath)
+                      input(type='hidden' name='format' value=format)
+                      input(type='hidden' name='primary_path' value=primaryPath)
+                      input(type='hidden' name='data_path' value=dataPath)
+                      input(type='hidden' name='index_path' value=indexPath)
                       .row.mb-3
                         .col-8
                           label.form-label Target message area:
@@ -90,36 +103,75 @@ block content
                           button.btn.btn-success.btn-lg.w-100(type='submit')
                             i.bi.bi-database-add.me-1
                             | Import Messages
+                      .form-check.mb-2
+                        input.form-check-input#sealCheck(type='checkbox' name='seal' value='1' checked)
+                        label.form-check-label(for='sealCheck') Mark imported messages as already distributed
+                      .form-text.mb-3
+                        | Advances the outbound pointer for peers subscribed to this area so the imported history is not sent to them as new traffic. Leave this on unless you specifically want downstream nodes to receive these messages.
 
                 //- Upload form (initial)
                 if !preview || preview.error
                   if !result || !result.status
-                    h5 Synchronet Message Base (SMB) Import
-                    p.text-muted Upload the .shd and .sdt files from a Synchronet message base. The .sid index file is optional but speeds up parsing.
-                    hr
-                    form(action='/admin/import/msgbase/preview' method='POST' enctype='multipart/form-data')
-                      .row.mb-3
-                        .col-6
-                          label.form-label
-                            | Header file (.shd)
-                            span.text-danger *
-                          input.form-control(type='file' name='shd_file' accept='.shd' required)
-                        .col-6
-                          label.form-label
-                            | Data file (.sdt)
-                            span.text-danger *
-                          input.form-control(type='file' name='sdt_file' accept='.sdt' required)
-                      .row.mb-3
-                        .col-6
-                          label.form-label Index file (.sid)
-                            span.text-muted.ms-1 optional
-                          input.form-control(type='file' name='sid_file' accept='.sid')
-                      .text-end
-                        button.btn.btn-primary(type='submit')
-                          i.bi.bi-search.me-1
-                          | Preview
+                    ul.nav.nav-tabs.mb-3(role='tablist')
+                      li.nav-item(role='presentation')
+                        button.nav-link.active#smbTab(data-bs-toggle='tab' data-bs-target='#smbPane' type='button' role='tab' aria-selected='true') Synchronet (SMB)
+                      li.nav-item(role='presentation')
+                        button.nav-link#jamTab(data-bs-toggle='tab' data-bs-target='#jamPane' type='button' role='tab' aria-selected='false') JAM
+
+                    .tab-content
+                      .tab-pane.fade.show.active#smbPane(role='tabpanel' aria-labelledby='smbTab')
+                        p.text-muted Upload the .shd and .sdt files from a Synchronet message base. The .sid index file is optional but speeds up parsing.
+                        hr
+                        form(action='/admin/import/msgbase/preview' method='POST' enctype='multipart/form-data')
+                          input(type='hidden' name='format' value='smb')
+                          .row.mb-3
+                            .col-6
+                              label.form-label
+                                | Header file (.shd)
+                                span.text-danger *
+                              input.form-control(type='file' name='shd_file' accept='.shd' required)
+                            .col-6
+                              label.form-label
+                                | Data file (.sdt)
+                                span.text-danger *
+                              input.form-control(type='file' name='sdt_file' accept='.sdt' required)
+                          .row.mb-3
+                            .col-6
+                              label.form-label Index file (.sid)
+                                span.text-muted.ms-1 optional
+                              input.form-control(type='file' name='sid_file' accept='.sid')
+                          .text-end
+                            button.btn.btn-primary(type='submit')
+                              i.bi.bi-search.me-1
+                              | Preview
+
+                      .tab-pane.fade#jamPane(role='tabpanel' aria-labelledby='jamTab')
+                        p.text-muted Upload the .jhr and .jdt files from a JAM message base, as written by Mystic, MBSE, HPT and others. The .jdx index file is optional.
+                        hr
+                        form(action='/admin/import/msgbase/preview' method='POST' enctype='multipart/form-data')
+                          input(type='hidden' name='format' value='jam')
+                          .row.mb-3
+                            .col-6
+                              label.form-label
+                                | Header file (.jhr)
+                                span.text-danger *
+                              input.form-control(type='file' name='jhr_file' accept='.jhr' required)
+                            .col-6
+                              label.form-label
+                                | Text file (.jdt)
+                                span.text-danger *
+                              input.form-control(type='file' name='jdt_file' accept='.jdt' required)
+                          .row.mb-3
+                            .col-6
+                              label.form-label Index file (.jdx)
+                                span.text-muted.ms-1 optional
+                              input.form-control(type='file' name='jdx_file' accept='.jdx')
+                          .text-end
+                            button.btn.btn-primary(type='submit')
+                              i.bi.bi-search.me-1
+                              | Preview
 
                     hr
                     p.text-muted
                       small
-                        | Future: JAM message base import (TODO)
+                        | Lastread files (.jlr) and Synchronet .sid pointers are not imported. Message base files only.

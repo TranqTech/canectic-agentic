@@ -110,11 +110,17 @@ async function setSubscriptions(peerConnectionId, areaIds, field, formObj) {
 				'redbright'
 			);
 
+			// Start at the area head, not 0. A new link gets traffic from now
+			// on, not the entire backlog. resetOutboundIdx is the explicit way
+			// to rewind and resend history.
+			var startIdx = await headIdForAreaId(id);
+
 			var insertObj = {
 				peer_connection_id: connId,
 				area_id: id,
 				allowed: field === 'allowed' ? true : false,
 				enabled: field === 'enabled' ? true : false,
+				msg_idx: startIdx,
 				created_at: currtime,
 				updated_at: currtime,
 				created_by_uuid: '1',
@@ -180,8 +186,9 @@ async function syncConnectionToNetwork(peerConnectionId) {
 	// Find all network_areas rows for this network that don't yet have a
 	// subscription row for this connection
 	var missing = await postgres.query(
-		`SELECT na.area_id
+		`SELECT na.area_id, ma.shortcode
 		 FROM network_areas na
+		 JOIN message_areas ma ON ma.id = na.area_id
 		 WHERE na.network_id = $1
 		   AND NOT EXISTS (
 		     SELECT 1 FROM peer_area_subscriptions pas
@@ -200,11 +207,18 @@ async function syncConnectionToNetwork(peerConnectionId) {
 	var errors = [];
 
 	for (var row of missing) {
+		// Start at the area head so a newly linked connection does not inherit
+		// the whole backlog. See the note in setSubscriptions.
+		var startIdx = row.shortcode
+			? await headIdForShortcode(row.shortcode).catch(function () { return 0; })
+			: await headIdForAreaId(row.area_id);
+
 		var insertObj = {
 			peer_connection_id: connId,
 			area_id: row.area_id,
 			allowed: false,
 			enabled: false,
+			msg_idx: startIdx,
 			created_at: currtime,
 			updated_at: currtime,
 			created_by_uuid: '1',
@@ -386,6 +400,89 @@ async function resetOutboundIdx(peerConnectionUUID, areaId) {
 	return { status: true, errormessages: [] };
 }
 
+// --- Outbound high water mark helpers ---
+
+// Backing message table for an area shortcode. Shortcodes are admin-controlled,
+// but this name is interpolated into SQL, so validate it the same way
+// postgres.js validates identifiers.
+var validShortcodeRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+function msgTableForShortcode(shortcode) {
+	var shorty = String(shortcode || '').toLowerCase().trim();
+	if (!validShortcodeRegex.test(shorty)) {
+		throw new Error('Invalid area shortcode: ' + shortcode);
+	}
+	return 'mb_' + shorty + '_msgs';
+}
+
+// Highest message id currently in an area, or 0 when the area is empty.
+async function headIdForShortcode(shortcode) {
+	var row = await postgres.queryOne(
+		'SELECT COALESCE(MAX(id), 0) AS head FROM ' + msgTableForShortcode(shortcode)
+	);
+	return row ? parseInt(row.head) : 0;
+}
+
+async function headIdForAreaId(areaId) {
+	var row = await postgres.queryOne(
+		'SELECT shortcode FROM message_areas WHERE id = $1',
+		[parseInt(areaId)]
+	);
+	if (!row || !row.shortcode) return 0;
+	try {
+		return await headIdForShortcode(row.shortcode);
+	} catch (err) {
+		alogger.writeAlog(3, 'headIdForAreaId: ' + err.message, 'yellow');
+		return 0;
+	}
+}
+
+// Advance the outbound high water mark for every subscription on an area so
+// downstream peers treat everything currently in it as already sent. This is
+// the mirror of resetOutboundIdx, which rewinds to 0 to force a resend.
+//
+// Only subscriptions at or past minIdx are moved. A peer that was already
+// behind before an import keeps its position, because a single high water mark
+// cannot express "send the old backlog but skip the middle". Suppression for
+// those peers relies on source_network_id instead, which
+// getOutboundForConnection checks per message.
+//
+// Passing minIdx as the area head recorded before an import therefore moves
+// exactly the peers that were caught up at that moment.
+async function advanceOutboundIdxForArea(areaId, shortcode, minIdx) {
+	var aid = parseInt(areaId);
+	var head;
+
+	try {
+		head = await headIdForShortcode(shortcode);
+	} catch (err) {
+		return { status: false, updated: 0, head: 0, errormessages: [err.message] };
+	}
+
+	if (!head) {
+		return { status: true, updated: 0, head: 0, errormessages: [] };
+	}
+
+	var floor = (minIdx === undefined || minIdx === null) ? 0 : parseInt(minIdx);
+
+	var rows = await postgres.query(
+		`UPDATE peer_area_subscriptions
+		 SET msg_idx = $1, updated_at = NOW()
+		 WHERE area_id = $2 AND msg_idx >= $3 AND msg_idx < $1
+		 RETURNING id`,
+		[head, aid, floor]
+	);
+
+	var updated = rows ? rows.length : 0;
+	alogger.writeAlog(4,
+		'advanceOutboundIdxForArea: area ' + aid + ' head ' + head +
+		', advanced ' + updated + ' subscription(s) from >= ' + floor,
+		'cyan'
+	);
+
+	return { status: true, updated: updated, head: head, errormessages: [] };
+}
+
 export {
 	getSubscriptionsByConnection,
 	getEnabledByConnection,
@@ -395,5 +492,8 @@ export {
 	allowAllNetworkAreas,
 	syncNetworkAreaToConnections,
 	removeSubscriptionsForNetworkArea,
-	resetOutboundIdx
+	resetOutboundIdx,
+	advanceOutboundIdxForArea,
+	headIdForShortcode,
+	headIdForAreaId
 };

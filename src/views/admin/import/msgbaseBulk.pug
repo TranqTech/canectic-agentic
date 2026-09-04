@@ -1,0 +1,157 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+      .row
+        .col-lg-10.offset-lg-1.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2= title
+                .col-4
+                  .text-end
+                    a.button.btn.btn-sm.btn-secondary.me-1(href='/admin/import/msgbase') Single Base
+                    a.button.btn.btn-sm.btn-info(href='/admin') Exit
+            .card-body
+
+              if error
+                .alert.alert-danger= error
+
+              if enqueued
+                .alert.alert-success
+                  h5 Import Queued
+                  p.mb-1 #{enqueued.count} message base#{enqueued.count === 1 ? '' : 's'} queued for import.
+                  if enqueued.missing > 0
+                    p.mb-1.text-warning
+                      | #{enqueued.missing} selected base#{enqueued.missing === 1 ? ' was' : 's were'} no longer present in the directory and #{enqueued.missing === 1 ? 'was' : 'were'} skipped.
+                  p.mb-0
+                    small.text-muted
+                      | The worker runs these one at a time and logs progress as it goes. Watch it with
+                      code.ms-1 pm2 logs worker
+                      |  or on the
+                      a.ms-1(href='/admin/logs') log viewer
+                      | .
+
+              //- Scan form
+              form(action='/admin/import/msgbase/bulk/scan' method='POST')
+                .row.mb-3
+                  .col-md-7
+                    label.form-label
+                      | Directory to scan
+                      span.text-danger *
+                    input.form-control(type='text' name='scan_dir' value=scanDir placeholder='/home/mystic/msgs' required)
+                    .form-text Flat scan of a single directory. Supports %X variables and ~ expansion.
+                  .col-md-3
+                    label.form-label Format
+                    select.form-select(name='format')
+                      option(value='jam' selected=(format === 'jam')) JAM (.jhr / .jdt)
+                      option(value='smb' selected=(format === 'smb')) Synchronet (.shd / .sdt)
+                  .col-md-2.d-flex.align-items-end
+                    button.btn.btn-primary.w-100(type='submit')
+                      i.bi.bi-search.me-1
+                      | Scan
+
+              if scan
+                hr
+                - var importable = scan.bases.filter(function (b) { return !b.error; })
+                - var unusable = scan.bases.filter(function (b) { return b.error; })
+                - var matched = importable.filter(function (b) { return b.suggestedArea; })
+
+                p.text-muted
+                  | Scanned
+                  code.mx-1= scan.dir
+                  | and found #{scan.bases.length} base#{scan.bases.length === 1 ? '' : 's'}:
+                  strong.ms-1 #{importable.length} usable
+                  | , #{matched.length} matched to an existing area.
+
+                if importable.length === 0
+                  .alert.alert-warning No usable message bases in that directory. Check the path and the selected format.
+                else
+                  form(action='/admin/import/msgbase/bulk/run' method='POST')
+                    input(type='hidden' name='format' value=format)
+                    input(type='hidden' name='scan_dir' value=scanDir)
+
+                    .d-flex.justify-content-between.align-items-center.mb-2
+                      .form-check
+                        input.form-check-input#toggleAll(type='checkbox' checked)
+                        label.form-check-label(for='toggleAll') Select all matched
+                      .form-check
+                        input.form-check-input#sealCheck(type='checkbox' name='seal' value='1' checked)
+                        label.form-check-label(for='sealCheck') Mark imported messages as already distributed
+
+                    .table-responsive
+                      table.table.table-sm.table-dark.align-middle
+                        thead
+                          tr
+                            th(style='width:3rem')
+                            th Base
+                            th.text-end(style='width:7rem') Messages
+                            th(style='width:5rem') Index
+                            th(style='width:30%') Target area
+                            th(style='width:9rem') Match
+                        tbody
+                          each base, idx in importable
+                            tr
+                              td
+                                input.form-check-input.base-include(type='checkbox' name='include' value=idx checked=!!base.suggestedArea)
+                                input(type='hidden' name='name_' + idx value=base.name)
+                              td
+                                code= base.name
+                              td.text-end= base.totalMsgs
+                              td
+                                if base.indexPath
+                                  i.bi.bi-check-lg.text-success
+                                else
+                                  span.text-muted.small none
+                              td
+                                select.form-select.form-select-sm(name='area_' + idx)
+                                  option(value='') -- skip --
+                                  each area in areas
+                                    option(value=area.shortcode selected=(base.suggestedArea === area.shortcode))= area.shortcode + ' - ' + area.name
+                              td
+                                if base.matchedBy
+                                  span.badge.bg-success= base.matchedBy
+                                else
+                                  span.badge.bg-secondary unmatched
+
+                    .text-end.mt-3
+                      button.btn.btn-success.btn-lg(type='submit')
+                        i.bi.bi-database-add.me-1
+                        | Queue Import
+
+                if unusable.length > 0
+                  hr
+                  h6.text-warning Skipped
+                  p.text-muted.small These were found but cannot be imported.
+                  table.table.table-sm.table-dark
+                    thead
+                      tr
+                        th Base
+                        th Reason
+                    tbody
+                      each base in unusable
+                        tr
+                          td
+                            code= base.name
+                          td.text-muted.small= base.error
+
+  script.
+    (function () {
+      var toggle = document.getElementById('toggleAll');
+      if (!toggle) return;
+      toggle.addEventListener('change', function () {
+        var boxes = document.querySelectorAll('.base-include');
+        for (var i = 0; i < boxes.length; i++) boxes[i].checked = toggle.checked;
+      });
+    })();

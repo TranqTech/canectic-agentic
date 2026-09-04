@@ -187,6 +187,20 @@ export async function startEmbeddedWorkers(opts = {}) {
 			case 'purge-pm-trash':
 				await privateMessages.purgeDeleted(job.data.days);
 				break;
+			case 'fix-msgids':
+				await messageBase.fixLegacyMsgIds({
+					areas: job.data.areas,
+					dryRun: job.data.dryRun,
+					batchSize: job.data.batchSize,
+				});
+				break;
+			case 'bulk-msgbase-import': {
+				var msgBaseBulk = await import("../maintenance/msgBaseBulk.js");
+				await msgBaseBulk.importMessageBases(job.data.mappings || [], {
+					seal: job.data.seal !== false,
+				});
+				break;
+			}
 			case 'pm-purged-cleanup': {
 				// Background hard-delete of rows tagged via purgeMessage /
 				// purgeDeleted. Drains in batches until exhausted so a

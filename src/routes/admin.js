@@ -4026,18 +4026,59 @@ router.post('/events/trigger', express.json(), requireAdmin, async (req, res) =>
 // Message Base Import
 // -------------------------------------------------------
 
-router.get('/import/msgbase', async (req, res) => {
-	var currentuser      = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
-	var areaList         = await msgAreas.getAllAreas();
-	res.render('admin/import/msgbase', {
-		sufficientAccess: sufficientAccess,
+// Message base import supports two on-disk formats. Everything below is
+// format-neutral apart from which parser/importer gets called and which
+// upload fields carry the files:
+//
+//   smb  .shd header  .sdt data  .sid index (optional)
+//   jam  .jhr header  .jdt text  .jdx index (optional)
+//
+// The three file paths travel through the preview step as primary/data/index
+// so the run form does not need per-format hidden fields.
+var MSGBASE_FORMATS = {
+	smb: {
+		label:     'Synchronet (SMB)',
+		fields:    ['shd_file', 'sdt_file', 'sid_file'],
+		missing:   'Both .shd and .sdt files are required',
+		preview:   function (mods, p, d, i) { return mods.smb.previewSMB(p, d, i); },
+		run:       function (mods, p, d, i, area, opts) { return mods.smb.importSMB(p, d, i, area, opts); },
+	},
+	jam: {
+		label:     'JAM',
+		fields:    ['jhr_file', 'jdt_file', 'jdx_file'],
+		missing:   'Both .jhr and .jdt files are required',
+		preview:   function (mods, p, d, i) { return mods.jam.previewJAM(p, d, i); },
+		run:       function (mods, p, d, i, area, opts) { return mods.jam.importJAM(p, d, i, area, opts); },
+	},
+};
+
+function msgbaseFormat(req) {
+	var requested = (req.body && req.body.format) || 'smb';
+	return MSGBASE_FORMATS[requested] ? requested : 'smb';
+}
+
+async function renderMsgbase(req, res, extra) {
+	var base = {
+		sufficientAccess: true,
 		title: 'Import Message Base',
 		activelink: 'import',
-		currentuser: currentuser,
-		areas: areaList,
+		currentuser: await getCurrentUser(req),
+		areas: await msgAreas.getAllAreas(),
 		result: null,
 		preview: null,
+		format: 'smb',
+		primaryPath: '',
+		dataPath: '',
+		indexPath: '',
+	};
+	res.render('admin/import/msgbase', Object.assign(base, extra || {}));
+}
+
+router.get('/import/msgbase', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	await renderMsgbase(req, res, {
+		sufficientAccess: checkAdminAccess(currentuser),
+		currentuser: currentuser,
 	});
 });
 
@@ -4045,74 +4086,227 @@ router.post('/import/msgbase/preview', multer({ dest: os.tmpdir() }).fields([
 	{ name: 'shd_file', maxCount: 1 },
 	{ name: 'sdt_file', maxCount: 1 },
 	{ name: 'sid_file', maxCount: 1 },
+	{ name: 'jhr_file', maxCount: 1 },
+	{ name: 'jdt_file', maxCount: 1 },
+	{ name: 'jdx_file', maxCount: 1 },
 ]), requireAdmin, async (req, res) => {
-	var smbImport = await import('../maintenance/smbImport.js');
-	var areaList = await msgAreas.getAllAreas();
+	var format = msgbaseFormat(req);
+	var spec   = MSGBASE_FORMATS[format];
 
-	var shdFile = req.files['shd_file'] ? req.files['shd_file'][0] : null;
-	var sdtFile = req.files['sdt_file'] ? req.files['sdt_file'][0] : null;
-	var sidFile = req.files['sid_file'] ? req.files['sid_file'][0] : null;
+	var picked = spec.fields.map(function (name) {
+		return (req.files && req.files[name]) ? req.files[name][0] : null;
+	});
+	var primaryFile = picked[0];
+	var dataFile    = picked[1];
+	var indexFile   = picked[2];
 
-	if (!shdFile || !sdtFile) {
-		return res.render('admin/import/msgbase', {
-			sufficientAccess: true,
-			title: 'Import Message Base',
-			activelink: 'import',
-			currentuser: await getCurrentUser(req),
-			areas: areaList,
-			result: null,
-			preview: { error: 'Both .shd and .sdt files are required' },
+	if (!primaryFile || !dataFile) {
+		return await renderMsgbase(req, res, {
+			format: format,
+			preview: { error: spec.missing },
 		});
 	}
 
-	var preview = smbImport.previewSMB(shdFile.path, sdtFile.path, sidFile ? sidFile.path : null);
+	var mods = {
+		smb: await import('../maintenance/smbImport.js'),
+		jam: await import('../maintenance/jamImport.js'),
+	};
 
-	res.render('admin/import/msgbase', {
-		sufficientAccess: true,
-		title: 'Import Message Base',
-		activelink: 'import',
-		currentuser: await getCurrentUser(req),
-		areas: areaList,
-		result: null,
+	var indexPath = indexFile ? indexFile.path : null;
+	var preview   = spec.preview(mods, primaryFile.path, dataFile.path, indexPath);
+
+	await renderMsgbase(req, res, {
+		format: format,
 		preview: preview,
-		shdPath: shdFile.path,
-		sdtPath: sdtFile.path,
-		sidPath: sidFile ? sidFile.path : '',
+		primaryPath: primaryFile.path,
+		dataPath: dataFile.path,
+		indexPath: indexPath || '',
 	});
 });
 
 router.post('/import/msgbase/run', urlencodedParser, requireAdmin, async (req, res) => {
-	var smbImport = await import('../maintenance/smbImport.js');
-	var areaList = await msgAreas.getAllAreas();
+	var format = msgbaseFormat(req);
+	var spec   = MSGBASE_FORMATS[format];
 
-	var shdPath = req.body.shd_path;
-	var sdtPath = req.body.sdt_path;
-	var sidPath = req.body.sid_path || null;
+	var primaryPath   = req.body.primary_path;
+	var dataPath      = req.body.data_path;
+	var indexPath     = req.body.index_path || null;
 	var areaShortcode = req.body.area_shortcode;
 
-	if (!shdPath || !sdtPath || !areaShortcode) {
-		return res.render('admin/import/msgbase', {
-			sufficientAccess: true,
-			title: 'Import Message Base',
-			activelink: 'import',
-			currentuser: await getCurrentUser(req),
-			areas: areaList,
+	if (!primaryPath || !dataPath || !areaShortcode) {
+		return await renderMsgbase(req, res, {
+			format: format,
 			result: { errors: ['Missing required fields'] },
-			preview: null,
 		});
 	}
 
-	var result = await smbImport.importSMB(shdPath, sdtPath, sidPath, areaShortcode);
+	var mods = {
+		smb: await import('../maintenance/smbImport.js'),
+		jam: await import('../maintenance/jamImport.js'),
+	};
 
-	res.render('admin/import/msgbase', {
+	// Unchecked checkboxes are not submitted, so absence means "do not seal"
+	var result = await spec.run(mods, primaryPath, dataPath, indexPath, areaShortcode, {
+		seal: req.body.seal === '1',
+	});
+
+	await renderMsgbase(req, res, {
+		format: format,
+		result: result,
+	});
+});
+
+// -------------------------------------------------------
+// Bulk message base import (scan a directory, map, enqueue)
+// -------------------------------------------------------
+
+// A hub migration can be hundreds of bases, and the mapping form posts a few
+// fields per row. bodyParser's default parameterLimit is 1000, which a large
+// scan would quietly exceed, so this route gets its own parser.
+var bulkParser = bodyParser.urlencoded({ limit: '250mb', extended: true, parameterLimit: 50000 });
+
+async function renderMsgbaseBulk(req, res, extra) {
+	var base = {
 		sufficientAccess: true,
-		title: 'Import Message Base',
+		title: 'Bulk Message Base Import',
 		activelink: 'import',
 		currentuser: await getCurrentUser(req),
-		areas: areaList,
-		result: result,
-		preview: null,
+		areas: await msgAreas.getAllAreas(),
+		scan: null,
+		enqueued: null,
+		error: null,
+		scanDir: '',
+		format: 'jam',
+		seal: true,
+	};
+	res.render('admin/import/msgbaseBulk', Object.assign(base, extra || {}));
+}
+
+router.get('/import/msgbase/bulk', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	await renderMsgbaseBulk(req, res, {
+		sufficientAccess: checkAdminAccess(currentuser),
+		currentuser: currentuser,
 	});
+});
+
+router.post('/import/msgbase/bulk/scan', urlencodedParser, requireAdmin, async (req, res) => {
+	var format  = MSGBASE_FORMATS[req.body.format] ? req.body.format : 'jam';
+	var scanDir = (req.body.scan_dir || '').trim();
+	var seal    = req.body.seal === '1';
+
+	if (!scanDir) {
+		return await renderMsgbaseBulk(req, res, {
+			format: format, seal: seal,
+			error: 'A directory to scan is required',
+		});
+	}
+
+	var scanner = await import('../maintenance/msgBaseScan.js');
+	var scan    = await scanner.scanAndMatch(scanDir, format);
+
+	await renderMsgbaseBulk(req, res, {
+		format: format,
+		seal: seal,
+		scanDir: scanDir,
+		scan: scan.status ? scan : null,
+		error: scan.status ? null : scan.error,
+	});
+});
+
+router.post('/import/msgbase/bulk/run', bulkParser, requireAdmin, async (req, res) => {
+	var format  = MSGBASE_FORMATS[req.body.format] ? req.body.format : 'jam';
+	var seal    = req.body.seal === '1';
+	var scanDir = (req.body.scan_dir || '').trim();
+
+	// A single selected row arrives as a bare string rather than an array
+	function asArray(v) {
+		if (v === undefined || v === null) return [];
+		return Array.isArray(v) ? v : [v];
+	}
+
+	if (!scanDir) {
+		return await renderMsgbaseBulk(req, res, {
+			format: format, seal: seal,
+			error: 'Lost track of the scanned directory. Please scan again.',
+		});
+	}
+
+	// Re-scan rather than trusting file paths posted by the browser. The paths
+	// then always come from the server's own view of the directory, and the
+	// form only has to carry the mapping decisions.
+	var scanner = await import('../maintenance/msgBaseScan.js');
+	var rescan  = scanner.scanDirectory(scanDir, format);
+	if (!rescan.status) {
+		return await renderMsgbaseBulk(req, res, {
+			format: format, seal: seal, scanDir: scanDir,
+			error: 'Could not re-read the directory: ' + rescan.error,
+		});
+	}
+
+	var byName = new Map();
+	for (var b of rescan.bases) {
+		if (!b.error) byName.set(b.name, b);
+	}
+
+	var selected = asArray(req.body.include);
+	var mappings = [];
+	var missing  = [];
+
+	for (var i = 0; i < selected.length; i++) {
+		var idx  = String(selected[i]);
+		var area = (req.body['area_' + idx] || '').trim();
+		var name = req.body['name_' + idx] || '';
+		if (!area || !name) continue;
+
+		var found = byName.get(name);
+		if (!found) {
+			missing.push(name);
+			continue;
+		}
+
+		mappings.push({
+			name:          found.name,
+			format:        format,
+			headerPath:    found.headerPath,
+			dataPath:      found.dataPath,
+			indexPath:     found.indexPath,
+			areaShortcode: area,
+		});
+	}
+
+	if (mappings.length === 0) {
+		return await renderMsgbaseBulk(req, res, {
+			format: format, seal: seal, scanDir: scanDir,
+			error: missing.length > 0
+				? 'None of the selected bases are still present in that directory.'
+				: 'No message bases were selected, or none had a target area set',
+		});
+	}
+
+	if (missing.length > 0) {
+		alogger.writeAlog(3, 'Bulk msgbase import: ' + missing.length +
+			' selected base(s) no longer present at scan time: ' + missing.join(', '), 'yellow');
+	}
+
+	try {
+		var job = await jobs.enqueueBulkMsgBaseImport({ mappings: mappings, seal: seal });
+		await renderMsgbaseBulk(req, res, {
+			format: format,
+			seal: seal,
+			scanDir: scanDir,
+			enqueued: {
+				count: mappings.length,
+				missing: missing.length,
+				jobId: job && job.id ? job.id : null,
+			},
+		});
+	} catch (err) {
+		await renderMsgbaseBulk(req, res, {
+			format: format, seal: seal,
+			error: 'Could not enqueue the import: ' + err.message + '. Is the worker running?',
+		});
+	}
 });
 
 // -------------------------------------------------------
