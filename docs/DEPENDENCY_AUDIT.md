@@ -193,3 +193,57 @@ on Node 18 gets a clear install-time failure rather than a confusing runtime one
 8. Raise `engines` to `>=22`; update README and INSTALL together.
 
 Steps 2 onward are housekeeping and can wait. Only step 1 is required for Node 26.
+
+---
+
+## Reachability review of `npm audit`
+
+`npm audit` reports **17 advisories (10 high)**. Counting them is misleading:
+most are not reachable in this codebase. Assessed against how Canectic actually
+uses each package.
+
+### Genuinely reachable — act on these
+
+| Package | Severity | Why it is reachable | Fix |
+|---|---|---|---|
+| `ws` 8.19.0 | high | Uninitialised memory disclosure and memory-exhaustion DoS from tiny fragments. We run **internet-facing** WebSocket servers: terminal pools, PresenceSocket, NodeSpy snoop. Frames are attacker-controlled. | in-range → 8.21.3 |
+| `adm-zip` 0.5.16 | high | Crafted ZIP forces a 4GB allocation. We extract archives arriving **over FTN** (nodelist and echolist scanning, TIC files, FILE_ID.DIZ). Untrusted input from peers. | 0.6.0 (Tier 2) |
+| `multer` 2.1.1 | high | DoS via deeply nested field names, and incomplete cleanup of aborted uploads. Reachable through the file-area upload and message base import endpoints. Requires an authenticated user. | in-range → 2.3.0 |
+| `qs` 6.15.0 | moderate | DoS via attacker-controlled `isBuffer`, array-limit bypass. Pulled by `express` and `body-parser`, so it parses the query string of **every** request. | in-range |
+| `basic-ftp` 5.2.0 | high | A malicious FTP server can DoS the client through unbounded multiline control-response buffering, and `Client.list()` has unbounded memory growth. Reachable when polling a QWK hub over FTP. The CRLF-injection-via-credentials path is **not** reachable: credentials come from sysop config, not from an attacker. | v6 (major) |
+
+### Not reachable — no action needed on their own merit
+
+| Package | Severity | Why not |
+|---|---|---|
+| `serialize-javascript` | high (RCE) | Pulled only by `mocha`. **Dev dependency**, never deployed. |
+| `js-yaml` | high | Pulled only by `mocha`. Dev only. |
+| `brace-expansion` | high | Reaches us only via `minimatch` ← `glob` ← `mocha`. Dev only. |
+| `sanitize-html` | moderate | **Imported in `routes/index.js` and `routes/admin.js` but never called.** Message sanitisation is hand-rolled in `messages.js:71` (`sanitizeMessageFields`). Dead import. |
+| `postcss` | high | Enters only through `sanitize-html`, which is never called. |
+| `nanoid` | high | Enters only through `postcss` ← `sanitize-html`. |
+| `uuid` (v3/v5/v6 buffer bounds) | moderate | We use **`v4` only**, at all 37 import sites. The affected functions are never called. Same for the copy bundled inside `bullmq`. |
+| `morgan` | moderate | Log forging via `:remote-user`. Imported at `webserver.js:6` but the middleware is **commented out** at `webserver.js:39`. |
+| `body-parser` | moderate | DoS when an *invalid* limit value silently disables size enforcement. Our limits are valid (`'250mb'`, `parameterLimit: 50000`), so enforcement is active. Fix is free and in-range regardless. |
+| `nodemailer` | high | The listed vectors need APIs we do not use: no `name` transport option (CRLF into EHLO/HELO), no `jsonTransport`, no message-level `raw`, no `List-*` headers, and no OAuth2 (we authenticate with user/password). Our transport passes only host, port, secure, auth and requireTLS. |
+
+### What this means in practice
+
+Four of the five reachable issues are closed by **`npm update` alone** — `ws`,
+`multer`, `qs` and `body-parser` are all in-range. Combined with `adm-zip` 0.6.0
+from Tier 2, that clears everything reachable except `basic-ftp`, which needs its
+major and only matters when polling a QWK hub over FTP.
+
+None of the high-severity advisories that sound most alarming — the
+`serialize-javascript` RCE, `postcss` path traversal, `js-yaml` DoS — are
+reachable in a deployed Canectic.
+
+### Separate finding worth its own look
+
+`sanitize-html` is a declared dependency, imported in two route files, and never
+called. Message `body_html` is produced by `formatBodyHtml()` and sanitised by a
+hand-rolled `sanitizeMessageFields()` in `messages.js`. Message bodies arrive
+from FTN, QWK and NNTP and are rendered in the web UI, so the sanitiser sits on
+an untrusted path. Either wire `sanitize-html` up or drop the dependency and the
+dead imports, but the hand-rolled sanitiser deserves review on its own merits
+rather than being left implicit. Not a dependency problem, so not tracked here.
