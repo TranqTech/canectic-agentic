@@ -135,6 +135,15 @@ block content
                       option(value='true') Yes
                 .row.mt-2
                   .col-1
+                  .col-5
+                    label(for="ng_post_as") Post As:
+                    select#ng_post_as(name='post_as').form-select
+                      option(value='username' selected) Username
+                      option(value='realname') Real Name
+                    .form-text.text-muted
+                      | Whether messages posted in this group's areas carry the user's handle or their real name. New areas inherit this.
+                .row.mt-2
+                  .col-1
                   .col-10
                     label(for="ng_qwk_conf_start") QWK Conference Start:
                     input(
