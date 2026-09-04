@@ -11,7 +11,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import AdmZip from 'adm-zip';
-import { isMailBundleFilename, formatKludge, bareFtnAddress, extractMailBundle } from '../src/middleware/tossers/ftnTosser.js';
+import { isMailBundleFilename, formatKludge, bareFtnAddress, extractMailBundle, processMessageText } from '../src/middleware/tossers/ftnTosser.js';
 
 describe('isMailBundleFilename', function () {
 
@@ -248,5 +248,205 @@ describe('extractMailBundle', function () {
 		assert.ok(res.err, 'expected an error on non-zip input');
 		assert.strictEqual(res.extracted, 0);
 		assert.strictEqual(fs.existsSync(badPath), true, 'bad bundle should be left in place for investigation');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// processMessageText — splits an FTS-0004 message body into kludges and text
+// ---------------------------------------------------------------------------
+
+describe('processMessageText', function () {
+
+	// Minimal stand-in for the message object the packet reader builds.
+	function msg(rawText, overrides) {
+		var base = {
+			RawText: rawText,
+			OptionalAttributes: [],
+			Source: '',
+			Destination: '',
+			SourceNet: 2,
+			SourceNode: 3,
+			DestinationNet: 5,
+			DestinationNode: 6,
+		};
+		return Object.assign(base, overrides || {});
+	}
+
+	function attrValue(m, name) {
+		var found = m.OptionalAttributes.find(function (a) { return a.attribute === name; });
+		return found ? found.value : undefined;
+	}
+
+	describe('body extraction', function () {
+
+		it('keeps plain text lines in the body', function () {
+			var m = msg('line one\rline two\r');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText, 'line one\rline two\r');
+		});
+
+		it('normalises CRLF to bare CR', function () {
+			var m = msg('line one\r\nline two\r\n');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText, 'line one\rline two\r');
+		});
+
+		it('normalises lone LF to bare CR', function () {
+			var m = msg('line one\nline two\n');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText, 'line one\rline two\r');
+		});
+
+		it('strips reverse-CR 0x8D soft wrap characters', function () {
+			var m = msg('soft\x8Dwrap\r');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText, 'softwrap\r');
+		});
+
+		it('mirrors the body into utf8', function () {
+			var m = msg('body\r');
+			processMessageText(m);
+			assert.strictEqual(m.utf8, m.BodyText);
+		});
+
+		it('keeps kludge lines out of the body', function () {
+			var m = msg('\x01MSGID: 1:2/3 abc\rvisible\r');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText.indexOf('MSGID'), -1);
+			assert.strictEqual(m.BodyText, 'visible\r');
+		});
+	});
+
+	describe('kludge extraction', function () {
+
+		it('extracts MSGID', function () {
+			var m = msg('\x01MSGID: 1:2/3 5f2a1b3c\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.MsgId, '1:2/3 5f2a1b3c');
+		});
+
+		it('extracts REPLY', function () {
+			var m = msg('\x01REPLY: 1:2/4 aabbccdd\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.ReplyTo, '1:2/4 aabbccdd');
+		});
+
+		it('extracts PID and TID as the tosser id', function () {
+			var a = msg('\x01PID: Mystic/1.12\rbody\r');
+			processMessageText(a);
+			assert.strictEqual(a.TosserId, 'Mystic/1.12');
+
+			var b = msg('\x01TID: hpt/1.9\rbody\r');
+			processMessageText(b);
+			assert.strictEqual(b.TosserId, 'hpt/1.9');
+		});
+
+		it('extracts TZUTC', function () {
+			var m = msg('\x01TZUTC: -0500\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.TZUTC, '-0500');
+		});
+
+		it('extracts PATH', function () {
+			var m = msg('\x01PATH: 2/3 4\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.Path, '2/3 4');
+		});
+
+		it('records unrecognised kludges as optional attributes', function () {
+			var m = msg('\x01CHRS: CP437 2\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(attrValue(m, 'CHRS'), 'CP437 2');
+		});
+
+		it('ignores a control line with no colon', function () {
+			var m = msg('\x01FLAGS NPD\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText, 'body\r');
+			assert.strictEqual(m.OptionalAttributes.length, 0);
+		});
+	});
+
+	describe('AREA and SEEN-BY', function () {
+
+		it('marks a message with an AREA line as echomail', function () {
+			var m = msg('AREA:TEST_ECHO\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.Type, 'Echomail');
+			assert.strictEqual(m.AreaTag, 'TEST_ECHO');
+		});
+
+		it('tolerates a space after AREA:', function () {
+			var m = msg('AREA: TEST_ECHO\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.AreaTag, 'TEST_ECHO');
+		});
+
+		it('extracts a space-separated SEEN-BY line', function () {
+			var m = msg('body\rSEEN-BY 2/3 4 5\r');
+			processMessageText(m);
+			assert.strictEqual(m.SeenBy, '2/3 4 5');
+			assert.strictEqual(m.BodyText.indexOf('SEEN-BY'), -1);
+		});
+	});
+
+	describe('INTL kludge', function () {
+
+		// FTS-0001 orders INTL as "<destination> <origin>".
+
+		it('parses the colonless form', function () {
+			var m = msg('\x01INTL 1:2/3 4:5/6\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(m.Destination, '1:2/3');
+			assert.strictEqual(m.Source, '4:5/6');
+		});
+
+		it('parses the colon form without throwing', function () {
+			// This form previously reassigned two consts and threw, which
+			// failed the whole packet read rather than one message.
+			var m = msg('\x01INTL: 1:2/3 4:5/6\rbody\r');
+			assert.doesNotThrow(function () { processMessageText(m); });
+			assert.strictEqual(m.Destination, '1:2/3');
+			assert.strictEqual(m.Source, '4:5/6');
+		});
+
+		it('produces the same result for both forms', function () {
+			var a = msg('\x01INTL 1:2/3 4:5/6\rbody\r');
+			var b = msg('\x01INTL: 1:2/3 4:5/6\rbody\r');
+			processMessageText(a);
+			processMessageText(b);
+			assert.strictEqual(a.Source, b.Source);
+			assert.strictEqual(a.Destination, b.Destination);
+			assert.strictEqual(attrValue(a, 'INTL'), attrValue(b, 'INTL'));
+		});
+
+		it('records INTL as a single normalised optional attribute', function () {
+			var m = msg('\x01INTL: 1:2/3 4:5/6\rbody\r');
+			processMessageText(m);
+			assert.strictEqual(attrValue(m, 'INTL'), '1:2/3 4:5/6');
+		});
+
+		it('keeps the body intact alongside an INTL kludge', function () {
+			var m = msg('\x01INTL: 1:2/3 4:5/6\rreal body here\r');
+			processMessageText(m);
+			assert.strictEqual(m.BodyText, 'real body here\r');
+		});
+	});
+
+	describe('address fallback', function () {
+
+		it('synthesises Source and Destination when no kludge supplies them', function () {
+			var m = msg('body\r');
+			processMessageText(m);
+			assert.strictEqual(m.Source, '1:2/3');
+			assert.strictEqual(m.Destination, '1:5/6');
+		});
+
+		it('does not overwrite an address that is already set', function () {
+			var m = msg('body\r', { Source: '9:9/9', Destination: '8:8/8' });
+			processMessageText(m);
+			assert.strictEqual(m.Source, '9:9/9');
+			assert.strictEqual(m.Destination, '8:8/8');
+		});
 	});
 });

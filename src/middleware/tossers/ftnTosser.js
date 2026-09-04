@@ -559,17 +559,12 @@ function processMessageText(message) {
 						message.Path = value
 						message.OptionalAttributes.push({ attribute, value });
 						break;
-					case 'INTL':
-						//console.log("Process intl")
-						const split = line.substring(1).split(" ")
-						//console.log(split)
-						attribute = split[0]
-						value = split[1] + value
-						const destsource = value.split(" ")
-						message.source = destsource[0]
-						message.destination = destsource[1]
-						message.OptionalAttributes.push({ attribute, value });
-						break;
+					// No 'INTL' case: the colon form ("\x01INTL: <dest> <orig>")
+					// falls through to the startsWith("INTL") handler in
+					// default, which parses both forms correctly because
+					// "INTL" and "INTL:" both occupy split[0]. A dedicated
+					// case here previously reassigned the attribute/value
+					// consts and threw on every colon-form INTL kludge.
 					default:
 						if (attribute.startsWith("INTL")){
 							const split = line.substring(1).split(" ")
