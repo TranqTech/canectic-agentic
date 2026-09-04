@@ -368,8 +368,29 @@ into a new database. Because the collation stays `C`, sort order and case
 folding are byte-identical afterwards; the only change is that PostgreSQL
 starts validating bytes on write.
 
-First confirm the existing data is already valid UTF-8. If it is, the
-conversion is lossless:
+There is a script for this:
+
+```bash
+pm2 stop all
+bash setup/convert_db_encoding.sh --source canectic_bbs --target canectic_utf8
+```
+
+It inspects the source, scans every text column for bytes that are not valid
+UTF-8 and refuses to start if it finds any, dumps and reloads into a new UTF8
+database, then compares row counts table by table and reports failure on any
+mismatch. The original database is never modified, so switching back is just
+editing `dbname` in `.env`.
+
+To check whether a database needs converting without changing anything:
+
+```bash
+bash setup/convert_db_encoding.sh --source canectic_bbs --preflight-only
+```
+
+Stop the processes first. A dump taken while the system is writing is
+internally consistent but misses anything committed after it starts.
+
+The equivalent by hand, if you would rather do it yourself:
 
 ```bash
 pg_dump -Fc canectic_bbs > canectic_bbs.dump
