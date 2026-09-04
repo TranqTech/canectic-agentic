@@ -72,129 +72,97 @@ block content
               button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
             .modal-body
               form(action=`/admin/msgGroup/new` method="POST" class="form-registration")
-                .row
-                  .col-1
-                  .col-10
-                    label(for="name") Name:
-                    input(
-                      type="text"
-                      id="name"
-                      name="name"
-                      class="form-control"
-                      required
-                    )
-                    br
-                    label(for="description") Description:
-                    input(
-                      type="text"
-                      id="description"
-                      name="description"
-                      class="form-control"
-                      required
-                    )
-                    br
-                .row
-                  .col-1
-                  .col-10
-                    label(for="shortcode") Short Code:
-                    input(
-                      type="text"
-                      id="shortcode"
-                      name="shortcode"
-                      class="form-control"
-                      required
-                    )
-                .row.mt-2
-                  .col-1
-                  .col-5
-                    label(for="ng_readsecurity") Default Read Security:
-                    input(
-                      type="number"
-                      id="ng_readsecurity"
-                      min=0
-                      max=255
-                      name="readsecurity"
-                      class="form-control"
-                      value=50
-                    )
-                  .col-5
-                    label(for="ng_postsecurity") Default Post Security:
-                    input(
-                      type="number"
-                      id="ng_postsecurity"
-                      min=0
-                      max=255
-                      name="postsecurity"
-                      class="form-control"
-                      value=60
-                    )
-                    br
-                    label(for="ng_newscan") Newscan Default:
-                    select#ng_newscan(name='newscan_default').form-select
-                      option(value='false' selected) No
-                      option(value='true') Yes
-                .row.mt-2
-                  .col-1
-                  .col-5
-                    label(for="ng_post_as") Post As:
-                    select#ng_post_as(name='post_as').form-select
-                      option(value='username' selected) Username
-                      option(value='realname') Real Name
-                    .form-text.text-muted
-                      | Whether messages posted in this group's areas carry the user's handle or their real name. New areas inherit this.
-                .row.mt-2
-                  .col-1
-                  .col-10
-                    label(for="ng_qwk_conf_start") QWK Conference Start:
-                    input(
-                      type="number"
-                      id="ng_qwk_conf_start"
-                      name="qwk_conf_start"
-                      class="form-control"
-                      min=101
-                      value=nextConfStart || ''
-                    )
-                    .form-text.text-muted
-                      | Start of this group's QWK conference number block. Areas in the group take consecutive offsets within the block. Numbers 1-100 are reserved for system conferences. Pre-filled with the next available block; edit only if you want a specific arrangement.
-                    .small.mt-1#ng_qwk_conf_start_status
-                .row.mt-2
-                  .col-1
-                  .col-5
-                    #ng_read_perm_inputs
-                    #ng_read_rest_inputs
-                    label Read Permission Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_read_perm_badges(style='min-height:2.2rem')
-                    .input-group.mb-2
-                      select#ng_read_perm_select.form-control
-                      button.btn.btn-sm.btn-success#ng_read_perm_add(type='button') Add
-                    label Read Restriction Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_read_rest_badges(style='min-height:2.2rem')
-                    .input-group
-                      select#ng_read_rest_select.form-control
-                      button.btn.btn-sm.btn-danger#ng_read_rest_add(type='button') Add
-                  .col-5
-                    #ng_post_perm_inputs
-                    #ng_post_rest_inputs
-                    label Post Permission Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_post_perm_badges(style='min-height:2.2rem')
-                    .input-group.mb-2
-                      select#ng_post_perm_select.form-control
-                      button.btn.btn-sm.btn-success#ng_post_perm_add(type='button') Add
-                    label Post Restriction Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_post_rest_badges(style='min-height:2.2rem')
-                    .input-group
-                      select#ng_post_rest_select.form-control
-                      button.btn.btn-sm.btn-danger#ng_post_rest_add(type='button') Add
-                .row
-                  .col-1
-                  .col-10
-                    br
-                    .text-end
-                      input(
-                        type="submit"
-                        value="Submit"
-                        class="btn btn-lg btn-success btn-block"
-                        )
+
+                //- ---- Tab nav ----
+                ul.nav.nav-tabs.mb-3(role='tablist')
+                  li.nav-item(role='presentation')
+                    button.nav-link.active(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_main') Main
+                  li.nav-item(role='presentation')
+                    button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_access') Access
+                  li.nav-item(role='presentation')
+                    button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_network') Network
+
+                .tab-content
+                  //- ============================================================
+                  //- MAIN — identity and posting behaviour
+                  //- ============================================================
+                  .tab-pane.fade.show.active#ng_tab_main(role='tabpanel')
+                    .mb-3
+                      label.form-label(for="name") Name:
+                      input.form-control(type="text" id="name" name="name" required)
+                    .mb-3
+                      label.form-label(for="description") Description:
+                      input.form-control(type="text" id="description" name="description" required)
+                    .mb-3
+                      label.form-label(for="shortcode") Short Code:
+                      input.form-control(type="text" id="shortcode" name="shortcode" required)
+                    .row
+                      .col-6
+                        label.form-label(for="ng_post_as") Post As:
+                        select#ng_post_as.form-select(name='post_as')
+                          option(value='username' selected) Username
+                          option(value='realname') Real Name
+                        .form-text.text-muted
+                          | Whether messages carry the user's handle or their real name. New areas inherit this.
+                      .col-6
+                        label.form-label(for="ng_newscan") Newscan Default:
+                        select#ng_newscan.form-select(name='newscan_default')
+                          option(value='false' selected) No
+                          option(value='true') Yes
+
+                  //- ============================================================
+                  //- ACCESS — security levels and flag defaults for new areas
+                  //- ============================================================
+                  .tab-pane.fade#ng_tab_access(role='tabpanel')
+                    .row.mb-3
+                      .col-6
+                        label.form-label(for="ng_readsecurity") Default Read Security:
+                        input.form-control(type="number" id="ng_readsecurity" min=0 max=255 name="readsecurity" value=50)
+                      .col-6
+                        label.form-label(for="ng_postsecurity") Default Post Security:
+                        input.form-control(type="number" id="ng_postsecurity" min=0 max=255 name="postsecurity" value=60)
+                    .row
+                      .col-6
+                        #ng_read_perm_inputs
+                        #ng_read_rest_inputs
+                        label Read Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_read_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ng_read_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ng_read_perm_add(type='button') Add
+                        label Read Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_read_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ng_read_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ng_read_rest_add(type='button') Add
+                      .col-6
+                        #ng_post_perm_inputs
+                        #ng_post_rest_inputs
+                        label Post Permission Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_post_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ng_post_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ng_post_perm_add(type='button') Add
+                        label Post Restriction Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_post_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ng_post_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ng_post_rest_add(type='button') Add
+
+                  //- ============================================================
+                  //- NETWORK — QWK conference numbering
+                  //- ============================================================
+                  .tab-pane.fade#ng_tab_network(role='tabpanel')
+                    .mb-3
+                      label.form-label(for="ng_qwk_conf_start") QWK Conference Start:
+                      input.form-control(type="number" id="ng_qwk_conf_start" name="qwk_conf_start" min=101 value=nextConfStart || '')
+                      .form-text.text-muted
+                        | Start of this group's QWK conference number block. Areas in the group take consecutive offsets within the block. Numbers 1-100 are reserved for system conferences. Pre-filled with the next available block; edit only if you want a specific arrangement.
+                      .small.mt-1#ng_qwk_conf_start_status
+
+                .text-end.mt-3
+                  input.btn.btn-lg.btn-success(type="submit" value="Submit")
+
   script.
     document.addEventListener('DOMContentLoaded', function() {
       var table = document.getElementById('msgGroups');
