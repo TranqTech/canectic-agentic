@@ -90,9 +90,9 @@ Nothing to test, and it shrinks everything downstream.
 `ssh2-sftp-client` looks unused to a static grep but is **not** — it is lazily
 loaded at `qwkTransport.js:236`. Keep it.
 
-## Tier 1 — in-range, no code changes
+## Tier 1 — in-range, no code changes  *(DONE 2026-09-04)*
 
-Already permitted by existing caret ranges; `npm update` takes them.
+Applied via `npm update`.
 
 ```
 dotenv 17.3.1 -> 17.4.2      morgan 1.10.1 -> 1.12.0     multer 2.1.1 -> 2.3.0
@@ -106,7 +106,7 @@ None of these are required for Node 26; they are housekeeping.
 
 | Upgrade | Why it is safe here |
 |---|---|
-| `adm-zip` 0.5 → 0.6 | **Fixes CVE-2026-39244**: a malicious archive declaring a huge uncompressed size could force unbounded memory allocation. We extract archives arriving over FTN, so untrusted zips do reach this code. The one breaking change is `extractEntryTo()` preserving subdirectories instead of flattening — and we never call it. Our surface is `new AdmZip(path)`, `.getEntries()`, `.extractAllTo()`. |
+| `adm-zip` 0.5 → 0.6 **(DONE)** | **Fixes CVE-2026-39244**: a malicious archive declaring a huge uncompressed size could force unbounded memory allocation. We extract archives arriving over FTN, so untrusted zips do reach this code. The one breaking change is `extractEntryTo()` preserving subdirectories instead of flattening — and we never call it. Our surface is `new AdmZip(path)`, `.getEntries()`, `.extractAllTo()`. |
 | `uuid` 13 → 14 | Needs Node 20+ and a global `crypto`. The `v4` export is unchanged and **all 37 import sites use exactly `{ v4 as uuidv4 }`**. The v14 fix hardens `v3`/`v5`/`v6` against a bad offset; we call none of them. |
 | `chalk` 5 → 6 | Requires Node 22+. We use plain colour methods only (`gray`, `red`, `bold`, `blueBright` …), no builder or template-literal API. |
 | `file-type` 21 → 22 | Requires Node 22+. Single import site. |
@@ -247,3 +247,37 @@ from FTN, QWK and NNTP and are rendered in the web UI, so the sanitiser sits on
 an untrusted path. Either wire `sanitize-html` up or drop the dependency and the
 dead imports, but the hand-rolled sanitiser deserves review on its own merits
 rather than being left implicit. Not a dependency problem, so not tracked here.
+
+---
+
+## Status after the 2026-09-04 pass
+
+Tier 1 (`npm update`) and `adm-zip` 0.6.0 are applied. `npm audit` went from
+**17 advisories (10 high) to 4**, and **every reachable one is cleared**:
+
+| Package | Now |
+|---|---|
+| `ws` | 8.21.3 |
+| `multer` | 2.3.0 |
+| `qs` | 6.16.0 |
+| `body-parser` | 2.3.0 |
+| `adm-zip` | 0.6.0 |
+| `basic-ftp` | **5.3.1** |
+
+`basic-ftp` resolved within the 5.x line: the advisory covered `<=5.3.0`, and
+5.3.1 carries the fix, so the v6 major listed in Tier 2 is **not** required for
+security. Evaluate it on its own merits or leave it.
+
+The 4 remaining advisories are all unreachable in a deployed system:
+
+- `diff` and `serialize-javascript` — both reach us only through `mocha`, a dev
+  dependency
+- `nodemailer` — only the message-level `raw` option advisory remains, and we
+  never pass `raw`
+
+Verified: 2642 tests pass; the adm-zip call sites are exercised by
+`fileDescExtractor` and `ftnTosser.extractMailBundle` tests, including the
+subdirectory case; the two untested sites (`qwkClasses.js`, `nodelistImport.js`)
+use `extractAllTo` and `getEntries`, neither of which changed in 0.6. All four
+processes restarted with no errors, HTTP serves 200 and a WebSocket upgrade
+returns 101.
