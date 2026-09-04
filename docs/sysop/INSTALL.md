@@ -372,14 +372,36 @@ There is a script for this:
 
 ```bash
 pm2 stop all
-bash setup/convert_db_encoding.sh --source canectic_bbs --target canectic_utf8
+bash setup/convert_db_encoding.sh --source canectic_bbs
+pm2 start ecosystem.config.cjs
 ```
 
-It inspects the source, scans every text column for bytes that are not valid
-UTF-8 and refuses to start if it finds any, dumps and reloads into a new UTF8
-database, then compares row counts table by table and reports failure on any
-mismatch. The original database is never modified, so switching back is just
-editing `dbname` in `.env`.
+The converted database takes over the original name and the old one is renamed
+aside to `canectic_bbs_sqlascii_<timestamp>`, so **`.env` needs no change**.
+
+The order matters: it dumps, restores into a staging database, and compares row
+counts table by table, and only renames anything once that has passed. A
+failure at any earlier point leaves the original exactly where it was. Before
+starting it also scans every text column for bytes that are not valid UTF-8 and
+refuses if it finds any, since those would fail the reload.
+
+Stopping the processes is required rather than advisory, and the script
+enforces it: PostgreSQL cannot rename a database while anything is connected.
+It refuses if it finds a connection, then sets `CONNECTION LIMIT 0` on the
+source for the duration so nothing can reconnect part way through. An idle
+connection pool reports zero connections and will happily reconnect, which
+would put writes into the backup instead of the live database.
+
+To roll back, stop everything and swap the two names again; the script prints
+the exact commands.
+
+If you would rather keep the original in place and have the copy under a new
+name, pass `--target`. Nothing is renamed in that mode, and you repoint `dbname`
+in `.env` yourself:
+
+```bash
+bash setup/convert_db_encoding.sh --source canectic_bbs --target canectic_utf8
+```
 
 To check whether a database needs converting without changing anything:
 
