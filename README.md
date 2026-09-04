@@ -65,7 +65,7 @@ Canectic brings together the BBS experience with modern infrastructure: a full-f
 
 ### Requirements
 
-- Node.js 18+
+- Node.js 22+
 - PostgreSQL 14+
 - Redis 6+
 - Linux (Debian/Ubuntu recommended)

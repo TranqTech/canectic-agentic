@@ -27,7 +27,13 @@ sudo apt install dosemu2
 
 ### Node.js
 
-Node.js 18 or later is required (Node 20+ recommended). The project uses ES modules, Express 5, and the `--experimental-vm-modules` flag for Synchronet JS door shims.
+Node.js 22 or later is required. The project uses ES modules, Express 5, and the `--experimental-vm-modules` flag for Synchronet JS door shims.
+
+The floor is 22 because `better-sqlite3` v13 requires it. That version is worth
+having: it is the first release built on N-API, so its native binary is stable
+across Node major versions and ships prebuilt. Earlier releases had to be
+compiled against each Node version's V8 internals, which is what made installs
+fail on newer Node and required `build-essential` and `python3` to be present.
 
 ```bash
 # Using nvm (recommended)
