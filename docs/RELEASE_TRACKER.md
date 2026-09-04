@@ -189,13 +189,15 @@ Last updated: 2026-04-09
 - [x] .env.example template (examples/env.example)
 
 ### Testing
-- [x] 2,127 tests passing (mocha)
+- [x] 2,650 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
 - [x] Config and access control tests
 - [x] Email transport tests
 - [x] New feature tests (areaAccess, activityMap, wall, bulletins, announcements, systemStats, artCodes, qwkUser)
+- [x] Message base parser tests (SMB, JAM) with synthesised binary fixtures
+- [x] Redis and BullMQ integration tests (skip cleanly when Redis is unreachable)
 
 ---
 
@@ -207,7 +209,7 @@ Last updated: 2026-04-09
 | 2 | User profile editing | [x] | Username cooldown, name, location, gender, inline password change |
 | 3 | Door menus and collections | [x] | Collections, terminal browser, web cards, TinyMCE descriptions, ANSI colour rendering |
 | 4 | Door server BBS registration | [ ] | Register with door game servers |
-| 5 | JAM message base import | [ ] | Parser + admin UI (SMB import done) |
+| 5 | JAM message base import | [x] | JAM parser (spec-verified struct offsets, CP437, streaming), adapter reusing the FTN kludge splitter, single-base UI, bulk scan-and-map directory import on the worker queue, outbound high water mark seal. Shared import loop with SMB. |
 | 6 | Full nodespy implementation | [x] | Web dashboard + live snoop + terminal command |
 | 7 | Sysop chat | [x] | Break-in, split-screen DECSTBM chat from NodeSpy (web + terminal), chat queue |
 | 8 | User QWK/REP packet handling | [x] | User-facing QWK packet download and REP packet upload for offline message reading |
@@ -252,6 +254,7 @@ Last updated: 2026-04-09
 | 47 | Bad echomail handling | [x] | Holding table for unknown areatags with recovery, tracking, and auto-purge. Inbound file log for peer traceability. |
 | 48 | Combined area browser | [x] | Single-page grouped view with Subscribed/All toggle, search, AJAX subscribe/unsubscribe for both messages and files. |
 | 49 | REST API v1 (QWK download/upload) | [x] | `/api/v1` Bearer token auth, user + admin token CRUD, `/qwk/download` + `/qwk/upload`, throttled logoncount via `api_call_count_interval_hours`, caller log entries, `user_qwk_fetched` template event. Scopes: qwk, qwk_rw. |
+| 50 | **RESP3 migration** | [ ] | **HIGH PRIORITY.** node-redis 6 and ioredis 6 both default to RESP3; both are currently pinned to RESP2 (`RESP: 2` in `middleware/db/redis.js`, `protocol: 2` in `queues/connection.js`) so the dependency upgrade could not change reply shapes. Migrating means auditing every reply-shape assumption: `hGetAll`/`hgetall` results, `exists` truthiness, pub/sub on shared connections, and `sessionstore.js` in particular. Gains real types (maps, sets, booleans, doubles) and push messages for client-side caching. See `docs/DEPENDENCY_AUDIT.md`. |
 
 ---
 

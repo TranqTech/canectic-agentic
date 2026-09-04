@@ -115,7 +115,7 @@ None of these are required for Node 26; they are housekeeping.
 
 ## Tier 3 — majors needing a deliberate decision
 
-### `ioredis` 5 → 6 and `redis` (node-redis) 5 → 6
+### `ioredis` 5 → 6 and `redis` (node-redis) 5 → 6  *(DONE, pinned to RESP2)*
 
 Both make **RESP3 the default wire protocol**, changing reply shapes. Both offer
 an explicit opt-out, which makes them low risk if taken:
@@ -338,3 +338,38 @@ secure, auth and requireTLS.
 `engines` is `>=22.0.0`. The binding constraints are `better-sqlite3` 13,
 `chalk` 6 and `file-type` 22 at Node >= 22; `ioredis` 6, `redis` 6, `uuid` 14
 and `nodemailer` 10 need >= 20. Node 26 installs cleanly.
+
+---
+
+## Follow-up: RESP3 migration — HIGH PRIORITY
+
+Both Redis clients are on v6 but **pinned to RESP2**:
+
+- `src/middleware/db/redis.js` — `createClient({ url, RESP: 2 })`
+- `src/queues/connection.js` — `protocol: 2` on both config paths
+
+That was deliberate: it kept a protocol change out of a version bump. It is a
+holding position, not the destination. Tracked as item 50 in
+`docs/RELEASE_TRACKER.md`.
+
+**What RESP3 changes.** RESP2 has very few types — strings, integers, errors,
+arrays — so the client infers meaning by convention. `HGETALL` arrives as a flat
+array and the client pairs it into an object; `EXISTS` returns `1` and the client
+decides that means true. RESP3 adds real types (maps, sets, doubles, booleans,
+big numbers) plus out-of-band push messages, so replies carry their own shape and
+the client stops guessing. Push also enables client-side caching and cleaner
+pub/sub on a shared connection.
+
+**What migrating requires.** Every place that assumes a RESP2 shape:
+
+- `hGetAll` / `hgetall` results, which become maps rather than plain objects.
+  `sessionstore.js` is the most exposed: sessions are Redis hashes and the code
+  reads properties directly off the reply.
+- Truthiness checks on integer replies such as `exists` and `expire`.
+- Pub/sub, which the config change events and PresenceSocket rely on.
+- Anything doing deep equality against a reply, since object prototypes differ.
+
+`tests/redisQueue.test.js` asserts the current RESP2 shapes, including that a
+hash reply is a plain object. Those assertions are the tripwire: they will fail
+the moment the pin is removed, which is the intended signal to work through the
+list above rather than a bug.
