@@ -67,13 +67,37 @@ END
 run_psql "ALTER ROLE ${DB_USER} WITH PASSWORD \$pw\$${DB_PASS}\$pw\$;"
 
 # 3) Create database if it doesn't exist, owned by the user
+#
+# ENCODING is set explicitly. Without it the database inherits template1,
+# and a cluster whose initdb ran under a C/POSIX locale defaults to
+# SQL_ASCII. SQL_ASCII does no encoding validation at all: invalid byte
+# sequences are stored silently and handed back unchanged, so any component
+# that writes non-UTF-8 corrupts data with no error. Message bodies carry
+# CP437 art and accented names, so this matters.
+#
+# TEMPLATE template0 is required to use an encoding different from the
+# cluster default. LC_COLLATE/LC_CTYPE stay C: any encoding is permitted
+# under the C locale, sorting is byte order (fast and stable), and case
+# folding stays ASCII-only, which is what the application already expects.
 run_psql "DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}') THEN
-    CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};
+    CREATE DATABASE ${DB_NAME} OWNER ${DB_USER}
+      TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';
   END IF;
 END
 \$\$;"
+
+# 3a) Warn if we adopted a pre-existing database that is not UTF8
+EXISTING_ENC="$(sudo -u "$PG_ADMIN_ROLE" "$PSQL_BIN" -X -q -t -A \
+  -c "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = '${DB_NAME}';" 2>/dev/null || true)"
+if [[ -n "${EXISTING_ENC}" && "${EXISTING_ENC}" != "UTF8" ]]; then
+  echo
+  echo "WARNING: database '${DB_NAME}' already existed with encoding ${EXISTING_ENC}, not UTF8."
+  echo "         SQL_ASCII performs no encoding validation, so invalid bytes are stored"
+  echo "         silently. See docs/sysop/INSTALL.md for how to convert it."
+  echo
+fi
 
 # 4) Ensure ownership and grant privileges on the database
 run_psql "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};"

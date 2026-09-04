@@ -86,16 +86,63 @@ cd canectic
 bash setup/install.sh          # choose install directory
 cd /opt/canectic               # or your chosen path
 
-bash setup/create_pg_db_user.sh   # create database and user
+bash setup/create_pg_db_user.sh   # create database and user (see below if this fails)
 $EDITOR .env                      # set database credentials
 npm install                       # install dependencies
 node src/tools/dbmigrations.js    # create tables
 pm2 start ecosystem.config.cjs    # start all processes
 ```
 
+### Creating the database by hand
+
+`setup/create_pg_db_user.sh` needs `sudo -u postgres psql` to work. On systems
+where that is restricted, where PostgreSQL runs under a different admin role,
+or where peer authentication is disabled, the script fails and you create the
+role and database yourself.
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE USER canectic WITH PASSWORD 'your_password_here';
+
+CREATE DATABASE canectic_bbs OWNER canectic
+  TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';
+
+\c canectic_bbs
+GRANT USAGE, CREATE ON SCHEMA public TO canectic;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO canectic;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO canectic;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO canectic;
+\q
+```
+
+Three things there are easy to get wrong:
+
+- **`ENCODING 'UTF8'` is required.** Without it the database inherits
+  `template1`, which on a C-locale cluster is `SQL_ASCII`. That performs no
+  encoding validation at all, so invalid bytes are stored silently and handed
+  back unchanged. `TEMPLATE template0` is what permits a different encoding.
+- **PostgreSQL 15+ revoked the default `public` schema grants.** Without the
+  `GRANT USAGE, CREATE` line, `dbmigrations.js` fails with permission errors.
+- **`peer` authentication** is the usual reason a correct password still fails.
+  If `psql -U canectic -h localhost -d canectic_bbs` reports "peer
+  authentication failed", change the local lines in `pg_hba.conf` from `peer`
+  to `scram-sha-256` and `sudo systemctl reload postgresql`.
+
+Verify before continuing:
+
+```bash
+psql -U canectic -h localhost -d canectic_bbs -c "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = current_database();"
+```
+
+That should print `UTF8`. Put the same database name, user and password into
+`.env`.
+
 Register your first account at `http://localhost:8080/users/register`. The first user is automatically promoted to Sysop.
 
-See [docs/sysop/INSTALL.md](docs/sysop/INSTALL.md) for the full installation guide.
+See [docs/sysop/INSTALL.md](docs/sysop/INSTALL.md) for the full installation guide, including how to convert an existing `SQL_ASCII` database.
 
 ## Running
 

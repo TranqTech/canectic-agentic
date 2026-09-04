@@ -104,7 +104,27 @@ Then run these commands (replace the values as desired):
 
 ```sql
 CREATE USER canectic WITH PASSWORD 'your_password_here';
-CREATE DATABASE canectic_bbs OWNER canectic;
+CREATE DATABASE canectic_bbs OWNER canectic
+  TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';
+```
+
+The `ENCODING` clause is not optional. Without it the database inherits its
+encoding from `template1`, and a cluster whose `initdb` ran under a C or POSIX
+locale defaults to `SQL_ASCII`. `SQL_ASCII` performs no encoding validation
+whatsoever: invalid byte sequences are stored silently and returned unchanged,
+so any component writing non-UTF-8 corrupts data without raising an error.
+Message bodies carry CP437 art and accented names, so this matters in practice.
+
+`TEMPLATE template0` is what allows an encoding different from the cluster
+default. Keeping `LC_COLLATE` and `LC_CTYPE` as `C` means any encoding is
+permitted, sorting is byte order, and case folding stays ASCII-only, which is
+what Canectic already expects.
+
+Check what you ended up with:
+
+```sql
+SELECT pg_encoding_to_char(encoding), datcollate, datctype
+  FROM pg_database WHERE datname = 'canectic_bbs';
 ```
 
 PostgreSQL 15+ changed the default permissions on the `public` schema. You must grant access explicitly. Connect to the new database and grant permissions:
@@ -332,6 +352,53 @@ After installation, your run directory contains:
 
 - Check the gateway logs: `pm2 logs gateway`
 - Ensure database migrations have run: `node src/tools/dbmigrations.js`
+
+### Existing database is SQL_ASCII instead of UTF8
+
+Installs created before the encoding was set explicitly inherited whatever
+`template1` used, which on a C-locale cluster is `SQL_ASCII`. Check with:
+
+```sql
+SELECT pg_encoding_to_char(encoding), datcollate, datctype
+  FROM pg_database WHERE datname = current_database();
+```
+
+Encoding cannot be altered in place, so converting means dumping and reloading
+into a new database. Because the collation stays `C`, sort order and case
+folding are byte-identical afterwards; the only change is that PostgreSQL
+starts validating bytes on write.
+
+First confirm the existing data is already valid UTF-8. If it is, the
+conversion is lossless:
+
+```bash
+pg_dump -Fc canectic_bbs > canectic_bbs.dump
+createdb -T template0 -E UTF8 --lc-collate=C --lc-ctype=C -O canectic canectic_utf8
+pg_restore -d canectic_utf8 canectic_bbs.dump
+```
+
+`pg_restore` validates every byte on the way in, so an invalid sequence fails
+the restore loudly rather than corrupting the new database. If the restore
+succeeds, compare a few row counts, point `dbname` in `.env` at the new
+database, and restart. Keep the original database until you are satisfied.
+
+### Web login returns to the login page with no error
+
+Terminal login works for the same account, but the web login form just
+redirects back to itself. Authentication is succeeding; the browser is
+discarding the session cookie.
+
+- Check `sitetld` (admin > config > network). It sets the cookie `Domain`,
+  and the FQDN you browse must be at or under it. `example.com` covers
+  `bbs.example.com`, but not `example.org`, and not a bare IP address.
+- Leave `sitetld` empty unless you need the session shared across
+  subdomains. Empty sends a host-only cookie that always matches whatever
+  host the request arrived on.
+- Confirm in browser devtools: if no `sessionid` cookie is stored after
+  the login POST, it is the domain mismatch. If the cookie is present and
+  you are still bounced, look at Redis instead (`redis-cli ping`), since
+  a failed session write shows an explicit "Login failed" error rather
+  than a silent redirect.
 
 ### Terminal connection hangs or drops
 

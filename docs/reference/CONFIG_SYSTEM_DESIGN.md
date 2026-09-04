@@ -53,7 +53,7 @@ These are the values the admin might want to change without restarting processes
 | `DefaultAddress` | `echomail.js`, `netmail.js` | string | `"1:1/1"` | network |
 | `SYSOP_USERNAME` | `.env` only | string | — | system |
 | `webport` | `gateway.js`, `doorserver.js`, `configvars.js` | number | `8080` | network |
-| `sitetld` | `index.js`, `admin.js`, `users.js` | string | — | network |
+| `sitetld` | `users.js` (session cookie domain only) | string | — | network |
 | `sitedomain` | `index.js`, `admin.js` | string | — | network |
 | `corsorigin` | `index.js`, `admin.js` | string | — | network |
 | `faviconlink` | `index.js`, `admin.js`, `pm.js`, `adminLogs.js` | string | `"/images/favicon.ico"` | display |

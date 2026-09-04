@@ -98,7 +98,9 @@ Default session TTL is 12 hours (`session_ttl` config key, in seconds). The TTL 
 
 ### Cookie
 
-Session ID is stored in a `sessionid` HTTP-only cookie. Max age matches the session TTL (12 hours default, or Remember Me duration). Domain set from `process.env.sitetld`. SameSite `lax`.
+Session ID is stored in a `sessionid` HTTP-only cookie. Max age matches the session TTL (12 hours default, or Remember Me duration). Domain set from the `sitetld` config key, which is empty by default; empty means no `Domain` attribute is sent, so the cookie is host-only and always matches the FQDN the request arrived on. Setting `sitetld` to a domain the browsed FQDN is not at or under makes the browser discard the cookie silently, which presents as a login that redirects straight back to the login form with no error. SameSite `lax`.
+
+`setSessionCookie()` and the logout path both call `clearSessionCookieAllVariants()`, which emits a `clearCookie` for the host-only and the domain-scoped variant, so changing `sitetld` cannot strand a companion cookie from the previous setting.
 
 ### Remember Me
 
