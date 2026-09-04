@@ -14,7 +14,11 @@ let connected = false;
 async function getClient() {
 	if (client && connected) return client;
 
-	client = createClient({ url: redisUrl });
+	// RESP: 2 pins the wire protocol. node-redis 6 defaults to RESP3, which
+	// changes the shape of several replies. Staying on RESP2 keeps behaviour
+	// identical to v5; moving to RESP3 should be its own deliberate change
+	// rather than a side effect of a version bump.
+	client = createClient({ url: redisUrl, RESP: 2 });
 
 	client.on('error', (err) => {
 		alogger.writeAlog(2, "Redis error: " + err.message, "redbright");

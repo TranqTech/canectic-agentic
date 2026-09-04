@@ -32,6 +32,10 @@ function parseRedisConfig() {
 			password: parsed.password || process.env.REDIS_PASSWORD || undefined,
 			db: bullmqDb,
 			maxRetriesPerRequest: null,   // required by BullMQ
+			// ioredis 6 defaults to RESP3, which changes reply shapes. Pin
+			// RESP2 so behaviour matches v5; adopting RESP3 should be its own
+			// deliberate change, not a side effect of a version bump.
+			protocol: 2,
 		};
 	} catch (err) {
 		// Fallback if URL parsing fails
@@ -41,6 +45,7 @@ function parseRedisConfig() {
 			password: process.env.REDIS_PASSWORD || undefined,
 			db: bullmqDb,
 			maxRetriesPerRequest: null,
+			protocol: 2,
 		};
 	}
 }

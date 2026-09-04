@@ -281,3 +281,60 @@ subdirectory case; the two untested sites (`qwkClasses.js`, `nodelistImport.js`)
 use `extractAllTo` and `getEntries`, neither of which changed in 0.6. All four
 processes restarted with no errors, HTTP serves 200 and a WebSocket upgrade
 returns 101.
+
+---
+
+## Completed 2026-09-04: everything on latest
+
+All tiers applied in one pass. `npm outdated` is empty and `npm audit` reports
+**0 vulnerabilities**.
+
+| Package | From | To |
+|---|---|---|
+| better-sqlite3 | 12.6.2 | **13.0.3** |
+| bullmq | 5.71.0 | **6.3.4** |
+| ioredis | 5.10.1 | **6.0.0** |
+| redis | 5.11.0 | **6.2.1** |
+| nodemailer | 8.0.4 | **10.0.0** |
+| uuid | 13.0.0 | **14.0.2** |
+| chalk | 5.6.2 | **6.0.0** |
+| file-type | 21.3.3 | **22.0.2** |
+| basic-ftp | 5.2.0 | **6.2.1** |
+| adm-zip | 0.5.16 | **0.6.0** |
+| mocha (dev) | 11.3.0 | **12.0.0** |
+| ws, multer, qs, body-parser, pg, pug, dotenv, morgan, sanitize-html, ssh2-sftp-client | | latest |
+
+Removed: `mongodb` (zero references) and `path` (inert shim for the built-in).
+
+### Code changes required
+
+Only two, both pinning the wire protocol so a version bump does not silently
+change reply shapes:
+
+- `src/middleware/db/redis.js` — `createClient({ url, RESP: 2 })`
+- `src/queues/connection.js` — `protocol: 2` on both config paths
+
+node-redis 6 and ioredis 6 default to RESP3. Adopting RESP3 remains available as
+its own deliberate change.
+
+BullMQ 6 needed **no** code change: it moved `ioredis` to an optional peer, and
+we already depend on it directly and construct the connection ourselves.
+Similarly nodemailer 10 needed none, since our transport passes only host, port,
+secure, auth and requireTLS.
+
+### Verification
+
+- 2642 tests pass, including on mocha 12
+- Live check against the running Redis: node-redis 6 string, hash and TTL round
+  trips, with the hash returned as a plain object (RESP3 would differ); ioredis 6
+  string and hash round trips; BullMQ 6 job enqueued, received by a worker and
+  completed with a return value
+- A real `recalc-area-counts` job enqueued through the CLI was picked up and
+  completed by the running worker process
+- All four processes restarted with zero errors; HTTP endpoints serve 200
+
+### Node floor
+
+`engines` is `>=22.0.0`. The binding constraints are `better-sqlite3` 13,
+`chalk` 6 and `file-type` 22 at Node >= 22; `ioredis` 6, `redis` 6, `uuid` 14
+and `nodemailer` 10 need >= 20. Node 26 installs cleanly.
