@@ -83,13 +83,15 @@ describe('db/schema: individual .conf file structure', function() {
 			.filter(function(f) { return f.endsWith('.conf') && !f.includes('-remove'); });
 	});
 
-	it('every non-empty .conf file defines at least one column', function() {
+	it('every .conf file defines at least one column', function() {
+		// No empty placeholders. A table listed in tablenames.conf with an
+		// empty .conf is never created or maintained, and dbmigrations reports
+		// "no column definitions" on every run. netmail_bad sat that way until
+		// pm_undeliverable superseded it.
 		for (var filename of confFiles) {
 			var filepath = path.join(TABLECOLUMNS_DIR, filename);
-			// Empty .conf files are valid placeholders (e.g. echomail_bad.conf,
-			// netmail_bad.conf) — skip them in this generic structural check.
 			var raw = fs.readFileSync(filepath, 'utf8').trim();
-			if (!raw) continue;
+			assert.ok(raw.length > 0, filename + ' is empty; remove it and its tablenames.conf entry, or define its columns');
 			var columns = parseConf(filepath);
 			assert.ok(columns.length > 0, filename + ' defines no columns');
 		}
