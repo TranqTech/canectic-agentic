@@ -141,12 +141,10 @@ async function prerunMaint(){
 	var newsFiles = await import("../src/models/newsFiles.js");
 	await newsFiles.ensureTable();
 
-	// Ensure sort_order columns on groups and areas
+	// Ensure the QWK conference start constraint. Column definitions for
+	// groups and areas are managed by dbmigrations from db/schema, not here.
 	var msgGroupsMod = await import("../src/models/msgGroups.js");
-	await msgGroupsMod.ensureSortOrder();
 	await msgGroupsMod.ensureQwkConfStartConstraint();
-	var fileGroupsMod = await import("../src/models/fileGroups.js");
-	await fileGroupsMod.ensureSortOrder();
 
 	// Ensure PM attachments table and columns
 	var pmAttachments = await import("../src/models/pmAttachments.js");

@@ -17,16 +17,6 @@ import * as fileAreas from "./fileAreas.js";
 import appConfig from "../config/appConfig.js";
 import { substitute } from '../utils/configvars.js';
 
-async function ensureSortOrder() {
-	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
-	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
-	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS newscan_default BOOLEAN DEFAULT true");
-	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS max_age_days INTEGER");
-	await postgres.write("ALTER TABLE file_areas ADD COLUMN IF NOT EXISTS max_files INTEGER");
-	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS max_age_days INTEGER");
-	await postgres.write("ALTER TABLE file_groups ADD COLUMN IF NOT EXISTS max_files INTEGER");
-}
-
 function normalizeFlags(input) {
 	if (!input) return JSON.stringify([]);
 	if (typeof input === 'string') {
@@ -344,7 +334,6 @@ async function pushDefaultsToAreas(shortcode, fields) {
 }
 
 export {
-	ensureSortOrder,
 	normalizeFlags,
 	newGroup,
 	updateGroup,

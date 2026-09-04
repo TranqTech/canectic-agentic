@@ -7,14 +7,6 @@ import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
 import appConfig from "../config/appConfig.js";
 
-// Ensure sort_order and post_as columns exist (migration)
-async function ensureSortOrder() {
-	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
-	await postgres.write("ALTER TABLE message_areas ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0");
-	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS post_as VARCHAR(16) DEFAULT 'username'");
-	await postgres.write("ALTER TABLE message_groups ADD COLUMN IF NOT EXISTS newscan_default BOOLEAN DEFAULT false");
-}
-
 // QWK conference number block model
 // ----------------------------------
 // Each message group owns a contiguous block of QWK conference numbers
@@ -617,7 +609,6 @@ async function pushDefaultsToAreas(shortcode, fields) {
 }
 
 export {
-	ensureSortOrder,
 	newGroup,
 	updateGroup,
 	removeGroup,
