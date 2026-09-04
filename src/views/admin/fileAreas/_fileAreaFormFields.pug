@@ -1,0 +1,190 @@
+//- _fileAreaFormFields.pug — shared field markup for file area create/edit forms.
+//-
+//- Mirrors msgAreas/_areaFormFields.pug. The same three-tab layout is used by
+//- the standalone file areas page and by the per-group view, which previously
+//- carried near-identical copies of this markup and drifted apart.
+//-
+//- Element ids are built from `prefix` so the create and edit forms can both be
+//- on one page without colliding, and so the existing flag-picker JS in each
+//- calling view keeps binding to the ids it already expects:
+//-
+//-   prefix 'na_' -> create form    prefix 'ea_' -> edit form
+//-
+//- Two deliberate id irregularities are preserved from the original markup
+//- rather than tidied, because the calling views' JavaScript references them:
+//-   <prefix>subdir   (not sub_dir)
+//-   <prefix>newscan  (not newscan_default)
+//- The create form's group selector is `na_group`, while the edit form's is
+//- `ea_groupshortcode`; both are emitted under their original ids.
+//-
+//- mode: 'new' | 'edit'
+//-   new  — includes Short Code, which cannot be changed afterwards
+//-   edit — omits it; values are populated by the caller's JS after render
+//-
+//- opts.hideGroupSelector — true inside a group view, where the group is implied
+//- opts.defaults          — group defaults used to prefill a new area
+
+mixin fileAreaFormFields(prefix, mode, opts)
+  - var options = opts || {}
+  - var defaults = options.defaults || {}
+  - var showGroupSelector = !options.hideGroupSelector
+  - var groupId = (mode === 'edit') ? prefix + 'groupshortcode' : prefix + 'group'
+  -
+  - // Only meaningful for mode === 'new'; edit mode is populated by caller JS.
+  - var initBrowseSec = (defaults.browse_security !== undefined) ? defaults.browse_security : 50
+  - var initReadSec   = (defaults.read_security   !== undefined) ? defaults.read_security   : 60
+  - var initPostSec   = (defaults.post_security   !== undefined) ? defaults.post_security   : 100
+  - var initMaxAge    = (defaults.max_age_days    !== undefined && defaults.max_age_days !== null) ? defaults.max_age_days : ''
+  - var initMaxFiles  = (defaults.max_files       !== undefined && defaults.max_files    !== null) ? defaults.max_files    : ''
+  - var initNewscan   = (defaults.newscan_default === false) ? 'false' : 'true'
+
+  //- ---- Tab nav ----
+  ul.nav.nav-tabs.mb-3(role='tablist')
+    li.nav-item(role='presentation')
+      button.nav-link.active(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#' + prefix + 'tab_main') Main
+    li.nav-item(role='presentation')
+      button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#' + prefix + 'tab_access') Access
+    li.nav-item(role='presentation')
+      button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#' + prefix + 'tab_retention') Retention
+
+  .tab-content
+    //- ==================================================================
+    //- MAIN — identity, storage location, scan behaviour
+    //- ==================================================================
+    .tab-pane.fade.show.active(id=prefix + 'tab_main' role='tabpanel')
+      if showGroupSelector
+        .mb-3
+          label.form-label(for=groupId) Group
+          select.form-select(id=groupId name='groupshortcode' required)
+            option(value='') Select a group
+            each g in (fileGroups || [])
+              option(value=g.shortcode)= g.name + ' (' + g.shortcode + ')'
+
+      if mode === 'new'
+        .row.mb-3
+          .col-8
+            label.form-label(for=prefix + 'name') Name
+            input.form-control(type='text' id=prefix + 'name' name='name' required)
+          .col-4
+            label.form-label(for=prefix + 'shortcode') Short Code
+            input.form-control(type='text' id=prefix + 'shortcode' name='shortcode' required)
+            .form-text.text-muted Cannot be changed later.
+      else
+        .mb-3
+          label.form-label(for=prefix + 'name') Name
+          input.form-control(type='text' id=prefix + 'name' name='name' required)
+
+      .mb-3
+        label.form-label(for=prefix + 'description') Description
+        input.form-control(type='text' id=prefix + 'description' name='description' required)
+
+      .mb-3
+        label.form-label(for=prefix + 'subdir') Sub Directory
+          |
+          span.ms-1(data-bs-toggle='tooltip' title='Directory for this area, resolved under the group base directory unless absolute. Leave blank to use the shortcode.') ⓘ
+        input.form-control(type='text' id=prefix + 'subdir' name='sub_dir')
+
+      .row
+        .col-6
+          label.form-label(for=prefix + 'newscan') Newscan Default
+          select.form-select(id=prefix + 'newscan' name='newscan_default')
+            if mode === 'new'
+              option(value='true' selected=(initNewscan === 'true')) Yes
+              option(value='false' selected=(initNewscan === 'false')) No
+            else
+              option(value='true') Yes
+              option(value='false') No
+        .col-6
+          label.form-label(for=prefix + 'active') Status
+          select.form-select(id=prefix + 'active' name='active')
+            option(value='true') Active
+            option(value='false') Inactive
+
+    //- ==================================================================
+    //- ACCESS — security levels and permission/restriction flags
+    //- ==================================================================
+    .tab-pane.fade(id=prefix + 'tab_access' role='tabpanel')
+      .row.mb-3
+        .col-4
+          label.form-label(for=prefix + 'browsesecurity') Browse Security
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'browsesecurity' name='browsesecurity' min=0 max=255 value=initBrowseSec required)
+          else
+            input.form-control(type='number' id=prefix + 'browsesecurity' name='browsesecurity' min=0 max=255 required)
+        .col-4
+          label.form-label(for=prefix + 'readsecurity') Download Security
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'readsecurity' name='readsecurity' min=0 max=255 value=initReadSec required)
+          else
+            input.form-control(type='number' id=prefix + 'readsecurity' name='readsecurity' min=0 max=255 required)
+        .col-4
+          label.form-label(for=prefix + 'postsecurity') Upload Security
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'postsecurity' name='postsecurity' min=0 max=255 value=initPostSec required)
+          else
+            input.form-control(type='number' id=prefix + 'postsecurity' name='postsecurity' min=0 max=255 required)
+
+      .row
+        .col-4
+          div(id=prefix + 'browse_perm_inputs')
+          div(id=prefix + 'browse_rest_inputs')
+          label Browse Perm Flags:
+          .border.rounded.p-2.mb-2.bg-light(id=prefix + 'browse_perm_badges' style='min-height:2.2rem')
+          .input-group.mb-2
+            select.form-control(id=prefix + 'browse_perm_select')
+            button.btn.btn-sm.btn-success(id=prefix + 'browse_perm_add' type='button') Add
+          label Browse Restrict Flags:
+          .border.rounded.p-2.mb-2.bg-light(id=prefix + 'browse_rest_badges' style='min-height:2.2rem')
+          .input-group
+            select.form-control(id=prefix + 'browse_rest_select')
+            button.btn.btn-sm.btn-danger(id=prefix + 'browse_rest_add' type='button') Add
+        .col-4
+          div(id=prefix + 'read_perm_inputs')
+          div(id=prefix + 'read_rest_inputs')
+          label Download Perm Flags:
+          .border.rounded.p-2.mb-2.bg-light(id=prefix + 'read_perm_badges' style='min-height:2.2rem')
+          .input-group.mb-2
+            select.form-control(id=prefix + 'read_perm_select')
+            button.btn.btn-sm.btn-success(id=prefix + 'read_perm_add' type='button') Add
+          label Download Restrict Flags:
+          .border.rounded.p-2.mb-2.bg-light(id=prefix + 'read_rest_badges' style='min-height:2.2rem')
+          .input-group
+            select.form-control(id=prefix + 'read_rest_select')
+            button.btn.btn-sm.btn-danger(id=prefix + 'read_rest_add' type='button') Add
+        .col-4
+          div(id=prefix + 'post_perm_inputs')
+          div(id=prefix + 'post_rest_inputs')
+          label Upload Perm Flags:
+          .border.rounded.p-2.mb-2.bg-light(id=prefix + 'post_perm_badges' style='min-height:2.2rem')
+          .input-group.mb-2
+            select.form-control(id=prefix + 'post_perm_select')
+            button.btn.btn-sm.btn-success(id=prefix + 'post_perm_add' type='button') Add
+          label Upload Restrict Flags:
+          .border.rounded.p-2.mb-2.bg-light(id=prefix + 'post_rest_badges' style='min-height:2.2rem')
+          .input-group
+            select.form-control(id=prefix + 'post_rest_select')
+            button.btn.btn-sm.btn-danger(id=prefix + 'post_rest_add' type='button') Add
+
+    //- ==================================================================
+    //- RETENTION — automatic pruning
+    //- ==================================================================
+    .tab-pane.fade(id=prefix + 'tab_retention' role='tabpanel')
+      .row
+        .col-6
+          label.form-label(for=prefix + 'max_age') Max Age (days)
+            |
+            span.ms-1(data-bs-toggle='tooltip' title='Auto-remove files older than this. 0 or blank = no limit.') ⓘ
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'max_age' name='max_age_days' min=0 value=initMaxAge)
+          else
+            input.form-control(type='number' id=prefix + 'max_age' name='max_age_days' min=0)
+        .col-6
+          label.form-label(for=prefix + 'max_files') Max Files
+            |
+            span.ms-1(data-bs-toggle='tooltip' title='Keep only the N newest files. 0 or blank = no limit.') ⓘ
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'max_files' name='max_files' min=0 value=initMaxFiles)
+          else
+            input.form-control(type='number' id=prefix + 'max_files' name='max_files' min=0)
+      .form-text.text-muted.mt-2
+        | Enforced by the daily file maintenance job. Leave blank for no limit.

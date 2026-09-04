@@ -1,4 +1,5 @@
 extends ../../layouts/admin
+include ./_fileAreaFormFields
 
 block content
   .container-fluid.main-wrapper
@@ -221,99 +222,7 @@ block content
                 button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
               .modal-body
                 form#editAreaForm(method='POST' class='form-registration')
-                  input#ea_groupshortcode(type='hidden' name='groupshortcode')
-                  .row
-                    .col-1
-                    .col-10
-                      label(for='ea_name') Name:
-                      input(type='text' id='ea_name' name='name' class='form-control' tabindex='1' required)
-                      br
-                      label(for='ea_description') Description:
-                      input(type='text' id='ea_description' name='description' class='form-control' tabindex='2' required)
-                      br
-                  .row
-                    .col-1
-                    .col-5
-                      label(for='ea_subdir') Sub Directory:
-                      input(type='text' id='ea_subdir' name='sub_dir' class='form-control' tabindex='3')
-                      br
-                      label(for='ea_newscan') Newscan Default:
-                      select(id='ea_newscan' name='newscan_default' class='form-control' tabindex='4')
-                        option(value='true') Yes
-                        option(value='false') No
-                      br
-                      label(for='ea_max_age') Max Age (days):
-                        |
-                        span(data-bs-toggle='tooltip' title='Auto-remove files older than this. 0 or blank = no limit.') ⓘ
-                      input(type='number' id='ea_max_age' name='max_age_days' class='form-control' min=0 tabindex='5')
-                      br
-                      label(for='ea_max_files') Max Files:
-                        |
-                        span(data-bs-toggle='tooltip' title='Keep only the N newest files, remove the rest. 0 or blank = no limit.') ⓘ
-                      input(type='number' id='ea_max_files' name='max_files' class='form-control' min=0 tabindex='6')
-                    .col-5
-                      label(for='ea_browsesecurity') Browse Security:
-                      input(type='number' id='ea_browsesecurity' name='browsesecurity' class='form-control' min=0 max=255 tabindex='5' required)
-                      br
-                      label(for='ea_readsecurity') Download Security:
-                      input(type='number' id='ea_readsecurity' name='readsecurity' class='form-control' min=1 max=255 tabindex='6' required)
-                      br
-                      label(for='ea_postsecurity') Upload Security:
-                      input(type='number' id='ea_postsecurity' name='postsecurity' class='form-control' min=1 max=255 tabindex='7' required)
-                      br
-                      label(for='ea_active') Status:
-                      select(id='ea_active' name='active' class='form-control' tabindex='8')
-                        option(value='true') Active
-                        option(value='false') Inactive
-                  .row
-                    .col-1
-                    .col-10
-                      #ea_browse_perm_inputs
-                      #ea_browse_rest_inputs
-                      label Browse Permission Flags:
-                      .border.rounded.p-2.mb-2.bg-light#ea_browse_perm_badges(style='min-height:2.2rem')
-                      .input-group.mb-2
-                        select#ea_browse_perm_select.form-control
-                        button.btn.btn-sm.btn-success#ea_browse_perm_add(type='button') Add
-                      label Browse Restriction Flags:
-                      .border.rounded.p-2.mb-2.bg-light#ea_browse_rest_badges(style='min-height:2.2rem')
-                      .input-group
-                        select#ea_browse_rest_select.form-control
-                        button.btn.btn-sm.btn-danger#ea_browse_rest_add(type='button') Add
-                  .row
-                    .col-1
-                    .col-5
-                      #ea_read_perm_inputs
-                      #ea_read_rest_inputs
-                      label Download Permission Flags:
-                      .border.rounded.p-2.mb-2.bg-light#ea_read_perm_badges(style='min-height:2.2rem')
-                      .input-group.mb-2
-                        select#ea_read_perm_select.form-control
-                        button.btn.btn-sm.btn-success#ea_read_perm_add(type='button') Add
-                      label Download Restriction Flags:
-                      .border.rounded.p-2.mb-2.bg-light#ea_read_rest_badges(style='min-height:2.2rem')
-                      .input-group
-                        select#ea_read_rest_select.form-control
-                        button.btn.btn-sm.btn-danger#ea_read_rest_add(type='button') Add
-                    .col-5
-                      #ea_post_perm_inputs
-                      #ea_post_rest_inputs
-                      label Upload Permission Flags:
-                      .border.rounded.p-2.mb-2.bg-light#ea_post_perm_badges(style='min-height:2.2rem')
-                      .input-group.mb-2
-                        select#ea_post_perm_select.form-control
-                        button.btn.btn-sm.btn-success#ea_post_perm_add(type='button') Add
-                      label Upload Restriction Flags:
-                      .border.rounded.p-2.mb-2.bg-light#ea_post_rest_badges(style='min-height:2.2rem')
-                      .input-group
-                        select#ea_post_rest_select.form-control
-                        button.btn.btn-sm.btn-danger#ea_post_rest_add(type='button') Add
-                  .row
-                    .col-1
-                    .col-10
-                      br
-                      .text-end
-                        input(type='submit' value='Save Changes' class='btn btn-lg btn-warning btn-block' tabindex='9')
+                  +fileAreaFormFields('ea_', 'edit')
 
         //- Delete Area Modal
         #deleteAreaModal.modal.fade(tabindex='-1' aria-hidden='true')
@@ -357,108 +266,7 @@ block content
                 button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
               .modal-body
                 form#newAreaForm(method='POST' class='form-registration')
-                  .row
-                    .col-1
-                    .col-10
-                      label(for='na_group') Group:
-                      select#na_group(name='groupshortcode' class='form-select' required)
-                        option(value='') — Select a group —
-                        if grouplist && grouplist.length > 0
-                          for group of grouplist
-                            option(value=group.shortcode)= group.name + ' (' + group.shortcode + ')'
-                      br
-                      label(for='na_name') Name:
-                      input(type='text' id='na_name' name='name' class='form-control' required)
-                      br
-                      label(for='na_description') Description:
-                      input(type='text' id='na_description' name='description' class='form-control' required)
-                      br
-                  .row
-                    .col-1
-                    .col-5
-                      label(for='na_shortcode') Short Code (Internal):
-                      input(type='text' id='na_shortcode' name='shortcode' class='form-control' required)
-                      br
-                      label(for='na_subdir') Sub Directory:
-                      input(type='text' id='na_subdir' name='sub_dir' class='form-control' placeholder='games')
-                      br
-                      label(for='na_newscan') Newscan Default:
-                      select#na_newscan(name='newscan_default').form-select
-                        option(value='true' selected) Yes
-                        option(value='false') No
-                      br
-                      label(for='na_max_age') Max Age (days):
-                        |
-                        span(data-bs-toggle='tooltip' title='Auto-remove files older than this. 0 or blank = no limit.') ⓘ
-                      input(type='number' id='na_max_age' name='max_age_days' class='form-control' min=0)
-                      br
-                      label(for='na_max_files') Max Files:
-                        |
-                        span(data-bs-toggle='tooltip' title='Keep only the N newest files, remove the rest. 0 or blank = no limit.') ⓘ
-                      input(type='number' id='na_max_files' name='max_files' class='form-control' min=0)
-                    .col-5
-                      label(for='na_browsesecurity') Browse Security:
-                      input(type='number' id='na_browsesecurity' min=0 max=255 name='browsesecurity' class='form-control' value=0 required)
-                      br
-                      label(for='na_readsecurity') Download Security:
-                      input(type='number' id='na_readsecurity' min=1 max=255 name='readsecurity' class='form-control' value=50 required)
-                      br
-                      label(for='na_postsecurity') Upload Security:
-                      input(type='number' id='na_postsecurity' min=1 max=255 name='postsecurity' class='form-control' value=100 required)
-                      br
-                      label(for='na_active') Status:
-                      select#na_active(name='active').form-select
-                        option(value='true' selected) Active
-                        option(value='false') Inactive
-                  .row
-                    .col-1
-                    .col-10
-                      #na_browse_perm_inputs
-                      #na_browse_rest_inputs
-                      label Browse Permission Flags:
-                      .border.rounded.p-2.mb-2.bg-light#na_browse_perm_badges(style='min-height:2.2rem')
-                      .input-group.mb-2
-                        select#na_browse_perm_select.form-control
-                        button.btn.btn-sm.btn-success#na_browse_perm_add(type='button') Add
-                      label Browse Restriction Flags:
-                      .border.rounded.p-2.mb-2.bg-light#na_browse_rest_badges(style='min-height:2.2rem')
-                      .input-group
-                        select#na_browse_rest_select.form-control
-                        button.btn.btn-sm.btn-danger#na_browse_rest_add(type='button') Add
-                  .row
-                    .col-1
-                    .col-5
-                      #na_read_perm_inputs
-                      #na_read_rest_inputs
-                      label Download Permission Flags:
-                      .border.rounded.p-2.mb-2.bg-light#na_read_perm_badges(style='min-height:2.2rem')
-                      .input-group.mb-2
-                        select#na_read_perm_select.form-control
-                        button.btn.btn-sm.btn-success#na_read_perm_add(type='button') Add
-                      label Download Restriction Flags:
-                      .border.rounded.p-2.mb-2.bg-light#na_read_rest_badges(style='min-height:2.2rem')
-                      .input-group
-                        select#na_read_rest_select.form-control
-                        button.btn.btn-sm.btn-danger#na_read_rest_add(type='button') Add
-                    .col-5
-                      #na_post_perm_inputs
-                      #na_post_rest_inputs
-                      label Upload Permission Flags:
-                      .border.rounded.p-2.mb-2.bg-light#na_post_perm_badges(style='min-height:2.2rem')
-                      .input-group.mb-2
-                        select#na_post_perm_select.form-control
-                        button.btn.btn-sm.btn-success#na_post_perm_add(type='button') Add
-                      label Upload Restriction Flags:
-                      .border.rounded.p-2.mb-2.bg-light#na_post_rest_badges(style='min-height:2.2rem')
-                      .input-group
-                        select#na_post_rest_select.form-control
-                        button.btn.btn-sm.btn-danger#na_post_rest_add(type='button') Add
-                  .row
-                    .col-1
-                    .col-10
-                      br
-                      .text-end
-                        input(type='submit' value='Submit' class='btn btn-lg btn-success btn-block')
+                  +fileAreaFormFields('na_', 'new')
 
   script.
     document.addEventListener('DOMContentLoaded', function() {

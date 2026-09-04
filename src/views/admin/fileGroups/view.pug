@@ -1,4 +1,5 @@
 extends ../../layouts/admin
+include ../fileAreas/_fileAreaFormFields
 
 block content
   .container-fluid.main-wrapper
@@ -496,152 +497,7 @@ block content
                   button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
                 .modal-body
                   form(action=`/admin/fileGroup/${fileGroup.shortcode}/newArea` method='POST' class='form-registration')
-                    .row
-                      .col-1
-                      .col-10
-                        label(for='na_name') Name:
-                        input(
-                          type='text'
-                          id='na_name'
-                          name='name'
-                          class='form-control'
-                          required
-                        )
-                        br
-                        label(for='na_description') Description:
-                        input(
-                          type='text'
-                          id='na_description'
-                          name='description'
-                          class='form-control'
-                          required
-                        )
-                        br
-                    .row
-                      .col-1
-                      .col-5
-                        label(for='na_shortcode') Short Code (Internal):
-                        input(
-                          type='text'
-                          id='na_shortcode'
-                          name='shortcode'
-                          class='form-control'
-                          required
-                        )
-                        br
-                        label(for='na_subdir') Sub Directory:
-                        input(
-                          type='text'
-                          id='na_subdir'
-                          name='sub_dir'
-                          class='form-control'
-                          placeholder='games'
-                        )
-                        br
-                        label(for='na_newscan') Newscan Default:
-                        select#na_newscan(name='newscan_default').form-select
-                          option(value='true' selected=(fileGroup.newscan_default !== false)) Yes
-                          option(value='false' selected=(fileGroup.newscan_default === false)) No
-                        br
-                        label(for='na_max_age') Max Age (days):
-                        input(type='number' id='na_max_age' name='max_age_days' class='form-control' min=0 value=fileGroup.max_age_days || '')
-                        br
-                        label(for='na_max_files') Max Files:
-                        input(type='number' id='na_max_files' name='max_files' class='form-control' min=0 value=fileGroup.max_files || '')
-                      .col-5
-                        label(for='na_browsesecurity') Browse Security:
-                        input(
-                          type='number'
-                          id='na_browsesecurity'
-                          min=0
-                          max=255
-                          name='browsesecurity'
-                          class='form-control'
-                          value=(fileGroup.browse_security || 0)
-                          required
-                        )
-                        br
-                        label(for='na_readsecurity') Download Security:
-                        input(
-                          type='number'
-                          id='na_readsecurity'
-                          min=1
-                          max=255
-                          name='readsecurity'
-                          class='form-control'
-                          value=(fileGroup.read_security || 50)
-                          required
-                        )
-                        br
-                        label(for='na_postsecurity') Upload Security:
-                        input(
-                          type='number'
-                          id='na_postsecurity'
-                          min=1
-                          max=255
-                          name='postsecurity'
-                          class='form-control'
-                          value=(fileGroup.post_security != null ? fileGroup.post_security : 100)
-                          required
-                        )
-                        br
-                        label(for='na_active') Status:
-                        select#na_active(name='active').form-select
-                          option(value='true' selected) Active
-                          option(value='false') Inactive
-                    .row
-                      .col-1
-                      .col-10
-                        #na_browse_perm_inputs
-                        #na_browse_rest_inputs
-                        label Browse Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_browse_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#na_browse_perm_select.form-control
-                          button.btn.btn-sm.btn-success#na_browse_perm_add(type='button') Add
-                        label Browse Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_browse_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#na_browse_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#na_browse_rest_add(type='button') Add
-                    .row
-                      .col-1
-                      .col-5
-                        #na_read_perm_inputs
-                        #na_read_rest_inputs
-                        label Download Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_read_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#na_read_perm_select.form-control
-                          button.btn.btn-sm.btn-success#na_read_perm_add(type='button') Add
-                        label Download Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_read_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#na_read_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#na_read_rest_add(type='button') Add
-                      .col-5
-                        #na_post_perm_inputs
-                        #na_post_rest_inputs
-                        label Upload Permission Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_post_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#na_post_perm_select.form-control
-                          button.btn.btn-sm.btn-success#na_post_perm_add(type='button') Add
-                        label Upload Restriction Flags:
-                        .border.rounded.p-2.mb-2.bg-light#na_post_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#na_post_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#na_post_rest_add(type='button') Add
-                    .row
-                      .col-1
-                      .col-10
-                        br
-                        .text-end
-                          input(
-                            type='submit'
-                            value='Submit'
-                            class='btn btn-lg btn-success btn-block'
-                          )
+                    +fileAreaFormFields('na_', 'new', { hideGroupSelector: true, defaults: fileGroup })
 
           // Edit Group Modal
           #editGroupModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')
@@ -652,162 +508,117 @@ block content
                   button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
                 .modal-body
                   form(action=`/admin/fileGroup/${fileGroup.shortcode}/update` method='POST' class='form-registration')
-                    .row
-                      .col-1
-                      .col-10
-                        label(for='edit_name') Name:
-                        input(
-                          type='text'
-                          id='edit_name'
-                          name='name'
-                          class='form-control'
-                          tabindex='1'
-                          value=fileGroup.name
-                          required
-                        )
-                        br
-                        label(for='edit_description') Description:
-                        input(
-                          type='text'
-                          id='edit_description'
-                          name='description'
-                          class='form-control'
-                          tabindex='2'
-                          value=fileGroup.description
-                          required
-                        )
-                        br
-                        label(for='edit_base_dir') Base Directory:
-                        input(
-                          type='text'
-                          id='edit_base_dir'
-                          name='base_dir'
-                          class='form-control'
-                          tabindex='3'
-                          value=fileGroup.base_dir || ''
-                        )
-                        br
-                    .row
-                      .col-1
-                      .col-5
-                        label(for='edit_browsesecurity') Browse Security:
-                        input(
-                          type='number'
-                          id='edit_browsesecurity'
-                          name='browsesecurity'
-                          class='form-control'
-                          tabindex='4'
-                          min=0
-                          max=255
-                          value=fileGroup.browse_security || 0
-                        )
-                        br
-                        label(for='edit_readsecurity') Download Security:
-                        input(
-                          type='number'
-                          id='edit_readsecurity'
-                          name='readsecurity'
-                          class='form-control'
-                          tabindex='5'
-                          min=0
-                          max=255
-                          value=fileGroup.read_security || 0
-                        )
-                        br
-                        label(for='edit_postsecurity') Upload Security:
-                        input(
-                          type='number'
-                          id='edit_postsecurity'
-                          name='postsecurity'
-                          class='form-control'
-                          tabindex='6'
-                          min=0
-                          max=255
-                          value=fileGroup.post_security || 0
-                        )
-                      .col-5
-                        label(for='edit_active') Status:
-                        select(
-                          id='edit_active'
-                          name='active'
-                          class='form-control'
-                          tabindex='7'
-                        )
-                          option(value='true'  selected=(fileGroup.active == true))  Active
-                          option(value='false' selected=(fileGroup.active == false)) Inactive
-                        br
-                        label(for='edit_newscan') Newscan Default:
-                        select(
-                          id='edit_newscan'
-                          name='newscan_default'
-                          class='form-control'
-                          tabindex='8'
-                        )
-                          option(value='true'  selected=(fileGroup.newscan_default !== false))  Yes
-                          option(value='false' selected=(fileGroup.newscan_default === false)) No
-                        br
-                        label(for='edit_max_age') Max Age (days):
-                        input(type='number' id='edit_max_age' name='max_age_days' class='form-control' min=0 tabindex='9' value=fileGroup.max_age_days || '')
-                        br
-                        label(for='edit_max_files') Max Files:
-                        input(type='number' id='edit_max_files' name='max_files' class='form-control' min=0 tabindex='10' value=fileGroup.max_files || '')
-                    .row
-                      .col-1
-                      .col-10
-                        #eg_browse_perm_inputs
-                        #eg_browse_rest_inputs
-                        br
-                        label Browse Perm Flags (default for areas):
-                        .border.rounded.p-2.mb-2.bg-light#eg_browse_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#eg_browse_perm_select.form-control
-                          button.btn.btn-sm.btn-success#eg_browse_perm_add(type='button') Add
-                        label Browse Restrict Flags:
-                        .border.rounded.p-2.mb-2.bg-light#eg_browse_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#eg_browse_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#eg_browse_rest_add(type='button') Add
-                    .row
-                      .col-1
-                      .col-5
-                        #eg_read_perm_inputs
-                        #eg_read_rest_inputs
-                        br
-                        label Download Perm Flags (default for areas):
-                        .border.rounded.p-2.mb-2.bg-light#eg_read_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#eg_read_perm_select.form-control
-                          button.btn.btn-sm.btn-success#eg_read_perm_add(type='button') Add
-                        label Download Restrict Flags:
-                        .border.rounded.p-2.mb-2.bg-light#eg_read_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#eg_read_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#eg_read_rest_add(type='button') Add
-                      .col-5
-                        #eg_post_perm_inputs
-                        #eg_post_rest_inputs
-                        br
-                        label Upload Perm Flags (default for areas):
-                        .border.rounded.p-2.mb-2.bg-light#eg_post_perm_badges(style='min-height:2.2rem')
-                        .input-group.mb-2
-                          select#eg_post_perm_select.form-control
-                          button.btn.btn-sm.btn-success#eg_post_perm_add(type='button') Add
-                        label Upload Restrict Flags:
-                        .border.rounded.p-2.mb-2.bg-light#eg_post_rest_badges(style='min-height:2.2rem')
-                        .input-group
-                          select#eg_post_rest_select.form-control
-                          button.btn.btn-sm.btn-danger#eg_post_rest_add(type='button') Add
-                    .row
-                      .col-1
-                      .col-10
-                        br
-                        .text-end
-                          input(
-                            type='submit'
-                            value='Save Changes'
-                            class='btn btn-lg btn-warning btn-block'
-                            tabindex='8'
-                          )
+
+                    //- ---- Tab nav ----
+                    ul.nav.nav-tabs.mb-3(role='tablist')
+                      li.nav-item(role='presentation')
+                        button.nav-link.active(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#eg_tab_main') Main
+                      li.nav-item(role='presentation')
+                        button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#eg_tab_access') Access
+                      li.nav-item(role='presentation')
+                        button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#eg_tab_retention') Retention
+
+                    .tab-content
+                      //- ========================================================
+                      //- MAIN — identity, storage location, scan behaviour
+                      //- ========================================================
+                      .tab-pane.fade.show.active#eg_tab_main(role='tabpanel')
+                        .mb-3
+                          label.form-label(for='edit_name') Name:
+                          input.form-control(type='text' id='edit_name' name='name' tabindex='1' value=fileGroup.name required)
+                        .mb-3
+                          label.form-label(for='edit_description') Description:
+                          input.form-control(type='text' id='edit_description' name='description' tabindex='2' value=fileGroup.description required)
+                        .mb-3
+                          label.form-label(for='edit_base_dir') Base Directory:
+                          input.form-control(type='text' id='edit_base_dir' name='base_dir' tabindex='3' value=fileGroup.base_dir || '')
+                        .row
+                          .col-6
+                            label.form-label(for='edit_newscan') Newscan Default:
+                            select#edit_newscan.form-select(name='newscan_default' tabindex='8')
+                              option(value='true' selected=(!!fileGroup.newscan_default)) Yes
+                              option(value='false' selected=(!fileGroup.newscan_default)) No
+                          .col-6
+                            label.form-label(for='edit_active') Status:
+                            select#edit_active.form-select(name='active' tabindex='7')
+                              option(value='true' selected=(fileGroup.active !== false)) Active
+                              option(value='false' selected=(fileGroup.active === false)) Inactive
+
+                      //- ========================================================
+                      //- ACCESS — security levels and flag defaults for new areas
+                      //- ========================================================
+                      .tab-pane.fade#eg_tab_access(role='tabpanel')
+                        .row.mb-3
+                          .col-4
+                            label.form-label(for='edit_browsesecurity') Browse Security:
+                            input.form-control(type='number' id='edit_browsesecurity' name='browsesecurity' min=0 max=255 tabindex='4' value=fileGroup.browse_security || 0)
+                          .col-4
+                            label.form-label(for='edit_readsecurity') Download Security:
+                            input.form-control(type='number' id='edit_readsecurity' name='readsecurity' min=0 max=255 tabindex='5' value=fileGroup.read_security || 0)
+                          .col-4
+                            label.form-label(for='edit_postsecurity') Upload Security:
+                            input.form-control(type='number' id='edit_postsecurity' name='postsecurity' min=0 max=255 tabindex='6' value=fileGroup.post_security || 0)
+                        .row
+                          .col-4
+                            #eg_browse_perm_inputs
+                            #eg_browse_rest_inputs
+                            label Browse Perm Flags (default for areas):
+                            .border.rounded.p-2.mb-2.bg-light#eg_browse_perm_badges(style='min-height:2.2rem')
+                            .input-group.mb-2
+                              select#eg_browse_perm_select.form-control
+                              button.btn.btn-sm.btn-success#eg_browse_perm_add(type='button') Add
+                            label Browse Restrict Flags:
+                            .border.rounded.p-2.mb-2.bg-light#eg_browse_rest_badges(style='min-height:2.2rem')
+                            .input-group
+                              select#eg_browse_rest_select.form-control
+                              button.btn.btn-sm.btn-danger#eg_browse_rest_add(type='button') Add
+                          .col-4
+                            #eg_read_perm_inputs
+                            #eg_read_rest_inputs
+                            label Download Perm Flags (default for areas):
+                            .border.rounded.p-2.mb-2.bg-light#eg_read_perm_badges(style='min-height:2.2rem')
+                            .input-group.mb-2
+                              select#eg_read_perm_select.form-control
+                              button.btn.btn-sm.btn-success#eg_read_perm_add(type='button') Add
+                            label Download Restrict Flags:
+                            .border.rounded.p-2.mb-2.bg-light#eg_read_rest_badges(style='min-height:2.2rem')
+                            .input-group
+                              select#eg_read_rest_select.form-control
+                              button.btn.btn-sm.btn-danger#eg_read_rest_add(type='button') Add
+                          .col-4
+                            #eg_post_perm_inputs
+                            #eg_post_rest_inputs
+                            label Upload Perm Flags (default for areas):
+                            .border.rounded.p-2.mb-2.bg-light#eg_post_perm_badges(style='min-height:2.2rem')
+                            .input-group.mb-2
+                              select#eg_post_perm_select.form-control
+                              button.btn.btn-sm.btn-success#eg_post_perm_add(type='button') Add
+                            label Upload Restrict Flags:
+                            .border.rounded.p-2.mb-2.bg-light#eg_post_rest_badges(style='min-height:2.2rem')
+                            .input-group
+                              select#eg_post_rest_select.form-control
+                              button.btn.btn-sm.btn-danger#eg_post_rest_add(type='button') Add
+
+                      //- ========================================================
+                      //- RETENTION — automatic pruning defaults for new areas
+                      //- ========================================================
+                      .tab-pane.fade#eg_tab_retention(role='tabpanel')
+                        .row
+                          .col-6
+                            label.form-label(for='edit_max_age') Max Age (days):
+                              |
+                              span(data-bs-toggle='tooltip' title='Default for new areas. Auto-remove files older than this. 0 or blank = no limit.') ⓘ
+                            input.form-control(type='number' id='edit_max_age' name='max_age_days' min=0 tabindex='9' value=fileGroup.max_age_days || '')
+                          .col-6
+                            label.form-label(for='edit_max_files') Max Files:
+                              |
+                              span(data-bs-toggle='tooltip' title='Default for new areas. Keep only the N newest files. 0 or blank = no limit.') ⓘ
+                            input.form-control(type='number' id='edit_max_files' name='max_files' min=0 tabindex='10' value=fileGroup.max_files || '')
+                        .form-text.text-muted.mt-2
+                          | These are defaults copied onto new areas in this group. Leave blank for no limit.
+
+                    .text-end.mt-3
+                      input.btn.btn-lg.btn-warning(type='submit' value='Save Changes' tabindex='11')
 
           // Delete Group Modal
           #deleteGroupModal.modal.fade(tabindex='-1' aria-labelledby='' aria-hidden='true')

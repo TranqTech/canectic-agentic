@@ -72,154 +72,118 @@ block content
               button.btn.btn-lg.btn-close(data-bs-dismiss="modal")
             .modal-body
               form(action=`/admin/fileGroup/new` method="POST" class="form-registration")
-                .row
-                  .col-1
-                  .col-10
-                    label(for="name") Name:
-                    input(
-                      type="text"
-                      id="name"
-                      name="name"
-                      class="form-control"
-                      required
-                    )
-                    br
-                    label(for="description") Description:
-                    input(
-                      type="text"
-                      id="description"
-                      name="description"
-                      class="form-control"
-                      required
-                    )
-                    br
-                    label(for="base_dir") Base Directory (optional):
-                    .input-group
-                      input(
-                        type="text"
-                        id="base_dir"
-                        name="base_dir"
-                        class="form-control"
-                        placeholder="/path/to/files"
-                      )
-                      button.btn.btn-outline-secondary#checkDirBtn(type='button') Check
-                    #dirStatus.small.mt-1
-                    br
-                .row
-                  .col-1
-                  .col-5
-                    label(for="shortcode") Short Code:
-                    input(
-                      type="text"
-                      id="shotcode"
-                      name="shortcode"
-                      class="form-control"
-                      required
-                    )
-                  .col-5
-                    label(for="ng_browsesecurity") Default Browse Security:
-                    input(
-                      type="number"
-                      id="ng_browsesecurity"
-                      min=0
-                      max=255
-                      name="browsesecurity"
-                      class="form-control"
-                      value=50
-                    )
-                    br
-                    label(for="ng_readsecurity") Default Download Security:
-                    input(
-                      type="number"
-                      id="ng_readsecurity"
-                      min=1
-                      max=255
-                      name="readsecurity"
-                      class="form-control"
-                      value=60
-                    )
-                    br
-                    label(for="ng_postsecurity") Default Upload Security:
-                    input(
-                      type="number"
-                      id="ng_postsecurity"
-                      min=1
-                      max=255
-                      name="postsecurity"
-                      class="form-control"
-                      value=100
-                    )
-                    br
-                    label(for="ng_newscan") Newscan Default:
-                    select#ng_newscan(name='newscan_default').form-select
-                      option(value='true' selected) Yes
-                      option(value='false') No
-                    br
-                    label(for="ng_max_age") Max Age (days):
-                      |
-                      span(data-bs-toggle='tooltip' title='Default for new areas. Auto-remove files older than this. 0 or blank = no limit.') ⓘ
-                    input(type='number' id='ng_max_age' name='max_age_days' class='form-control' min=0)
-                    br
-                    label(for="ng_max_files") Max Files:
-                      |
-                      span(data-bs-toggle='tooltip' title='Default for new areas. Keep only the N newest files. 0 or blank = no limit.') ⓘ
-                    input(type='number' id='ng_max_files' name='max_files' class='form-control' min=0)
-                .row
-                  .col-1
-                  .col-10
-                    #ng_browse_perm_inputs
-                    #ng_browse_rest_inputs
-                    br
-                    label Browse Perm Flags (default for areas):
-                    .border.rounded.p-2.mb-2.bg-light#ng_browse_perm_badges(style='min-height:2.2rem')
-                    .input-group.mb-2
-                      select#ng_browse_perm_select.form-control
-                      button.btn.btn-sm.btn-success#ng_browse_perm_add(type='button') Add
-                    label Browse Restrict Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_browse_rest_badges(style='min-height:2.2rem')
-                    .input-group
-                      select#ng_browse_rest_select.form-control
-                      button.btn.btn-sm.btn-danger#ng_browse_rest_add(type='button') Add
-                .row
-                  .col-1
-                  .col-5
-                    #ng_read_perm_inputs
-                    #ng_read_rest_inputs
-                    br
-                    label Download Perm Flags (default for areas):
-                    .border.rounded.p-2.mb-2.bg-light#ng_read_perm_badges(style='min-height:2.2rem')
-                    .input-group.mb-2
-                      select#ng_read_perm_select.form-control
-                      button.btn.btn-sm.btn-success#ng_read_perm_add(type='button') Add
-                    label Download Restrict Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_read_rest_badges(style='min-height:2.2rem')
-                    .input-group
-                      select#ng_read_rest_select.form-control
-                      button.btn.btn-sm.btn-danger#ng_read_rest_add(type='button') Add
-                  .col-5
-                    #ng_post_perm_inputs
-                    #ng_post_rest_inputs
-                    br
-                    label Upload Perm Flags (default for areas):
-                    .border.rounded.p-2.mb-2.bg-light#ng_post_perm_badges(style='min-height:2.2rem')
-                    .input-group.mb-2
-                      select#ng_post_perm_select.form-control
-                      button.btn.btn-sm.btn-success#ng_post_perm_add(type='button') Add
-                    label Upload Restrict Flags:
-                    .border.rounded.p-2.mb-2.bg-light#ng_post_rest_badges(style='min-height:2.2rem')
-                    .input-group
-                      select#ng_post_rest_select.form-control
-                      button.btn.btn-sm.btn-danger#ng_post_rest_add(type='button') Add
-                .row
-                  .col-1
-                  .col-10
-                    br
-                    .text-end
-                      input(
-                        type="submit"
-                        value="Submit"
-                        class="btn btn-lg btn-success btn-block"
-                        )
+
+                //- ---- Tab nav ----
+                ul.nav.nav-tabs.mb-3(role='tablist')
+                  li.nav-item(role='presentation')
+                    button.nav-link.active(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_main') Main
+                  li.nav-item(role='presentation')
+                    button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_access') Access
+                  li.nav-item(role='presentation')
+                    button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_retention') Retention
+
+                .tab-content
+                  //- ============================================================
+                  //- MAIN — identity, storage location, scan behaviour
+                  //- ============================================================
+                  .tab-pane.fade.show.active#ng_tab_main(role='tabpanel')
+                    .mb-3
+                      label.form-label(for="name") Name:
+                      input.form-control(type="text" id="name" name="name" required)
+                    .mb-3
+                      label.form-label(for="description") Description:
+                      input.form-control(type="text" id="description" name="description" required)
+                    .mb-3
+                      label.form-label(for="shortcode") Short Code:
+                      input.form-control(type="text" id="shortcode" name="shortcode" required)
+                    .mb-3
+                      label.form-label(for="base_dir") Base Directory (optional):
+                      .input-group
+                        input.form-control(type="text" id="base_dir" name="base_dir" placeholder="/path/to/files")
+                        button.btn.btn-outline-secondary#checkDirBtn(type='button') Check
+                      #dirStatus.small.mt-1
+                    .mb-3
+                      label.form-label(for="ng_newscan") Newscan Default:
+                      select#ng_newscan.form-select(name='newscan_default')
+                        option(value='true' selected) Yes
+                        option(value='false') No
+
+                  //- ============================================================
+                  //- ACCESS — security levels and flag defaults for new areas
+                  //- ============================================================
+                  .tab-pane.fade#ng_tab_access(role='tabpanel')
+                    .row.mb-3
+                      .col-4
+                        label.form-label(for="ng_browsesecurity") Default Browse Security:
+                        input.form-control(type="number" id="ng_browsesecurity" min=0 max=255 name="browsesecurity" value=50)
+                      .col-4
+                        label.form-label(for="ng_readsecurity") Default Download Security:
+                        input.form-control(type="number" id="ng_readsecurity" min=1 max=255 name="readsecurity" value=60)
+                      .col-4
+                        label.form-label(for="ng_postsecurity") Default Upload Security:
+                        input.form-control(type="number" id="ng_postsecurity" min=1 max=255 name="postsecurity" value=100)
+                    .row
+                      .col-4
+                        #ng_browse_perm_inputs
+                        #ng_browse_rest_inputs
+                        label Browse Perm Flags (default for areas):
+                        .border.rounded.p-2.mb-2.bg-light#ng_browse_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ng_browse_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ng_browse_perm_add(type='button') Add
+                        label Browse Restrict Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_browse_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ng_browse_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ng_browse_rest_add(type='button') Add
+                      .col-4
+                        #ng_read_perm_inputs
+                        #ng_read_rest_inputs
+                        label Download Perm Flags (default for areas):
+                        .border.rounded.p-2.mb-2.bg-light#ng_read_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ng_read_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ng_read_perm_add(type='button') Add
+                        label Download Restrict Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_read_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ng_read_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ng_read_rest_add(type='button') Add
+                      .col-4
+                        #ng_post_perm_inputs
+                        #ng_post_rest_inputs
+                        label Upload Perm Flags (default for areas):
+                        .border.rounded.p-2.mb-2.bg-light#ng_post_perm_badges(style='min-height:2.2rem')
+                        .input-group.mb-2
+                          select#ng_post_perm_select.form-control
+                          button.btn.btn-sm.btn-success#ng_post_perm_add(type='button') Add
+                        label Upload Restrict Flags:
+                        .border.rounded.p-2.mb-2.bg-light#ng_post_rest_badges(style='min-height:2.2rem')
+                        .input-group
+                          select#ng_post_rest_select.form-control
+                          button.btn.btn-sm.btn-danger#ng_post_rest_add(type='button') Add
+
+                  //- ============================================================
+                  //- RETENTION — automatic pruning defaults for new areas
+                  //- ============================================================
+                  .tab-pane.fade#ng_tab_retention(role='tabpanel')
+                    .row
+                      .col-6
+                        label.form-label(for="ng_max_age") Max Age (days):
+                          |
+                          span(data-bs-toggle='tooltip' title='Default for new areas. Auto-remove files older than this. 0 or blank = no limit.') ⓘ
+                        input.form-control(type='number' id='ng_max_age' name='max_age_days' min=0)
+                      .col-6
+                        label.form-label(for="ng_max_files") Max Files:
+                          |
+                          span(data-bs-toggle='tooltip' title='Default for new areas. Keep only the N newest files. 0 or blank = no limit.') ⓘ
+                        input.form-control(type='number' id='ng_max_files' name='max_files' min=0)
+                    .form-text.text-muted.mt-2
+                      | These are defaults copied onto new areas in this group. Leave blank for no limit.
+
+                .text-end.mt-3
+                  input.btn.btn-lg.btn-success(type="submit" value="Submit")
+
   script.
     document.addEventListener('DOMContentLoaded', function() {
       // Directory check/create for base_dir
