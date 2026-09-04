@@ -226,82 +226,19 @@ async function checkOrCreateTable(tablename, summary) {
 // Idempotent: running on an already-migrated DB finds no rows with
 // spaces in msg_id and does nothing.
 async function migrateMsgidTupleSplit() {
-	// Global tables that have msg_id (and optionally reply_to)
-	var tables = [
-		{ name: 'pm_inbox',         hasReplyTo: false },
-		{ name: 'pm_outbox',        hasReplyTo: false },
-		{ name: 'pm_undeliverable', hasReplyTo: false },
-		{ name: 'netmail_in',       hasReplyTo: false },
-		{ name: 'netmail_out',      hasReplyTo: false },
-		{ name: 'echomail_bad',     hasReplyTo: true  }
-	];
+	// Delegates to messageBase.fixLegacyMsgIds so there is one definition of
+	// the MSGID split. Doing it here in SQL with split_part would diverge from
+	// ftnUtils.splitFullMsgid, which the tossers use: split_part(msg_id,' ',2)
+	// silently drops everything after a second space, whereas splitFullMsgid
+	// splits on the first space and keeps the remainder.
+	var messageBase = await import('../maintenance/messageBase.js');
+	var totals = await messageBase.fixLegacyMsgIds();
 
-	// Per-area message tables are named mb_<shortcode>_msgs. Enumerate
-	// them by querying message_areas. They all have both msg_id and
-	// reply_to per the template.
-	try {
-		var areas = await pgdb.query(
-			"SELECT shortcode FROM message_areas WHERE active = true",
-			[]
-		);
-		for (var a of (areas || [])) {
-			if (a.shortcode) {
-				tables.push({
-					name: 'mb_' + a.shortcode.toLowerCase() + '_msgs',
-					hasReplyTo: true
-				});
-			}
-		}
-	} catch (_) {
-		// message_areas may not exist on fresh install — skip per-area scan
-	}
-
-	var totalMsgidSplit = 0;
-	var totalReplyToSplit = 0;
-	var tablesSkipped = 0;
-
-	for (var t of tables) {
-		try {
-			// Check that the table exists and has the new columns before touching
-			var hasTable = await checkTable(t.name);
-			if (!hasTable) { tablesSkipped++; continue; }
-			var hasOrigAddr = await checkColumn(t.name, 'msg_orig_addr');
-			if (!hasOrigAddr) { tablesSkipped++; continue; }
-
-			// Split msg_id: where msg_id contains a space AND msg_orig_addr is
-			// currently NULL (haven't migrated this row yet).
-			var msgIdResult = await pgdb.pgpool.query(
-				"UPDATE " + t.name + " SET " +
-				"  msg_orig_addr = SPLIT_PART(msg_id, ' ', 1)," +
-				"  msg_id = SPLIT_PART(msg_id, ' ', 2) " +
-				"WHERE msg_id LIKE '% %' AND msg_orig_addr IS NULL"
-			);
-			totalMsgidSplit += (msgIdResult.rowCount || 0);
-
-			// Split reply_to if the table has it
-			if (t.hasReplyTo) {
-				var hasReplyAddr = await checkColumn(t.name, 'reply_orig_addr');
-				if (hasReplyAddr) {
-					var replyResult = await pgdb.pgpool.query(
-						"UPDATE " + t.name + " SET " +
-						"  reply_orig_addr = SPLIT_PART(reply_to, ' ', 1)," +
-						"  reply_to = SPLIT_PART(reply_to, ' ', 2) " +
-						"WHERE reply_to LIKE '% %' AND reply_orig_addr IS NULL"
-					);
-					totalReplyToSplit += (replyResult.rowCount || 0);
-				}
-			}
-		} catch (err) {
-			console.log("  msgid tuple split: error on " + t.name + ": " + err.message);
-		}
-	}
-
-	if (totalMsgidSplit > 0 || totalReplyToSplit > 0) {
-		console.log("  msgid tuple split: " + totalMsgidSplit + " msg_id rows, " +
-			totalReplyToSplit + " reply_to rows across " +
-			(tables.length - tablesSkipped) + " tables");
+	if (totals.msgidFixed > 0 || totals.replyFixed > 0) {
+		console.log("  Split " + totals.msgidFixed + " msg_id and " +
+			totals.replyFixed + " reply_to value(s) across " + totals.tables + " table(s).");
 	} else {
-		console.log("  msgid tuple split: no legacy format rows found (already migrated or fresh install)");
+		console.log("  No legacy MSGID strings found.");
 	}
 }
 

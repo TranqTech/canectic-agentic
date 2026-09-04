@@ -478,25 +478,61 @@ async function rethreadAreas(options) {
 // Legacy MSGID repair
 // ---------------------------------------------------------------------------
 //
-// The platform stores MSGID split across two columns: the 8-char serial in
-// msg_id, the origin FTN address in msg_orig_addr. The SMB importer used to
-// write the whole "address serial" string into msg_id and leave
-// msg_orig_addr empty, which defeats dupe detection against the same message
-// arriving later over FTN.
+// The platform stores MSGID split across two columns: the serial in msg_id,
+// the origin FTN address in msg_orig_addr. Older code paths wrote the whole
+// "address serial" string into msg_id and left msg_orig_addr empty, which
+// defeats dupe detection against the same message arriving later over FTN.
 //
-// This walks every area and repairs those rows using the same
-// splitFullMsgid() the tossers use, so there is one definition of the split.
-// It is idempotent: repaired rows no longer match the selection predicate, so
-// re-running is harmless. Realistically a one-time run after upgrading.
+// This walks every table that carries a MSGID and repairs those rows using
+// ftnUtils.splitFullMsgid, the same function the tossers use, so there is one
+// definition of the split. Doing it in SQL with split_part would be faster but
+// would diverge: split_part(msg_id, ' ', 2) silently discards everything after
+// a second space, whereas splitFullMsgid splits on the first space and keeps
+// the remainder.
+//
+// Idempotent: repaired rows no longer match the selection predicate, so
+// re-running is harmless. Called by dbmigrations.js after schema maintenance,
+// and available on demand as maintenance.js --fix-msgids.
 //
 // options: { areas: [shortcode], dryRun: bool, batchSize: int }
-// Returns { areas, scanned, msgidFixed, replyFixed, collisions }
+// Returns { tables, scanned, msgidFixed, replyFixed, collisions }
 
-// A legacy row is one where the serial column still holds a space-separated
-// "address serial" pair and the address column was never populated.
-var LEGACY_PREDICATE =
-	"((msg_id LIKE '% %' AND COALESCE(msg_orig_addr, '') = '') OR " +
-	" (reply_to LIKE '% %' AND COALESCE(reply_orig_addr, '') = ''))";
+// Global tables carrying a MSGID. Per-area mb_<shortcode>_msgs tables are
+// discovered at runtime and always have both columns per the template.
+var MSGID_TABLES = [
+	{ name: 'pm_inbox',         hasReplyTo: false },
+	{ name: 'pm_outbox',        hasReplyTo: false },
+	{ name: 'pm_undeliverable', hasReplyTo: false },
+	{ name: 'netmail_in',       hasReplyTo: false },
+	{ name: 'netmail_out',      hasReplyTo: false },
+	{ name: 'echomail_bad',     hasReplyTo: true  },
+];
+
+// A legacy row is one where a serial column still holds a space-separated
+// "address serial" pair and its address column was never populated.
+function legacyPredicate(hasReplyTo) {
+	var clauses = ["(msg_id LIKE '% %' AND COALESCE(msg_orig_addr, '') = '')"];
+	if (hasReplyTo) {
+		clauses.push("(reply_to LIKE '% %' AND COALESCE(reply_orig_addr, '') = '')");
+	}
+	return '(' + clauses.join(' OR ') + ')';
+}
+
+async function tableExists(name) {
+	var row = await postgres.queryOne(
+		"SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
+		[name]
+	);
+	return !!row;
+}
+
+async function columnExists(table, column) {
+	var row = await postgres.queryOne(
+		"SELECT 1 AS ok FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+		[table, column]
+	);
+	return !!row;
+}
 
 async function fixLegacyMsgIds(options) {
 	var opts      = options || {};
@@ -504,81 +540,105 @@ async function fixLegacyMsgIds(options) {
 	var batchSize = opts.batchSize || 500;
 	var ftnUtils  = await import('../utils/ftnUtils.js');
 
-	var totals = { areas: 0, scanned: 0, msgidFixed: 0, replyFixed: 0, collisions: 0 };
+	var totals = { tables: 0, scanned: 0, msgidFixed: 0, replyFixed: 0, collisions: 0 };
 
-	var areaRows;
-	if (opts.areas && opts.areas.length > 0) {
-		areaRows = [];
-		for (var sc of opts.areas) {
-			var row = await postgres.queryOne(
-				"SELECT shortcode FROM message_areas WHERE UPPER(shortcode) = UPPER($1)", [sc]
-			);
-			if (row) areaRows.push(row);
-			else alogger.writeAlog(3, '[FixMsgIds] Area not found: ' + sc, 'yellow');
-		}
-	} else {
-		areaRows = await postgres.query(
-			"SELECT shortcode FROM message_areas WHERE active ORDER BY shortcode"
-		);
+	// Build the work list. A specific --area limits it to those message areas
+	// and skips the global tables, which are not area-scoped.
+	var work = [];
+
+	if (!opts.areas || opts.areas.length === 0) {
+		for (var g of MSGID_TABLES) work.push(g);
 	}
 
-	if (!areaRows || areaRows.length === 0) {
-		alogger.writeAlog(5, '[FixMsgIds] No areas to process', 'cyan');
+	try {
+		var areaRows;
+		if (opts.areas && opts.areas.length > 0) {
+			areaRows = [];
+			for (var sc of opts.areas) {
+				var row = await postgres.queryOne(
+					"SELECT shortcode FROM message_areas WHERE UPPER(shortcode) = UPPER($1)", [sc]
+				);
+				if (row) areaRows.push(row);
+				else alogger.writeAlog(3, '[FixMsgIds] Area not found: ' + sc, 'yellow');
+			}
+		} else {
+			areaRows = await postgres.query(
+				"SELECT shortcode FROM message_areas WHERE active ORDER BY shortcode"
+			);
+		}
+		for (var a of (areaRows || [])) {
+			work.push({ name: 'mb_' + a.shortcode.toLowerCase() + '_msgs', hasReplyTo: true });
+		}
+	} catch (_) {
+		// message_areas may not exist yet on a fresh install; globals still apply
+	}
+
+	if (work.length === 0) {
+		alogger.writeAlog(5, '[FixMsgIds] Nothing to scan', 'cyan');
 		return totals;
 	}
 
-	alogger.writeAlog(5, '[FixMsgIds] Scanning ' + areaRows.length + ' area(s)' +
+	alogger.writeAlog(5, '[FixMsgIds] Scanning ' + work.length + ' table(s)' +
 		(dryRun ? ' (dry run)' : ''), 'cyan');
 
-	for (var area of areaRows) {
-		var shorty   = area.shortcode.toLowerCase();
-		var msgtable = 'mb_' + shorty + '_msgs';
+	for (var t of work) {
+		// Skip tables or columns that do not exist yet rather than erroring:
+		// this runs during migration, when the schema may be part way built.
+		if (!(await tableExists(t.name))) continue;
+		if (!(await columnExists(t.name, 'msg_orig_addr'))) continue;
+
+		var hasReplyTo = t.hasReplyTo &&
+			(await columnExists(t.name, 'reply_to')) &&
+			(await columnExists(t.name, 'reply_orig_addr'));
+		var predicate = legacyPredicate(hasReplyTo);
 
 		var countRow;
 		try {
 			countRow = await postgres.queryOne(
-				'SELECT COUNT(*) AS cnt FROM ' + msgtable + ' WHERE ' + LEGACY_PREDICATE
+				'SELECT COUNT(*) AS cnt FROM ' + t.name + ' WHERE ' + predicate
 			);
 		} catch (err) {
-			// Missing backing table for an area row is not fatal here
-			alogger.writeAlog(3, '[FixMsgIds] Skipping ' + area.shortcode + ': ' + err.message, 'yellow');
+			alogger.writeAlog(3, '[FixMsgIds] Skipping ' + t.name + ': ' + err.message, 'yellow');
 			continue;
 		}
 
 		var todo = countRow ? parseInt(countRow.cnt) : 0;
 		if (!todo) continue;
 
-		totals.areas++;
+		totals.tables++;
 		totals.scanned += todo;
-		alogger.writeAlog(4, '[FixMsgIds] ' + area.shortcode + ': ' + todo + ' legacy row(s)', 'cyan');
+		alogger.writeAlog(4, '[FixMsgIds] ' + t.name + ': ' + todo + ' legacy row(s)', 'cyan');
 
 		if (dryRun) {
-			// Splitting can expose serials that are only distinct because of
+			// Splitting can expose serials that were only distinct because of
 			// their address prefix. Dupe detection matches on msg_id alone, so
 			// report those rather than discovering them after the fact.
 			try {
 				var collisionRow = await postgres.queryOne(
 					"SELECT COUNT(*) AS cnt FROM (" +
 					"  SELECT btrim(substring(btrim(msg_id) from position(' ' in btrim(msg_id)) + 1)) AS serial" +
-					"  FROM " + msgtable + " WHERE msg_id LIKE '% %'" +
+					"  FROM " + t.name + " WHERE msg_id LIKE '% %'" +
 					"  GROUP BY 1 HAVING COUNT(*) > 1" +
-					") t"
+					") x"
 				);
 				var collisions = collisionRow ? parseInt(collisionRow.cnt) : 0;
 				if (collisions > 0) {
 					totals.collisions += collisions;
-					alogger.writeAlog(3, '[FixMsgIds] ' + area.shortcode + ': ' + collisions +
+					alogger.writeAlog(3, '[FixMsgIds] ' + t.name + ': ' + collisions +
 						' serial(s) would appear more than once after splitting', 'yellow');
 				}
 			} catch (_) { /* reporting only */ }
 			continue;
 		}
 
+		var cols = 'id, msg_id, msg_orig_addr' +
+			(hasReplyTo ? ', reply_to, reply_orig_addr' : '');
+
 		var lastId = 0;
 		for (;;) {
 			var rows = await postgres.query(
-				'SELECT id, msg_id, msg_orig_addr, reply_to, reply_orig_addr FROM ' + msgtable +
-				' WHERE id > $1 AND ' + LEGACY_PREDICATE + ' ORDER BY id LIMIT $2',
+				'SELECT ' + cols + ' FROM ' + t.name +
+				' WHERE id > $1 AND ' + predicate + ' ORDER BY id LIMIT $2',
 				[lastId, batchSize]
 			);
 			if (!rows || rows.length === 0) break;
@@ -595,7 +655,7 @@ async function fixLegacyMsgIds(options) {
 					}
 				}
 
-				if (r.reply_to && r.reply_to.indexOf(' ') >= 0 && !r.reply_orig_addr) {
+				if (hasReplyTo && r.reply_to && r.reply_to.indexOf(' ') >= 0 && !r.reply_orig_addr) {
 					var p = ftnUtils.splitFullMsgid(r.reply_to);
 					if (p.msg_id) {
 						updates.reply_to = p.msg_id;
@@ -605,7 +665,7 @@ async function fixLegacyMsgIds(options) {
 
 				if (Object.keys(updates).length === 0) continue;
 
-				var affected = await postgres.updateById(r.id, updates, msgtable);
+				var affected = await postgres.updateById(r.id, updates, t.name);
 				if (affected > 0) {
 					if (updates.msg_id)   totals.msgidFixed++;
 					if (updates.reply_to) totals.replyFixed++;
@@ -614,10 +674,12 @@ async function fixLegacyMsgIds(options) {
 		}
 	}
 
-	alogger.writeAlog(2, '[FixMsgIds] ' + (dryRun ? 'Would repair ' : 'Repaired ') +
-		totals.msgidFixed + ' MSGID and ' + totals.replyFixed + ' REPLY value(s) across ' +
-		totals.areas + ' area(s)' + (dryRun ? ' (' + totals.scanned + ' rows matched)' : ''),
-		'greenbright');
+	if (totals.scanned > 0 || dryRun) {
+		alogger.writeAlog(2, '[FixMsgIds] ' + (dryRun ? 'Would repair ' : 'Repaired ') +
+			totals.msgidFixed + ' MSGID and ' + totals.replyFixed + ' REPLY value(s) across ' +
+			totals.tables + ' table(s)' + (dryRun ? ' (' + totals.scanned + ' rows matched)' : ''),
+			'greenbright');
+	}
 
 	return totals;
 }
