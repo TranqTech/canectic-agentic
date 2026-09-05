@@ -35,11 +35,39 @@ across Node major versions and ships prebuilt. Earlier releases had to be
 compiled against each Node version's V8 internals, which is what made installs
 fail on newer Node and required `build-essential` and `python3` to be present.
 
+#### Install with nvm (recommended)
+
 ```bash
-# Using nvm (recommended)
-nvm install 22
-nvm use 22
+nvm install 26
+nvm alias default 26
 ```
+
+nvm is the recommended way to run Canectic, and the rest of this guide assumes
+it. A BBS is expected to stay up for years, across several OS upgrades, and nvm
+decouples the Node version from the distro: you upgrade the OS without the
+packaged Node moving underneath the BBS, and you upgrade Node without waiting
+for your distro to ship it. Setting the `default` alias matters, because that is
+what the boot path follows.
+
+Note that global npm packages are installed per Node version under nvm. After
+`nvm install` of a new major, re-install anything you rely on globally
+(`npm install -g pm2`).
+
+#### Install natively
+
+A distro or NodeSource package works too, and is fully supported. Canectic never
+hardcodes an interpreter path, so nothing in the tree assumes one layout or the
+other.
+
+```bash
+# Debian/Ubuntu, via NodeSource
+curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+The trade-off is that the Node version is then tied to your distro packaging, so
+an OS upgrade can move it without warning. If you go this route, pin the package
+and check `node -v` after any OS upgrade.
 
 ---
 
@@ -208,6 +236,10 @@ pm2 save      # persist across reboots
 pm2 startup   # generate system startup script
 ```
 
+If you installed Node with nvm, patch the unit `pm2 startup` generates before
+you rely on it. As generated it hardcodes the Node version and will stop
+booting after an upgrade. See [Surviving Node Upgrades](#surviving-node-upgrades).
+
 **Single process (development/testing):**
 ```bash
 PROCESS_MODE=embedded node bin/gateway.js
@@ -264,6 +296,88 @@ pm2 start ecosystem.config.cjs    # start all
 pm2 restart gateway                # restart one process
 pm2 logs worker                    # tail logs
 pm2 monit                          # live monitoring dashboard
+```
+
+### Surviving Node Upgrades
+
+`pm2 startup` generates a systemd unit that hardcodes the Node version in both
+`PATH` and every `Exec*` line:
+
+```ini
+Environment=PATH=/home/you/.nvm/versions/node/v26.8.1/bin:...
+ExecStart=/home/you/.nvm/versions/node/v26.8.1/lib/node_modules/pm2/bin/pm2 resurrect
+```
+
+Under nvm that pins the service to whichever Node was current the day the unit
+was generated. After `nvm alias default 27` the BBS still boots on 26, and once
+26 is uninstalled it stops booting at all.
+
+A native Node install has a milder version of the same problem: the unit points
+at `/usr/bin/pm2`, which keeps working, but an OS upgrade can move the Node
+underneath it without warning.
+
+Canectic ships a wrapper that resolves Node at start time instead of freezing it
+into the unit. It follows nvm's `default` alias when nvm is present, and falls
+back to whatever `pm2` is on `PATH` when it is not, so the same unit works on
+both kinds of install. Install it once, to a path outside the repo (`setup/` is
+wiped and recopied by `update.sh`, so a boot during an update would find no
+wrapper):
+
+```bash
+install -m 755 setup/canectic-pm2.sh ~/.local/bin/canectic-pm2
+```
+
+Then edit `/etc/systemd/system/pm2-<user>.service` to drop the nvm directory
+from `PATH`, add `NVM_DIR`, and route the `Exec*` lines through the wrapper:
+
+```ini
+Environment=PATH=/home/you/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PM2_HOME=/home/you/.pm2
+Environment=NVM_DIR=/home/you/.nvm
+
+ExecStart=/home/you/.local/bin/canectic-pm2 resurrect
+ExecReload=/home/you/.local/bin/canectic-pm2 reload all
+ExecStop=/home/you/.local/bin/canectic-pm2 kill
+```
+
+On a native install, leave `NVM_DIR` out. The wrapper then finds no `nvm.sh` and
+goes straight to `pm2` on `PATH`.
+
+Reload systemd and restart once to confirm the new path boots:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart pm2-<user>
+```
+
+Upgrading Node then needs no unit edit, but it does still need a `pm2 save`,
+because `dump.pm2` stores an absolute interpreter path for each of the four
+children. Under nvm:
+
+```bash
+nvm install 27 && nvm alias default 27
+npm install -g pm2                  # globals are per-version under nvm
+sudo systemctl restart pm2-<user>
+pm2 save                            # re-pin the children in dump.pm2
+```
+
+Natively, the package upgrade replaces Node in place, so only the last two steps
+apply:
+
+```bash
+sudo apt install --only-upgrade nodejs
+sudo systemctl restart pm2-<user>
+pm2 save
+```
+
+Skip the `pm2 save` and the daemon comes up on the new Node while `resurrect`
+still spawns the four children under the old interpreter recorded in the dump.
+`ecosystem.config.cjs` pins `interpreter` to `process.execPath`, so a plain
+`pm2 start ecosystem.config.cjs` followed by `pm2 save` always re-pins the
+children to the daemon's own Node. Verify with:
+
+```bash
+pm2 jlist | python3 -c "import json,sys; [print(p['name'], p['pm2_env']['node_version']) for p in json.load(sys.stdin)]"
 ```
 
 ---
