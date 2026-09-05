@@ -20,6 +20,30 @@ Knowing which pieces move with the distro and which do not is most of the job.
 
 If you run Node natively from a distro package rather than nvm, add it to the "tied to the OS" list: the upgrade will move it, possibly below Canectic's floor of Node 22. That is the argument for nvm.
 
+## If Canectic runs in a container
+
+Check first, because it changes several steps:
+
+```bash
+systemd-detect-virt
+```
+
+If this reports `lxc` (or another container type) rather than `none` or a hypervisor name, then:
+
+- **There is no kernel to upgrade.** `dpkg -l 'linux-image-*'` will be empty and the container runs the host's kernel. That removes a whole category of upgrade risk, and it means `/var/run/reboot-required` is about restarting services after library upgrades, not about booting a new kernel.
+- **"Reboot" means restarting the container**, from the host (`pct reboot <id>` on Proxmox), not `reboot` from inside.
+- **Snapshot from the host, not from inside.** This is the single best thing you can do before an OS upgrade. On Proxmox with LXC on ZFS or Ceph RBD:
+
+```bash
+# on the Proxmox host, not in the container
+pct snapshot <ctid> preupgrade-$(date +%Y%m%d)
+pct listsnapshot <ctid>
+```
+
+A snapshot turns the [rollback](#rollback) section from a data recovery exercise into a one command restore. If your storage backend supports it, take one and the rest of this guide becomes a safety net you probably will not need.
+
+For a full VM rather than a container, the equivalent is `qm snapshot <vmid> <name>`, and the kernel does upgrade normally.
+
 ## Before you upgrade
 
 ### 1. Confirm the upgrade is offered
@@ -28,7 +52,17 @@ If you run Node natively from a distro package rather than nvm, add it to the "t
 do-release-upgrade -c
 ```
 
-Ubuntu only offers LTS to LTS upgrades after the first point release of the target, so there is normally a gap of a few months after a new LTS appears. If this reports no release available, you are done for now. Do not force it with `-d`; that pulls a development release.
+Ubuntu only offers LTS to LTS upgrades once Canonical opens the path, which is normally some months after the target's first point release. If this reports no release available, that is the gate, not a fault on your machine.
+
+You can see the gate directly. `do-release-upgrade` reads Canonical's release index and honours a per-release `Supported` flag:
+
+```bash
+curl -s https://changelogs.ubuntu.com/meta-release-lts | awk '/^Dist: <target>/,/^$/'
+```
+
+`Supported: 1` means the upgrade is open, `Supported: 0` means it is published but not yet enabled. The rest of the entry (`UpgradeTool`, release notes) is populated well before the flag flips, so its presence is not a signal that you can proceed. Re-check periodically rather than looking for an announcement.
+
+Do not work around a closed gate. `-d` targets the development release, not your intended LTS, and hand-editing `sources.list` skips the upgrade tool's handling of held packages, obsolete package removal and third-party source disabling.
 
 ### 2. Record the current state
 
@@ -251,7 +285,7 @@ Then exercise the parts that touch the pieces you just moved:
 
 Ubuntu release upgrades cannot be reversed in place. Your recovery paths, in order of preference:
 
-1. **VM or filesystem snapshot taken before the upgrade.** By far the best option. If the BBS runs on a hypervisor or on ZFS/btrfs, take a snapshot first and this whole section becomes a five minute problem.
+1. **Hypervisor or filesystem snapshot taken before the upgrade.** By far the best option, and on Proxmox it is one command (see [If Canectic runs in a container](#if-canectic-runs-in-a-container)). Take one and this whole section becomes a five minute problem.
 2. **The old PostgreSQL cluster**, if you have not dropped it. Reinstall the old major and restart it.
 3. **The `pg_dumpall` file**, restored into a fresh cluster on a rebuilt host.
 
@@ -263,7 +297,7 @@ Findings from checking this specific path, current as of September 2026:
 
 | Item | Status |
 |---|---|
-| Upgrade offered | Not yet. `do-release-upgrade -c` reports no LTS available with `Prompt=lts`. |
+| Upgrade offered | **Not yet.** The `resolute` entry in `meta-release-lts` is complete but carries `Supported: 0`, while `noble` has `Supported: 1`. Canonical has published the 26.04.1 path and not yet enabled it. Nothing to fix locally; re-check periodically. |
 | PostgreSQL | 24.04 ships 16. Expect a major version jump and a mandatory `pg_upgradecluster`. The main work. |
 | dosemu2 | **Covered.** The PPA publishes for `resolute` (26.04) at the same source revision as the `noble` build, so DOS doors have a path forward. |
 | Redis | **Redis 8.0.5, not valkey** (confirmed on a 26.04 install). Major jump from 24.04's 7.0.x. RDB is forward-only, so the dataset does not survive a rollback; see the Redis section for why that is tolerable. |
