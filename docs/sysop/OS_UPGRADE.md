@@ -123,6 +123,10 @@ sudo systemctl stop pm2-$USER
 
 Leaving it running risks writes landing in a database that is about to be replaced underneath it.
 
+**Do not run `pm2 save` after stopping.** The dump records current state, so saving now records four *stopped* processes, and `pm2 resurrect` at boot faithfully restores them stopped. Save before you stop, or not at all.
+
+Beware also of any command that starts a pm2 daemon behind your back. Plain `pm2 -v` or `pm2 list` will spawn one outside systemd, which then blocks the later `systemctl start` with a PID-ownership error. If you have run one, `pm2 kill` before starting the service.
+
 ## Running the upgrade
 
 ```bash
@@ -137,42 +141,125 @@ Expect a reboot at the end.
 
 ### 1. PostgreSQL: migrate the cluster
 
-This is the step that most often gets missed, because nothing obviously fails: the new PostgreSQL is running, it just has none of your data in it.
+This is the step that most often gets missed, because nothing obviously fails. The release upgrade installs the new PostgreSQL major but leaves your data in the old cluster, and a new empty cluster answering on 5432 looks perfectly healthy while containing nothing.
 
 ```bash
 pg_lsclusters
 ```
 
-You will see two clusters, for example the old `16/main` (now `down`, on a different port) and a new empty one on 5432.
-
-Migrate the old cluster forward. Substitute your actual old and new version numbers:
+**What you see here varies, and it changes the command you run.** On a system where the new major auto-created its own cluster you will see two, the old one and a new empty one. On a system where `postgresql-common` detected the existing cluster it skips that, and you will see only the old one. Both are normal.
 
 ```bash
-sudo pg_dropcluster <NEW> main --stop      # discard the empty new cluster
-sudo pg_upgradecluster 16 main             # upgrade the old one in its place
-pg_lsclusters                              # new cluster should now be online on 5432
+# ONLY if pg_lsclusters showed an empty new cluster:
+sudo pg_dropcluster <NEW> main --stop
+
+# then, in either case:
+sudo pg_upgradecluster <OLD> main
 ```
 
-Port continuity matters: Canectic connects on 5432 per your `.env`, and `pg_upgradecluster` gives the upgraded cluster the old cluster's port. Confirm that before moving on.
+Do not run `pg_dropcluster` blind. If no new cluster was created it fails, and on a system where one exists but is *not* empty you would be deleting real data.
 
-Verify your data actually arrived:
+A two major version jump (16 to 18, say) is handled in one step. There is no need to hop through intermediate versions.
+
+#### If pg_upgradecluster is interrupted
+
+Worth knowing before you start, because the recovery is not obvious.
+
+While it runs, `pg_upgradecluster` starts the new cluster **itself, outside systemd**, with a temporary restricted `pg_hba.conf` (you will see `-c hba_file=/tmp/pg_hba.XXXXXX.conf` in the process list) so no client can connect mid-migration. Its final steps are to stop that instance, swap the ports so the new cluster takes the old one's port, and hand control back to systemd.
+
+If it dies before those final steps, you get a confusing state:
+
+- `pg_lsclusters` reports the new cluster **down** while it is very much running, because it reads systemd's view and systemd does not own the process
+- `systemctl start postgresql@<NEW>-main` fails with `Cluster is already running` and a `New main PID ... does not belong to service` protocol error
+- the ports are still unswapped, so your application's 5432 is pointed at the old cluster
+
+The data is usually fine; only the cleanup was missed. Finish it by hand:
 
 ```bash
-sudo -u postgres psql -tAc \
-    "select datname, pg_size_pretty(pg_database_size(datname)) from pg_database where datistemplate=false;"
+sudo pg_ctlcluster <OLD> main stop            # stop the old cluster
+sudo pg_ctlcluster <NEW> main stop            # stop the temporary un-systemd instance
+sudo pg_conftool <OLD> main set port 5433     # park the old one
+sudo pg_conftool <NEW> main set port 5432     # new cluster takes the app's port
+sudo systemctl reset-failed postgresql@<NEW>-main.service
+sudo systemctl start postgresql@<NEW>-main.service
+```
+
+Confirm systemd owns it now and no temporary hba file remains:
+
+```bash
+pg_lsclusters                                  # <NEW>/main online on 5432
+pgrep -af 'postgresql/<NEW>/bin/postgres' | grep -o 'hba_file=[^ ]*'   # should print nothing
+```
+
+#### Do not mistake page cache for memory pressure
+
+The migration streams the whole cluster through `pg_dump`, which fills the page cache. `free` will show very little "free" memory while showing plenty "available", and monitoring or supervisors that watch the wrong column may decide the system is out of memory and kill something mid-migration.
+
+Before reacting, check whether an OOM actually happened:
+
+```bash
+free -h                                   # look at "available", not "free"
+cat /sys/fs/cgroup/memory.events          # oom_kill should be 0
+pgrep -af pg_upgradecluster               # is it actually still running?
+```
+
+`buff/cache` is reclaimable and is exactly what heavy sequential reads are supposed to produce. If `oom_kill` is 0 and the process is alive, leave it alone. Killing a migration halfway is far worse than waiting.
+
+#### Verify the data properly
+
+Table counts alone are not enough. Compare **every table's row count** and **every sequence value** against the old cluster, which is still readable on its parked port. Unset sequences are the dangerous failure: the data looks perfect and then the next insert collides with an existing id.
+
+```bash
+OLD_PORT=5433; NEW_PORT=5432; DB=<your_db>
+q() { sudo -u postgres psql -p "$1" -d "$DB" -tAc "$2" | tr -d ' '; }
+
+for t in $(q $OLD_PORT "select table_name from information_schema.tables
+                        where table_schema='public' and table_type='BASE TABLE' order by 1;"); do
+    a=$(q $OLD_PORT "select count(*) from \"$t\";")
+    b=$(q $NEW_PORT "select count(*) from \"$t\";")
+    [ "$a" != "$b" ] && echo "MISMATCH $t: old=$a new=$b"
+done
+
+for s in $(q $OLD_PORT "select sequencename from pg_sequences where schemaname='public' order by 1;"); do
+    a=$(q $OLD_PORT "select coalesce(last_value,0) from \"$s\";")
+    b=$(q $NEW_PORT "select coalesce(last_value,0) from \"$s\";")
+    [ "$a" != "$b" ] && echo "SEQUENCE DIFF $s: old=$a new=$b"
+done
+```
+
+Silence from both loops means the migration is sound. Then confirm your application's own database user can authenticate over TCP, not just `postgres` over the unix socket, since that is the path Canectic actually uses:
+
+```bash
+PGPASSWORD=<pass> psql -h 127.0.0.1 -p 5432 -U <dbuser> -d <dbname> \
+    -tAc "select current_setting('server_version');"
+```
+
+#### Rebuild the planner statistics
+
+**Do not skip this.** A dump and restore carries no statistics, so the planner flies blind and queries that were fast become slow for no visible reason.
+
+```bash
+sudo -u postgres vacuumdb --analyze-only -d <your_db> -p 5432
+```
+
+Check it worked. The count should jump to roughly your number of non-empty tables:
+
+```bash
 sudo -u postgres psql -d <your_db> -tAc \
-    "select count(*) from information_schema.tables where table_schema='public';"
+    "select count(distinct tablename) from pg_stats where schemaname='public';"
 ```
 
-The size and table count should match what you recorded before the upgrade. Only once you are satisfied should you remove the old cluster:
+#### Keep the old cluster
+
+Only once every check above passes should you remove it:
 
 ```bash
-sudo pg_dropcluster 16 main
+sudo pg_dropcluster <OLD> main
 ```
 
-Keep it until you are certain. It costs nothing but disk, and it is your fastest rollback.
+Keep it until you are certain. It costs nothing but disk and it is your fastest rollback.
 
-If `pg_upgradecluster` fails, fall back to the dump: create a fresh cluster and `gunzip -c ~/canectic-pg-*.sql.gz | sudo -u postgres psql`.
+If `pg_upgradecluster` fails outright, fall back to the dump: create a fresh cluster and `gunzip -c ~/canectic-pg-*.sql.gz | sudo -u postgres psql`.
 
 ### 2. Redis: check the package and the major version
 
@@ -213,6 +300,8 @@ node src/tools/tosser.js --in
 
 Client compatibility needs no action: Canectic uses bullmq 6.x and ioredis 6.x, both of which support Redis 8.
 
+Confirmed in practice on the 24.04 to 26.04 path: Redis 8.0.5 read the 7.0.x dataset without complaint, `maxmemory-policy` survived as `noeviction`, and both databases came through with their keys intact.
+
 ### 3. Node and native addons
 
 With nvm, nothing should have moved:
@@ -224,7 +313,9 @@ which node       # should still be under ~/.nvm
 
 Native addons compiled before the upgrade link against `libstdc++.so.6`, `libgcc_s.so.1` and `libc.so.6`. glibc is forward-compatible through symbol versioning, so binaries built on an older release keep running on a newer one. The prebuilt N-API modules (bcrypt, better-sqlite3, serialport) are stable across both Node versions and glibc by design.
 
-If anything misbehaves, rebuild rather than debugging linkage:
+This has been confirmed in practice across glibc 2.39 to 2.43 (24.04 to 26.04): the locally compiled addons (`node-pty`, ssh2's `sshcrypto`, `cpu-features`, `msgpackr-extract`) loaded without a rebuild and the full suite passed unchanged.
+
+If anything does misbehave, rebuild rather than debugging linkage:
 
 ```bash
 cd /path/to/canectic
@@ -232,14 +323,22 @@ npm rebuild
 npm test
 ```
 
+Compare the suite against the count you recorded before the upgrade. An identical pass count is the single best signal that the runtime came through intact.
+
 ### 4. Third-party PPAs
 
-The upgrade disables them. Re-point each at the new release codename and re-enable. For dosemu2, which matters if you run DOS door games:
+The upgrade disables them, and there are **two** fields to fix, not one. It rewrites `Enabled: yes` to `Enabled: no` and leaves `Suites:` pointing at the old codename. Changing only the suite leaves the source silently inert.
+
+Note also that the *filename* keeps the old codename (`dosemu2-ubuntu-ppa-noble.sources` stays that way after moving to resolute). That is cosmetic; only the fields inside matter.
 
 ```bash
-sudo sed -i 's/Suites: <old-codename>/Suites: <new-codename>/' \
-    /etc/apt/sources.list.d/dosemu2-*.sources
+F=/etc/apt/sources.list.d/dosemu2-*.sources
+sudo sed -i 's/^Suites: <old-codename>/Suites: <new-codename>/' $F
+sudo sed -i 's/^Enabled: no/Enabled: yes/' $F
+grep -E '^(URIs|Suites|Enabled)' $F     # confirm all three before continuing
+
 sudo apt update
+apt-cache policy dosemu2                # candidate should carry the new release tag
 sudo apt install --only-upgrade dosemu2
 dosemu --version
 ```
@@ -265,9 +364,11 @@ for p in $(pgrep -P $(pgrep -f 'PM2.*God Daemon')); do readlink -f /proc/$p/exe;
 # Listeners are back
 ss -ltnp | grep -E ':(8080|2023|10143|10587|24554)'
 
-# Web and health
+# Web and health. /health is the single best check: it exercises the app's own
+# database and Redis connections rather than probing them from outside.
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/
 curl -s http://127.0.0.1:8080/health
+# expect: {"status":"ok","postgres":"ok","redis":"ok"}
 
 # No new errors
 tail -50 logs/production/*-error.log
@@ -293,16 +394,18 @@ Options 2 and 3 recover your data, not your OS. Plan on a snapshot if downtime m
 
 ## Reference: Ubuntu 24.04 to 26.04
 
-Findings from checking this specific path, current as of September 2026:
+This upgrade has been performed and verified end to end on a Canectic install (an LXC container, September 2026). Results:
 
-| Item | Status |
+| Item | Outcome |
 |---|---|
-| Upgrade offered | **Not yet.** The `resolute` entry in `meta-release-lts` is complete but carries `Supported: 0`, while `noble` has `Supported: 1`. Canonical has published the 26.04.1 path and not yet enabled it. Nothing to fix locally; re-check periodically. |
-| PostgreSQL | 24.04 ships 16. Expect a major version jump and a mandatory `pg_upgradecluster`. The main work. |
-| dosemu2 | **Covered.** The PPA publishes for `resolute` (26.04) at the same source revision as the `noble` build, so DOS doors have a path forward. |
-| Redis | **Redis 8.0.5, not valkey** (confirmed on a 26.04 install). Major jump from 24.04's 7.0.x. RDB is forward-only, so the dataset does not survive a rollback; see the Redis section for why that is tolerable. |
-| Node | Unaffected under nvm. |
-| Native addons | Low risk. Prebuilt N-API modules are version-stable; locally compiled ones link only to backward-compatible system libraries. |
-| glibc | 2.39 on 24.04. Existing binaries keep working on newer via symbol versioning. |
+| Upgrade path | Ran with `do-release-upgrade -d`. At the time the `resolute` entry in `meta-release-lts` still carried `Supported: 0`, so the normal path was closed, but `meta-release-development` listed resolute as `Supported: 1` and 26.10 as `Supported: 0`, meaning `-d` correctly targeted 26.04.1 rather than the next interim release. **Check that before using `-d`;** it is not always true. |
+| Result | Ubuntu 26.04.1 LTS. 725 packages upgraded, 180 obsolete removed, **zero errors**. |
+| PostgreSQL | **16.15 to 18.6**, a two major jump, handled by a single `pg_upgradecluster 16 main`. No empty 18 cluster was auto-created, so the `pg_dropcluster` step did not apply. All 126 tables and all 126 sequences matched exactly afterwards. |
+| Redis | **7.0.15 to 8.0.5**, Redis rather than valkey. Read the old dataset cleanly, `maxmemory-policy` stayed `noeviction`, keys intact. |
+| glibc | **2.39 to 2.43.** No addon rebuild required; the full test suite passed with an identical count (2670). |
+| Node | **Untouched at v26.8.1** under nvm, along with pm2 and the systemd unit. The entire point of the runtime portability work. |
+| dosemu2 | PPA publishes for `resolute` at the same source revision as `noble`. Upgraded cleanly once the source was re-pointed **and re-enabled**. |
+| coreutils | 26.04 installs `rust-coreutils` and `coreutils-from-uutils` alongside `gnu-coreutils`, but on an upgraded system `/usr/bin/cp` remains a symlink to `gnucp`, the GNU implementation. Canectic's `install.sh` and `update.sh` therefore still run against GNU coreutils. Worth re-checking on a fresh 26.04 install, where the default may differ. |
+| Container | No kernel packages, so nothing kernel related to do. dbus and polkitd both requested a restart, satisfied by restarting the container from the host. |
 
 Codenames, for editing PPA suites: `noble` is 24.04, `resolute` is 26.04.
