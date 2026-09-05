@@ -388,7 +388,18 @@ Approved, because the script is what resolves the native binary:
 bcrypt@6.0.0                      node-gyp-build
 node-pty@1.1.0                    prebuild / node-gyp rebuild
 @serialport/bindings-cpp@13.0.0   node-gyp-build
+better-sqlite3@13.0.3             node-gyp rebuild (see below)
 ```
+
+`better-sqlite3` is approved despite shipping prebuilt binaries. It sets
+`gypfile: false`, and `lib/binding.js` resolves `build/Debug`, then
+`build/Release`, then `prebuilds/<platform>-<arch>.node` with musl detection, so
+on any covered platform it loads without ever compiling. npm flags it regardless
+because it keys off the `binding.gyp` file present in the package. Denying it
+would be harmless on mainstream platforms and would fail confusingly at first
+door launch on anything else, and unlike the three denials below this module is
+load-bearing rather than an optional accelerator, so the compile fallback is
+worth keeping available.
 
 Denied, because each is an optional accelerator with a working fallback, and
 approving everything would give away the point of the change:

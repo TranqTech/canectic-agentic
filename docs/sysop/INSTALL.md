@@ -382,6 +382,17 @@ native binary, and nothing works without it:
 | `bcrypt` | `node-gyp-build` | password hashing, so nobody can log in |
 | `node-pty` | prebuild or `node-gyp rebuild` | door games |
 | `@serialport/bindings-cpp` | `node-gyp-build` | DOS doors over socat serial pairs |
+| `better-sqlite3` | `node-gyp rebuild` | Synchronet JS door data, on platforms with no prebuilt binary |
+
+`better-sqlite3` is a special case worth understanding. It ships prebuilt
+binaries for Linux, macOS and Windows on x64 and arm64, including a musl
+variant, and on those platforms it never compiles: it loads
+`prebuilds/<platform>-<arch>.node` directly. It even sets `gypfile: false` in
+its manifest to say so. npm still flags it, because it keys off the
+`binding.gyp` file shipped in the package rather than that field. Blocking it is
+harmless on a mainstream platform, but it is approved anyway so that a system
+with no matching prebuild falls back to compiling rather than failing at first
+door launch with a missing-bindings error.
 
 Three more are deliberately **denied**, because each is an optional accelerator
 with a working fallback: `msgpackr-extract` (an optional dependency of
@@ -396,7 +407,7 @@ will see the block warning again, which is intended: re-approve deliberately
 with
 
 ```bash
-npm install-scripts approve bcrypt node-pty @serialport/bindings-cpp
+npm install-scripts approve bcrypt node-pty @serialport/bindings-cpp better-sqlite3
 npm install-scripts ls        # review anything still unreviewed
 ```
 
