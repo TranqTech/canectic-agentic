@@ -44,11 +44,24 @@ if (!resolvedTZ) {
 }
 var baseEnv = resolvedTZ ? { TZ: resolvedTZ } : {};
 
+// Resolve the Node binary the child processes run under. PM2's default is a
+// bare 'node' looked up on PATH, which is resolved at spawn time from whatever
+// environment the daemon happens to have inherited. On a box running nvm that
+// is not stable: `pm2 resurrect` replays the PATH saved in the dump, so the
+// children can silently come back on a different Node than the one running
+// pm2. Pinning to process.execPath means the children always run under the
+// same interpreter as the daemon itself.
+//   1. CANECTIC_NODE in the environment (explicit override, e.g. to validate
+//      the suite against a newer Node without changing the default)
+//   2. process.execPath, the Node currently running pm2
+var resolvedInterpreter = process.env.CANECTIC_NODE || process.execPath;
+
 module.exports = {
 	apps: [
 		{
 			name: 'gateway',
 			script: './bin/gateway.js',
+			interpreter: resolvedInterpreter,
 			node_args: '--experimental-vm-modules',
 			env: {
 				...baseEnv,
@@ -68,6 +81,7 @@ module.exports = {
 		{
 			name: 'mail',
 			script: './bin/mail.js',
+			interpreter: resolvedInterpreter,
 			node_args: '--experimental-vm-modules',
 			env: {
 				...baseEnv,
@@ -86,6 +100,7 @@ module.exports = {
 		{
 			name: 'mailer',
 			script: './bin/mailer.js',
+			interpreter: resolvedInterpreter,
 			node_args: '--experimental-vm-modules',
 			env: {
 				...baseEnv,
@@ -106,6 +121,7 @@ module.exports = {
 		{
 			name: 'worker',
 			script: './bin/worker.js',
+			interpreter: resolvedInterpreter,
 			node_args: '--experimental-vm-modules',
 			env: {
 				...baseEnv,
