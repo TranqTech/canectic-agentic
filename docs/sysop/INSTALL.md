@@ -370,6 +370,9 @@ sudo systemctl restart pm2-<user>
 pm2 save
 ```
 
+Upgrading the operating system underneath a running BBS is a separate job with
+its own risks, chiefly the PostgreSQL cluster. See [OS_UPGRADE.md](OS_UPGRADE.md).
+
 Skip the `pm2 save` and the daemon comes up on the new Node while `resurrect`
 still spawns the four children under the old interpreter recorded in the dump.
 `ecosystem.config.cjs` pins `interpreter` to `process.execPath`, so a plain
