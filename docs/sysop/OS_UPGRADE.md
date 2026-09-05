@@ -315,6 +315,28 @@ Native addons compiled before the upgrade link against `libstdc++.so.6`, `libgcc
 
 This has been confirmed in practice across glibc 2.39 to 2.43 (24.04 to 26.04): the locally compiled addons (`node-pty`, ssh2's `sshcrypto`, `cpu-features`, `msgpackr-extract`) loaded without a rebuild and the full suite passed unchanged.
 
+**Check the build toolchain is still installed.** A release upgrade can drop
+`build-essential`, and the loss is silent: every native addon keeps working
+because the compiled artefacts are already on disk. It only surfaces later, on
+the next clean install, dependency bump or Node upgrade, as a wall of node-gyp
+output ending in `Error: not found: make`.
+
+```bash
+which make gcc g++          # all three should resolve
+dpkg -l build-essential | tail -1
+```
+
+If they are missing:
+
+```bash
+sudo apt-get install -y build-essential
+```
+
+This happened on a real 24.04 to 26.04 run: `build-essential` was present the
+day before the upgrade and gone the day after, with `dpkg -l` reporting
+`Installed: (none)`. Nothing failed until a clean `npm ci` was attempted.
+Note that the rebuild advice below depends on this toolchain, so check it first.
+
 If anything does misbehave, rebuild rather than debugging linkage:
 
 ```bash
