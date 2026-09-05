@@ -1036,10 +1036,55 @@ Per-network registries of available areas, imported from standard area list file
 - `fileNetworkAreas.addMapping()` / `removeMapping()` -- same for filebone entries
 - Hooks use dynamic import to avoid circular dependencies; wrapped in try/catch (non-critical)
 
+### Batch Subscribe
+
+Subscribing to a large echolist one area at a time is impractical: a BACKBONE-sized
+list runs to a couple of hundred uncarried areatags. The batch page creates a local
+message area for many areatags in one pass.
+
+- Page: `GET /admin/echolist/:networkId/batch`, optional `?echolistId=N` to scope to
+  a single echolist rather than every list on the network. Reachable from the
+  combined view and from an individual echolist page.
+- Enqueue: `POST /admin/echolist/:networkId/batch/subscribe`
+- Job: `echolist:batch-subscribe` on the **maintenance** queue
+- Worker module: `src/maintenance/echolistBatchSubscribe.js`
+
+**Why it is a job and not a request.** Each area costs a shortcode uniqueness
+check, a QWK conference allocation, an INSERT, two backing tables
+(`mb_<shortcode>_msgs` and `_threads`), a scan pointer row per active user, the
+network mapping, and a peer subscription sync. Two hundred areas is several
+hundred CREATE TABLEs, well past a request timeout. The sysop gets a
+`echolist_batch_subscribe` notification when the run finishes.
+
+**Create-only.** Mapping an existing local area onto an areatag is a per-area
+pairing decision and does not generalise, so the batch page only creates.
+
+**Settings are shared.** One target message group, one read/post security pair,
+one `post_as`, one newscan default, one set of flags, and the allow/enable peer
+toggles apply to the whole batch. One group per batch also keeps QWK conference
+numbering in a single block. Run the page again with a different filter to split
+areas across groups.
+
+**Shortcodes.** Derived exactly as the single-area flow does
+(`areatag.toUpperCase()`, non-alphanumerics to `_`, truncated to 64). That is
+lossy, so `FSX.GEN` and `FSX-GEN` both yield `FSX_GEN`. `planBatch()` resolves
+collisions against both the database and shortcodes already claimed earlier in
+the same run, suffixing `_2`, `_3` and so on, and reports which areas were
+renamed. Duplicate areatags in one submission are deduplicated, since an areatag
+is unique per network and a repeat means a doubled checkbox, not a second area.
+
+**Failure isolation.** Areas are processed one at a time; a failure is recorded
+against that areatag and the run continues. The notification summarises created,
+failed, skipped, and renamed counts.
+
+`planBatch(networkId, areatags)` is the read-only pre-flight and is exported
+separately, so a dry run never disagrees with what the job will do.
+
 ### Models
 
 - `src/models/networkEcholist.js` -- echolist CRUD, import diff/execute, query helpers, sync
 - `src/models/fileEcholist.js` -- filebone CRUD (identical API, different tables)
+- `src/maintenance/echolistBatchSubscribe.js` -- batch subscribe planning and execution
 
 ## sbbsecho.ini Import
 

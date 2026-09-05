@@ -421,6 +421,12 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'echolist:batch-subscribe': {
+				var batchSub = await import("../src/maintenance/echolistBatchSubscribe.js");
+				await batchSub.runBatch(job.data.networkId, job.data.areatags, job.data.settings);
+				break;
+			}
+
 			case 'scan-echolists': {
 				var echolistScan = await import("../src/maintenance/echolistScan.js");
 				await echolistScan.scanForUpdates();

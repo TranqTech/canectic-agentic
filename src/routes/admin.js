@@ -3396,6 +3396,106 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 	res.redirect('/admin/echolist/' + networkId + '/combined');
 });
 
+// Batch subscribe page. Lists every areatag on this network's echolists that
+// is not already carried, with a checkbox each and one shared set of area
+// settings. Optional ?echolistId=N narrows the list to a single echolist.
+router.get('/echolist/:networkId/batch', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+	var echolistId       = req.query.echolistId ? parseInt(req.query.echolistId) : null;
+
+	var areas = [];
+	var scopedEcholist = null;
+	if (network) {
+		if (echolistId) {
+			scopedEcholist = await networkEcholist.getEcholistById(echolistId);
+			// Guard against ?echolistId pointing at another network's list
+			if (scopedEcholist && parseInt(scopedEcholist.network_id) !== networkId) {
+				scopedEcholist = null;
+			}
+			if (scopedEcholist) {
+				areas = await networkEcholist.getAreasByEcholist(echolistId) || [];
+			}
+		}
+		if (!scopedEcholist) {
+			areas = await networkEcholist.getAreasAcrossNetwork(networkId) || [];
+		}
+	}
+
+	// Only areas we do not already carry can be subscribed to.
+	var available = (areas || []).filter(function (a) { return !a.local_area_id; });
+	var carriedCount = (areas || []).length - available.length;
+
+	res.render('admin/echolists/batch', {
+		sufficientAccess: sufficientAccess,
+		title: 'Batch Subscribe',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		scopedEcholist: scopedEcholist,
+		available: available,
+		carriedCount: carriedCount,
+		groups: await msgGroups.getActiveGroups(),
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
+		defaultReadSecurity: appConfig.getNumber('default_msg_read_security', 50),
+		defaultPostSecurity: appConfig.getNumber('default_msg_post_security', 60)
+	});
+});
+
+// Enqueue the batch. The work itself runs on the worker: a few hundred areas
+// means a few hundred CREATE TABLE pairs, well past a request timeout.
+router.post('/echolist/:networkId/batch/subscribe', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var networkId   = parseInt(req.params.networkId);
+
+	var raw = req.body.areatags;
+	var areatags = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+	if (areatags.length === 0) {
+		await flash.setOne(req, 'warning', 'No areas were selected.');
+		return res.redirect('/admin/echolist/' + networkId + '/batch');
+	}
+	if (!req.body.group_shortcode) {
+		await flash.setOne(req, 'danger', 'A target message group is required.');
+		return res.redirect('/admin/echolist/' + networkId + '/batch');
+	}
+
+	var settings = {
+		groupshortcode:  req.body.group_shortcode,
+		readsecurity:    req.body.read_security,
+		postsecurity:    req.body.post_security,
+		post_as:         req.body.post_as || 'realname',
+		newscan_default: req.body.newscan_default,
+		read_perm_flags: req.body.read_perm_flags,
+		read_rest_flags: req.body.read_rest_flags,
+		post_perm_flags: req.body.post_perm_flags,
+		post_rest_flags: req.body.post_rest_flags,
+		allowPeers:      req.body.allow_peers === 'true',
+		enablePeers:     req.body.enable_peers === 'true',
+		createdByUUID:   currentuser ? currentuser.uuid : '',
+		createdByName:   currentuser ? currentuser.username : ''
+	};
+
+	try {
+		await jobs.enqueueEcholistBatchSubscribe({
+			networkId: networkId,
+			areatags: areatags,
+			settings: settings
+		});
+		await flash.setOne(req, 'success',
+			'Queued ' + areatags.length + ' area(s) for creation. This runs on the worker; ' +
+			'you will get a notification when it finishes.');
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/echolist/batch] enqueue failed: ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Could not queue the batch: ' + err.message);
+	}
+
+	res.redirect('/admin/echolist/' + networkId + '/combined');
+});
+
 router.post('/echolist/:networkId/combined/unmap', urlencodedParser, requireAdmin, async (req, res) => {
 	var networkId    = parseInt(req.params.networkId);
 	var areaId       = parseInt(req.body.area_id);

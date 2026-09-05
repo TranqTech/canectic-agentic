@@ -37,7 +37,11 @@ block content
                         li.breadcrumb-item
                           a.text-white(href='/admin/echolist/' + network.id) Echolists
                         li.breadcrumb-item.active.text-light Combined
-                    a.btn.btn-sm.btn-info(href='/admin/echolists') All Echolists
+                    div
+                      a.btn.btn-sm.btn-primary.me-2(href='/admin/echolist/' + network.id + '/batch' title='Create local areas for many areatags at once')
+                        i.bi.bi-check2-square.me-1
+                        | Batch Subscribe
+                      a.btn.btn-sm.btn-info(href='/admin/echolists') All Echolists
 
                 ul.nav.nav-tabs.px-3.pt-2(role='tablist')
                   li.nav-item(role='presentation')

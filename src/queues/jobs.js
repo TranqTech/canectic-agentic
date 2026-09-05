@@ -473,6 +473,23 @@ export async function enqueueScanFileArea(areaShortcode) {
  * Import an FTN nodelist file into the database.
  * Called by: admin panel, CLI.
  */
+/**
+ * Batch subscribe to many echolist areatags at once.
+ *
+ * Goes on the maintenance queue rather than running in the request because a
+ * BACKBONE-sized selection is a couple of hundred areas, and each one creates
+ * two backing tables plus a scan pointer per active user.
+ */
+export async function enqueueEcholistBatchSubscribe(opts = {}) {
+	return maintenanceQueue.add('echolist:batch-subscribe', {
+		networkId: opts.networkId,
+		areatags:  opts.areatags || [],
+		settings:  opts.settings || {},
+	}, {
+		jobId: `echolist-batch--${opts.networkId || 'unknown'}--${Date.now()}`,
+	});
+}
+
 export async function enqueueNodelistImport(opts = {}) {
 	return maintenanceQueue.add('import-nodelist', {
 		filePath:     opts.filePath,
