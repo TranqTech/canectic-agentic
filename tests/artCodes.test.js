@@ -11,7 +11,6 @@
 
 import assert from 'assert';
 import { processArtCodes, scanSlotMap } from '../src/utils/artCodes.js';
-import { redisAvailable } from './helpers/redisAvailable.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -415,22 +414,6 @@ describe('processArtCodes — context codes @MG@, @MA@, @FG@, @FA@', function ()
 
 describe('processArtCodes — async codes (@TC@, @TU@, @ON@) graceful fallback', function () {
 
-	// @ON@ resolves the online count through Redis presence. With Redis
-	// unreachable the client retries rather than failing fast, so the resolver's
-	// catch never fires and the test times out instead of seeing the '0'
-	// fallback. Skip rather than fail. (That the resolver has no timeout of its
-	// own is a separate production concern.)
-	var haveRedis = false;
-
-	before(async function () {
-		this.timeout(12000);
-		haveRedis = await redisAvailable();
-	});
-
-	beforeEach(function () {
-		if (!haveRedis) this.skip();
-	});
-
 	it('should replace @TC@ with a numeric string (fallback "0" without DB)', async function () {
 		var result = await processArtCodes('@TC@', null, {});
 		// Without a real DB the catch block returns '0'
@@ -646,4 +629,47 @@ describe('processArtCodes — _fitValue (padding/truncation via width specifier)
 		assert.strictEqual(result.processed, 'abcd');
 	});
 
+});
+
+// ---------------------------------------------------------------------------
+// processArtCodes — stat cache and degraded-service fallback
+// ---------------------------------------------------------------------------
+
+describe('processArtCodes — stat lookups never block a render', function () {
+
+	// @TC@, @TU@ and @ON@ reach PostgreSQL or Redis, and art is re-rendered on
+	// every menu redraw. resolveStat caches per code, bounds how long a render
+	// waits, and serves the last known value on timeout while letting the
+	// refresh finish in the background. These assert the observable contract
+	// rather than the timings, which vary by machine.
+
+	it('always yields a numeric string, service up or down', async function () {
+		var r = await processArtCodes('@TC@|@TU@|@ON@', null, {});
+		var parts = r.processed.split('|');
+		assert.strictEqual(parts.length, 3);
+		for (var p of parts) {
+			assert.match(p.trim(), /^\d+$/, 'expected a number, got ' + JSON.stringify(p));
+		}
+	});
+
+	it('serves a repeated render from cache with the same value', async function () {
+		var first  = await processArtCodes('@TU@', null, {});
+		var second = await processArtCodes('@TU@', null, {});
+		assert.strictEqual(second.processed, first.processed);
+	});
+
+	it('counts terminal nodes for @ON@ without needing any service', async function () {
+		// The terminal component is local, so it must survive a Redis outage.
+		// Only the web presence portion is cached and can degrade to zero.
+		var call = { nodeManager: { nodenumsinuse: [1, 2, 3] } };
+		var r = await processArtCodes('@ON@', call, {});
+		var n = parseInt(r.processed.trim(), 10);
+		assert.ok(Number.isFinite(n), 'expected a number, got ' + JSON.stringify(r.processed));
+		assert.ok(n >= 3, 'should include the 3 connected terminal nodes, got ' + n);
+	});
+
+	it('leaves an unknown code untouched', async function () {
+		var r = await processArtCodes('@NOPE@', null, {});
+		assert.strictEqual(r.processed, '@NOPE@');
+	});
 });

@@ -44,30 +44,124 @@ var UNIVERSAL_CODES = {
 	VR: function() { return appConfig.get('currentversion', '0.0.0'); },
 };
 
-// Async resolvers -- called once, values cached for the buffer
+// Async resolvers.
+//
+// These reach Redis or PostgreSQL, and art is rendered on every menu redraw, so
+// they must never hold up a render. Each returns only the portion that needs a
+// service; anything already known locally is added at substitution time so it
+// cannot go stale. See resolveStat below for the caching and timeout policy.
+//
+// Deliberately no try/catch here. A rejection has to stay distinguishable from
+// a real result, otherwise a failed lookup caches '0' as though it were true.
 var ASYNC_CODES = {
-	ON: async function(call) {
-		var termCount = 0;
-		if (call?.nodeManager) {
-			termCount = call.nodeManager.nodenumsinuse.length;
-		}
-		var webUsers = [];
-		try { webUsers = await getOnlineUsers(); } catch (_) {}
-		return String(termCount + webUsers.length);
+	// Web presence only. The terminal node count is local and instant, and is
+	// added in localComponent() rather than cached.
+	ON: async function() {
+		var webUsers = await getOnlineUsers();
+		return String((webUsers || []).length);
 	},
 	TC: async function() {
-		try {
-			var result = await postgres.queryOne("SELECT COUNT(*) AS cnt FROM calls");
-			return String(result?.cnt || 0);
-		} catch (_) { return '0'; }
+		var result = await postgres.queryOne("SELECT COUNT(*) AS cnt FROM calls");
+		return String(result?.cnt || 0);
 	},
 	TU: async function() {
-		try {
-			var result = await postgres.queryOne("SELECT COUNT(*) AS cnt FROM users");
-			return String(result?.cnt || 0);
-		} catch (_) { return '0'; }
+		var result = await postgres.queryOne("SELECT COUNT(*) AS cnt FROM users");
+		return String(result?.cnt || 0);
 	},
 };
+
+// How long a resolved value stays usable. @ON@ moves constantly; the two counts
+// barely move, and running COUNT(*) on calls and users for every menu redraw is
+// wasteful even when everything is healthy.
+var STAT_TTL_MS = { ON: 10000, TC: 60000, TU: 60000 };
+var DEFAULT_TTL_MS = 30000;
+
+// code -> { value, expires, inflight }
+var statCache = {};
+
+// The component of a code that is known locally and needs no service. Kept out
+// of the cache so it is never stale, and so a value refreshed on behalf of one
+// session is safe to serve to another.
+function localComponent(code, call) {
+	if (code === 'ON') {
+		return call?.nodeManager ? call.nodeManager.nodenumsinuse.length : 0;
+	}
+	return 0;
+}
+
+// Resolve one async code without letting a slow service block the render.
+//
+//   fresh cache      return immediately, nothing is awaited
+//   stale or missing start a refresh unless one is already running, then race
+//                    it against art_stat_timeout_ms
+//   timed out        return the last known value, or the static fallback, and
+//                    LEAVE THE REFRESH RUNNING so it fills the cache for the
+//                    next render
+//
+// The refresh is never abandoned, which is what makes one slightly stale render
+// the worst case rather than a repeated wait. Once a render has given up
+// waiting on a particular refresh, later renders do not wait on it again: they
+// return the last known value immediately and let it keep running. Without that
+// every render during an outage would pay the timeout over again, since a
+// client that retries internally leaves the lookup pending indefinitely.
+//
+// When the service recovers the pending lookup settles on its own, the cache
+// fills, and the next render is fresh.
+//
+// A failed lookup deliberately leaves the previous value in place rather than
+// overwriting good data with a fallback.
+async function resolveStat(code) {
+	var entry = statCache[code];
+	if (!entry) {
+		entry = statCache[code] = { value: null, expires: 0, inflight: null, gaveUp: false };
+	}
+
+	if (entry.value !== null && Date.now() < entry.expires) {
+		return entry.value;
+	}
+
+	// A refresh is running and we already timed out on it once. Do not wait
+	// again; serve what we have and let it finish in the background.
+	if (entry.inflight && entry.gaveUp) {
+		return entry.value !== null ? entry.value : '0';
+	}
+
+	if (!entry.inflight) {
+		entry.gaveUp = false;
+		entry.inflight = Promise.resolve()
+			.then(function() { return ASYNC_CODES[code](); })
+			.then(function(v) {
+				entry.value = String(v);
+				entry.expires = Date.now() + (STAT_TTL_MS[code] || DEFAULT_TTL_MS);
+				return entry.value;
+			})
+			.catch(function() { return null; })
+			.finally(function() { entry.inflight = null; });
+	}
+
+	// Capture the promise: .finally clears the slot once it settles.
+	var pending = entry.inflight;
+	var TIMED_OUT = {};
+	var timer = null;
+
+	var raced = await Promise.race([
+		pending,
+		new Promise(function(resolve) {
+			timer = setTimeout(function() { resolve(TIMED_OUT); }, appConfig.getNumber('art_stat_timeout_ms', 1500));
+		}),
+	]);
+	if (timer) clearTimeout(timer);
+
+	if (raced !== TIMED_OUT && raced !== null && raced !== undefined) {
+		return raced;
+	}
+
+	// Remember that this refresh outlived our patience, so concurrent and
+	// subsequent renders skip the wait entirely while it is still pending.
+	if (raced === TIMED_OUT) entry.gaveUp = true;
+
+	return entry.value !== null ? entry.value : '0';
+}
 
 // Menu entry code pattern: @E01@, @E0120@ (with width), @F01@, @F0120@
 // UI position codes: @MT@, @HK@, @PR@, @ER@ (with optional width: @MT30@)
@@ -91,13 +185,21 @@ async function processArtCodes(artString, call, options) {
 		return { processed: artString, slotMap: null };
 	}
 
-	// Pre-resolve async values that appear in the art
+	// Pre-resolve async values that appear in the art. Resolved in parallel so
+	// art using several codes waits once rather than once per code.
 	var asyncCache = {};
-	for (var code in ASYNC_CODES) {
-		// Check if this code appears before doing the async work
-		if (artString.indexOf('@' + code) !== -1) {
-			asyncCache[code] = await ASYNC_CODES[code](call);
-		}
+	var wanted = Object.keys(ASYNC_CODES).filter(function(code) {
+		return artString.indexOf('@' + code) !== -1;
+	});
+	if (wanted.length > 0) {
+		var resolved = await Promise.all(wanted.map(function(code) {
+			return resolveStat(code);
+		}));
+		wanted.forEach(function(code, i) {
+			var base = parseInt(resolved[i], 10);
+			if (!Number.isFinite(base)) base = 0;
+			asyncCache[code] = String(base + localComponent(code, call));
+		});
 	}
 
 	// Build slot map for menu mode

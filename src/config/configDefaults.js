@@ -58,6 +58,7 @@ var CONFIG_DEFINITIONS = [
 	// Display
 	// -----------------------------------------------------------------------
 	{ key: 'faviconlink',       defaultValue: '/images/favicon.ico', type: 'string', category: 'display',  description: 'Favicon path for web UI' },
+	{ key: 'art_stat_timeout_ms', defaultValue: '1500',      type: 'number',  category: 'display',     description: 'How long an art file render waits for a @TC@/@TU@/@ON@ stat lookup before using the last known value. The lookup keeps running and refreshes the cache for the next render.' },
 	{ key: 'theme',             defaultValue: 'canectic',       type: 'string',  category: 'display',     description: 'Terminal color theme name' },
 
 	// -----------------------------------------------------------------------
