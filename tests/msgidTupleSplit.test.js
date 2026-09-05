@@ -18,6 +18,7 @@
 // Run: npx mocha tests/msgidTupleSplit.test.js
 
 import assert from 'assert';
+import { dbAvailable } from './helpers/dbAvailable.js';
 
 var SHORT = 'zzmsgidsplit';
 var TABLE = 'mb_' + SHORT + '_msgs';
@@ -47,13 +48,8 @@ describe('MSGID tuple split', function () {
 			var ftnUtils = await import('../src/utils/ftnUtils.js');
 			splitFullMsgid = ftnUtils.splitFullMsgid;
 
-			// Bound the probe so an unreachable database skips rather than hanging.
-			var probe = pg.queryOne('SELECT 1 AS ok').then(function (r) { return !!r; })
-				.catch(function () { return false; });
-			available = await Promise.race([
-				probe,
-				new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 6000); }),
-			]);
+			// Shared bounded probe; see tests/helpers/dbAvailable.js.
+			available = await dbAvailable();
 
 			if (available) {
 				await pg.pgpool.query('DROP TABLE IF EXISTS ' + TABLE);

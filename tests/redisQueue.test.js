@@ -16,6 +16,7 @@
 // Run: npx mocha tests/redisQueue.test.js
 
 import assert from 'assert';
+import { redisAvailable } from './helpers/redisAvailable.js';
 
 var KEY = 'zz_test_redisqueue';
 var QUEUE = 'zz_test_redisqueue_q';
@@ -37,20 +38,9 @@ describe('Redis and BullMQ integration', function () {
 			connMod  = await import('../src/queues/connection.js');
 			bullmq   = await import('bullmq');
 
-			// getClient() retries internally, so awaiting it directly turns an
-			// unreachable Redis into a hook timeout, which mocha reports as a
-			// failure rather than a skip. Bound the probe and swallow both the
-			// rejection and the hang so the file always skips instead.
-			var probe = (async function () {
-				var client = await redisMod.getClient();
-				await client.ping();
-				return true;
-			})().catch(function () { return false; });
-
-			available = await Promise.race([
-				probe,
-				new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 6000); }),
-			]);
+			// Shared bounded probe; see tests/helpers/redisAvailable.js for why
+			// awaiting getClient() directly would time out the hook instead.
+			available = await redisAvailable();
 		} catch (err) {
 			available = false;
 		}

@@ -21,6 +21,7 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { dbAvailable } from './helpers/dbAvailable.js';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -241,8 +242,19 @@ describe('createReqFile', function () {
 
 describe('resolveRequest parsing', function () {
 
-	before(function () {
+	// resolveRequest reaches the file entries table. Without a database the pool
+	// retries rather than failing fast, so these hang instead of returning the
+	// { found: false } this suite expects. Skip rather than fail.
+	var haveDb = false;
+
+	before(async function () {
+		this.timeout(12000);
+		haveDb = await dbAvailable();
 		fs.mkdirSync(TMP_REQ_DIR, { recursive: true });
+	});
+
+	beforeEach(function () {
+		if (!haveDb) this.skip();
 	});
 
 	after(function () {

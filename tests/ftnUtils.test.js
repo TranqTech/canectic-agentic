@@ -13,6 +13,7 @@
 // Run: npx mocha tests/ftnUtils.test.js
 
 import assert from 'assert';
+import { dbAvailable } from './helpers/dbAvailable.js';
 import {
 	getDateTimeString,
 	genMsgId,
@@ -256,6 +257,17 @@ describe('parseSerial', function () {
 
 describe('getMilliHex (async)', function () {
 
+	// These allocate MSGID serials, which need the msgid_day_watermark table.
+	var haveDb = false;
+	beforeEach(function () {
+		if (!haveDb) this.skip();
+	});
+
+	before(async function () {
+		this.timeout(12000);
+		haveDb = await dbAvailable();
+	});
+
 	// Ensure the msgid_day_watermark table exists before running any
 	// test that allocates a serial. initializeMsgidCounter is idempotent
 	// and creates the table via CREATE TABLE IF NOT EXISTS.
@@ -303,6 +315,17 @@ describe('getMilliHex (async)', function () {
 
 describe('genMsgId (async)', function () {
 
+	// These allocate MSGID serials, which need the msgid_day_watermark table.
+	var haveDb = false;
+	beforeEach(function () {
+		if (!haveDb) this.skip();
+	});
+
+	before(async function () {
+		this.timeout(12000);
+		haveDb = await dbAvailable();
+	});
+
 	it('should return EXACTLY 8 characters', async function () {
 		var r = await genMsgId();
 		assert.strictEqual(r.length, 8);
@@ -332,6 +355,17 @@ describe('genMsgId (async)', function () {
 // ---------------------------------------------------------------------------
 
 describe('msgid_day_watermark helpers', function () {
+
+	// These allocate MSGID serials, which need the msgid_day_watermark table.
+	var haveDb = false;
+	beforeEach(function () {
+		if (!haveDb) this.skip();
+	});
+
+	before(async function () {
+		this.timeout(12000);
+		haveDb = await dbAvailable();
+	});
 
 	before(async function () {
 		// Make sure the table exists
