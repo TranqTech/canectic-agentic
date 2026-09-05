@@ -2700,8 +2700,38 @@ router.get('/config', async (req, res) => {
 		activelink: 'config',
 		currentuser: currentuser,
 		categories: categories,
-		settings: settings
+		settings: settings,
+		envFilePath: appConfig.getEnvFilePath(),
+		envDivergence: appConfig.getEnvDivergence()
 	});
+});
+
+// Reload configuration from the .env file and the database, across all
+// processes.  Nothing is written: this re-reads the tiers, which is how a
+// sysop applies a .env edit without restarting.
+router.post('/config/reload', urlencodedParser, requireAdmin, async (req, res) => {
+	try {
+		await appConfig.reload();        // this process, right now
+		configStore.publishReload();     // gateway, mail, mailer, worker
+
+		var divergent = appConfig.getEnvDivergence();
+		alogger.writeAlog(3, "[admin/config] Configuration reloaded from .env + DB", "cyan");
+
+		if (divergent.length > 0) {
+			await flash.setOne(req, 'warning',
+				'Configuration reloaded, but ' + divergent.length + ' key(s) in .env still differ ' +
+				'from the environment this process was started with: ' +
+				divergent.map(function (d) { return d.key; }).join(', ') + '. ' +
+				'The .env value is in use for non-bootstrap keys.');
+		} else {
+			await flash.setOne(req, 'success', 'Configuration reloaded from .env and the database on all processes.');
+		}
+	} catch (err) {
+		alogger.writeAlog(2, "[admin/config] Reload failed: " + err.message, "redbright");
+		await flash.setOne(req, 'danger', 'Configuration reload failed: ' + err.message);
+	}
+
+	res.redirect('/admin/config');
 });
 
 router.post('/config', urlencodedParser, requireAdmin, async (req, res) => {

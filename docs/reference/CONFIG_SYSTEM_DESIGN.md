@@ -170,17 +170,19 @@ var _loading = null;     // Promise for in-flight load (deduplication)
 await appConfig.load()
 // Performs the three-tier merge:
 //   1. Read configDefaults (all defaults as a flat object)
-//   2. Read all rows from config_settings table (PostgreSQL)
-//   3. Read process.env for bootstrap + path variables
+//   2. Read all rows from the settings table (PostgreSQL)
+//   3. Parse the .env FILE from disk (not process.env -- see below)
 // Merge order: defaults < DB < .env (highest precedence)
 // After merge, _cache is a plain object, _loaded = true.
 // Returns: void. Throws on DB connection failure during initial load.
 
 await appConfig.reload()
-// Re-reads DB tier only (defaults and .env don't change at runtime).
-// Merges fresh DB values over defaults, then overlays .env.
+// Re-reads the .env file AND the DB tier, then rebuilds the merge.
 // Atomically swaps _cache reference. Safe during concurrent reads.
 // Returns: void. On failure, keeps previous _cache (log + continue).
+// This is what lets a sysop apply a .env edit without restarting:
+// the admin Reload button publishes CONFIG_CHANGED and every process
+// lands here. Keys marked `restart: true` still need a real restart.
 
 // --- Synchronous Getters (used everywhere after load) ---
 
@@ -215,6 +217,50 @@ appConfig.getCategory(category)
 appConfig.isLoaded()
 // Returns _loaded boolean. For guard checks during early startup.
 ```
+
+#### Why tier 1 is the .env FILE, not process.env
+
+`appConfig` parses `.env` from disk rather than reading `process.env`. These are
+not the same thing, and the difference is a real bug that shipped:
+
+1. `pm2 save` snapshots the current environment into `~/.pm2/dump.pm2`, per app.
+2. `pm2 restart` and `pm2 resurrect` replay that saved environment into each
+   child. A restart performed *after* editing `.env` still hands the child the
+   old values.
+3. `dotenv.config()` does **not** overwrite a key that is already present in
+   `process.env` -- that is its documented default (`override: false`).
+4. So the stale value survives, and a merge that trusts `process.env` will
+   faithfully prefer it over both the DB row and the file the sysop just edited.
+
+The failure is silent: no error, no warning, and the admin UI would show an
+`Environment` badge next to a value that is not what `.env` contains.
+
+Reading the file directly removes the ambiguity. The rules are:
+
+| key is in… | winner |
+|---|---|
+| `.env` file and ambient env | **file** (disagreement is reported) |
+| `.env` file only | file |
+| ambient env only | ambient (one-off overrides still work) |
+| neither | DB, then default |
+
+**Bootstrap keys are the deliberate exception.** `dbuser`, `dbhost`, `dbname`,
+`dbpass`, `dbport`, `redis_url`, `NODE_ENV`, `PROCESS_MODE`, `MAILER_ENABLED`
+and friends keep ambient precedence, because they are needed before the file can
+be located and because setting them on the command line is a supported workflow
+(`PROCESS_MODE=embedded node bin/gateway.js`). A disagreement on a bootstrap key
+is still recorded and logged, so a stale value is never silent -- it just is not
+overridden.
+
+Divergence is exposed three ways:
+
+- a `yellowbright` warning per key at load/reload, naming both values, with the
+  `pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save` remedy
+- `appConfig.getEnvDivergence()` -> `[{ key, file, ambient, bootstrap, secret }]`
+- a warning banner on `/admin/config`
+
+Values for keys whose name contains `pass`, `secret`, `token` or `credential`
+are redacted in all three.
 
 #### Three-Tier Merge at Startup
 

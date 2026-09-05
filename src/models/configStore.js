@@ -214,8 +214,20 @@ function shutdown() {
 	}
 }
 
+/**
+ * Publish a CONFIG_CHANGED event without writing anything to the DB.
+ *
+ * Used by the admin "Reload configuration" action so every process re-reads
+ * the .env file and the settings table.  Nothing is persisted: this is a
+ * pure invalidation signal.
+ */
+function publishReload() {
+	publishInvalidation([]);
+}
+
 export {
 	loadAll,
+	publishReload,
 	loadAllWithMeta,
 	getValue,
 	setValue,

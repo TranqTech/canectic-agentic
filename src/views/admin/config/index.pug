@@ -26,12 +26,56 @@ block content
                     h2= title
                   .col-4
                     .text-end
+                      form.d-inline.me-2(action='/admin/config/reload' method='POST')
+                        button.button.btn.btn-sm.btn-warning(
+                          type='submit'
+                          title='Re-read the .env file and the database on every process. Applies a .env edit without restarting.'
+                        )
+                          i.bi.bi-arrow-clockwise.me-1
+                          | Reload
                       a.button.btn.btn-sm.btn-info(href='/admin')
                         | Exit
 
               .card-body
                 p.text-muted.mb-3
-                  | Settings are loaded from three tiers: defaults, database overrides, and environment variables. Environment variables take highest precedence and cannot be changed here.
+                  | Settings load from three tiers: defaults, then database overrides, then the 
+                  code .env
+                  |  file. The 
+                  code .env
+                  |  file wins, so keys set there cannot be changed on this page. It is read from disk rather than from the environment this process inherited, so editing it and pressing Reload applies the change without a restart.
+                if envFilePath
+                  p.text-muted.small.mb-3
+                    | Reading 
+                    code= envFilePath
+                if envDivergence && envDivergence.length
+                  .alert.alert-warning.mb-3
+                    h5.alert-heading
+                      i.bi.bi-exclamation-triangle-fill.me-2
+                      | Stale environment detected
+                    p.mb-2
+                      | These key(s) differ between the 
+                      code .env
+                      |  file and the environment this process was started with. That normally means PM2 replayed a saved environment from 
+                      code dump.pm2
+                      | .
+                    ul.mb-2
+                      each d in envDivergence
+                        li
+                          code= d.key
+                          if d.secret
+                            |  (values hidden)
+                          else
+                            |  file: 
+                            code= d.file
+                            | , running: 
+                            code= d.ambient
+                          if d.bootstrap
+                            span.badge.bg-danger.ms-2 bootstrap key, running value in use
+                    p.mb-0.small
+                      | Non-bootstrap keys are already using the 
+                      code .env
+                      |  value, so the system is behaving correctly. To clear the stale environment itself, run 
+                      code pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save
 
                 .input-group.mb-3
                   span.input-group-text
@@ -68,7 +112,9 @@ block content
                                   br
                                   //- Source badge
                                   if s.source === 'env'
-                                    span.badge.bg-warning.text-dark Environment
+                                    span.badge.bg-warning.text-dark(
+                                      title='Set in the .env file, which takes precedence over the database. Edit .env and press Reload to change it.'
+                                    ) Environment
                                   else if s.source === 'db'
                                     span.badge.bg-info Database
                                   else
