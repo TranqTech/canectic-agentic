@@ -107,7 +107,7 @@ Last updated: 2026-09-05
 - [x] Seed sync tool (`node src/tools/seedSync.js` -- upsert JSON seed data to DB)
 - [x] Message templates (event-triggered sysop-authored messages with PM/email/netmail delivery, built-in + custom events, admin CRUD, manual fire, CLI, menu command, timed event integration)
 - [x] API tokens (admin audit + revoke at /admin/api-tokens, per-user CRUD on profile page, Bearer auth, scopes, bcrypt hashing, one-time plaintext reveal)
-- [ ] JAM message base import
+- [x] JAM message base import (parser with spec-verified offsets, single-base preview/import UI, bulk scan-and-map directory import on the worker queue)
 
 ### Message Networking
 - [x] FTN tosser (inbound/outbound, type-2 packets, REPLY kludge)
