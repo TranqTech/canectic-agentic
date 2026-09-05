@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-04-09
+Last updated: 2026-09-05
 
 ---
 
@@ -181,15 +181,28 @@ Last updated: 2026-04-09
 - [x] Redis pub/sub event bus
 - [x] Centralized logging (alogger, Redis bus, admin viewer)
 - [x] Configuration system (3-tier, admin UI, cross-process reload)
+- [x] Config tier 1 reads the `.env` file from disk, not `process.env`, so a stale
+      inherited environment (pm2 replaying `dump.pm2`) cannot silently beat a
+      `.env` edit. Divergence is logged and shown on `/admin/config`
+- [x] Apply a `.env` edit without restarting (Reload button on `/admin/config`,
+      POST `/admin/config/reload`, fans out via CONFIG_CHANGED)
 - [x] Database migrations (declarative schema management)
 - [x] Startup DB/Redis validation (fail fast with clear error)
 - [x] Health check endpoint (GET /health)
 - [x] CSRF protection (Origin/Referer check middleware)
 - [x] Install/update script (setup/install.sh)
 - [x] .env.example template (examples/env.example)
+- [x] Runtime portability: no hardcoded interpreter or Node version paths
+      anywhere. `ecosystem.config.cjs` resolves the child interpreter at start
+      time, `setup/canectic-pm2.sh` follows nvm's `default` alias with a plain
+      PATH fallback so the same wrapper serves native Node installs
+- [x] systemd boot unit routed through the installed wrapper, so an nvm Node
+      upgrade no longer breaks boot (verified by cold boot, not just restart)
+- [x] OS upgrade runbook (docs/sysop/OS_UPGRADE.md), written against a real
+      24.04 to 26.04 run with PostgreSQL 16 to 18 and Redis 7 to 8
 
 ### Testing
-- [x] 2,650 tests passing (mocha)
+- [x] 2,670 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
@@ -224,7 +237,7 @@ Last updated: 2026-04-09
 | 17 | areas.bbs import | [x] | Parse areas.bbs from FTN hub, batch-create message areas + network mappings + peer subscriptions |
 | 18 | Web art + seasonal art | [x] | Web art from txtfiles/webart/, random selection, seasonal overrides with admin CRUD, call flow welcome splash |
 | 19 | Top 10 lists | [ ] | Top posters, top downloaders, most active users (week/month). Web page + terminal command |
-| 20 | Birthday messages | [ ] | "Happy birthday" in call flow when users have birthdays today (birthdate column exists) |
+| 20 | Birthday messages | [~] | Detection and delivery are done: the daily template sweep in `bin/worker.js` fires the built-in `user_birthday` event (with `event.age`) through `messageTemplates`, so a sysop can already send a birthday PM, email or netmail. The call flow greeting is still missing, which is the half this item was originally about. No `birthday` stage exists in `call_flows`, terminal or web. |
 | 21 | FTN netmail file attach | [x] | Inbound: recognize file-attach flag, link received files to netmail PM. Outbound: place attachment in BSO for binkp delivery. |
 | 22 | PM file attachments | [x] | Full attachment system across all transports (LOCAL, EMAIL, FTN, Web, IMAP, terminal indicator). pm_attachments table, disk storage, config limits. |
 | 23 | Session management | [x] | Remember Me, configurable session TTL, Log Out All Other Sessions, admin kill sessions |
