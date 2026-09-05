@@ -373,3 +373,42 @@ pub/sub on a shared connection.
 hash reply is a plain object. Those assertions are the tripwire: they will fail
 the moment the pin is removed, which is the intended signal to work through the
 list above rather than a bug.
+
+---
+
+## npm 12 install-script blocking (Node 26)
+
+npm 12 no longer runs dependency `install` and `postinstall` scripts unless the
+package appears in `allowScripts` in `package.json`. On Node 26 a plain
+`npm install` reports six blocked packages here.
+
+Approved, because the script is what resolves the native binary:
+
+```
+bcrypt@6.0.0                      node-gyp-build
+node-pty@1.1.0                    prebuild / node-gyp rebuild
+@serialport/bindings-cpp@13.0.0   node-gyp-build
+```
+
+Denied, because each is an optional accelerator with a working fallback, and
+approving everything would give away the point of the change:
+
+```
+msgpackr-extract   optionalDependency of msgpackr; JS path without it
+cpu-features       optionalDependency of ssh2; require is wrapped in try/catch
+ssh2               its install.js builds an "optional crypto binding" and
+                   exits 0 when the build fails
+```
+
+The approvals are pinned to versions, so upgrading any of the three requires a
+deliberate `npm install-scripts approve`. That is friction worth keeping: a
+native module changing version is exactly when its install script deserves
+another look.
+
+**Not verified locally.** This box runs npm 11.8.0, which has no
+`install-scripts` command and ignores the field, so the allowlist is inert here.
+It parses, and `npm install` is unaffected. The blocking behaviour itself has to
+be confirmed on the Node 26 machine. What was verified is the reasoning behind
+each denial: `msgpackr-extract` and `cpu-features` are declared optional by
+their parents, ssh2 guards its `require` in a `try`, and ssh2's install script
+exits 0 on failure by design.

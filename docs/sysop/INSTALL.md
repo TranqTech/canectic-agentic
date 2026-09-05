@@ -37,8 +37,8 @@ fail on newer Node and required `build-essential` and `python3` to be present.
 
 ```bash
 # Using nvm (recommended)
-nvm install 20
-nvm use 20
+nvm install 22
+nvm use 22
 ```
 
 ---
@@ -182,7 +182,14 @@ All other configuration is managed through the Admin UI at `/admin/config` after
 npm install
 ```
 
-This compiles native addons (node-pty, bcrypt, better-sqlite3). The `build-essential` and `python3` packages are required for this step.
+This resolves the native addons. `bcrypt`, `node-pty` and `@serialport/bindings-cpp`
+build from source when no prebuilt binary matches your platform, which is why
+`build-essential` and `python3` are required. `better-sqlite3` v13 ships
+prebuilt binaries and does not compile.
+
+On npm 12 and later, which ships with Node 26, dependency install scripts are
+blocked unless allowed. Canectic ships the allowlist, so this step needs no
+action; see the troubleshooting section if you see a block warning.
 
 ### 6. Run Database Migrations
 
@@ -358,6 +365,44 @@ After installation, your run directory contains:
 
 - Check the gateway logs: `pm2 logs gateway`
 - Ensure database migrations have run: `node src/tools/dbmigrations.js`
+
+### npm reports "install scripts blocked" for a native module
+
+npm 12, which ships with Node 26, no longer runs dependency `install` and
+`postinstall` scripts by default. That is a supply chain measure: a package can
+no longer execute code on your machine simply by being installed. Packages must
+be listed in the `allowScripts` field of `package.json`.
+
+Canectic ships that allowlist, so a normal install needs no action. Three
+dependencies are approved because their install script is what resolves the
+native binary, and nothing works without it:
+
+| Package | Why it must run | What breaks without it |
+|---|---|---|
+| `bcrypt` | `node-gyp-build` | password hashing, so nobody can log in |
+| `node-pty` | prebuild or `node-gyp rebuild` | door games |
+| `@serialport/bindings-cpp` | `node-gyp-build` | DOS doors over socat serial pairs |
+
+Three more are deliberately **denied**, because each is an optional accelerator
+with a working fallback: `msgpackr-extract` (an optional dependency of
+`msgpackr`, which uses a JavaScript path without it), `cpu-features` (an
+optional dependency of `ssh2`, whose `require` is wrapped in a `try`), and
+`ssh2` itself, whose install script builds an *optional* crypto binding and
+exits successfully when that fails. Denying them costs a little SFTP and
+queue-serialisation speed and nothing else.
+
+The three approvals are **pinned to versions**. After upgrading any of them you
+will see the block warning again, which is intended: re-approve deliberately
+with
+
+```bash
+npm install-scripts approve bcrypt node-pty @serialport/bindings-cpp
+npm install-scripts ls        # review anything still unreviewed
+```
+
+and commit the updated `package.json`. If you see the warning for a package not
+listed above, review it before approving rather than approving to clear the
+message.
 
 ### Existing database is SQL_ASCII instead of UTF8
 
