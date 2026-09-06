@@ -1,0 +1,262 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        .row.mt-2
+          .col-lg-10.offset-lg-1.col-12
+            if !network
+              br
+              .card
+                .card-header.bg-darkblue.text-white
+                  h2= title
+                .card-body
+                  h3 Network Not Found
+            else
+              include ../../partials/flash
+
+              form(action='/admin/filebone/' + network.id + '/batch/subscribe' method='POST')
+                .card
+                  .card-header.bg-darkblue.text-white
+                    .d-flex.justify-content-between.align-items-center
+                      nav(aria-label='breadcrumb')
+                        ol.breadcrumb.mb-0
+                          li.breadcrumb-item
+                            a.text-white(href='/admin') Admin
+                          li.breadcrumb-item
+                            a.text-white(href='/admin/network/' + network.uuid)= network.name
+                          li.breadcrumb-item
+                            a.text-white(href='/admin/filebone/' + network.id) Filebones
+                          li.breadcrumb-item.active.text-light Batch Subscribe
+                      a.btn.btn-sm.btn-info(href='/admin/filebone/' + network.id + '/combined') Combined View
+
+                  .card-body
+                    p.text-muted.mb-3
+                      | Creates a new local file area for each areatag you tick, and maps it onto
+                      |
+                      strong= network.name
+                      | . Areas already carried are not listed. Settings below apply to every area in the batch.
+                      if scopedEcholist
+                        |  Showing one filebone:
+                        |
+                        code= scopedEcholist.name
+                        | .
+                      else
+                        |  Showing every filebone on this network.
+
+                    //- ---------------------------------------------------------
+                    //- Shared settings
+                    //- ---------------------------------------------------------
+                    .card.mb-3
+                      .card-header.bg-secondary.text-white.py-2
+                        strong Settings applied to every selected area
+                      .card-body
+                        .row
+                          .col-md-4
+                            .mb-3
+                              label.form-label.fw-bold(for='batchGroup') File Group
+                              select#batchGroup.form-select(name='group_shortcode' required)
+                                option(value='') -- Select --
+                                each g in groups
+                                  option(value=g.shortcode)= g.name
+                              .form-text All selected areas are created in this group. Each area gets its own subdirectory named after its shortcode.
+                          .col-md-2
+                            .mb-3
+                              label.form-label(for='batchBrowseSec') Browse Security
+                              input#batchBrowseSec.form-control(type='number' name='browse_security' min=0 max=255 value=defaultBrowseSecurity)
+                          .col-md-2
+                            .mb-3
+                              label.form-label(for='batchReadSec') Download Security
+                              input#batchReadSec.form-control(type='number' name='read_security' min=0 max=255 value=defaultReadSecurity)
+                          .col-md-2
+                            .mb-3
+                              label.form-label(for='batchPostSec') Upload Security
+                              input#batchPostSec.form-control(type='number' name='post_security' min=0 max=255 value=defaultPostSecurity)
+                          .col-md-2
+                            .mb-3
+                              label.form-label(for='batchNewscan') Newscan Default
+                              select#batchNewscan.form-select(name='newscan_default')
+                                option(value='false' selected) No
+                                option(value='true') Yes
+
+                        .row
+                          .col-md-3
+                            .mb-3
+                              label.form-label(for='batchMaxAge') Max Age (days)
+                              input#batchMaxAge.form-control(type='number' name='max_age_days' min=0 placeholder='no limit')
+                          .col-md-3
+                            .mb-3
+                              label.form-label(for='batchMaxFiles') Max Files
+                              input#batchMaxFiles.form-control(type='number' name='max_files' min=0 placeholder='no limit')
+                          .col-md-6
+                            .mb-3
+                              .form-text.mt-4 Retention limits are enforced by the daily file-maintenance job. Leave blank for no limit.
+
+                        .row
+                          .col-md-2
+                            label.form-label.small Browse Perm Flags
+                            select.form-select.form-select-sm(name='browse_perm_flags' multiple size=4)
+                              each p in availablePermissions
+                                option(value=p)= p
+                          .col-md-2
+                            label.form-label.small Browse Restrict Flags
+                            select.form-select.form-select-sm(name='browse_rest_flags' multiple size=4)
+                              each r in availableRestrictions
+                                option(value=r)= r
+                          .col-md-2
+                            label.form-label.small Download Perm Flags
+                            select.form-select.form-select-sm(name='read_perm_flags' multiple size=4)
+                              each p in availablePermissions
+                                option(value=p)= p
+                          .col-md-2
+                            label.form-label.small Download Restrict Flags
+                            select.form-select.form-select-sm(name='read_rest_flags' multiple size=4)
+                              each r in availableRestrictions
+                                option(value=r)= r
+                          .col-md-2
+                            label.form-label.small Upload Perm Flags
+                            select.form-select.form-select-sm(name='post_perm_flags' multiple size=4)
+                              each p in availablePermissions
+                                option(value=p)= p
+                          .col-md-2
+                            label.form-label.small Upload Restrict Flags
+                            select.form-select.form-select-sm(name='post_rest_flags' multiple size=4)
+                              each r in availableRestrictions
+                                option(value=r)= r
+                        .form-text.mb-3 Ctrl-click or Cmd-click to select more than one. Leave empty for none.
+
+                        .form-check
+                          input#batchAllowPeers.form-check-input(type='checkbox' name='allow_peers' value='true' checked)
+                          label.form-check-label(for='batchAllowPeers') Allow for all network peers
+                        .form-check
+                          input#batchEnablePeers.form-check-input(type='checkbox' name='enable_peers' value='true')
+                          label.form-check-label(for='batchEnablePeers') Enable for all network peers
+
+                    //- ---------------------------------------------------------
+                    //- Selection
+                    //- ---------------------------------------------------------
+                    .card
+                      .card-header.bg-secondary.text-white.py-2.d-flex.justify-content-between.align-items-center
+                        strong Available areas
+                        span.badge.bg-light.text-dark
+                          span#batchSelectedCount 0
+                          |  selected of #{available.length}
+                      .card-body
+                        if available.length === 0
+                          .alert.alert-info.mb-0
+                            | Every areatag on this network is already carried, so there is nothing to subscribe to.
+                            if carriedCount
+                              |  (#{carriedCount} carried.)
+                        else
+                          .row.mb-2
+                            .col-md-6
+                              .input-group.input-group-sm
+                                span.input-group-text
+                                  i.bi.bi-search
+                                input#batchSearch.form-control(type='text' placeholder='Filter by areatag or description...' autocomplete='off')
+                                button#batchSearchClear.btn.btn-outline-secondary(type='button')
+                                  i.bi.bi-x-lg
+                            .col-md-6.text-end
+                              button#batchSelectAll.btn.btn-sm.btn-outline-primary(type='button') Select all shown
+                              |
+                              button#batchSelectNone.btn.btn-sm.btn-outline-secondary.ms-2(type='button') Clear
+                          if carriedCount
+                            p.text-muted.small.mb-2 #{carriedCount} area(s) already carried and not listed.
+
+                          .table-responsive(style='max-height:50vh; overflow-y:auto')
+                            table.table.table-sm.table-hover.align-middle
+                              thead.table-dark(style='position:sticky; top:0; z-index:1')
+                                tr
+                                  th(style='width:3rem')
+                                  th Areatag
+                                  th Description
+                              tbody#batchRows
+                                each a in available
+                                  tr.batch-row(data-areatag=a.areatag.toLowerCase() data-description=(a.description || '').toLowerCase())
+                                    td
+                                      input.form-check-input.batch-check(type='checkbox' name='areatags' value=a.areatag)
+                                    td
+                                      code= a.areatag
+                                    td.small.text-muted= a.description || ''
+
+                  .card-footer
+                    .d-flex.justify-content-between.align-items-center
+                      .small.text-muted
+                        | Runs on the worker. Each area creates a directory and a scan pointer per
+                        | user. You will get a notification when it finishes.
+                      button#batchSubmit.btn.btn-success(type='submit' disabled)
+                        i.bi.bi-plus-circle.me-1
+                        | Subscribe selected
+
+      script.
+        (function () {
+          var search    = document.getElementById('batchSearch');
+          var clearBtn  = document.getElementById('batchSearchClear');
+          var selAll    = document.getElementById('batchSelectAll');
+          var selNone   = document.getElementById('batchSelectNone');
+          var countEl   = document.getElementById('batchSelectedCount');
+          var submitBtn = document.getElementById('batchSubmit');
+          var rowsBody  = document.getElementById('batchRows');
+          if (!rowsBody) return;
+
+          var rows = Array.prototype.slice.call(rowsBody.querySelectorAll('tr.batch-row'));
+
+          function updateCount() {
+            var n = rowsBody.querySelectorAll('.batch-check:checked').length;
+            countEl.textContent = n;
+            submitBtn.disabled = (n === 0);
+          }
+
+          function visibleRows() {
+            return rows.filter(function (r) { return r.style.display !== 'none'; });
+          }
+
+          function doFilter() {
+            var term = (search.value || '').toLowerCase().trim();
+            for (var i = 0; i < rows.length; i++) {
+              var r = rows[i];
+              var match = !term ||
+                r.dataset.areatag.indexOf(term) !== -1 ||
+                r.dataset.description.indexOf(term) !== -1;
+              r.style.display = match ? '' : 'none';
+            }
+          }
+
+          search.addEventListener('input', doFilter);
+          clearBtn.addEventListener('click', function () {
+            search.value = '';
+            doFilter();
+            search.focus();
+          });
+
+          // Select all respects the active filter, so you can narrow to a
+          // prefix and take just those without touching the rest.
+          selAll.addEventListener('click', function () {
+            visibleRows().forEach(function (r) {
+              var cb = r.querySelector('.batch-check');
+              if (cb) cb.checked = true;
+            });
+            updateCount();
+          });
+
+          selNone.addEventListener('click', function () {
+            rows.forEach(function (r) {
+              var cb = r.querySelector('.batch-check');
+              if (cb) cb.checked = false;
+            });
+            updateCount();
+          });
+
+          rowsBody.addEventListener('change', function (e) {
+            if (e.target && e.target.classList.contains('batch-check')) updateCount();
+          });
+
+          updateCount();
+        })();

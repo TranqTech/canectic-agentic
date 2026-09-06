@@ -490,6 +490,21 @@ export async function enqueueEcholistBatchSubscribe(opts = {}) {
 	});
 }
 
+/**
+ * Batch subscribe to many filebone areatags at once. The filebone counterpart
+ * to enqueueEcholistBatchSubscribe: cheaper per area (no backing tables) but
+ * still a directory and a scan pointer per user each time.
+ */
+export async function enqueueFileboneBatchSubscribe(opts = {}) {
+	return maintenanceQueue.add('filebone:batch-subscribe', {
+		networkId: opts.networkId,
+		areatags:  opts.areatags || [],
+		settings:  opts.settings || {},
+	}, {
+		jobId: `filebone-batch--${opts.networkId || 'unknown'}--${Date.now()}`,
+	});
+}
+
 export async function enqueueNodelistImport(opts = {}) {
 	return maintenanceQueue.add('import-nodelist', {
 		filePath:     opts.filePath,

@@ -427,6 +427,12 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'filebone:batch-subscribe': {
+				var fbBatch = await import("../src/maintenance/fileboneBatchSubscribe.js");
+				await fbBatch.runBatch(job.data.networkId, job.data.areatags, job.data.settings);
+				break;
+			}
+
 			case 'scan-echolists': {
 				var echolistScan = await import("../src/maintenance/echolistScan.js");
 				await echolistScan.scanForUpdates();

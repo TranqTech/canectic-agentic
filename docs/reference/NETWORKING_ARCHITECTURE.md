@@ -1080,6 +1080,27 @@ failed, skipped, and renamed counts.
 `planBatch(networkId, areatags)` is the read-only pre-flight and is exported
 separately, so a dry run never disagrees with what the job will do.
 
+**Filebones have the same feature**, at `/admin/filebone/:networkId/batch`, job
+`filebone:batch-subscribe`, module `src/maintenance/fileboneBatchSubscribe.js`.
+Kept as a parallel module rather than a shared abstraction, matching the
+convention that `fileEcholist.js` mirrors `networkEcholist.js`. The file side
+differs in five ways:
+
+- no per-area backing tables (one shared `file_entries`), so an area is much
+  cheaper than on the message side
+- creating and mapping are two calls: `fileAreas.newArea()` takes no network, so
+  `fileNetworkAreas.addMapping()` follows it. A mapping failure is reported
+  distinctly, since the area exists but is not on the network
+- peer sync takes `allowAll` and `enableAll` in one `syncFileAreaToConnections()`
+  pass, rather than allow-inside-create plus a second enable pass
+- no QWK conference number to allocate
+- extra settings: browse security, browse flags, and the `max_age_days` /
+  `max_files` retention limits
+
+`sub_dir` is deliberately not a batch setting. `fileAreas.newArea()` defaults it
+to the lowercased shortcode, giving every area its own directory under the
+group's `base_dir`; a single shared value would put every area in one directory.
+
 ### Models
 
 - `src/models/networkEcholist.js` -- echolist CRUD, import diff/execute, query helpers, sync

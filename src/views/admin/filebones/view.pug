@@ -61,6 +61,9 @@ block content
                         button.btn.btn-lg.btn-success.me-1(data-bs-toggle='collapse' data-bs-target='#importSection')
                           i.bi.bi-upload.me-1
                           | Import
+                        a.button.btn.btn-lg.btn-primary.me-1(href='/admin/filebone/' + network.id + '/batch?echolistId=' + echolist.id title='Create local file areas for many areatags on this filebone at once')
+                          i.bi.bi-check2-square.me-1
+                          | Batch Subscribe
                         button.btn.btn-lg.btn-warning.me-1(data-bs-toggle='modal' data-bs-target='#editFileboneModal')
                           i.bi.bi-pencil.me-1
                           | Edit

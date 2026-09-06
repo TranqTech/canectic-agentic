@@ -3791,6 +3791,109 @@ router.get('/filebone/:networkId/combined', async (req, res) => {
 	});
 });
 
+// Filebone batch subscribe page. Same shape as the echolist one, over
+// file_echolists / file_areas. Optional ?echolistId=N scopes to one filebone.
+router.get('/filebone/:networkId/batch', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var networkId        = parseInt(req.params.networkId);
+	var network          = networkId ? await msgNetworks.getNetworkById(networkId) : null;
+	var echolistId       = req.query.echolistId ? parseInt(req.query.echolistId) : null;
+
+	var areas = [];
+	var scopedEcholist = null;
+	if (network) {
+		if (echolistId) {
+			scopedEcholist = await fileEcholist.getEcholistById(echolistId);
+			// Guard against ?echolistId pointing at another network's filebone
+			if (scopedEcholist && parseInt(scopedEcholist.network_id) !== networkId) {
+				scopedEcholist = null;
+			}
+			if (scopedEcholist) {
+				areas = await fileEcholist.getAreasByEcholist(echolistId) || [];
+			}
+		}
+		if (!scopedEcholist) {
+			areas = await fileEcholist.getAreasAcrossNetwork(networkId) || [];
+		}
+	}
+
+	var available = (areas || []).filter(function (a) { return !a.local_area_id; });
+	var carriedCount = (areas || []).length - available.length;
+
+	res.render('admin/filebones/batch', {
+		sufficientAccess: sufficientAccess,
+		title: 'Batch Subscribe',
+		activelink: 'networks',
+		currentuser: currentuser,
+		network: network,
+		scopedEcholist: scopedEcholist,
+		available: available,
+		carriedCount: carriedCount,
+		groups: await fileGroups.getActiveGroups(),
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions(),
+		defaultBrowseSecurity: appConfig.getNumber('default_file_browse_security', 50),
+		defaultReadSecurity: appConfig.getNumber('default_file_read_security', 60),
+		defaultPostSecurity: appConfig.getNumber('default_file_post_security', 100)
+	});
+});
+
+// Enqueue the filebone batch. Cheaper per area than the message side, but a
+// directory and a scan pointer per user each time still adds up.
+router.post('/filebone/:networkId/batch/subscribe', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var networkId   = parseInt(req.params.networkId);
+
+	var raw = req.body.areatags;
+	var areatags = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+	if (areatags.length === 0) {
+		await flash.setOne(req, 'warning', 'No areas were selected.');
+		return res.redirect('/admin/filebone/' + networkId + '/batch');
+	}
+	if (!req.body.group_shortcode) {
+		await flash.setOne(req, 'danger', 'A target file group is required.');
+		return res.redirect('/admin/filebone/' + networkId + '/batch');
+	}
+
+	var settings = {
+		groupshortcode:    req.body.group_shortcode,
+		browsesecurity:    req.body.browse_security,
+		readsecurity:      req.body.read_security,
+		postsecurity:      req.body.post_security,
+		newscan_default:   req.body.newscan_default,
+		max_age_days:      req.body.max_age_days || null,
+		max_files:         req.body.max_files || null,
+		browse_perm_flags: req.body.browse_perm_flags,
+		browse_rest_flags: req.body.browse_rest_flags,
+		read_perm_flags:   req.body.read_perm_flags,
+		read_rest_flags:   req.body.read_rest_flags,
+		post_perm_flags:   req.body.post_perm_flags,
+		post_rest_flags:   req.body.post_rest_flags,
+		allowPeers:        req.body.allow_peers === 'true',
+		enablePeers:       req.body.enable_peers === 'true',
+		createdByUUID:     currentuser ? currentuser.uuid : '',
+		createdByName:     currentuser ? currentuser.username : ''
+	};
+
+	try {
+		await jobs.enqueueFileboneBatchSubscribe({
+			networkId: networkId,
+			areatags: areatags,
+			settings: settings
+		});
+		await flash.setOne(req, 'success',
+			'Queued ' + areatags.length + ' file area(s) for creation. This runs on the worker; ' +
+			'you will get a notification when it finishes.');
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/filebone/batch] enqueue failed: ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Could not queue the batch: ' + err.message);
+	}
+
+	res.redirect('/admin/filebone/' + networkId + '/combined');
+});
+
 router.post('/filebone/:networkId/combined/subscribe', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var networkId   = parseInt(req.params.networkId);
