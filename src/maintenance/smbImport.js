@@ -101,8 +101,11 @@ function smbToDbObj(msg, target) {
 		tz_utc: '',
 		seen_by: stripNulls(hdr.fidoSeenBy || ''),
 		path: stripNulls(hdr.fidoPath || ''),
-		// Stamping the origin network stops getOutboundForConnection from
-		// echoing imported history back out to that same network.
+		// `imported` is what stops getOutboundForConnection echoing this
+		// history back out to peers. source_network_id stays for bookkeeping
+		// but is no longer used for outbound suppression: it is stamped on all
+		// inbound echomail, so filtering on it stopped a hub forwarding at all.
+		imported: true,
 		source_network_id: (target && target.networkId) || null,
 		system_time: systemTime,
 		created_at: currtime,

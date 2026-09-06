@@ -31,10 +31,14 @@ function stripNulls(str) {
 // parsing so a bad shortcode fails fast instead of after reading a whole
 // message base.
 //
-// networkId matters for more than bookkeeping: getOutboundForConnection skips
-// messages whose source_network_id matches the peer's network (echomail.js),
-// so stamping it on imported rows is what stops a migration from echoing the
-// old system's history back out to that same network.
+// Imported rows are stamped `imported = true` (when sealing, which is the
+// default). getOutboundForConnection skips those, which is what stops a
+// migration from echoing the old system's history out to peers.
+//
+// networkId is bookkeeping only. It used to drive outbound suppression via
+// source_network_id, but that column is stamped on ALL inbound echomail, so
+// suppressing on it stopped a hub forwarding anything at all. See the note in
+// echomail.js getOutboundForConnection.
 //
 // options.networkId forces a specific network. Otherwise the area's network
 // mapping is used when there is exactly one; an area carried on several
@@ -138,6 +142,12 @@ async function importParsedMessages(source, target, toDbObj, options) {
 
 		try {
 			var dbObj = toDbObj(msg, target);
+
+			// Mark the row as imported history. This, not source_network_id, is
+			// what keeps a migration from echoing another system's back traffic
+			// out to peers. It is tied to the seal option so `seal: false` still
+			// means "treat this import as ordinary traffic".
+			dbObj.imported = seal;
 
 			// Dupe check
 			var isUnique = await postgres.checkValueUnique('msg_id', dbObj.msg_id, target.msgtable);

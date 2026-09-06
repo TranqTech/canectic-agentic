@@ -274,13 +274,47 @@ async function getOutboundForConnection(conn) {
 						var updateseenby = false;
 						var seenbystring = "";
 
-						// Skip messages that originated on this connection's network
-						// (catches both FTN source-address check and NNTP-imported messages)
-						if (msg.source_network_id && msg.source_network_id === conn.network_id) {
+						// Deliberately NOT filtering on source_network_id here.
+						//
+						// This used to skip any message whose source_network_id
+						// matched the connection's network, on the reasoning that
+						// a message should not go back to the network it arrived
+						// from. That conflates the network with the node. A hub
+						// receives from its uplink on network N and must forward
+						// to its downlinks, which are also on network N: that is
+						// what echomail distribution is. The check suppressed
+						// almost all forwarded traffic, leaving only locally
+						// posted messages, because handleInboundEchoMessage
+						// stamps source_network_id on every inbound message.
+						//
+						// Not re-sending to the node it came from is a separate
+						// concern, and is covered twice below: the explicit
+						// source-address check, and SEEN-BY per FTS-0004, which
+						// is the standard loop prevention and also stops a
+						// message reaching any node already listed.
+						//
+						// Imported history is held back by the outbound seal
+						// (peerAreaSubscriptions.advanceOutboundIdxForArea),
+						// which fast-forwards msg_idx past the import. That is
+						// the correct mechanism and does not need this filter.
+
+						// Never export imported history. This is the precise
+						// replacement for the old source_network_id filter: it
+						// marks rows that came from an SMB/JAM migration rather
+						// than off the wire, so a migration is not echoed out to
+						// peers while ordinary forwarding is untouched.
+						//
+						// The outbound seal advances msg_idx past an import so
+						// caught-up peers never even scan these rows. This flag
+						// covers the case the seal deliberately cannot: a peer
+						// that was already behind at import time keeps its real
+						// backlog, and a single watermark cannot say "send
+						// 51-100 but skip the imported 101-5100".
+						if (msg.imported) {
 							istossable = false;
 						}
 
-						// FTN-specific: skip if we received it from this node
+						// FTN: skip if we received it from this node
 						if (istossable && msg.source === nodeAddress) {
 							istossable = false;
 						}
