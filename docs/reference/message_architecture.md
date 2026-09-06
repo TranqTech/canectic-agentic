@@ -133,9 +133,17 @@ disposable: nodelist distribution, BBS ads, announcement echoes.
 | `max_messages` | `message_areas`, `message_groups` | keep the N newest, remove the rest |
 
 The group copies are defaults seeded into new areas created in that group, the
-same relationship `file_groups` has with `file_areas`. Note that unlike the file
-side there is no `pushDefaultsToAreas()` for message groups, so changing a group
-value does not reach areas that already exist.
+same relationship `file_groups` has with `file_areas`. To reach areas that
+already exist, use `msgGroups.pushDefaultsToAreas(shortcode, ['retention'])`,
+exposed as a Retention tickbox in the Push Group Defaults modal on the group
+page.
+
+That tickbox is **unticked by default**, unlike the other push fields. Both
+retention columns are nullable and null means no pruning, so pushing retention
+from a group with no limits set turns pruning off on every area in the group.
+The modal warns when the group is in that state. `file_groups` has the same
+property and ticks its Retention box by default, which is worth knowing before
+using it.
 
 Enforcement: `messages.enforceRetentionLimits()`, run by the
 `message-maintenance` job at 04:00 daily. Both limits combine, so an area can

@@ -309,7 +309,18 @@ router.post('/msgGroup/:shortcode/pushDefaults', urlencodedParser, requireAdmin,
 	var shortcode = req.params.shortcode.toUpperCase().trim();
 	var fields = req.body.fields;
 	if (typeof fields === 'string') fields = [fields];
-	var result = await msgGroups.pushDefaultsToAreas(shortcode, fields || ['all']);
+
+	// The form posts one entry per ticked checkbox, so an empty body means the
+	// sysop ticked nothing. Previously that fell through to ['all'] and pushed
+	// every field, which is the opposite of what unticking everything asks for,
+	// and with retention in the list it could silently disable pruning across
+	// the group.
+	if (!Array.isArray(fields) || fields.length === 0) {
+		await flash.setOne(req, 'warning', 'No settings were selected, so nothing was pushed.');
+		return res.redirect('/admin/msgGroup/' + shortcode);
+	}
+
+	var result = await msgGroups.pushDefaultsToAreas(shortcode, fields);
 	if (result.status) {
 		await flash.setOne(req, 'success', 'Pushed defaults to ' + result.updated + ' area(s).');
 	} else {
@@ -1713,7 +1724,18 @@ router.post('/fileGroup/:shortcode/pushDefaults', urlencodedParser, requireAdmin
 	var shortcode = req.params.shortcode.toUpperCase().trim();
 	var fields = req.body.fields;
 	if (typeof fields === 'string') fields = [fields];
-	var result = await fileGroups.pushDefaultsToAreas(shortcode, fields || ['all']);
+
+	// The form posts one entry per ticked checkbox, so an empty body means the
+	// sysop ticked nothing. Previously that fell through to ['all'] and pushed
+	// every field, which is the opposite of what unticking everything asks for,
+	// and with retention in the list it could silently disable pruning across
+	// the group.
+	if (!Array.isArray(fields) || fields.length === 0) {
+		await flash.setOne(req, 'warning', 'No settings were selected, so nothing was pushed.');
+		return res.redirect('/admin/fileGroup/' + shortcode);
+	}
+
+	var result = await fileGroups.pushDefaultsToAreas(shortcode, fields);
 	if (result.status) {
 		await flash.setOne(req, 'success', 'Pushed defaults to ' + result.updated + ' area(s).');
 	} else {

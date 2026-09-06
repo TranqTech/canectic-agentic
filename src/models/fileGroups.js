@@ -276,7 +276,10 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	var group = await getGroupByShortcode(shortcode);
 	if (!group) return { status: false, errormessages: ['Group not found'], updated: 0 };
 
-	var pushAll = !fields || fields.length === 0 || fields.includes('all');
+	// An explicitly empty list means push nothing. Only an omitted argument or
+	// an explicit 'all' means everything, so a caller that filters its field
+	// list down to zero cannot accidentally overwrite every area setting.
+	var pushAll = !fields || fields.includes('all');
 	var updateObj = {};
 
 	if (pushAll || fields.includes('security')) {

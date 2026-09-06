@@ -561,7 +561,10 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	var group = await getGroupByShortcode(shortcode);
 	if (!group) return { status: false, errormessages: ['Group not found'], updated: 0 };
 
-	var pushAll = !fields || fields.length === 0 || fields.includes('all');
+	// An explicitly empty list means push nothing. Only an omitted argument or
+	// an explicit 'all' means everything, so a caller that filters its field
+	// list down to zero cannot accidentally overwrite every area setting.
+	var pushAll = !fields || fields.includes('all');
 	var updateObj = {};
 
 	if (pushAll || fields.includes('security')) {
@@ -579,6 +582,13 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	}
 	if (pushAll || fields.includes('newscan_default')) {
 		updateObj.newscan_default = group.newscan_default || false;
+	}
+	if (pushAll || fields.includes('retention')) {
+		// Note both can be null, and null means no pruning. Pushing retention
+		// from a group that has no limits set therefore turns pruning OFF on
+		// every area in the group, which is why the UI leaves this unchecked.
+		updateObj.max_age_days = group.max_age_days;
+		updateObj.max_messages = group.max_messages;
 	}
 
 	if (Object.keys(updateObj).length === 0) {

@@ -514,6 +514,16 @@ block content
                     .form-check.mb-2
                       input.form-check-input#push_newscan(type='checkbox' name='fields' value='newscan_default' checked)
                       label.form-check-label(for='push_newscan') Newscan Default (#{msgGroup.newscan_default ? 'Yes' : 'No'})
+                    .form-check.mb-2
+                      input.form-check-input#push_retention(type='checkbox' name='fields' value='retention')
+                      label.form-check-label(for='push_retention')
+                        | Retention (Max Age: #{msgGroup.max_age_days || 'none'}, Max Messages: #{msgGroup.max_messages || 'none'})
+                      if !msgGroup.max_age_days && !msgGroup.max_messages
+                        .form-text.text-warning
+                          i.bi.bi-exclamation-triangle.me-1
+                          | This group has no limits set, so pushing retention turns pruning OFF on every area in the group.
+                      else
+                        .form-text.text-muted Unticked by default, since this replaces any per-area limits.
                     .alert.alert-warning.mt-3
                       i.bi.bi-exclamation-triangle.me-1
                       | This will overwrite the selected settings on all areas in this group.
