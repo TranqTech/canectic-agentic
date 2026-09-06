@@ -60,6 +60,8 @@ block content
                           data-bs-postsecurity=area.post_security
                           data-bs-minage=area.min_age || 13
                           data-bs-maxage=area.max_age || 255
+                          data-bs-maxagedays=(area.max_age_days === null || area.max_age_days === undefined) ? '' : area.max_age_days
+                          data-bs-maxmessages=(area.max_messages === null || area.max_messages === undefined) ? '' : area.max_messages
                           data-bs-active=(area.active ? 'true' : 'false')
                           data-bs-threadmode=area.thread_mode || 'standard'
                           data-bs-postas=area.post_as || 'username'
@@ -453,6 +455,8 @@ block content
         document.getElementById('ea_postsecurity').value   = d.bsPostsecurity;
         document.getElementById('ea_minage').value         = d.bsMinage;
         document.getElementById('ea_maxage').value         = d.bsMaxage;
+        document.getElementById('ea_max_age_days').value   = d.bsMaxagedays || '';
+        document.getElementById('ea_max_messages').value   = d.bsMaxmessages || '';
         document.getElementById('ea_active').value         = d.bsActive === 'true' ? 'true' : 'false';
         document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
         document.getElementById('ea_post_as').value        = d.bsPostas || 'username';

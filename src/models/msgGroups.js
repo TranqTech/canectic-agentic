@@ -177,7 +177,13 @@ async function newGroup(formObj) {
 		post_rest_flags: normalizeFlags(formObj.post_rest_flags),
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase() : 'username',
-		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true
+		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true,
+		// Retention defaults for areas created in this group. NULL means no
+		// pruning, which is what every group and area starts as.
+		max_age_days: (formObj.max_age_days && parseInt(formObj.max_age_days) > 0)
+			? parseInt(formObj.max_age_days) : null,
+		max_messages: (formObj.max_messages && parseInt(formObj.max_messages) > 0)
+			? parseInt(formObj.max_messages) : null,
 	};
 
 	var dbres = await postgres.insertObject(pgObj, "message_groups");
@@ -277,6 +283,10 @@ async function updateGroup(shortcode, formObj) {
 	}
 	if (formObj.newscan_default !== undefined) {
 		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
+	if (formObj.max_age_days !== undefined) updateObj.max_age_days =
+		(formObj.max_age_days !== '' && parseInt(formObj.max_age_days) > 0) ? parseInt(formObj.max_age_days) : null;
+	if (formObj.max_messages !== undefined) updateObj.max_messages =
+		(formObj.max_messages !== '' && parseInt(formObj.max_messages) > 0) ? parseInt(formObj.max_messages) : null;
 	}
 
 	// QWK conference start. If supplied and different from the current

@@ -151,6 +151,19 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily message base retention pruning
+		// Only touches areas with max_age_days or max_messages set; both are
+		// NULL by default, so this is a no-op until a sysop opts an area in.
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('message-maintenance-daily', {
+			pattern: '0 4 * * *',   // 4:00 AM daily, before user maintenance
+		}, {
+			name: 'message-maintenance',
+			data: {},
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily user record maintenance
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('user-maintenance-daily', {

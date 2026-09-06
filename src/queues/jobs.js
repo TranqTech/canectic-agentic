@@ -480,6 +480,16 @@ export async function enqueueScanFileArea(areaShortcode) {
  * BACKBONE-sized selection is a couple of hundred areas, and each one creates
  * two backing tables plus a scan pointer per active user.
  */
+/**
+ * Message base retention pruning. Opt-in per area, so this is a no-op until a
+ * sysop sets max_age_days or max_messages somewhere.
+ */
+export async function enqueueMessageMaintenance() {
+	return maintenanceQueue.add('message-maintenance', {}, {
+		jobId: 'message-maintenance',
+	});
+}
+
 export async function enqueueEcholistBatchSubscribe(opts = {}) {
 	return maintenanceQueue.add('echolist:batch-subscribe', {
 		networkId: opts.networkId,

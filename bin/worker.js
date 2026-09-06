@@ -524,6 +524,17 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'message-maintenance': {
+				var msgMaint = await import("../src/models/messages.js");
+				var retResult = await msgMaint.enforceRetentionLimits();
+				if (retResult.messagesRemoved > 0 || retResult.threadsRemoved > 0) {
+					alogger.writeAlog(2, '[Worker] Retention: removed ' + retResult.messagesRemoved +
+						' message(s) and ' + retResult.threadsRemoved + ' empty thread(s) across ' +
+						retResult.areasChecked + ' area(s)', 'cyan');
+				}
+				break;
+			}
+
 			case 'file-maintenance': {
 				var fileMaint = await import("../src/models/fileEntries.js");
 				await fileMaint.cleanDuplicates();

@@ -1451,6 +1451,259 @@ async function deleteThreadByUUID(uuid, shortcode) {
 // Exports
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Retention
+// ---------------------------------------------------------------------------
+
+/**
+ * Prune old messages from areas that have a retention limit set.
+ *
+ * Opt-in per area: both limits are NULL by default and NULL means keep
+ * everything. Mirrors the file side (fileEntries.enforceRetentionLimits), and
+ * the two limits combine, so an area can cap both age and count.
+ *
+ *   max_age_days  delete messages older than N days
+ *   max_messages  keep the N newest, delete the rest
+ *
+ * Age is the message's OWN date (system_time), not when we received it, which
+ * is what a sysop means by "keep 90 days" and what Synchronet and Mystic do.
+ * Note the consequence for migrations: a JAM or SMB import carries its original
+ * dates, so importing an old base into an area that already has max_age_days
+ * set will prune most of it on the next run. Preview first (dryRun) when
+ * setting a limit on an area holding imported mail.
+ *
+ * Pruning is per message, not per thread. In FTN a reply whose parent has
+ * already rolled off the base is normal, every node prunes at its own depth,
+ * and threadMessage() never produces a NULL thread. Whole-thread pruning would
+ * also mean one late reply keeps an ancient thread alive forever, which defeats
+ * the point on a busy ads or nodelist area. Thread rows are kept honest
+ * afterwards: recounted, last_message recomputed, and emptied threads removed.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.dryRun]     report what would go, delete nothing
+ * @param {string}  [opts.shortcode]  limit to a single area
+ * @returns {object} { areasChecked, messagesRemoved, threadsRemoved, areas: [...] }
+ */
+async function enforceRetentionLimits(opts) {
+	opts = opts || {};
+	var dryRun = !!opts.dryRun;
+
+	var sql = "SELECT id, shortcode, max_age_days, max_messages FROM message_areas " +
+	          "WHERE active = true AND (max_age_days IS NOT NULL OR max_messages IS NOT NULL)";
+	var params = [];
+	if (opts.shortcode) {
+		sql += " AND UPPER(shortcode) = $1";
+		params.push(String(opts.shortcode).toUpperCase().trim());
+	}
+
+	var areas = await postgres.query(sql, params);
+	var result = { areasChecked: 0, messagesRemoved: 0, threadsRemoved: 0, areas: [] };
+	if (!areas || areas.length === 0) return result;
+
+	for (var area of areas) {
+		try {
+			var areaResult = await pruneArea(area, dryRun);
+			result.areasChecked++;
+			result.messagesRemoved += areaResult.messagesRemoved;
+			result.threadsRemoved  += areaResult.threadsRemoved;
+			result.areas.push(areaResult);
+		} catch (err) {
+			alogger.writeAlog(2, "enforceRetentionLimits: " + area.shortcode + " failed: " +
+				(err.message || err), "redbright");
+			result.areas.push({
+				shortcode: area.shortcode,
+				error: err.message || String(err),
+				messagesRemoved: 0,
+				threadsRemoved: 0
+			});
+		}
+	}
+
+	if (!dryRun && (result.messagesRemoved > 0 || result.threadsRemoved > 0)) {
+		alogger.writeAlog(1, "[retention] pruned " + result.messagesRemoved + " message(s) and " +
+			result.threadsRemoved + " empty thread(s) across " + result.areasChecked + " area(s)",
+			"cyan", true);
+	}
+
+	return result;
+}
+
+/**
+ * Preview a prune for one area without touching anything.
+ *
+ * Takes an area-shaped object rather than a shortcode so a proposed limit can
+ * be previewed before it is saved. Runs the same pruneArea() selection logic
+ * the real job uses, so the preview and the run can never disagree.
+ */
+async function previewRetentionForArea(area) {
+	return await pruneArea(area, true);
+}
+
+/**
+ * The outbound floor for an area: the highest message id that every enabled
+ * peer subscription has already been sent.
+ *
+ * Echomail export runs `WHERE id > msg_idx`, so deleting a message above a
+ * peer's high water mark drops it from that feed permanently and silently. On
+ * a hub that is downstream nodes losing mail with no error anywhere, so
+ * pruning never crosses this line.
+ *
+ * Returns null when the area has no enabled subscriptions, meaning there is no
+ * export obligation and anything may be pruned.
+ */
+async function getOutboundFloor(areaId) {
+	var row = await postgres.queryOne(
+		"SELECT MIN(COALESCE(msg_idx, 0)) AS floor_idx, COUNT(*) AS sub_count " +
+		"FROM peer_area_subscriptions WHERE area_id = $1 AND enabled = true",
+		[areaId]
+	);
+	if (!row || parseInt(row.sub_count) === 0) return null;
+	return parseInt(row.floor_idx) || 0;
+}
+
+/**
+ * Prune a single area. Split out so a dry run and the real thing walk exactly
+ * the same selection logic and can never disagree.
+ */
+async function pruneArea(area, dryRun) {
+	var shorty      = area.shortcode.toLowerCase().trim();
+	var msgtable    = "mb_" + shorty + "_msgs";
+	var threadtable = "mb_" + shorty + "_threads";
+
+	var out = {
+		shortcode: area.shortcode,
+		maxAgeDays: area.max_age_days || null,
+		maxMessages: area.max_messages || null,
+		messagesRemoved: 0,
+		threadsRemoved: 0,
+		blockedByPeer: false,
+		outboundFloor: null
+	};
+
+	var floor = await getOutboundFloor(area.id);
+	out.outboundFloor = floor;
+
+	// Candidate ids, as a set so the two limits can overlap freely.
+	var ids = new Set();
+
+	if (area.max_age_days && area.max_age_days > 0) {
+		var oldRows = await postgres.query(
+			"SELECT id FROM " + msgtable +
+			" WHERE COALESCE(system_time, created_at) < NOW() - ($1::text || ' days')::interval",
+			[String(area.max_age_days)]
+		);
+		for (var r of (oldRows || [])) ids.add(parseInt(r.id));
+	}
+
+	if (area.max_messages && area.max_messages > 0) {
+		var excessRows = await postgres.query(
+			"SELECT id FROM " + msgtable + " ORDER BY id DESC OFFSET $1",
+			[area.max_messages]
+		);
+		for (var r2 of (excessRows || [])) ids.add(parseInt(r2.id));
+	}
+
+	if (ids.size === 0) return out;
+
+	// Apply the outbound floor. A message at or below the floor has reached
+	// every enabled peer; anything above it has not.
+	var eligible = [];
+	if (floor === null) {
+		eligible = Array.from(ids);
+	} else {
+		for (var id of ids) {
+			if (id <= floor) eligible.push(id);
+		}
+		if (eligible.length < ids.size) {
+			out.blockedByPeer = true;
+			out.blockedCount = ids.size - eligible.length;
+		}
+	}
+
+	if (eligible.length === 0) return out;
+
+	// Which threads are affected, so they can be repaired afterwards.
+	var threadRows = await postgres.query(
+		"SELECT DISTINCT thread_id FROM " + msgtable + " WHERE id = ANY($1::int[]) AND thread_id IS NOT NULL",
+		[eligible]
+	);
+	var threadIds = (threadRows || []).map(function (t) { return parseInt(t.thread_id); });
+
+	if (dryRun) {
+		out.messagesRemoved = eligible.length;
+		// Count threads that would be left with nothing.
+		if (threadIds.length) {
+			var emptied = await postgres.query(
+				"SELECT t.id FROM " + threadtable + " t WHERE t.id = ANY($1::int[]) AND NOT EXISTS (" +
+				"  SELECT 1 FROM " + msgtable + " m WHERE m.thread_id = t.id AND NOT (m.id = ANY($2::int[]))" +
+				")",
+				[threadIds, eligible]
+			);
+			out.threadsRemoved = (emptied || []).length;
+		}
+		return out;
+	}
+
+	await postgres.write("DELETE FROM " + msgtable + " WHERE id = ANY($1::int[])", [eligible]);
+	out.messagesRemoved = eligible.length;
+
+	// Repair thread bookkeeping. The reader lists threads straight out of the
+	// thread table and orders by last_message, so a stale count or a thread with
+	// no messages left would show up as an empty, mis-sorted entry.
+	if (threadIds.length) {
+		var emptyRows = await postgres.query(
+			"SELECT t.id FROM " + threadtable + " t WHERE t.id = ANY($1::int[]) AND NOT EXISTS (" +
+			"  SELECT 1 FROM " + msgtable + " m WHERE m.thread_id = t.id)",
+			[threadIds]
+		);
+		var emptyIds = (emptyRows || []).map(function (e) { return parseInt(e.id); });
+
+		if (emptyIds.length) {
+			// Drop the per-thread read pointers too, or they accumulate forever.
+			// user_thread_pointers.thread_id holds the integer thread row id
+			// (callers pass thread.id), so emptyIds match it directly.
+			try {
+				await postgres.write(
+					"DELETE FROM user_thread_pointers WHERE area_shortcode = $1 AND thread_id = ANY($2::int[])",
+					[area.shortcode, emptyIds]
+				);
+			} catch (ptrErr) {
+				alogger.writeAlog(3, "pruneArea: thread pointer cleanup failed for " +
+					area.shortcode + ": " + (ptrErr.message || ptrErr), "yellow");
+			}
+
+			await postgres.write("DELETE FROM " + threadtable + " WHERE id = ANY($1::int[])", [emptyIds]);
+			out.threadsRemoved = emptyIds.length;
+		}
+
+		// Survivors get an accurate count and last_message.
+		await postgres.write(
+			"UPDATE " + threadtable + " t SET " +
+			"  message_count = s.cnt, last_message = s.last_msg " +
+			"FROM (SELECT thread_id, COUNT(*) AS cnt, MAX(COALESCE(system_time, created_at)) AS last_msg " +
+			"      FROM " + msgtable + " WHERE thread_id = ANY($1::int[]) GROUP BY thread_id) s " +
+			"WHERE t.id = s.thread_id",
+			[threadIds]
+		);
+	}
+
+	// Area-level counters (message_count, last_message, last_subject, ...)
+	try {
+		var msgAreasModule = await import('./msgAreas.js');
+		await msgAreasModule.updateStatsForArea(area.shortcode);
+	} catch (e) {
+		alogger.writeAlog(3, "pruneArea: area stats update failed for " + area.shortcode +
+			": " + (e.message || e), "yellow");
+	}
+
+	alogger.writeAlog(3, "[retention] " + area.shortcode + ": removed " + out.messagesRemoved +
+		" message(s), " + out.threadsRemoved + " empty thread(s)" +
+		(out.blockedByPeer ? ", " + out.blockedCount + " held back by a peer high water mark" : ""),
+		"cyan");
+
+	return out;
+}
+
 export {
 	// Group/area listing
 	listMsgGroups,
@@ -1480,6 +1733,10 @@ export {
 
 	// Inbound message handling (called by tossers)
 	handleInboundEchoMessage,
+
+	// Retention
+	enforceRetentionLimits,
+	previewRetentionForArea,
 
 	// Threading helpers (used by all tossers and importers)
 	threadMessage,

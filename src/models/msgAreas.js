@@ -203,6 +203,12 @@ async function newArea(formObj) {
 		post_security: formObj.postsecurity,
 		min_age: formObj.minage,
 		max_age: formObj.maxage,
+		// Retention. Blank or 0 means no limit, stored as NULL so the daily
+		// prune skips the area entirely rather than treating 0 as "keep none".
+		max_age_days: (formObj.max_age_days && parseInt(formObj.max_age_days) > 0)
+			? parseInt(formObj.max_age_days) : null,
+		max_messages: (formObj.max_messages && parseInt(formObj.max_messages) > 0)
+			? parseInt(formObj.max_messages) : null,
 		created_at: currtime,
 		updated_at: null,
 		active: true,
@@ -449,6 +455,10 @@ async function updateArea(shortcode, formObj) {
 	if (formObj.postsecurity  !== undefined) updateObj.post_security = parseInt(formObj.postsecurity);
 	if (formObj.minage        !== undefined) updateObj.min_age       = parseInt(formObj.minage);
 	if (formObj.maxage        !== undefined) updateObj.max_age       = parseInt(formObj.maxage);
+	if (formObj.max_age_days  !== undefined) updateObj.max_age_days  =
+		(formObj.max_age_days !== '' && parseInt(formObj.max_age_days) > 0) ? parseInt(formObj.max_age_days) : null;
+	if (formObj.max_messages  !== undefined) updateObj.max_messages  =
+		(formObj.max_messages !== '' && parseInt(formObj.max_messages) > 0) ? parseInt(formObj.max_messages) : null;
 	if (formObj.active      !== undefined) updateObj.active          = (formObj.active === "true" || formObj.active === true);
 	if (formObj.thread_mode !== undefined) {
 		var validModes = ['standard', 'subscribe_only', 'no_threads'];

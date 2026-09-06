@@ -1270,6 +1270,61 @@ router.get('/msgArea/:shortcode/thread/:uuid', async (req, res, next) => {
 	});
 });
 
+// Retention preview. Reports exactly what a prune would remove, deleting
+// nothing. Worth running before saving a limit on an area holding imported
+// mail: a JAM or SMB import keeps its original dates, so a base imported today
+// can already be far past any cutoff.
+//
+// Accepts optional max_age_days / max_messages in the query so a limit can be
+// previewed before it is saved; falls back to whatever is stored on the area.
+router.get('/msgArea/:shortcode/retention/preview', async (req, res) => {
+	// Own access check rather than requireAdmin: this endpoint answers JSON, and
+	// requireAdmin renders an HTML template on refusal.
+	var currentuser = await getCurrentUser(req);
+	if (!checkAdminAccess(currentuser)) {
+		return res.status(403).json({ error: 'Unauthorized' });
+	}
+
+	var shortcode = req.params.shortcode.toUpperCase().trim();
+
+	try {
+		var area = await msgAreas.getAreaByShortcode(shortcode);
+		if (!area) return res.status(404).json({ error: 'Area not found' });
+
+		var overrideAge = req.query.max_age_days !== undefined ? req.query.max_age_days : null;
+		var overrideCnt = req.query.max_messages !== undefined ? req.query.max_messages : null;
+
+		// Preview a proposed limit by applying it temporarily in memory only.
+		var probeArea = {
+			id: area.id,
+			shortcode: area.shortcode,
+			max_age_days: overrideAge !== null
+				? (parseInt(overrideAge) > 0 ? parseInt(overrideAge) : null)
+				: area.max_age_days,
+			max_messages: overrideCnt !== null
+				? (parseInt(overrideCnt) > 0 ? parseInt(overrideCnt) : null)
+				: area.max_messages
+		};
+
+		if (!probeArea.max_age_days && !probeArea.max_messages) {
+			return res.json({
+				shortcode: shortcode,
+				noLimits: true,
+				messagesRemoved: 0,
+				threadsRemoved: 0,
+				totalMessages: parseInt(area.msg_count || 0)
+			});
+		}
+
+		var preview = await messages.previewRetentionForArea(probeArea);
+		preview.totalMessages = parseInt(area.msg_count || 0);
+		res.json(preview);
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/retention/preview] ' + shortcode + ': ' + err.message, 'redbright');
+		res.status(500).json({ error: err.message });
+	}
+});
+
 router.post('/msgArea/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);

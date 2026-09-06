@@ -343,7 +343,9 @@ block content
                         read_security: msgGroup.read_security,
                         post_security: msgGroup.post_security,
                         post_as: msgGroup.post_as,
-                        newscan_default: msgGroup.newscan_default
+                        newscan_default: msgGroup.newscan_default,
+                        max_age_days: msgGroup.max_age_days,
+                        max_messages: msgGroup.max_messages
                       }
                     })
                     .text-end.mt-3
@@ -390,6 +392,12 @@ block content
                             select#edit_newscan.form-select(name='newscan_default')
                               option(value='false' selected=(!msgGroup.newscan_default)) No
                               option(value='true' selected=(!!msgGroup.newscan_default)) Yes
+                          .col-4
+                            label.form-label(for='edit_max_age_days') Max Age (days):
+                            input#edit_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit' value=(msgGroup.max_age_days === null || msgGroup.max_age_days === undefined) ? '' : msgGroup.max_age_days)
+                          .col-4
+                            label.form-label(for='edit_max_messages') Max Messages:
+                            input#edit_max_messages.form-control(type='number' name='max_messages' min=0 placeholder='no limit' value=(msgGroup.max_messages === null || msgGroup.max_messages === undefined) ? '' : msgGroup.max_messages)
                           .col-4
                             label.form-label(for='edit_active') Status:
                             select#edit_active.form-select(name='active')

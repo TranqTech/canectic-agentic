@@ -109,6 +109,17 @@ block content
                         select#ng_newscan.form-select(name='newscan_default')
                           option(value='false' selected) No
                           option(value='true') Yes
+                    .row.mt-3
+                      .col-6
+                        label.form-label(for='ng_max_age_days') Max Age (days):
+                        input#ng_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit')
+                        .form-text.text-muted
+                          | Default for new areas. Blank = never prune, which is the default.
+                      .col-6
+                        label.form-label(for='ng_max_messages') Max Messages:
+                        input#ng_max_messages.form-control(type='number' name='max_messages' min=0 placeholder='no limit')
+                        .form-text.text-muted
+                          | Default for new areas. Blank = never prune.
 
                   //- ============================================================
                   //- ACCESS — security levels and flag defaults for new areas

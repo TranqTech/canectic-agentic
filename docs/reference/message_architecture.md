@@ -120,6 +120,79 @@ Thread table columns:
 
 ---
 
+## Retention
+
+Optional per-area pruning of old messages. **Both limits default to NULL, and
+NULL means keep everything**, so a fresh install and every existing area prune
+nothing until a sysop opts in. Intended for areas that are inherently
+disposable: nodelist distribution, BBS ads, announcement echoes.
+
+| Column | On | Meaning |
+|---|---|---|
+| `max_age_days` | `message_areas`, `message_groups` | remove messages older than N days |
+| `max_messages` | `message_areas`, `message_groups` | keep the N newest, remove the rest |
+
+The group copies are defaults seeded into new areas created in that group, the
+same relationship `file_groups` has with `file_areas`. Note that unlike the file
+side there is no `pushDefaultsToAreas()` for message groups, so changing a group
+value does not reach areas that already exist.
+
+Enforcement: `messages.enforceRetentionLimits()`, run by the
+`message-maintenance` job at 04:00 daily. Both limits combine, so an area can
+cap age and count together.
+
+### Age is the message's own date
+
+`max_age_days` measures against `COALESCE(system_time, created_at)`, the date the
+message carries, not when it arrived. That is what a sysop means by "keep 90
+days" and matches Synchronet and Mystic.
+
+**This has a sharp edge for migrations.** A JAM or SMB import keeps the original
+dates, and real imports on this system show lag between message date and import
+date of up to 1999 days. So setting `max_age_days = 90` on an area holding a
+freshly imported base will prune nearly all of it on the next run. That is
+correct behaviour for the stated rule, but surprising, which is what the preview
+endpoint exists for.
+
+### Pruning is per message, not per thread
+
+In FTN a reply whose parent has already rolled off the base is the normal state
+of the network. Every node prunes at its own depth, and `threadMessage()` never
+produces a NULL thread, so an orphaned reply still lands somewhere sensible.
+Whole-thread pruning would also mean a single late reply keeps an ancient thread
+alive indefinitely, which defeats the purpose on a busy ads or nodelist area.
+
+Thread rows are kept honest afterwards, which matters because the reader lists
+threads straight out of the thread table and orders by `last_message`:
+
+- threads that lose some messages get `message_count` and `last_message` recomputed
+- threads left with no messages are deleted, along with their `user_thread_pointers` rows
+- area counters are refreshed via `msgAreas.updateStatsForArea()`
+
+### The outbound high water mark is a hard floor
+
+Echomail export runs `WHERE id > msg_idx` against
+`peer_area_subscriptions`. Deleting a message above a peer's high water mark
+drops it from that feed permanently and silently, which on a hub means
+downstream nodes losing mail with no error anywhere.
+
+So pruning never crosses `MIN(msg_idx)` across **enabled** subscriptions for the
+area. Areas with no enabled subscriptions have no export obligation and prune
+freely. The consequence: an enabled peer that has not polled in months pins the
+floor and blocks pruning, which is arguably correct since the mail is still
+owed. The result reports `blockedByPeer` and `blockedCount` so this is visible
+rather than looking like the job silently doing nothing.
+
+### Preview before committing
+
+`GET /admin/msgArea/:shortcode/retention/preview` reports what a prune would
+remove and deletes nothing. Optional `max_age_days` / `max_messages` query
+parameters preview a limit **before it is saved**, which is the safe way to set
+one on an area holding imported mail.
+
+Both preview and the real run call the same `pruneArea()` selection logic, so
+they cannot disagree.
+
 ## body_html Pipeline
 
 All three tossers and the maintenance tool use `formatBodyHtml()` from `terminalText.js` — the single source of truth for HTML generation.

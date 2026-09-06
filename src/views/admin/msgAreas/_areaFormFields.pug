@@ -52,6 +52,8 @@ mixin areaFormFields(prefix, mode, opts)
   - var initMaxAge   = (defaults.max_age        !== undefined) ? defaults.max_age        : 255
   - var initPostAs   = defaults.post_as || 'username'
   - var initNewscan  = (defaults.newscan_default === true) ? 'true' : 'false'
+  - var initMaxAgeDays  = (defaults.max_age_days  !== undefined && defaults.max_age_days  !== null) ? defaults.max_age_days  : ''
+  - var initMaxMessages = (defaults.max_messages !== undefined && defaults.max_messages !== null) ? defaults.max_messages : ''
 
   //- ---- Tab nav ----
   ul.nav.nav-tabs.mb-3(role='tablist')
@@ -61,6 +63,8 @@ mixin areaFormFields(prefix, mode, opts)
       button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#' + prefix + 'tab_access') Access
     li.nav-item(role='presentation')
       button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#' + prefix + 'tab_network') Network
+    li.nav-item(role='presentation')
+      button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#' + prefix + 'tab_retention') Retention
 
   .tab-content
     //- ================================================================
@@ -221,3 +225,36 @@ mixin areaFormFields(prefix, mode, opts)
         p.text-muted.small.mb-0
           em
             | Inline network editing for an area may be added in a future release.
+
+    //- ================================================================
+    //- RETENTION tab -- optional pruning limits
+    //- ================================================================
+    .tab-pane.fade(id=prefix + 'tab_retention' role='tabpanel')
+      .alert.alert-secondary.small
+        strong Both limits are off by default.
+        |  Leave blank for no pruning, which is what every area does until you change it here.
+        |  Pruning runs once a day and never removes a message that an enabled network peer has
+        |  not received yet.
+      .row.mb-3
+        .col-6
+          label.form-label(for=prefix + 'max_age_days') Max Age (days)
+            |
+            span.ms-1(data-bs-toggle='tooltip' title='Remove messages older than this many days, by the message date. Blank or 0 = no limit.') &#9432;
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'max_age_days' name='max_age_days' min=0 value=initMaxAgeDays placeholder='no limit')
+          else
+            input.form-control(type='number' id=prefix + 'max_age_days' name='max_age_days' min=0 placeholder='no limit')
+          small.form-text.text-muted Uses the message's own date, not when it arrived.
+        .col-6
+          label.form-label(for=prefix + 'max_messages') Max Messages
+            |
+            span.ms-1(data-bs-toggle='tooltip' title='Keep only the N newest messages. Blank or 0 = no limit.') &#9432;
+          if mode === 'new'
+            input.form-control(type='number' id=prefix + 'max_messages' name='max_messages' min=0 value=initMaxMessages placeholder='no limit')
+          else
+            input.form-control(type='number' id=prefix + 'max_messages' name='max_messages' min=0 placeholder='no limit')
+          small.form-text.text-muted Oldest messages roll off first.
+      .alert.alert-warning.small.mb-0
+        strong Setting a limit on an imported area prunes immediately.
+        |  A JAM or SMB import keeps its original message dates, so a base imported today can
+        |  already be years old. Preview from the area list before saving a limit on imported mail.
