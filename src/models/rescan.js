@@ -13,6 +13,11 @@
  *
  * So the parser is shared and the two executors are not.
  *
+ * Both executors return { lines, ... counts }. `lines` is the netmail response
+ * body the fixers send back; the counts exist because the admin UI needs a
+ * one-line summary and flash messages render as plain text, so it cannot just
+ * paste the netmail body in.
+ *
  * Grammar, accepted by both:
  *
  *   %RESCAN                     every subscribed area, default window
@@ -154,7 +159,8 @@ async function rescanMessageAreas(opts) {
 	var lines = [];
 
 	if (!appConfig.getBoolean('areafix_rescan_enabled', true)) {
-		return ['  Rescan is disabled on this system. Contact the sysop.'];
+		return { lines: ['  Rescan is disabled on this system. Contact the sysop.'],
+		         disabled: true, rewound: 0, areas: 0, days: 0, full: false };
 	}
 
 	var windowed = resolveWindow(opts);
@@ -172,9 +178,12 @@ async function rescanMessageAreas(opts) {
 
 	var subs = await postgres.query(sql, params);
 	if (!subs || subs.length === 0) {
-		return opts.areatag
-			? ['  ' + opts.areatag + ': not subscribed, nothing to rescan']
-			: ['  No subscribed areas to rescan'];
+		return {
+			lines: [opts.areatag
+				? '  ' + opts.areatag + ': not subscribed, nothing to rescan'
+				: '  No subscribed areas to rescan'],
+			rewound: 0, areas: 0, days: days, full: !!opts.full
+		};
 	}
 
 	var rewound = 0;
@@ -209,7 +218,8 @@ async function rescanMessageAreas(opts) {
 
 	alogger.writeAlog(2, 'AreaFix: rescan rewound ' + rewound + ' area(s) for connection ' +
 		opts.connectionId + (opts.full ? ' (full)' : ' (' + days + ' days)'), 'cyan');
-	return lines;
+	return { lines: lines, rewound: rewound, areas: subs.length, days: days, full: !!opts.full,
+	         capped: windowed.capped, maxDays: windowed.maxDays };
 }
 
 /**
@@ -224,7 +234,8 @@ async function rescanFileAreas(opts) {
 	var lines = [];
 
 	if (!appConfig.getBoolean('areafix_rescan_enabled', true)) {
-		return ['  Rescan is disabled on this system. Contact the sysop.'];
+		return { lines: ['  Rescan is disabled on this system. Contact the sysop.'],
+		         disabled: true, queued: 0, areas: 0, days: 0, full: false };
 	}
 
 	var windowed = resolveWindow(opts);
@@ -242,9 +253,12 @@ async function rescanFileAreas(opts) {
 
 	var subs = await postgres.query(sql, params);
 	if (!subs || subs.length === 0) {
-		return opts.areatag
-			? ['  ' + opts.areatag + ': not subscribed, nothing to rescan']
-			: ['  No subscribed file areas to rescan'];
+		return {
+			lines: [opts.areatag
+				? '  ' + opts.areatag + ': not subscribed, nothing to rescan'
+				: '  No subscribed file areas to rescan'],
+			queued: 0, areas: 0, days: days, full: !!opts.full
+		};
 	}
 
 	var queuedTotal = 0;
@@ -305,7 +319,8 @@ async function rescanFileAreas(opts) {
 
 	alogger.writeAlog(2, 'FileFix: rescan queued ' + queuedTotal + ' file(s) across ' +
 		areasTouched + ' area(s) for connection ' + opts.connectionId, 'cyan');
-	return lines;
+	return { lines: lines, queued: queuedTotal, areas: areasTouched, days: days,
+	         full: !!opts.full, capped: windowed.capped, maxDays: windowed.maxDays };
 }
 
 // ---------------------------------------------------------------------------

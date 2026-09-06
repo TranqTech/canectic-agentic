@@ -361,13 +361,14 @@ async function _cmdRescan(cmd, conn, networkId) {
 		];
 	}
 
-	return await rescan.rescanMessageAreas({
+	var result = await rescan.rescanMessageAreas({
 		connectionId: conn.id,
 		networkId: networkId,
 		areatag: req.areatag,
 		full: req.full,
 		days: req.days
 	});
+	return result.lines;
 }
 
 function _cmdHelp() {

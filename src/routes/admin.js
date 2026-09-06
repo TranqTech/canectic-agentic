@@ -854,7 +854,8 @@ router.get('/peer/:uuid', async (req, res, next) => {
 		grouplist: grouplist || [],
 		fileGrouplist: fileGrouplist || [],
 		networklist: networklist || [],
-		networkAddressMap: networkAddressMap || {}
+		networkAddressMap: networkAddressMap || {},
+		defaultRescanDays: appConfig.getNumber('areafix_rescan_default_days', 60)
 	});
 });
 
@@ -986,6 +987,80 @@ router.post('/connection/:uuid/setenabled', urlencodedParser, requireAdmin, asyn
 	}
 	var peer = await peers.getPeerById(conn.peer_id);
 	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
+});
+
+// Rescan for a connection: the admin-side equivalent of a downlink sending
+// %RESCAN by netmail, and it goes through the same model so the two cannot
+// drift apart.
+//
+// FTN connections carry both message and file areas, so both are rescanned;
+// QWK and NNTP have message areas only.
+router.post('/connection/:uuid/rescan', urlencodedParser, requireAdmin, async (req, res) => {
+	var uuid = req.params.uuid.toLowerCase().trim();
+	var conn = await peerConnections.getConnectionByUUID(uuid);
+	if (!conn) {
+		await flash.setOne(req, 'danger', 'Connection not found.');
+		return res.redirect('/admin/peers');
+	}
+
+	var peer = await peers.getPeerById(conn.peer_id);
+	var back = peer ? '/admin/peer/' + peer.uuid : '/admin/peers';
+
+	var full    = req.body.full === 'true';
+	var areatag = (req.body.areatag || '').trim().toUpperCase();
+	if (!areatag || areatag === 'ALL' || areatag === '*') areatag = null;
+
+	var days = parseInt(req.body.days, 10);
+	if (!days || days <= 0) days = appConfig.getNumber('areafix_rescan_default_days', 60);
+
+	try {
+		var rescan = await import('../models/rescan.js');
+		var parts = [];
+
+		var msgResult = await rescan.rescanMessageAreas({
+			connectionId: conn.id, networkId: conn.network_id,
+			areatag: areatag, full: full, days: days
+		});
+		if (msgResult.disabled) {
+			await flash.setOne(req, 'warning',
+				'Rescan is disabled (areafix_rescan_enabled is off).');
+			return res.redirect(back);
+		}
+		parts.push(msgResult.rewound + ' message area(s) rewound');
+
+		if (conn.connection_type === 'FTN') {
+			var fileResult = await rescan.rescanFileAreas({
+				connectionId: conn.id, networkId: conn.network_id,
+				areatag: areatag, full: full, days: days
+			});
+			if (fileResult.queued > 0 || fileResult.areas > 0) {
+				parts.push(fileResult.queued + ' file(s) re-queued across ' +
+					fileResult.areas + ' file area(s)');
+			}
+		}
+
+		var scope = areatag ? areatag : 'all subscribed areas';
+		var window = full ? 'everything still held' : 'last ' + msgResult.days + ' days';
+		var summary = 'Rescan queued for ' + scope + ' (' + window + '): ' + parts.join(', ') +
+			'. Delivery happens on the next toss cycle.';
+
+		if (msgResult.capped) {
+			summary += ' Window reduced to the system maximum of ' + msgResult.maxDays + ' days.';
+		}
+
+		// The per-area detail is only useful in the log; flash renders plain
+		// text on one line, so a 200-area rescan would be unreadable there.
+		for (var line of (msgResult.lines || [])) {
+			alogger.writeAlog(4, '[admin/rescan] ' + line, 'cyan');
+		}
+
+		await flash.setOne(req, msgResult.rewound > 0 ? 'success' : 'info', summary);
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/rescan] ' + uuid + ': ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Rescan failed: ' + err.message);
+	}
+
+	res.redirect(back);
 });
 
 // Reset NNTP outbound msg_idx for a connection (all areas, or a specific area)

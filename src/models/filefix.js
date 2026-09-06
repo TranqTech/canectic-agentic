@@ -326,13 +326,14 @@ async function _cmdRescan(cmd, conn, networkId) {
 		];
 	}
 
-	return await rescan.rescanFileAreas({
+	var result = await rescan.rescanFileAreas({
 		connectionId: conn.id,
 		networkId: networkId,
 		areatag: req.areatag,
 		full: req.full,
 		days: req.days
 	});
+	return result.lines;
 }
 
 function _cmdHelp() {

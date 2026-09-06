@@ -166,6 +166,16 @@ block content
                             )
                               | Edit
                             |  
+                            button.btn.btn-sm.btn-info(
+                              data-bs-toggle='modal'
+                              data-bs-target='#rescanConnModal'
+                              data-bs-uuid=conn.uuid
+                              data-bs-networkname=(conn.network_name || conn.network_id)
+                              data-bs-conntype=conn.connection_type
+                              title='Resend held mail to this peer'
+                            )
+                              | Rescan
+                            |  
                             if conn.connection_type === 'NNTP'
                               form(method='POST' action=`/admin/connection/${conn.uuid}/resetnntpidx` style='display:inline')
                                 button.btn.btn-sm.btn-secondary(type='submit' title='Reset outbound index — rescan all areas on next toss') Reset Idx
@@ -1055,6 +1065,46 @@ block content
                               )
 
               // Remove Connection Modal
+              #rescanConnModal.modal.fade(tabindex='-1' aria-hidden='true')
+                .modal-dialog.modal-dialog-centered
+                  .modal-content
+                    .modal-header.bg-info.text-dark
+                      h3.modal-title Rescan
+                      button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+                    form#rescanConnForm(method='POST')
+                      .modal-body.bg-dark.text-white
+                        p
+                          | Resend mail this system still holds to 
+                          strong#rescanConnName
+                          | . Same operation a downlink gets by sending 
+                          code %RESCAN
+                          |  by netmail.
+                        .mb-3
+                          label.form-label(for='rescanAreatag') Area
+                          input#rescanAreatag.form-control(type='text' name='areatag' placeholder='ALL')
+                          .form-text.text-muted
+                            | One areatag, or blank / 
+                            code ALL
+                            |  for every subscribed area.
+                        .mb-3
+                          label.form-label(for='rescanDays') Window (days)
+                          input#rescanDays.form-control(type='number' name='days' min=1 placeholder=String(defaultRescanDays))
+                          .form-text.text-muted
+                            | How far back to resend. Blank uses the system default of #{defaultRescanDays} days.
+                        .form-check
+                          input#rescanFull.form-check-input(type='checkbox' name='full' value='true')
+                          label.form-check-label(for='rescanFull') Full rescan: resend everything still held
+                        .alert.alert-warning.mt-3.mb-0.small
+                          | A full rescan of a busy area can push thousands of messages down the link.
+                          | Only content still held is resent, so areas with a retention limit hold less
+                          | than the window asks for, and imported message base history is never resent.
+                          span#rescanFileNote.d-none
+                            |  This is an FTN link, so subscribed file areas are re-queued too.
+                      .modal-footer.bg-dark
+                        button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                        |  
+                        input(type='submit' value='Queue Rescan' class='btn btn-info')
+
               #removeConnModal.modal.fade(tabindex='-1' aria-hidden='true')
                 .modal-dialog.modal-dialog-centered
                   .modal-content
@@ -1413,6 +1463,20 @@ block content
       });
 
       // Remove connection modal — populate from data attributes
+      document.querySelectorAll('[data-bs-target="#rescanConnModal"]').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const d = this.dataset;
+          document.getElementById('rescanConnName').textContent = d.bsNetworkname || '';
+          document.getElementById('rescanConnForm').action = `/admin/connection/${d.bsUuid}/rescan`;
+          document.getElementById('rescanAreatag').value = '';
+          document.getElementById('rescanDays').value = '';
+          document.getElementById('rescanFull').checked = false;
+          // File areas only ride along on FTN links.
+          const note = document.getElementById('rescanFileNote');
+          note.classList.toggle('d-none', d.bsConntype !== 'FTN');
+        });
+      });
+
       document.querySelectorAll('[data-bs-target="#removeConnModal"]').forEach(btn => {
         btn.addEventListener('click', function() {
           const d = this.dataset;

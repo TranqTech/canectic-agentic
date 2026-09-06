@@ -1161,6 +1161,27 @@ no-op rather than an accidental full replay.
 A rescan only ever moves a pointer backwards, so asking for 60 days while
 already further behind than that does not skip mail.
 
+### From the admin panel
+
+`POST /admin/connection/:uuid/rescan`, driven by a **Rescan** button on every
+connection row of the peer page. It goes through the same model functions as the
+netmail path, so the two cannot drift.
+
+The modal takes an areatag (blank or `ALL` for everything), a window in days
+(blank uses `areafix_rescan_default_days`) and a Full checkbox, mirroring the
+netmail grammar. On an FTN connection it rescans message areas **and** file
+areas; QWK and NNTP have message areas only.
+
+Note the existing type-specific **Reset Idx** buttons are unchanged. Those are a
+one-click "full, all areas" for NNTP and QWK, which is a rescan with `/FULL`.
+FTN previously had no reset button at all, so the Rescan button is the first
+way to do this for an FTN link from the UI.
+
+The executors return `{ lines, ... counts }`. `lines` is the netmail response
+body; the counts exist because flash messages render as plain text on one line,
+so the admin path summarises rather than pasting a 200-area body in. The
+per-area detail goes to the log at level 4.
+
 ### What a rescan cannot do
 
 Both are stated in the response text rather than left to surprise the downlink:
