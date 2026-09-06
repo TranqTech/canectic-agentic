@@ -41,6 +41,9 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// Network
 	// -----------------------------------------------------------------------
+	{ key: 'areafix_rescan_default_days', defaultValue: '60',  type: 'number',  category: 'network',     description: 'Days of history a %RESCAN replays when no count is given. /FULL overrides it and replays everything still held.' },
+	{ key: 'areafix_rescan_max_days',     defaultValue: '0',   type: 'number',  category: 'network',     description: 'Ceiling on a requested %RESCAN window in days. 0 = no ceiling. Does not limit /FULL.' },
+	{ key: 'areafix_rescan_enabled',      defaultValue: 'true', type: 'boolean', category: 'network',     description: 'Allow downlinks to request a rescan by netmail. Disable to make %RESCAN a sysop-only operation.' },
 	{ key: 'webport',              defaultValue: '8080',         type: 'number',  category: 'network',     description: 'HTTP server port (requires restart)',                        restart: true },
 	{ key: 'terminalport',         defaultValue: '2023',         type: 'number',  category: 'network',     description: 'Terminal server port - auto-detects TCP vs Telnet (requires restart, 0 = disabled)', restart: true },
 	{ key: 'tcpport',              defaultValue: '0',            type: 'number',  category: 'network',     description: 'Legacy TCP-only server port (0 = disabled, use terminalport instead)', restart: true },

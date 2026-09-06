@@ -23,8 +23,9 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | `ftnNodelist.js` | FTN nodelist database model. `ensureTable()` creates the `ftn_nodelist` table with unique constraint on (network_id, zone, net, node, point). `importNodelist()` performs batch upsert (500/batch) with historical tracking (first_seen preserved, last_seen updated, absent nodes deactivated). Lookups: `getNode`, `getNetHost`, `getNodeHub`, `getRegionCoord`, `getZoneCoord`, `findConnectable` (IBN+hostname+not Down/Hold/Pvt), `searchNodes`, `getNodesInNet`. Historical: `getRecentlyAdded`, `getRecentlyRemoved`, `getNetworkStats`, `getNodeHistory`. Utility: `getImportInfo`, `clearNetwork`. |
 | `ftnRouter.js` | FTN routing resolver. Given a destination FTN address, determines the next-hop peer connection. Cascade: direct connection match → routing rule wildcard match → nodelist direct → coordinator walk (hub → host → region → zone). Returns `routeResult` with nextHop, connection UUID, method, packet flavour, and `nodelistData` for nodelist-resolved routes. Accepts optional `networkId` parameter. |
 | `ftnUtils.js` | FTN utility functions. Message-ID generation, datetime string formatting, system time parsing with timezone offset handling. |
-| `areafix.js` | AreaFix automated echomail area manager. Processes netmail commands from FTN peers to subscribe/unsubscribe echomail areas. Authenticates via `areafix_password` in `connection_data`. Commands: +AREATAG, -AREATAG, %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME. Builds response netmail via `buildResponse()`. |
+| `areafix.js` | AreaFix automated echomail area manager. Processes netmail commands from FTN peers to subscribe/unsubscribe echomail areas. Authenticates via `areafix_password` in `connection_data`. Commands: +AREATAG, -AREATAG, %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME, %RESCAN. Builds response netmail via `buildResponse()`. |
 | `filefix.js` | FileFix automated TIC file area manager. Same command set and authentication as AreaFix, operates on `file_network_areas` + `file_peer_subscriptions`. Handles netmail addressed to 'filefix', 'filemgr', or 'tic'. |
+| `rescan.js` | %RESCAN grammar shared by AreaFix and FileFix, plus the two executors. Only the parser is shared: the mechanisms differ (see Rescan below). |
 | `ftnNetmailAdapter.js` | FTN netmail processor routing. Routes inbound netmail by `ToUser` field to AreaFix ('areafix'/'areamgr'), FileFix ('filefix'/'filemgr'/'tic'), or standard PM delivery. Queues response netmail as outbound packets. |
 | `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
@@ -1106,6 +1107,68 @@ group's `base_dir`; a single shared value would put every area in one directory.
 - `src/models/networkEcholist.js` -- echolist CRUD, import diff/execute, query helpers, sync
 - `src/models/fileEcholist.js` -- filebone CRUD (identical API, different tables)
 - `src/maintenance/echolistBatchSubscribe.js` -- batch subscribe planning and execution
+
+## Rescan
+
+`%RESCAN` lets a downlink ask for content it already missed. Grammar, identical
+on both fixers:
+
+```
+%RESCAN                     every subscribed area, default window
+%RESCAN ALL                 same; `*` also accepted
+%RESCAN AREATAG             one area, default window
+%RESCAN AREATAG 30          one area, last 30 days
+%RESCAN ALL /FULL           everything still held
+%RESCAN AREATAG -FULL       same, dash form accepted
+```
+
+Bare `%RESCAN` meaning "all" is the form SBBSecho, Mystic and Squish implement,
+so it has to work. `/FULL` is the documented flag: a leading dash already means
+unsubscribe in the AreaFix grammar, so `-FULL` is only unambiguous on the same
+line as `%RESCAN`.
+
+Config: `areafix_rescan_default_days` (60), `areafix_rescan_max_days` (0, no
+ceiling; does not restrict `/FULL`), `areafix_rescan_enabled` (true).
+
+Defaulting to a window rather than everything is deliberate. A full rescan of a
+busy area pushes thousands of messages down a link, which is antisocial on a
+shared network.
+
+### The two sides do not share a mechanism
+
+Only the parser is shared. `src/models/rescan.js` carries both executors
+because the underlying models differ:
+
+| | mechanism |
+|---|---|
+| message areas | `peer_area_subscriptions.msg_idx` is a high water mark, so a rescan **rewinds a pointer** |
+| file areas | `file_peer_subscriptions` has no pointer. Distribution is per file per peer in `file_distribution`, so a rescan **re-queues rows to `pending`** and creates them where a file was never queued for that peer |
+
+### Computing the pointer
+
+`msg_idx` is a message **id**; the window is a **date**; the two do not move
+together. An imported message can carry a high id and a very old date, so
+anchoring on "the newest thing older than the cutoff" can land above messages
+inside the window and silently skip exactly the mail that was asked for. This is
+the same trap as the import seal race.
+
+`pointerForWindow()` anchors on the low end instead: the oldest id inside the
+window, minus one. The whole window replays, possibly with a few older messages
+alongside. For a rescan, over-sending is the right direction to err. When
+nothing falls inside the window it returns the current head, making the rescan a
+no-op rather than an accidental full replay.
+
+A rescan only ever moves a pointer backwards, so asking for 60 days while
+already further behind than that does not skip mail.
+
+### What a rescan cannot do
+
+Both are stated in the response text rather than left to surprise the downlink:
+
+- **Retention caps it.** Only content still held is replayed, so an area with
+  `max_age_days` set holds less than a wider window would ask for.
+- **Imported history stays out.** The `imported` flag keeps an SMB/JAM migration
+  from being replayed.
 
 ## sbbsecho.ini Import
 

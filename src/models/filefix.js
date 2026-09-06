@@ -12,8 +12,13 @@
 //   %HELP           Show help text
 //   %PAUSE          Disable all subscriptions
 //   %RESUME         Re-enable all subscriptions
+//   %RESCAN [tag] [days] [/FULL]
+//                   Re-queue file distribution so held files are sent again.
+//                   Note this re-queues file_distribution rows rather than
+//                   rewinding a pointer: file areas have no high water mark.
 
 import * as postgres from '../middleware/db/postgres.js';
+import * as rescan from './rescan.js';
 import * as alogger from '../utils/alogger.js';
 import * as fileNetworkAreas from './fileNetworkAreas.js';
 import { Message } from './ftnClasses.js';
@@ -181,6 +186,7 @@ async function _executeCommand(cmd, conn, networkId) {
 				case 'PAUSE':  return await _cmdPause(conn);
 				case 'AREAS':  return await _cmdAreas(conn, networkId);
 				case 'RESUME': return await _cmdResume(conn);
+				case 'RESCAN': return await _cmdRescan(cmd, conn, networkId);
 				default:       return ['*** Unknown command: %' + cmd.name];
 			}
 		default:
@@ -301,6 +307,34 @@ async function _cmdQuery(conn, networkId) {
 	return lines;
 }
 
+/**
+ * %RESCAN [AREATAG|ALL|*] [days] [/FULL]
+ *
+ * Re-queues file distribution for this connection. Unlike the message side
+ * there is no pointer to rewind: distribution is one row per file per peer in
+ * file_distribution, so a rescan resets those rows to 'pending' and creates
+ * them for files the peer was never queued for.
+ */
+async function _cmdRescan(cmd, conn, networkId) {
+	var defaultDays = appConfig.getNumber('areafix_rescan_default_days', 60);
+	var req = rescan.parseRescanRequest(cmd.raw, defaultDays);
+
+	if (req.error) {
+		return [
+			'*** %RESCAN: ' + req.error,
+			'    Usage: %RESCAN [AREATAG|ALL] [days] [/FULL]'
+		];
+	}
+
+	return await rescan.rescanFileAreas({
+		connectionId: conn.id,
+		networkId: networkId,
+		areatag: req.areatag,
+		full: req.full,
+		days: req.days
+	});
+}
+
 function _cmdHelp() {
 	return [
 		'FileFix Command Reference',
@@ -317,6 +351,11 @@ function _cmdHelp() {
 		'  %HELP           This help text',
 		'  %PAUSE          Disable all file area subscriptions',
 		'  %RESUME         Re-enable all file area subscriptions',
+		'  %RESCAN         Resend recent files for every subscribed area',
+		'  %RESCAN TAG     Resend recent files for one area',
+		'  %RESCAN TAG 30  Resend the last 30 days for one area',
+		'  %RESCAN ALL /FULL',
+		'                  Resend everything still held. Use sparingly.',
 		'',
 		'Powered by Canectic BBS'
 	];

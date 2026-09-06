@@ -12,10 +12,14 @@
 //   %HELP           Show help text
 //   %PAUSE          Disable all subscriptions (keep config)
 //   %RESUME         Re-enable all subscriptions
+//   %RESCAN [tag] [days] [/FULL]
+//                   Rewind the outbound pointer so held mail is sent again.
+//                   Bare, ALL or * means every subscribed area.
 //
 // Password is in the Subject line of the netmail.
 
 import * as postgres from '../middleware/db/postgres.js';
+import * as rescan from './rescan.js';
 import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as networkAreas from './networkAreas.js';
@@ -206,6 +210,8 @@ async function _executeCommand(cmd, conn, networkId) {
 					return await _cmdPause(conn);
 				case 'RESUME':
 					return await _cmdResume(conn);
+				case 'RESCAN':
+					return await _cmdRescan(cmd, conn, networkId);
 				default:
 					return ['*** Unknown command: %' + cmd.name];
 			}
@@ -336,6 +342,34 @@ async function _cmdQuery(conn, networkId) {
 }
 
 // %HELP
+/**
+ * %RESCAN [AREATAG|ALL|*] [days] [/FULL]
+ *
+ * Rewinds this connection's outbound pointer so mail still held is sent again.
+ * Defaults to a window rather than everything: a full rescan of a busy area
+ * pushes thousands of messages down a link, which is antisocial on a shared
+ * network. /FULL is there when it is genuinely wanted.
+ */
+async function _cmdRescan(cmd, conn, networkId) {
+	var defaultDays = appConfig.getNumber('areafix_rescan_default_days', 60);
+	var req = rescan.parseRescanRequest(cmd.raw, defaultDays);
+
+	if (req.error) {
+		return [
+			'*** %RESCAN: ' + req.error,
+			'    Usage: %RESCAN [AREATAG|ALL] [days] [/FULL]'
+		];
+	}
+
+	return await rescan.rescanMessageAreas({
+		connectionId: conn.id,
+		networkId: networkId,
+		areatag: req.areatag,
+		full: req.full,
+		days: req.days
+	});
+}
+
 function _cmdHelp() {
 	return [
 		'AreaFix Command Reference',
@@ -352,6 +386,11 @@ function _cmdHelp() {
 		'  %HELP           This help text',
 		'  %PAUSE          Disable all area subscriptions',
 		'  %RESUME         Re-enable all area subscriptions',
+		'  %RESCAN         Resend recent mail for every subscribed area',
+		'  %RESCAN TAG     Resend recent mail for one area',
+		'  %RESCAN TAG 30  Resend the last 30 days for one area',
+		'  %RESCAN ALL /FULL',
+		'                  Resend everything still held. Use sparingly.',
 		'',
 		'Powered by Canectic BBS'
 	];
