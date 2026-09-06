@@ -177,19 +177,34 @@ threads straight out of the thread table and orders by `last_message`:
 - threads left with no messages are deleted, along with their `user_thread_pointers` rows
 - area counters are refreshed via `msgAreas.updateStatsForArea()`
 
-### The outbound high water mark is a hard floor
+### Retention overrides peer high water marks
 
-Echomail export runs `WHERE id > msg_idx` against
-`peer_area_subscriptions`. Deleting a message above a peer's high water mark
-drops it from that feed permanently and silently, which on a hub means
-downstream nodes losing mail with no error anywhere.
+Echomail export runs `WHERE id > msg_idx` against `peer_area_subscriptions`, so
+a pruned message is simply absent from a lagging peer's next feed. Nothing is
+corrupted by pruning above a watermark.
 
-So pruning never crosses `MIN(msg_idx)` across **enabled** subscriptions for the
-area. Areas with no enabled subscriptions have no export obligation and prune
-freely. The consequence: an enabled peer that has not polled in months pins the
-floor and blocks pruning, which is arguably correct since the mail is still
-owed. The result reports `blockedByPeer` and `blockedCount` so this is visible
-rather than looking like the job silently doing nothing.
+An earlier version treated the lowest enabled `msg_idx` as a hard floor and
+refused to prune past it, so nothing was deleted before every peer had
+collected it. That is the right instinct and the wrong rule: one downlink that
+stopped polling a year ago pins the floor at its old position and retention
+silently does nothing, forever. A hub cannot have its message base held hostage
+by a dead link, and the mail that peer "loses" was never going to be collected.
+
+So retention is authoritative. After a prune, any subscription whose `msg_idx`
+falls below the highest pruned id is dragged forward to it. That changes no
+behaviour on the wire, since export would skip the deleted rows regardless; it
+keeps the recorded position meaningful and stops the loss being invisible.
+
+Both the real run and the preview report it:
+
+```
+peersAdvanced: 1
+peersBehind: [{ peer, connectionUUID, previousIdx, messagesLost }]
+```
+
+and each advance is logged at level 2 naming the peer and the count. A sysop
+setting a limit on an area with a lagging downlink sees what it will cost
+before committing.
 
 ### Preview before committing
 

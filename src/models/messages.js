@@ -1576,10 +1576,13 @@ async function pruneArea(area, dryRun) {
 		maxMessages: area.max_messages || null,
 		messagesRemoved: 0,
 		threadsRemoved: 0,
-		blockedByPeer: false,
+		peersAdvanced: 0,
+		peersBehind: [],
 		outboundFloor: null
 	};
 
+	// Recorded for reporting only. Retention is authoritative: a peer that has
+	// stopped collecting must not be able to pin a hub's message base forever.
 	var floor = await getOutboundFloor(area.id);
 	out.outboundFloor = floor;
 
@@ -1605,20 +1608,19 @@ async function pruneArea(area, dryRun) {
 
 	if (ids.size === 0) return out;
 
-	// Apply the outbound floor. A message at or below the floor has reached
-	// every enabled peer; anything above it has not.
-	var eligible = [];
-	if (floor === null) {
-		eligible = Array.from(ids);
-	} else {
-		for (var id of ids) {
-			if (id <= floor) eligible.push(id);
-		}
-		if (eligible.length < ids.size) {
-			out.blockedByPeer = true;
-			out.blockedCount = ids.size - eligible.length;
-		}
-	}
+	// Retention is authoritative. An earlier version capped pruning at the
+	// lowest enabled peer's high water mark so nothing was deleted before every
+	// peer had collected it. That is the right instinct and the wrong rule: a
+	// single downlink that stopped polling a year ago pins the floor at its old
+	// position and retention silently does nothing forever, which is a worse
+	// outcome than that peer missing mail it was never going to fetch.
+	//
+	// Pruning above a watermark does not corrupt anything. Export selects
+	// `WHERE id > msg_idx`, so a deleted row is simply absent and the peer
+	// receives what survives. The watermarks are dragged forward below purely
+	// so the recorded state stays honest, and which peers lost how much is
+	// reported rather than left silent.
+	var eligible = Array.from(ids);
 
 	if (eligible.length === 0) return out;
 
@@ -1631,6 +1633,34 @@ async function pruneArea(area, dryRun) {
 
 	if (dryRun) {
 		out.messagesRemoved = eligible.length;
+
+		// Report which peers would lose mail. This is the main thing a sysop
+		// needs to see before committing, now that retention overrides
+		// watermarks rather than deferring to them.
+		var dryHighest = 0;
+		for (var dpid of eligible) { if (dpid > dryHighest) dryHighest = dpid; }
+		try {
+			var dryBehind = await postgres.query(
+				"SELECT pas.msg_idx, pc.uuid AS conn_uuid, p.name AS peer_name " +
+				"FROM peer_area_subscriptions pas " +
+				"JOIN peer_connections pc ON pc.id = pas.peer_connection_id " +
+				"JOIN peers p ON p.id = pc.peer_id " +
+				"WHERE pas.area_id = $1 AND COALESCE(pas.msg_idx, 0) < $2",
+				[area.id, dryHighest]
+			);
+			for (var drow of (dryBehind || [])) {
+				var dlost = 0;
+				for (var deid of eligible) { if (deid > (parseInt(drow.msg_idx) || 0)) dlost++; }
+				out.peersBehind.push({
+					peer: drow.peer_name,
+					connectionUUID: drow.conn_uuid,
+					previousIdx: parseInt(drow.msg_idx) || 0,
+					messagesLost: dlost
+				});
+			}
+			out.peersAdvanced = (dryBehind || []).length;
+		} catch (_) { /* reporting only */ }
+
 		// Count threads that would be left with nothing.
 		if (threadIds.length) {
 			var emptied = await postgres.query(
@@ -1646,6 +1676,55 @@ async function pruneArea(area, dryRun) {
 
 	await postgres.write("DELETE FROM " + msgtable + " WHERE id = ANY($1::int[])", [eligible]);
 	out.messagesRemoved = eligible.length;
+
+	// Drag any watermark that now points into deleted space up to the highest
+	// pruned id, and record what each peer lost. Nothing breaks without this,
+	// but leaving msg_idx below a pruned range makes the number meaningless and
+	// hides the loss from anyone reading it later.
+	var highestPruned = 0;
+	for (var pid of eligible) { if (pid > highestPruned) highestPruned = pid; }
+
+	try {
+		var behindRows = await postgres.query(
+			"SELECT pas.id, pas.msg_idx, pc.uuid AS conn_uuid, p.name AS peer_name " +
+			"FROM peer_area_subscriptions pas " +
+			"JOIN peer_connections pc ON pc.id = pas.peer_connection_id " +
+			"JOIN peers p ON p.id = pc.peer_id " +
+			"WHERE pas.area_id = $1 AND COALESCE(pas.msg_idx, 0) < $2",
+			[area.id, highestPruned]
+		);
+
+		for (var row of (behindRows || [])) {
+			var lost = 0;
+			for (var eid of eligible) { if (eid > (parseInt(row.msg_idx) || 0)) lost++; }
+			out.peersBehind.push({
+				peer: row.peer_name,
+				connectionUUID: row.conn_uuid,
+				previousIdx: parseInt(row.msg_idx) || 0,
+				messagesLost: lost
+			});
+		}
+
+		if (behindRows && behindRows.length > 0) {
+			await postgres.write(
+				"UPDATE peer_area_subscriptions SET msg_idx = $1, updated_at = NOW() " +
+				"WHERE area_id = $2 AND COALESCE(msg_idx, 0) < $1",
+				[highestPruned, area.id]
+			);
+			out.peersAdvanced = behindRows.length;
+
+			for (var b of out.peersBehind) {
+				alogger.writeAlog(2,
+					"[retention] " + area.shortcode + ": advanced " + b.peer +
+					" from msg_idx " + b.previousIdx + " to " + highestPruned + "; " +
+					b.messagesLost + " pruned message(s) will not be sent to it",
+					"yellowbright");
+			}
+		}
+	} catch (err) {
+		alogger.writeAlog(2, "pruneArea: watermark advance failed for " + area.shortcode +
+			": " + (err.message || err), "redbright");
+	}
 
 	// Repair thread bookkeeping. The reader lists threads straight out of the
 	// thread table and orders by last_message, so a stale count or a thread with
@@ -1698,7 +1777,7 @@ async function pruneArea(area, dryRun) {
 
 	alogger.writeAlog(3, "[retention] " + area.shortcode + ": removed " + out.messagesRemoved +
 		" message(s), " + out.threadsRemoved + " empty thread(s)" +
-		(out.blockedByPeer ? ", " + out.blockedCount + " held back by a peer high water mark" : ""),
+		(out.peersAdvanced ? ", advanced " + out.peersAdvanced + " lagging peer watermark(s)" : ""),
 		"cyan");
 
 	return out;
