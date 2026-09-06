@@ -465,6 +465,47 @@ async function advanceOutboundIdxForArea(areaId, shortcode, minIdx) {
 
 	var floor = (minIdx === undefined || minIdx === null) ? 0 : parseInt(minIdx);
 
+	// Never seal across a message that did not come from the import.
+	//
+	// head is MAX(id) as of right now, not "the last row the import wrote".
+	// Inbound tossing runs on a separate worker and keeps going throughout a
+	// bulk import, so ordinary mail lands interleaved with imported rows. A
+	// seal straight to MAX(id) jumps msg_idx over that mail and it is never
+	// sent downstream, silently, which is exactly the failure this guard
+	// exists to prevent.
+	//
+	// So stop one short of the oldest non-imported row above the floor. On a
+	// quiet system there is none and the seal behaves as before; on a busy one
+	// it stops at the first real message and the normal outbound pass picks up
+	// from there. Note msg_idx advances past skipped rows anyway during
+	// outbound (curIdx = msg.id runs for every row examined), so stopping
+	// short costs one scan, not correctness.
+	try {
+		var firstNew = await postgres.queryOne(
+			'SELECT COALESCE(MIN(id), 0) AS first_new FROM ' + msgTableForShortcode(shortcode) +
+			' WHERE id > $1 AND COALESCE(imported, false) = false',
+			[floor]
+		);
+		var boundary = firstNew ? parseInt(firstNew.first_new) : 0;
+		if (boundary > 0 && (boundary - 1) < head) {
+			alogger.writeAlog(3,
+				'advanceOutboundIdxForArea: ' + shortcode + ' capping seal at ' + (boundary - 1) +
+				' instead of ' + head + ' — message ' + boundary + ' arrived during the import',
+				'yellowbright'
+			);
+			head = boundary - 1;
+		}
+	} catch (e) {
+		// If the column is missing (area table not yet migrated) fall back to
+		// the old behaviour rather than refusing to seal.
+		alogger.writeAlog(3, 'advanceOutboundIdxForArea: seal boundary check failed for ' +
+			shortcode + ': ' + e.message, 'yellow');
+	}
+
+	if (head <= floor) {
+		return { status: true, updated: 0, head: head, errormessages: [] };
+	}
+
 	var rows = await postgres.query(
 		`UPDATE peer_area_subscriptions
 		 SET msg_idx = $1, updated_at = NOW()

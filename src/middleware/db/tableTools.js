@@ -100,7 +100,14 @@ async function getColumnsFromFile(filepath) {
 	try {
 		var filearray = fs.readFileSync(filepath).toString().split("\n");
 		if (filearray) {
-			colarray = filearray;
+			// Drop blank lines. A raw split leaves an empty entry for a
+			// trailing newline, which lands in the CREATE TABLE column list as
+			// ", )" and fails with a syntax error. The templates happen to be
+			// written without a trailing newline, so the whole file format was
+			// one stray keystroke away from breaking area creation.
+			colarray = filearray.filter(function (line) {
+				return line && line.trim().length > 0;
+			});
 		}
 	} catch (error) {
 		alogger.writeAlog(3, "getColumnsFromFile: could not read " + filepath + ": " + error.message, "redbright");
