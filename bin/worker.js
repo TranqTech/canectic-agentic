@@ -416,6 +416,26 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'purge-outbound-log': {
+				var outboundLog = await import("../src/models/outboundFileLog.js");
+				var outDays = job.data.days || appConfig.getNumber('outbound_log_retention_days', 90);
+				if (outDays > 0) {
+					var outPurged = await outboundLog.purgeOld(outDays);
+					if (outPurged > 0) alogger.writeAlog(3, 'Purged ' + outPurged + ' outbound file log entries older than ' + outDays + ' days', 'cyan');
+				}
+				break;
+			}
+
+			case 'purge-mailer-sessions': {
+				var mailerSess = await import("../src/models/mailerSessions.js");
+				var sessDays = job.data.days || appConfig.getNumber('mailer_session_retention_days', 30);
+				if (sessDays > 0) {
+					var sessPurged = await mailerSess.purgeOld(sessDays);
+					if (sessPurged > 0) alogger.writeAlog(3, 'Purged ' + sessPurged + ' mailer session history rows older than ' + sessDays + ' days', 'cyan');
+				}
+				break;
+			}
+
 			case 'recalc-area-counts': {
 				await msgAreas.recalculateAreaCounts();
 				break;

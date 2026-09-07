@@ -214,6 +214,11 @@ class TransferEngine extends EventEmitter {
 			this.emit('sendComplete', {
 				name:     info.name,
 				filepath: item.filepath,
+				// Carried so the session can total what it actually pushed.
+				// bytesSent was declared and reported for the whole life of the
+				// mailer while nothing ever incremented it, so every session
+				// reported zero bytes out.
+				size:     item.size || 0,
 				floFile:  item.floFile
 			});
 

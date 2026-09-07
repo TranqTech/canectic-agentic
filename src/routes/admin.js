@@ -60,6 +60,9 @@ import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
 import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
+import * as mailerSessions from '../models/mailerSessions.js';
+import * as outboundFileLog from '../models/outboundFileLog.js';
+import * as mailerFormat from '../utils/mailerFormat.js';
 import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
 import * as fileEcholist from '../models/fileEcholist.js';
@@ -831,6 +834,15 @@ router.get('/peer/:uuid', async (req, res, next) => {
 			for (var conn of connections) {
 				conn.subscriptions     = await peerAreaSubscriptions.getSubscriptionsByConnection(conn.id);
 				conn.fileSubscriptions = await filePeerSubscriptions.getSubscriptionsByConnection(conn.id);
+
+				// Mailer diagnostics. Only FTN connections have sessions; a
+				// QWK or NNTP peer is tossed to, never dialled, so asking
+				// would always come back empty and read as a broken link.
+				if (conn.network_type === 'FTN') {
+					conn.sessions     = await mailerSessions.recentForConnection(conn.id, 15);
+					conn.lastInbound  = await inboundFileLog.lastForConnection(conn.id);
+					conn.lastOutbound = await outboundFileLog.lastForConnection(conn.id);
+				}
 			}
 		}
 		grouplist      = await msgGroups.getAllGroupsWithAreas();
@@ -855,7 +867,9 @@ router.get('/peer/:uuid', async (req, res, next) => {
 		fileGrouplist: fileGrouplist || [],
 		networklist: networklist || [],
 		networkAddressMap: networkAddressMap || {},
-		defaultRescanDays: appConfig.getNumber('areafix_rescan_default_days', 60)
+		defaultRescanDays: appConfig.getNumber('areafix_rescan_default_days', 60),
+		fmt: mailerFormat,
+		now: new Date()
 	});
 });
 
@@ -6267,6 +6281,86 @@ router.post('/nodelist-flags/:id/update', urlencodedParser, requireAdmin, async 
 router.post('/nodelist-flags/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
 	await nodelistFlags.remove(parseInt(req.params.id));
 	res.redirect('/admin/nodelist-flags');
+});
+
+// -------------------------------------------------------
+// Mailer diagnostics
+// -------------------------------------------------------
+//
+// Everything here reads mailer_sessions, which the mailer writes one row to per
+// attempt including the ones that never got a socket open. Nothing acts on it,
+// so a peer with no history shows as "never contacted" rather than an error.
+
+router.get('/mailer', requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var windowHours      = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 720);
+
+	var connections = await peerConnections.getAllConnectionsWithPeer();
+
+	// Two queries rather than one: the window is the right frame for "how has
+	// it been going lately" and the wrong one for "when did this last work at
+	// all", which is the question that matters when something has broken.
+	var statsRows   = await mailerSessions.statsByConnection(windowHours);
+	var contactRows = await mailerSessions.lastContactByConnection();
+
+	var statsById   = {};
+	var contactById = {};
+	for (var sr of statsRows)   statsById[sr.peer_connection_id]   = sr;
+	for (var cr of contactRows) contactById[cr.peer_connection_id] = cr;
+
+	var now = new Date();
+	var rows = [];
+	for (var conn of connections) {
+		// Only the mailer produces sessions, so a QWK or NNTP peer would sit
+		// permanently at "never contacted" and read as broken. Its traffic is
+		// tossed, not dialled, and belongs on a different page.
+		if (conn.network_type !== 'FTN') continue;
+		var cd = conn.connection_data || {};
+		rows.push({
+			connection: conn,
+			address:    cd.address || '',
+			summary:    mailerFormat.summariseConnection(
+				statsById[conn.id], contactById[conn.id], { now: now })
+		});
+	}
+
+	// Trouble first: never-contacted peers sort after failing ones, because a
+	// peer that used to work and stopped is the more urgent of the two.
+	rows.sort(function (a, b) {
+		if (a.summary.failing !== b.summary.failing) return a.summary.failing ? -1 : 1;
+		if (a.summary.everContacted !== b.summary.everContacted) {
+			return a.summary.everContacted ? -1 : 1;
+		}
+		var at = a.summary.lastContact ? a.summary.lastContact.getTime() : 0;
+		var bt = b.summary.lastContact ? b.summary.lastContact.getTime() : 0;
+		return bt - at;
+	});
+
+	res.render('admin/mailer/index', {
+		sufficientAccess, title: 'Mailer Diagnostics', activelink: 'mailer',
+		activenav: 'networks', currentuser,
+		rows:        rows,
+		windowHours: windowHours,
+		recent:      await mailerSessions.recent(40),
+		unmatched:   await mailerSessions.recentUnmatched(15),
+		fmt:         mailerFormat,
+		now:         now
+	});
+});
+
+// -------------------------------------------------------
+// Outbound File Log
+// -------------------------------------------------------
+
+router.get('/outbound-log', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var entries = await outboundFileLog.getRecent(500);
+	res.render('admin/outboundLog/index', {
+		sufficientAccess, title: 'Outbound File Log', activelink: 'outbound-log',
+		activenav: 'networks', currentuser, entries, fmt: mailerFormat
+	});
 });
 
 // -------------------------------------------------------

@@ -22,6 +22,7 @@ import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
 import { resolveFileboxPath } from '../utils/fileboxPath.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
+import * as outboundFileLog from '../models/outboundFileLog.js';
 
 class SessionController extends EventEmitter {
 	constructor(transport, role, options) {
@@ -361,7 +362,9 @@ class SessionController extends EventEmitter {
 
 			this.transfer.on('sendComplete', (info) => {
 				this.filesSent++;
+				this.bytesSent += (info.size || 0);
 				alogger.writeClog(5, 'Session ' + this.uuid + ': sent ' + info.name, 'mailer', 'green');
+				this._logOutboundFile(info);
 			});
 			this.transfer.on('receiveComplete', (info) => {
 				this.filesReceived++;
@@ -469,7 +472,9 @@ class SessionController extends EventEmitter {
 
 		wazoo.on('sendComplete', (info) => {
 			this.filesSent++;
+			this.bytesSent += (info.size || 0);
 			alogger.writeClog(5, 'Session ' + this.uuid + ': Wazoo sent ' + info.name, 'mailer', 'green');
+			this._logOutboundFile(info);
 		});
 		wazoo.on('receiveComplete', (info) => {
 			this.filesReceived++;
@@ -861,14 +866,22 @@ class SessionController extends EventEmitter {
 			}
 		}
 
-		this.emit('sessionEnd', {
+		// Everything the history row needs travels with the event. The manager
+		// cannot ask for it afterwards: by the time it handles this the
+		// transport is closing and the protocol handler is on its way out.
+		this.emit('sessionEnd', Object.assign({
 			uuid:          this.uuid,
+			role:          this.role,
 			reason:        reason,
 			filesSent:     this.filesSent,
 			filesReceived: this.filesReceived,
 			filesToToss:   this.filesToToss,
+			bytesSent:     this.bytesSent,
+			bytesReceived: this.bytesReceived,
+			startedAt:     new Date(this.startTime),
+			endedAt:       new Date(),
 			duration:      Math.floor((Date.now() - this.startTime) / 1000)
-		});
+		}, this.getPeerInfo()));
 	}
 
 	// Delay socket close by a short interval so the peer's userspace has
@@ -882,6 +895,33 @@ class SessionController extends EventEmitter {
 				self.transport.close();
 			}
 		}, ms);
+	}
+
+	// Record a file the peer acknowledged. Sends are logged on M_GOT, so a row
+	// means the file landed, not merely that we started pushing it.
+	_logOutboundFile(info) {
+		var cd = this.peerConnection ? (this.peerConnection.connection_data || {}) : {};
+		outboundFileLog.logFile(info.name, info.filepath || info.path || null, info.size || 0, {
+			address: cd.address || (this.peerAddresses[0] || '').split('@')[0],
+			connectionId: this.peerConnection ? this.peerConnection.id : null,
+			peerName: this.peerName,
+			sessionUuid: this.uuid
+		}).catch(function () {});
+	}
+
+	// What the session knows about the far end, for the history row. Gathered
+	// here rather than in the manager because most of it lives on the protocol
+	// handler and is gone once the socket closes.
+	getPeerInfo() {
+		var opts = (this.protocol && this.protocol._peerOptions) || {};
+		return {
+			protocol:       this.protocolType || 'binkp',
+			remoteHost:     this.transport ? this.transport.remoteAddress : null,
+			peerAddresses:  this.peerAddresses || [],
+			peerSoftware:   opts.version || null,
+			peerSystem:     opts.systemName || this.peerName || null,
+			peerSysop:      opts.sysopName || null
+		};
 	}
 
 	// -----------------------------------------------------------------------

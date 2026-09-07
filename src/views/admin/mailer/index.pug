@@ -1,0 +1,179 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-11.offset-lg-1.col-12
+        h2.mb-1
+          i.bi.bi-activity.me-2
+          | Mailer Diagnostics
+        p.text-muted.small.mb-4
+          | One row is recorded for every session attempt, including connects that never
+          | opened a socket. FTN peers only: QWK and NNTP peers are tossed to, not dialled.
+
+        //- ------------------------------------------------------------------
+        //- Peer rollup
+        //- ------------------------------------------------------------------
+        .card.mb-4
+          .card-header.d-flex.justify-content-between.align-items-center
+            span
+              i.bi.bi-hdd-network.me-2
+              | Peers
+            .btn-group.btn-group-sm
+              each h in [24, 72, 168, 720]
+                a.btn(
+                  href='/admin/mailer?hours=' + h
+                  class=(windowHours === h ? 'btn-primary' : 'btn-outline-secondary')
+                )= h < 168 ? h + 'h' : (h / 24) + 'd'
+          .card-body.p-0
+            if rows && rows.length > 0
+              .table-responsive
+                table.table.table-sm.table-hover.mb-0
+                  thead
+                    tr
+                      th Peer
+                      th Address
+                      th Network
+                      th.text-end Last contact
+                      th.text-end Last success
+                      th.text-end(title='Attempts in the selected window') Tries
+                      th.text-end OK
+                      th.text-end(title='Files and bytes received in the window') In
+                      th.text-end(title='Files and bytes sent in the window') Out
+                      th Software
+                  tbody
+                    each row in rows
+                      - var s = row.summary
+                      tr(class=s.failing ? 'table-danger' : '')
+                        td
+                          a(href='/admin/peer/' + row.connection.peer_uuid)= row.connection.peer_name
+                          if !row.connection.active
+                            span.badge.bg-secondary.ms-2 inactive
+                          else if !row.connection.poll_enabled
+                            span.badge.bg-secondary.ms-2(title='This system never dials out to this peer') no poll
+                        td.monospace.small= row.address || '-'
+                        td.small.text-muted= row.connection.network_name
+                        td.text-end.small
+                          if s.lastContactAge
+                            span(title=s.lastContact.toISOString())= s.lastContactAge
+                            if s.lastOutcome && s.lastOutcome !== 'complete'
+                              |  
+                              span.badge(class='bg-' + fmt.outcomeClass(s.lastOutcome))= fmt.outcomeLabel(s.lastOutcome)
+                          else
+                            span.text-muted never
+                        td.text-end.small
+                          if s.lastSuccessAge
+                            span(title=s.lastSuccess.toISOString())= s.lastSuccessAge
+                          else if s.everContacted
+                            span.text-danger never
+                          else
+                            span.text-muted -
+                        td.text-end.small= s.attempts || '-'
+                        td.text-end.small
+                          if s.successRate === null
+                            span.text-muted -
+                          else
+                            span(class=s.successRate === 100 ? '' : 'text-warning')= s.successRate + '%'
+                        td.text-end.small.monospace
+                          if s.filesReceived
+                            = s.filesReceived + ' / ' + fmt.formatBytes(s.bytesReceived)
+                          else
+                            span.text-muted -
+                        td.text-end.small.monospace
+                          if s.filesSent
+                            = s.filesSent + ' / ' + fmt.formatBytes(s.bytesSent)
+                          else
+                            span.text-muted -
+                        td.small.text-muted= s.peerSoftware || '-'
+                      if s.failing && s.lastReason
+                        tr.table-danger
+                          td
+                          td.small.text-muted(colspan='9')
+                            i.bi.bi-arrow-return-right.me-1
+                            = s.lastReason
+            else
+              .p-4.text-center.text-muted No FTN peer connections configured.
+
+        //- ------------------------------------------------------------------
+        //- Recent sessions
+        //- ------------------------------------------------------------------
+        .card.mb-4
+          .card-header
+            i.bi.bi-clock-history.me-2
+            | Recent sessions
+          .card-body.p-0
+            if recent && recent.length > 0
+              .table-responsive
+                table.table.table-sm.table-hover.mb-0
+                  thead
+                    tr
+                      th
+                      th Address
+                      th Dir
+                      th When
+                      th.text-end Duration
+                      th.text-end Sent
+                      th.text-end Received
+                      th Host
+                      th Detail
+                  tbody
+                    each sess in recent
+                      tr
+                        td
+                          span.badge(class='bg-' + fmt.outcomeClass(sess.outcome))= fmt.outcomeLabel(sess.outcome)
+                        td.monospace.small= sess.remote_address || '-'
+                        td.small.text-muted= sess.direction === 'in' ? 'in' : 'out'
+                        td.small(title=sess.started_at)= fmt.relativeAge(sess.started_at, now) || '-'
+                        td.text-end.small= fmt.formatDuration(sess.duration_seconds)
+                        td.text-end.small.monospace= sess.files_sent ? (sess.files_sent + ' / ' + fmt.formatBytes(sess.bytes_sent)) : '-'
+                        td.text-end.small.monospace= sess.files_received ? (sess.files_received + ' / ' + fmt.formatBytes(sess.bytes_received)) : '-'
+                        td.small.text-muted= sess.remote_host || '-'
+                        td.small.text-muted= sess.outcome === 'complete' ? (sess.peer_software || '') : (sess.reason || '')
+            else
+              .p-4.text-center.text-muted
+                | No sessions recorded yet. Rows appear here after the mailer next runs.
+
+        //- ------------------------------------------------------------------
+        //- Unmatched
+        //- ------------------------------------------------------------------
+        if unmatched && unmatched.length > 0
+          .card.mb-4
+            .card-header
+              i.bi.bi-question-circle.me-2
+              | Sessions with no peer record
+              small.text-muted.ms-2 Inbound calls from unknown systems, and nodelist-resolved outbound
+            .card-body.p-0
+              .table-responsive
+                table.table.table-sm.table-hover.mb-0
+                  thead
+                    tr
+                      th
+                      th Address
+                      th Dir
+                      th When
+                      th Host
+                      th System
+                      th Detail
+                  tbody
+                    each sess in unmatched
+                      tr
+                        td
+                          span.badge(class='bg-' + fmt.outcomeClass(sess.outcome))= fmt.outcomeLabel(sess.outcome)
+                        td.monospace.small= sess.remote_address || (sess.remote_addresses && sess.remote_addresses[0]) || '-'
+                        td.small.text-muted= sess.direction === 'in' ? 'in' : 'out'
+                        td.small(title=sess.started_at)= fmt.relativeAge(sess.started_at, now) || '-'
+                        td.small.text-muted= sess.remote_host || '-'
+                        td.small.text-muted= sess.peer_system || '-'
+                        td.small.text-muted= sess.reason || ''
+
+        .mb-5
+          a.btn.btn-sm.btn-outline-secondary.me-2(href='/admin/inbound-log')
+            i.bi.bi-inbox.me-1
+            |  Inbound file log
+          a.btn.btn-sm.btn-outline-secondary.me-2(href='/admin/outbound-log')
+            i.bi.bi-box-arrow-up.me-1
+            |  Outbound file log
+          a.btn.btn-sm.btn-outline-secondary(href='/admin/peers')
+            i.bi.bi-hdd-network.me-1
+            |  Peers

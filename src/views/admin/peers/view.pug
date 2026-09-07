@@ -457,6 +457,65 @@ block content
                               if !anyFileEnabled
                                 p.text-muted None
 
+                      //- ----------------------------------------------------
+                      //- Mailer diagnostics
+                      //-
+                      //- FTN only. A QWK or NNTP peer is tossed to rather than
+                      //- dialled, so it has no sessions and this would sit
+                      //- permanently empty and read as a broken link.
+                      //- ----------------------------------------------------
+                      if conn.network_type === 'FTN'
+                        .row.mt-3
+                          .col-12
+                            .card
+                              .card-header.d-flex.justify-content-between.align-items-center
+                                span
+                                  i.bi.bi-activity.me-2
+                                  | Recent sessions
+                                  if conn.lastInbound || conn.lastOutbound
+                                    small.text-muted.ms-3
+                                      if conn.lastInbound
+                                        span.me-3
+                                          i.bi.bi-arrow-down.me-1
+                                          span.monospace= conn.lastInbound.filename
+                                          |  #{fmt.formatBytes(conn.lastInbound.file_size)}, #{fmt.relativeAge(conn.lastInbound.received_at, now)} ago
+                                      if conn.lastOutbound
+                                        span
+                                          i.bi.bi-arrow-up.me-1
+                                          span.monospace= conn.lastOutbound.filename
+                                          |  #{fmt.formatBytes(conn.lastOutbound.file_size)}, #{fmt.relativeAge(conn.lastOutbound.sent_at, now)} ago
+                                a.btn.btn-xs.btn-sm.btn-outline-secondary(href='/admin/mailer')
+                                  | All peers
+                              .card-body.p-0
+                                if conn.sessions && conn.sessions.length > 0
+                                  .table-responsive
+                                    table.table.table-sm.table-hover.mb-0
+                                      thead
+                                        tr
+                                          th
+                                          th Dir
+                                          th When
+                                          th.text-end Duration
+                                          th.text-end Sent
+                                          th.text-end Received
+                                          th Host
+                                          th Detail
+                                      tbody
+                                        each sess in conn.sessions
+                                          tr
+                                            td
+                                              span.badge(class='bg-' + fmt.outcomeClass(sess.outcome))= fmt.outcomeLabel(sess.outcome)
+                                            td.small.text-muted= sess.direction === 'in' ? 'in' : 'out'
+                                            td.small(title=sess.started_at)= fmt.relativeAge(sess.started_at, now) || '-'
+                                            td.text-end.small= fmt.formatDuration(sess.duration_seconds)
+                                            td.text-end.small.monospace= sess.files_sent ? (sess.files_sent + ' / ' + fmt.formatBytes(sess.bytes_sent)) : '-'
+                                            td.text-end.small.monospace= sess.files_received ? (sess.files_received + ' / ' + fmt.formatBytes(sess.bytes_received)) : '-'
+                                            td.small.text-muted= sess.remote_host || '-'
+                                            td.small.text-muted= sess.outcome === 'complete' ? (sess.peer_software || '') : (sess.reason || '')
+                                else
+                                  .p-3.text-center.text-muted.small
+                                    | No sessions recorded for this connection yet.
+
               // -------------------------------------------------------
               // Modals
               // -------------------------------------------------------

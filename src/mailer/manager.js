@@ -20,6 +20,7 @@ import { WsTransport } from './transports/ws.js';
 import { SessionController } from './session.js';
 import { BsoScanner } from './bsoScanner.js';
 import * as peerConnections from '../models/peerConnections.js';
+import * as mailerSessions from '../models/mailerSessions.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
 
@@ -340,6 +341,7 @@ class MailerManager extends EventEmitter {
 			transport.once('error', (err) => {
 				alogger.writeClog(3, 'Mailer: outbound connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
 				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
+				this._recordConnectFailure(conn, host, port, 'binkp', 'tcp: ' + err.message);
 				// Record failure for backoff. Pre-session failures go here;
 				// post-handshake failures are recorded in the sessionEnd
 				// handler below.
@@ -363,6 +365,7 @@ class MailerManager extends EventEmitter {
 			wsTransport.once('error', (err) => {
 				alogger.writeClog(3, 'Mailer: outbound WS connect to ' + wsUrl + ' failed: ' + err.message, 'mailer', 'redbright');
 				this.emit('pollFailed', { connectionUUID: conn.uuid, error: err.message });
+				this._recordConnectFailure(conn, wsUrl, null, 'binkp', 'ws: ' + err.message);
 				peerConnections.recordConnectFailure(conn.uuid, 'ws: ' + err.message, {
 					capHours: appConfig.getNumber('mailer_backoff_max_hours', 24)
 				}).catch(() => {});
@@ -407,6 +410,15 @@ class MailerManager extends EventEmitter {
 		transport.once('error', (err) => {
 			alogger.writeClog(3, 'Mailer: nodelist connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
 			this.emit('pollFailed', { address: destinationAddress, error: err.message });
+			// No peer record, so this lands in the unmatched list. Worth
+			// keeping: it is a route we took without a configured peer.
+			mailerSessions.record({
+				direction: 'out', remoteAddress: destinationAddress,
+				remoteHost: host + ':' + port, protocol: 'binkp',
+				outcome: mailerSessions.OUTCOME_CONNECT_FAILED,
+				reason: 'nodelist: ' + err.message,
+				startedAt: new Date(), endedAt: new Date(), durationSeconds: 0
+			}).catch(() => {});
 		});
 	}
 
@@ -433,6 +445,11 @@ class MailerManager extends EventEmitter {
 				'mailer', 'cyan'
 			);
 			this.emit('sessionEnd', info);
+
+			// History row. Written for every session either way round, so the
+			// peer page can answer "what happened the last five times" without
+			// anyone having to keep logs.
+			this._recordSessionHistory(session, info);
 
 			// Record backoff state for outbound (caller) sessions. Inbound
 			// answerer sessions don't affect our outbound poll schedule.
@@ -468,6 +485,80 @@ class MailerManager extends EventEmitter {
 
 		session.start();
 		this.emit('sessionStart', session.getStatus());
+	}
+
+	// -----------------------------------------------------------------------
+	// Session history
+	// -----------------------------------------------------------------------
+
+	_recordSessionHistory(session, info) {
+		var conn = session.peerConnection || null;
+		var addresses = info.peerAddresses || [];
+
+		// The address we file it under: the configured one if we know the
+		// peer, otherwise the first AKA the far end presented. Domains are
+		// stripped so a row matches how addresses are stored everywhere else.
+		var cd = conn ? (conn.connection_data || {}) : {};
+		var address = cd.address || (addresses[0] || '').split('@')[0] || null;
+
+		mailerSessions.record({
+			uuid:             info.uuid,
+			direction:        (info.role || session.role) === 'caller' ? 'out' : 'in',
+			peerId:           conn ? conn.peer_id : null,
+			peerConnectionId: conn ? conn.id : null,
+			networkId:        conn ? conn.network_id : null,
+			remoteAddress:    address,
+			remoteAddresses:  addresses,
+			remoteHost:       info.remoteHost,
+			protocol:         info.protocol,
+			peerSoftware:     info.peerSoftware,
+			peerSystem:       info.peerSystem,
+			peerSysop:        info.peerSysop,
+			outcome:          info.reason === 'complete' ? 'complete' : this._classifyOutcome(info.reason),
+			reason:           info.reason,
+			filesSent:        info.filesSent,
+			filesReceived:    info.filesReceived,
+			bytesSent:        info.bytesSent,
+			bytesReceived:    info.bytesReceived,
+			startedAt:        info.startedAt,
+			endedAt:          info.endedAt,
+			durationSeconds:  info.duration
+		}).catch(() => {});
+	}
+
+	// Session end reasons are free text from several places. Bucketing them
+	// lets the dashboard group failures without losing the original string,
+	// which is kept alongside in `reason`.
+	_classifyOutcome(reason) {
+		var r = String(reason || '').toLowerCase();
+		if (r.indexOf('timeout') !== -1 || r.indexOf('timed out') !== -1) return 'timeout';
+		if (r.indexOf('auth') !== -1 || r.indexOf('password') !== -1) return 'auth_failed';
+		if (r.indexOf('busy') !== -1) return 'busy';
+		return 'error';
+	}
+
+	// A connect that never became a session. These matter most: the peer that
+	// is failing hardest is the one that never gets far enough to have a
+	// session at all, and recording only completed handshakes would leave it
+	// looking like the quietest node on the board.
+	_recordConnectFailure(conn, host, port, protocol, message) {
+		var cd = conn ? (conn.connection_data || {}) : {};
+		mailerSessions.record({
+			uuid:             null,
+			direction:        'out',
+			peerId:           conn ? conn.peer_id : null,
+			peerConnectionId: conn ? conn.id : null,
+			networkId:        conn ? conn.network_id : null,
+			remoteAddress:    cd.address || null,
+			remoteAddresses:  [],
+			remoteHost:       host ? (host + (port ? ':' + port : '')) : null,
+			protocol:         protocol || 'binkp',
+			outcome:          mailerSessions.OUTCOME_CONNECT_FAILED,
+			reason:           message,
+			startedAt:        new Date(),
+			endedAt:          new Date(),
+			durationSeconds:  0
+		}).catch(() => {});
 	}
 
 	_removeSession(session) {

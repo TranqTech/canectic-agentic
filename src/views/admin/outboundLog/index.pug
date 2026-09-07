@@ -1,0 +1,58 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-1
+          i.bi.bi-box-arrow-up.me-2
+          | Outbound File Log
+        p.text-muted.small.mb-4
+          | Files a peer acknowledged receiving. A row means the transfer completed,
+          | not merely that it started.
+
+        .card
+          .card-body
+            if entries && entries.length > 0
+              table#outboundLogTable.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Filename
+                    th Peer Address
+                    th Peer Name
+                    th Size
+                    th Session
+                    th Sent
+                tbody
+                  each entry in entries
+                    tr
+                      td.monospace.small= entry.filename
+                      td.monospace.small= entry.peer_address || '-'
+                      td.small= entry.peer_name || '-'
+                      td.small.text-end= fmt.formatBytes(entry.file_size)
+                      td.monospace.small.text-muted= entry.session_uuid ? entry.session_uuid.substring(0, 8) : '-'
+                      td.small= new Date(entry.sent_at).toLocaleString()
+            else
+              .text-center.text-muted.p-4
+                | Nothing sent yet, or entries have aged out of the retention window.
+
+        .mt-3.mb-5
+          a.btn.btn-sm.btn-outline-secondary.me-2(href='/admin/mailer')
+            i.bi.bi-activity.me-1
+            |  Mailer diagnostics
+          a.btn.btn-sm.btn-outline-secondary(href='/admin/inbound-log')
+            i.bi.bi-inbox.me-1
+            |  Inbound file log
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable &&
+          document.getElementById('outboundLogTable')) {
+        jQuery('#outboundLogTable').DataTable({
+          paging: true,
+          pageLength: 50,
+          order: [[5, 'desc']]
+        });
+      }
+    });

@@ -129,6 +129,34 @@ export async function registerSchedules() {
 		}
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily outbound file log purge
+		// -----------------------------------------------------------------
+		var outboundLogDays = appConfig.getNumber('outbound_log_retention_days', 90);
+		if (outboundLogDays > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-outbound-log-daily', {
+				pattern: '0 52 3 * * *',   // 3:52 AM daily
+			}, {
+				name: 'purge-outbound-log',
+				data: { days: outboundLogDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
+		// Maintenance: daily mailer session history purge
+		// -----------------------------------------------------------------
+		var mailerSessionDays = appConfig.getNumber('mailer_session_retention_days', 30);
+		if (mailerSessionDays > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-mailer-sessions-daily', {
+				pattern: '0 54 3 * * *',   // 3:54 AM daily
+			}, {
+				name: 'purge-mailer-sessions',
+				data: { days: mailerSessionDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily echolist/filebone auto-scan
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('scan-echolists-daily', {

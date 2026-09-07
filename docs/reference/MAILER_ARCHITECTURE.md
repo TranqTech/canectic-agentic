@@ -540,6 +540,89 @@ Config: `mailer_backoff_enabled` (default `true`) to toggle globally, `mailer_ba
 
 Model helpers: `peerConnections.recordConnectFailure`, `recordConnectSuccess`, `resetBackoff`, `isInBackoff`, `computeBackoffDelayMs`. JSONB writes use `jsonb_set` so concurrent updates don't clobber sysop config edits on the same row.
 
+### Session History and Diagnostics
+
+Backoff state above is *current* state: it is overwritten on every attempt, so it
+answers "is this peer in trouble right now" and cannot answer "what happened the
+last five times we called". `mailer_sessions` keeps the history.
+
+One row is written per attempt, in both directions, including attempts that never
+opened a socket. That last part matters: the peer failing hardest is the one that
+never gets far enough to have a session, and recording only completed handshakes
+would leave it looking like the quietest node on the board.
+
+Columns of note:
+
+- `direction` -- `out` for caller sessions, `in` for answerer
+- `outcome` -- `complete`, `connect_failed`, `auth_failed`, `timeout`, `busy`,
+  `error`. Session end reasons are free text from several places, so
+  `MailerManager._classifyOutcome()` buckets them for grouping while `reason`
+  keeps the original string
+- `peer_software` / `peer_system` / `peer_sysop` -- the peer's M_NUL `VER`, `SYS`
+  and `ZYZ` lines, useful when a remote's behaviour turns out to be
+  implementation specific
+- `remote_addresses` -- every AKA the far end presented, as JSONB
+- `bytes_sent` / `bytes_received` -- BIGINT, so they arrive back from postgres as
+  strings. `utils/mailerFormat.js` accepts both
+
+`peer_connection_id` is null for inbound calls from systems with no peer record
+and for nodelist-resolved outbound. Those are listed separately in the admin view
+rather than dropped: the first may be someone trying to link, the second is a
+route taken without a configured peer.
+
+Capture points:
+
+- `SessionController._endSession()` -- the `sessionEnd` event carries everything
+  the history row needs, gathered by `getPeerInfo()`. It has to travel with the
+  event: by the time the manager handles it the transport is closing and the
+  protocol handler is on its way out
+- `MailerManager._recordSessionHistory()` -- writes the row
+- `MailerManager._recordConnectFailure()` -- the three `transport.once('error')`
+  paths, for attempts that never became a session
+
+Writes are diagnostic only. Nothing reads them to make a decision, and a failed
+insert is logged and swallowed rather than taking a session down with it.
+
+### Outbound File Log
+
+`inbound_file_log` has always recorded what arrived. `outbound_file_log` is its
+mirror, written on `M_GOT`, so a row means the peer acknowledged the file rather
+than that we started pushing it.
+
+Kept as a separate table rather than a `direction` column on the inbound one
+because the FTN tosser looks packets up in that table by filename to trace who
+sent them, and a widened table would have to exclude our own sends from every one
+of those lookups.
+
+Note that `SessionController.bytesSent` was declared, reported in `getStatus()`
+and carried through the whole mailer while nothing ever incremented it, because
+`TransferEngine`'s `sendComplete` did not say how big the file was. Every session
+reported zero bytes out, which looked plausible next to a working inbound count.
+Fixed by adding `size` to that payload.
+
+### Admin Views
+
+- `/admin/mailer` -- per-peer rollup over a selectable window (24h / 72h / 7d /
+  30d) with last contact, last success, success rate and traffic each way, then a
+  recent-sessions feed across all peers, then sessions with no peer record.
+  Trouble sorts first. FTN connections only: a QWK or NNTP peer is tossed to
+  rather than dialled, so it has no sessions and would read as permanently broken
+- `/admin/peer/:uuid` -- recent sessions per connection, plus the last packet in
+  and out
+- `/admin/outbound-log` -- the outbound file log, mirroring `/admin/inbound-log`
+
+`utils/mailerFormat.js` holds the presentation logic (byte formatting, relative
+ages, outcome labelling, the per-connection summary) so the two views cannot
+disagree about what "ok" or "stale" means. A peer that has never been contacted is
+deliberately **not** flagged: a newly added node has not failed, and painting it
+red before it has had a chance to poll is noise in the view meant to cut noise.
+Likewise a connection with no attempts in the window reports a null success rate
+rather than 0%, since zero of zero is not a failure.
+
+Retention: `mailer_session_retention_days` (default 30) and
+`outbound_log_retention_days` (default 90), purged by daily maintenance jobs
+alongside the existing inbound log purge.
+
 ### Connection Deduplication
 
 Before initiating an outbound call, check the active session pool. If a session to the same peer (by FTN address) already exists (inbound or outbound), skip the outbound call -- the existing session will handle the file exchange. For multi-address sessions, `_hasSessionForAddress()` checks both the session's `peerAddresses` array and all `peerConnections[].connection_data.address` entries, so a session already handling multiple AKAs correctly blocks duplicate outbound polls to any of those addresses.

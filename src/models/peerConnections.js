@@ -640,6 +640,24 @@ async function getConnectionsByPeer(peerId) {
 	return dblist || [];
 }
 
+/**
+ * Every connection with its peer and network names attached, for views that
+ * list the whole board rather than one peer. Inactive connections are included
+ * so the mailer dashboard can show a link that was turned off rather than
+ * quietly dropping it from the list.
+ */
+async function getAllConnectionsWithPeer() {
+	var dblist = await postgres.query(
+		`SELECT pc.*, mn.name AS network_name, mn.network_type, mn.domain,
+		        p.name AS peer_name, p.uuid AS peer_uuid, p.sysop_name
+		 FROM peer_connections pc
+		 JOIN message_networks mn ON mn.id = pc.network_id
+		 JOIN peers p ON p.id = pc.peer_id
+		 ORDER BY p.name ASC, mn.name ASC`
+	);
+	return dblist || [];
+}
+
 async function getConnectionsByNetwork(networkId) {
 	var dblist = await postgres.query(
 		`SELECT pc.*, p.name AS peer_name, p.sysop_name, p.uuid AS peer_uuid
@@ -755,6 +773,7 @@ export {
 	updateConnectionData,
 	removeConnection,
 	getConnectionsByPeer,
+	getAllConnectionsWithPeer,
 	getConnectionsByNetwork,
 	getConnectionByUUID,
 	getConnectionByUUIDWithNetwork,

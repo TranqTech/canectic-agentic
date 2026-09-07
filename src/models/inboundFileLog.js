@@ -54,6 +54,31 @@ async function getRecent(limit) {
 }
 
 /**
+ * Most recent file received from a connection, for the "last packet in" line
+ * on the peer diagnostics panel. Mirrors outboundFileLog.lastForConnection.
+ */
+async function lastForConnection(connectionId) {
+	if (!connectionId) return null;
+	return await postgres.queryOne(
+		'SELECT * FROM inbound_file_log WHERE peer_connection_id = $1 ' +
+		'ORDER BY received_at DESC LIMIT 1',
+		[parseInt(connectionId)]
+	);
+}
+
+/**
+ * Recent files received from one connection, newest first.
+ */
+async function recentForConnection(connectionId, limit) {
+	if (!connectionId) return [];
+	return await postgres.query(
+		'SELECT * FROM inbound_file_log WHERE peer_connection_id = $1 ' +
+		'ORDER BY received_at DESC LIMIT $2',
+		[parseInt(connectionId), Math.min(parseInt(limit) || 10, 100)]
+	) || [];
+}
+
+/**
  * Purge entries older than N days.
  */
 async function purgeOld(days) {
@@ -67,4 +92,5 @@ async function purgeOld(days) {
 	return result.rowCount || 0;
 }
 
-export { logFile, lookupSender, lookupByPath, getRecent, purgeOld };
+export { logFile, lookupSender, lookupByPath, lastForConnection,
+	recentForConnection, getRecent, purgeOld };
