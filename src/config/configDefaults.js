@@ -54,7 +54,8 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'sitetld',             defaultValue: '',              type: 'string',  category: 'network',     description: 'Cookie domain (e.g. example.com)' },
 	{ key: 'sitedomain',          defaultValue: '',              type: 'string',  category: 'network',     description: 'Full domain for URL generation' },
 	{ key: 'corsorigin',          defaultValue: '',              type: 'string',  category: 'network',     description: 'CORS allowed origin' },
-	{ key: 'allow_netmail_relay', defaultValue: 'false',         type: 'boolean', category: 'network',     description: 'Allow FTN netmail relay through this system' },
+	{ key: 'netmail_relay_mode', defaultValue: 'nodelist',       type: 'string',  category: 'network',     description: 'FTN netmail relay: nodelist (default, relay only when both sender and recipient are listed in the same network nodelist), off (no relay), on (relay anything routable, including between networks this system carries)' },
+	{ key: 'allow_netmail_relay', defaultValue: 'false',         type: 'boolean', category: 'network',     description: 'Deprecated and ignored. Replaced by netmail_relay_mode' },
 	{ key: 'netmail_ping_enabled', defaultValue: 'true',         type: 'boolean', category: 'network',     description: 'Answer netmail addressed to "Ping" with a Pong showing the route taken' },
 	{ key: 'PacketPwd',           defaultValue: '',              type: 'string',  category: 'network',     description: 'Default FTN packet password' },
 

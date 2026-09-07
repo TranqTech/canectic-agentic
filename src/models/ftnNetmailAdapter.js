@@ -16,6 +16,8 @@ import { storeAttachments } from './pmAttachments.js';
 import * as netmailRoutes from './netmailRoutes.js';
 import { resolveFileboxPath } from '../utils/fileboxPath.js';
 import * as ftnVia from '../utils/ftnVia.js';
+import * as ftnNodelist from './ftnNodelist.js';
+import { parseFtnAddress } from './ftnRouter.js';
 import appConfig from "../config/appConfig.js";
 
 // ============================================================
@@ -43,7 +45,18 @@ async function importFtnNetmail(ftnMessage) {
 
   if (!isLocal) {
     // Transit/relay mail
-    if (appConfig.getBoolean('allow_netmail_relay', false)) {
+    var relayMode = currentRelayMode();
+    var relayGate = { allowed: relayMode === RELAY_ON, reason: 'relay is off' };
+
+    if (relayMode === RELAY_NODELIST) {
+      relayGate = await relayAllowedByNodelist(pmObj.from_address, pmObj.to_address);
+      if (!relayGate.allowed) {
+        alogger.writeAlog(2, "FTN netmail relay refused (nodelist): " +
+          pmObj.from_address + " -> " + pmObj.to_address + ": " + relayGate.reason, "yellow");
+      }
+    }
+
+    if (relayGate.allowed) {
       var relayResult = await relayNetmail(ftnMessage, pmObj);
       retObj.status = true;
       if (relayResult && relayResult.looped) {
@@ -58,9 +71,10 @@ async function importFtnNetmail(ftnMessage) {
       }
     } else {
       // Reject: write to bad dir, notify sysops
-      await rejectRelay(ftnMessage, pmObj);
+      await rejectRelay(ftnMessage, pmObj, relayMode, relayGate.reason);
       retObj.status = true;
       retObj.undeliverable = true;
+      retObj.relayRefused = relayGate.reason;
       alogger.writeAlog(2, "FTN netmail relay rejected: " + pmObj.from_address + " → " + pmObj.to_address, "yellow");
     }
     return retObj;
@@ -444,19 +458,19 @@ async function relayNetmail(ftnMessage, pmObj) {
     } else {
       // No route found — treat as undeliverable
       alogger.writeAlog(2, "FTN netmail relay: no route to " + pmObj.to_address, "yellow");
-      await rejectRelay(ftnMessage, pmObj);
+      await rejectRelay(ftnMessage, pmObj, currentRelayMode(), 'no route to ' + pmObj.to_address);
       return { norouted: true };
     }
   } catch (error) {
     alogger.writeAlog(2, "FTN netmail relay error: " + error.message, "redbright");
-    await rejectRelay(ftnMessage, pmObj);
+    await rejectRelay(ftnMessage, pmObj, currentRelayMode(), 'routing error: ' + error.message);
     return { norouted: true };
   }
   return { relayed: true };
 }
 
 // Reject relay: write raw to bad dir, notify sysops
-async function rejectRelay(ftnMessage, pmObj) {
+async function rejectRelay(ftnMessage, pmObj, mode, reason) {
   var badDir = appConfig.get('ftnbad', 'ftn/bad');
   // Ensure bad directory exists
   try {
@@ -489,9 +503,142 @@ async function rejectRelay(ftnMessage, pmObj) {
     "From: " + (ftnMessage.FromUser || '') + " at " + (pmObj.from_address || '') + "\n" +
     "To: " + (ftnMessage.ToUser || '') + " at " + (pmObj.to_address || '') + "\n" +
     "Subject: " + (ftnMessage.Subject || '') + "\n\n" +
-    "Relay is disabled (allow_netmail_relay=false).\n" +
+    explainRefusal(mode, reason) + "\n" +
     "Raw message stored in " + badDir + "."
   );
+}
+
+// ============================================================
+// Relay policy
+// ============================================================
+
+const RELAY_OFF = 'off';
+const RELAY_NODELIST = 'nodelist';
+const RELAY_ON = 'on';
+const RELAY_MODES = [RELAY_OFF, RELAY_NODELIST, RELAY_ON];
+
+/**
+ * Which relay mode is configured?
+ *
+ *   nodelist  the default: relay only when both the sender and the recipient
+ *             are listed in the same network's nodelist
+ *   off       refuse all transit mail
+ *   on        relay anything the router can find a way to, including between
+ *             two networks this system happens to carry
+ *
+ * Nodelist is the default rather than off because it is safe enough to leave
+ * on: it cannot be used to reach a network this system does not carry, or a
+ * node that does not exist, so a new install is a good FTN citizen without the
+ * sysop having to know the setting is there.
+ *
+ * `allow_netmail_relay` was the original boolean and is now ignored. It cannot
+ * be honoured: configStore seeds every default into the settings table, so a
+ * sysop who deliberately set it false is indistinguishable from one who never
+ * touched it, and guessing wrong in that direction would either pin every
+ * upgrade to the old behaviour or switch relay on for someone who had turned
+ * it off. Since relay never worked correctly before this release anyway (the
+ * message and packet headers were swapped on every transit message), there is
+ * no working configuration to preserve. Upgrades land on nodelist and the
+ * change is called out in the docs.
+ *
+ * @param {string} mode  configured mode, or empty for the default
+ */
+function resolveRelayMode(mode) {
+	var m = String(mode === null || mode === undefined ? '' : mode).trim().toLowerCase();
+	if (RELAY_MODES.indexOf(m) !== -1) return m;
+
+	// A value we do not recognise must fail closed, and closed means off rather
+	// than the default. A misspelled mode is a mistake, and the safe answer to
+	// a mistake is to carry nothing.
+	if (m) {
+		alogger.writeAlog(2, "Unknown netmail_relay_mode '" + mode +
+			"', treating as off", "yellow");
+		return RELAY_OFF;
+	}
+	return RELAY_NODELIST;
+}
+
+function currentRelayMode() {
+	return resolveRelayMode(appConfig.get('netmail_relay_mode', ''));
+}
+
+/**
+ * Nodelist gate: are both ends real, listed nodes of the same network?
+ *
+ * This is the whole of the "nodelist" mode, and it is doing more work than it
+ * looks like. Nodelists here are scoped per network, so requiring both ends in
+ * the *same* one stops this system carrying mail between two networks it
+ * happens to link with. Without it, a node on one othernet can reach any node
+ * on any other othernet this system carries, which is the shape of an open
+ * relay even when every individual link is trusted.
+ *
+ * It also puts a floor under the router. resolveRoute will happily find a way
+ * to anything dialable in the nodelist, or walk up to a hub or coordinator for
+ * anything else, so "on" really does mean the whole of whatever networks this
+ * system carries. Requiring both ends to be listed keeps the relay inside one
+ * network rather than between them.
+ *
+ * Points are stripped before the lookup. Points are not listed in a nodelist,
+ * and a point's mail is its boss node's responsibility, so 1:229/426.1 is
+ * checked as 1:229/426.
+ *
+ * What this deliberately does not do is verify that the sender is who the
+ * message says. FTN has no way to do that: the origin address is whatever the
+ * packet claims. That is a problem for a network whose nodelist can carry
+ * public keys, not one this system can solve from the outside.
+ *
+ * @returns {object} { allowed, reason }
+ */
+async function relayAllowedByNodelist(sourceAddress, destAddress) {
+	var src = parseFtnAddress(bareAddress(sourceAddress));
+	var dst = parseFtnAddress(bareAddress(destAddress));
+
+	if (!src) return { allowed: false, reason: 'unparseable sender address' };
+	if (!dst) return { allowed: false, reason: 'unparseable recipient address' };
+
+    // Which network owns each end? Answered by the zone, via the addresses this
+    // system holds. A zone we hold no address in is a network we do not carry,
+    // so there is nothing to relay within.
+	var srcNetwork = await networkIdForZone(src.zone);
+	if (!srcNetwork) {
+		return { allowed: false, reason: 'sender zone ' + src.zone + ' is not a network this system carries' };
+	}
+	var dstNetwork = await networkIdForZone(dst.zone);
+	if (!dstNetwork) {
+		return { allowed: false, reason: 'recipient zone ' + dst.zone + ' is not a network this system carries' };
+	}
+	if (srcNetwork !== dstNetwork) {
+		return { allowed: false, reason: 'sender and recipient are on different networks' };
+	}
+
+	// Point stripped: points are not listed, and the boss node answers for them.
+	var srcNode = await ftnNodelist.getNode(srcNetwork, src.zone, src.net, src.node, 0);
+	if (!srcNode) {
+		return { allowed: false, reason: 'sender ' + fmtAddr(src) + ' is not in the nodelist' };
+	}
+	var dstNode = await ftnNodelist.getNode(dstNetwork, dst.zone, dst.net, dst.node, 0);
+	if (!dstNode) {
+		return { allowed: false, reason: 'recipient ' + fmtAddr(dst) + ' is not in the nodelist' };
+	}
+
+	return { allowed: true, reason: null };
+}
+
+/**
+ * The network that owns a zone, by way of the addresses this system holds in
+ * it. Null when we hold none, which is the same as saying we do not carry that
+ * network.
+ */
+async function networkIdForZone(zone) {
+	var rows = await systemAddresses.getAddressesForZone(parseInt(zone));
+	for (var r of (rows || [])) {
+		if (r.network_id) return r.network_id;
+	}
+	return null;
+}
+
+function fmtAddr(a) {
+	return a.zone + ':' + a.net + '/' + a.node;
 }
 
 // ============================================================
@@ -566,6 +713,21 @@ function bareAddress(addr) {
 function numberOr(value, fallback) {
 	var n = parseInt(value, 10);
 	return isNaN(n) ? fallback : n;
+}
+
+// Why a relay was refused, in words a sysop can act on. "Relay is disabled" was
+// the only message this ever produced, which was wrong as soon as there was
+// more than one reason to refuse.
+function explainRefusal(mode, reason) {
+  if (mode === RELAY_NODELIST) {
+    return "Relay is set to nodelist only and this message did not qualify: " +
+      (reason || 'unknown reason') + ".";
+  }
+  if (mode === RELAY_ON) {
+    return "Relay is on but this message could not be relayed: " +
+      (reason || 'no route') + ".";
+  }
+  return "Relay is off (netmail_relay_mode=off).";
 }
 
 // ============================================================
@@ -690,6 +852,12 @@ export {
   importFtnNetmail,
   privateMessageToFtn,
   resolveOutboundSource,
+  resolveRelayMode,
+  currentRelayMode,
+  relayAllowedByNodelist,
+  RELAY_OFF,
+  RELAY_NODELIST,
+  RELAY_ON,
   localAddressStrings,
   ftnToPrivateMessage,
   isLocalAddress

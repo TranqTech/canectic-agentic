@@ -374,9 +374,71 @@ buildQwkForNode() → gather echomail from subscriptions
 
 ## Netmail Relay
 
-Off by default (`allow_netmail_relay`, a single global boolean). Turning it on
-makes this system carry transit mail for anyone who can hand it a packet; there
-is no per-peer or per-destination policy yet, tracked as issue #41.
+`netmail_relay_mode`, three values:
+
+| Mode | Behaviour |
+| --- | --- |
+| `nodelist` | **Default.** Relay only when both the sender and the recipient are listed in the same network's nodelist |
+| `off` | Refuse all transit mail |
+| `on` | Relay anything the router can find a way to, including between two networks this system carries |
+
+### Why nodelist is the default
+
+`on` is far more open than it reads. `ftnRouter.resolveRoute` finds a way to
+anything dialable in the nodelist (step 3) and walks up to a hub, host, RC or ZC
+for anything else (step 4), so `on` means transit for the whole of every network
+this system carries, in any direction, **including between two of them**. A node
+on one othernet could reach any node on another through this system, which is the
+shape of an open relay even when every individual link is trusted.
+
+Nodelists here are scoped per `network_id`, so requiring both ends to be listed
+in the *same* one is the whole fix:
+
+- cross-network relay is refused, because the two ends resolve to different networks
+- invented addresses are refused, because they are not listed anywhere
+- a zone this system holds no address in is refused, because we do not carry that network
+- ordinary routed netmail is untouched, including across the zones of one network
+
+That last point is why the rule is network-scoped rather than net-scoped. A
+coordinator routes outbound mail for their nodes, or has the echo hub do it, so
+anything restricted to the sysop's own net breaks immediately. FidoNet also spans
+zones 1 to 6, so a zone-scoped rule would refuse normal traffic.
+
+Points are stripped before the lookup. Points are not listed in a nodelist and
+never will be, and a point's mail is its boss node's responsibility, so
+`1:229/426.1` is checked as `1:229/426`.
+
+### What it deliberately does not do
+
+It does not verify that the sender is who the message says. FTN cannot: the
+origin address is whatever the packet claims, and there is no signature to check
+it against. Chasing that with per-link trust rules buys very little, since the
+practical exposure is one of your own authenticated links injecting forged mail.
+Real sender authentication needs a network whose nodelist can carry public keys,
+which is a thing to build rather than a thing to configure.
+
+There is also no rate limiting and no per-peer policy. Issue #41 holds the
+discussion.
+
+### Operational notes
+
+**No nodelist for a network means no relay for that network.** Every transit
+message for it is refused with "not in the nodelist". That is the right failure
+direction but it is confusing if you do not expect it, so check
+`/admin/nodelists` before concluding relay is broken.
+
+**Refusals are noisy by design.** Each one writes the raw message to `ftn/bad`
+and notifies sysops, with a reason naming the rule that refused it and the
+address it could not find.
+
+**Upgrade behaviour.** `allow_netmail_relay` is deprecated and ignored, and every
+install lands on `nodelist` regardless of what that key said. It cannot be
+honoured: `configStore` seeds every default into the settings table, so a sysop
+who deliberately set it `false` is indistinguishable from one who never touched
+it. Since relay never worked correctly before this release anyway (the message
+and packet headers were swapped on every transit message, below), there is no
+working configuration to preserve. A system that wants full relay back sets
+`netmail_relay_mode=on` deliberately.
 
 ### Two "from" addresses, not one
 
@@ -967,7 +1029,8 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `pm_trash_retention_days` | 30 | Days to keep soft-deleted messages before hard purge |
-| `allow_netmail_relay` | false | Whether to relay FTN netmail through this system |
+| `netmail_relay_mode` | nodelist | FTN netmail relay: `nodelist`, `off`, or `on` |
+| `allow_netmail_relay` | false | Deprecated and ignored, replaced by `netmail_relay_mode` |
 | `netmail_ping_enabled` | true | Answer netmail addressed to "Ping" with a Pong showing the route taken |
 | `boardname` | 'Canectic BBS' | Used in bounce notifications and FTN origin lines |
 
