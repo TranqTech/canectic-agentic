@@ -12,6 +12,7 @@ const pexec = util.promisify(exec);
 //internals
 import {Message, Packet} from '../../models/ftnClasses.js'
 import * as ftnNetmailAdapter from '../../models/ftnNetmailAdapter.js'
+import * as ftnVia from '../../utils/ftnVia.js'
 import * as privateMessages from '../../models/privateMessages.js'
 import * as systemAddresses from '../../models/systemAddresses.js'
 import * as echomail from '../../models/echomail.js'
@@ -575,9 +576,20 @@ function processMessageText(message) {
 							break;
 						}
 						if ((attribute.startsWith("VIA"))||(attribute.startsWith("Via"))){
+							// Shared with ftnVia so there is one definition of
+							// what a Via line is. The copy that lived here kept
+							// two tokens and dropped the rest, losing the
+							// timestamp or the software from every line it read
+							// depending on whether the writer used the optional
+							// '@' before the stamp. A truncated chain still
+							// relays and still looks like a path, so nothing
+							// complained, and the tested implementation was
+							// somewhere else entirely.
 							const split = line.substring(1).split(" ")
-							const newval = split[1] + " " + split[2]
-							message.OptionalAttributes.push({ attribute: split[0], value: newval });
+							message.OptionalAttributes.push({
+								attribute: split[0],
+								value: ftnVia.viaValueFromKludge(line.substring(1))
+							});
 							break;
 						}
 						message.OptionalAttributes.push({ attribute, value });
@@ -1163,17 +1175,20 @@ function WritePkts(messageArray){
 	for (const message of messageArray){
 		var sourceZone = message.SourceZone || 1
 		var destinationZone = message.DestinationZone || 1
-		var SourceKey = `${sourceZone}:${message.SourceNet}/${message.SourceNode}`
-		var DestKey = `${destinationZone}:${message.DestinationNet}/${message.DestinationNode}`
-		for (const attrib of message.OptionalAttributes){
-			if (attrib.attribute == "INTL"){
-				var addresses = attrib.value.split(" ")
-				DestKey = addresses[0]
-				SourceKey = addresses[1]
-			}
-		}
-		message.Source = SourceKey
-		message.Destination = DestKey
+
+		// The packet envelope. PacketSource is set by the caller when it
+		// differs from the message header, which is the transit case.
+		//
+		// This used to be read out of the INTL kludge. INTL describes the
+		// message's own endpoints, so on relayed mail it named the original
+		// author and the packet went out claiming to be from a system that had
+		// merely written the message, not sent the packet. For mail we
+		// originated INTL and the message header agree, which is why it looked
+		// correct for years.
+		var SourceKey = message.PacketSource ||
+			`${sourceZone}:${message.SourceNet}/${message.SourceNode}`
+		var DestKey = message.PacketDestination ||
+			`${destinationZone}:${message.DestinationNet}/${message.DestinationNode}`
 		if (!packetGroups.has(SourceKey)){
 			packetGroups.set(SourceKey, {})			
 		}
@@ -1485,11 +1500,19 @@ async function TossOutboundNetmail(){
 
 		var srcAddr = sourceResult.address
 
-		// Stamp source address
-		msg.SourceZone = srcAddr.address_zone || 1
-		msg.SourceNet  = srcAddr.address_net  || 0
-		msg.SourceNode = srcAddr.address_node || 0
-		msg.Source     = srcAddr.address
+		// Stamp the message header and the packet envelope separately. They
+		// are the same address for mail we wrote, and different for transit
+		// mail: the message keeps its author, the packet is from us.
+		var stamp = ftnNetmailAdapter.resolveOutboundSource(msg, srcAddr, pmRow.transport_data)
+		msg.SourceZone = stamp.message.zone
+		msg.SourceNet  = stamp.message.net
+		msg.SourceNode = stamp.message.node
+		msg.Source     = stamp.message.address
+		msg.PacketSource = stamp.packet.zone + ":" + stamp.packet.net + "/" + stamp.packet.node
+
+		if (stamp.relayed) {
+			console.log("Relaying netmail from", msg.Source, "to", msg.Destination, "as", msg.PacketSource)
+		}
 
 		// Ensure destination numeric fields are populated
 		if (!msg.DestinationNet && msg.Destination) {
@@ -1508,6 +1531,8 @@ async function TossOutboundNetmail(){
 
 		// Setup INTL attribute. Both halves must be bare 4D-style addresses,
 		// so drop any 5D "@domain" suffix carried in from a pseudo-TLD address.
+		// INTL describes the message's own endpoints, not the packet's, so it
+		// is built from the message source even when relaying.
 		var intlval = bareFtnAddress(msg.Destination) + " " + bareFtnAddress(msg.Source)
 		var hasintl = false
 		for await (var oa of msg.OptionalAttributes){

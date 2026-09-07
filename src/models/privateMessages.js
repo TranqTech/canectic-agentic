@@ -87,7 +87,10 @@ function simpleTextToHtml(text) {
 const AUTOMATED_PROCESSORS = [
   'areafix', 'areamgr',
   'filefix', 'filemgr', 'tic',
-  'raidfix'
+  'raidfix',
+  // Netmail ping. A convention rather than a numbered standard, but Husky,
+  // Mystic and Synchronet all answer it, so other sysops expect it to work.
+  'ping'
 ];
 
 // ============================================================

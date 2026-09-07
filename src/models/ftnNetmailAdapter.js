@@ -15,6 +15,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import { storeAttachments } from './pmAttachments.js';
 import * as netmailRoutes from './netmailRoutes.js';
 import { resolveFileboxPath } from '../utils/fileboxPath.js';
+import * as ftnVia from '../utils/ftnVia.js';
 import appConfig from "../config/appConfig.js";
 
 // ============================================================
@@ -45,8 +46,16 @@ async function importFtnNetmail(ftnMessage) {
     if (appConfig.getBoolean('allow_netmail_relay', false)) {
       var relayResult = await relayNetmail(ftnMessage, pmObj);
       retObj.status = true;
-      retObj.relayed = true;
-      alogger.writeAlog(1, "FTN netmail relayed: " + pmObj.from_address + " → " + pmObj.to_address, "cyan");
+      if (relayResult && relayResult.looped) {
+        // Reported honestly rather than as a relay: the message went nowhere.
+        retObj.undeliverable = true;
+        retObj.relayLoop = true;
+      } else if (relayResult && relayResult.norouted) {
+        retObj.undeliverable = true;
+      } else {
+        retObj.relayed = true;
+        alogger.writeAlog(1, "FTN netmail relayed: " + pmObj.from_address + " → " + pmObj.to_address, "cyan");
+      }
     } else {
       // Reject: write to bad dir, notify sysops
       await rejectRelay(ftnMessage, pmObj);
@@ -134,6 +143,17 @@ async function importFtnNetmail(ftnMessage) {
         }
       } catch (afErr) {
         alogger.writeAlog(3, "AreaFix handler error: " + afErr.message, "redbright");
+      }
+    } else if (retObj.processor === 'ping') {
+      try {
+        var netmailPing = await import('./netmailPing.js');
+        var pingResult = await netmailPing.handleRequest(ftnMessage);
+        if (pingResult.responseLines && pingResult.responseLines.length > 0) {
+          retObj.responseMessage = netmailPing.buildResponse(
+            ftnMessage, pingResult.responseLines, netmailPing.PROCESSOR_NAME);
+        }
+      } catch (pingErr) {
+        alogger.writeAlog(3, "Ping handler error: " + pingErr.message, "redbright");
       }
     } else if (retObj.processor === 'filefix' || retObj.processor === 'filemgr' || retObj.processor === 'tic') {
       try {
@@ -344,6 +364,24 @@ function formatFtnDateTime(dateInput) {
 }
 
 // Check if an FTN address is one of our system addresses
+// Every FTN address this system answers to, as plain strings. Used for the
+// relay loop check, which has to know all of them: a message that came back to
+// a different AKA of ours is the same loop.
+async function localAddressStrings() {
+  try {
+    var rows = await systemAddresses.getActiveAddressesByNetworkType('FTN');
+    var out = [];
+    for (var r of (rows || [])) {
+      if (r.address) out.push(r.address);
+    }
+    return out;
+  } catch (err) {
+    alogger.writeAlog(3, "Could not load local addresses for relay loop check: " +
+      err.message, "redbright");
+    return [];
+  }
+}
+
 async function isLocalAddress(addressString) {
   if (!addressString) return false;
   var row = await systemAddresses.getActiveAddressByNetworkType(addressString, 'FTN');
@@ -354,8 +392,43 @@ async function isLocalAddress(addressString) {
 async function relayNetmail(ftnMessage, pmObj) {
   // Route the message via ftnRouter
   try {
+    // Loop check first, before anything is queued. Two systems that route to
+    // each other will otherwise pass the same message back and forth until a
+    // sysop notices, and the Via chain is the only thing that can tell us we
+    // have already handled it.
+    var ourAddresses = await localAddressStrings();
+    if (ftnVia.hasPassedThrough(ftnMessage.OptionalAttributes, ourAddresses)) {
+      alogger.writeAlog(2,
+        "FTN netmail relay: refusing loop, message already passed through this system (" +
+        pmObj.from_address + " -> " + pmObj.to_address + ")", "yellow");
+      await privateMessages.insertUndeliverable(pmObj, 'relay_loop');
+      return { looped: true };
+    }
+
     var routeResult = await ftnRouter.resolveRoute(pmObj.to_address);
     if (routeResult && routeResult.nextHop) {
+      // Stamp our hop into the chain so the next system can do the same check,
+      // and so the path is readable at the far end.
+      // The address of ours that fits the destination's zone, so the chain
+      // names the AKA the next hop actually knows us by.
+      var viaAddress = ourAddresses[0] || '';
+      try {
+        var destZone = parseInt(String(pmObj.to_address || '').split(':')[0]) || 0;
+        if (destZone) {
+          var viaSrc = await systemAddresses.resolveSourceForDestinationZone(destZone);
+          if (viaSrc && viaSrc.address && viaSrc.address.address) {
+            viaAddress = viaSrc.address.address;
+          }
+        }
+      } catch (_) { /* fall back to the first address we hold */ }
+
+      var attrs = Array.isArray(ftnMessage.OptionalAttributes)
+        ? ftnMessage.OptionalAttributes.slice()
+        : [];
+      ftnVia.appendVia(attrs, viaAddress, new Date(), appConfig.get('version', ''));
+      pmObj.transport_data = Object.assign({}, pmObj.transport_data, {
+        optional_attributes: attrs
+      });
       // Queue for outbound via the PM model
       // The outbound tosser will pick it up via getPendingByTransport('FTN')
       var relayObj = Object.assign({}, pmObj, {
@@ -372,11 +445,14 @@ async function relayNetmail(ftnMessage, pmObj) {
       // No route found — treat as undeliverable
       alogger.writeAlog(2, "FTN netmail relay: no route to " + pmObj.to_address, "yellow");
       await rejectRelay(ftnMessage, pmObj);
+      return { norouted: true };
     }
   } catch (error) {
     alogger.writeAlog(2, "FTN netmail relay error: " + error.message, "redbright");
     await rejectRelay(ftnMessage, pmObj);
+    return { norouted: true };
   }
+  return { relayed: true };
 }
 
 // Reject relay: write raw to bad dir, notify sysops
@@ -416,6 +492,80 @@ async function rejectRelay(ftnMessage, pmObj) {
     "Relay is disabled (allow_netmail_relay=false).\n" +
     "Raw message stored in " + badDir + "."
   );
+}
+
+// ============================================================
+// Outbound source stamping
+// ============================================================
+
+/**
+ * Who does this message claim to be from, and who is sending the packet?
+ *
+ * Two different questions that were being answered with one address, and got
+ * swapped in the process. The message header names the system that wrote the
+ * message. The packet header names the system handing the packet over. For
+ * mail we originated they are the same address, which is why this went
+ * unnoticed. For relayed transit mail they are not: the message stays from
+ * whoever wrote it, and the packet is from us, because we are the ones sending
+ * it.
+ *
+ * Before this existed, TossOutboundNetmail stamped our address over the
+ * message header while WritePkts read the packet header out of the INTL
+ * kludge, which on transit mail carries the original endpoints. So a relayed
+ * netmail went out with the message claiming to be from us and the packet
+ * claiming to be from the originator: backwards on both counts, replies coming
+ * back to the wrong system.
+ *
+ * @param {object} msg      FTN message, source fields already restored from
+ *                          transport_data by privateMessageToFtn
+ * @param {object} srcAddr  our system address for the destination zone
+ *                          ({ address, address_zone, address_net, address_node })
+ * @param {object} transportData  the pm row's transport_data; `relayed` marks
+ *                          transit mail
+ * @returns {object} { relayed, message: {...}, packet: {...} }
+ */
+function resolveOutboundSource(msg, srcAddr, transportData) {
+	var td = transportData || {};
+	var relayed = td.relayed === true;
+	var ours = {
+		address: bareAddress(srcAddr && srcAddr.address),
+		zone:    (srcAddr && srcAddr.address_zone) || 1,
+		net:     (srcAddr && srcAddr.address_net)  || 0,
+		node:    (srcAddr && srcAddr.address_node) || 0
+	};
+
+	// The packet is always from us. We are the system sending it, whoever
+	// wrote what is inside.
+	var out = { relayed: relayed, packet: ours, message: ours };
+	if (!relayed) return out;
+
+	// Transit mail keeps its author. Fall back to our address only if the
+	// originator did not survive, which would mean a malformed inbound
+	// message: better to send it as ours than to emit a 0:0/0 header.
+	var origin = {
+		address: bareAddress(msg && msg.Source) || ours.address,
+		zone:    numberOr((msg && msg.SourceZone), ours.zone),
+		net:     numberOr((msg && msg.SourceNet),  ours.net),
+		node:    numberOr((msg && msg.SourceNode), ours.node)
+	};
+	if (!origin.net && !origin.node) {
+		return out;
+	}
+
+	out.message = origin;
+	return out;
+}
+
+function bareAddress(addr) {
+	if (!addr) return '';
+	var s = String(addr).trim();
+	var at = s.indexOf('@');
+	return at >= 0 ? s.substring(0, at) : s;
+}
+
+function numberOr(value, fallback) {
+	var n = parseInt(value, 10);
+	return isNaN(n) ? fallback : n;
 }
 
 // ============================================================
@@ -539,6 +689,8 @@ async function _processFileAttach(ftnMessage, inboxUuid) {
 export {
   importFtnNetmail,
   privateMessageToFtn,
+  resolveOutboundSource,
+  localAddressStrings,
   ftnToPrivateMessage,
   isLocalAddress
 };

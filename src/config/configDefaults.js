@@ -55,6 +55,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'sitedomain',          defaultValue: '',              type: 'string',  category: 'network',     description: 'Full domain for URL generation' },
 	{ key: 'corsorigin',          defaultValue: '',              type: 'string',  category: 'network',     description: 'CORS allowed origin' },
 	{ key: 'allow_netmail_relay', defaultValue: 'false',         type: 'boolean', category: 'network',     description: 'Allow FTN netmail relay through this system' },
+	{ key: 'netmail_ping_enabled', defaultValue: 'true',         type: 'boolean', category: 'network',     description: 'Answer netmail addressed to "Ping" with a Pong showing the route taken' },
 	{ key: 'PacketPwd',           defaultValue: '',              type: 'string',  category: 'network',     description: 'Default FTN packet password' },
 
 	// -----------------------------------------------------------------------

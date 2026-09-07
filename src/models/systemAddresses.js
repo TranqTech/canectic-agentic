@@ -357,6 +357,25 @@ async function removeAddress(uuid) {
 // on a network of the given type (e.g. 'FTN', 'QWK', 'NNTP').
 // Returns the system_addresses row if found, null otherwise.
 // Used by ftnNetmailAdapter to determine if a destination is local.
+/**
+ * Every active address for one network type.
+ *
+ * getActiveAddresses() returns the bare table, which has no network_type
+ * column, so callers that need FTN addresses only cannot filter what they get
+ * back. The relay loop check is one: matching a QWK or NNTP address string
+ * against an FTN Via chain would be a false positive that silently drops mail.
+ */
+async function getActiveAddressesByNetworkType(networkType) {
+	var rows = await postgres.query(
+		"SELECT sa.* FROM system_addresses sa " +
+		"JOIN message_networks mn ON sa.network_id = mn.id " +
+		"WHERE UPPER(mn.network_type) = UPPER($1) AND sa.active = true AND mn.active = true " +
+		"ORDER BY sa.address ASC",
+		[networkType]
+	);
+	return rows || [];
+}
+
 async function getActiveAddressByNetworkType(addressString, networkType) {
 	var row = await postgres.queryOne(
 		"SELECT sa.* FROM system_addresses sa " +
@@ -446,6 +465,7 @@ export {
 	getAddressesForDomain,
 	getAddressById,
 	getAddressByUUID,
+	getActiveAddressesByNetworkType,
 	getActiveAddressByNetworkType,
 	getDefaultAddressByNetworkType,
 	resolveSourceForDestinationZone

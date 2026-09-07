@@ -308,8 +308,13 @@ Remote system sends .pkt → ftnTosser.TossInboundFile()
   → ReadPkt() parses packet → message.Type === "Netmail"
   → ftnNetmailAdapter.importFtnNetmail(ftnMessage)
     → isLocalAddress() — checks systemAddresses for our FTN addresses
+    → LOCAL: netmailRoutes.matchRoute() → alias / dump / ignore
+    → LOCAL: isAutomatedProcessor() → areafix / filefix / ping
     → LOCAL: resolveRecipient() → deliverMessage() to pm_inbox
-    → RELAY (if allow_netmail_relay=true): ftnRouter.resolveRoute() → queueOutbound()
+    → RELAY (if allow_netmail_relay=true):
+        ftnVia.hasPassedThrough() → refuse loops
+        ftnVia.appendVia() → stamp our hop
+        ftnRouter.resolveRoute() → queueOutbound()
     → RELAY (if relay disabled): write to ftn/bad/ → notifySysops()
     → UNRESOLVABLE: insertUndeliverable() → notifySysops()
 ```
@@ -366,6 +371,98 @@ buildQwkForNode() → gather echomail from subscriptions
 ```
 
 ---
+
+## Netmail Relay
+
+Off by default (`allow_netmail_relay`, a single global boolean). Turning it on
+makes this system carry transit mail for anyone who can hand it a packet; there
+is no per-peer or per-destination policy yet, tracked as issue #41.
+
+### Two "from" addresses, not one
+
+A netmail carries two source addresses answering different questions:
+
+| | Says | On relay |
+| --- | --- | --- |
+| Message header (`msg.SourceNet` / `SourceNode`) | who wrote the message | the original author |
+| Packet header (`packet.SourceNet` / `SourceNode`) | who is handing this packet over | us |
+
+For mail we originated they are the same address, which is why getting them
+backwards went unnoticed: relay is off by default and locally written mail
+exercises neither path.
+
+They *were* backwards. `TossOutboundNetmail` stamped our address over the
+message header unconditionally, ignoring `transport_data.relayed`, while
+`WritePkts` derived the packet header from the INTL kludge, which on transit
+mail names the original endpoints. So a relayed netmail went out claiming to be
+*written* by us and *sent* by the originator: wrong in both directions, with
+replies going back to the wrong system.
+
+`ftnNetmailAdapter.resolveOutboundSource(msg, srcAddr, transportData)` now
+answers both questions in one place and is unit tested.
+`TossOutboundNetmail` applies it and sets `msg.PacketSource`, which `WritePkts`
+groups packets by. The INTL override in `WritePkts` is gone: INTL describes the
+message's endpoints, never the packet's.
+
+### Via chain
+
+Every system that passes a netmail on appends one Via line, so the message
+carries its own route:
+
+```
+Via <address> <yyyymmdd>.<hhmmss>.UTC <product> <version>
+```
+
+`src/utils/ftnVia.js` owns this: `buildViaLine`, `parseViaLine`, `viaChain`,
+`hasPassedThrough`, `appendVia`. Implementations disagree about the `@` before
+the timestamp, so it is accepted on read and omitted on write, and the raw line
+is kept so another system's hop survives a relay verbatim rather than being
+normalised.
+
+Two things depend on the chain:
+
+- **Loop refusal.** `relayNetmail` checks `hasPassedThrough()` against every
+  active FTN address this system holds before queueing anything. Two systems
+  routing to each other would otherwise pass the same message back and forth
+  indefinitely. Matching is on the bare address and case insensitive, because a
+  system may write itself into the chain with a domain one hop and without it
+  the next, and a loop check that misses is worse than none: it reads as
+  protection. A refused message reports `relayLoop` and goes to the
+  undeliverable queue rather than being counted as relayed.
+- **Ping replies**, below.
+
+The inbound parser in `ftnTosser` used to keep only two tokens of each Via line,
+dropping the timestamp or the software depending on whether the writer used the
+optional `@`. A truncated chain still relays and still looks like a path, so
+nothing complained. It now calls `ftnVia.viaValueFromKludge()` rather than
+carrying its own copy: the first pass at this fix left two implementations, and
+reverting the tosser's copy broke no test because the tested one was somewhere
+else entirely.
+
+## Netmail Ping
+
+Netmail addressed to `Ping` at one of our addresses gets a `Pong` back showing
+the route it took. A convention rather than a numbered standard, but Husky's
+pinger, Mystic and Synchronet all answer it, so other sysops expect it to work.
+Before this, a ping fell through to recipient resolution, failed, and landed in
+the undeliverable queue with a sysop notification.
+
+`src/models/netmailPing.js` is shaped like `areafix.js` and `filefix.js`
+(`handleRequest` + `buildResponse`) so the Step 2 dispatch needed no special
+case beyond one branch. `ping` is in `AUTOMATED_PROCESSORS`. Config:
+`netmail_ping_enabled` (default true).
+
+The reply is plain text inside 80 columns, since it is read by a person in a
+terminal on the far side of whatever link they are debugging. It names the
+sender, when the message was written and received, and every hop in the Via
+chain with its timestamp and software. It comes *from the address the ping was
+aimed at*, not our default AKA, so a node pinging one of several addresses can
+tell which answered. It deliberately carries no Via lines of its own: the reply
+is a new message taking its own route, and copying the request's chain would
+make our own loop check refuse it.
+
+`TRACE`, the related convention where every transit node reports back
+separately, is not implemented.
 
 ## Recipient Resolution
 
@@ -871,6 +968,7 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 |----------|---------|---------|
 | `pm_trash_retention_days` | 30 | Days to keep soft-deleted messages before hard purge |
 | `allow_netmail_relay` | false | Whether to relay FTN netmail through this system |
+| `netmail_ping_enabled` | true | Answer netmail addressed to "Ping" with a Pong showing the route taken |
 | `boardname` | 'Canectic BBS' | Used in bounce notifications and FTN origin lines |
 
 ---
