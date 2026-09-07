@@ -50,7 +50,7 @@ import { updateTimedEventSchedule, removeTimedEventSchedule, updateSegmentSchedu
 import { maintenanceQueue } from "../queues/queues.js";
 import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
-import { CONFIG_DEFINITIONS, getDefinition, getCategories } from "../config/configDefaults.js";
+import { CONFIG_DEFINITIONS, getDefinition, getCategories, isAllowedValue } from "../config/configDefaults.js";
 import * as configStore from "../models/configStore.js";
 import * as fileGroups from '../models/fileGroups.js';
 import * as fileAreas from '../models/fileAreas.js';
@@ -2854,6 +2854,7 @@ router.get('/config', async (req, res) => {
 			category: def.category,
 			description: def.description,
 			restart: def.restart || false,
+			options: def.options || null,
 			value: allValues[def.key] !== undefined ? allValues[def.key] : def.defaultValue,
 			source: appConfig.getSource(def.key)
 		});
@@ -2904,6 +2905,7 @@ router.post('/config', urlencodedParser, requireAdmin, async (req, res) => {
 	var formData = req.body;
 	var category = formData._category || '';
 	var kvArray = [];
+	var rejected = [];
 
 	for (var def of CONFIG_DEFINITIONS) {
 		// Only process settings from the submitted category
@@ -2921,7 +2923,22 @@ router.post('/config', urlencodedParser, requireAdmin, async (req, res) => {
 			newValue = formData[formKey] !== undefined ? formData[formKey] : def.defaultValue;
 		}
 
+		// A key with a fixed set of values must never store anything else.
+		// These read as free text everywhere they are consumed, so a typo does
+		// not fail loudly: it falls back to whatever that setting treats as
+		// safe, and the sysop is left looking at a saved value that is not the
+		// one in effect.
+		if (!isAllowedValue(def.key, newValue)) {
+			rejected.push(def.key + ' (' + newValue + ')');
+			continue;
+		}
+
 		kvArray.push({ key: def.key, value: newValue });
+	}
+
+	if (rejected.length > 0) {
+		alogger.writeAlog(2, "[admin/config] Refused invalid value(s): " + rejected.join(', '), "yellow");
+		await flash.setOne(req, 'warning', 'Not a valid choice, left unchanged: ' + rejected.join(', '));
 	}
 
 	if (kvArray.length > 0) {

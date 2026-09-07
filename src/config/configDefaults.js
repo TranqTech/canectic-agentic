@@ -54,7 +54,12 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'sitetld',             defaultValue: '',              type: 'string',  category: 'network',     description: 'Cookie domain (e.g. example.com)' },
 	{ key: 'sitedomain',          defaultValue: '',              type: 'string',  category: 'network',     description: 'Full domain for URL generation' },
 	{ key: 'corsorigin',          defaultValue: '',              type: 'string',  category: 'network',     description: 'CORS allowed origin' },
-	{ key: 'netmail_relay_mode', defaultValue: 'nodelist',       type: 'string',  category: 'network',     description: 'FTN netmail relay: nodelist (default, relay only when both sender and recipient are listed in the same network nodelist), off (no relay), on (relay anything routable, including between networks this system carries)' },
+	{ key: 'netmail_relay_mode', defaultValue: 'nodelist',       type: 'string',  category: 'network',     description: 'Whether this system carries netmail addressed to other nodes. Nodelist mode is safe to leave on: it cannot reach a network you do not carry, or a node that does not exist.',
+	  options: [
+	    { value: 'nodelist', label: 'Nodelist only (recommended)', hint: 'Relay only when the sender and recipient are both listed in the same network nodelist. Blocks relaying between two networks you carry.' },
+	    { value: 'off',      label: 'Off',                        hint: 'Refuse all netmail addressed to other nodes.' },
+	    { value: 'on',       label: 'On (unrestricted)',          hint: 'Relay anything this system can route, including between two networks you carry. Only sensible if you intend to be a general transit point.' }
+	  ] },
 	{ key: 'allow_netmail_relay', defaultValue: 'false',         type: 'boolean', category: 'network',     description: 'Deprecated and ignored. Replaced by netmail_relay_mode' },
 	{ key: 'netmail_ping_enabled', defaultValue: 'true',         type: 'boolean', category: 'network',     description: 'Answer netmail addressed to "Ping" with a Pong showing the route taken' },
 	{ key: 'PacketPwd',           defaultValue: '',              type: 'string',  category: 'network',     description: 'Default FTN packet password' },
@@ -182,7 +187,12 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	{ key: 'file_base_dir',           defaultValue: 'files',          type: 'string',  category: 'files',       description: 'Base directory for file area storage' },
 	{ key: 'file_upload_staging_dir', defaultValue: 'files/staging',  type: 'string',  category: 'files',       description: 'Staging directory for file uploads' },
-	{ key: 'zmodem_default_crc',      defaultValue: 'auto',           type: 'string',  category: 'files',       description: 'ZMODEM CRC mode: auto (detect from terminal), zbin32 (force CRC-32), zbin_crc16 (force CRC-16)' },
+	{ key: 'zmodem_default_crc',      defaultValue: 'auto',           type: 'string',  category: 'files',       description: 'ZMODEM CRC mode used for downloads.',
+	  options: [
+	    { value: 'auto',       label: 'Auto (recommended)', hint: 'Pick from the terminal type. Modern terminals get CRC-32.' },
+	    { value: 'zbin32',     label: 'Force CRC-32',       hint: 'Faster, but older terminals may not support it.' },
+	    { value: 'zbin_crc16', label: 'Force CRC-16',       hint: 'Maximum compatibility with legacy terminals.' }
+	  ] },
 	{ key: 'file_max_upload_size',    defaultValue: '10485760',       type: 'number',  category: 'files',       description: 'Maximum upload file size in bytes (default 10MB)' },
 	{ key: 'file_allowed_extensions', defaultValue: '',               type: 'string',  category: 'files',       description: 'Comma-separated allowed file extensions (empty = all)' },
 	{ key: 'tic_staging_dir',         defaultValue: 'ftn/tic_staging', type: 'string', category: 'files',       description: 'TIC processing staging directory' },
@@ -271,6 +281,28 @@ function getDefinition(key) {
 }
 
 // Return sorted list of distinct categories
+/**
+ * Is this an acceptable value for a key with a fixed set of options?
+ *
+ * True for any key that does not declare options, so callers can ask about
+ * every key without special casing.
+ *
+ * Lives here rather than in the admin route because the point is that nothing
+ * should be able to store a value the consumers will not honour, and the admin
+ * form is only the most likely way in. These read as free text wherever they
+ * are consumed and fall back to a default on anything unrecognised, so a bad
+ * value does not fail loudly: the setting quietly behaves as something other
+ * than what the settings page shows.
+ */
+function isAllowedValue(key, value) {
+	var def = getDefinition(key);
+	if (!def || !def.options || def.options.length === 0) return true;
+	for (var opt of def.options) {
+		if (opt.value === value) return true;
+	}
+	return false;
+}
+
 function getCategories() {
 	var seen = {};
 	var cats = [];
@@ -283,4 +315,4 @@ function getCategories() {
 	return cats;
 }
 
-export { CONFIG_DEFINITIONS, getDefaults, getDefinition, getCategories };
+export { CONFIG_DEFINITIONS, getDefaults, getDefinition, getCategories, isAllowedValue };

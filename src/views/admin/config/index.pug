@@ -160,6 +160,24 @@ block content
                                         name='cfg_' + s.key
                                         value=s.value
                                       )
+                                  else if s.options && s.options.length
+                                    //- A fixed set of values: offer them rather
+                                    //- than making the sysop guess the spelling
+                                    //- from the description. The save route
+                                    //- refuses anything outside the list too,
+                                    //- since these read as free text wherever
+                                    //- they are consumed and a typo falls back
+                                    //- to a default rather than failing loudly.
+                                    select.form-control(
+                                      id='cfg_' + s.key
+                                      name='cfg_' + s.key
+                                      disabled=(s.source === 'env')
+                                    )
+                                      each opt in s.options
+                                        option(value=opt.value selected=(String(s.value) === opt.value))= opt.label
+                                    each opt in s.options
+                                      if String(s.value) === opt.value && opt.hint
+                                        small.form-text.fg-cyan.d-block= opt.hint
                                   else
                                     if s.source === 'env'
                                       input.form-control(
