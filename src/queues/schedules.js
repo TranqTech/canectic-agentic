@@ -373,19 +373,32 @@ export async function registerSchedules() {
 /**
  * Update the schedule for a single peer connection.
  *
- * Call from admin routes when a connection's poll_interval or pull_interval
- * is changed, or when a connection is activated/deactivated.
+ * Call from admin routes whenever a connection's schedule inputs change:
+ * poll_interval or pull_interval, active, poll_enabled, or FTN status.
  *
- * @param {string} connectionUUID
+ * Without this, schedules were only ever written by registerSchedules() at
+ * gateway startup, so every change a sysop made through the admin UI sat in the
+ * database doing nothing until the next restart. A poll interval edited from 60
+ * to 240 kept polling at 60, with the settings page showing 240.
+ *
+ * Takes the connection row rather than loose fields so a caller cannot forget
+ * one and quietly create a schedule that startup would not have created.
+ *
+ * @param {object} conn - peer_connections row: uuid, connection_data, active, poll_enabled
  * @param {string} networkType - 'FTN', 'QWK', or 'NNTP'
- * @param {object} connectionData - the connection_data JSONB
- * @param {boolean} active - whether the connection is active
  */
-export async function updateConnectionSchedule(connectionUUID, networkType, connectionData, active) {
-	var cd = connectionData || {};
+export async function updateConnectionSchedule(conn, networkType) {
+	if (!conn || !conn.uuid) return;
 
-	if (!active) {
-		// Connection deactivated — remove its schedules
+	var connectionUUID = conn.uuid;
+	var cd = conn.connection_data || {};
+
+	// The same three conditions registerSchedules applies at startup. They have
+	// to agree, or a connection ends up with a schedule that startup would not
+	// have created and that nothing ever removes: turning polling off used to
+	// leave the old scheduler running forever, because registration skips
+	// disabled connections rather than clearing them.
+	if (!conn.active || !conn.poll_enabled) {
 		await removeConnectionSchedule(connectionUUID, networkType);
 		return;
 	}

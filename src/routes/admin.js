@@ -51,6 +51,7 @@ import { maintenanceQueue } from "../queues/queues.js";
 import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
 import { CONFIG_DEFINITIONS, getDefinition, getCategories, isAllowedValue } from "../config/configDefaults.js";
+import { updateConnectionSchedule, removeConnectionSchedule } from "../queues/schedules.js";
 import * as configStore from "../models/configStore.js";
 import * as fileGroups from '../models/fileGroups.js';
 import * as fileAreas from '../models/fileAreas.js';
@@ -920,8 +921,38 @@ router.post('/peer/:uuid/newconnection', urlencodedParser, requireAdmin, async (
 	if (result.status !== true) {
 		alogger.writeAlog(3, "newConnection failed for peer " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
+	if (result && result.status === true && result.insertUUID) {
+		await applyConnectionSchedule(
+			await peerConnections.getConnectionByUUIDWithNetwork(result.insertUUID), 'create');
+	}
 	res.redirect('/admin/peer/' + uuid);
 });
+
+// Apply a connection's schedule after any change that affects it. Schedules
+// used to be written only by registerSchedules() at gateway startup, so every
+// edit a sysop made sat in the database doing nothing until the next restart:
+// a poll interval changed from 60 to 240 kept polling at 60 while the settings
+// page showed 240.
+//
+// Failure is logged rather than thrown. The connection change itself already
+// succeeded, and losing the redirect would leave the sysop thinking the save
+// failed when it did not.
+async function applyConnectionSchedule(conn, what) {
+	if (!conn || !conn.network_type) return;
+	try {
+		await updateConnectionSchedule(conn, conn.network_type);
+		var cd = conn.connection_data || {};
+		alogger.writeAlog(4,
+			"[schedules] " + what + ": " + (cd.address || conn.uuid) +
+			" poll_enabled=" + (conn.poll_enabled ? 'yes' : 'no') +
+			" interval=" + (cd.poll_interval || cd.pull_interval || 'default'),
+			"cyan");
+	} catch (err) {
+		alogger.writeAlog(2,
+			"[schedules] could not apply schedule for " + conn.uuid + ": " + err.message,
+			"redbright");
+	}
+}
 
 router.post('/connection/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
@@ -936,7 +967,8 @@ router.post('/connection/:uuid/update', urlencodedParser, requireAdmin, async (r
 		alogger.writeAlog(3, "updateConnection failed for " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
 	// Redirect back to the owning peer's page
-	var conn = await peerConnections.getConnectionByUUID(uuid);
+	var conn = await peerConnections.getConnectionByUUIDWithNetwork(uuid);
+	await applyConnectionSchedule(conn, 'update');
 	var peer = conn ? await peers.getPeerById(conn.peer_id) : null;
 	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
 });
@@ -944,11 +976,21 @@ router.post('/connection/:uuid/update', urlencodedParser, requireAdmin, async (r
 router.post('/connection/:uuid/remove', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var uuid        = req.params.uuid.toLowerCase().trim();
-	var conn        = await peerConnections.getConnectionByUUID(uuid);
+	var conn        = await peerConnections.getConnectionByUUIDWithNetwork(uuid);
 	var peer        = conn ? await peers.getPeerById(conn.peer_id) : null;
 	var result      = await peerConnections.removeConnection(uuid);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "removeConnection failed for " + uuid + ": " + result.errormessages.join(", "), "redbright");
+	} else if (conn && conn.network_type) {
+		// The row is gone but its schedule is not: nothing else would ever
+		// clear it, and it would go on firing polls for a peer that no longer
+		// exists until someone noticed.
+		try {
+			await removeConnectionSchedule(uuid, conn.network_type);
+			alogger.writeAlog(4, "[schedules] removed schedule for deleted connection " + uuid, "cyan");
+		} catch (err) {
+			alogger.writeAlog(2, "[schedules] could not remove schedule for " + uuid + ": " + err.message, "redbright");
+		}
 	}
 	res.redirect(peer ? '/admin/peer/' + peer.uuid : '/admin/peers');
 });
