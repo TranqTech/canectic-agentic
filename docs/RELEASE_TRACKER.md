@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ---
 
@@ -119,6 +119,18 @@ Last updated: 2026-09-05
 - [x] NNTP tosser (pull/push)
 - [x] TIC file echo distribution
 - [x] FTN nodelist import and routing
+- [x] Batch subscribe from an echolist or filebone (per-network page, filter-aware
+      select-all, one shared settings block, runs on the worker with a sysop
+      notification; create-only)
+- [x] Message retention limits (optional `max_age_days` / `max_messages` per area,
+      group defaults, daily prune, admin preview before committing; both NULL by
+      default so nothing prunes until opted in)
+- [x] %RESCAN on AreaFix and FileFix (bare/ALL/*, optional day count, /FULL;
+      windowed by default. Message areas rewind msg_idx, file areas re-queue
+      distribution rows). Also a Rescan button per connection on the peer page
+- [x] Outbound eligibility extracted to `evaluateOutbound()` and tested: imported
+      history, don't-send-back-to-source, SEEN-BY (FTS-0004, compressed form),
+      PATH. Does not consult source_network_id
 
 ### Private Messaging
 - [x] Unified PM model (LOCAL, FTN, QWK, EMAIL)
@@ -202,7 +214,7 @@ Last updated: 2026-09-05
       24.04 to 26.04 run with PostgreSQL 16 to 18 and Redis 7 to 8
 
 ### Testing
-- [x] 2,670 tests passing (mocha)
+- [x] 2,791 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
