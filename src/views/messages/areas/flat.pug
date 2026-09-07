@@ -85,7 +85,7 @@ block content
               data-shortcode=msgArea.shortcode
               data-force80=msgArea.ansi_area ? 'true' : 'false'
               data-can-post=canPost ? 'true' : 'false'
-              data-can-moderate=canModerate ? 'true' : 'false'
+              data-can-moderate=(msgArea.moderation && msgArea.moderation.enabled) ? 'true' : 'false'
               data-total=totalMessages
               data-loaded=messages.length
               data-oldest-id=messages.length > 0 ? messages[0].id : 0
@@ -128,7 +128,17 @@ block content
                             data-bs-subject=message.subject
                             data-bs-threaduuid=message.thread_uuid || ''
                           ) Reply
-                        if canModerate
+                        if message.moderation && message.moderation.canMove
+                          button.btn.btn-xs.btn-sm.btn-outline-light.ms-1.message-move(
+                            type='button'
+                            data-msg-uuid=message.uuid || ''
+                            data-msg-from=message.from_user
+                            data-thread-uuid=message.thread_uuid || ''
+                            data-from-network=message.moderation.fromNetwork ? 'true' : 'false'
+                            title='Move this message to another area'
+                          )
+                            i.bi.bi-box-arrow-right
+                        if message.moderation && message.moderation.canDelete
                           button.btn.btn-xs.btn-sm.btn-outline-danger.ms-1.message-delete(
                             type='button'
                             data-msg-uuid=message.uuid || ''
@@ -404,6 +414,31 @@ block content
         return d.innerHTML;
       }
 
+      // The server decides what may be done with each message and sends the
+      // answer with it. This only renders that answer, exactly as the pug
+      // above does for the server-rendered rows, so an appended message and a
+      // first-page message never disagree.
+      function moderationButtons(msg, threadUuid) {
+        var m = msg.moderation || {};
+        var html = '';
+        if (m.canMove) {
+          html += '<button type="button" class="btn btn-xs btn-sm btn-outline-light ms-1 message-move"'
+            +  ' data-msg-uuid="' + escapeHtml(msg.uuid || '') + '"'
+            +  ' data-msg-from="' + escapeHtml(msg.from_user || '') + '"'
+            +  ' data-thread-uuid="' + escapeHtml(threadUuid || '') + '"'
+            +  ' data-from-network="' + (m.fromNetwork ? 'true' : 'false') + '"'
+            +  ' title="Move this message to another area"><i class="bi bi-box-arrow-right"></i></button>';
+        }
+        if (m.canDelete) {
+          html += '<button type="button" class="btn btn-xs btn-sm btn-outline-danger ms-1 message-delete"'
+            +  ' data-msg-uuid="' + escapeHtml(msg.uuid || '') + '"'
+            +  ' data-msg-from="' + escapeHtml(msg.from_user || '') + '"'
+            +  ' data-thread-uuid="' + escapeHtml(threadUuid || '') + '"'
+            +  ' title="Delete this message"><i class="bi bi-trash"></i></button>';
+        }
+        return html;
+      }
+
       function buildMsgHtml(msg) {
         var dateStr = formatDate(msg.system_time);
         var bodyContent = '';
@@ -434,13 +469,7 @@ block content
               +   ' data-bs-threaduuid="' + (msg.thread_uuid || '') + '"'
               + '>Reply</button>'
               : '')
-          +   (canModerateJs
-              ? '<button type="button" class="btn btn-xs btn-sm btn-outline-danger ms-1 message-delete"'
-              +   ' data-msg-uuid="' + escapeHtml(msg.uuid || '') + '"'
-              +   ' data-msg-from="' + escapeHtml(msg.from_user || '') + '"'
-              +   ' data-thread-uuid="' + (msg.thread_uuid || '') + '"'
-              +   ' title="Delete this message"><i class="bi bi-trash"></i></button>'
-              : '')
+          +   (canModerateJs ? moderationButtons(msg, msg.thread_uuid) : '')
           +   '</div>'
           + '</div>'
           + '<div class="px-2 py-2">'
@@ -714,5 +743,5 @@ block content
 
   include ../../partials/messages/_msgAutoSize
 
-      if canModerate && msgArea
-        +moderateControls(msgArea.shortcode)
+      if msgArea && msgArea.moderation && msgArea.moderation.enabled
+        +moderateControls(msgArea.shortcode, msgArea.moderation.targets)

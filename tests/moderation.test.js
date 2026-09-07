@@ -6,6 +6,12 @@
 // that lands, these tests say plainly which behaviours were meant to survive:
 // Sysop keeps working everywhere, and an ordinary user still gets nothing.
 //
+// Whether a control appears is decided by messages.moderationFor and read off
+// item.moderation. Views used to be handed a page-level canModerate flag and
+// work it out themselves, which meant a rule tightened in one view stayed loose
+// in the others and the terminal had no rule at all. These tests pin that the
+// answer travels with the message.
+//
 // The view tests pin where the controls live, which was got wrong first time.
 // They belong where a moderator can read what they are about to remove: on the
 // thread view, both in the header for the whole thread and on each message, and
@@ -20,12 +26,14 @@
 // Run: npx mocha --spec tests/moderation.test.js
 
 import assert from 'assert';
+import fs from 'fs';
 
-var areaAccess = null, pug = null, luxon = null;
+var areaAccess = null, pug = null, luxon = null, messages = null;
 try {
 	areaAccess = await import('../src/utils/areaAccess.js');
 	pug = (await import('pug')).default;
 	luxon = await import('luxon');
+	messages = await import('../src/models/messages.js');
 } catch (_) { /* leave null, suites skip */ }
 
 describe('areaAccess.canModerateArea', function () {
@@ -76,23 +84,50 @@ describe('areaAccess.canModerateArea', function () {
 });
 
 describe('moderation controls placement', function () {
-	before(function () { if (!pug || !luxon) this.skip(); });
+	before(function () { if (!pug || !luxon || !messages) this.skip(); });
 
 	var AREA = { shortcode: 'GEN', name: 'General', group_shortcode: 'G', thread_mode: 'standard' };
+	var SYSOP = { username: 'sysop', permissionflags: ['Sysop'] };
+	var PLAIN = { username: 'joe', permissionflags: [] };
 	var MSG = {
 		id: 1, uuid: 'm-1', from_user: 'alice', to_user: 'All', subject: 'Hi',
 		system_time: '2026-07-16 10:00:00-06', body_text: 'hello', thread_uuid: 't-1'
 	};
 
-	function render(template, canModerate) {
+	var TARGETS = [
+		{ shortcode: 'LOCAL', name: 'Local Chat', group_shortcode: 'G', networked: false },
+		{ shortcode: 'NET', name: 'Networked Echo', group_shortcode: 'G', networked: true }
+	];
+
+	// The route decorates before rendering, so the tests do too: nothing is
+	// passed that the real render sites do not pass.
+	function decorate(canModerate, opts) {
+		opts = opts || {};
+		var targets = canModerate ? TARGETS : [];
+		var area = Object.assign({}, AREA, {
+			moderation: messages.moderationForArea(
+				canModerate ? SYSOP : PLAIN, AREA, targets)
+		});
+		var msg = Object.assign({}, MSG, { source_network_id: opts.fromNetwork ? 7 : null });
+		messages.attachModeration(canModerate ? SYSOP : PLAIN, AREA, [msg], targets);
+		var thread = { id: 1, uuid: 't-1', subject: 'Hi', threadid: 'x',
+		               anyFromNetwork: !!opts.fromNetwork };
+		thread.moderation = messages.moderationFor(
+			canModerate ? SYSOP : PLAIN, AREA, thread, targets);
+		return { area: area, msg: msg, thread: thread };
+	}
+
+	function render(template, canModerate, opts) {
+		var d = decorate(canModerate, opts);
 		var extra = template === 'thread'
-			? { thread: { id: 1, uuid: 't-1', subject: 'Hi', threadid: 'x' }, messages: [MSG], totalMessages: 1 }
-			: { messages: [MSG], totalMessages: 1, messagesBefore: 0, hasOlder: false, hasNewer: false, firstUnreadId: 0 };
+			? { thread: d.thread, messages: [d.msg], totalMessages: 1 }
+			: { messages: [d.msg], totalMessages: 1, messagesBefore: 0, hasOlder: false,
+			    hasNewer: false, firstUnreadId: 0 };
 
 		var locals = Object.assign({
 			title: 'T', activelink: 'messages', ismobile: false, DateTime: luxon.DateTime,
 			currentuser: { username: 'tester' }, sufficientAccess: true,
-			canPost: true, canModerate: canModerate, msgArea: AREA,
+			canPost: true, msgArea: d.area,
 			threadMode: 'standard', postFromName: 'tester'
 		}, extra);
 
@@ -133,7 +168,9 @@ describe('moderation controls placement', function () {
 		var html = fn({
 			title: 'Area', activelink: 'messages', ismobile: false, DateTime: luxon.DateTime,
 			currentuser: { username: 'tester' }, sufficientAccess: true, canPost: true,
-			canModerate: true, msgArea: AREA, threadMode: 'standard', totalThreads: 1,
+			msgArea: Object.assign({}, AREA, {
+				moderation: messages.moderationForArea(SYSOP, AREA, TARGETS)
+			}), threadMode: 'standard', totalThreads: 1,
 			threadlist: [{ id: 1, uuid: 't-1', subject: 'Hi', message_count: 2, started_by: 'a',
 			               last_message: '2026-07-16 10:00:00-06', last_message_from: 'b' }]
 		});
@@ -164,6 +201,74 @@ describe('moderation controls placement', function () {
 			// show, or lose ones it should.
 			assert.ok(/data-can-moderate="true"/.test(render(tpl, true)));
 			assert.ok(/data-can-moderate="false"/.test(render(tpl, false)));
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// move
+	// -----------------------------------------------------------------------
+
+	it('offers a thread move in the thread view header', function () {
+		assert.ok(/class="[^"]*thread-move/.test(markup(render('thread', true))));
+	});
+
+	['thread', 'flat'].forEach(function (tpl) {
+		it('offers a per-message move in the ' + tpl + ' view', function () {
+			assert.ok(/class="[^"]*message-move/.test(markup(render(tpl, true))));
+		});
+
+		it('renders no move control for a non-moderator in the ' + tpl + ' view', function () {
+			assert.ok(!/class="[^"]*message-move/.test(markup(render(tpl, false))));
+			assert.ok(!/id="moveContentModal"/.test(markup(render(tpl, false))));
+		});
+
+		it('renders the destination list once per page in the ' + tpl + ' view', function () {
+			var dom = markup(render(tpl, true));
+			assert.strictEqual((dom.match(/id="moveDestination"/g) || []).length, 1,
+				'one shared dialog, not one per message');
+			assert.ok(/value="LOCAL"/.test(dom) && /value="NET"/.test(dom));
+		});
+
+		it('marks which destinations are networked in the ' + tpl + ' view', function () {
+			// The dialog hides the ones a networked message may not go to, and
+			// needs to know which those are without asking the server again.
+			var dom = markup(render(tpl, true));
+			assert.ok(/value="NET"[^>]*data-networked="true"/.test(dom) ||
+			          /data-networked="true"[^>]*value="NET"/.test(dom), dom.match(/<option[^>]*>/g));
+		});
+
+		it('tells the ' + tpl + ' move control where the message came from', function () {
+			assert.ok(/class="[^"]*message-move[^"]*"[\s\S]{0,300}?data-from-network="true"/
+				.test(markup(render(tpl, true, { fromNetwork: true }))),
+				'a networked message must say so, or the dialog cannot filter');
+			assert.ok(/class="[^"]*message-move[^"]*"[\s\S]{0,300}?data-from-network="false"/
+				.test(markup(render(tpl, true, { fromNetwork: false }))));
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// the answer travels with the message
+	// -----------------------------------------------------------------------
+
+	['thread', 'flat'].forEach(function (tpl) {
+		it('has the ' + tpl + ' lazy-load builder read each message\'s own answer', function () {
+			// Both views render messages twice, server side and again in JS. The
+			// JS half used to key off a single page flag, so every appended
+			// message got the same controls regardless of where it came from,
+			// and a networked one offered a move the route would refuse.
+			var script = render(tpl, true);
+			assert.ok(/msg\.moderation/.test(script),
+				'the row builder has to read the per-message answer, not a page flag');
+			assert.ok(/m\.canMove/.test(script) && /m\.canDelete/.test(script));
+		});
+
+		it('does not decide moderation itself in the ' + tpl + ' view', function () {
+			// Nothing in a template should be reading permission flags or
+			// working out provenance. If it is, the terminal and the browser
+			// will disagree the next time one of them is changed.
+			var src = fs.readFileSync('src/views/messages/areas/' + tpl + '.pug', 'utf8');
+			assert.ok(!/permissionflags/.test(src), 'a view must not read flags');
+			assert.ok(!/source_network_id/.test(src), 'a view must not derive provenance');
 		});
 	});
 

@@ -2,9 +2,13 @@
 //- flat views. Both show message content, which is the point: a moderator
 //- should be able to read what they are removing before they remove it.
 //-
-//- Include inside a view that renders .thread-delete and/or .message-delete
-//- controls, and pass the area shortcode.
-mixin moderateControls(shortcode)
+//- Include inside a view that renders .thread-delete / .message-delete and
+//- .thread-move / .message-move controls. Pass the area shortcode and the
+//- destination list from msgArea.moderation.targets.
+//-
+//- Which controls appear is decided per item by messages.moderationFor and
+//- read off item.moderation, never worked out here.
+mixin moderateControls(shortcode, moveTargets)
   .modal.fade#deleteThreadModal(tabindex='-1')
     .modal-dialog.modal-dialog-centered
       .modal-content
@@ -45,9 +49,63 @@ mixin moderateControls(shortcode)
             input#deleteMessageThreadUuid(type='hidden' name='thread_uuid' value='')
             button.btn.btn-danger(type='submit') Delete message
 
+  .modal.fade#moveContentModal(tabindex='-1')
+    .modal-dialog.modal-dialog-centered
+      .modal-content
+        form#moveContentForm(method='POST')
+          .modal-header.bg-darkblue.text-white
+            h5.modal-title Move
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          .modal-body
+            p.mb-2
+              | Move
+              strong#moveContentWhat  this
+              |  to another area.
+            .mb-2
+              label.form-label.small(for='moveDestination') Destination area
+              select#moveDestination.form-select(name='destination' required)
+                option(value='') Choose an area
+                if moveTargets && moveTargets.length
+                  each t in moveTargets
+                    option(
+                      value=t.shortcode
+                      data-networked=t.networked ? 'true' : 'false'
+                    )= (t.group_shortcode ? t.group_shortcode + ' / ' : '') + t.name
+            .alert.alert-info.small.mb-0#moveContentNote
+              | Moving re-exports the content from its new area, which is the point of
+              | moving it. Content that arrived from a network can only go to a
+              | local-only area, so this system never republishes it into a different
+              | network.
+          .modal-footer
+            button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+            input#moveContentThreadUuid(type='hidden' name='thread_uuid' value='')
+            button.btn.btn-primary(type='submit') Move
+
   script.
     (function () {
       var areaShortcode = '#{shortcode}';
+
+      // The one policy line the browser needs: content that came off a network
+      // may only land somewhere local. messages.moderationTargetAllowed is the
+      // server-side copy, and the route enforces it regardless of what is
+      // posted, so this is presentation rather than access control.
+      function limitDestinations(fromNetwork) {
+        var sel = document.getElementById('moveDestination');
+        if (!sel) return;
+        var opts = sel.querySelectorAll('option');
+        for (var i = 0; i < opts.length; i++) {
+          if (!opts[i].value) continue;
+          var blocked = fromNetwork && opts[i].dataset.networked === 'true';
+          opts[i].disabled = blocked;
+          opts[i].hidden = blocked;
+        }
+        sel.value = '';
+      }
+
+      function showModal(id) {
+        var el = document.getElementById(id);
+        if (el && window.bootstrap) bootstrap.Modal.getOrCreateInstance(el).show();
+      }
 
       // Delegated: messages arrive lazily on both views, so binding per button
       // at load would miss everything appended afterwards.
@@ -64,8 +122,7 @@ mixin moderateControls(shortcode)
           if (subjEl) subjEl.textContent = threadBtn.dataset.threadSubject || 'this thread';
           tForm.action = '/messages/area/' + areaShortcode + '/thread/' +
             threadBtn.dataset.threadUuid + '/delete';
-          var tModal = document.getElementById('deleteThreadModal');
-          if (tModal && window.bootstrap) bootstrap.Modal.getOrCreateInstance(tModal).show();
+          showModal('deleteThreadModal');
           return;
         }
 
@@ -83,8 +140,30 @@ mixin moderateControls(shortcode)
           if (tuInput) tuInput.value = msgBtn.dataset.threadUuid || '';
           mForm.action = '/messages/area/' + areaShortcode + '/message/' +
             msgBtn.dataset.msgUuid + '/delete';
-          var mModal = document.getElementById('deleteMessageModal');
-          if (mModal && window.bootstrap) bootstrap.Modal.getOrCreateInstance(mModal).show();
+          showModal('deleteMessageModal');
+          return;
+        }
+
+        var moveBtn = ev.target.closest('.thread-move, .message-move');
+        if (moveBtn) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          var vForm = document.getElementById('moveContentForm');
+          if (!vForm) return;
+          var isThread = moveBtn.classList.contains('thread-move');
+          var whatEl = document.getElementById('moveContentWhat');
+          if (whatEl) {
+            whatEl.textContent = isThread
+              ? ' "' + (moveBtn.dataset.threadSubject || 'this thread') + '" and every message in it'
+              : ' the message from ' + (moveBtn.dataset.msgFrom || 'this user');
+          }
+          vForm.action = isThread
+            ? '/messages/area/' + areaShortcode + '/thread/' + moveBtn.dataset.threadUuid + '/move'
+            : '/messages/area/' + areaShortcode + '/message/' + moveBtn.dataset.msgUuid + '/move';
+          var vt = document.getElementById('moveContentThreadUuid');
+          if (vt) vt.value = isThread ? '' : (moveBtn.dataset.threadUuid || '');
+          limitDestinations(moveBtn.dataset.fromNetwork === 'true');
+          showModal('moveContentModal');
         }
       });
     })();

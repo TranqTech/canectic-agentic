@@ -300,6 +300,46 @@ router.get('/messages/group/:shortcode', async (req, res) => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// Moderation decoration
+// ---------------------------------------------------------------------------
+//
+// Every view that shows a message asks the model the same question once and
+// reads the answer off the item. The web thread view, the flat view, the
+// terminal reader and the JSON lazy-load endpoints all go through here, so a
+// rule tightened in messages.js reaches all of them rather than whichever one
+// was remembered.
+//
+// msgArea.moderation answers "may this user moderate here, and what are the
+// destinations"; item.moderation narrows that per message or thread.
+async function decorateModeration(currentuser, msgArea, items, thread) {
+	if (!msgArea) return [];
+
+	var enabled = currentuser && canModerateArea(currentuser, msgArea);
+	var targets = enabled
+		? await messages.buildMoveTargets(currentuser, msgArea.shortcode, checkAreaPostAccess)
+		: [];
+
+	msgArea.moderation = messages.moderationForArea(currentuser, msgArea, targets);
+
+	// Stamped even when the answer is no, so a template never has to tell a
+	// missing field apart from a refusal.
+	messages.attachModeration(currentuser, msgArea, items || [], targets);
+
+	if (thread) {
+		// A thread is as restricted as its most restricted message: if any part
+		// of it arrived from a network, moving the whole thing into a networked
+		// area would republish that part.
+		if (enabled) {
+			var origin = await messages.threadOriginSummary(thread.uuid, msgArea.shortcode);
+			thread.anyFromNetwork = !!(origin && origin.anyFromNetwork);
+		}
+		thread.moderation = messages.moderationFor(currentuser, msgArea, thread, targets);
+	}
+
+	return targets;
+}
+
 // Area view — threads listing or flat messages depending on thread_mode / user toggle
 router.get('/messages/area/:shortcode', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
@@ -311,9 +351,9 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 	if (!currentuser || !msgArea || !sufficientAccess) {
 		var threadMode = (msgArea && msgArea.thread_mode) || 'standard';
 		var viewMode   = req.query.view || null;
+		await decorateModeration(null, msgArea, []);
 		if ((threadMode === 'no_threads' || viewMode === 'flat') && msgArea) {
 			return res.render('messages/areas/flat', {
-			canModerate: canModerateArea(currentuser, msgArea),
 				title: msgArea ? msgArea.name : 'Message Area',
 				activelink: 'messages',
 				currentuser: currentuser,
@@ -331,7 +371,6 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 			});
 		}
 		return res.render('messages/areas/view', {
-		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 			title: msgArea ? msgArea.name : 'Message Area',
 			activelink: 'messages',
 			currentuser: currentuser,
@@ -410,6 +449,8 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 			}
 		}
 
+		await decorateModeration(currentuser, msgArea, msglist);
+
 		return res.render('messages/areas/flat', {
 			title: msgArea.name,
 			activelink: 'messages',
@@ -443,8 +484,9 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 		}
 	}
 
+	await decorateModeration(currentuser, msgArea, []);
+
 	res.render('messages/areas/view', {
-		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 		title: msgArea.name,
 		activelink: 'messages',
 		currentuser: currentuser,
@@ -589,21 +631,12 @@ router.get('/messages/area/:shortcode/messages/load', async (req, res) => {
 		threadUUIDs = await messages.getThreadUUIDMap(shortcode, threadIds);
 	}
 
+	await decorateModeration(currentuser, msgArea, batch);
+
 	res.json({
 		direction: direction,
 		messages: batch.map(function(m) {
-			return {
-				id: m.id,
-				msg_id: m.msg_id,
-				from_user: m.from_user,
-				to_user: m.to_user,
-				subject: m.subject,
-				system_time: m.system_time,
-				body_text: m.body_text,
-				body_html: m.body_html,
-				isAnsi: m.isAnsi || false,
-				thread_uuid: threadUUIDs[m.thread_id] || ''
-			};
+			return messages.messageForClient(m, threadUUIDs[m.thread_id] || '');
 		}),
 		hasMore: hasMore
 	});
@@ -646,8 +679,8 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 
 	// Bail early if no user, no area, or no access — template guards handle display
 	if (!currentuser || !msgArea || !sufficientAccess) {
+		await decorateModeration(null, msgArea, []);
 		return res.render('messages/areas/thread', {
-		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 			title: msgArea ? msgArea.name : 'Thread',
 			activelink: 'messages',
 			currentuser: currentuser,
@@ -669,8 +702,8 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 
 	var thread = await messages.getThreadByUUID(uuid, shortcode);
 	if (!thread) {
+		await decorateModeration(currentuser, msgArea, []);
 		return res.render('messages/areas/thread', {
-		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 			title: 'Thread Not Found',
 			activelink: 'messages',
 			currentuser: currentuser,
@@ -744,8 +777,9 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 		messagesBefore = await messages.countMessagesBefore(shortcode, oldestInBatch, thread.id);
 	}
 
+	await decorateModeration(currentuser, msgArea, allMessages, thread);
+
 	res.render('messages/areas/thread', {
-		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 		title: thread.subject,
 		activelink: 'messages',
 		currentuser: currentuser,
@@ -839,21 +873,11 @@ router.get('/messages/area/:shortcode/thread/:uuid/load', async (req, res) => {
 		hasMore = check.length > 0;
 	}
 
+	await decorateModeration(currentuser, msgArea, batch);
+
 	res.json({
 		direction: direction,
-		messages: batch.map(function(m) {
-			return {
-				id: m.id,
-				msg_id: m.msg_id,
-				from_user: m.from_user,
-				to_user: m.to_user,
-				subject: m.subject,
-				system_time: m.system_time,
-				body_text: m.body_text,
-				body_html: m.body_html,
-				isAnsi: m.isAnsi || false
-			};
-		}),
+		messages: batch.map(function(m) { return messages.messageForClient(m, uuid); }),
 		hasMore: hasMore
 	});
 });
@@ -935,6 +959,112 @@ router.post('/messages/area/:shortcode/message/:uuid/delete', urlencodedParser, 
 		if (stillThere) return res.redirect('/messages/area/' + shortcode + '/thread/' + threadUUID);
 	}
 	res.redirect('/messages/area/' + shortcode);
+});
+
+// Moving content between areas.
+//
+// Re-export is the point: a thread that now lives in a networked area should
+// reach that network. The rule guards provenance instead. Locally written mail
+// may go anywhere; mail that arrived from a network may only go to a local-only
+// area, so it cannot be republished into a different network under this
+// system's name.
+
+router.post('/messages/area/:shortcode/thread/:uuid/move', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var shortcode   = req.params.shortcode;
+	var msgArea     = await msgAreas.getAreaByShortcode(shortcode);
+	var destcode    = (req.body.destination || '').trim().toUpperCase();
+
+	if (!msgArea || !currentuser || !canModerateArea(currentuser, msgArea)) {
+		await flash.setOne(req, 'danger', 'You do not have permission to moderate this area.');
+		return res.redirect('/messages/area/' + shortcode);
+	}
+
+	var dest = destcode ? await msgAreas.getAreaByShortcode(destcode) : null;
+	if (!dest) {
+		await flash.setOne(req, 'danger', 'Pick an area to move it to.');
+		return res.redirect('/messages/area/' + shortcode + '/thread/' + req.params.uuid);
+	}
+	if (!checkAreaPostAccess(currentuser, dest)) {
+		await flash.setOne(req, 'danger', 'You cannot post to that area.');
+		return res.redirect('/messages/area/' + shortcode + '/thread/' + req.params.uuid);
+	}
+
+	// A thread is as restricted as its most restricted message: if any part of
+	// it came off a network, moving the whole thing into a networked area
+	// would republish that part.
+	var origin = await messages.threadOriginSummary(req.params.uuid, shortcode);
+	var destNetworked = await messages.areaIsNetworked(dest.id);
+	var verdict = messages.canMoveMessageToArea(
+		{ source_network_id: origin.anyFromNetwork ? 1 : null }, destNetworked);
+
+	if (!verdict.allowed) {
+		await flash.setOne(req, 'warning', verdict.reason);
+		return res.redirect('/messages/area/' + shortcode + '/thread/' + req.params.uuid);
+	}
+
+	var result = await messages.moveThreadToArea(req.params.uuid, shortcode, dest.shortcode);
+	if (result.status) {
+		alogger.writeAlog(2, 'Moderation: ' + currentuser.username + ' moved a thread from ' +
+			shortcode + ' to ' + dest.shortcode + ' (' + result.moved + ' message(s))', 'yellowbright');
+		await flash.setOne(req, 'success', 'Thread moved to ' + dest.name + ' (' +
+			result.moved + ' message' + (result.moved === 1 ? '' : 's') + ').');
+		return res.redirect('/messages/area/' + dest.shortcode);
+	}
+
+	await flash.setOne(req, 'danger', 'Could not move that thread: ' +
+		(result.errormessages || []).join(', '));
+	res.redirect('/messages/area/' + shortcode + '/thread/' + req.params.uuid);
+});
+
+router.post('/messages/area/:shortcode/message/:uuid/move', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var shortcode   = req.params.shortcode;
+	var msgArea     = await msgAreas.getAreaByShortcode(shortcode);
+	var destcode    = (req.body.destination || '').trim().toUpperCase();
+	var backTo      = (req.body.thread_uuid || '').trim();
+
+	function back() {
+		return backTo
+			? '/messages/area/' + shortcode + '/thread/' + backTo
+			: '/messages/area/' + shortcode;
+	}
+
+	if (!msgArea || !currentuser || !canModerateArea(currentuser, msgArea)) {
+		await flash.setOne(req, 'danger', 'You do not have permission to moderate this area.');
+		return res.redirect('/messages/area/' + shortcode);
+	}
+
+	var dest = destcode ? await msgAreas.getAreaByShortcode(destcode) : null;
+	if (!dest || !checkAreaPostAccess(currentuser, dest)) {
+		await flash.setOne(req, 'danger', 'Pick an area you can post to.');
+		return res.redirect(back());
+	}
+
+	var msg = await messages.getMessageByUUID(req.params.uuid, shortcode);
+	if (!msg) {
+		await flash.setOne(req, 'danger', 'Message not found.');
+		return res.redirect(back());
+	}
+
+	var destNetworked = await messages.areaIsNetworked(dest.id);
+	var verdict = messages.canMoveMessageToArea(msg, destNetworked);
+	if (!verdict.allowed) {
+		await flash.setOne(req, 'warning', verdict.reason);
+		return res.redirect(back());
+	}
+
+	var result = await messages.moveMessageToArea(req.params.uuid, shortcode, dest.shortcode);
+	if (result.status) {
+		alogger.writeAlog(2, 'Moderation: ' + currentuser.username + ' moved a message from ' +
+			shortcode + ' to ' + dest.shortcode, 'yellowbright');
+		await flash.setOne(req, 'success', 'Message moved to ' + dest.name + '.');
+	} else {
+		await flash.setOne(req, 'danger', 'Could not move that message: ' +
+			(result.errormessages || []).join(', '));
+	}
+
+	res.redirect(back());
 });
 
 router.post('/messages/area/:shortcode/newthread', urlencodedParser, async (req, res) => {

@@ -1,6 +1,9 @@
 import { BaseSubModule } from "../basesubmodule.js";
 import { getRecentThreadsForArea, getThreadsPage, getThreadCount,
-	getMessages, getMessageCount, countMessagesBefore, getMessage } from "../../models/messages.js";
+	getMessages, getMessageCount, countMessagesBefore, getMessage,
+	moderationForArea, attachModeration, buildMoveTargets, threadOriginSummary,
+	moderationFor, deleteMessageByUUID, deleteThreadByUUID,
+	moveMessageToArea, moveThreadToArea } from "../../models/messages.js";
 import { getAreaByShortcode } from "../../models/msgAreas.js";
 import * as alogger from "../../utils/alogger.js";
 
@@ -88,6 +91,7 @@ const STATE = {
 	LOADING: 0,
 	THREAD_LIST: 1,
 	MESSAGE_VIEW: 2,
+	MODERATE: 3,
 };
 
 const MSG_BATCH = 30;
@@ -158,6 +162,13 @@ class msgReader extends BaseSubModule {
 
 		// Post permission — resolved after area config loads
 		this._canPost = false;
+
+		// Moderation. The area answer and the destination list come from the
+		// model once per area; each message carries its own answer in
+		// message.moderation. Nothing here decides policy.
+		this._moderation = { enabled: false, targets: [] };
+		this._modPrompt = null;   // active prompt: { text, hint, onChar, onKey }
+		this._modPickIdx = 0;     // cursor within the destination list
 
 		// State machine
 		this._state = STATE.LOADING;
@@ -423,7 +434,31 @@ class msgReader extends BaseSubModule {
 		this._threadMode = this._areaConfig.thread_mode || "standard";
 		this._areaName = this._areaConfig.name || this._areaShortcode;
 		this._canPost = this.call.user_record ? checkPostAccess(this.call.user_record, this._areaConfig) : false;
+		await this._loadModeration();
 		return true;
+	}
+
+	// Same question the web views ask, answered in the same place. Destinations
+	// are resolved once when the area opens rather than per message.
+	async _loadModeration() {
+		this._moderation = { enabled: false, targets: [] };
+		var user = this.call && this.call.user_record;
+		if (!user || !this._areaConfig) return;
+
+		try {
+			var targets = await buildMoveTargets(user, this._areaShortcode, checkPostAccess);
+			this._moderation = moderationForArea(user, this._areaConfig, targets);
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " moderation load failed: " +
+				(err?.message || err), "redbright");
+		}
+	}
+
+	// Called after any load that replaces this._messages.
+	_decorateMessages() {
+		if (!this._areaConfig) return;
+		attachModeration(this.call && this.call.user_record, this._areaConfig,
+			this._messages, this._moderation.targets);
 	}
 
 	async _loadThreadList() {
@@ -633,6 +668,11 @@ class msgReader extends BaseSubModule {
 	}
 
 	_updateMessageBounds() {
+		// Every path that replaces or extends this._messages ends here, so this
+		// is where the moderation answer gets attached. Doing it at each load
+		// site instead is how a newly added one ends up undecorated.
+		this._decorateMessages();
+
 		if (this._messages.length > 0) {
 			this._oldestId = this._messages[0].id;
 			this._newestId = this._messages[this._messages.length - 1].id;
@@ -776,6 +816,9 @@ class msgReader extends BaseSubModule {
 				} else {
 					this._drawEmptyArea();
 				}
+				break;
+			case STATE.MODERATE:
+				this._drawModPrompt();
 				break;
 		}
 	}
@@ -1310,6 +1353,16 @@ class msgReader extends BaseSubModule {
 			this._navKey("R", "Reply");
 			this.call.cmds.senddata("  ");
 		}
+		// Read off the message on screen, not worked out here.
+		var mod = (this._currentMessage() || {}).moderation;
+		if (mod && mod.canDelete) {
+			this._navKey("D", "Del");
+			this.call.cmds.senddata("  ");
+		}
+		if (mod && mod.canMove) {
+			this._navKey("M", "Move");
+			this.call.cmds.senddata("  ");
+		}
 		this._navKey("L", "Last");
 
 		if (this._viewMode === "threaded") {
@@ -1475,7 +1528,9 @@ class msgReader extends BaseSubModule {
 	// ===========================================================================
 
 	onKey(key) {
-		if (this._state === STATE.THREAD_LIST) {
+		if (this._state === STATE.MODERATE) {
+			this._onKeyModerate(key);
+		} else if (this._state === STATE.THREAD_LIST) {
 			this._onKeyThreadList(key);
 		} else if (this._state === STATE.MESSAGE_VIEW) {
 			this._onKeyMessageView(key);
@@ -1483,7 +1538,9 @@ class msgReader extends BaseSubModule {
 	}
 
 	onChar(ch) {
-		if (this._state === STATE.THREAD_LIST) {
+		if (this._state === STATE.MODERATE) {
+			this._onCharModerate(ch);
+		} else if (this._state === STATE.THREAD_LIST) {
 			this._onCharThreadList(ch);
 		} else if (this._state === STATE.MESSAGE_VIEW) {
 			this._onCharMessageView(ch);
@@ -1552,6 +1609,12 @@ class msgReader extends BaseSubModule {
 				return;
 			case "j":
 				this._launchJump();
+				return;
+			case "d":
+				this._beginDelete();
+				return;
+			case "m":
+				this._beginMove();
 				return;
 		}
 	}
@@ -1693,6 +1756,408 @@ class msgReader extends BaseSubModule {
 				this._launchJump();
 				return;
 		}
+	}
+
+	// ===========================================================================
+	// MODERATION
+	// ===========================================================================
+	//
+	// Delete and move for a moderator, matching the web views. What may be done
+	// is read off message.moderation and this._moderation, both filled in by
+	// messages.js, so the rules live in one place and the terminal cannot drift
+	// from the browser.
+	//
+	// Prompts are data driven: one state, one draw, one dispatch. Everything is
+	// confirmed, since none of it can be undone from here.
+
+	_currentMessage() {
+		if (this._msgIdx < 0 || this._msgIdx >= this._messages.length) return null;
+		return this._messages[this._msgIdx];
+	}
+
+	_currentThread() {
+		if (!this._currentThreadId) return null;
+		for (var t of this._filteredThreads) {
+			if (t.id === this._currentThreadId) return t;
+		}
+		return null;
+	}
+
+	// Thread level operations only make sense in a threaded view, and only when
+	// the thread is actually on hand.
+	_threadOpsAvailable() {
+		return this._viewMode === "threaded" && !!this._currentThread();
+	}
+
+	_openModPrompt(prompt) {
+		this._modPrompt = prompt;
+		this._setState(STATE.MODERATE);
+	}
+
+	_closeModPrompt() {
+		this._modPrompt = null;
+		this._modPickIdx = 0;
+		this._setState(STATE.MESSAGE_VIEW);
+	}
+
+	_modStatus(text, isError) {
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  " + text + "\r\n");
+			return;
+		}
+		this.call.cmds.movecursor(1, this._navRow);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.setfgcolor(isError ? CLR_ERROR : CLR_NAV);
+		this.call.cmds.senddata(" " + this._truncate(text, this._termW - 2));
+		this.call.cmds.resetcolors();
+	}
+
+	_drawModPrompt() {
+		var p = this._modPrompt;
+		if (!p) return;
+
+		if (this.dumb) {
+			this.call.cmds.senddata("\r\n  " + p.text + "\r\n");
+			if (p.list) {
+				for (var d = 0; d < p.list.length; d++) {
+					this.call.cmds.senddata("  " + (d + 1) + ") " + p.list[d].label + "\r\n");
+				}
+			}
+			if (p.hint) this.call.cmds.senddata("  " + p.hint + "\r\n");
+			return;
+		}
+
+		// A destination list needs room, so it takes over the body viewport.
+		// A plain question only needs the nav row.
+		if (p.list) {
+			this.call.cmds.clearscreen();
+			this.call.cmds.movecursor(2, 2);
+			this.call.cmds.setfgcolor(CLR_TITLE);
+			this.call.cmds.senddata(this._truncate(p.text, this._termW - 3));
+			this.call.cmds.resetcolors();
+
+			var rows = Math.max(1, this._bodyViewEnd - this._bodyViewStart + 1);
+			var first = Math.max(0, Math.min(this._modPickIdx - Math.floor(rows / 2),
+				p.list.length - rows));
+			if (first < 0) first = 0;
+
+			for (var i = 0; i < rows && (first + i) < p.list.length; i++) {
+				var idx = first + i;
+				var sel = (idx === this._modPickIdx);
+				this.call.cmds.movecursor(2, this._bodyViewStart + i);
+				this.call.cmds.cleartoeol();
+				if (sel) {
+					this.call.cmds.setbgcolor(CLR_BAR_BG);
+					this.call.cmds.setfgcolor(CLR_BAR_FG);
+				} else {
+					this.call.cmds.setfgcolor(CLR_THREAD);
+				}
+				this.call.cmds.senddata(this._padRight(
+					(sel ? "> " : "  ") + p.list[idx].label, this._termW - 4));
+				this.call.cmds.resetcolors();
+			}
+		}
+
+		this.call.cmds.movecursor(1, this._navRow);
+		this.call.cmds.cleartoeol();
+		this.call.cmds.setfgcolor(CLR_NAV);
+		this.call.cmds.senddata(" " + this._truncate(
+			p.list ? (p.hint || "") : (p.text + "  " + (p.hint || "")), this._termW - 2));
+		this.call.cmds.resetcolors();
+	}
+
+	// --- entry points from the message view ---
+
+	_beginDelete() {
+		var msg = this._currentMessage();
+		if (!msg || !msg.moderation || !msg.moderation.canDelete) return;
+
+		if (this._threadOpsAvailable()) {
+			this._openModPrompt({
+				text: "Delete (M)essage or the whole (T)hread?",
+				hint: "Esc cancels",
+				onChar: (ch) => {
+					var c = ch.toLowerCase();
+					if (c === "m") return this._confirmDeleteMessage();
+					if (c === "t") return this._confirmDeleteThread();
+					if (c === "n" || c === "q") return this._closeModPrompt();
+				}
+			});
+			return;
+		}
+		this._confirmDeleteMessage();
+	}
+
+	_confirmDeleteMessage() {
+		var msg = this._currentMessage();
+		if (!msg) return this._closeModPrompt();
+		this._openModPrompt({
+			text: "Delete the message from " + (msg.from_user || "this user") + "?",
+			hint: "(Y/N)  Local only: peers keep what they already have",
+			onChar: (ch) => {
+				var c = ch.toLowerCase();
+				if (c === "y") return this._doDeleteMessage(msg);
+				if (c === "n" || c === "q") return this._closeModPrompt();
+			}
+		});
+	}
+
+	_confirmDeleteThread() {
+		var thread = this._currentThread();
+		if (!thread) return this._closeModPrompt();
+		this._openModPrompt({
+			text: "Delete \"" + this._truncate(thread.subject || "this thread", 40) +
+				"\" and every message in it?",
+			hint: "(Y/N)  Local only: peers keep what they already have",
+			onChar: (ch) => {
+				var c = ch.toLowerCase();
+				if (c === "y") return this._doDeleteThread(thread);
+				if (c === "n" || c === "q") return this._closeModPrompt();
+			}
+		});
+	}
+
+	_beginMove() {
+		var msg = this._currentMessage();
+		if (!msg || !msg.moderation || !msg.moderation.canMove) return;
+
+		if (this._threadOpsAvailable()) {
+			this._openModPrompt({
+				text: "Move (M)essage or the whole (T)hread?",
+				hint: "Esc cancels",
+				onChar: (ch) => {
+					var c = ch.toLowerCase();
+					if (c === "m") return this._pickDestinationForMessage(msg);
+					if (c === "t") return this._pickDestinationForThread();
+					if (c === "n" || c === "q") return this._closeModPrompt();
+				}
+			});
+			return;
+		}
+		this._pickDestinationForMessage(msg);
+	}
+
+	_pickDestination(text, targets, onPick) {
+		if (!targets || targets.length === 0) {
+			this._closeModPrompt();
+			this._modStatus("Nothing to move it to.", true);
+			return;
+		}
+		this._modPickIdx = 0;
+		this._openModPrompt({
+			text: text,
+			hint: "Up/Down to choose, Enter to move, Esc to cancel",
+			list: targets.map(function (t) {
+				return {
+					label: (t.group_shortcode ? t.group_shortcode + " / " : "") + t.name +
+						(t.networked ? "  (networked)" : ""),
+					target: t
+				};
+			}),
+			onKey: (key) => {
+				var p = this._modPrompt;
+				if (!p) return;
+				if (key === "UpArrow") {
+					this._modPickIdx = Math.max(0, this._modPickIdx - 1);
+					this._drawModPrompt();
+				} else if (key === "DownArrow") {
+					this._modPickIdx = Math.min(p.list.length - 1, this._modPickIdx + 1);
+					this._drawModPrompt();
+				} else if (key === "PgUp") {
+					this._modPickIdx = 0;
+					this._drawModPrompt();
+				} else if (key === "PgDn") {
+					this._modPickIdx = p.list.length - 1;
+					this._drawModPrompt();
+				} else if (key === "Enter") {
+					onPick(p.list[this._modPickIdx].target);
+				}
+			},
+			// Dumb terminals get a numbered list, so accept digits there.
+			onChar: (ch) => {
+				var p = this._modPrompt;
+				if (!p) return;
+				if (ch === "\r" || ch === "\n") return onPick(p.list[this._modPickIdx].target);
+				var n = parseInt(ch, 10);
+				if (!isNaN(n) && n >= 1 && n <= p.list.length) {
+					this._modPickIdx = n - 1;
+					return onPick(p.list[n - 1].target);
+				}
+				if (ch.toLowerCase() === "q") this._closeModPrompt();
+			}
+		});
+	}
+
+	// A message carries its own usable destinations; the model has already
+	// dropped the ones its origin forbids.
+	_pickDestinationForMessage(msg) {
+		this._pickDestination("Move the message from " + (msg.from_user || "this user") + " to:",
+			msg.moderation.targets, (target) => this._doMoveMessage(msg, target));
+	}
+
+	// A thread is as restricted as its most restricted message, so its own
+	// answer has to be asked for rather than borrowed from the message on screen.
+	async _pickDestinationForThread() {
+		var thread = this._currentThread();
+		if (!thread) return this._closeModPrompt();
+
+		var mod;
+		try {
+			var origin = await threadOriginSummary(thread.uuid, this._areaShortcode);
+			thread.anyFromNetwork = !!(origin && origin.anyFromNetwork);
+			mod = moderationFor(this.call.user_record, this._areaConfig, thread,
+				this._moderation.targets);
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " thread origin lookup failed: " +
+				(err?.message || err), "redbright");
+			this._closeModPrompt();
+			this._modStatus("Could not check where that thread came from.", true);
+			return;
+		}
+		if (!this.active) return;
+
+		if (!mod.canMove) {
+			this._closeModPrompt();
+			this._modStatus("Part of that thread came from a network, so it can only " +
+				"go to a local area, and there is none you can post to.", true);
+			return;
+		}
+		this._pickDestination("Move \"" + this._truncate(thread.subject || "this thread", 30) +
+			"\" to:", mod.targets, (target) => this._doMoveThread(thread, target));
+	}
+
+	// --- the actions themselves ---
+
+	async _doDeleteMessage(msg) {
+		this._closeModPrompt();
+		try {
+			var result = await deleteMessageByUUID(msg.uuid, this._areaShortcode);
+			if (!this.active) return;
+			if (!result || !result.status) {
+				this._modStatus("Could not delete that message.", true);
+				return;
+			}
+			alogger.writeAlog(2, "Moderation: " + (this.call.user_record.username || "?") +
+				" deleted a message in " + this._areaShortcode + " from the terminal", "yellowbright");
+			await this._reloadAfterModeration("Message deleted.");
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " delete failed: " + (err?.stack || err), "redbright");
+			if (this.active) this._modStatus("Could not delete that message.", true);
+		}
+	}
+
+	async _doDeleteThread(thread) {
+		this._closeModPrompt();
+		try {
+			var result = await deleteThreadByUUID(thread.uuid, this._areaShortcode);
+			if (!this.active) return;
+			if (!result || !result.status) {
+				this._modStatus("Could not delete that thread.", true);
+				return;
+			}
+			alogger.writeAlog(2, "Moderation: " + (this.call.user_record.username || "?") +
+				" deleted a thread in " + this._areaShortcode + " from the terminal", "yellowbright");
+			// The thread is gone, so there is nothing to return to.
+			this._currentThreadId = null;
+			this._messages = [];
+			await this._loadThreadList();
+			if (this.active) this._setState(STATE.THREAD_LIST);
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " thread delete failed: " + (err?.stack || err), "redbright");
+			if (this.active) this._modStatus("Could not delete that thread.", true);
+		}
+	}
+
+	async _doMoveMessage(msg, target) {
+		this._closeModPrompt();
+		try {
+			var result = await moveMessageToArea(msg.uuid, this._areaShortcode, target.shortcode);
+			if (!this.active) return;
+			if (!result || !result.status) {
+				this._modStatus("Could not move that message: " +
+					((result && result.errormessages) || []).join(", "), true);
+				return;
+			}
+			alogger.writeAlog(2, "Moderation: " + (this.call.user_record.username || "?") +
+				" moved a message from " + this._areaShortcode + " to " + target.shortcode +
+				" from the terminal", "yellowbright");
+			await this._reloadAfterModeration("Moved to " + target.name + ".");
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " move failed: " + (err?.stack || err), "redbright");
+			if (this.active) this._modStatus("Could not move that message.", true);
+		}
+	}
+
+	async _doMoveThread(thread, target) {
+		this._closeModPrompt();
+		try {
+			var result = await moveThreadToArea(thread.uuid, this._areaShortcode, target.shortcode);
+			if (!this.active) return;
+			if (!result || !result.status) {
+				this._modStatus("Could not move that thread: " +
+					((result && result.errormessages) || []).join(", "), true);
+				return;
+			}
+			alogger.writeAlog(2, "Moderation: " + (this.call.user_record.username || "?") +
+				" moved a thread from " + this._areaShortcode + " to " + target.shortcode +
+				" from the terminal (" + result.moved + " message(s))", "yellowbright");
+			this._currentThreadId = null;
+			this._messages = [];
+			await this._loadThreadList();
+			if (this.active) {
+				this._setState(STATE.THREAD_LIST);
+				this._modStatus("Thread moved to " + target.name + ".");
+			}
+		} catch (err) {
+			alogger.writeAlog(3, this.loggingId + " thread move failed: " + (err?.stack || err), "redbright");
+			if (this.active) this._modStatus("Could not move that thread.", true);
+		}
+	}
+
+	// After a message goes, the batch on screen is stale. Reload the same view
+	// and keep the cursor near where it was rather than snapping to the top.
+	async _reloadAfterModeration(note) {
+		var wasIdx = this._msgIdx;
+		if (this._currentThreadId) {
+			await this._loadMessagesForThread(this._currentThreadId);
+		} else {
+			await this._loadMessagesFlat();
+		}
+		if (!this.active) return;
+
+		if (this._messages.length === 0) {
+			// The last message went with it, so the thread did too.
+			if (this._viewMode === "threaded" || this._threadMode === "standard") {
+				this._currentThreadId = null;
+				await this._loadThreadList();
+				if (this.active) this._setState(STATE.THREAD_LIST);
+				return;
+			}
+			this._setState(STATE.MESSAGE_VIEW);
+			return;
+		}
+
+		this._msgIdx = Math.max(0, Math.min(wasIdx, this._messages.length - 1));
+		this._setState(STATE.MESSAGE_VIEW);
+		this._modStatus(note);
+	}
+
+	// What the dumb prompt line should offer, read off the message on screen.
+	_dumbModKeys() {
+		var mod = (this._currentMessage() || {}).moderation;
+		var out = "";
+		if (mod && mod.canDelete) out += ", D=Delete";
+		if (mod && mod.canMove) out += ", M=Move";
+		return out;
+	}
+
+	_onKeyModerate(key) {
+		if (key === "ESC") return this._closeModPrompt();
+		if (this._modPrompt && this._modPrompt.onKey) this._modPrompt.onKey(key);
+	}
+
+	_onCharModerate(ch) {
+		if (this._modPrompt && this._modPrompt.onChar) this._modPrompt.onChar(ch);
 	}
 
 	async _launchReply() {
@@ -1891,7 +2356,8 @@ class msgReader extends BaseSubModule {
 			}
 		}
 		this.call.cmds.senddata("\r\n  " + this._getMsgPositionStr());
-		this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last, Q=Quit]: ");
+		this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last" +
+			this._dumbModKeys() + ", Q=Quit]: ");
 		this._dumbMode = "msgprompt";
 		this._dumbBuf = "";
 		this._advancePointers(msg);
@@ -1901,6 +2367,19 @@ class msgReader extends BaseSubModule {
 		for (var i = 0; i < inputArray.length; i++) {
 			if (!this.active) return;
 			var token = inputArray[i];
+
+			// A moderation prompt owns the keyboard until it is answered, on a
+			// dumb terminal the same as anywhere else. Without this the yes/no
+			// falls through to the reader's own keys and the question is left
+			// hanging while the screen moves on.
+			if (this._modPrompt) {
+				if (token.startsWith("KEY_")) {
+					this._onKeyModerate(token.slice(4));
+				} else if (token.startsWith("CHAR_")) {
+					this._onCharModerate(token.slice(5));
+				}
+				continue;
+			}
 
 			if (this._dumbMode === "more") {
 				// Any key continues
@@ -1922,7 +2401,8 @@ class msgReader extends BaseSubModule {
 		if (!this._dumbMoreLines || this._dumbMoreLines.length === 0) {
 			var msg = this._messages[this._msgIdx];
 			this.call.cmds.senddata("\r\n  " + this._getMsgPositionStr());
-			this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last, Q=Quit]: ");
+			this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last" +
+				this._dumbModKeys() + ", Q=Quit]: ");
 			this._dumbMode = "msgprompt";
 			this._advancePointers(msg);
 			return;
@@ -1942,7 +2422,8 @@ class msgReader extends BaseSubModule {
 		}
 		var msg = this._messages[this._msgIdx];
 		this.call.cmds.senddata("\r\n  " + this._getMsgPositionStr());
-		this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last, Q=Quit]: ");
+		this.call.cmds.senddata("\r\n  [Right=Next, Left=Prev, L=Last" +
+			this._dumbModKeys() + ", Q=Quit]: ");
 		this._dumbMode = "msgprompt";
 		this._advancePointers(msg);
 	}
@@ -2014,6 +2495,10 @@ class msgReader extends BaseSubModule {
 			} else if (lower === "l") {
 				this._msgIdx = this._messages.length - 1;
 				this._drawMessageDumb();
+			} else if (lower === "d") {
+				this._beginDelete();
+			} else if (lower === "m") {
+				this._beginMove();
 			}
 		}
 	}

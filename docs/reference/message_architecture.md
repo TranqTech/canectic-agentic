@@ -17,7 +17,7 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 | File | Purpose |
 |------|---------|
-| `messages.js` | **Canonical message model** (post April 2026 consolidation). Owns all message CRUD, posting, threading, sanitization, and read operations. **Viewing:** `listMsgGroups(userSecurity)`, `getAreasInGroup(shortcode, userSecurity)`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml` (re-exported from `terminalText.js`). **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `resolveAreaAddress(areaId)` (origin line and FTN address resolution). **Unified threading** (called by all three tossers FTN/QWK/NNTP): `threadMessage(message, messagetable, threadtable, shortcode)` — 4-step algorithm: Step A (pre-assigned threadid) → Step B (reply_to MSGID lookup, case-insensitive) → Step C (subject match, case-sensitive, 365d for replies/30d for new) → Step D (guaranteed thread creation). No message exits with NULL threadid. `getExistingThreadBySubject` — subject-based matching helper. `createThreadRow`, `updateThreadStats`, `rollbackThread` — low-level thread helpers. **Inbound orchestrator:** `handleInboundEchoMessage(message)` — called by FTN tosser; delegates FTN-specific conversion to `echomail.ftnToDb` then runs unified threading and insertion. **Thread update queue:** `threadUpdateArray`, `drainThreadUpdateArray`, `pushThreadIdToUpdateQueue`. **Orphan reconciliation:** `pushImportedMsgId`, `drainImportedMsgIds`, `reconcileOrphans(shortcode, batchMsgIds)` (post-batch re-linking), `applyThreadingForArea(shortcode)` (retroactive orphan repair). **Thread maintenance:** `updateThread`, `updateThreadArray`, `updateDailyThreads`, `updateAreaThreads`, `mergeThreads`, `mergeRecentThreads`. **Security:** `sanitizeMessageFields` — strips dangerous HTML and URIs; called by user posting and importable by tossers. **Deletion:** `deleteMessageByUUID`, `deleteThreadByUUID`. |
+| `messages.js` | **Canonical message model** (post April 2026 consolidation). Owns all message CRUD, posting, threading, sanitization, and read operations. **Viewing:** `listMsgGroups(userSecurity)`, `getAreasInGroup(shortcode, userSecurity)`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml` (re-exported from `terminalText.js`). **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `resolveAreaAddress(areaId)` (origin line and FTN address resolution). **Unified threading** (called by all three tossers FTN/QWK/NNTP): `threadMessage(message, messagetable, threadtable, shortcode)` — 4-step algorithm: Step A (pre-assigned threadid) → Step B (reply_to MSGID lookup, case-insensitive) → Step C (subject match, case-sensitive, 365d for replies/30d for new) → Step D (guaranteed thread creation). No message exits with NULL threadid. `getExistingThreadBySubject` — subject-based matching helper. `createThreadRow`, `updateThreadStats`, `rollbackThread` — low-level thread helpers. **Inbound orchestrator:** `handleInboundEchoMessage(message)` — called by FTN tosser; delegates FTN-specific conversion to `echomail.ftnToDb` then runs unified threading and insertion. **Thread update queue:** `threadUpdateArray`, `drainThreadUpdateArray`, `pushThreadIdToUpdateQueue`. **Orphan reconciliation:** `pushImportedMsgId`, `drainImportedMsgIds`, `reconcileOrphans(shortcode, batchMsgIds)` (post-batch re-linking), `applyThreadingForArea(shortcode)` (retroactive orphan repair). **Thread maintenance:** `updateThread`, `updateThreadArray`, `updateDailyThreads`, `updateAreaThreads`, `mergeThreads`, `mergeRecentThreads`. **Security:** `sanitizeMessageFields` — strips dangerous HTML and URIs; called by user posting and importable by tossers. **Deletion:** `deleteMessageByUUID`, `deleteThreadByUUID`. **Moderation:** `moderationForArea`, `moderationFor`, `attachModeration`, `moderationTargetAllowed`, `buildMoveTargets`, `networkedAreaIds`, `canMoveMessageToArea`, `areaIsNetworked`, `threadOriginSummary`, `moveThreadToArea`, `moveMessageToArea`, `messageForClient` (wire shape shared by both lazy-load endpoints). See the Moderation section. |
 | `userMsgPointers.js` | Message read tracking model. Two-tier pointer system: area-level scan pointers (`user_msg_pointers`) and per-thread pointers (`user_thread_pointers`). Area pointer is a floor — any message with `id <= area_pointer` is read. Thread pointers add granularity above the floor. Effective read threshold for a thread: `MAX(area_pointer, COALESCE(thread_pointer, 0))`. Provides: `advancePointer`, `advanceThreadPointer`, `markAreaRead`, `getThreadUnreadCounts` (batch), `getUnreadCount`, `hasNewMessages`, `getNewscanSummary`, `getFirstUnreadInThread`, `getFirstUnreadInArea`. Pre-populates pointers on user/area creation. Table bootstrap via `ensureConstraintsAndIndexes()` at startup. |
 | `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId)` returns `Map<shortcode, boolean>` resolving: user override → area `newscan_default` → true. `getSubscription(userId, shortcode)`, `setSubscription(userId, shortcode, subscribed)`, `removeSubscription(userId, shortcode)` for individual management. Used by terminal newscan, area selector, and future web newscan. |
 | `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). `normalizeFlags(input)` — coerces form input (string, array, or undefined) to JSON array for JSONB storage. Schema includes `thread_mode`, `post_as`, `newscan_default`, `ansi_area`, and four flag JSONB columns (`read_perm_flags`, `read_rest_flags`, `post_perm_flags`, `post_rest_flags`). |
@@ -117,6 +117,94 @@ Thread table columns:
 - `id` (BIGSERIAL), `uuid`, `threadid` (FTN message-ID of root)
 - `subject`, `started_at`, `started_by`
 - `message_count`, `last_message`, `last_message_from`
+
+---
+
+## Moderation
+
+Deleting and moving other people's messages. Gated on `areaAccess.canModerateArea()`,
+which is the Sysop permission flag today and takes the area as an argument so
+per-group and per-area moderators plug in at one place (issue #40).
+
+### The answer travels with the message
+
+Every view that shows a message asks the same question, so the question is
+answered once, in `messages.js`, and attached to the item:
+
+```js
+var targets = await messages.buildMoveTargets(user, area.shortcode, checkAreaPostAccess);
+area.moderation = messages.moderationForArea(user, area, targets);
+messages.attachModeration(user, area, messageList, targets);
+```
+
+- `moderationForArea(user, area, targets)` gives `{ enabled, targets }`: may this
+  user moderate here at all, and every destination before any one item narrows
+  the list. Views use it to decide whether to render the dialogs.
+- `moderationFor(user, area, item, targets)` gives
+  `{ canDelete, canMove, fromNetwork, targets }` for one message or thread.
+- `attachModeration(user, area, items, targets)` stamps `.moderation` on a list
+  in one pass. It stamps a refusal too, so a view never has to tell "not
+  computed" apart from "no".
+
+Consumers read `item.moderation` and render it. They do not read permission
+flags, and they do not look at `source_network_id`. The web thread and flat
+views, both lazy-load endpoints and the terminal reader all go through this, so
+a rule tightened here reaches all of them.
+
+`buildMoveTargets` resolves the networked flag for every area with a single
+query (`networkedAreaIds()`), not one query per area.
+
+### The move rule
+
+Re-export from the new area is the point of moving, not a hazard. The rule
+guards provenance instead:
+
+| Origin | May move to |
+| --- | --- |
+| Written locally (`source_network_id` null) | any area, networked or not |
+| Arrived from a network | local-only areas |
+
+So this system publishes its own mail wherever the sysop likes, and never
+republishes someone else's into a network it did not come from. A message
+carries its origin in `source_network_id`; a thread is as restricted as its most
+restricted message, which `threadOriginSummary()` reports as `anyFromNetwork`.
+
+`moderationTargetAllowed(fromNetwork, targetIsNetworked)` is the single line
+both the decorator and the route guard read. `canMoveMessageToArea()` is the
+same rule with a sysop-facing reason string, used by the routes to refuse a
+posted destination regardless of what the browser offered.
+
+Moving copies the row into the destination table and drops the `id`: ids are per
+area and carry outbound high water mark meaning, so reusing one would put the
+message behind peers' pointers and it would never be exported.
+
+### Where the controls live
+
+On the thread and flat views, where the message body is on screen: a thread
+control in the thread header, and one per message in both views. Deliberately
+not on the area's thread list, which shows subject lines only, where removing
+something means removing content the moderator has not read.
+
+Both views render messages twice, server side and again in JS as they lazily
+append. `messages.messageForClient()` is the single definition of the wire
+shape so the two halves cannot disagree about which fields exist.
+
+### Terminal
+
+`msgReader.js` reads the same `.moderation` field. `D` deletes and `M` moves
+from the message view, both confirmed, with a scope question first
+(message or whole thread) when a thread is on screen. Move shows a lightbar
+list of the destinations that message's own answer allows. The dumb-terminal
+path gets the same operations with a numbered list, and an open prompt owns the
+keyboard until it is answered.
+
+Messages are decorated in `_updateMessageBounds()`, which every load path ends
+in, rather than at each of the six load sites.
+
+### What deleting does not do
+
+It removes the message from this system. Anything already sent to peers stays
+where it is, and a peer may send it back on a later rescan. The dialogs say so.
 
 ---
 

@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 //internal modules
 import * as postgres from '../middleware/db/postgres.js';
+import { canModerateArea } from '../utils/areaAccess.js';
 import * as msgAreas from './msgAreas.js';
 import * as msgGroups from './msgGroups.js';
 import * as networkAreas from './networkAreas.js';
@@ -920,15 +921,35 @@ async function threadMessage(message, messagetable, threadtable, shortcode) {
 	var existingthread;
 	var querytext;
 
-	// Step A: Pre-assigned threadid (used by rethreadAreas)
+	// Step A: Pre-assigned threadid (used by rethreadAreas and by moves)
+	//
+	// Only returns early when the thread is actually found. It used to return
+	// regardless, so a message carrying a threadid with no matching row in this
+	// table came back with thread_id unset, breaking the guarantee this
+	// function exists to make. That happens whenever content arrives from
+	// somewhere else: a move between areas always does, and rethreadAreas can.
+	// Such a message is invisible in the thread list, because the reader lists
+	// threads and looks up their messages.
+	//
+	// When it is not found, create the thread under the same threadid rather
+	// than falling through, so the identity the caller assigned survives.
 	if (message.threadid) {
 		querytext = "SELECT * FROM " + threadtable + " WHERE threadid = $1";
 		existingthread = await postgres.queryOne(querytext, [message.threadid]);
 		if (existingthread) {
 			message.thread_id = existingthread.id;
 			await pushThreadIdToUpdateQueue(existingthread.id, shortcode);
+			return message;
 		}
-		return message;
+
+		var madeThread = await createThreadRow(threadtable, message.threadid, message.subject,
+			message.system_time, message.from_user);
+		if (madeThread && madeThread.threadId) {
+			message.thread_id = madeThread.threadId;
+			return message;
+		}
+		// Could not create one under that id: fall through to the normal
+		// reply_to / subject / new-thread path rather than returning orphaned.
 	}
 
 	// Step B: reply_to lookup (case-insensitive tuple match)
@@ -1813,6 +1834,23 @@ export {
 	// Inbound message handling (called by tossers)
 	handleInboundEchoMessage,
 
+	// Moderation
+	moderationFor,
+	moderationForArea,
+	moderationTargetAllowed,
+	buildMoveTargets,
+	attachModeration,
+	messageForClient,
+
+	// Moving between areas
+	getMessageByUUID,
+	threadOriginSummary,
+	canMoveMessageToArea,
+	areaIsNetworked,
+	networkedAreaIds,
+	moveThreadToArea,
+	moveMessageToArea,
+
 	// Retention
 	enforceRetentionLimits,
 	previewRetentionForArea,
@@ -1851,3 +1889,451 @@ export {
 	formatBodyHtml,
 	sanitizeMessageFields
 };
+
+// ---------------------------------------------------------------------------
+// Moving content between areas
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch a message by uuid. getMessage() takes the numeric id; moderation works
+ * in uuids because that is what the views carry.
+ */
+async function getMessageByUUID(uuid, shortcode) {
+	var msgtable = 'mb_' + String(shortcode).toLowerCase().trim() + '_msgs';
+	return await postgres.queryOne('SELECT * FROM ' + msgtable + ' WHERE uuid = $1', [uuid]);
+}
+
+/**
+ * Where did a thread's messages come from?
+ *
+ * A thread is as restricted as its most restricted message: if any part of it
+ * arrived off a network, moving the whole thread into a networked area would
+ * republish that part, so the whole thread is treated as network-origin.
+ */
+async function threadOriginSummary(threadUUID, shortcode) {
+	var shorty = String(shortcode).toLowerCase().trim();
+	var msgtable = 'mb_' + shorty + '_msgs';
+	var threadtable = 'mb_' + shorty + '_threads';
+
+	var thread = await postgres.queryOne(
+		'SELECT id FROM ' + threadtable + ' WHERE uuid = $1', [threadUUID]);
+	if (!thread) return { found: false, anyFromNetwork: false, total: 0 };
+
+	var row = await postgres.queryOne(
+		'SELECT COUNT(*)::int AS total, ' +
+		'COUNT(source_network_id)::int AS from_network ' +
+		'FROM ' + msgtable + ' WHERE thread_id = $1', [thread.id]);
+
+	return {
+		found: true,
+		total: row ? row.total : 0,
+		anyFromNetwork: !!(row && row.from_network > 0)
+	};
+}
+
+/**
+ * May this message be moved into this area?
+ *
+ * Re-export on arrival is the point of moving, not a hazard: a thread that now
+ * lives in a networked area should reach that network's peers. The risk is
+ * different, and it is about provenance. Pushing mail that arrived from one
+ * network into a different network's echo republishes someone else's traffic
+ * under this system's name, which is antisocial and hard to undo once tossed.
+ *
+ * So:
+ *
+ *   locally written  may go anywhere, including a networked area. It is ours
+ *                    to publish.
+ *   from a network   may only go to a local-only area. Useful for pulling
+ *                    something into a holding or archive area, and incapable
+ *                    of re-injecting it into another network.
+ *
+ * Origin is read from `source_network_id`, which handleInboundEchoMessage
+ * stamps on everything arriving off the wire and local posting never sets.
+ *
+ * @param {object} message           needs source_network_id
+ * @param {boolean} destIsNetworked  whether the destination area is mapped to
+ *                                   any network
+ * @returns {object} { allowed, reason }
+ */
+function canMoveMessageToArea(message, destIsNetworked) {
+	var locallyWritten = !message || message.source_network_id === null ||
+		message.source_network_id === undefined;
+
+	if (locallyWritten) return { allowed: true, reason: null };
+	if (!destIsNetworked) return { allowed: true, reason: null };
+
+	return {
+		allowed: false,
+		reason: 'This message arrived from a network. It can only be moved to a ' +
+			'local area, so it is not republished into another network.'
+	};
+}
+
+/**
+ * Is this area carried on any network?
+ */
+async function areaIsNetworked(areaId) {
+	var row = await postgres.queryOne(
+		'SELECT COUNT(*)::int AS cnt FROM network_areas WHERE area_id = $1 AND active = true',
+		[parseInt(areaId)]
+	);
+	return !!(row && row.cnt > 0);
+}
+
+/**
+ * The same answer for every area at once, as a Set of area ids.
+ *
+ * buildMoveTargets needs it for the whole area list on every page render of a
+ * thread, and asking per area is one query per area on a board that may carry
+ * hundreds.
+ */
+async function networkedAreaIds() {
+	var rows = await postgres.query(
+		'SELECT DISTINCT area_id FROM network_areas WHERE active = true');
+	var set = new Set();
+	for (var r of (rows || [])) set.add(parseInt(r.area_id));
+	return set;
+}
+
+/**
+ * Copy a message row into another area's table.
+ *
+ * The id is dropped so the destination assigns its own: ids are per area and
+ * carry the outbound high water mark meaning, so reusing one would put the
+ * message behind peers' pointers and it would never be exported.
+ */
+function rowForInsert(row, threadRowId) {
+	var copy = {};
+	for (var key in row) {
+		if (!row.hasOwnProperty(key)) continue;
+		if (key === 'id' || key === 'thread_id') continue;
+		copy[key] = row[key];
+	}
+	copy.thread_id = threadRowId;
+	copy.updated_at = new Date();
+	return copy;
+}
+
+/**
+ * Move a whole thread, messages and all, into another area.
+ *
+ * @returns {object} { status, moved, errormessages }
+ */
+async function moveThreadToArea(threadUUID, fromShortcode, toShortcode) {
+	var out = { status: false, moved: 0, errormessages: [] };
+
+	var from = String(fromShortcode).toLowerCase().trim();
+	var to   = String(toShortcode).toLowerCase().trim();
+	if (from === to) {
+		out.errormessages.push('Source and destination are the same area');
+		return out;
+	}
+
+	var fromMsgs = 'mb_' + from + '_msgs';
+	var fromThreads = 'mb_' + from + '_threads';
+	var toMsgs = 'mb_' + to + '_msgs';
+	var toThreads = 'mb_' + to + '_threads';
+
+	var thread = await postgres.queryOne('SELECT * FROM ' + fromThreads + ' WHERE uuid = $1', [threadUUID]);
+	if (!thread) {
+		out.errormessages.push('Thread not found');
+		return out;
+	}
+
+	var msgs = await postgres.query(
+		'SELECT * FROM ' + fromMsgs + ' WHERE thread_id = $1 ORDER BY id ASC', [thread.id]);
+	if (!msgs || msgs.length === 0) {
+		out.errormessages.push('Thread has no messages');
+		return out;
+	}
+
+	try {
+		var created = await createThreadRow(toThreads, thread.threadid, thread.subject,
+			thread.started_at, thread.started_by);
+		if (!created || !created.threadId) {
+			out.errormessages.push('Could not create the thread in the destination');
+			return out;
+		}
+
+		for (var m of msgs) {
+			await postgres.insertObject(rowForInsert(m, created.threadId), toMsgs);
+			out.moved++;
+		}
+
+		// Set the totals rather than calling updateThreadStats, which bumps the
+		// count by one for a single reply. createThreadRow already seeded it at
+		// 1 and we have just inserted the whole thread.
+		await postgres.write(
+			'UPDATE ' + toThreads + ' SET message_count = $1, last_message = $2, ' +
+			'last_message_from = $3 WHERE id = $4',
+			[msgs.length, thread.last_message, thread.last_message_from, created.threadId]
+		);
+
+		await postgres.write('DELETE FROM ' + fromMsgs + ' WHERE thread_id = $1', [thread.id]);
+		await postgres.write('DELETE FROM ' + fromThreads + ' WHERE id = $1', [thread.id]);
+
+		// Per-thread read pointers are keyed to the source thread row and mean
+		// nothing once it is gone.
+		try {
+			await postgres.write(
+				'DELETE FROM user_thread_pointers WHERE area_shortcode = $1 AND thread_id = $2',
+				[String(fromShortcode).toUpperCase(), thread.id]);
+		} catch (_) { /* pointer cleanup is not worth failing the move over */ }
+
+		await refreshAreaStats([fromShortcode, toShortcode]);
+
+		out.status = true;
+		alogger.writeAlog(2, 'moveThreadToArea: moved ' + out.moved + ' message(s) from ' +
+			fromShortcode + ' to ' + toShortcode, 'cyan');
+	} catch (err) {
+		out.errormessages.push(err.message || String(err));
+		alogger.writeAlog(2, 'moveThreadToArea failed: ' + (err.message || err), 'redbright');
+	}
+
+	return out;
+}
+
+/**
+ * Move a single message into another area, threading it there.
+ *
+ * If it was the only message in its thread the empty thread row is removed
+ * behind it, the same as a delete would.
+ */
+async function moveMessageToArea(msgUUID, fromShortcode, toShortcode) {
+	var out = { status: false, errormessages: [] };
+
+	var from = String(fromShortcode).toLowerCase().trim();
+	var to   = String(toShortcode).toLowerCase().trim();
+	if (from === to) {
+		out.errormessages.push('Source and destination are the same area');
+		return out;
+	}
+
+	var fromMsgs = 'mb_' + from + '_msgs';
+	var fromThreads = 'mb_' + from + '_threads';
+	var toMsgs = 'mb_' + to + '_msgs';
+	var toThreads = 'mb_' + to + '_threads';
+
+	var msg = await postgres.queryOne('SELECT * FROM ' + fromMsgs + ' WHERE uuid = $1', [msgUUID]);
+	if (!msg) {
+		out.errormessages.push('Message not found');
+		return out;
+	}
+
+	try {
+		var sourceThreadId = msg.thread_id;
+
+		// Let the destination thread it: by reply_to, then subject, then a new
+		// thread. Carrying the source thread_id across would point at a row in
+		// another area's table.
+		var placed = Object.assign({}, msg);
+		delete placed.id;
+		delete placed.thread_id;
+		// threadMessage guarantees a thread: reply_to, then subject, then a new
+		// one. No special handling needed here for content arriving from
+		// another area.
+		placed = await threadMessage(placed, toMsgs, toThreads, to);
+		if (!placed.thread_id) {
+			out.errormessages.push('Destination threading failed');
+			return out;
+		}
+
+		await postgres.insertObject(placed, toMsgs);
+
+		await postgres.write('DELETE FROM ' + fromMsgs + ' WHERE id = $1', [msg.id]);
+
+		// Tidy the source thread: recount, or remove it if that was the last
+		// message in it.
+		if (sourceThreadId) {
+			var remaining = await postgres.queryOne(
+				'SELECT COUNT(*)::int AS cnt, MAX(COALESCE(system_time, created_at)) AS last_msg ' +
+				'FROM ' + fromMsgs + ' WHERE thread_id = $1', [sourceThreadId]);
+
+			if (!remaining || remaining.cnt === 0) {
+				await postgres.write('DELETE FROM ' + fromThreads + ' WHERE id = $1', [sourceThreadId]);
+				try {
+					await postgres.write(
+						'DELETE FROM user_thread_pointers WHERE area_shortcode = $1 AND thread_id = $2',
+						[String(fromShortcode).toUpperCase(), sourceThreadId]);
+				} catch (_) { /* not worth failing the move over */ }
+			} else {
+				await postgres.write(
+					'UPDATE ' + fromThreads + ' SET message_count = $1, last_message = $2 WHERE id = $3',
+					[remaining.cnt, remaining.last_msg, sourceThreadId]);
+			}
+		}
+
+		await refreshAreaStats([fromShortcode, toShortcode]);
+
+		out.status = true;
+		alogger.writeAlog(2, 'moveMessageToArea: moved a message from ' + fromShortcode +
+			' to ' + toShortcode, 'cyan');
+	} catch (err) {
+		out.errormessages.push(err.message || String(err));
+		alogger.writeAlog(2, 'moveMessageToArea failed: ' + (err.message || err), 'redbright');
+	}
+
+	return out;
+}
+
+/**
+ * Refresh area counters after content moves. last_message drives both the
+ * areas list and its recently-active sort, so a stale one leaves an area
+ * looking busier than it is.
+ */
+async function refreshAreaStats(shortcodes) {
+	try {
+		var msgAreasModule = await import('./msgAreas.js');
+		for (var sc of shortcodes) {
+			await msgAreasModule.updateStatsForArea(sc);
+		}
+	} catch (e) {
+		alogger.writeAlog(3, 'refreshAreaStats failed: ' + (e.message || e), 'yellow');
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Moderation affordances, attached to the content itself
+// ---------------------------------------------------------------------------
+
+/**
+ * What may this user do with this message or thread?
+ *
+ * Deliberately answered here rather than in each view. The web thread view, the
+ * flat view, the terminal reader and anything else that shows a message all
+ * need the same answer, and working it out separately in each is how they drift
+ * apart: a rule tightened in one place silently stays loose in another.
+ *
+ * Callers attach the result to the item as `.moderation` and views read it.
+ * Adding a consumer means reading a field, not reimplementing a policy.
+ *
+ * @param {object} user
+ * @param {object} area     the area the content currently lives in
+ * @param {object} item     message or thread; needs source_network_id for a
+ *                          message, or anyFromNetwork for a thread
+ * @param {Array}  targets  candidate destinations from buildMoveTargets()
+ * @returns {object} { canDelete, canMove, targets }
+ */
+function moderationFor(user, area, item, targets) {
+	var allowed = canModerateArea(user, area);
+	if (!allowed) return { canDelete: false, canMove: false, fromNetwork: false, targets: [] };
+
+	// A thread reports anyFromNetwork; a single message carries the column.
+	var fromNetwork = (item && item.anyFromNetwork !== undefined)
+		? !!item.anyFromNetwork
+		: !(item && (item.source_network_id === null || item.source_network_id === undefined));
+
+	var usable = (targets || []).filter(function (t) {
+		return moderationTargetAllowed(fromNetwork, t.networked);
+	});
+
+	return {
+		canDelete: true,
+		canMove: usable.length > 0,
+		fromNetwork: fromNetwork,
+		targets: usable
+	};
+}
+
+/**
+ * The area-level answer: may this user moderate here at all, and what are all
+ * the candidate destinations before any single item narrows them?
+ *
+ * A view uses this to decide whether to render the moderation dialogs and the
+ * destination list at all, and reads item.moderation for each individual
+ * control. Both come from here so a view never asks the permission question
+ * itself.
+ */
+function moderationForArea(user, area, targets) {
+	var enabled = canModerateArea(user, area);
+	return { enabled: enabled, targets: enabled ? (targets || []) : [] };
+}
+
+/**
+ * The destination half of the move rule, kept separate so both the decorator
+ * and the route guard read the same line.
+ */
+function moderationTargetAllowed(fromNetwork, targetIsNetworked) {
+	if (!fromNetwork) return true;         // ours to publish anywhere
+	return !targetIsNetworked;             // theirs: local destinations only
+}
+
+/**
+ * Candidate destinations for a move: active areas the user may post to, minus
+ * the one the content is already in, each flagged with whether it is carried on
+ * a network.
+ *
+ * Computed once per request and handed to moderationFor for each item, since
+ * the expensive part is the same for every message on the page.
+ */
+async function buildMoveTargets(user, excludeShortcode, postAccessCheck) {
+	if (!user) return [];
+
+	var msgAreasModule = await import('./msgAreas.js');
+	var all = await msgAreasModule.getAllAreas();
+	var networked = await networkedAreaIds();
+	var targets = [];
+
+	for (var a of (all || [])) {
+		if (!a.active) continue;
+		if (excludeShortcode && a.shortcode === excludeShortcode) continue;
+		if (postAccessCheck && !postAccessCheck(user, a)) continue;
+		targets.push({
+			shortcode: a.shortcode,
+			name: a.name,
+			group_shortcode: a.group_shortcode,
+			networked: networked.has(parseInt(a.id))
+		});
+	}
+
+	return targets;
+}
+
+/**
+ * The shape a message takes when it is sent to the browser.
+ *
+ * Both lazy-load endpoints append messages to a page that already rendered the
+ * first batch server side, so the two have to agree on every field the row
+ * builder reads. Defining it twice is how `uuid` came to be missing from the
+ * JSON while the builder was still reading it, which left an appended
+ * message's delete control addressing nothing.
+ *
+ * The full destination list is deliberately not included. It is already on the
+ * page once from moderationForArea, and repeating it per message would send
+ * the whole area list thirty times over.
+ */
+function messageForClient(m, threadUUID) {
+	var mod = (m && m.moderation) || {};
+	return {
+		id: m.id,
+		uuid: m.uuid || '',
+		msg_id: m.msg_id,
+		from_user: m.from_user,
+		to_user: m.to_user,
+		subject: m.subject,
+		system_time: m.system_time,
+		body_text: m.body_text,
+		body_html: m.body_html,
+		isAnsi: m.isAnsi || false,
+		thread_uuid: threadUUID || m.thread_uuid || '',
+		moderation: {
+			canDelete: !!mod.canDelete,
+			canMove: !!mod.canMove,
+			fromNetwork: !!mod.fromNetwork
+		}
+	};
+}
+
+/**
+ * Attach `.moderation` to every item in a list.
+ *
+ * One pass, one target list, so a page of thirty messages does not run the
+ * area lookup thirty times.
+ */
+function attachModeration(user, area, items, targets) {
+	for (var item of (items || [])) {
+		item.moderation = moderationFor(user, area, item, targets);
+	}
+	return items;
+}
