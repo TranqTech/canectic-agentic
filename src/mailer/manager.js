@@ -39,6 +39,7 @@ class MailerManager extends EventEmitter {
 		this._wsPool        = null;      // WsPool from WsManager (embedded mode)
 		this._bsoScanner    = null;      // BsoScanner instance
 		this._pollTimers    = new Map(); // connectionUUID -> timer
+		this._nodelistBackoff = new Map(); // address -> { failures, nextAllowedAt }
 		this._running       = false;
 	}
 
@@ -289,12 +290,38 @@ class MailerManager extends EventEmitter {
 			'mailer', 'cyan'
 		);
 
-		this._connectToPeer(conn);
+		// Sysop intent wins over backoff.
+		this._connectToPeer(conn, { force: true });
 	}
 
-	// Internal — initiate TCP/WS connection to a peer (from peer_connections record)
-	async _connectToPeer(conn) {
+	/**
+	 * Open an outbound connection to a peer.
+	 *
+	 * @param {object} conn  peer_connections row
+	 * @param {object} opts  { force } to bypass the backoff guard, which only
+	 *                       a deliberate sysop action should do
+	 */
+	async _connectToPeer(conn, opts) {
+		var options = opts || {};
 		var cd = conn.connection_data || {};
+
+		// The backoff guard lives here rather than at each call site. It used
+		// to be checked only in pollConnection, so the BSO scanner, which calls
+		// this directly whenever there is mail waiting, retried a failing peer
+		// every scan interval and the configured backoff did nothing at all.
+		// Putting it where every caller has to come through means a new caller
+		// cannot miss it.
+		if (!options.force &&
+		    appConfig.getBoolean('mailer_backoff_enabled', true) &&
+		    peerConnections.isInBackoff(conn)) {
+			alogger.writeClog(4,
+				'Mailer: not connecting to ' + (cd.address || conn.uuid) +
+				' — backoff until ' + cd.next_allowed_poll_at +
+				' (' + (cd.consecutive_failures || 0) + ' consecutive failures)',
+				'mailer', 'yellow');
+			return;
+		}
+
 		var mailerTransport = cd.mailer_transport || 'tcp';
 		var host = cd.mailer_host || cd.remote_host || '';
 		var port = cd.mailer_port || cd.remote_port || BINKP_PORT;
@@ -373,6 +400,63 @@ class MailerManager extends EventEmitter {
 		}
 	}
 
+	// -----------------------------------------------------------------------
+	// Backoff for nodelist-routed addresses
+	// -----------------------------------------------------------------------
+	//
+	// A peer connection carries its backoff state in connection_data. An
+	// address routed purely through the nodelist has no such row, so it had no
+	// backoff of any kind: a node that refused connections was retried on every
+	// BSO scan, for ever, because the mail never left the outbound.
+	//
+	// Kept in memory rather than persisted. These are transient routes rather
+	// than configured links, the session history in mailer_sessions is the
+	// durable record, and starting clean after a restart is the right default
+	// for a route that may only exist for one batch of mail.
+
+	_nodelistBackoffKey(address) {
+		return String(address || '').trim().toLowerCase();
+	}
+
+	_isNodelistAddressInBackoff(address) {
+		if (!appConfig.getBoolean('mailer_backoff_enabled', true)) return false;
+		var entry = this._nodelistBackoff.get(this._nodelistBackoffKey(address));
+		if (!entry) return false;
+		if (entry.nextAllowedAt > Date.now()) return true;
+		return false;
+	}
+
+	_recordNodelistFailure(address) {
+		var key = this._nodelistBackoffKey(address);
+		if (!key) return;
+
+		var entry = this._nodelistBackoff.get(key) || { failures: 0, nextAllowedAt: 0 };
+		entry.failures++;
+
+		// Same shape as the peer backoff: double each time from the default
+		// poll interval, capped, so a dead route stops costing a connection a
+		// minute without ever giving up on it entirely. MAILER_POLL_INTERVAL
+		// is in seconds; the backoff helper works in minutes.
+		var baseMin = Math.max(1,
+			Math.round(appConfig.getNumber('MAILER_POLL_INTERVAL', 900) / 60));
+		var capHours = appConfig.getNumber('mailer_backoff_max_hours', 24);
+		var delayMs = peerConnections.computeBackoffDelayMs(entry.failures, baseMin, capHours);
+		entry.nextAllowedAt = Date.now() + delayMs;
+
+		this._nodelistBackoff.set(key, entry);
+		alogger.writeClog(4,
+			'Mailer: nodelist route ' + address + ' failure #' + entry.failures +
+			' — next attempt allowed in ' + Math.round(delayMs / 60000) + ' min',
+			'mailer', 'yellow');
+	}
+
+	_clearNodelistBackoff(address) {
+		var key = this._nodelistBackoffKey(address);
+		if (key && this._nodelistBackoff.delete(key)) {
+			alogger.writeClog(4, 'Mailer: nodelist route ' + address + ' recovered', 'mailer', 'greenbright');
+		}
+	}
+
 	// Internal — initiate TCP connection to a nodelist-resolved address (no peer record)
 	connectToNodelistAddress(nodelistData, destinationAddress) {
 		if (!nodelistData || !nodelistData.hostname) {
@@ -393,6 +477,16 @@ class MailerManager extends EventEmitter {
 			return;
 		}
 
+		if (this._isNodelistAddressInBackoff(destinationAddress)) {
+			var nb = this._nodelistBackoff.get(this._nodelistBackoffKey(destinationAddress));
+			alogger.writeClog(4,
+				'Mailer: skipping nodelist connect to ' + destinationAddress +
+				' — backoff after ' + nb.failures + ' failure(s), next attempt ' +
+				new Date(nb.nextAllowedAt).toISOString(),
+				'mailer', 'yellow');
+			return;
+		}
+
 		alogger.writeClog(3,
 			'Mailer: nodelist connect to ' + destinationAddress +
 			' (' + (nodelistData.systemName || 'unknown') + ') at ' + host + ':' + port,
@@ -410,6 +504,7 @@ class MailerManager extends EventEmitter {
 		transport.once('error', (err) => {
 			alogger.writeClog(3, 'Mailer: nodelist connect to ' + host + ':' + port + ' failed: ' + err.message, 'mailer', 'redbright');
 			this.emit('pollFailed', { address: destinationAddress, error: err.message });
+			this._recordNodelistFailure(destinationAddress);
 			// No peer record, so this lands in the unmatched list. Worth
 			// keeping: it is a route we took without a configured peer.
 			mailerSessions.record({
@@ -463,6 +558,16 @@ class MailerManager extends EventEmitter {
 						peerConnections.recordConnectFailure(outConnUUID, 'session: ' + info.reason, {
 							capHours: appConfig.getNumber('mailer_backoff_max_hours', 24)
 						}).catch(() => {});
+					}
+				} else if (session.options.nodelistAddress) {
+					// A route with no peer record behind it. Without this, a
+					// nodelist-routed node that answers and then fails every
+					// session is retried on every scan for ever, because the
+					// mail never leaves the outbound and nothing is counting.
+					if (info.reason === 'complete') {
+						this._clearNodelistBackoff(session.options.nodelistAddress);
+					} else {
+						this._recordNodelistFailure(session.options.nodelistAddress);
 					}
 				}
 			}

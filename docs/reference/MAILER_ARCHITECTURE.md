@@ -534,7 +534,11 @@ Failure is recorded in two places:
 - `MailerManager._connectToPeer()` `transport.once('error')` — pre-session failures (TCP refused, DNS, timeout)
 - `MailerManager._createSession()` `session.on('sessionEnd')` — post-handshake failures (`auth failed`, `connection closed unexpectedly`, etc.). Inbound answerer sessions are excluded from this tracking since they don't affect the outbound schedule.
 
-Success clears the counter immediately. `pollConnection()` checks `isInBackoff()` before connecting and skips scheduled polls during the backoff window. `triggerPoll()` (admin manual) bypasses the guard so a sysop can force a retry. Admin peer detail view shows current failure count, next allowed time, last reason, and a Reset button.
+Success clears the counter immediately. The guard lives in `_connectToPeer()`, which every outbound path comes through, and `triggerPoll()` (admin manual) passes `{ force: true }` so a sysop can force a retry.
+
+It used to be checked in `pollConnection()` only. The BSO scanner calls `_connectToPeer()` directly whenever there is mail waiting, so a peer that was refusing connections got retried on every scan cycle (60 seconds by default) and the configured backoff did nothing at all. Adding the check to the scanner fixed that one caller and left the same trap for the next, so it moved to the shared entry point.
+
+**Nodelist-routed addresses** have no `peer_connections` row and therefore no `connection_data` to hold backoff state, so they had no backoff of any kind. `MailerManager` keeps an in-memory map for them (`_nodelistBackoff`, address to failures and next allowed time) with the same doubling and cap, fed by both the connect error and the session end, and cleared when a session finally completes. In memory rather than persisted: these are transient routes rather than configured links, `mailer_sessions` is the durable record, and starting clean after a restart is right for a route that may exist for one batch of mail. Admin peer detail view shows current failure count, next allowed time, last reason, and a Reset button.
 
 Config: `mailer_backoff_enabled` (default `true`) to toggle globally, `mailer_backoff_max_hours` for the cap.
 
