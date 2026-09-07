@@ -158,7 +158,7 @@ function resolvePostName(sessionUser, msgArea) {
 }
 
 // Access check helpers — shared with qwkUser.js and other consumers
-import { parseFlags, checkAreaReadAccess, checkAreaPostAccess } from '../utils/areaAccess.js';
+import { parseFlags, checkAreaReadAccess, checkAreaPostAccess, canModerateArea } from '../utils/areaAccess.js';
 
 /* GET home page. */
 router.get('/', async function(req, res, next) {
@@ -330,6 +330,7 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 			});
 		}
 		return res.render('messages/areas/view', {
+		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 			title: msgArea ? msgArea.name : 'Message Area',
 			activelink: 'messages',
 			currentuser: currentuser,
@@ -442,6 +443,7 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 	}
 
 	res.render('messages/areas/view', {
+		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 		title: msgArea.name,
 		activelink: 'messages',
 		currentuser: currentuser,
@@ -644,6 +646,7 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 	// Bail early if no user, no area, or no access — template guards handle display
 	if (!currentuser || !msgArea || !sufficientAccess) {
 		return res.render('messages/areas/thread', {
+		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 			title: msgArea ? msgArea.name : 'Thread',
 			activelink: 'messages',
 			currentuser: currentuser,
@@ -666,6 +669,7 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 	var thread = await messages.getThreadByUUID(uuid, shortcode);
 	if (!thread) {
 		return res.render('messages/areas/thread', {
+		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 			title: 'Thread Not Found',
 			activelink: 'messages',
 			currentuser: currentuser,
@@ -740,6 +744,7 @@ router.get('/messages/area/:shortcode/thread/:uuid', async (req, res) => {
 	}
 
 	res.render('messages/areas/thread', {
+		canModerate: canModerateArea(currentuser, typeof msgArea !== 'undefined' ? msgArea : null),
 		title: thread.subject,
 		activelink: 'messages',
 		currentuser: currentuser,
@@ -857,6 +862,80 @@ router.get('/messages/area/:shortcode/thread/:uuid/load', async (req, res) => {
 // -------------------------------------------------------
 
 // New thread
+// ---------------------------------------------------------------------------
+// Moderation: removing threads and messages
+// ---------------------------------------------------------------------------
+//
+// Gated on canModerateArea, which is the Sysop flag today and the seam where
+// per-area moderators will plug in. The check is here as well as in the
+// template: hiding a button is presentation, not access control.
+
+router.post('/messages/area/:shortcode/thread/:uuid/delete', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var shortcode   = req.params.shortcode;
+	var msgArea     = await msgAreas.getAreaByShortcode(shortcode);
+
+	if (!msgArea || !currentuser || !canModerateArea(currentuser, msgArea)) {
+		alogger.writeAlog(3, 'Unauthorised thread delete attempt on ' + shortcode + ' by ' +
+			(currentuser ? currentuser.username : 'unauthenticated'), 'redbright');
+		await flash.setOne(req, 'danger', 'You do not have permission to moderate this area.');
+		return res.redirect('/messages/area/' + shortcode);
+	}
+
+	var result = await messages.deleteThreadByUUID(req.params.uuid, shortcode);
+	if (result && result.status) {
+		alogger.writeAlog(2, 'Moderation: ' + currentuser.username + ' deleted a thread in ' +
+			shortcode + ' (' + result.deleted + ' message(s))', 'yellowbright');
+		await flash.setOne(req, 'success',
+			'Thread deleted (' + result.deleted + ' message' + (result.deleted === 1 ? '' : 's') + ').');
+	} else {
+		await flash.setOne(req, 'danger', 'Could not delete that thread.');
+	}
+
+	res.redirect('/messages/area/' + shortcode);
+});
+
+router.post('/messages/area/:shortcode/message/:uuid/delete', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var shortcode   = req.params.shortcode;
+	var msgArea     = await msgAreas.getAreaByShortcode(shortcode);
+
+	if (!msgArea || !currentuser || !canModerateArea(currentuser, msgArea)) {
+		alogger.writeAlog(3, 'Unauthorised message delete attempt on ' + shortcode + ' by ' +
+			(currentuser ? currentuser.username : 'unauthenticated'), 'redbright');
+		await flash.setOne(req, 'danger', 'You do not have permission to moderate this area.');
+		return res.redirect('/messages/area/' + shortcode);
+	}
+
+	// Where to land afterwards: back in the thread when it survives, otherwise
+	// the area, since deleting the root takes the thread with it.
+	var threadUUID = (req.body.thread_uuid || '').trim();
+
+	var ok = await messages.deleteMessageByUUID(req.params.uuid, shortcode);
+	if (ok) {
+		alogger.writeAlog(2, 'Moderation: ' + currentuser.username + ' deleted a message in ' +
+			shortcode, 'yellowbright');
+		await flash.setOne(req, 'success', 'Message deleted.');
+	} else {
+		await flash.setOne(req, 'danger', 'Could not delete that message.');
+	}
+
+	// Area stats drive the areas list and the recently-active sort, so they
+	// have to be refreshed or a deleted last message keeps the area looking
+	// busier and more recent than it is.
+	try {
+		await msgAreas.updateStatsForArea(shortcode);
+	} catch (e) {
+		alogger.writeAlog(3, 'Moderation: stats refresh failed for ' + shortcode + ': ' + e.message, 'yellow');
+	}
+
+	if (threadUUID) {
+		var stillThere = await messages.getThreadByUUID(threadUUID, shortcode);
+		if (stillThere) return res.redirect('/messages/area/' + shortcode + '/thread/' + threadUUID);
+	}
+	res.redirect('/messages/area/' + shortcode);
+});
+
 router.post('/messages/area/:shortcode/newthread', urlencodedParser, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) {

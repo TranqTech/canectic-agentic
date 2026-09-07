@@ -50,4 +50,41 @@ function checkAreaPostAccess(user, area) {
 	return true;
 }
 
-export { parseFlags, checkAreaReadAccess, checkAreaPostAccess };
+
+// ---------------------------------------------------------------------------
+// Moderation
+// ---------------------------------------------------------------------------
+
+/**
+ * Can this user moderate this area: delete or move other people's threads and
+ * messages?
+ *
+ * Today this is the Sysop flag and nothing else. It exists as its own function
+ * rather than an inline permissionflags check because per-area and per-group
+ * moderators are wanted next, and when they arrive every caller should start
+ * honouring them without being revisited. Adding the check inline at each call
+ * site would guarantee one gets missed.
+ *
+ * The shape that is coming, sketched here so the seam is not accidentally
+ * designed shut:
+ *
+ *   - a moderators table keyed by user plus either group or area
+ *   - group-level moderation implying every area in that group
+ *   - Sysop continuing to imply moderation everywhere, as a superset rather
+ *     than a special case
+ *
+ * `area` is accepted and currently unused for exactly that reason: callers
+ * should already be passing the area they are moderating, so the per-area
+ * lookup can be added here alone. Callers that cannot name an area should pass
+ * null and get the board-wide answer.
+ *
+ * @param {object} user  needs permissionflags
+ * @param {object} [area] the area being moderated, for future per-area rules
+ * @returns {boolean}
+ */
+function canModerateArea(user, area) {   // eslint-disable-line no-unused-vars
+	if (!user) return false;
+	return parseFlags(user.permissionflags).includes('Sysop');
+}
+
+export { parseFlags, checkAreaReadAccess, checkAreaPostAccess, canModerateArea };
