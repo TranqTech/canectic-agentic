@@ -225,23 +225,6 @@ async function checkOrCreateTable(tablename, summary) {
 //
 // Idempotent: running on an already-migrated DB finds no rows with
 // spaces in msg_id and does nothing.
-async function migrateMsgidTupleSplit() {
-	// Delegates to messageBase.fixLegacyMsgIds so there is one definition of
-	// the MSGID split. Doing it here in SQL with split_part would diverge from
-	// ftnUtils.splitFullMsgid, which the tossers use: split_part(msg_id,' ',2)
-	// silently drops everything after a second space, whereas splitFullMsgid
-	// splits on the first space and keeps the remainder.
-	var messageBase = await import('../maintenance/messageBase.js');
-	var totals = await messageBase.fixLegacyMsgIds();
-
-	if (totals.msgidFixed > 0 || totals.replyFixed > 0) {
-		console.log("  Split " + totals.msgidFixed + " msg_id and " +
-			totals.replyFixed + " reply_to value(s) across " + totals.tables + " table(s).");
-	} else {
-		console.log("  No legacy MSGID strings found.");
-	}
-}
-
 async function migrateMenuLayout() {
 	try {
 		// Step 1: Migrate display_entries from BOOLEAN to VARCHAR(8)
@@ -361,11 +344,59 @@ async function setupTables() {
 	console.log("\n--- Message Table Maintenance ---");
 	await maintainAllAreaTables();
 
-	// After both global tables and per-area tables are up to date, backfill
-	// the msg_orig_addr / reply_orig_addr tuple columns from any legacy
-	// "addr serial" msg_id strings still in the DB. Idempotent.
+	// The MSGID tuple split is NOT run here. It is a one-time repair for message
+	// bases written before msg_id and msg_orig_addr were separate columns, and
+	// running it on every migration meant a full scan of every per-area message
+	// table on every update: its predicate is `msg_id LIKE '% %'`, which no
+	// index helps. On a hub with hundreds of areas that is minutes of work to
+	// establish there is nothing to do.
+	//
+	// Instead, say whether it still needs running. The check is a single
+	// lookup, not a scan.
+	await advertiseMsgidSplit();
+}
+
+/**
+ * Tell the sysop whether the one-time MSGID tuple split still needs running.
+ *
+ * A system with no per-area message tables has nothing to repair and is marked
+ * done immediately, so a fresh install never sees the notice.
+ */
+async function advertiseMsgidSplit() {
 	console.log("\n--- MSGID tuple split ---");
-	await migrateMsgidTupleSplit();
+	try {
+		var messageBase = await import('../maintenance/messageBase.js');
+
+		if (await messageBase.msgidSplitCompleted()) {
+			console.log("  Already done on this system.");
+			return;
+		}
+
+		var areaRow = await pgdb.queryOne(
+			"SELECT COUNT(*) AS cnt FROM information_schema.tables " +
+			"WHERE table_schema = 'public' AND table_name LIKE 'mb\\_%\\_msgs'"
+		);
+		var areaTables = areaRow ? parseInt(areaRow.cnt) : 0;
+
+		if (areaTables === 0) {
+			await messageBase.markMsgidSplitCompleted('no message bases at install time');
+			console.log("  No message bases yet, nothing to repair.");
+			return;
+		}
+
+		console.log("  NOT RUN on this system yet.");
+		console.log("");
+		console.log("  If this message base predates the msg_id / msg_orig_addr split, run:");
+		console.log("");
+		console.log("      node src/tools/maintenance.js --fix-msgids --dry-run   (report only)");
+		console.log("      node src/tools/maintenance.js --fix-msgids             (repair)");
+		console.log("");
+		console.log("  It needs the worker running, and only ever needs doing once.");
+		console.log("  It is no longer part of migrations because it scans every message");
+		console.log("  table in full, which made every update slow for no benefit.");
+	} catch (err) {
+		console.log("  Could not determine status: " + err.message);
+	}
 }
 
 async function main() {

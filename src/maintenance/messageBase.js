@@ -534,6 +534,67 @@ async function columnExists(table, column) {
 	return !!row;
 }
 
+// The MSGID tuple split is a one-time repair for message bases written before
+// msg_id and msg_orig_addr were separate columns. It used to run on every
+// `dbmigrations.js`, which meant a full scan of every per-area message table on
+// every update: the predicate is `msg_id LIKE '% %'`, which no index helps, and
+// on a hub with hundreds of areas and large bases that is minutes of work to
+// discover there is nothing to do.
+//
+// It is manual now (`maintenance.js --fix-msgids`), and this marker is how a
+// system remembers it has been done, so migrations can say "you still need to
+// run this" without paying for the scan to find out.
+const MSGID_SPLIT_MARKER = 'msgid_tuple_split_completed_at';
+
+/**
+ * Has the one-time MSGID tuple split been run on this system?
+ */
+async function msgidSplitCompleted() {
+	try {
+		var row = await postgres.queryOne(
+			'SELECT value FROM settings WHERE key = $1', [MSGID_SPLIT_MARKER]);
+		return !!(row && row.value);
+	} catch (_) {
+		// settings may not exist yet on a fresh install, which is the same
+		// answer as far as the caller is concerned.
+		return false;
+	}
+}
+
+/**
+ * May this run claim the whole system is repaired?
+ *
+ * Only a full pass proves it. An --area run repairs what it was pointed at and
+ * says nothing about the rest, and a dry run repairs nothing at all. Marking
+ * either as complete would silence the migration notice on a system that is
+ * still half broken, which is worse than never having had the notice.
+ */
+function shouldMarkComplete(options) {
+	var opts = options || {};
+	if (opts.dryRun) return false;
+	if (opts.areas && opts.areas.length > 0) return false;
+	return true;
+}
+
+/**
+ * Record that it has been done. Called after a full, non-dry run, and by the
+ * migration tool on a system that has no message bases to repair.
+ */
+async function markMsgidSplitCompleted(note) {
+	try {
+		await postgres.write(
+			'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ' +
+			'ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()',
+			[MSGID_SPLIT_MARKER, note || new Date().toISOString()]
+		);
+		return true;
+	} catch (err) {
+		alogger.writeAlog(3, '[FixMsgIds] could not record completion marker: ' +
+			(err?.message || err), 'yellow');
+		return false;
+	}
+}
+
 async function fixLegacyMsgIds(options) {
 	var opts      = options || {};
 	var dryRun    = opts.dryRun || false;
@@ -681,6 +742,16 @@ async function fixLegacyMsgIds(options) {
 			'greenbright');
 	}
 
+	// Only a full pass proves the whole system is clean. An --area run repairs
+	// what it was pointed at and says nothing about the rest, and a dry run
+	// repairs nothing at all, so neither may claim the job is done.
+	if (shouldMarkComplete(opts)) {
+		totals.markedComplete = await markMsgidSplitCompleted(
+			'repaired ' + totals.msgidFixed + ' msg_id and ' + totals.replyFixed +
+			' reply_to value(s) on ' + new Date().toISOString());
+		alogger.writeAlog(3, '[FixMsgIds] recorded as complete; migrations will stop asking', 'cyan');
+	}
+
 	return totals;
 }
 
@@ -689,5 +760,9 @@ export {
 	regenerateAreaBodyHtml,
 	regeneratePmBodyHtml,
 	rethreadAreas,
-	fixLegacyMsgIds
+	fixLegacyMsgIds,
+	msgidSplitCompleted,
+	shouldMarkComplete,
+	markMsgidSplitCompleted,
+	MSGID_SPLIT_MARKER
 };

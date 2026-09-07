@@ -422,6 +422,27 @@ After the script completes, restart services:
 pm2 restart all
 ```
 
+### One-time repairs
+
+Migrations do not run one-time data repairs, because a repair that can only ever
+find something once should not scan every message table on every update. Where
+one is outstanding, the migration output says so and gives the command.
+
+Currently there is one, the **MSGID tuple split**, for message bases written
+before `msg_id` and `msg_orig_addr` were separate columns. If migrations tell
+you it has not run:
+
+```bash
+node src/tools/maintenance.js --fix-msgids --dry-run   # report only
+node src/tools/maintenance.js --fix-msgids             # repair
+```
+
+It needs the worker running, takes a while on a large message base, and only
+ever needs doing once. Migrations stop mentioning it afterwards.
+
+A fresh install has nothing to repair and is marked done automatically, so you
+will only see this on a system carrying older message bases.
+
 ---
 
 ## Directory Structure
