@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DateTime } from "luxon";
+import { formatListDate, formatListDateFull } from "../utils/dateFormat.js";
 import bodyParser from 'body-parser'
 import cookieParser from 'cookie-parser';
 import { v4 as uuidv4 } from 'uuid';
@@ -53,6 +54,8 @@ router.use(async function(req, res, next) {
 	res.locals.currentPath = req.path;
 	res.locals.activelink  = '';
 	res.locals.DateTime    = DateTime;
+	res.locals.formatListDate     = formatListDate;
+	res.locals.formatListDateFull = formatListDateFull;
 	res.locals.ismobile    = mobile({ ua: req.headers['user-agent'] });
 	res.locals.pmUnreadCount = 0;
 	res.locals.callflowPending = false;

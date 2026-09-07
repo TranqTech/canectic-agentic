@@ -67,10 +67,11 @@ block content
                             td(style='width:200px')
                               if area.last_message
                                 .small
-                                  - var ldate = Date.parse(area.last_message)
-                                  - var ld = DateTime.fromMillis(ldate)
-                                  div
-                                    span.fg-yellow= ld.toFormat('MMM dd')
+                                  //- "Mar 15" while recent, "Mar 2021" once old.
+                                  //- A bare day made a 2021 echo look as fresh as
+                                  //- last week's. Exact value is in the tooltip.
+                                  div(title=formatListDateFull(area.last_message) || '')
+                                    span.fg-yellow= formatListDate(area.last_message)
                                   div
                                     span.fg-green= area.last_from || ''
               else
