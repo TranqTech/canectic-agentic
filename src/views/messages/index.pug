@@ -111,6 +111,7 @@ block content
           .modal-footer
             button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Close
 
+    script(type='module' src='/js/messageAreas.js')
     script.
       document.addEventListener('DOMContentLoaded', function() {
         var currentView = 'subscribed';
@@ -135,22 +136,13 @@ block content
         var sortLabel = document.getElementById('areaSortLabel');
 
         function applySort() {
-          document.querySelectorAll('.group-section').forEach(function(section) {
-            var body = section.querySelector('tbody');
-            if (!body) return;
-            var rows = Array.prototype.slice.call(body.querySelectorAll('.area-row'));
-            rows.sort(function(a, b) {
-              if (sortMode === 'recent') {
-                var at = parseInt(a.dataset.lastMessage, 10) || 0;
-                var bt = parseInt(b.dataset.lastMessage, 10) || 0;
-                // Newest first. An area that has never carried a message sorts
-                // last rather than jumbling in among dated ones.
-                if (bt !== at) return bt - at;
-              }
-              return (parseInt(a.dataset.order, 10) || 0) - (parseInt(b.dataset.order, 10) || 0);
-            });
-            rows.forEach(function(r) { body.appendChild(r); });
-          });
+          // Comparator lives in /js/messageAreas.js so it can be tested.
+          // If it failed to load, leave the rows in the server order rather
+          // than throwing: a sort control is not worth breaking the page over.
+          var sorter = window.CanecticAreaSort;
+          if (sorter && typeof sorter.applyAreaSort === 'function') {
+            sorter.applyAreaSort(document, sortMode);
+          }
 
           if (sortLabel) sortLabel.textContent = (sortMode === 'recent') ? 'Recently active' : 'Default order';
           if (sortBtn) sortBtn.classList.toggle('active', sortMode === 'recent');
