@@ -145,6 +145,103 @@ async function updateSeenbyArray(sbArray) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Outbound eligibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Decide whether one message may be sent to one node, and what its SEEN-BY
+ * should become if so.
+ *
+ * Extracted from getOutboundForConnection so it can be tested. The decision
+ * used to live inline in a function that also writes packets and advances
+ * watermarks, which is why a filter that suppressed 127 of 129 messages went
+ * unnoticed: there was no way to ask "would this be sent?" without sending it.
+ *
+ * The rules, in order:
+ *
+ *   1. imported history is never exported
+ *   2. never send back to the node the message came from
+ *   3. SEEN-BY per FTS-0004: never send to a node already listed for its net
+ *   4. PATH: never send to a node the message already routed through
+ *
+ * Deliberately absent is any test on source_network_id. Suppressing a message
+ * because it arrived from the peer's *network* conflates the network with the
+ * node and stops a hub forwarding at all: a hub receives from its uplink on
+ * network N and must forward to its downlinks, which are also on network N.
+ *
+ * @param {object} msg   message row, needs imported/source/seen_by/path
+ * @param {object} dest  { address, net, node } of the destination node
+ * @param {object} self  { netnode } our own net/node, e.g. "134/100"
+ * @returns {object} { tossable, reason, seenBy } where seenBy is the updated
+ *                   SEEN-BY string when it needs writing, otherwise null
+ */
+function evaluateOutbound(msg, dest, self) {
+	if (msg.imported) {
+		return { tossable: false, reason: 'imported history', seenBy: null };
+	}
+
+	if (msg.source && msg.source === dest.address) {
+		return { tossable: false, reason: 'received from this node', seenBy: null };
+	}
+
+	var seenBy = null;
+
+	if (msg.seen_by) {
+		// SEEN-BY is compressed: "134/101 102 103 220/1" means 134/101,
+		// 134/102, 134/103, 220/1. Bare numbers belong to the preceding net.
+		var sbArray = String(msg.seen_by).trim().split(/\s+/);
+		var sbnets = [];
+		var netobj = null;
+
+		for (var sb of sbArray) {
+			if (!sb) continue;
+			if (sb.includes('/')) {
+				if (netobj) sbnets.push(netobj);
+				var parts = sb.split('/');
+				netobj = { net: parts[0], netstring: sb, nodes: [parts[1]] };
+			} else if (netobj) {
+				netobj.nodes.push(sb);
+				netobj.netstring += ' ' + sb;
+			}
+		}
+		if (netobj) sbnets.push(netobj);
+
+		var netpresent = false;
+		for (var net of sbnets) {
+			if (net.net !== dest.net) continue;
+			netpresent = true;
+			if (net.nodes.includes(dest.node)) {
+				return { tossable: false, reason: 'already in SEEN-BY', seenBy: null };
+			}
+			net.nodes.push(dest.node);
+			net.netstring += ' ' + dest.node;
+		}
+
+		if (netpresent) {
+			var joined = [];
+			for (var sn of sbnets) joined.push(sn.netstring);
+			seenBy = joined.join(' ');
+		} else {
+			seenBy = String(msg.seen_by) + ' ' + dest.net + '/' + dest.node;
+		}
+	} else {
+		seenBy = self.netnode;
+		seenBy += (dest.net === String(self.netnode).split('/')[0])
+			? ' ' + dest.node
+			: ' ' + dest.net + '/' + dest.node;
+	}
+
+	if (msg.path) {
+		var patharr = String(msg.path).trim().split(/\s+/);
+		if (patharr.includes(dest.net + '/' + dest.node)) {
+			return { tossable: false, reason: 'already in PATH', seenBy: null };
+		}
+	}
+
+	return { tossable: true, reason: null, seenBy: seenBy };
+}
+
 async function getOutboundForConnection(conn) {
 	// conn is a peer_connections row joined with network fields.
 	// connection_data holds FTN-specific transport fields.
@@ -270,56 +367,23 @@ async function getOutboundForConnection(conn) {
 					for (var msg of msglist) {
 						if (tossableArray.length >= maxOutbound) break outerLoop;
 
-						var istossable   = true;
-						var updateseenby = false;
-						var seenbystring = "";
+						// The eligibility rules live in evaluateOutbound so they can be
+						// tested without writing packets or moving watermarks. Keeping
+						// them inline here is how a filter that suppressed almost all
+						// forwarded traffic went unnoticed.
+						var verdict = evaluateOutbound(
+							msg,
+							{
+								address: nodeAddress,
+								net: netnode.split("/")[0],
+								node: netnode.split("/")[1]
+							},
+							{ netnode: systemaddress.netnode }
+						);
 
-						// Deliberately NOT filtering on source_network_id here.
-						//
-						// This used to skip any message whose source_network_id
-						// matched the connection's network, on the reasoning that
-						// a message should not go back to the network it arrived
-						// from. That conflates the network with the node. A hub
-						// receives from its uplink on network N and must forward
-						// to its downlinks, which are also on network N: that is
-						// what echomail distribution is. The check suppressed
-						// almost all forwarded traffic, leaving only locally
-						// posted messages, because handleInboundEchoMessage
-						// stamps source_network_id on every inbound message.
-						//
-						// Not re-sending to the node it came from is a separate
-						// concern, and is covered twice below: the explicit
-						// source-address check, and SEEN-BY per FTS-0004, which
-						// is the standard loop prevention and also stops a
-						// message reaching any node already listed.
-						//
-						// Imported history is held back by the outbound seal
-						// (peerAreaSubscriptions.advanceOutboundIdxForArea),
-						// which fast-forwards msg_idx past the import. That is
-						// the correct mechanism and does not need this filter.
-
-						// Never export imported history. This is the precise
-						// replacement for the old source_network_id filter: it
-						// marks rows that came from an SMB/JAM migration rather
-						// than off the wire, so a migration is not echoed out to
-						// peers while ordinary forwarding is untouched.
-						//
-						// The outbound seal advances msg_idx past an import so
-						// caught-up peers never even scan these rows. This flag
-						// covers the case the seal deliberately cannot: a peer
-						// that was already behind at import time keeps its real
-						// backlog, and a single watermark cannot say "send
-						// 51-100 but skip the imported 101-5100".
-						if (msg.imported) {
-							istossable = false;
-						}
-
-						// FTN: skip if we received it from this node
-						if (istossable && msg.source === nodeAddress) {
-							istossable = false;
-						}
-
-						if (istossable) {
+						if (verdict.tossable) {
+							// Restamp for this hop. Done after the verdict because the
+							// "did this come from them" test needs the original source.
 							msg.source           = systemaddress.address;
 							msg.source_zone      = systemaddress.zone;
 							msg.source_net       = systemaddress.net;
@@ -329,81 +393,22 @@ async function getOutboundForConnection(conn) {
 							msg.destination_net  = netnode.split("/")[0];
 							msg.destination_node = netnode.split("/")[1];
 
-							if (msg.seen_by) {
-								var netpresent = false;
-								var sbArray    = msg.seen_by.split(" ");
-								var sbnets     = [];
-								var netobj;
-
-								for (var sb of sbArray) {
-									if (sb.includes("/")) {
-										if (netobj) sbnets.push(netobj);
-										var sbsplit = sb.split("/");
-										netobj = {
-											net: sbsplit[0],
-											netstring: sb,
-											nodes: [sbsplit[1]]
-										};
-									} else if (netobj) {
-										netobj.nodes.push(sb);
-										netobj.netstring += " " + sb;
-									}
-								}
-								if (netobj) sbnets.push(netobj);
-
-								for (var net of sbnets) {
-									if (net.net === msg.destination_net) {
-										netpresent = true;
-										if (net.nodes.includes(msg.destination_node)) {
-											istossable = false;
-										} else {
-											net.nodes.push(msg.destination_node);
-											net.netstring += " " + msg.destination_node;
-										}
-									}
-								}
-
-								if (istossable) {
-									updateseenby = true;
-									if (netpresent) {
-										for (var sn of sbnets) {
-											if (seenbystring.length > 0) seenbystring += " ";
-											seenbystring += sn.netstring;
-										}
-									} else {
-										seenbystring = (msg.seen_by ? msg.seen_by + " " : "");
-										seenbystring += msg.destination_net + "/" + msg.destination_node;
-									}
-								}
-							} else {
-								updateseenby = true;
-								seenbystring = systemaddress.netnode;
-								if (msg.destination_net === systemaddress.net) {
-									seenbystring += " " + msg.destination_node;
-								} else {
-									seenbystring += " " + msg.destination_net + "/" + msg.destination_node;
-								}
-							}
-
-							if (msg.path) {
-								var patharr = msg.path.split(" ");
-								if (patharr.includes(netnode)) istossable = false;
-							}
-						}
-
-						if (istossable) {
-							if (updateseenby) {
-								msg.seen_by = seenbystring;
+							if (verdict.seenBy) {
+								msg.seen_by = verdict.seenBy;
 								nodeSeenByUpdateArray.push({
 									id: msg.id,
 									msgtable: msgtable,
-									newsbstring: seenbystring
+									newsbstring: verdict.seenBy
 								});
 							}
+
 							msg.path = systemaddress.netnode;
 							var ftnObj = await dbToFtn(msg);
 							ftnObj.AreaTag = sub.areatag;
 							tossableArray.push(ftnObj);
+						} else {
+							alogger.writeAlog(5, "Skipping msg " + msg.id + " for " +
+								nodeAddress + ": " + verdict.reason, "cyan");
 						}
 
 						curIdx = msg.id;
@@ -465,6 +470,7 @@ async function updateMsgIndexes(idxUpdateArray) {
 // All other message/threading logic lives in messages.js. Callers should
 // import from messages.js directly.
 export {
+	evaluateOutbound,
 	ftnToDb,
 	dbToFtn,
 	getOutboundForConnection

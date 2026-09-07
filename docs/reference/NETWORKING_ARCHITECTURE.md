@@ -1108,6 +1108,31 @@ group's `base_dir`; a single shared value would put every area in one directory.
 - `src/models/fileEcholist.js` -- filebone CRUD (identical API, different tables)
 - `src/maintenance/echolistBatchSubscribe.js` -- batch subscribe planning and execution
 
+## Outbound eligibility
+
+`echomail.evaluateOutbound(msg, dest, self)` decides whether one message may go
+to one node, and what its SEEN-BY becomes if so. Extracted from
+`getOutboundForConnection` so the decision can be tested: it previously lived
+inline in a function that also writes packets and advances watermarks, so there
+was no way to ask "would this be sent?" without sending it. That is how a filter
+suppressing 127 of 129 messages went unnoticed.
+
+Rules, in order:
+
+1. imported history is never exported
+2. never send back to the node the message came from
+3. SEEN-BY per FTS-0004: never send to a node already listed for its net
+4. PATH: never send to a node the message already routed through
+
+Deliberately absent is any test on `source_network_id`. Suppressing a message
+because it arrived from the peer's *network* conflates the network with the
+node, and describes a hub's whole job: mail arrives from an uplink on network N
+and must go out to downlinks, also on network N.
+
+SEEN-BY is read in its compressed form, where bare numbers belong to the
+preceding net: `134/1 100 101 220/1` means 134/1, 134/100, 134/101 and 220/1. A
+node number matching in a different net does not block.
+
 ## Rescan
 
 `%RESCAN` lets a downlink ask for content it already missed. Grammar, identical
