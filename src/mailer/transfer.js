@@ -124,6 +124,11 @@ class TransferEngine extends EventEmitter {
 		// Verify file still exists (could have been sent by another session)
 		if (!fs.existsSync(item.filepath)) {
 			alogger.writeClog(4, 'TransferEngine: skipping disappeared file ' + item.filepath, 'mailer', 'yellow');
+			// Mark it done rather than just skipping. An unmarked line will
+			// never do anything again, but it keeps the flow file alive, and a
+			// flow file that outlives its contents is read as pending mail on
+			// every BSO scan for ever.
+			if (item.floFile) this._markFloLineSent(item.floFile, item.filepath);
 			this._offerNextFile();
 			return;
 		}
@@ -513,16 +518,17 @@ class TransferEngine extends EventEmitter {
 				}
 			}
 
-			if (updated) {
-				if (allSent) {
-					// All lines processed — delete the flow file
-					fs.unlinkSync(floFile);
-					alogger.writeClog(5, 'TransferEngine: all files sent, deleted flow file ' + floFile, 'mailer', 'green');
-				} else {
-					// Write updated flow file with ~ markers
-					fs.writeFileSync(floFile, lines.join('\n'));
-					alogger.writeClog(5, 'TransferEngine: marked sent in ' + path.basename(floFile) + ': ' + path.basename(filepath), 'mailer', 'green');
-				}
+			// Deletion used to be gated on `updated`, so a flow file whose last
+			// line was marked in an earlier session was never removed: nothing
+			// changed this time round, so nothing checked whether anything was
+			// left. It then read as pending mail on every scan.
+			if (allSent) {
+				fs.unlinkSync(floFile);
+				alogger.writeClog(5, 'TransferEngine: all files sent, deleted flow file ' + floFile, 'mailer', 'green');
+			} else if (updated) {
+				// Write updated flow file with ~ markers
+				fs.writeFileSync(floFile, lines.join('\n'));
+				alogger.writeClog(5, 'TransferEngine: marked sent in ' + path.basename(floFile) + ': ' + path.basename(filepath), 'mailer', 'green');
 			}
 		} catch (err) {
 			alogger.writeClog(3, 'TransferEngine: cannot update flow file ' + floFile + ': ' + err.message, 'mailer', 'redbright');

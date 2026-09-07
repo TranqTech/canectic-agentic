@@ -202,6 +202,7 @@ For each discovered address:
 
 5a. If routeResult.connectionUUID exists:
     — Load the peer connection record
+    — Skip if the peer is in connect backoff
     — Call manager._connectToPeer(conn)
 
 5b. If routeResult.nodelistData exists (no peer connection):
@@ -223,6 +224,43 @@ The existing `_startPollScheduling()` in MailerManager only polls configured pee
 This is the key architectural improvement: the scanner makes the mailer aware of mail destined for nodes that have no configured peer connection.
 
 ---
+
+## 3.5 Flow File Housekeeping
+
+The scanner decides a node has mail from the **filename**, not the contents. That
+is fine for packets, which are self-evidently mail, and wrong for flow files,
+which are a list of things to send and can end up listing nothing.
+
+A flow file with nothing left to do used to read as pending work for ever:
+
+1. Scanner sees `00860065.flo` and records the address as having mail
+2. It triggers a session
+3. The session skips every line, because each is either already marked `~` or
+   names a file that no longer exists
+4. Nothing is sent, so nothing marks a line, so nothing deletes the flow file
+5. Next scan cycle, back to 1
+
+At the default `MAILER_BSO_SCAN_INTERVAL` of 60 seconds that is one connection a
+minute, indefinitely, to a peer whose `poll_interval` might say four hours. The
+poll schedule is not involved: this path calls `_connectToPeer` directly.
+
+Two ways in:
+
+- **Every line already `~`.** `TransferEngine._markFloLineSent` only deleted the
+  flow file when a line changed during that call, so one whose last line was
+  marked in an earlier session was never removed.
+- **Files that vanished.** Both outbound list builders and the send loop skipped
+  a missing file silently, leaving its line unmarked for ever.
+
+`src/utils/floFile.js` owns the fix. `pruneFlowFile()` marks lines whose file has
+gone and deletes the flow file once nothing actionable remains. It is called from
+the scanner before counting an address, and from both outbound list builders, so
+the tidy-up does not depend on any one of them running. `pendingCount()` is the
+honest answer to "does this node have mail", as against "does a flow file exist".
+
+Deletion in `_markFloLineSent` is now gated on `allSent` alone rather than on
+`updated && allSent`, and `_offerNextFile` marks a line whose file disappeared
+between queueing and sending.
 
 ## 4. Flavour Handling
 

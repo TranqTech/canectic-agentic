@@ -23,6 +23,7 @@ import appConfig from '../config/appConfig.js';
 import { resolveFileboxPath } from '../utils/fileboxPath.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as outboundFileLog from '../models/outboundFileLog.js';
+import * as floFile from '../utils/floFile.js';
 
 class SessionController extends EventEmitter {
 	constructor(transport, role, options) {
@@ -526,6 +527,11 @@ class SessionController extends EventEmitter {
 		var floExtensions = ['.flo', '.clo', '.dlo', '.hlo', '.ilo'];
 		for (var ext of floExtensions) {
 			var floPath = outDir + '/' + desthex + ext;
+			// Tidy first: mark lines whose file has gone and remove the flow
+			// file when nothing actionable is left. Without this an exhausted
+			// flow file survives every session that reads it, and the BSO
+			// scanner goes on reading it as pending mail.
+			floFile.pruneFlowFile(floPath);
 			if (fs.existsSync(floPath)) {
 				var content = fs.readFileSync(floPath, 'utf8');
 				var lines = content.split('\n').map(l => l.trim()).filter(Boolean);
@@ -684,6 +690,12 @@ class SessionController extends EventEmitter {
 
 	_processFlowFile(floPath) {
 		try {
+			// As in _buildOutboundList: mark vanished files and drop the flow
+			// file when nothing actionable remains, so it cannot outlive its
+			// contents and keep the BSO scanner triggering sessions.
+			floFile.pruneFlowFile(floPath);
+			if (!fs.existsSync(floPath)) return;
+
 			var content = fs.readFileSync(floPath, 'utf8');
 			var lines   = content.split('\n').map(l => l.trim()).filter(Boolean);
 

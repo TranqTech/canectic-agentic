@@ -15,6 +15,7 @@ import * as ftnRouter from '../models/ftnRouter.js';
 import * as peerConnections from '../models/peerConnections.js';
 import appConfig from '../config/appConfig.js';
 import { resolveFileboxPath } from '../utils/fileboxPath.js';
+import * as floFile from '../utils/floFile.js';
 
 // -------------------------------------------------------------------------
 // BSO extension maps
@@ -216,6 +217,7 @@ class BsoScanner {
 		var skipped = 0;
 		var holdCount = 0;
 		var noRoute = 0;
+		var backedOff = 0;
 
 		for (var [addr, info] of allAddresses) {
 			if (this._manager && !this._manager.isRunning()) break;
@@ -225,6 +227,7 @@ class BsoScanner {
 			else if (result === 'skipped') skipped++;
 			else if (result === 'hold') holdCount++;
 			else if (result === 'noroute') noRoute++;
+			else if (result === 'backoff') backedOff++;
 		}
 
 		if (allAddresses.size > 0) {
@@ -234,6 +237,7 @@ class BsoScanner {
 				(skipped > 0 ? ', ' + skipped + ' active session(s) skipped' : '') +
 				(holdCount > 0 ? ', ' + holdCount + ' hold' : '') +
 				(noRoute > 0 ? ', ' + noRoute + ' unroutable' : '') +
+				(backedOff > 0 ? ', ' + backedOff + ' in backoff' : '') +
 				(fileboxTriggered > 0 ? ', ' + fileboxTriggered + ' filebox(es)' : ''),
 				'mailer', 'cyan'
 			);
@@ -267,6 +271,18 @@ class BsoScanner {
 			for (var entry of entries) {
 				var parsed = parseBsoFilename(entry, zone);
 				if (!parsed) continue;
+
+				// A flow file used to count as pending mail on its filename
+				// alone. One with nothing left to send therefore triggered a
+				// session every scan, the session found nothing, and nothing
+				// removed the file, so it happened again a minute later for
+				// ever, on a peer whose poll interval said hours. Look inside,
+				// tidy it up, and skip it when there is genuinely nothing left.
+				if (parsed.type === 'flow') {
+					var pruned = floFile.pruneFlowFile(dirPath + '/' + entry);
+					if (pruned.pending === 0) continue;
+				}
+
 				fileCount++;
 
 				var addrKey = parsed.zone + ':' + parsed.net + '/' + parsed.node;
@@ -467,6 +483,21 @@ class BsoScanner {
 				if (cd.status === 'HOLD') {
 					alogger.writeClog(4, 'BSO scan: peer ' + addrString + ' has HOLD status — waiting for inbound', 'mailer', 'cyan');
 					return 'hold';
+				}
+
+				// Respect backoff, which pollConnection checks and this path did
+				// not. A peer that is refusing connections was being retried
+				// every scan interval, so the backoff a sysop configured did
+				// nothing at all whenever there was mail waiting.
+				if (appConfig.getBoolean('mailer_backoff_enabled', true) &&
+				    peerConnections.isInBackoff(conn)) {
+					alogger.writeClog(4,
+						'BSO scan: ' + addrString + ' has mail waiting but is in backoff until ' +
+						(cd.next_allowed_poll_at || 'unknown') +
+						' (' + (cd.consecutive_failures || 0) + ' consecutive failures)',
+						'mailer', 'yellow'
+					);
+					return 'backoff';
 				}
 
 				alogger.writeClog(3,
