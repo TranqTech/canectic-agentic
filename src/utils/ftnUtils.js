@@ -418,6 +418,64 @@ function getMonthNumberFromDate(monthAbbreviation) {
   return String(date.getMonth() + 1).padStart(2, '0');; // Add 1 because getMonth() is zero-indexed
 }
 
+/**
+ * Reject a message date that cannot be true.
+ *
+ * A message dated years in the future is not a clock-skew problem, it is bad
+ * data, and it does real damage downstream: the area's last_message pins it to
+ * the top of any "recently active" ordering forever, retention never prunes it
+ * because it is permanently inside any window, and the list column shows a
+ * plausible-looking day.
+ *
+ * Seen in practice: ten messages in a COOKING base carrying 2060 dates whose
+ * MSGIDs decode to 2024. They arrived that way from upstream, every one of them
+ * congruent to 16 seconds mod 60, so a systematic corruption at the source
+ * rather than a wrong clock. Nothing downstream of the ingest point can tell
+ * the difference afterwards, so the check belongs here.
+ *
+ * Modest future tolerance is deliberate. Clock skew of minutes or hours between
+ * systems is completely normal in FTN and a message an hour ahead is not
+ * suspect. Years ahead is.
+ *
+ * @param {Date}   candidate    the parsed message date
+ * @param {Date}   [receivedAt] fallback, defaults to now
+ * @param {object} [opts]
+ * @param {number} [opts.futureToleranceDays] default 2
+ * @param {number} [opts.earliestYear]        default 1980, before FTN existed
+ * @returns {object} { date, clamped, reason }
+ */
+function sanitiseMessageDate(candidate, receivedAt, opts) {
+	opts = opts || {};
+	var fallback = receivedAt instanceof Date && !isNaN(receivedAt.getTime())
+		? receivedAt : new Date();
+
+	if (!(candidate instanceof Date) || isNaN(candidate.getTime())) {
+		return { date: fallback, clamped: true, reason: 'unparseable date' };
+	}
+
+	var toleranceDays = opts.futureToleranceDays === undefined ? 2 : opts.futureToleranceDays;
+	var limit = fallback.getTime() + (toleranceDays * 86400000);
+	if (candidate.getTime() > limit) {
+		return {
+			date: fallback,
+			clamped: true,
+			reason: 'dated ' + candidate.toISOString().substring(0, 10) + ', more than ' +
+				toleranceDays + ' day(s) in the future'
+		};
+	}
+
+	var earliestYear = opts.earliestYear === undefined ? 1980 : opts.earliestYear;
+	if (candidate.getUTCFullYear() < earliestYear) {
+		return {
+			date: fallback,
+			clamped: true,
+			reason: 'dated ' + candidate.toISOString().substring(0, 10) + ', before ' + earliestYear
+		};
+	}
+
+	return { date: candidate, clamped: false, reason: null };
+}
+
 async function getSystemTime(dtstring, TZString){
 	// FTS-0001 DateTime is "DD MMM YY  HH:MM:SS" (two spaces before time).
 	// Malformed or missing dates from ancient/broken tossers must not abort
@@ -476,6 +534,7 @@ async function getSystemTime(dtstring, TZString){
 }
 
 export{
+	sanitiseMessageDate,
 	getDateTimeString,
 	genMsgId,
 	getMilliHex,

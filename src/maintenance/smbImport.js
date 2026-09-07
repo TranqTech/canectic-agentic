@@ -25,6 +25,16 @@ function smbToDbObj(msg, target) {
 		? new Date(hdr.whenWritten.time * 1000)
 		: currtime;
 
+	// SMB stores when_written as a raw u32 and we copy it verbatim, so a base
+	// carrying a corrupt value hands us a message dated decades out. Seen in
+	// practice with 2060 dates whose MSGIDs decoded to 2024.
+	var dateCheck = ftnUtils.sanitiseMessageDate(systemTime, currtime);
+	if (dateCheck.clamped) {
+		alogger.writeAlog(3, 'smbImport: message from ' + (hdr.sender || 'unknown') + ' ' +
+			dateCheck.reason + '; using the import time instead', 'yellow');
+	}
+	systemTime = dateCheck.date;
+
 	// Build body text - combine body and tail (origin/tearline)
 	var rawBody = stripNulls(msg.bodyText || '');
 	var rawTail = stripNulls(msg.tailText || '');

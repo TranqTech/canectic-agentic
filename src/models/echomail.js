@@ -35,6 +35,16 @@ function parseAddrPart(addrStr, intFallback) {
 async function ftnToDb(ftnMessage) {
 	var currtime   = new Date();
 	var systemTime = await ftnUtils.getSystemTime(ftnMessage.DateTime, ftnMessage.TZUTC);
+
+	// A date years in the future is bad data, not clock skew, and nothing
+	// downstream can tell the difference once it is stored.
+	var dateCheck = ftnUtils.sanitiseMessageDate(systemTime, new Date());
+	if (dateCheck.clamped) {
+		alogger.writeAlog(2, 'ftnToDb: ' + (ftnMessage.AreaTag || 'netmail') + ' message from ' +
+			(ftnMessage.FromUser || 'unknown') + ' ' + dateCheck.reason +
+			'; using the receive time instead', 'yellowbright');
+	}
+	systemTime = dateCheck.date;
 	var uuid       = uuidv4();
 
 	// Split the incoming full-string MSGID ("address serial") into the
