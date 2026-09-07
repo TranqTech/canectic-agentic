@@ -313,6 +313,7 @@ router.get('/messages/area/:shortcode', async (req, res) => {
 		var viewMode   = req.query.view || null;
 		if ((threadMode === 'no_threads' || viewMode === 'flat') && msgArea) {
 			return res.render('messages/areas/flat', {
+			canModerate: canModerateArea(currentuser, msgArea),
 				title: msgArea ? msgArea.name : 'Message Area',
 				activelink: 'messages',
 				currentuser: currentuser,

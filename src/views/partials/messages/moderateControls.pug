@@ -1,0 +1,90 @@
+//- Moderation confirm dialogs and their handlers, shared by the thread and
+//- flat views. Both show message content, which is the point: a moderator
+//- should be able to read what they are removing before they remove it.
+//-
+//- Include inside a view that renders .thread-delete and/or .message-delete
+//- controls, and pass the area shortcode.
+mixin moderateControls(shortcode)
+  .modal.fade#deleteThreadModal(tabindex='-1')
+    .modal-dialog.modal-dialog-centered
+      .modal-content
+        .modal-header.bg-danger.text-white
+          h5.modal-title Delete thread
+          button.btn-close(type='button' data-bs-dismiss='modal')
+        .modal-body
+          p
+            | Delete
+            strong#deleteThreadSubject
+            |  and every message in it?
+          .alert.alert-warning.small.mb-0
+            | This removes the messages from this system only. Anything already sent
+            | to network peers stays where it is, and a peer may send the thread back
+            | on a later rescan.
+        .modal-footer
+          button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+          form#deleteThreadForm(method='POST' style='display:inline')
+            button.btn.btn-danger(type='submit') Delete thread
+
+  .modal.fade#deleteMessageModal(tabindex='-1')
+    .modal-dialog.modal-dialog-centered
+      .modal-content
+        .modal-header.bg-danger.text-white
+          h5.modal-title Delete message
+          button.btn-close(type='button' data-bs-dismiss='modal')
+        .modal-body
+          p
+            | Delete the message from
+            strong#deleteMessageFrom
+            | ?
+          .alert.alert-warning.small.mb-0
+            | Local only, as above. Deleting the first message of a thread removes the
+            | whole thread, since the replies have nothing left to hang from.
+        .modal-footer
+          button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+          form#deleteMessageForm(method='POST' style='display:inline')
+            input#deleteMessageThreadUuid(type='hidden' name='thread_uuid' value='')
+            button.btn.btn-danger(type='submit') Delete message
+
+  script.
+    (function () {
+      var areaShortcode = '#{shortcode}';
+
+      // Delegated: messages arrive lazily on both views, so binding per button
+      // at load would miss everything appended afterwards.
+      document.addEventListener('click', function (ev) {
+        if (!ev.target.closest) return;
+
+        var threadBtn = ev.target.closest('.thread-delete');
+        if (threadBtn) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          var subjEl = document.getElementById('deleteThreadSubject');
+          var tForm  = document.getElementById('deleteThreadForm');
+          if (!tForm) return;
+          if (subjEl) subjEl.textContent = threadBtn.dataset.threadSubject || 'this thread';
+          tForm.action = '/messages/area/' + areaShortcode + '/thread/' +
+            threadBtn.dataset.threadUuid + '/delete';
+          var tModal = document.getElementById('deleteThreadModal');
+          if (tModal && window.bootstrap) bootstrap.Modal.getOrCreateInstance(tModal).show();
+          return;
+        }
+
+        var msgBtn = ev.target.closest('.message-delete');
+        if (msgBtn) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          var fromEl = document.getElementById('deleteMessageFrom');
+          var mForm  = document.getElementById('deleteMessageForm');
+          if (!mForm) return;
+          if (fromEl) fromEl.textContent = msgBtn.dataset.msgFrom || 'this user';
+          // Carried so the route can send us back to the thread when it
+          // survives, rather than always bouncing to the area.
+          var tuInput = document.getElementById('deleteMessageThreadUuid');
+          if (tuInput) tuInput.value = msgBtn.dataset.threadUuid || '';
+          mForm.action = '/messages/area/' + areaShortcode + '/message/' +
+            msgBtn.dataset.msgUuid + '/delete';
+          var mModal = document.getElementById('deleteMessageModal');
+          if (mModal && window.bootstrap) bootstrap.Modal.getOrCreateInstance(mModal).show();
+        }
+      });
+    })();

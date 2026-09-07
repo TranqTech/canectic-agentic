@@ -1,4 +1,5 @@
 extends ../../layouts/user
+include ../../partials/messages/moderateControls.pug
 
 block content
   style.
@@ -84,6 +85,7 @@ block content
               data-shortcode=msgArea.shortcode
               data-force80=msgArea.ansi_area ? 'true' : 'false'
               data-can-post=canPost ? 'true' : 'false'
+              data-can-moderate=canModerate ? 'true' : 'false'
               data-total=totalMessages
               data-loaded=messages.length
               data-oldest-id=messages.length > 0 ? messages[0].id : 0
@@ -118,13 +120,23 @@ block content
                           - var mdate = Date.parse(message.system_time)
                           - var md = DateTime.fromMillis(mdate)
                           = md.toFormat('MMM dd, yyyy HH:mm')
-                      if canPost
-                        button.btn.btn-xs.btn-sm.btn-primary.replybtn.ms-2.flex-shrink-0(
-                          data-bs-msgposter=message.from_user
-                          data-bs-msguuid=message.uuid || ''
-                          data-bs-subject=message.subject
-                          data-bs-threaduuid=message.thread_uuid || ''
-                        ) Reply
+                      .d-flex.flex-shrink-0.ms-2
+                        if canPost
+                          button.btn.btn-xs.btn-sm.btn-primary.replybtn(
+                            data-bs-msgposter=message.from_user
+                            data-bs-msguuid=message.uuid || ''
+                            data-bs-subject=message.subject
+                            data-bs-threaduuid=message.thread_uuid || ''
+                          ) Reply
+                        if canModerate
+                          button.btn.btn-xs.btn-sm.btn-outline-danger.ms-1.message-delete(
+                            type='button'
+                            data-msg-uuid=message.uuid || ''
+                            data-msg-from=message.from_user
+                            data-thread-uuid=message.thread_uuid || ''
+                            title='Delete this message'
+                          )
+                            i.bi.bi-trash
                     .px-2.py-2
                       .messagebody.monospace.fg-brightgrey
                         if message.isAnsi
@@ -344,6 +356,7 @@ block content
       var hasNewer      = container.dataset.hasNewer === 'true';
       var firstUnreadId = parseInt(container.dataset.firstUnread) || 0;
       var canPostJs     = container.dataset.canPost === 'true';
+      var canModerateJs = container.dataset.canModerate === 'true';
       var loading       = false;
       var batchSize     = 30;
 
@@ -412,14 +425,23 @@ block content
           +     '</div>'
           +     '<div class="small fg-yellow">' + dateStr + '</div>'
           +   '</div>'
+          +   '<div class="d-flex flex-shrink-0 ms-2">'
           +   (canPostJs
-              ? '<button class="btn btn-xs btn-sm btn-primary replybtn ms-2 flex-shrink-0"'
+              ? '<button class="btn btn-xs btn-sm btn-primary replybtn"'
               +   ' data-bs-msgposter="' + escapeHtml(msg.from_user || '') + '"'
               +   ' data-bs-msguuid="' + escapeHtml(msg.uuid || '') + '"'
               +   ' data-bs-subject="' + escapeHtml(msg.subject || '') + '"'
               +   ' data-bs-threaduuid="' + (msg.thread_uuid || '') + '"'
               + '>Reply</button>'
               : '')
+          +   (canModerateJs
+              ? '<button type="button" class="btn btn-xs btn-sm btn-outline-danger ms-1 message-delete"'
+              +   ' data-msg-uuid="' + escapeHtml(msg.uuid || '') + '"'
+              +   ' data-msg-from="' + escapeHtml(msg.from_user || '') + '"'
+              +   ' data-thread-uuid="' + (msg.thread_uuid || '') + '"'
+              +   ' title="Delete this message"><i class="bi bi-trash"></i></button>'
+              : '')
+          +   '</div>'
           + '</div>'
           + '<div class="px-2 py-2">'
           +   '<div class="messagebody monospace fg-brightgrey">'
@@ -691,3 +713,6 @@ block content
     });
 
   include ../../partials/messages/_msgAutoSize
+
+      if canModerate && msgArea
+        +moderateControls(msgArea.shortcode)
