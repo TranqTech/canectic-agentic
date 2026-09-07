@@ -25,6 +25,12 @@ block content
                     button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
                     button.btn.btn-outline-light.view-toggle(data-view='all') All
                 .d-flex.align-items-center
+                  button#areaSort.btn.btn-sm.btn-outline-light.me-2(
+                    type='button'
+                    title='Toggle between the sysop ordering and most recently active first'
+                  )
+                    i.bi.bi-sort-down.me-1
+                    span#areaSortLabel Default order
                   .input-group.input-group-sm.me-2(style='width:220px')
                     span.input-group-text
                       i.bi.bi-search
@@ -42,12 +48,14 @@ block content
                         small.text-muted.ms-2= entry.group.description
                     table.table.table-sm.table-hover.mb-0.area-table
                       tbody
-                        each area in entry.areas
+                        each area, areaIndex in entry.areas
                           tr.area-row(
                             data-subscribed=(area.subscribed ? 'true' : 'false')
                             data-name=area.name.toLowerCase()
                             data-desc=(area.description || '').toLowerCase()
                             data-shortcode=area.shortcode
+                            data-order=areaIndex
+                            data-last-message=(area.last_message ? new Date(area.last_message).getTime() : 0)
                           )
                             td(style='width:30px')
                               button.btn.btn-sm.sub-toggle(
@@ -96,6 +104,8 @@ block content
               |  shows every area you have access to, so you can discover and subscribe to new ones.
             h6 Search
             p Use the search box to quickly filter areas by name, description, or shortcode. The filter works across all groups.
+            h6 Sorting
+            p The sort button switches between the sysop's ordering and most recently active first. Areas are sorted within their group, and areas that have never carried a message sort last. Your choice is remembered in this browser.
             h6 Reading Messages
             p Click an area name to open it and browse threads. Unread counts are shown as badges.
           .modal-footer
@@ -104,6 +114,57 @@ block content
     script.
       document.addEventListener('DOMContentLoaded', function() {
         var currentView = 'subscribed';
+
+        // ---- Sort -------------------------------------------------------
+        // Two orders: the sysop's (whatever the server sent, preserved in
+        // data-order) and most recently active first. Sorting happens inside
+        // each group rather than across the whole page, so the grouping still
+        // means something.
+        //
+        // Client side because the rows are all here already: a round trip to
+        // reorder a list the browser is holding would be slower and would lose
+        // the current search and view toggle.
+        var SORT_KEY = 'canectic.messageAreas.sort';
+        var sortMode = 'default';
+        try {
+          var saved = localStorage.getItem(SORT_KEY);
+          if (saved === 'recent' || saved === 'default') sortMode = saved;
+        } catch (e) { /* private window, or site data blocked */ }
+
+        var sortBtn = document.getElementById('areaSort');
+        var sortLabel = document.getElementById('areaSortLabel');
+
+        function applySort() {
+          document.querySelectorAll('.group-section').forEach(function(section) {
+            var body = section.querySelector('tbody');
+            if (!body) return;
+            var rows = Array.prototype.slice.call(body.querySelectorAll('.area-row'));
+            rows.sort(function(a, b) {
+              if (sortMode === 'recent') {
+                var at = parseInt(a.dataset.lastMessage, 10) || 0;
+                var bt = parseInt(b.dataset.lastMessage, 10) || 0;
+                // Newest first. An area that has never carried a message sorts
+                // last rather than jumbling in among dated ones.
+                if (bt !== at) return bt - at;
+              }
+              return (parseInt(a.dataset.order, 10) || 0) - (parseInt(b.dataset.order, 10) || 0);
+            });
+            rows.forEach(function(r) { body.appendChild(r); });
+          });
+
+          if (sortLabel) sortLabel.textContent = (sortMode === 'recent') ? 'Recently active' : 'Default order';
+          if (sortBtn) sortBtn.classList.toggle('active', sortMode === 'recent');
+        }
+
+        if (sortBtn) {
+          sortBtn.addEventListener('click', function() {
+            sortMode = (sortMode === 'recent') ? 'default' : 'recent';
+            try { localStorage.setItem(SORT_KEY, sortMode); } catch (e) { /* not fatal */ }
+            applySort();
+          });
+        }
+
+        applySort();
 
         // View toggle
         document.querySelectorAll('.view-toggle').forEach(function(btn) {
