@@ -115,6 +115,10 @@ Every relay decision writes one row to `netmail_relay_log`, whatever the decisio
 
 Before this, the traces were scattered. A success wrote a log line and a `pm_outbox` row. A refusal wrote a different log line. A loop wrote an undeliverable row. An unroutable address wrote a text dump into `ftn/bad`. Two of those roll over, so the question "did we relay what we should have, and did it leave" was not answerable after the fact.
 
+The admin page is at **Networking > Netmail Relay Log** (`/admin/relay-log`). It leads with anything relayed and not sent, then a summary by decision, then every decision with a detail view per row showing the Via chain as it arrived, the AKA you stamped, and the route taken. Filter by decision, and change the window with the selector.
+
+The same thing from the command line:
+
 ```bash
 node src/tools/relayLog.js                     # summary, plus anything stuck
 node src/tools/relayLog.js --list 50           # the last 50 decisions

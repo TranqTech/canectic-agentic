@@ -63,6 +63,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
 import * as mailerSessions from '../models/mailerSessions.js';
 import * as outboundFileLog from '../models/outboundFileLog.js';
+import * as netmailRelayLog from '../models/netmailRelayLog.js';
 import * as mailerFormat from '../utils/mailerFormat.js';
 import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
@@ -6419,6 +6420,43 @@ router.get('/outbound-log', requireAdmin, async (req, res) => {
 	res.render('admin/outboundLog/index', {
 		sufficientAccess, title: 'Outbound File Log', activelink: 'outbound-log',
 		activenav: 'networks', currentuser, entries, fmt: mailerFormat
+	});
+});
+
+// -------------------------------------------------------
+// Netmail Relay Log
+//
+// Every decision this system made about netmail addressed to somebody else.
+// The stuck list is the point of the page: relayed and never sent is the
+// failure nothing else surfaces, because queueing looks like success and a
+// message then sitting unsent produces no further event.
+// -------------------------------------------------------
+
+router.get('/relay-log', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+
+	var days = parseInt(req.query.days) || 7;
+	if (days < 1) days = 1;
+	if (days > 365) days = 365;
+
+	// A decision filter that is not one of ours would silently return nothing,
+	// which reads as "no relays" rather than "bad filter".
+	var valid = [netmailRelayLog.RELAY_SENT, netmailRelayLog.RELAY_REFUSED,
+		netmailRelayLog.RELAY_LOOP, netmailRelayLog.RELAY_NO_ROUTE, netmailRelayLog.RELAY_ERROR];
+	var decision = valid.indexOf(req.query.decision) >= 0 ? req.query.decision : null;
+
+	var stuckHours = parseInt(req.query.stuck) || 6;
+
+	res.render('admin/relayLog/index', {
+		sufficientAccess, title: 'Netmail Relay Log', activelink: 'relay-log',
+		activenav: 'networks', currentuser,
+		entries:   await netmailRelayLog.getRecent(500, decision),
+		summary:   await netmailRelayLog.summarise(days),
+		stuck:     await netmailRelayLog.pendingDelivery(stuckHours),
+		sources:   await netmailRelayLog.byPacketSource(days),
+		days, decision, stuckHours,
+		relayMode: appConfig.get('netmail_relay_mode', 'nodelist')
 	});
 });
 

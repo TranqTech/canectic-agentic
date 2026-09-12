@@ -27,6 +27,7 @@ var RELAY_REFUSED  = 'refused';    // the relay gate said no
 var RELAY_LOOP     = 'loop';       // we had already handled it, per the Via chain
 var RELAY_NO_ROUTE = 'no_route';   // gate allowed it, router could not place it
 var RELAY_ERROR    = 'error';      // something threw
+var RELAY_UNKNOWN  = 'unknown';    // a caller that did not say; recorded, not dropped
 
 /**
  * Record one relay decision. Returns whether the row was written; callers
@@ -51,7 +52,10 @@ async function logDecision(entry) {
 			// the message. Keeping both is the only way to tell an uplink
 			// feeding us transit traffic from a node writing it directly.
 			packet_source: trunc(e.packetSource, 64),
-			decision:      trunc(e.decision, 32),
+			// Never null. A row whose decision is missing is still worth
+			// keeping, but it has to be visible as wrong rather than absent,
+			// and every reader would otherwise have to guard against null.
+			decision:      trunc(e.decision, 32) || RELAY_UNKNOWN,
 			reason:        e.reason || null,
 			relay_mode:    trunc(e.relayMode, 16),
 			next_hop:      trunc(e.nextHop, 64),
@@ -181,6 +185,7 @@ export {
 	RELAY_LOOP,
 	RELAY_NO_ROUTE,
 	RELAY_ERROR,
+	RELAY_UNKNOWN,
 	logDecision,
 	getRecent,
 	getByMsgId,

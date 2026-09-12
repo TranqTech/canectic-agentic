@@ -1,0 +1,267 @@
+extends ../../layouts/admin
+
+block content
+  //- Badge colour per decision. Relayed is the only good outcome; no_route and
+  //- error are faults on our side, while refused and loop are the gate and the
+  //- Via chain doing their job, so those read as warnings rather than errors.
+  -
+    var decisionClass = {
+      relayed:  'success',
+      refused:  'warning',
+      loop:     'info',
+      no_route: 'danger',
+      error:    'danger'
+    }
+    var decisionHelp = {
+      relayed:  'Routed and queued for delivery',
+      refused:  'The relay gate declined it',
+      loop:     'Already passed through, per the Via chain',
+      no_route: 'Allowed, but no route to the destination',
+      error:    'Routing threw'
+    }
+    var shortAddr = function (a) { return a || '?' }
+    // Defensive: the view must not be the thing that falls over on a row it
+    // did not expect. A decision is never null now, but a log page crashing
+    // is a worse outcome than a row reading 'unknown'.
+    var decisionLabel = function (d) { return String(d || 'unknown').replace('_', ' ') }
+
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-11.offset-lg-0.col-12
+        h2.mb-1
+          i.bi.bi-signpost-split.me-2
+          | Netmail Relay Log
+        p.text-muted.small.mb-3
+          | Every decision this system made about netmail addressed to somebody else.
+          | Refusals are recorded alongside relays: a gate you cannot see refusing
+          | anything is a gate you cannot validate.
+
+        .d-flex.flex-wrap.align-items-center.gap-2.mb-4
+          span.badge.bg-secondary
+            | Relay mode: #{relayMode}
+          .ms-auto
+            form.d-flex.align-items-center.gap-2(method='GET' action='/admin/relay-log')
+              label.form-label.mb-0.small.text-muted(for='daysSelect') Window
+              select#daysSelect.form-select.form-select-sm(name='days' style='width:auto' onchange='this.form.submit()')
+                each d in [1, 7, 30, 90]
+                  option(value=d selected=(days === d))= d + (d === 1 ? ' day' : ' days')
+              if decision
+                input(type='hidden' name='decision' value=decision)
+              //- The select submits itself on change, which covers the normal
+              //- case. This keeps the form working when that does not run.
+              button.btn.btn-sm.btn-outline-secondary(type='submit') Apply
+
+        //- ============================================================
+        //- Stuck: the reason this page exists
+        //- ============================================================
+        if stuck && stuck.length > 0
+          .alert.alert-danger.mb-4
+            h5.alert-heading
+              i.bi.bi-exclamation-triangle-fill.me-2
+              | #{stuck.length} relayed message#{stuck.length === 1 ? '' : 's'} #{stuck.length === 1 ? 'has' : 'have'} not been sent
+            p.mb-2.small
+              | Accepted for relay and queued more than #{stuckHours} hours ago, and the outbound
+              | row still has not gone. Nothing else reports this: queueing looks like success,
+              | and a message that then sits unsent produces no further event.
+            .table-responsive
+              table.table.table-sm.table-dark.mb-2
+                thead
+                  tr
+                    th Received
+                    th From
+                    th To
+                    th Next Hop
+                    th Subject
+                    th State
+                tbody
+                  each row in stuck
+                    tr
+                      td.small= new Date(row.received_at).toLocaleString()
+                      td.monospace.small #{shortAddr(row.from_address)}
+                      td.monospace.small #{shortAddr(row.to_address)}
+                      td.monospace.small= row.next_hop || '-'
+                      td.small= row.subject || '(none)'
+                      td.small
+                        if row.sent === null
+                          span.badge.bg-danger no outbound row
+                        else if row.undeliverable
+                          span.badge.bg-danger undeliverable
+                        else
+                          span.badge.bg-warning.text-dark queued
+            p.mb-0.small
+              | Start with whether the next hop is being polled:
+              code.ms-1 node src/tools/schedules.js
+
+        //- ============================================================
+        //- Summary
+        //- ============================================================
+        .row.g-3.mb-4
+          each row in (summary || [])
+            .col-6.col-md-4.col-lg-2
+              .card.h-100
+                .card-body.text-center.py-3
+                  h3.mb-0(class='text-' + (decisionClass[row.decision] || 'secondary'))= row.count
+                  .small.text-uppercase.text-muted= decisionLabel(row.decision)
+                  .small.text-muted(style='font-size:0.75rem')= decisionHelp[row.decision] || ''
+          if !summary || summary.length === 0
+            .col-12
+              .card
+                .card-body.text-center.text-muted.py-4
+                  | No netmail addressed elsewhere has reached this system in the last #{days} day#{days === 1 ? '' : 's'}.
+
+        //- ============================================================
+        //- Decisions
+        //- ============================================================
+        .card.mb-4
+          .card-header.d-flex.align-items-center
+            span
+              i.bi.bi-list-ul.me-2
+              | Decisions
+            .ms-auto.btn-group.btn-group-sm
+              a.btn(href='/admin/relay-log?days=' + days
+                class=decision ? 'btn-outline-secondary' : 'btn-secondary') All
+              each key in ['relayed', 'refused', 'loop', 'no_route', 'error']
+                a.btn(href='/admin/relay-log?days=' + days + '&decision=' + key
+                  class=(decision === key ? 'btn-' + decisionClass[key] : 'btn-outline-secondary'))= decisionLabel(key)
+          .card-body
+            if entries && entries.length > 0
+              .table-responsive
+                table#relayTable.table.table-sm.table-hover.mb-0
+                  thead
+                    tr
+                      th Received
+                      th Decision
+                      th From
+                      th To
+                      th Packet From
+                      th Next Hop
+                      th Subject
+                      th
+                  tbody
+                    each entry, idx in entries
+                      tr
+                        td.small(data-order=new Date(entry.received_at).getTime())= new Date(entry.received_at).toLocaleString()
+                        td
+                          span.badge(class='bg-' + (decisionClass[entry.decision] || 'secondary'))= decisionLabel(entry.decision)
+                        td.monospace.small
+                          = entry.from_user || '?'
+                          br
+                          span.text-muted= shortAddr(entry.from_address)
+                        td.monospace.small
+                          = entry.to_user || '?'
+                          br
+                          span.text-muted= shortAddr(entry.to_address)
+                        td.monospace.small.text-muted= entry.packet_source || '-'
+                        td.monospace.small= entry.next_hop || '-'
+                        td.small= entry.subject || '(none)'
+                        td.text-end
+                          button.btn.btn-sm.btn-outline-info.relay-detail(type='button' data-idx=idx)
+                            i.bi.bi-info-circle
+            else
+              .text-center.text-muted.p-4
+                if decision
+                  | No #{decisionLabel(decision)} decisions recorded.
+                else
+                  | Nothing recorded yet. Rows appear as netmail addressed to other systems arrives.
+
+        //- ============================================================
+        //- Who is sending us transit mail
+        //- ============================================================
+        if sources && sources.length > 0
+          .card.mb-5
+            .card-header
+              i.bi.bi-diagram-3.me-2
+              | Transit mail by sender, last #{days} day#{days === 1 ? '' : 's'}
+            .card-body
+              p.text-muted.small
+                | Who handed us the packet, which on transit mail is not who wrote the message.
+                | A link showing nothing but refusals is either misconfigured or probing.
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Packet From
+                    th Decision
+                    th.text-end Count
+                tbody
+                  each row in sources
+                    tr
+                      td.monospace.small= row.packet_source || '(unknown)'
+                      td
+                        span.badge(class='bg-' + (decisionClass[row.decision] || 'secondary'))= decisionLabel(row.decision)
+                      td.text-end.small= row.count
+
+    //- ============================================================
+    //- Detail modal
+    //- ============================================================
+    #relayDetailModal.modal.fade(tabindex='-1' aria-hidden='true')
+      .modal-dialog.modal-dialog-centered.modal-lg
+        .modal-content
+          .modal-header.bg-dark.text-white
+            h4.modal-title Relay Decision
+            button.btn.btn-lg.btn-close(data-bs-dismiss='modal')
+          .modal-body#relayDetailBody
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof jQuery !== 'undefined' && jQuery.fn.DataTable &&
+          document.getElementById('relayTable')) {
+        jQuery('#relayTable').DataTable({
+          paging: true,
+          pageLength: 50,
+          order: [[0, 'desc']],
+          columnDefs: [{ orderable: false, targets: 7 }]
+        });
+      }
+
+      var rows = !{JSON.stringify(entries || [])};
+      var modalEl = document.getElementById('relayDetailModal');
+      var modal = modalEl && typeof bootstrap !== 'undefined'
+        ? new bootstrap.Modal(modalEl) : null;
+
+      function esc(v) {
+        if (v === null || v === undefined || v === '') return '<span class="text-muted">-</span>';
+        return String(v).replace(/[&<>"]/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+      }
+
+      function line(label, value) {
+        return '<dt class="col-sm-4 small text-muted">' + label + '</dt>' +
+               '<dd class="col-sm-8 small">' + esc(value) + '</dd>';
+      }
+
+      document.addEventListener('click', function(ev) {
+        var btn = ev.target.closest('.relay-detail');
+        if (!btn) return;
+        var r = rows[parseInt(btn.getAttribute('data-idx'))];
+        if (!r || !modal) return;
+
+        var html = '<dl class="row mb-0">';
+        html += line('Received', new Date(r.received_at).toLocaleString());
+        html += line('Decision', r.decision);
+        if (r.reason) html += line('Reason', r.reason);
+        html += line('Relay mode', r.relay_mode);
+        html += '<dt class="col-12 small text-muted mt-2">Message</dt>';
+        html += line('From', (r.from_user || '?') + ' @ ' + (r.from_address || '?'));
+        html += line('To', (r.to_user || '?') + ' @ ' + (r.to_address || '?'));
+        html += line('Subject', r.subject);
+        html += line('MSGID', r.msg_id);
+        html += '<dt class="col-12 small text-muted mt-2">Transport</dt>';
+        // Who handed us the packet, as distinct from who wrote the message.
+        html += line('Packet from', r.packet_source);
+        html += line('Next hop', r.next_hop);
+        html += line('Route method', r.route_method);
+        html += line('Stamped as', r.via_stamped);
+        html += line('Outbound row', r.outbound_uuid);
+        if (r.via_in) {
+          html += '<dt class="col-12 small text-muted mt-2">Via chain on arrival</dt>';
+          html += '<dd class="col-12"><pre class="small mb-0">' + esc(r.via_in) + '</pre></dd>';
+        }
+        html += '</dl>';
+
+        document.getElementById('relayDetailBody').innerHTML = html;
+        modal.show();
+      });
+    });

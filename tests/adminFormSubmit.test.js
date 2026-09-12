@@ -79,6 +79,14 @@ function label(form) {
 
 var PAGES = [
 	{
+		name: 'netmail relay log',
+		template: 'src/views/admin/relayLog/index.pug',
+		locals: {
+			entries: [], summary: [], stuck: [], sources: [],
+			days: 7, decision: null, stuckHours: 6, relayMode: 'nodelist'
+		}
+	},
+	{
 		name: 'file areas',
 		template: 'src/views/admin/fileAreas/index.pug',
 		locals: {}

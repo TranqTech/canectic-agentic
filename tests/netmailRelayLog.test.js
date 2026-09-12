@@ -44,9 +44,24 @@ describe('netmailRelayLog', function () {
 
 	beforeEach(function () { if (!haveDb) this.skip(); });
 
+	// Cleaning up by msg_id is not enough: the "whatever it is handed" case
+	// deliberately writes rows with every field null, so a LIKE on msg_id
+	// misses them and they accumulate in the developer's real table. Fourteen
+	// of them were sitting there before this was noticed, and they broke the
+	// admin page. Delete by id instead, which catches every row the suite
+	// wrote no matter what is in it.
+	var highWater = 0;
+
+	beforeEach(async function () {
+		if (!haveDb) return;
+		var row = await postgres.queryOne(
+			'SELECT COALESCE(MAX(id), 0)::bigint AS max_id FROM netmail_relay_log', []);
+		highWater = row ? String(row.max_id) : '0';
+	});
+
 	afterEach(async function () {
 		if (!haveDb) return;
-		await postgres.query('DELETE FROM netmail_relay_log WHERE msg_id LIKE $1', [TAG + '%']);
+		await postgres.query('DELETE FROM netmail_relay_log WHERE id > $1', [highWater]);
 		await postgres.query('DELETE FROM pm_outbox WHERE uuid LIKE $1', [TAG + '%']);
 	});
 
@@ -102,6 +117,16 @@ describe('netmailRelayLog', function () {
 		await relayLog.logDecision({});
 		await relayLog.logDecision({ decision: relayLog.RELAY_ERROR, receivedAt: 'not a date' });
 		assert.ok(true, 'no throw');
+	});
+
+	it('never writes a row with no decision at all', async function () {
+		// A null decision is not a decision, and every reader would have to
+		// guard against it. The admin page did not, and fell over on rows this
+		// very suite had left behind.
+		await relayLog.logDecision({ msgId: TAG + 'nodecision' });
+
+		var row = (await relayLog.getByMsgId(TAG + 'nodecision'))[0];
+		assert.strictEqual(row.decision, relayLog.RELAY_UNKNOWN);
 	});
 
 	it('reports a write it could not make, rather than failing silently', async function () {
