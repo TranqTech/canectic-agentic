@@ -97,22 +97,32 @@ function generatePktFilename(outDir) {
 
 async function getFileType(filePath) {
   try {
-    const buffer = await fs.promises.readFile(filePath);
-    const type = await fileType.fileTypeFromBuffer(buffer);
-    //return type && type.ext === 'zip';
-    if (type){
-    	return type.ext
-    }else{
-    	return null
-    }
+    // Anything that is not a regular file is simply not ours. Sysops keep
+    // subdirectories in the inbound (ftn/in/Old is the usual one) and reading
+    // a directory throws EISDIR, which the old code logged as an error on
+    // every pass. At the inbound scan interval that is a stack trace every few
+    // seconds for ever, and it buried the lines that mattered. Symlinks are
+    // followed, since stat resolves them, so a linked-in packet still works.
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile()) return null;
+
+    // Sniff from the file rather than pulling it into memory. Magic numbers
+    // live in the first few bytes, but an arcmail bundle or a TIC attachment
+    // can be hundreds of megabytes, and the old readFile loaded every one of
+    // them in full on every scan of the directory.
+    const type = await fileType.fileTypeFromFile(filePath);
+    return type ? type.ext : null;
   } catch (error) {
-    // ENOENT is a benign race — another processor (ticTosser, wildcard router,
+    // ENOENT is a benign race: another processor (ticTosser, wildcard router,
     // parallel FTN toss job) moved the file out of inbound between our
-    // readdirSync and our readFile. Signal "gone" to the caller quietly.
+    // readdirSync and our stat. Signal "gone" to the caller quietly.
     if (error && error.code === 'ENOENT') {
       return 'GONE';
     }
-    console.error('Error checking file type:', error);
+    // Anything else is worth seeing, but through the log bus like the rest of
+    // the tosser, not console.error, so it lands in the admin log viewer and
+    // obeys the configured level.
+    alogger.writeClog(2, '[FTN] cannot identify ' + filePath + ': ' + error.message, 'tosser', 'yellow');
     return false;
   }
 }
@@ -360,10 +370,13 @@ async function TossInbound(inboundDir){
 				processcount += returnObj.pktprocesscount
 				successcount += returnObj.pktsuccesscount
 			}else{
-				console.log("Could not process file")
+				alogger.writeClog(3, '[FTN] could not process ' + file, 'tosser', 'yellow')
 			}
 		}else{
-			console.log(file, "is not pkt")
+			// Every non-pkt entry in the inbound lands here on every pass,
+			// subdirectories included. On the log bus at trace level rather
+			// than unconditional console output.
+			alogger.writeClog(5, '[FTN] not a pkt, leaving in inbound: ' + file, 'tosser', 'cyan')
 		}
 	}
 	//todo: write stats to db or similar
@@ -1652,6 +1665,7 @@ export {
 	TossInboundFile,
 	processMessageText,
 	isMailBundleFilename,
+	getFileType,
 	formatKludge,
 	bareFtnAddress,
 	extractMailBundle
