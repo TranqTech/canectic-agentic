@@ -405,6 +405,33 @@ Sections separated by blank lines. LF line endings. Hex offset matches the byte 
 
 ---
 
+## FTN packet password
+
+The 8-byte password field at offset 26 of the packet header, per FTS-0001. Peers that check it reject a packet whose field does not match what they have configured for the link.
+
+Two writers produce packets, and they take the password from different places:
+
+| Writer | Used for | Source |
+|--------|----------|--------|
+| `WritePktToNode` | echomail | the peer's `packet_password` from `connection_data` |
+| `WritePkts` | netmail, including AreaFix/FileFix/Ping replies and relayed transit | the peer's `packet_password`, falling back to the global `PacketPwd` |
+
+`WritePkts` took the global key and nothing else until this was fixed. A sysop who set a packet password on a link therefore got authenticated echomail and unauthenticated netmail, which shows up as an uplink bouncing AreaFix requests with "no password" while everything else to that same system works.
+
+The lookup is keyed on the **packet destination**, not the message destination. The caller sets `PacketDestination` to the routing target on transit mail, so a relayed netmail is stamped with the password shared with the hop we hand it to rather than the final recipient's. Addresses are matched with a trailing `.0` and any 5D `@domain` suffix stripped, since `1:153/757.0` is the same system as `1:153/757`.
+
+`packetPasswordBuffer()` fixes the field at 8 bytes. The previous code built a buffer as long as the password and copied all of it while advancing the write offset by 8. Nothing was ever corrupted by that, because the zone writes and the 20-byte fill that follow overwrite the rest of the header, but the field was only correct by accident.
+
+A packet going out with no password at all is logged, so it is visible before the far end says so.
+
+## Inbound directory scanning
+
+`getFileType()` stats before it reads. Sysops keep subdirectories in the inbound, `ftn/in/Old` being the usual one, and reading a directory throws EISDIR. That used to be logged as an error through `console.error` on every pass, which at the inbound scan interval is a stack trace every few minutes for ever, outside the log bus and outside the configured level. Anything that is not a regular file is now simply not ours. It also sniffs from the file rather than loading it whole, since an arcmail bundle can be hundreds of megabytes and only the first few bytes decide the type.
+
+`isTossableInboundFile()` is the shared predicate for "would an inbound toss do anything with this". Both `TossInbound` and the periodic `scan-inbound` backstop use it, so they cannot drift apart. See the inbound backstop section in PROCESS_ARCHITECTURE.md for why that mattered.
+
+---
+
 ## FTN Reference
 
 ### Addressing
@@ -939,6 +966,8 @@ Inbound netmail is routed by `ftnNetmailAdapter.js` based on the `ToUser` field:
 | `filefix`, `filemgr`, `tic` | FileFix | `src/models/filefix.js` |
 
 **Custom routes override.** Before the built-in processor check, `ftnNetmailAdapter` consults `netmailRoutes.matchRoute()` (sysop-configured rules at `/admin/netmail-routes`). A matching rule with `action=alias` rewrites `to_user` and falls through to processor dispatch (lets a sysop add their own processor aliases, e.g. `areamanager` → `areafix`). `action=dump` writes the netmail as JSON to a target directory and consumes the message. `action=ignore` drops the message silently (used for IBBS noise). Attached files are not touched by route actions -- they remain in the inbound dir for wildcards/TIC handling. See `src/models/netmailRoutes.js` and `docs/sysop/NETMAIL_ROUTES.md`.
+
+**Relay decision log.** Every decision the relay path reaches, in either direction, writes one row via `src/models/netmailRelayLog.js`: relayed, refused, loop, no_route or error. Refusals are recorded on purpose, since a gate nobody can see refusing anything cannot be validated. Each row keeps `from_address` (who wrote the message) apart from `packet_source` (who handed us the packet), which differ only on transit and are the only way to see which link is feeding you transit traffic; carrying the second one is why `importFtnNetmail` takes a packet-origin argument from the tosser. The row also links to the `pm_outbox` uuid the message became, which makes `pendingDelivery()` possible: relayed and never sent, the failure nothing else surfaces because queueing looks like success and an unsent row produces no further event. Diagnostic only and never throws. Admin page `/admin/relay-log`, CLI `src/tools/relayLog.js`, retention `netmail_relay_log_retention_days` (180). See `docs/sysop/NETMAIL_RELAY.md`.
 
 ### Authentication
 

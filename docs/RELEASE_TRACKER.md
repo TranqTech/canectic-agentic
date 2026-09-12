@@ -71,6 +71,10 @@ Last updated: 2026-09-06
 - [x] Last callers page (web view of recent callers, reusable partial)
 - [x] Who's online page (web view of terminal nodes + web presence, reusable partial)
 - [x] Virtual call flow (web equivalent of the terminal login experience: announcements, last callers, who's online, wall, message newscan, file newscan)
+- [x] Call flow no longer forces itself forever on a session that a completion
+      broadcast missed. The username index is refreshed on session renew, the
+      completing session is always written directly, and loading the call flow
+      reconciles its cached timestamp against the database
 
 ### Admin Panel
 - [x] Dashboard
@@ -108,6 +112,14 @@ Last updated: 2026-09-06
 - [x] Message templates (event-triggered sysop-authored messages with PM/email/netmail delivery, built-in + custom events, admin CRUD, manual fire, CLI, menu command, timed event integration)
 - [x] API tokens (admin audit + revoke at /admin/api-tokens, per-user CRUD on profile page, Bearer auth, scopes, bcrypt hashing, one-time plaintext reveal)
 - [x] JAM message base import (parser with spec-verified offsets, single-base preview/import UI, bulk scan-and-map directory import on the worker queue)
+- [x] File area add/edit forms have a submit button again. Collapsing three forms
+      into a shared mixin dropped it, and the conversion was checked by diffing
+      element ids, which a submit input does not have. `tests/adminFormSubmit`
+      now asserts every admin form has something to submit it with
+- [x] Netmail Relay Log page (`/admin/relay-log`): stuck deliveries first, then
+      counts by decision, every decision with a per-row detail view, and transit
+      mail grouped by sender
+
 
 ### Message Networking
 - [x] FTN tosser (inbound/outbound, type-2 packets, REPLY kludge)
@@ -131,6 +143,19 @@ Last updated: 2026-09-06
 - [x] Outbound eligibility extracted to `evaluateOutbound()` and tested: imported
       history, don't-send-back-to-source, SEEN-BY (FTS-0004, compressed form),
       PATH. Does not consult source_network_id
+- [x] Netmail packet password. Both writers now take it from the peer's
+      `packet_password`, keyed on the packet destination so relayed mail gets the
+      hop's password. Netmail previously used only the global `PacketPwd`, so a
+      configured link sent authenticated echomail and unauthenticated netmail
+- [x] Netmail relay decision log (`netmail_relay_log`): one row per decision
+      including refusals, keeps message author apart from packet sender, links to
+      the outbound row so "relayed but never sent" is answerable. Admin page at
+      `/admin/relay-log`, CLI `src/tools/relayLog.js`, 180-day retention
+- [x] Inbound backstop covers arcmail bundles, not just `.pkt`, via a predicate
+      shared with the tosser so the two cannot drift
+- [ ] Peer interop: BBBS has no `%RESCAN` on either AreaFix or FileFix, so file
+      echo backfill from a BBBS uplink needs the sysop to re-send by hand. Its
+      FREQ support over binkp specifically is unverified. See PEER_INTEROP.md
 
 ### Private Messaging
 - [x] Unified PM model (LOCAL, FTN, QWK, EMAIL)
@@ -201,6 +226,19 @@ Last updated: 2026-09-06
 - [x] Database migrations (declarative schema management)
 - [x] Startup DB/Redis validation (fail fast with clear error)
 - [x] Health check endpoint (GET /health)
+- [x] Worker liveness. The worker publishes a heartbeat with its per-queue
+      consumer state and the age of the longest job in flight; the gateway
+      watches it, notifies the sysop, and restarts after a grace window with a
+      cooldown and an attempt cap. Both queue processors are wrapped in a
+      timeout, since BullMQ's stalled-job detection cannot see a job parked on an
+      await that never settles, and three of those stop the pipeline silently
+- [x] Queue diagnostics: `src/tools/schedules.js` reports the heartbeat, per-queue
+      depth with active-job ages, and each scheduler's next run. A BullMQ
+      scheduler is not a timer, so a `next` in the past means nothing is draining
+      that queue
+- [x] pm2 worker restart backoff. A flat delay with a 3s `min_uptime` burned all
+      fifteen restarts inside a minute when a dependency was slow to start, after
+      which pm2 left the process stopped for good
 - [x] CSRF protection (Origin/Referer check middleware)
 - [x] Install/update script (setup/install.sh)
 - [x] .env.example template (examples/env.example)
@@ -331,5 +369,7 @@ Last updated: 2026-09-06
 | `WEB_CALLFLOW_DESIGN.md` | [x] |
 | `FILEBOX_WILDCARD_DESIGN.md` | [x] |
 | `API_DESIGN.md` | [x] |
+| `PEER_INTEROP.md` | [x] |
+| `HUB_COORDINATOR_DESIGN.md` | [x] |
 | `INSTALL.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |

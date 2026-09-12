@@ -112,6 +112,7 @@ var TOPIC_TAGS = {
     // reference
     'NETWORKING_ARCHITECTURE.md':   ['networking', 'ftn', 'qwk', 'nntp', 'tossers', 'architecture'],
     'MAILER_ARCHITECTURE.md':       ['networking', 'ftn', 'mailer', 'binkp', 'architecture'],
+    'PEER_INTEROP.md':              ['networking', 'ftn', 'interop', 'bbbs', 'reference'],
     'PM_ARCHITECTURE.md':           ['pm', 'messaging', 'attachments', 'architecture'],
     'EMAIL_ARCHITECTURE.md':        ['email', 'smtp', 'imap', 'architecture'],
     'message_architecture.md':      ['messages', 'echomail', 'architecture'],

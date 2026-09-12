@@ -1172,7 +1172,7 @@ The predicate has to match what `TossInbound` actually processes, or the backsto
 node src/tools/schedules.js
 ```
 
-Reports, in order: the worker's own account of itself, per-queue depth with the age of every active job, and every scheduler with its interval, next run and iteration count. Overdue schedules, paused queues and stuck jobs are called out by name. `--sync` and `--prune` repair registration drift only; they deliberately skip overdue entries, because an overdue schedule is a consumer problem and re-registering it would look like a fix and change nothing.
+Reports, in order: the worker's own account of itself, per-queue depth with the age of every active job, and every scheduler with its interval, next run and iteration count. The arithmetic behind it (is this scheduler late, is this job stuck) lives in `src/utils/scheduleFormat.js` so it can be tested; a CLI script cannot be. Overdue schedules, paused queues and stuck jobs are called out by name. `--sync` and `--prune` repair registration drift only; they deliberately skip overdue entries, because an overdue schedule is a consumer problem and re-registering it would look like a fix and change nothing.
 
 ### `connection_data` additions
 

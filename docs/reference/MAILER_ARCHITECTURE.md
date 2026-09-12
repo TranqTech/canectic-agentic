@@ -143,7 +143,7 @@ New fields (additive — existing connection_data fields unchanged):
 Existing fields used by the mailer:
 - `address` — remote FTN address, presented during handshake
 - `session_password` — validated during session authentication
-- `packet_password` — used for packet header password field
+- `packet_password` — written into the 8-byte packet header password field by both packet writers. Echomail has always used it. Netmail did not until it was fixed: `WritePkts` read the global `PacketPwd` config key and nothing else, so a sysop who set a password on a link got authenticated echomail and netmail with eight zero bytes where the password belongs. It surfaced as an uplink bouncing AreaFix requests with "no password" while every other kind of traffic to the same system worked, because everything else was echomail. See the FTN packet password section in NETWORKING_ARCHITECTURE.md.
 - `status` — NORMAL/CRASH/HOLD (controls polling behavior and BSO flavour for filebox files)
 - `outbox_dir` — optional per-peer outbound filebox directory (see Outbound Fileboxes below)
 
