@@ -128,10 +128,19 @@ module.exports = {
 				NODE_ENV: 'production',
 				WORKER_CONCURRENCY: '3',
 			},
-			// Worker can be restarted freely — BullMQ retries failed jobs
+			// Worker can be restarted freely: BullMQ retries failed jobs.
+			//
+			// max_restarts counts restarts where uptime stayed under min_uptime,
+			// and once it is exceeded pm2 gives up and leaves the process
+			// stopped for good. With a flat 2s delay a worker that exits on
+			// startup (Postgres or Redis briefly unreachable, which is exactly
+			// what a reboot or a maintenance window looks like) burns all
+			// fifteen inside a minute and never comes back. Exponential backoff
+			// stretches the same fifteen attempts across many minutes, which
+			// is long enough for a dependency to finish starting.
 			max_restarts: 15,
-			min_uptime: '3s',
-			restart_delay: 2000,
+			min_uptime: '30s',
+			exp_backoff_restart_delay: 2000,
 			// Logging
 			error_file: './logs/production/worker-error.log',
 			out_file: './logs/production/worker-out.log',

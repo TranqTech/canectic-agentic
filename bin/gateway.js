@@ -36,6 +36,7 @@ import { closeQueues } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
 import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
+import { startWorkerWatchdog } from "../src/queues/workerWatchdog.js";
 import { registerLogWebSocket } from "../src/routes/adminLogs.js";
 import { registerNodeSpyWebSocket } from "../src/servers/nodespySocket.js";
 import appConfig from "../src/config/appConfig.js";
@@ -537,6 +538,12 @@ async function main(){
 
 	// Register job schedules (polls, toss cycles, maintenance)
 	await registerSchedules()
+
+	// Watch the worker. The gateway does this because a dead gateway is
+	// obvious within minutes and a dead worker is silent for days: nothing
+	// user-facing depends on the worker, so the only symptom of losing it is
+	// mail that quietly stops moving.
+	startWorkerWatchdog({ processMode: processMode })
 }
 
 await main()

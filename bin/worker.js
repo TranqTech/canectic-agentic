@@ -33,6 +33,8 @@ import * as fileWildcards from "../src/models/fileWildcards.js";
 import * as netmailRoutes from "../src/models/netmailRoutes.js";
 import { Worker } from 'bullmq';
 import appConfig from "../src/config/appConfig.js";
+import * as workerHealth from "../src/queues/workerHealth.js";
+import os from 'os';
 
 // Tosser imports — relocated to middleware/tossers/
 import * as ftnTosser from "../src/middleware/tossers/ftnTosser.js";
@@ -64,6 +66,130 @@ var maintWorker;
 var eventPublisher;
 
 // ---------------------------------------------------------------------------
+// Liveness bookkeeping
+//
+// A worker that dies is the easy case: the supervisor restarts it and the
+// heartbeat key expires in the meantime. The case that cost a hub four days of
+// mail was a worker that stayed up, kept its event loop turning and its job
+// locks renewed, and never finished another job. BullMQ's own stalled-job
+// detection cannot see that, because a job sitting on an await that never
+// settles renews its lock exactly like a healthy one. So the worker has to
+// keep the books itself and publish them.
+// ---------------------------------------------------------------------------
+const startedAt = Date.now();
+var _activeJobs = new Map();      // jobKey -> ms timestamp the job went active
+var _lastJobAt = null;            // when a job of any kind last finished
+var _heartbeatTimer = null;
+var _selfCheckFailures = 0;
+
+function _jobKey(job) {
+	return String(job && job.queueName ? job.queueName : '?') + ':' + String(job && job.id ? job.id : '?');
+}
+
+function _longestActiveMs(now) {
+	var longest = 0;
+	for (var startedMs of _activeJobs.values()) {
+		var age = now - startedMs;
+		if (age > longest) longest = age;
+	}
+	return longest;
+}
+
+/**
+ * Bookkeeping wrapper around workerHealth.withTimeout.
+ *
+ * The timeout itself lives in workerHealth so it can be tested; what belongs
+ * here is the record of which jobs are in flight and when they started, which
+ * is what the heartbeat publishes and what makes a wedged worker visible from
+ * outside the process.
+ */
+function withJobTimeout(processor, timeoutKey, defaultMinutes) {
+	var timed = null;
+	var timedForMs = null;
+
+	return async function (job) {
+		var key = _jobKey(job);
+		_activeJobs.set(key, Date.now());
+
+		try {
+			// Read the limit per job rather than once at startup, so a sysop
+			// raising it from /admin/config takes effect without a restart.
+			// The wrapper is rebuilt only when the value actually changes.
+			var timeoutMs = appConfig.getNumber(timeoutKey, defaultMinutes) * 60 * 1000;
+			if (timed === null || timedForMs !== timeoutMs) {
+				timed = workerHealth.withTimeout(processor, timeoutMs, timeoutKey);
+				timedForMs = timeoutMs;
+			}
+			return await timed(job);
+		} finally {
+			_activeJobs.delete(key);
+			_lastJobAt = Date.now();
+		}
+	};
+}
+
+/**
+ * Publish liveness, and decide whether this process is still fit to run.
+ *
+ * Exiting is the right answer to a consumer that has stopped: the supervisor
+ * brings back a clean process, and BullMQ hands the in-flight jobs to it. The
+ * failure has to persist across several beats first, because a single failed
+ * Redis round trip during a network blip is not a reason to drop the process.
+ */
+async function _beat() {
+	var now = Date.now();
+	var tossUp  = !!(tossWorker && tossWorker.isRunning());
+	var maintUp = !!(maintWorker && maintWorker.isRunning());
+
+	if (tossUp && maintUp) {
+		_selfCheckFailures = 0;
+	} else {
+		_selfCheckFailures++;
+		alogger.writeAlog(1, '[Worker] queue consumer down (toss=' + (tossUp ? 'up' : 'down') +
+			' maintenance=' + (maintUp ? 'up' : 'down') + '), strike ' + _selfCheckFailures,
+			'redbright', true);
+
+		var maxFailures = appConfig.getNumber('worker_selfcheck_max_failures', 3);
+		if (_selfCheckFailures >= maxFailures) {
+			alogger.writeAlog(0, '[Worker] consumer has not recovered after ' + _selfCheckFailures +
+				' checks, exiting so the supervisor can restart a clean process', 'redbright', true);
+			// Leave the heartbeat in place rather than marking a clean stop:
+			// this is a fault, and the watchdog should still see it as one if
+			// the supervisor does not bring us back.
+			process.exit(1);
+		}
+	}
+
+	await workerHealth.writeHeartbeat(workerHealth.buildHeartbeat({
+		state:     workerHealth.STATE_OK,
+		pid:       process.pid,
+		host:      os.hostname(),
+		startedAt: startedAt,
+		ts:        now,
+		toss:      { running: tossUp,  paused: !!(tossWorker && tossWorker.isPaused()),  active: 0 },
+		maint:     { running: maintUp, paused: !!(maintWorker && maintWorker.isPaused()), active: 0 },
+		lastJobAt: _lastJobAt,
+		longestActiveMs: _longestActiveMs(now)
+	}), appConfig.getNumber('worker_heartbeat_interval', 30) * 6);
+}
+
+function startHeartbeat() {
+	if (_heartbeatTimer) return;
+	var everySec = appConfig.getNumber('worker_heartbeat_interval', 30);
+	if (everySec < 5) everySec = 5;
+
+	_beat().catch(function () {});
+	_heartbeatTimer = setInterval(function () {
+		_beat().catch(function (err) {
+			alogger.writeAlog(4, '[Worker] heartbeat failed: ' + err.message, 'yellow');
+		});
+	}, everySec * 1000);
+	if (_heartbeatTimer.unref) _heartbeatTimer.unref();
+
+	alogger.writeAlog(2, '[Worker] heartbeat every ' + everySec + 's', 'cyan');
+}
+
+// ---------------------------------------------------------------------------
 // Safety catches
 // ---------------------------------------------------------------------------
 
@@ -77,6 +203,11 @@ process.on('unhandledRejection', (reason) => {
 
 async function shutdown() {
 	alogger.writeAlog(1, "[Worker] Shutting down", "yellowbright", true);
+	if (_heartbeatTimer) clearInterval(_heartbeatTimer);
+	// Record that this was deliberate. Without it the gateway watchdog cannot
+	// tell a sysop stopping the worker from the worker falling over, and would
+	// spend the maintenance window restarting it underneath them.
+	try { await workerHealth.markStopped(process.pid); } catch (_) {}
 	if (tossWorker) await tossWorker.close();
 	if (maintWorker) await maintWorker.close();
 	await closeQueues();
@@ -690,7 +821,7 @@ async function main() {
 	var tossConnection = createQueueConnection();
 	var maintConnection = createQueueConnection();
 
-	tossWorker = new Worker('toss', createTossProcessor(), {
+	tossWorker = new Worker('toss', withJobTimeout(createTossProcessor(), 'toss_job_timeout', 30), {
 		connection: tossConnection,
 		concurrency: tossConcurrency,
 	});
@@ -703,7 +834,7 @@ async function main() {
 		alogger.writeAlog(2, `[Worker] Toss worker error: ${err.message}`, "redbright");
 	});
 
-	maintWorker = new Worker('maintenance', createMaintenanceProcessor(), {
+	maintWorker = new Worker('maintenance', withJobTimeout(createMaintenanceProcessor(), 'maintenance_job_timeout', 60), {
 		connection: maintConnection,
 		concurrency: 1,   // maintenance jobs run one at a time
 	});
@@ -730,6 +861,8 @@ async function main() {
 			netmailRoutes.invalidateCache();
 		}
 	});
+
+	startHeartbeat();
 
 	alogger.writeAlog(1, `[Worker] Ready — toss(concurrency=${tossConcurrency}) + maintenance`, "greenbright", true);
 }

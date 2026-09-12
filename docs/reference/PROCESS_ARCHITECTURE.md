@@ -1111,6 +1111,63 @@ export async function registerSchedules() {
 
 Schedules are registered by the gateway on startup (`registerSchedules()` in `main()`). They persist in Redis — BullMQ handles the timer and enqueues jobs at the specified intervals. The worker or mailer process picks them up. Updating a schedule (e.g., admin changes poll interval) calls `upsertJobScheduler` again with the same key — BullMQ replaces the existing schedule.
 
+### A scheduler is not a timer
+
+The sentence above says BullMQ "handles the timer", and that is the wrong mental model. A job scheduler creates one delayed job at a time. The next iteration is only created when a worker picks the current one up. Nothing in Redis counts down on its own.
+
+The consequence is the important part. A worker that is stopped, or alive but no longer processing, freezes every schedule it consumes at the point it stopped. The registered intervals still read as correct, `getJobSchedulers` still returns every entry, and the admin UI still shows the configured values. The only visible difference is that `next` stops moving. A hub ran four days in exactly that state with its tosser silent and pm2 reporting the process online throughout.
+
+So `next` in the past is not "the job ran late". It means nothing collected it, and the question is what happened to the consumer.
+
+---
+
+## Worker Health
+
+The worker owns both the `toss` and `maintenance` queues, and nothing else drains them. Losing it stops all message tossing, all TIC processing, and every maintenance sweep, while every user-facing part of the system carries on normally. That combination is why it can go unnoticed for days.
+
+Three separate failures have to be covered, and only the first is the one people think of.
+
+| Failure | What the supervisor sees | What catches it |
+|---------|--------------------------|-----------------|
+| Process exits | Non-zero exit, restart | pm2, plus `exp_backoff_restart_delay` so a dependency that is slow to start does not burn the restart budget |
+| Process alive, consumer closed | Online, healthy | Worker self check, exits so the supervisor restarts a clean process |
+| Process alive, job never returns | Online, healthy | Job timeout, plus the heartbeat's longest-active-job figure |
+
+The third is the one BullMQ cannot help with. Its stalled-job detection fires when a worker stops renewing a job's lock, which happens when the process dies. A job parked on an await that never settles keeps renewing its lock exactly like a healthy one, so BullMQ considers it fine while the concurrency slot is gone for good. At the default toss concurrency of three, three of those and the queue is stopped.
+
+### Job timeouts
+
+`bin/worker.js` wraps both queue processors in `workerHealth.withTimeout`. A job that exceeds its limit rejects, BullMQ fails and retries it, and the slot returns to circulation. The timeout rejects rather than cancels, because the underlying work cannot be cancelled; the orphaned promise is accepted as the lesser cost.
+
+- `toss_job_timeout` (30 minutes)
+- `maintenance_job_timeout` (60 minutes, higher because imports and batch subscribes legitimately run long)
+
+Either set to 0 disables the limit for that queue.
+
+### Heartbeat
+
+The worker writes `canectic:health:worker` to Redis every `worker_heartbeat_interval` seconds, carrying its pid, host, uptime, per-queue consumer status, when it last finished a job, and the age of the longest job in flight. The TTL is a small multiple of the interval, so a worker that dies outright lets the key expire and reads as `missing` rather than an ever-older `stale`.
+
+A clean shutdown writes a `stopped` marker instead. Without it the watchdog cannot tell a sysop running `pm2 stop worker` from a worker falling over, and would spend the maintenance window restarting it underneath them.
+
+### Watchdog
+
+`src/queues/workerWatchdog.js` runs in the gateway, because a dead gateway is obvious within minutes and a dead worker is silent. It is skipped in embedded mode, where the consumers run in the gateway's own process.
+
+Each tick reads the heartbeat and escalates: log it, notify the sysop once per incident, then restart. The restart is last because it is the only step that can make things worse, and it is gated three ways. Nothing happens until the fault outlives `worker_health_grace`, because a worker that is itself restarting looks briefly identical to one that has died. Attempts are spaced by `worker_restart_cooldown`. After `worker_restart_max_attempts` the watchdog stops trying and leaves it to the sysop, because a worker that cannot stay up will not be fixed by restarting it a hundred times.
+
+`worker_restart_command` defaults to `pm2 restart worker`. A bare `pm2` is resolved next to the running Node binary before falling back to PATH: under nvm the pm2 daemon may have been started from a login shell whose PATH the gateway never inherited. Sysops supervising with something else point the key at their own command, for example `systemctl --user restart canectic-worker`.
+
+The watchdog also warns when a schedule is overdue while the worker reports healthy. That combination usually means the processes disagree about `REDIS_BULLMQ_DB`, so the gateway is registering schedules into one database while the worker consumes another, and every process reports itself perfectly well.
+
+### Diagnosing
+
+```bash
+node src/tools/schedules.js
+```
+
+Reports, in order: the worker's own account of itself, per-queue depth with the age of every active job, and every scheduler with its interval, next run and iteration count. Overdue schedules, paused queues and stuck jobs are called out by name. `--sync` and `--prune` repair registration drift only; they deliberately skip overdue entries, because an overdue schedule is a consumer problem and re-registering it would look like a fix and change nothing.
+
 ### `connection_data` additions
 
 | Field | Type | Default | Description |

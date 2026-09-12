@@ -181,6 +181,18 @@ var CONFIG_DEFINITIONS = [
 	// Worker
 	// -----------------------------------------------------------------------
 	{ key: 'WORKER_CONCURRENCY',    defaultValue: '3',          type: 'number',  category: 'worker',      description: 'Toss queue concurrency (requires restart)',                   restart: true },
+	{ key: 'toss_job_timeout',        defaultValue: '30',       type: 'number',  category: 'worker',      description: 'Minutes a toss job may run before it is failed and its slot released (0 = no limit). Without a limit one stuck job holds a concurrency slot for ever.' },
+	{ key: 'maintenance_job_timeout', defaultValue: '60',       type: 'number',  category: 'worker',      description: 'Minutes a maintenance job may run before it is failed and its slot released (0 = no limit). Higher than the toss timeout because imports and batch subscribes legitimately run long.' },
+	{ key: 'worker_health_enabled',   defaultValue: 'true',     type: 'boolean', category: 'worker',      description: 'Publish a worker heartbeat and have the gateway watch it. Turning this off means a stopped worker goes unreported.' },
+	{ key: 'worker_heartbeat_interval', defaultValue: '30',     type: 'number',  category: 'worker',      description: 'Seconds between worker heartbeats' },
+	{ key: 'worker_health_check_interval', defaultValue: '60',  type: 'number',  category: 'worker',      description: 'Seconds between gateway checks of the worker heartbeat' },
+	{ key: 'worker_health_grace',     defaultValue: '180',      type: 'number',  category: 'worker',      description: 'Seconds a worker may go quiet before it counts as failed. Must comfortably exceed the time the worker takes to restart.' },
+	{ key: 'worker_selfcheck_max_failures', defaultValue: '3',  type: 'number',  category: 'worker',      description: 'Consecutive failed self checks before the worker exits so the supervisor restarts it' },
+	{ key: 'worker_restart_enabled',  defaultValue: 'true',     type: 'boolean', category: 'worker',      description: 'Let the gateway restart a failed worker automatically. With this off the sysop is still notified, but nothing acts.' },
+	{ key: 'worker_restart_command',  defaultValue: 'pm2 restart worker', type: 'string', category: 'worker', description: 'Command used to restart the worker. A bare pm2 is resolved next to the running Node binary first. Change this if the processes are supervised by something other than pm2.' },
+	{ key: 'worker_restart_cooldown', defaultValue: '300',      type: 'number',  category: 'worker',      description: 'Seconds to wait between automatic restart attempts' },
+	{ key: 'worker_restart_max_attempts', defaultValue: '3',    type: 'number',  category: 'worker',      description: 'Automatic restarts to attempt per incident before giving up and leaving it to the sysop. A restart loop is worse than the outage it chases.' },
+	{ key: 'worker_schedule_lag_grace', defaultValue: '15',     type: 'number',  category: 'worker',      description: 'Minutes a repeating job may be overdue before the sysop is warned (0 = never warn). Overdue schedules alongside a healthy worker usually mean the processes disagree about REDIS_BULLMQ_DB.' },
 
 	// -----------------------------------------------------------------------
 	// Files
