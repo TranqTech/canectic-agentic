@@ -735,10 +735,18 @@ async function TossInboundFile(pktfilepath, movepktpath){
 	} catch (_) {}
 
 	var targetsuccess = pkt.Messages.length
+	// Who handed us this packet, as distinct from who wrote the messages in
+	// it. On transit mail those differ, and the relay log needs both to tell
+	// an uplink feeding us traffic from a node writing it directly.
+	var _pktOrigin = {
+		packetSource: pkt.Source || null,
+		peerAddress:  _senderInfo.address || null,
+		connectionId: _senderInfo.connectionId || null
+	}
 	//pkt.Messages.forEach(message =>{
 	for await (var message of pkt.Messages){			
 		if (message.Type === "Netmail"){
-			var result = await ftnNetmailAdapter.importFtnNetmail(message)
+			var result = await ftnNetmailAdapter.importFtnNetmail(message, _pktOrigin)
 			if (result.status === true){
 				if (result.duplicate){
 					returnObj.pktdupecount ++
@@ -840,10 +848,15 @@ async function OldTossInbound(inboundDir){
 		var pktskipcount = 0
 		var pktimportcount = 0
 		var pktprocesscount = 0
+		var _pktOrigin2 = {
+			packetSource: pkt.Source || null,
+			peerAddress:  _senderInfo2.address || null,
+			connectionId: _senderInfo2.connectionId || null
+		}
 		//pkt.Messages.forEach(message =>{
 		for await (var message of pkt.Messages){			
 			if (message.Type === "Netmail"){
-				var result = await ftnNetmailAdapter.importFtnNetmail(message)
+				var result = await ftnNetmailAdapter.importFtnNetmail(message, _pktOrigin2)
 				if (result.status === true){
 					if (result.duplicate){
 						pktdupecount ++

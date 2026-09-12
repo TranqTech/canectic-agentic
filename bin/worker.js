@@ -547,6 +547,16 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'purge-relay-log': {
+				var relayLog = await import("../src/models/netmailRelayLog.js");
+				var relayDays = job.data.days || appConfig.getNumber('netmail_relay_log_retention_days', 180);
+				if (relayDays > 0) {
+					var relayPurged = await relayLog.purgeOld(relayDays);
+					if (relayPurged > 0) alogger.writeAlog(3, 'Purged ' + relayPurged + ' netmail relay log entries older than ' + relayDays + ' days', 'cyan');
+				}
+				break;
+			}
+
 			case 'purge-outbound-log': {
 				var outboundLog = await import("../src/models/outboundFileLog.js");
 				var outDays = job.data.days || appConfig.getNumber('outbound_log_retention_days', 90);

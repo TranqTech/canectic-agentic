@@ -19,6 +19,8 @@ import * as ftnVia from '../utils/ftnVia.js';
 import * as ftnNodelist from './ftnNodelist.js';
 import { parseFtnAddress } from './ftnRouter.js';
 import appConfig from "../config/appConfig.js";
+import * as netmailRelayLog from './netmailRelayLog.js';
+import { v4 as uuidv4 } from 'uuid';
 
 // ============================================================
 // Inbound: FTN Message → PM system
@@ -26,7 +28,7 @@ import appConfig from "../config/appConfig.js";
 
 // Main entry point for inbound FTN netmail. Replaces netmail.newInboundNetmail().
 // Returns { status, duplicate, imported, relayed, undeliverable, processor, errormessages }
-async function importFtnNetmail(ftnMessage) {
+async function importFtnNetmail(ftnMessage, pktOrigin) {
   var retObj = {
     status: false,
     duplicate: false,
@@ -48,6 +50,10 @@ async function importFtnNetmail(ftnMessage) {
     var relayMode = currentRelayMode();
     var relayGate = { allowed: relayMode === RELAY_ON, reason: 'relay is off' };
 
+    // Every outcome below writes one row. Refusals matter as much as relays:
+    // a gate nobody can see refusing anything is a gate nobody can validate.
+    var logBase = relayLogBase(pmObj, relayMode, pktOrigin);
+
     if (relayMode === RELAY_NODELIST) {
       relayGate = await relayAllowedByNodelist(pmObj.from_address, pmObj.to_address);
       if (!relayGate.allowed) {
@@ -63,11 +69,27 @@ async function importFtnNetmail(ftnMessage) {
         // Reported honestly rather than as a relay: the message went nowhere.
         retObj.undeliverable = true;
         retObj.relayLoop = true;
+        await netmailRelayLog.logDecision(Object.assign({}, logBase, {
+          decision: netmailRelayLog.RELAY_LOOP,
+          reason: 'already passed through this system, per the Via chain'
+        }));
       } else if (relayResult && relayResult.norouted) {
         retObj.undeliverable = true;
+        await netmailRelayLog.logDecision(Object.assign({}, logBase, {
+          decision: netmailRelayLog.RELAY_NO_ROUTE,
+          reason: relayResult.reason || 'no route to ' + pmObj.to_address
+        }));
       } else {
         retObj.relayed = true;
         alogger.writeAlog(1, "FTN netmail relayed: " + pmObj.from_address + " → " + pmObj.to_address, "cyan");
+        await netmailRelayLog.logDecision(Object.assign({}, logBase, {
+          decision:     netmailRelayLog.RELAY_SENT,
+          nextHop:      relayResult && relayResult.nextHop,
+          routeMethod:  relayResult && relayResult.routeMethod,
+          viaStamped:   relayResult && relayResult.viaStamped,
+          // The netmail_out row, so delivery can be followed from here.
+          outboundUuid: relayResult && relayResult.outboundUuid
+        }));
       }
     } else {
       // Reject: write to bad dir, notify sysops
@@ -76,6 +98,10 @@ async function importFtnNetmail(ftnMessage) {
       retObj.undeliverable = true;
       retObj.relayRefused = relayGate.reason;
       alogger.writeAlog(2, "FTN netmail relay rejected: " + pmObj.from_address + " → " + pmObj.to_address, "yellow");
+      await netmailRelayLog.logDecision(Object.assign({}, logBase, {
+        decision: netmailRelayLog.RELAY_REFUSED,
+        reason: relayGate.reason
+      }));
     }
     return retObj;
   }
@@ -402,6 +428,37 @@ async function isLocalAddress(addressString) {
   return !!row;
 }
 
+// The fields every relay log row carries, whatever the decision was.
+//
+// from_address is who wrote the message; packet_source is who handed us the
+// packet. They are the same for mail originated by the sender and different
+// for transit, and keeping both is the only way to see which of your links is
+// actually feeding you transit traffic.
+function relayLogBase(pmObj, relayMode, pktOrigin) {
+  var origin = pktOrigin || {};
+  var attrs = (pmObj.transport_data && pmObj.transport_data.optional_attributes) || [];
+
+  // The Via chain as it arrived, kept as text so another system's hop reads
+  // back exactly as it was written.
+  var viaIn = attrs
+    .filter(function (a) { return a && /^via$/i.test(a.attribute || ''); })
+    .map(function (a) { return a.value; })
+    .join('\n');
+
+  return {
+    receivedAt:   new Date(),
+    msgId:        pmObj.msg_id,
+    fromUser:     pmObj.from_user,
+    fromAddress:  pmObj.from_address,
+    toUser:       pmObj.to_user,
+    toAddress:    pmObj.to_address,
+    subject:      pmObj.subject,
+    packetSource: origin.packetSource || origin.peerAddress || null,
+    relayMode:    relayMode,
+    viaIn:        viaIn || null
+  };
+}
+
 // Relay netmail through outbound routing
 async function relayNetmail(ftnMessage, pmObj) {
   // Route the message via ftnRouter
@@ -453,20 +510,30 @@ async function relayNetmail(ftnMessage, pmObj) {
         })
       });
 
+      // Carry the uuid so the relay log can point at the row this became and
+      // delivery can be followed from the decision that made it.
+      if (!relayObj.uuid) relayObj.uuid = uuidv4();
       await privateMessages.queueOutbound(relayObj);
       alogger.writeAlog(1, "FTN netmail queued for relay via " + routeResult.nextHop, "cyan");
+
+      return {
+        relayed:      true,
+        nextHop:      routeResult.nextHop,
+        routeMethod:  routeResult.method,
+        viaStamped:   viaAddress,
+        outboundUuid: relayObj.uuid
+      };
     } else {
       // No route found — treat as undeliverable
       alogger.writeAlog(2, "FTN netmail relay: no route to " + pmObj.to_address, "yellow");
       await rejectRelay(ftnMessage, pmObj, currentRelayMode(), 'no route to ' + pmObj.to_address);
-      return { norouted: true };
+      return { norouted: true, reason: 'no route to ' + pmObj.to_address };
     }
   } catch (error) {
     alogger.writeAlog(2, "FTN netmail relay error: " + error.message, "redbright");
     await rejectRelay(ftnMessage, pmObj, currentRelayMode(), 'routing error: ' + error.message);
-    return { norouted: true };
+    return { norouted: true, reason: 'routing error: ' + error.message };
   }
-  return { relayed: true };
 }
 
 // Reject relay: write raw to bad dir, notify sysops

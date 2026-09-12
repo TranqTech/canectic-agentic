@@ -108,3 +108,30 @@ and the sending system swapped in the headers, so there is no working
 configuration being replaced.
 
 If you were deliberately running an open relay, set the mode to **On** again.
+
+## Seeing what was relayed
+
+Every relay decision writes one row to `netmail_relay_log`, whatever the decision was. Refusals are recorded alongside relays on purpose: a gate you cannot see refusing anything is a gate you cannot validate.
+
+Before this, the traces were scattered. A success wrote a log line and a `pm_outbox` row. A refusal wrote a different log line. A loop wrote an undeliverable row. An unroutable address wrote a text dump into `ftn/bad`. Two of those roll over, so the question "did we relay what we should have, and did it leave" was not answerable after the fact.
+
+```bash
+node src/tools/relayLog.js                     # summary, plus anything stuck
+node src/tools/relayLog.js --list 50           # the last 50 decisions
+node src/tools/relayLog.js --decision refused  # only refusals
+node src/tools/relayLog.js --stuck 6           # relayed but not sent after 6h
+node src/tools/relayLog.js --sources           # who is sending you transit mail
+node src/tools/relayLog.js --msgid <MSGID>     # everything about one message
+```
+
+Each row records who wrote the message and, separately, who handed you the packet. On mail a node originated those are the same; on transit they are not, and keeping both is the only way to see which of your links is actually feeding you transit traffic. It also keeps the Via chain as it arrived, the AKA you stamped, the next hop and how the route resolved, and the relay mode in effect at the time.
+
+### The check worth running
+
+```bash
+node src/tools/relayLog.js --stuck
+```
+
+Relayed but never sent is the failure nothing else surfaces. Accepting a message for relay and queueing it looks like success at every other point, and a message then sitting unsent in `pm_outbox` produces no further event at all. Anything listed here was accepted and has not gone; start with whether the next hop is being polled (`node src/tools/schedules.js`).
+
+Rows are kept for `netmail_relay_log_retention_days`, default 180. That is longer than the other logs because relay disputes surface slowly: a downlink usually notices missing mail weeks after the fact.

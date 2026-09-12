@@ -143,6 +143,20 @@ export async function registerSchedules() {
 		}
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily netmail relay log purge
+		// -----------------------------------------------------------------
+		var relayLogDays = appConfig.getNumber('netmail_relay_log_retention_days', 180);
+		if (relayLogDays > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-relay-log-daily', {
+				pattern: '0 56 3 * * *',   // 3:56 AM daily
+			}, {
+				name: 'purge-relay-log',
+				data: { days: relayLogDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily mailer session history purge
 		// -----------------------------------------------------------------
 		var mailerSessionDays = appConfig.getNumber('mailer_session_retention_days', 30);
