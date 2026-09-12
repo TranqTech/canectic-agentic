@@ -129,12 +129,32 @@ function checkAdminAccess(user) {
 	return perms.includes('Sysop');
 }
 
-// Middleware: block POST routes if user is not authorized
+// Does this caller want a JSON refusal rather than a page?
+//
+// Admin routes are a mix of pages and JSON endpoints, and a caller expecting
+// JSON handed an HTML error page reports a parse error rather than the 403 that
+// actually happened. Deliberately conservative: a browser navigation sends
+// text/html and a bare fetch() sends */*, neither of which is a request for
+// JSON in particular, so only an explicit signal counts.
+function wantsJsonRefusal(req) {
+	if (/\.json$/.test(req.path)) return true;
+	if (req.get('X-Requested-With') === 'XMLHttpRequest') return true;
+	var accept = req.get('Accept') || '';
+	return accept.indexOf('application/json') !== -1 && accept.indexOf('text/html') === -1;
+}
+
+// Middleware: block routes if user is not authorized
 async function requireAdmin(req, res, next) {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	if (sufficientAccess) return next();
-	alogger.writeAlog(3, "Unauthorized admin POST attempt: " + req.path + " by " + (currentuser ? currentuser.username : 'unauthenticated'), "redbright");
+	alogger.writeAlog(3, "Unauthorized admin request: " + req.method + " " + req.path + " by " + (currentuser ? currentuser.username : 'unauthenticated'), "redbright");
+	if (wantsJsonRefusal(req)) {
+		return res.status(403).json({
+			error: 'Forbidden',
+			message: currentuser ? 'Administrator access required' : 'Not logged in'
+		});
+	}
 	return res.status(403).render('admin/unauthorized', {
 		title: 'Unauthorized',
 		activelink: '',

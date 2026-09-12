@@ -1,0 +1,21 @@
+//- The page requireAdmin renders when it refuses a request.
+//-
+//- It had no template at all. requireAdmin called res.status(403).render on
+//- this name, the render threw ENOENT, Express caught it, and the caller got
+//- 500 rather than the 403 the guard had already decided on. The alog line
+//- confirming the refusal was written either way, so the logs said 403 while
+//- the client saw 500.
+//-
+//- Every other admin page reaches the same partial through its own guard
+//- chain, by rendering with sufficientAccess false. This is that chain with
+//- nothing else in it, for the case where there is no page to render.
+extends ../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else
+      include ../partials/status/unauthorized.pug
