@@ -139,6 +139,29 @@ function isMailBundleFilename(filename) {
 	return /^(mo|tu|we|th|fr|sa|su)[0-9a-z]$/.test(ext);
 }
 
+/**
+ * Would an inbound toss do anything with this filename?
+ *
+ * This is the predicate the periodic inbound scan needs, and it has to be the
+ * same one TossInbound uses or the backstop does not back anything up. The
+ * scan used to test for a literal .pkt and nothing else, so an arcmail bundle
+ * (.mo0, .tu5, .su9) sitting in the inbound never triggered a toss. In normal
+ * operation that was hidden, because the mailer enqueues a toss itself the
+ * moment a file arrives. It only showed when that enqueue did not happen: a
+ * worker that was down, a restart between receipt and enqueue, a bundle
+ * dropped in by hand or recovered from a filebox. Exactly the cases the
+ * backstop exists for, and exactly the ones it missed.
+ *
+ * The bundle test is by filename, not by archive format, which is what
+ * TossInbound does too: it covers ZIP, ARJ and LHA bundles alike, and leaves
+ * TIC attachments, nodelist archives and infopacks to their own processors.
+ */
+function isTossableInboundFile(filename) {
+	if (!filename) return false;
+	if (path.extname(filename).toUpperCase() === '.PKT') return true;
+	return isMailBundleFilename(filename);
+}
+
 // FTS-0004 kludge line format. Most kludges use "KEYWORD: value" with a
 // colon-space separator. A handful of legacy routing/addressing kludges
 // (INTL, TOPT, FMPT, Via) use a bare space separator with no colon per
@@ -1665,6 +1688,7 @@ export {
 	TossInboundFile,
 	processMessageText,
 	isMailBundleFilename,
+	isTossableInboundFile,
 	getFileType,
 	formatKludge,
 	bareFtnAddress,

@@ -1160,6 +1160,12 @@ Each tick reads the heartbeat and escalates: log it, notify the sysop once per i
 
 The watchdog also warns when a schedule is overdue while the worker reports healthy. That combination usually means the processes disagree about `REDIS_BULLMQ_DB`, so the gateway is registering schedules into one database while the worker consumes another, and every process reports itself perfectly well.
 
+### The inbound backstop
+
+`scan-inbound` runs every `inbound_scan_interval` seconds and enqueues a toss when the inbound directory holds work. In normal operation it never fires, because the mailer enqueues a toss itself the moment a binkp session receives files. It only matters when that enqueue did not happen: the worker was down, the process restarted between receipt and enqueue, or a bundle was placed by hand or recovered from a filebox.
+
+The predicate has to match what `TossInbound` actually processes, or the backstop does not back anything up. It tested for a literal `.pkt` and nothing else, so an arcmail bundle (`.mo0`, `.tu5`, `.su9`) sat in the inbound indefinitely. Both now call `ftnTosser.isTossableInboundFile`, which covers packets and bundles by the FTS-5000 filename pattern, whatever the archive format, and leaves TIC attachments, nodelist archives and infopacks to their own processors.
+
 ### Diagnosing
 
 ```bash

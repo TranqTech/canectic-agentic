@@ -91,3 +91,57 @@ describe('ftnTosser.getFileType', function () {
 		assert.strictEqual(await tosser.getFileType(path.join(dir, 'nope.pkt')), 'GONE');
 	});
 });
+
+describe('ftnTosser.isTossableInboundFile', function () {
+	before(function () { if (!tosser || !tosser.isTossableInboundFile) this.skip(); });
+
+	// The periodic inbound scan is the backstop for mail that nobody claimed.
+	// In normal operation it never fires, because the mailer enqueues a toss
+	// itself the moment a file arrives. It only matters when that enqueue did
+	// not happen: the worker was down, the process restarted between receipt
+	// and enqueue, or a bundle was put there by hand or recovered from a
+	// filebox. The scan tested for a literal .pkt and nothing else, so an
+	// arcmail bundle sat in the inbound for ever, and the one case the
+	// backstop existed for was the one case it did not cover.
+
+	it('claims a packet', function () {
+		assert.strictEqual(tosser.isTossableInboundFile('1a2b3c4d.pkt'), true);
+	});
+
+	it('claims a packet whatever the case of the extension', function () {
+		assert.strictEqual(tosser.isTossableInboundFile('1A2B3C4D.PKT'), true);
+	});
+
+	it('claims an arcmail bundle for every day of the week', function () {
+		// FTS-5000 / FSC-0057: day prefix plus one counter character.
+		for (var name of ['abcd0001.mo0', 'abcd0001.tu5', 'abcd0001.we9',
+		                  'abcd0001.thf', 'abcd0001.fr1', 'abcd0001.sa0',
+		                  'abcd0001.suz']) {
+			assert.strictEqual(tosser.isTossableInboundFile(name), true, name + ' is mail');
+		}
+	});
+
+	it('leaves archives that are not mail bundles alone', function () {
+		// TIC attachments, nodelist archives and infopacks have their own
+		// processors. Claiming them here would have the FTN toss trying to
+		// extract packets out of a file area upload.
+		for (var name of ['nodelist.z12', 'fsxnet.zip', 'infopack.zip', 'somefile.arj']) {
+			assert.strictEqual(tosser.isTossableInboundFile(name), false, name + ' is not mail');
+		}
+	});
+
+	it('does not claim a TIC descriptor', function () {
+		// The TIC path enqueues its own job.
+		assert.strictEqual(tosser.isTossableInboundFile('abcd0001.tic'), false);
+	});
+
+	it('does not claim a bare directory name', function () {
+		assert.strictEqual(tosser.isTossableInboundFile('Old'), false);
+	});
+
+	it('survives an empty or missing name', function () {
+		assert.strictEqual(tosser.isTossableInboundFile(''), false);
+		assert.strictEqual(tosser.isTossableInboundFile(null), false);
+		assert.strictEqual(tosser.isTossableInboundFile(undefined), false);
+	});
+});

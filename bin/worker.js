@@ -714,16 +714,26 @@ function createMaintenanceProcessor() {
 				var ticDir = appConfig.get('tic_inbound_dir') || inDir;
 
 				try {
-					var hasPkt = false;
+					var hasMail = false;
 					var hasTic = false;
+					var trigger = null;
 
 					if (fs.existsSync(inDir)) {
 						var files = fs.readdirSync(inDir);
 						for (var f of files) {
-							var lower = f.toLowerCase();
-							if (lower.endsWith('.pkt')) hasPkt = true;
-							if (lower.endsWith('.tic')) hasTic = true;
-							if (hasPkt && hasTic) break;
+							// Same predicate TossInbound uses, so the backstop
+							// covers everything the toss would act on. Testing
+							// for a literal .pkt here missed arcmail bundles
+							// entirely, which is precisely the case this scan
+							// exists to catch: the mailer enqueues a toss when
+							// a file arrives, so a bundle only sits unclaimed
+							// when that enqueue did not happen.
+							if (!hasMail && ftnTosser.isTossableInboundFile(f)) {
+								hasMail = true;
+								trigger = f;
+							}
+							if (f.toLowerCase().endsWith('.tic')) hasTic = true;
+							if (hasMail && hasTic) break;
 						}
 					}
 
@@ -735,15 +745,19 @@ function createMaintenanceProcessor() {
 						}
 					}
 
-					if (hasPkt) {
-						alogger.writeAlog(3, "[Worker] Inbound scan: .pkt files found, enqueueing ftn:inbound", "cyan");
+					if (hasMail) {
+						// Name the file that triggered it. When this scan fires
+						// it means something got left behind, and which file it
+						// was is the first thing worth knowing.
+						alogger.writeAlog(3, "[Worker] Inbound scan: unclaimed mail in " + inDir +
+							" (" + trigger + "), enqueueing ftn:inbound", "cyan");
 						await jobs.enqueueFtnInbound();
 					}
 					if (hasTic) {
 						alogger.writeAlog(3, "[Worker] Inbound scan: .tic files found, enqueueing tic:inbound", "cyan");
 						await jobs.enqueueTicInbound();
 					}
-					if (!hasPkt && !hasTic) {
+					if (!hasMail && !hasTic) {
 						alogger.writeAlog(4, "[Worker] Inbound scan: no files", "cyan");
 					}
 				} catch (scanErr) {
