@@ -188,3 +188,18 @@ mixin fileAreaFormFields(prefix, mode, opts)
             input.form-control(type='number' id=prefix + 'max_files' name='max_files' min=0)
       .form-text.text-muted.mt-2
         | Enforced by the daily file maintenance job. Leave blank for no limit.
+
+  //- ---- Submit ----
+  //- Inside the mixin rather than left to each caller, which is where it used
+  //- to live. When these three forms were collapsed into this mixin the button
+  //- was simply not carried across, and every one of them rendered with no way
+  //- to save. The conversion was checked by diffing element ids before and
+  //- after, and a submit input has no id, so the check passed. Keeping it here
+  //- means a caller cannot forget it.
+  //- Sits outside .tab-content on purpose: inside, it would only appear while
+  //- the Retention tab was open.
+  .text-end.mt-3
+    if mode === 'edit'
+      input.btn.btn-lg.btn-warning(type='submit' value='Save Changes')
+    else
+      input.btn.btn-lg.btn-success(type='submit' value='Submit')
