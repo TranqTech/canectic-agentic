@@ -31,10 +31,13 @@ import * as dotenv from 'dotenv';
 import { Queue } from 'bullmq';
 import { createQueueConnection } from '../queues/connection.js';
 import * as peerConnections from '../models/peerConnections.js';
+import * as timedEvents from '../models/timedEvents.js';
+import * as coordinatorSegments from '../models/coordinatorSegments.js';
 import appConfig from '../config/appConfig.js';
 import * as workerHealth from '../queues/workerHealth.js';
 import {
-	formatDuration, formatEvery, describeNext, stalledJobs, summariseCounts
+	formatDuration, formatEvery, describeNext, stalledJobs, summariseCounts,
+	isManagedSchedulerKey
 } from '../utils/scheduleFormat.js';
 
 dotenv.config();
@@ -83,6 +86,28 @@ async function expectedSchedules() {
 				expected.set('nntp-push:' + conn.uuid, { queue: 'toss', label: label, every: nm });
 			}
 		}
+	}
+
+	// Timed events and coordinator segments are registered by the same startup
+	// pass, so they belong here too. Leaving them out did not merely under-report:
+	// the orphan rule is now shared with registerSchedules, and a key it knows
+	// how to write that this function does not know how to expect would be
+	// reported as an orphan and removed by --prune.
+	var events = await timedEvents.getActive();
+	for (var evt of (events || [])) {
+		expected.set('timed-event:' + evt.id, {
+			queue: 'maintenance', label: (evt.name || evt.id) + ' [timed event]',
+			pattern: evt.cron_pattern, syncable: false
+		});
+	}
+
+	var segments = await coordinatorSegments.getAll();
+	for (var seg of (segments || [])) {
+		if (!seg.active || !seg.schedule || seg.schedule === 'manual') continue;
+		expected.set('generate-stub:' + seg.id, {
+			queue: 'maintenance', label: (seg.name || seg.id) + ' [segment]',
+			pattern: seg.schedule, syncable: false
+		});
 	}
 
 	return expected;
@@ -205,18 +230,30 @@ async function main() {
 
 			if (exp) {
 				seen.add(key);
-				if (exp.every !== sched.every) {
+				// Interval schedules carry `every`, cron ones carry `pattern`.
+				// Comparing only `every` reported every timed event as matching
+				// whatever it was actually registered with, since undefined
+				// equals undefined.
+				var mismatched = exp.pattern !== undefined
+					? exp.pattern !== sched.pattern
+					: exp.every !== sched.every;
+				if (mismatched) {
 					// The failure this tool exists for: what is registered is
 					// not what the sysop configured, and nothing would have
 					// told them.
-					note = '  <-- MISMATCH, database says ' + minutes(exp.every);
+					note = '  <-- MISMATCH, database says ' +
+						(exp.pattern !== undefined ? exp.pattern : minutes(exp.every));
 					problems.push({ kind: 'mismatch', key: key, queue: qname,
-						have: sched.every, want: exp.every, label: exp.label });
+						have: sched.every, want: exp.every, label: exp.label,
+						syncable: exp.syncable !== false });
 				}
-			} else if (/^(poll|qwk-pull|qwk-push|nntp-pull|nntp-push):/.test(key)) {
-				// A connection schedule with no connection behind it, or one
-				// whose polling was turned off. Nothing else ever removes these.
-				note = '  <-- ORPHAN, no matching enabled connection';
+			} else if (isManagedSchedulerKey(key)) {
+				// A schedule with no database row behind it: a deleted
+				// connection, one whose polling was turned off, or a timed
+				// event or segment that is gone. The predicate is shared with
+				// registerSchedules, which prunes these automatically at
+				// startup, so the two cannot disagree about what is managed.
+				note = '  <-- ORPHAN, nothing in the database asks for it';
 				problems.push({ kind: 'orphan', key: key, queue: qname });
 			}
 
@@ -238,7 +275,8 @@ async function main() {
 
 	var missing = [];
 	for (var [key, exp] of expected) {
-		if (!seen.has(key)) missing.push(Object.assign({ kind: 'missing', key: key }, exp));
+		if (!seen.has(key)) missing.push(Object.assign({ kind: 'missing', key: key,
+			syncable: exp.syncable !== false }, exp));
 	}
 	if (missing.length > 0) {
 		console.log('\n=== not registered at all ===');
@@ -279,6 +317,15 @@ async function main() {
 				await q.removeJobScheduler(p.key);
 				console.log('  removed orphan ' + p.key);
 			} else if (DO_SYNC && (p.kind === 'mismatch' || p.kind === 'missing')) {
+				// Only the connection families. A timed event or segment
+				// schedule carries a cron pattern and an entirely different
+				// job payload, and the prefix-to-job-name mapping below ends
+				// in a fallback, so feeding it one would register a stub
+				// schedule as an NNTP push. Gateway startup rewrites those.
+				if (p.syncable === false) {
+					console.log('  skipped ' + p.key + ', rewritten at gateway start');
+					continue;
+				}
 				var jobName = p.key.startsWith('poll:') ? 'poll-scheduled'
 					: p.key.startsWith('qwk-pull:') ? 'qwk:pull'
 					: p.key.startsWith('qwk-push:') ? 'qwk:push'

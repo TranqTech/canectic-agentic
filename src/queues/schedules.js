@@ -27,11 +27,87 @@ import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as timedEvents from '../models/timedEvents.js';
 import * as coordinatorSegments from '../models/coordinatorSegments.js';
+import * as scheduleFormat from '../utils/scheduleFormat.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from '../config/appConfig.js';
 
+/**
+ * Every scheduler key currently registered on a queue.
+ *
+ * Paged rather than fetched in one call: getJobSchedulers takes a range, and a
+ * hub carrying a few hundred connections would silently lose the tail of the
+ * list to a fixed bound, which on a pruning pass reads as "these are all fine"
+ * rather than as a truncated answer.
+ */
+async function listSchedulerKeys(queue) {
+	var out  = [];
+	var page = 200;
+	var start = 0;
+	for (;;) {
+		var batch = await queue.getJobSchedulers(start, start + page - 1);
+		if (!batch || batch.length === 0) break;
+		for (var s of batch) out.push(String(s.key || s.id));
+		if (batch.length < page) break;
+		start += page;
+	}
+	return out;
+}
+
+/**
+ * Remove schedulers that registration did not just write.
+ *
+ * registerSchedules rebuilds the whole managed set from the database on every
+ * start, so anything in a managed family that it did not write has no row
+ * behind it: a deleted connection, or one whose polling was turned off, which
+ * registration skips rather than clears. Those keep firing their job for ever.
+ * The admin routes now maintain schedules directly, but that only covers
+ * changes made through the UI from this release forward; it does nothing about
+ * orphans a database already carries, or one created by a change made outside
+ * the UI.
+ *
+ * MUST only be called with the complete expected set. Pruning against a partial
+ * set deletes live schedules, which is why the only call site is at the end of
+ * a registration pass that reached it without throwing.
+ *
+ * @param {string[]} expectedKeys - every managed key just registered
+ * @param {object} [queueMap] - queues to sweep, for tests. Defaults to the three
+ *                              real ones; a test passing its own queue can prove
+ *                              the sweep against real BullMQ without touching a
+ *                              live schedule.
+ * @returns {number} schedulers removed
+ */
+export async function pruneOrphanSchedules(expectedKeys, queueMap) {
+	var queues  = queueMap || { mailer: mailerQueue, toss: tossQueue, maintenance: maintenanceQueue };
+	var removed = 0;
+
+	for (var qname of Object.keys(queues)) {
+		var keys    = await listSchedulerKeys(queues[qname]);
+		var orphans = scheduleFormat.orphanSchedulerKeys(keys, expectedKeys);
+		for (var key of orphans) {
+			try {
+				await queues[qname].removeJobScheduler(key);
+				removed++;
+				alogger.writeAlog(3,
+					`  Removed orphan schedule ${key} from ${qname}: nothing in the database asks for it`,
+					"yellow");
+			} catch (rmErr) {
+				// Worth a line but not worth failing startup over. The job it
+				// fires is at worst a no-op, and the next start tries again.
+				alogger.writeAlog(3, `  Could not remove orphan schedule ${key}: ${rmErr.message}`, "yellow");
+			}
+		}
+	}
+	return removed;
+}
+
 export async function registerSchedules() {
 	var scheduleCount = 0;
+
+	// Keys in the families pruneOrphanSchedules is allowed to remove. Collected
+	// as they are written so the prune compares against what this pass actually
+	// registered rather than against a second reading of the database, which
+	// could disagree with it.
+	var managedKeys = [];
 
 	try {
 		// -----------------------------------------------------------------
@@ -266,6 +342,7 @@ export async function registerSchedules() {
 						data: { connectionUUID: conn.uuid },
 					}
 				);
+				managedKeys.push(`poll:${conn.uuid}`);
 				scheduleCount++;
 			}
 		}
@@ -298,6 +375,7 @@ export async function registerSchedules() {
 						data: { connectionUUID: conn.uuid },
 					}
 				);
+				managedKeys.push(`qwk-pull:${conn.uuid}`, `qwk-push:${conn.uuid}`);
 				scheduleCount += 2;
 			}
 		}
@@ -328,6 +406,7 @@ export async function registerSchedules() {
 						data: { connectionUUID: conn.uuid },
 					}
 				);
+				managedKeys.push(`nntp-pull:${conn.uuid}`, `nntp-push:${conn.uuid}`);
 				scheduleCount += 2;
 			}
 		}
@@ -347,6 +426,7 @@ export async function registerSchedules() {
 							data: { eventId: evt.id },
 						}
 					);
+					managedKeys.push(`timed-event:${evt.id}`);
 					scheduleCount++;
 				} catch (evtErr) {
 					alogger.writeAlog(3, `Failed to register timed event "${evt.name}": ${evtErr.message}`, "yellow");
@@ -370,6 +450,7 @@ export async function registerSchedules() {
 							data: { segmentId: seg.id },
 						}
 					);
+					managedKeys.push(`generate-stub:${seg.id}`);
 					scheduleCount++;
 				} catch (segErr) {
 					alogger.writeAlog(3, `Failed to register stub schedule for "${seg.name}": ${segErr.message}`, "yellow");
@@ -378,6 +459,14 @@ export async function registerSchedules() {
 		}
 
 		alogger.writeAlog(2, `  Registered ${scheduleCount} job schedule(s)`, "cyan");
+
+		// Only reachable when every database read above succeeded. postgres.query
+		// throws on error, so a failed read leaves through the catch below and
+		// never gets here with a half-built managedKeys to prune against.
+		var pruned = await pruneOrphanSchedules(managedKeys);
+		if (pruned > 0) {
+			alogger.writeAlog(2, `  Pruned ${pruned} orphan job schedule(s)`, "yellow");
+		}
 
 	} catch (err) {
 		alogger.writeAlog(2, `Schedule registration error: ${err.message}`, "redbright");

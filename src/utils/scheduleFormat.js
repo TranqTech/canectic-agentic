@@ -130,13 +130,59 @@ function summariseCounts(counts) {
 	};
 }
 
+// Scheduler keys whose existence is decided entirely by a database row, and
+// which registerSchedules therefore rebuilds in full on every gateway start.
+// Anything matching one of these and absent from that rebuild has no row behind
+// it any more: a deleted connection, or one whose polling was turned off.
+//
+// This list is the whole safety argument for automatic pruning. A key outside
+// it is left alone, because something other than registerSchedules owns it and
+// its absence from the expected set proves nothing. Adding a prefix here is a
+// statement that registerSchedules is the sole authority for that family.
+var MANAGED_KEY_PREFIXES = [
+	'poll:',
+	'qwk-pull:',
+	'qwk-push:',
+	'nntp-pull:',
+	'nntp-push:',
+	'timed-event:',
+	'generate-stub:'
+];
+
+function isManagedSchedulerKey(key) {
+	var k = String(key || '');
+	return MANAGED_KEY_PREFIXES.some(function (p) { return k.startsWith(p); });
+}
+
+// Which registered scheduler keys no longer have a database row behind them.
+//
+// Orphans are not cosmetic. registerSchedules skips a connection whose polling
+// is disabled rather than clearing its schedule, and nothing removed one when a
+// connection was deleted, so an orphan goes on firing its job for ever: a poll
+// to a peer that is gone, or a pull for a connection the sysop turned off. The
+// job then fails or silently does nothing, once per interval, indefinitely.
+//
+// `expected` must be the complete set the caller just registered. Handing this
+// a partial set deletes live schedules, so a caller that could not finish
+// building it must not call this at all rather than calling it with what it
+// has. Returns keys in the order given, so a caller's log reads predictably.
+function orphanSchedulerKeys(registered, expected) {
+	var want = expected instanceof Set ? expected : new Set(expected || []);
+	return (registered || [])
+		.map(function (k) { return String(k); })
+		.filter(function (k) { return isManagedSchedulerKey(k) && !want.has(k); });
+}
+
 export {
 	DEFAULT_LATE_GRACE_MS,
 	DEFAULT_STALL_MS,
+	MANAGED_KEY_PREFIXES,
 	formatDuration,
 	formatEvery,
 	describeNext,
 	lateSchedulers,
 	stalledJobs,
-	summariseCounts
+	summariseCounts,
+	isManagedSchedulerKey,
+	orphanSchedulerKeys
 };

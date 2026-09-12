@@ -1111,6 +1111,45 @@ export async function registerSchedules() {
 
 Schedules are registered by the gateway on startup (`registerSchedules()` in `main()`). They persist in Redis — BullMQ handles the timer and enqueues jobs at the specified intervals. The worker or mailer process picks them up. Updating a schedule (e.g., admin changes poll interval) calls `upsertJobScheduler` again with the same key — BullMQ replaces the existing schedule.
 
+### Orphan pruning
+
+Registration is a full rebuild of the managed set, not an additive pass, and it
+prunes on the way out.
+
+The reason it has to is that registration *skips* rather than clears. A
+connection whose polling is disabled is passed over, and until recently nothing
+removed a schedule when a connection was deleted, so either way the scheduler
+stayed in Redis firing its job for ever: a poll to a peer that no longer exists,
+once per interval, with no row anywhere asking for it. Five were live on the
+development box when this was written, two of them for connections that had been
+deleted outright. The admin routes now maintain schedules directly, but that
+only covers changes made through the UI; it does nothing about orphans a
+database already carries, or a change made outside the UI.
+
+After registering, `registerSchedules` enumerates every scheduler on the three
+queues and removes the ones it did not just write. Two constraints make that
+safe rather than reckless:
+
+**The allowlist.** Only keys in a family registration owns are candidates:
+`poll:`, `qwk-pull:`, `qwk-push:`, `nntp-pull:`, `nntp-push:`, `timed-event:`,
+`generate-stub:`. The list lives in `scheduleFormat.MANAGED_KEY_PREFIXES` and is
+shared with `src/tools/schedules.js`, so the diagnostic and the automatic sweep
+cannot disagree about what is managed. Everything else is left alone, including
+the fixed daily maintenance schedules, which registration writes unconditionally
+and never records as managed keys. Without the allowlist, the first restart
+after any bug in the expected set would silently switch off PM trash purging,
+tossed packet purging and nodelist scanning, with a log line that reads like
+tidying up.
+
+**The completeness requirement.** Pruning against a partial expected set deletes
+live schedules. `registerSchedules` collects managed keys as it writes them, and
+the prune call sits at the end of the `try` block, so it is only reachable when
+every database read succeeded. `postgres.query` throws on error rather than
+returning an empty array, which is what makes that guarantee real: a failed read
+leaves through the catch and the prune never runs at all.
+
+`src/tools/schedules.js --prune` does the same thing without a restart.
+
 ### A scheduler is not a timer
 
 The sentence above says BullMQ "handles the timer", and that is the wrong mental model. A job scheduler creates one delayed job at a time. The next iteration is only created when a worker picks the current one up. Nothing in Redis counts down on its own.
