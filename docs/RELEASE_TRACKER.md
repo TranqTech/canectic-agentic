@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-09-06
+Last updated: 2026-09-12
 
 ---
 
@@ -46,6 +46,16 @@ Last updated: 2026-09-06
 - [x] Registration with gender selection (hotkey selector)
 - [x] Password reset handler (pre-login token + post-login change)
 - [x] News file viewer (ANSI/ASCII art display with centering, menu command + call flow)
+- [x] Moderation in the reader: delete and move on D and M, confirmed, with a
+      scope question when a thread is on screen and a lightbar list of the
+      destinations that message's own answer allows. The dumb-terminal path gets
+      the same operations with a numbered list. The reader reads `.moderation`
+      off the message rather than deciding for itself
+- [x] Art code stat lookups no longer stall a redraw. `@TC@`/`@TU@`/`@ON@` cache
+      per code and race a refresh against `art_stat_timeout_ms`, returning the
+      last known value on timeout while the refresh fills the cache. A catch
+      alone was not enough: both clients retry internally, so an outage produced
+      a hang rather than a rejection
 - [~] ZMODEM (works with most clients, known issue with IcyTerm both directions)
 
 ### Web
@@ -75,6 +85,13 @@ Last updated: 2026-09-06
       broadcast missed. The username index is refreshed on session renew, the
       completing session is always written directly, and loading the call flow
       reconciles its cached timestamp against the database
+- [x] Message moderation from the content views: thread delete in the thread
+      header, per-message delete in both thread and flat views, and move. Never
+      on the area thread list, which shows subjects only, so deleting from it
+      would be blind. The check is in the routes as well as the templates
+- [x] Message areas list sort toggle (sysop ordering or most recently active,
+      within each group, remembered in `localStorage`), and a last-message
+      column that shows the year once a date is older than six months
 
 ### Admin Panel
 - [x] Dashboard
@@ -119,6 +136,14 @@ Last updated: 2026-09-06
 - [x] Netmail Relay Log page (`/admin/relay-log`): stuck deliveries first, then
       counts by decision, every decision with a per-row detail view, and transit
       mail grouped by sender
+- [x] Tabbed layout for the message group and file group create/edit forms and
+      all three file area forms, with the three near-identical file area copies
+      collapsed into one mixin
+- [x] Post As on the new message group modal. The backend already read it; the
+      form never sent it, so a group created there silently took the default
+- [x] Mailer diagnostics (`/admin/mailer`): one row per session attempt in both
+      directions including connects that never opened a socket, with outcome,
+      files and bytes each way, the peer's banner and every AKA it presented
 
 
 ### Message Networking
@@ -153,6 +178,42 @@ Last updated: 2026-09-06
       `/admin/relay-log`, CLI `src/tools/relayLog.js`, 180-day retention
 - [x] Inbound backstop covers arcmail bundles, not just `.pkt`, via a predicate
       shared with the tosser so the two cannot drift
+- [x] Netmail relay modes: `netmail_relay_mode` is `off`, `nodelist` or `on`,
+      defaulting to `nodelist`, which requires both ends to be listed in the
+      same network's nodelist. The old `allow_netmail_relay` boolean's "on" was
+      an open relay between every network this system carries, because route
+      resolution walks the nodelist and the coordinator tree. Deprecated and
+      ignored. Sysop guide at `docs/sysop/NETMAIL_RELAY.md`
+- [x] Relayed netmail no longer misreports its origin. The message header says
+      who wrote it and the packet header says who handed the packet over; the
+      two were swapped on every transit message, so replies went to the wrong
+      system. `resolveOutboundSource()` answers both in one tested place
+- [x] Via chain: written on relay, parsed on inbound keeping the raw line, and
+      used for loop refusal on the bare address. An enabled relay
+      previously had no loop protection at all
+- [x] Netmail addressed to Ping answered with a Pong showing the Via chain the
+      request accumulated. Replies from the address the ping was aimed at, not
+      the default AKA. Config `netmail_ping_enabled`
+- [x] Mailer session history (`mailer_sessions`): one row per attempt in both
+      directions, including connects that never opened a socket, since the peer
+      failing hardest is the one that never gets far enough to have a session.
+      Plus `outbound_file_log`, written on M_GOT so a row means the peer
+      acknowledged the file
+- [x] Connect backoff moved to `_connectToPeer`, the choke point every outbound
+      path passes. It was in `pollConnection` only, so the BSO scanner bypassed
+      it entirely whenever mail was waiting. Nodelist-routed addresses, which
+      have no peer row to hold state, get an in-memory equivalent
+- [x] Flow files with nothing left to send no longer trigger a session a minute.
+      The scanner decides a node has mail from the filename, so a spent `.flo`
+      read as pending work for ever. `floFile.pruneFlowFile()` marks vanished
+      lines and deletes an exhausted file; `pendingCount()` is the honest answer
+- [x] Poll interval changes from the admin UI apply immediately instead of at
+      the next gateway restart, and deleting a connection removes its schedule.
+      Nothing called `updateConnectionSchedule` despite its doc comment saying to
+- [x] Message dates that cannot be true are rejected at both ingest points
+      (`echomail.ftnToDb` and `smbImport`), falling back to the receive time. A
+      corrupt future date otherwise pins an area to the top of the recently
+      active sort for ever and keeps it inside every retention window
 - [ ] Peer interop: BBBS has no `%RESCAN` on either AreaFix or FileFix, so file
       echo backfill from a BBBS uplink needs the sysop to re-send by hand. Its
       FREQ support over binkp specifically is unverified. See PEER_INTEROP.md
@@ -250,9 +311,20 @@ Last updated: 2026-09-06
       upgrade no longer breaks boot (verified by cold boot, not just restart)
 - [x] OS upgrade runbook (docs/sysop/OS_UPGRADE.md), written against a real
       24.04 to 26.04 run with PostgreSQL 16 to 18 and Redis 7 to 8
+- [x] Node 26 target, Node 22 floor. Every dependency at its current release,
+      `npm outdated` empty and `npm audit` at 0 from 17 advisories. `better-sqlite3`
+      13 is N-API, so the native binary survives a Node major upgrade
+- [x] npm 12 `allowScripts`: the three native modules plus `better-sqlite3`
+      approved and pinned to version, three optional accelerators denied
+      explicitly rather than omitted so the decision is visible
+- [x] Both Redis clients pinned to RESP2 so the client majors could not silently
+      change reply shapes. Adopting RESP3 is tracked separately as high priority
+- [x] Databases created as UTF8 explicitly, with `setup/convert_db_encoding.sh`
+      to convert an existing SQL_ASCII database (invalid-byte preflight, row
+      count verification, name swap so `.env` needs no edit)
 
 ### Testing
-- [x] 2,791 tests passing (mocha)
+- [x] 3,252 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
@@ -261,6 +333,16 @@ Last updated: 2026-09-06
 - [x] New feature tests (areaAccess, activityMap, wall, bulletins, announcements, systemStats, artCodes, qwkUser)
 - [x] Message base parser tests (SMB, JAM) with synthesised binary fixtures
 - [x] Redis and BullMQ integration tests (skip cleanly when Redis is unreachable)
+- [x] Suite skips cleanly when PostgreSQL or Redis is unavailable, so a clean
+      checkout can tell a real regression from a missing service. Both probes
+      race against a bound and swallow the hang as well as the rejection, since
+      each client retries internally and an await in a `before` hook turns a
+      missing service into a hook timeout reported as a failure
+- [x] Networking correctness tests: outbound eligibility, the Via chain, relay
+      decisions, rescan grammar and pointer arithmetic, AreaFix end to end from
+      netmail arrival to response body, flow file pruning
+- [x] Worker health detection, schedule registration against a real BullMQ
+      queue, and every admin form having something to submit it with
 
 ---
 
