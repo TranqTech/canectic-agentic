@@ -82,6 +82,30 @@ router.get('/', async (req, res) => {
 	res.locals.callflowPending = false;
 	res.locals.callflowForce = false;
 
+	// Reconcile the session's cached last_callflow_at against the database.
+	//
+	// That cache has no expiry and is only ever corrected by an explicit write,
+	// so a session a write failed to reach keeps a stale value for its whole
+	// life and is forced back here on every request. This is the way out: the
+	// database is authoritative, the user is already on the page that would be
+	// looping, and it costs one query on a page nobody loads in a hot path.
+	if (currentuser && req.cookies && req.cookies.sessionid) {
+		try {
+			var dbLast = await getLastCallflowAt(parseInt(currentuser.id));
+			var dbTs = dbLast ? String(dbLast.getTime()) : '0';
+			if (sess && sess.last_callflow_at !== dbTs) {
+				await sessionStore.sessionUpdate(req.cookies.sessionid, {
+					last_callflow_at: dbTs,
+					_callflow_checked: 'true'
+				});
+				alogger.writeAlog(5, 'Callflow: reconciled session cache from db (' +
+					(sess.last_callflow_at || 'unset') + ' -> ' + dbTs + ')', 'cyan');
+			}
+		} catch (err) {
+			alogger.writeAlog(4, 'Callflow: cache reconcile failed: ' + err.message, 'yellow');
+		}
+	}
+
 	// Clear callflow_pending flag so viewing the callflow page itself breaks the loop.
 	// If the user leaves without completing, the time-based check will still trigger
 	// when appropriate, but the session won't have a sticky pending flag.
@@ -408,15 +432,21 @@ router.post('/complete', urlencodedParser, async (req, res) => {
 	if (currentuser) {
 		await updateLastCallflowAt(parseInt(currentuser.id));
 
-		// Update last_callflow_at on ALL sessions for this user (handles multi-tab/device)
-		var updateCount = await sessionStore.sessionUpdateUser(currentuser.username, sessionFields);
-		alogger.writeAlog(5, 'Callflow session update: ' + updateCount + ' session(s) updated for ' + currentuser.username, 'cyan');
-
-		// If index-based update missed this session (stale index), update directly as fallback
-		if (updateCount === 0 && req.cookies && req.cookies.sessionid) {
+		// Always write the session that actually completed the flow, first and
+		// unconditionally. The broadcast below reaches every session in the
+		// username index, and this one may not be in it: the index key expires
+		// on its own schedule and is rebuilt at login, so an older window's
+		// session drops out of it while its own hash lives on. The old code
+		// only fell back when the broadcast updated nothing at all, so a user
+		// with a newer session elsewhere got a non-zero count, no fallback, and
+		// an older window that was forced back here on every request for ever.
+		if (req.cookies && req.cookies.sessionid) {
 			await sessionStore.sessionUpdate(req.cookies.sessionid, sessionFields);
-			alogger.writeAlog(5, 'Callflow session update: direct fallback for ' + req.cookies.sessionid, 'yellow');
 		}
+
+		// Then the rest of this user's sessions, for multi-tab and multi-device.
+		var updateCount = await sessionStore.sessionUpdateUser(currentuser.username, sessionFields);
+		alogger.writeAlog(5, 'Callflow session update: ' + updateCount + ' indexed session(s) for ' + currentuser.username, 'cyan');
 	} else if (req.cookies && req.cookies.sessionid) {
 		await sessionStore.sessionUpdate(req.cookies.sessionid, sessionFields);
 		alogger.writeAlog(5, 'Callflow session update: no user, fallback for session ' + req.cookies.sessionid, 'cyan');

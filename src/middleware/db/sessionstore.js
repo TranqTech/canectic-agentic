@@ -58,13 +58,27 @@ async function sessionExists(sessionId) {
 }
 
 async function sessionRenew(sessionId, ttl) {
-	if (!ttl) {
-		// Read the stored TTL from the session itself (set at login)
-		var stored = await hGetAll(SESSION_PREFIX + sessionId);
-		if (stored && stored._session_ttl) {
-			ttl = parseInt(stored._session_ttl);
-		}
+	// Read the session whether or not a ttl was passed, because the username
+	// index has to be refreshed alongside it and that needs the username.
+	var stored = await hGetAll(SESSION_PREFIX + sessionId);
+	if (!ttl && stored && stored._session_ttl) {
+		ttl = parseInt(stored._session_ttl);
 	}
+
+	// Keep the reverse index alive as long as the session it points at.
+	//
+	// The index was written once at login with an expiry of twice session_ttl
+	// and never touched again, while the session hash itself was renewed on
+	// every page view. A Remember Me session outlives its own index entry by
+	// days, and once it has dropped out, every sessionUpdateUser broadcast
+	// silently skips it: a config change, a security level change, or the call
+	// flow marking itself complete reaches every session but that one. The
+	// call flow case was a visible loop, being forced back to the same page on
+	// every request with no way out. The others just went quietly stale.
+	if (stored && stored.username) {
+		await _addSessionIndex(stored.username, sessionId);
+	}
+
 	return await expire(SESSION_PREFIX + sessionId, ttl || appConfig.getNumber('session_ttl', 2880) * 60);
 }
 

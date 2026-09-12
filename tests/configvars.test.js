@@ -256,11 +256,29 @@ describe('substitute', function () {
 	});
 
 	describe('unknown tokens', function () {
-		it('should consume unknown %X tokens (replace with empty)', function () {
-			// Unknown tokens are consumed, not passed through
-			var r = substitute('test%qvalue', makeCall());
-			assert.ok(!r.includes('%'));
-			assert.strictEqual(r, 'testvalue');
+		// This block used to assert that an unknown token is consumed, using
+		// %q as the example. %Q is not unknown, it is System name, and the
+		// assertion only held because nothing in the suite had loaded
+		// appConfig, so the resolver returned an empty string and a defined
+		// token looked like a consumed one. The first test file to load
+		// appConfig ahead of this one exposed it. The substitution loop passes
+		// an unmatched %X through literally, which is the behaviour worth
+		// pinning down.
+
+		it('passes an unknown %X token through untouched', function () {
+			// %9 has no definition. Leaving it visible is better than
+			// swallowing it: a typo in a door command line shows up in the
+			// command rather than silently becoming nothing.
+			assert.strictEqual(substitute('test%9value', makeCall()), 'test%9value');
+			assert.strictEqual(substitute('a%8b', makeCall()), 'a%8b');
+		});
+
+		it('consumes a defined token that resolves to nothing', function () {
+			// The distinct case the old test was accidentally covering. %Q is
+			// System name; with no value configured it expands to empty rather
+			// than passing through.
+			var r = substitute('test%Qvalue', makeCall());
+			assert.ok(!/%Q/i.test(r), 'a defined token is always expanded');
 		});
 	});
 

@@ -187,6 +187,22 @@ Progress indicator (dots or step counter) shows position in the sequence.
 | `src/servers/webserver.js` | Mount callflow router |
 | `db/schema/` | Add `last_callflow_at` column to users table |
 
+## The cached timestamp, and how it loops
+
+`last_callflow_at` is cached on the session so the trigger check does not query the database on every request. The cache has no expiry of its own. It is corrected only when something explicitly writes to the session, which makes every write path a place the cache can go permanently wrong.
+
+A session holding a stale timestamp forces the call flow on every request. Completing the flow is supposed to end that, and it does so by writing the new timestamp to the session. If that write misses, completing changes nothing and the user is sent straight back, for as long as the session lives.
+
+Three separate things had to hold for it to be endless, and all three did:
+
+1. **The username index dropped the session.** `sessionUpdateUser` can only reach sessions listed in `session_index:<username>`. That key was written once at login with an expiry of twice `session_ttl` and never refreshed, while the session hash was renewed on every page view. A Remember Me session outlives its own index entry by days. `sessionRenew` now re-adds the session to the index, so the index lives as long as the thing it points at.
+
+2. **Completion did not write the session in front of it.** It broadcast to the index and fell back to the current session only when the broadcast had updated *nothing at all*. A user with any newer session got a non-zero count, so the fallback never fired and the older window was skipped. Completion now always writes the current session first, unconditionally, then broadcasts to the rest.
+
+3. **Nothing re-read the authoritative value.** The lazy database lookup in the root router is gated on `_callflow_checked`, which is set once and never cleared, so a session that has been checked once never consults the database again. `GET /callflow` now reconciles the session cache against `users.last_callflow_at` on every load. It is one query on a page nobody loads in a hot path, and it guarantees the loop terminates even if the first two fixes are somehow bypassed.
+
+The decision itself lives in `src/utils/callflowTrigger.js` so it can be tested. `isRedirectablePath` holds the exemptions, and the call flow's own pages are the important one: redirecting those would be an immediate loop rather than a slow one.
+
 ## Config keys
 
 | Key | Type | Default | Description |

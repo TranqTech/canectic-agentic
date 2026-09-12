@@ -38,6 +38,7 @@ import * as flash from '../middleware/db/flash.js';
 import { buildQwkForUser, importRepForUser, getQwkBbsId, cleanupQwkPacket } from '../models/qwkUser.js';
 import { getStats, formatFileSize } from '../models/systemStats.js';
 import { getActiveBulletins, getBulletinByUuid } from '../models/bulletins.js';
+import { evaluateCallflow, isRedirectablePath } from '../utils/callflowTrigger.js';
 
 //setup
 router.use(cookieParser());
@@ -70,34 +71,27 @@ router.use(async function(req, res, next) {
 
 				// Check last_callflow_at for time-based triggers (cached on session)
 				if (appConfig.getBoolean('callflow_enabled', true)) {
-					var lastCf = pmSession.last_callflow_at ? parseInt(pmSession.last_callflow_at) : 0;
+					var cf = evaluateCallflow(pmSession, Date.now());
 
-					// Lazy-init: if session doesn't have it cached, load from DB once
-					if (!lastCf && !pmSession._callflow_checked) {
+					// Lazy-init: if the session has nothing cached, read it from
+					// the database once and cache it there.
+					if (cf.needsLookup) {
 						try {
 							var lastCfDate = await userAccounts.getLastCallflowAt(pmUid);
-							lastCf = lastCfDate ? lastCfDate.getTime() : 0;
+							var lastCfMs = lastCfDate ? lastCfDate.getTime() : 0;
 							await sessionStore.sessionUpdate(req.cookies.sessionid, {
-								last_callflow_at: String(lastCf || '0'),
+								last_callflow_at: String(lastCfMs || '0'),
 								_callflow_checked: 'true'
 							});
+							pmSession.last_callflow_at = String(lastCfMs || '0');
+							pmSession._callflow_checked = 'true';
+							cf = evaluateCallflow(pmSession, Date.now());
 						} catch (_) {}
 					}
 
-					if (lastCf) {
-						var hoursSince = (Date.now() - lastCf) / 3600000;
-						res.locals.callflowHoursSince = hoursSince;
-
-						if (hoursSince >= 24) {
-							res.locals.callflowForce = true;
-						} else if (hoursSince >= 2) {
-							res.locals.callflowPending = true;
-						}
-					} else {
-						// Never done callflow -- force it
-						res.locals.callflowForce = true;
-						res.locals.callflowHoursSince = 999;
-					}
+					res.locals.callflowForce = cf.force;
+					res.locals.callflowPending = cf.pending;
+					res.locals.callflowHoursSince = cf.hoursSince;
 				}
 			}
 			// Session-level pending flag (from idle resume) also triggers banner
@@ -107,13 +101,9 @@ router.use(async function(req, res, next) {
 		}
 	}
 
-	// Force redirect to callflow after 24 hours
-	// Skip: callflow itself, login/register, admin, health, static, websocket, API endpoints
-	if (res.locals.callflowForce && !req.path.startsWith('/callflow') &&
-		!req.path.startsWith('/users') && !req.path.startsWith('/admin') &&
-		!req.path.startsWith('/health') && !req.path.startsWith('/webart') &&
-		!req.path.startsWith('/ws/') && !req.path.startsWith('/pm') &&
-		!req.path.startsWith('/notifications') && req.method === 'GET') {
+	// Force redirect to callflow. isRedirectablePath keeps the call flow's own
+	// pages out of it, which would otherwise be an immediate loop.
+	if (res.locals.callflowForce && isRedirectablePath(req.path, req.method)) {
 		// Store the page they were trying to reach so callflow can redirect back
 		if (req.cookies && req.cookies.sessionid) {
 			sessionStore.sessionUpdate(req.cookies.sessionid, { callflow_return_url: req.path });
