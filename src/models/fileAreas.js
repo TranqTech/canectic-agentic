@@ -279,11 +279,28 @@ async function removeArea(shortcode, deleteFiles) {
 		alogger.writeAlog(3, "removeFileArea: failed to clean user_file_subscriptions for " + shorty + ": " + error.message, "yellow");
 	}
 
-	// Remove the area record
-	try {
-		await postgres.write("DELETE FROM file_areas WHERE id = $1", [dbarea.id]);
-	} catch (error) {
-		returnObj.errormessages.push("Failed to remove area record: " + error.message);
+	// Clear filebone entries pointing at this area. Same reasoning as the
+	// message side: the daily reconciliation clears by areatag and only for
+	// active entries, and file area ids come from a sequence, so a stale
+	// pointer can later name an unrelated area rather than nothing at all.
+	var elErr = await postgres.write(
+		"UPDATE file_echolist_areas SET local_area_id = NULL WHERE local_area_id = $1",
+		[dbarea.id]
+	);
+	if (elErr) {
+		alogger.writeAlog(3, "removeFileArea: failed to clear filebone local_area_id for " + shorty + ": " + elErr.message, "redbright");
+		returnObj.errormessages.push("Failed to clear filebone links: " + elErr.message);
+		return returnObj;
+	}
+
+	// Remove the area record.
+	//
+	// postgres.write reports a failure in its return value rather than
+	// throwing, so the try/catch this used to have could never fire: a delete
+	// that failed left the area in place and returned status true.
+	var delErr = await postgres.write("DELETE FROM file_areas WHERE id = $1", [dbarea.id]);
+	if (delErr) {
+		returnObj.errormessages.push("Failed to remove area record: " + delErr.message);
 		return returnObj;
 	}
 

@@ -797,11 +797,38 @@ async function removeArea(shortcode, deleteTables) {
 		return returnObj;
 	}
 
-	// Remove the area record
-	try {
-		await postgres.write("DELETE FROM message_areas WHERE id = $1", [dbarea.id]);
-	} catch (error) {
-		returnObj.errormessages.push("Failed to remove area record: " + error.message);
+	// Clear echolist entries pointing at this area.
+	//
+	// Deleting the network_areas rows above is not enough on its own. The daily
+	// reconciliation clears local_area_id by areatag and only for active
+	// entries, so an inactive one keeps the pointer for ever and every entry
+	// keeps it until the next daily run. Area ids come from a sequence, so a
+	// stale pointer does not stay merely dangling: a later area can be created
+	// with the same id, at which point the echolist reports an unrelated area
+	// as locally carried. Clearing by id needs no areatag match and covers
+	// inactive rows.
+	var elErr = await postgres.write(
+		"UPDATE network_echolist_areas SET local_area_id = NULL WHERE local_area_id = $1",
+		[dbarea.id]
+	);
+	if (elErr) {
+		alogger.writeAlog(3,
+			"removeArea: failed to clear echolist local_area_id for area " + shorty +
+			": " + elErr.message,
+			"redbright"
+		);
+		returnObj.errormessages.push("Failed to clear echolist links: " + elErr.message);
+		return returnObj;
+	}
+
+	// Remove the area record.
+	//
+	// postgres.write reports a failure in its return value rather than
+	// throwing, so the try/catch this used to have could never fire: a delete
+	// that failed left the area in place and returned status true.
+	var delErr = await postgres.write("DELETE FROM message_areas WHERE id = $1", [dbarea.id]);
+	if (delErr) {
+		returnObj.errormessages.push("Failed to remove area record: " + delErr.message);
 		return returnObj;
 	}
 

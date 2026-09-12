@@ -472,6 +472,15 @@ async function reconcileLocalAreaIds() {
 		")"
 	);
 
+	// Clear local_area_id where the area it names no longer exists at all.
+	// Mirrors networkEcholist.reconcileLocalAreaIds; see the reasoning there.
+	// Deliberately not scoped to active.
+	await postgres.write(
+		"UPDATE file_echolist_areas SET local_area_id = NULL " +
+		"WHERE local_area_id IS NOT NULL " +
+		"AND NOT EXISTS (SELECT 1 FROM file_areas fa WHERE fa.id = file_echolist_areas.local_area_id)"
+	);
+
 	alogger.writeAlog(5, 'Filebone local_area_id reconciliation complete', 'greenbright');
 }
 

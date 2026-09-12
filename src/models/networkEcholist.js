@@ -494,6 +494,20 @@ async function reconcileLocalAreaIds() {
 		")"
 	);
 
+	// Clear local_area_id where the area it names no longer exists at all.
+	//
+	// Both statements above are scoped to active entries and match on areatag,
+	// so neither reaches an inactive entry, and neither notices a pointer that
+	// is simply wrong. removeArea now clears by id at the point of deletion,
+	// but databases predating that carry dangling pointers already, and an area
+	// id is reusable, so a dangle can become a pointer at an unrelated area
+	// rather than staying visibly broken. Deliberately not scoped to active.
+	await postgres.write(
+		"UPDATE network_echolist_areas SET local_area_id = NULL " +
+		"WHERE local_area_id IS NOT NULL " +
+		"AND NOT EXISTS (SELECT 1 FROM message_areas ma WHERE ma.id = network_echolist_areas.local_area_id)"
+	);
+
 	alogger.writeAlog(5, 'Echolist local_area_id reconciliation complete', 'greenbright');
 }
 
