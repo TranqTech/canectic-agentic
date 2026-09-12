@@ -156,6 +156,61 @@ function isMailBundleFilename(filename) {
  * TossInbound does too: it covers ZIP, ARJ and LHA bundles alike, and leaves
  * TIC attachments, nodelist archives and infopacks to their own processors.
  */
+// Strip anything that stops two spellings of the same node comparing equal:
+// a 5D "@domain" suffix, and a trailing ".0", which is the node itself and
+// which systems write both ways.
+function normaliseFtnAddress(addr) {
+	return bareFtnAddress(addr).replace(/\.0$/, '').toLowerCase();
+}
+
+/**
+ * The packet password to stamp on a packet addressed to a given system.
+ *
+ * Netmail used to take this from the global PacketPwd config key and nothing
+ * else, while echomail took it from the peer's own packet_password. So a sysop
+ * who set a packet password on a link got authenticated echomail and netmail
+ * with an empty password field, and the only symptom was the uplink bouncing
+ * AreaFix requests back with "no password" while everything else worked.
+ *
+ * Keyed on the packet destination rather than the message destination, because
+ * the packet envelope is addressed to whoever we hand it to. On transit mail
+ * the caller has already set PacketDestination to the routing target, so this
+ * picks up that hop's password rather than the final recipient's.
+ */
+async function buildPacketPasswordIndex() {
+	var index = new Map();
+	try {
+		var conns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
+		for (var conn of (conns || [])) {
+			var cd = conn.connection_data || {};
+			if (!cd.address || !cd.packet_password) continue;
+			index.set(normaliseFtnAddress(cd.address), cd.packet_password);
+		}
+	} catch (err) {
+		// A packet with no password beats no packet at all, so fall through to
+		// the global key rather than failing the toss.
+		alogger.writeClog(2, '[FTN] could not read peer packet passwords: ' + err.message, 'tosser', 'yellow');
+	}
+	return index;
+}
+
+/**
+ * The 8 byte password field, per FTS-0001.
+ *
+ * The old code built a buffer as long as the password and copied all of it
+ * while advancing the write offset by 8, so an over-length password spilled
+ * past the field. Nothing was ever corrupted by that, because the zone writes
+ * and the 20 byte fill that follow overwrite the rest of the header, and only
+ * a password over 32 characters could have outrun them. This makes the field
+ * self-contained rather than correct by accident, dependent on what happens
+ * to be written next.
+ */
+function packetPasswordBuffer(password) {
+	var buf = Buffer.alloc(8);
+	Buffer.from(String(password || ''), 'latin1').copy(buf, 0, 0, 8);
+	return buf;
+}
+
 function isTossableInboundFile(filename) {
 	if (!filename) return false;
 	if (path.extname(filename).toUpperCase() === '.PKT') return true;
@@ -695,7 +750,7 @@ async function TossInboundFile(pktfilepath, movepktpath){
 				// If a processor generated a response message, queue it for outbound
 				if (result.responseMessage) {
 					try {
-						var respPkt = WritePkts([result.responseMessage])
+						var respPkt = await WritePkts([result.responseMessage])
 						if (respPkt && respPkt.pktcount > 0) {
 							alogger.writeClog(3, 'Queued processor response netmail to ' + result.responseMessage.Destination, 'tosser', 'cyan', false, false)
 						}
@@ -949,8 +1004,7 @@ function WritePktToNode(messageArray, conn, systemaddress){
 	buffer.writeUInt8(packet.Serial, offset); offset += 1;
 
 	// Password (8 bytes, null-padded)
-	const pwdBuf = Buffer.from(packet.Password.padEnd(8, '\0'));
-	pwdBuf.copy(buffer, offset); offset += 8;
+	packetPasswordBuffer(packet.Password).copy(buffer, offset); offset += 8;
 
 	// Zones
 	buffer.writeUInt16LE(packet.SourceZone, offset); offset += 2;
@@ -1183,7 +1237,7 @@ async function WritePktsToNode(messageArray, conn, systemaddress){
 	return returnObj
 }
 
-function WritePkts(messageArray){
+async function WritePkts(messageArray){
 	var returnObj = {
 		processedmsgs: [],
 		failedmsgs: [],
@@ -1205,6 +1259,10 @@ function WritePkts(messageArray){
 		throw new Error(`Failure ensuring export directory present: ${error.message}`);
 		return false
 	}
+	// Peer packet passwords, read once for the whole batch rather than per
+	// packet, since a netmail run can produce a packet per destination.
+	const pwIndex = await buildPacketPasswordIndex();
+
 	//create groups by source and destination to group messages into separate packets
 	const packetGroups = new Map();
 
@@ -1264,10 +1322,13 @@ function WritePkts(messageArray){
 			packet.PacketType = 2;
 			packet.ProdCode = 0xFE;
 			packet.Serial = 0x01;
-			packet.Password = '';
-			var pktpwd = appConfig.get('PacketPwd', '');
-			if (pktpwd){
-				packet.Password = pktpwd
+			// The peer's own password first, the global key only as a
+			// fallback for links that have none of their own.
+			packet.Password = pwIndex.get(normaliseFtnAddress(destinationAddress)) ||
+				appConfig.get('PacketPwd', '') || '';
+			if (!packet.Password) {
+				alogger.writeClog(3, '[FTN] no packet password for ' + destinationAddress +
+					', sending unauthenticated', 'tosser', 'yellow');
 			}
 			packet.Messages = destination;
 			packet.MessageCount = destination.length;
@@ -1301,8 +1362,7 @@ function WritePkts(messageArray){
 			buffer.writeUInt8(packet.Serial, offset); offset += 1;
 
 			// Password (8 bytes, null-padded)
-			const pwdBuf = Buffer.from(packet.Password.padEnd(8, '\0'));
-			pwdBuf.copy(buffer, offset); offset += 8;
+			packetPasswordBuffer(packet.Password).copy(buffer, offset); offset += 8;
 
 			// Zones
 			buffer.writeUInt16LE(packet.SourceZone, offset); offset += 2;
@@ -1689,6 +1749,8 @@ export {
 	processMessageText,
 	isMailBundleFilename,
 	isTossableInboundFile,
+	normaliseFtnAddress,
+	packetPasswordBuffer,
 	getFileType,
 	formatKludge,
 	bareFtnAddress,
