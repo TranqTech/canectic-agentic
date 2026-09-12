@@ -144,6 +144,11 @@ Last updated: 2026-09-12
 - [x] Mailer diagnostics (`/admin/mailer`): one row per session attempt in both
       directions including connects that never opened a socket, with outcome,
       files and bytes each way, the peer's banner and every AKA it presented
+- [x] A refused admin request returns 403 rather than 500. requireAdmin rendered
+      a template that did not exist, so the render threw and Express turned the
+      refusal into a server error while the log said 403. JSON callers now get a
+      JSON refusal, and every literal render target in src/routes is checked
+      against the views directory by a test
 
 
 ### Message Networking
@@ -210,6 +215,11 @@ Last updated: 2026-09-12
 - [x] Poll interval changes from the admin UI apply immediately instead of at
       the next gateway restart, and deleting a connection removes its schedule.
       Nothing called `updateConnectionSchedule` despite its doc comment saying to
+- [x] Deleting an area clears the echolist entries pointing at it. local_area_id
+      is what makes an areatag read as locally carried, and area ids are reusable,
+      so a stale pointer eventually names whichever area took the id rather than
+      staying visibly broken. Reconciliation also clears pointers at areas that
+      no longer exist, repairing databases that already carry them
 - [x] Message dates that cannot be true are rejected at both ingest points
       (`echomail.ftnToDb` and `smbImport`), falling back to the receive time. A
       corrupt future date otherwise pins an area to the top of the recently
@@ -322,9 +332,15 @@ Last updated: 2026-09-12
 - [x] Databases created as UTF8 explicitly, with `setup/convert_db_encoding.sh`
       to convert an existing SQL_ASCII database (invalid-byte preflight, row
       count verification, name swap so `.env` needs no edit)
+- [x] Orphan job schedules removed automatically at gateway startup. Registration
+      rebuilds the managed set from the database, so anything in a managed family
+      it did not write has no row behind it and would otherwise fire its job for
+      ever. Confined by an explicit allowlist, and only run after a registration
+      pass that completed, since pruning against a half-built expected set would
+      delete live schedules
 
 ### Testing
-- [x] 3,252 tests passing (mocha)
+- [x] 3,278 tests passing (mocha)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
