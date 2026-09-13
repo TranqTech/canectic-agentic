@@ -157,6 +157,7 @@ var TOPIC_TAGS = {
     'NETMAIL_ROUTES.md':            ['netmail', 'ftn', 'routing', 'configuration'],
     'NETMAIL_RELAY.md':             ['netmail', 'ftn', 'relay', 'routing', 'configuration'],
     'OS_UPGRADE.md':                ['installation', 'maintenance', 'postgresql', 'upgrade'],
+    'UPDATES.md':                   ['updates', 'releases', 'maintenance', 'configuration'],
     'CHANGELOG.md':                 ['changelog']
 };
 

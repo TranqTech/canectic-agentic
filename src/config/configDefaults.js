@@ -249,6 +249,26 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'notifications_retention_days',   defaultValue: '30',    type: 'number',  category: 'maintenance', description: 'Days to keep read notifications before purge (0 = never purge)' },
 
 	// -----------------------------------------------------------------------
+	// Updates
+	//
+	// Off by default. An outbound request from a sysop's box should be
+	// something they turned on, not something they have to discover and turn
+	// off. The check never downloads and never applies.
+	// -----------------------------------------------------------------------
+	{ key: 'update_check_enabled',  defaultValue: 'false', type: 'boolean', category: 'updates',
+	  description: 'Check daily for a newer Canectic release and raise a sysop notification. Read-only: it never downloads and never applies anything.' },
+	{ key: 'update_channel',        defaultValue: 'stable', type: 'string',  category: 'updates',
+	  description: 'Which release channel this install follows. A system on development is also told when stable is available, since converging onto stable is a move it should be offered.',
+	  options: [
+	    { value: 'stable',      label: 'Stable',      hint: 'Full releases only. Also the right choice for a board other people call.' },
+	    { value: 'development', label: 'Development', hint: 'Builds cut when there is something worth having, possibly weeks apart. Meant to be run on live boards, not merely inspected.' }
+	  ] },
+	{ key: 'update_check_url',      defaultValue: 'https://canectic.tranqsoft.com/releases/', type: 'string', category: 'updates',
+	  description: 'Base URL holding the channel indexes. The check fetches index-<channel>.json from here and nothing else.' },
+	{ key: 'update_check_retention_days', defaultValue: '90', type: 'number', category: 'maintenance',
+	  description: 'Days of update check history to keep (0 = never purge)' },
+
+	// -----------------------------------------------------------------------
 	// Call Flow (web login experience)
 	// -----------------------------------------------------------------------
 	{ key: 'callflow_enabled',         defaultValue: 'true',           type: 'boolean', category: 'callflow',    description: 'Enable guided call flow on web login (announcements, callers, wall, newscan)' },

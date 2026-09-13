@@ -34,7 +34,7 @@ import { parseVersion, formatVersion, compareVersions, isNewer, baseStable, chan
 import { listTrackedFiles, selectShippedFiles } from '../src/release/shippedTree.js';
 import {
 	buildManifest, serialiseManifest, parseManifest, deltaFiles, diffManifests,
-	hashFile, hashBuffer, totalBytes, MANIFEST_FILENAME
+	hashFile, hashBuffer, totalBytes, manifestIsFor, MANIFEST_FILENAME
 } from '../src/release/manifest.js';
 import {
 	buildMetadata, validateMetadata, serialiseMetadata, artifactName, metadataName,
@@ -177,14 +177,30 @@ function loadIndex(outputDir, channel) {
 	return parseIndex(fs.readFileSync(file, 'utf8'));
 }
 
+// A manifest is only usable as a base if it describes the tree the metadata
+// names. The version and the `base` field are both derived from the version
+// string, so they agree with each other no matter which manifest was loaded;
+// this is the only check that can catch --base-manifest aimed at the wrong
+// tree, and the failure it prevents is a published delta nobody can rebuild.
+function verifiedBase(text, base, source) {
+	var manifest = parseManifest(text);
+	if (!manifestIsFor(manifest, base)) {
+		die(source + ' describes ' + (manifest.version || 'an unnamed tree') + ', not ' + base + '. ' +
+			'A delta built against it would reconstruct into a tree no release corresponds to.');
+	}
+	return manifest;
+}
+
 function loadBaseManifest(outputDir, base, override) {
 	if (override) {
 		if (!fs.existsSync(override)) die('base manifest not found: ' + override);
-		return parseManifest(fs.readFileSync(override, 'utf8'));
+		return verifiedBase(fs.readFileSync(override, 'utf8'), base, override);
 	}
 
 	var standalone = path.join(outputDir, manifestName(base));
-	if (fs.existsSync(standalone)) return parseManifest(fs.readFileSync(standalone, 'utf8'));
+	if (fs.existsSync(standalone)) {
+		return verifiedBase(fs.readFileSync(standalone, 'utf8'), base, manifestName(base));
+	}
 
 	// Fall back to the copy inside the stable tarball, which is the authority
 	// and is what a maintainer who only kept the published files will have.
@@ -192,7 +208,7 @@ function loadBaseManifest(outputDir, base, override) {
 	if (fs.existsSync(tarball)) {
 		var text = execFileSync('tar', ['-xzOf', tarball, 'canectic-' + base + '/' + MANIFEST_FILENAME],
 			{ maxBuffer: 64 * 1024 * 1024 }).toString('utf8');
-		return parseManifest(text);
+		return verifiedBase(text, base, artifactName(base, { delta: false }));
 	}
 
 	die('no manifest for base ' + base + ' in ' + outputDir + '. A development build is a delta ' +

@@ -99,6 +99,13 @@ stable released) plus today's date, builds a delta against that stable, and
 publishes it. A second build on one day gets a counter rather than overwriting
 the first, which somebody may already be running.
 
+It refuses a `--base-manifest` that describes a different tree than the metadata
+names. The version and the `base` field are both derived from the version
+string, so they agree with each other whichever manifest was loaded, and nothing
+else can catch a delta computed against the wrong tree. The manifest states
+which version it describes, so the check costs one comparison and the failure it
+prevents is a published delta nobody can reconstruct.
+
 It refuses when nothing differs from the base but the version stamp. Every
 development build rewrites the version in the staged `package.json`, so that one
 file always differs; the script re-hashes it with the base's version put back to
@@ -224,6 +231,7 @@ Two retention constraints, neither of them a preference:
 | `src/release/releaseIndex.js` | The per-channel index |
 | `src/release/pipelineCheck.js` | The migration coverage rule, both callers |
 | `src/release/changelog.js` | Reading and closing `Pending` |
+| `src/release/updateVerdict.js` | Whether an update exists and may be taken (phase 5) |
 | `docs/releases/pending.json` | The declarations accumulating this cycle |
 
 Everything under `src/release/` is pure or filesystem-only, and unit tested in

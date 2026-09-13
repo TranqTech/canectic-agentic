@@ -1,0 +1,187 @@
+extends ../../layouts/admin
+
+block content
+  //- Read-only. Nothing on this page downloads or applies anything; that is the
+  //- updater, which does not exist yet. What it can do is answer the two
+  //- questions a sysop has: is there something newer, and may this system take
+  //- it.
+  -
+    var verdictClass = {
+      current:   'secondary',
+      available: 'success',
+      blocked:   'warning',
+      unknown:   'secondary'
+    }
+    var verdictLabel = {
+      current:   'Up to date',
+      available: 'Available',
+      blocked:   'Blocked',
+      unknown:   'Not resolved'
+    }
+    var blockerLabel = {
+      migration:        'Migration',
+      min_upgrade_from: 'Too old to upgrade directly',
+      node_min:         'Node too old'
+    }
+    var cls = function (v) { return verdictClass[v] || 'secondary' }
+    var lbl = function (v) { return verdictLabel[v] || String(v || 'unknown') }
+
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-11.col-12
+        h2.mb-1
+          i.bi.bi-arrow-up-circle.me-2
+          | Software Update
+        p.text-muted.small.mb-3
+          | Whether a newer Canectic exists, and whether this system can move to it.
+          | The check is read-only: it resolves a release index and nothing else.
+          | Downloading and applying an update is not implemented yet.
+
+        //- What is running
+        .card.bg-dark.border-secondary.mb-3
+          .card-body
+            .row
+              .col-md-3.col-6.mb-2
+                .text-muted.small Running
+                .fs-5.fw-bold= running
+              .col-md-3.col-6.mb-2
+                .text-muted.small Channel
+                .fs-5= channel
+              .col-md-3.col-6.mb-2
+                .text-muted.small Node
+                .fs-5= nodeVersion
+              .col-md-3.col-6.mb-2
+                .text-muted.small Daily check
+                if enabled
+                  span.badge.bg-success.fs-6 On
+                else
+                  span.badge.bg-secondary.fs-6 Off
+
+            if !enabled
+              .alert.alert-secondary.small.mt-3.mb-0
+                | The daily check is off, so this system never reaches out on its own.
+                | Turn on
+                code.mx-1 update_check_enabled
+                a(href='/admin/config') on the config page
+                |  to have it look once a day and raise a notification, or press
+                | Check now below, which asks straight away.
+
+        //- Last check
+        .d-flex.align-items-center.mb-2
+          h4.mb-0 Last check
+          .ms-auto
+            form(method='post' action='/admin/update/check' style='display:inline')
+              button.btn.btn-sm.btn-primary(type='submit')
+                i.bi.bi-arrow-clockwise.me-1
+                | Check now
+
+        if !last
+          .alert.alert-secondary
+            | This system has never checked. Nothing has been sent anywhere.
+
+        else
+          p.text-muted.small
+            | #{new Date(last.checked_at).toLocaleString()}
+            |  (#{last.source === 'manual' ? 'asked for' : 'scheduled'})
+
+          if last.error
+            .alert.alert-danger
+              strong Could not resolve the release index.
+              br
+              code= last.error
+              br
+              span.small
+                | Fetching from
+                code.mx-1= checkUrl
+                | . Nothing published there yet is a normal answer while the
+                | project has cut no releases.
+
+          if result && result.channels
+            .row.g-3
+              each chan, name in result.channels
+                .col-lg-6
+                  .card.bg-dark.border-secondary.h-100
+                    .card-header.d-flex.align-items-center
+                      strong.text-capitalize= name
+                      if name === channel
+                        span.badge.bg-info.ms-2 your channel
+                      span.badge.ms-auto(class='bg-' + cls(chan.verdict))= lbl(chan.verdict)
+                    .card-body
+                      if chan.verdict === 'current'
+                        p.mb-0.text-muted
+                          | Nothing newer than #{chan.current} on this channel.
+                      else if chan.verdict === 'unknown'
+                        p.mb-0.text-muted
+                          | No index resolved for this channel.
+                      else
+                        p.mb-2
+                          span.fs-5.fw-bold= chan.available
+                          if chan.release && chan.release.codename
+                            span.text-muted.ms-2= chan.release.codename
+                          if chan.release && chan.release.released
+                            span.text-muted.small.ms-2 released #{chan.release.released}
+
+                        if chan.release
+                          dl.row.small.mb-2
+                            if chan.release.node_min
+                              dt.col-5.text-muted Needs Node
+                              dd.col-7= chan.release.node_min
+                            if chan.release.min_upgrade_from
+                              dt.col-5.text-muted Upgrades from
+                              dd.col-7 #{chan.release.min_upgrade_from} or later
+                            if chan.release.migrations && chan.release.migrations.length
+                              dt.col-5.text-muted Migrations
+                              dd.col-7= chan.release.migrations.join(', ')
+                            if chan.release.delta
+                              dt.col-5.text-muted Delta against
+                              dd.col-7= chan.release.base
+
+                        if chan.blockers && chan.blockers.length
+                          .alert.alert-warning.small.mb-0
+                            strong This system cannot take it yet:
+                            ul.mb-0.mt-1
+                              each b in chan.blockers
+                                li
+                                  strong #{blockerLabel[b.kind] || b.kind}:
+                                  |  #{b.detail}
+                        else
+                          .alert.alert-success.small.mb-0
+                            | Nothing blocks this move. Applying it is not implemented yet;
+                            | update with
+                            code.mx-1 setup/update.sh
+                            | for now.
+
+        //- History
+        if history && history.length
+          h4.mt-4 History
+          p.text-muted.small
+            | Every check, whether it found anything or not. A page showing only the
+            | last result cannot tell a check that found nothing from a check that
+            | never ran, and the second is the one worth seeing.
+          .table-responsive
+            table.table.table-sm.table-dark.table-striped
+              thead
+                tr
+                  th When
+                  th Source
+                  th Running
+                  th Verdict
+                  th Found
+                  th Notified
+              tbody
+                each h in history
+                  tr
+                    td.small= new Date(h.checked_at).toLocaleString()
+                    td.small= h.source
+                    td.small= h.current_version
+                    td
+                      span.badge(class='bg-' + cls(h.verdict))= lbl(h.verdict)
+                      if h.error
+                        i.bi.bi-exclamation-triangle.text-danger.ms-1(title=h.error)
+                    td.small= h.available_version || '-'
+                    td.small
+                      if h.notified
+                        i.bi.bi-bell-fill.text-info
+    br

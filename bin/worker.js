@@ -547,6 +547,30 @@ function createMaintenanceProcessor() {
 				break;
 			}
 
+			case 'update-check': {
+				var updateCheck = await import("../src/maintenance/updateCheck.js");
+				var checkResult = await updateCheck.runCheck({ source: 'schedule' });
+				if (checkResult && checkResult.skipped) {
+					alogger.writeAlog(3, '[Worker] Update check skipped: ' + checkResult.reason, 'cyan');
+				} else if (checkResult && checkResult.best) {
+					alogger.writeAlog(2, '[Worker] Update check: ' + checkResult.best.verdict +
+						' (' + checkResult.best.available + ' on ' + checkResult.best.channel + ')', 'cyan');
+				} else {
+					alogger.writeAlog(3, '[Worker] Update check: nothing newer', 'cyan');
+				}
+				break;
+			}
+
+			case 'purge-update-checks': {
+				var updateChecksModel = await import("../src/models/updateChecks.js");
+				var ucDays = job.data.days || appConfig.getNumber('update_check_retention_days', 90);
+				if (ucDays > 0) {
+					var ucPurged = await updateChecksModel.purgeOld(ucDays);
+					if (ucPurged > 0) alogger.writeAlog(3, 'Purged ' + ucPurged + ' update check records older than ' + ucDays + ' days', 'cyan');
+				}
+				break;
+			}
+
 			case 'purge-relay-log': {
 				var relayLog = await import("../src/models/netmailRelayLog.js");
 				var relayDays = job.data.days || appConfig.getNumber('netmail_relay_log_retention_days', 180);

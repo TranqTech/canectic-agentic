@@ -620,9 +620,11 @@ told stable is available and reachable.
 1. **Signing.** GPG-signed `SHA256SUMS` is the right answer for a sysop
    audience, but it means key management and a documented verification path.
    Checksums alone are weaker but free.
-2. **Does the update page offer "check now"?** If the daily check is off, a
-   sysop still needs a way to ask, and that is an outbound request they opted
-   out of. Probably allowed as an explicit action, since it is a human asking.
+2. ~~**Does the update page offer "check now"?**~~ **Resolved: yes.** The
+   opt-out is about this system reaching out on its own, unprompted. A person
+   pressing a button is not that, and refusing them would mean the only way to
+   ask a question is to change a setting. `/admin/update` offers it and it runs
+   with `force`, whatever `update_check_enabled` says.
 3. **Is a database dump required before migrating**, offered, or only warned
    about?
 4. **How is the cached stable base stored**, and when is it discarded? It has to
@@ -653,7 +655,9 @@ Resolved during design:
    `scripts/release.mjs`, `src/release/`, `docs/releases/pending.json`. See
    `RELEASE_PROCESS.md` and section 13 below for what was decided while
    building it
-5. Update check and notification (read-only, no apply)
+5. ~~Update check and notification (read-only, no apply)~~ **done**:
+   `src/release/updateVerdict.js`, `src/maintenance/updateCheck.js`,
+   `src/models/updateChecks.js`, `/admin/update`. See section 14
 6. The updater, with the handoff model
 7. Bootstrap installer
 8. FTN transport
@@ -738,3 +742,82 @@ pending, which is the state v0.9.5a shipped in.
 - Nothing consumes the index yet. That is phase 5.
 - The manifest's `verifyTree` and `pathsToRemove` are written and tested but
   have no caller until the updater exists in phase 6.
+
+---
+
+## 14. Phase 5 as built
+
+The check exists, is off by default, and never downloads anything.
+`docs/sysop/UPDATES.md` is the sysop-facing guide; this records what the build
+decided that the design above did not.
+
+### Only what works is configurable
+
+`update_check_enabled`, `update_channel`, `update_check_url` and
+`update_check_retention_days`. The three FTN keys in section 5's table
+(`update_check_transport`, `update_stable_file_area`, `update_dev_file_area`)
+are deliberately absent until phase 8 ships that transport.
+
+Shipping a setting whose only other value does nothing is precisely what the
+`options` mechanism exists to prevent: a sysop selects `ftn`, nothing changes,
+nothing errors, and the settings page displays their choice as though it were in
+effect. They go in with the transport.
+
+The category is `updates` rather than the `system` the design's table named.
+`wall`, `qwk`, `chat`, `callflow` and `pm` are all their own category already, so
+four keys of their own is the established shape, not an exception.
+
+### The move rule reads only `applied`
+
+`migrationLedger.appliedIds()` is narrower than `settledIds()`. A `skipped`
+migration decided this system did not need it, and `preinstalled` means the
+database was born current, so in neither case is there a transformation for a
+target release to understand. `applied` is the only outcome that means data here
+changed.
+
+The conservative reading would have been to block on every settled id, and it is
+wrong in a way that would have been hard to see: a fresh install records every
+migration as `preinstalled`, so it would refuse every upgrade on a brand new
+board.
+
+### The notification deduplicates on version AND verdict
+
+Not in the design, and load-bearing. A daily job that says the same thing every
+morning is a job a sysop turns off, after which they hear about nothing at all.
+
+The key is both halves because a release that was blocked and is now reachable,
+because they ran the migration or upgraded Node, is news even though the version
+has not moved. Keying on version alone would swallow exactly the notification
+they have been waiting for.
+
+### A missing index is unknown, not an error
+
+A channel with nothing published has no index, and a 404 there is the normal
+state of a project that has cut no development builds. Treating it as a failure
+would put a red error on the page of every stable-only install, daily, for ever.
+A channel that resolves nothing reads as `unknown`; a 500, a timeout, or a
+document that is not an index is an error and is recorded as one.
+
+One channel failing does not discard the other. A system on development whose
+own index is unreachable is still told about stable.
+
+### The schedule is registered only when the check is on
+
+Rather than registered and skipped. `src/tools/schedules.js` reports every
+registered scheduler and compares it against what the database says should
+exist, so a permanently inert entry would be a line in the diagnostics that
+means nothing, on the one page whose value is that everything on it means
+something.
+
+The consequence is that turning the check on needs a gateway restart or a
+schedule sync, the same as every other schedule-affecting setting.
+
+### What phase 5 does not do
+
+No download, no verify, no apply, no preflight. `/admin/update` reports and
+offers Check now. The page says plainly that applying is not implemented and
+points at `setup/update.sh`.
+
+The FTN transport is phase 8, so an install with no outbound HTTP cannot check
+yet. It also cannot be harmed by one: with `update_check_enabled` off, which is
+the default, this system makes no outbound request at all.

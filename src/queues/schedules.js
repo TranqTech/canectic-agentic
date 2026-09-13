@@ -282,6 +282,38 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily update check
+		//
+		// Only registered when the sysop turned it on. An opt-in outbound
+		// request should not have a scheduler sitting there waiting for
+		// somebody to notice it, and registering it disabled would mean the
+		// queue diagnostics list a schedule that deliberately does nothing.
+		// -----------------------------------------------------------------
+		if (appConfig.getBoolean('update_check_enabled', false)) {
+			await maintenanceQueue.upsertJobScheduler('update-check-daily', {
+				pattern: '0 40 4 * * *',   // 4:40 AM daily
+			}, {
+				name: 'update-check',
+				data: {},
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
+		// Maintenance: daily update check history purge
+		// -----------------------------------------------------------------
+		var updateCheckDays = appConfig.getNumber('update_check_retention_days', 90);
+		if (updateCheckDays > 0) {
+			await maintenanceQueue.upsertJobScheduler('purge-update-checks-daily', {
+				pattern: '0 58 3 * * *',   // 3:58 AM daily
+			}, {
+				name: 'purge-update-checks',
+				data: { days: updateCheckDays },
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily user record maintenance
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('user-maintenance-daily', {

@@ -25,7 +25,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
 	hashBuffer, hashFile, buildManifest, serialiseManifest, parseManifest,
-	manifestIndex, diffManifests, deltaFiles, verifyTree, pathsToRemove, totalBytes
+	manifestIndex, diffManifests, deltaFiles, verifyTree, pathsToRemove, manifestIsFor, totalBytes
 } from '../src/release/manifest.js';
 
 function tmpTree(files) {
@@ -205,6 +205,31 @@ describe('deltaFiles', function () {
 		var m = manifestOf(tree, { 'a.js': 1 });
 		assert.deepStrictEqual(deltaFiles(m, m), []);
 		fs.rmSync(tree, { recursive: true, force: true });
+	});
+});
+
+describe('manifestIsFor', function () {
+
+	it('accepts the manifest of the version it names', function () {
+		assert.strictEqual(manifestIsFor({ version: '0.9.6a' }, '0.9.6a'), true);
+		assert.strictEqual(manifestIsFor({ version: 'v0.9.6a' }, '0.9.6a'), true);
+	});
+
+	it('rejects the manifest of a different tree', function () {
+		// The only check that can catch --base-manifest aimed at the wrong
+		// place. The version and the metadata `base` field are both derived
+		// from the version string, so they agree with each other whichever
+		// manifest was loaded, and the result is a published delta that
+		// reconstructs into a tree no release corresponds to.
+		assert.strictEqual(manifestIsFor({ version: '0.9.5a' }, '0.9.6a'), false);
+		assert.strictEqual(manifestIsFor({ version: '0.9.6a.20260913' }, '0.9.6a'), false);
+	});
+
+	it('fails closed on a manifest that names no tree', function () {
+		assert.strictEqual(manifestIsFor({}, '0.9.6a'), false);
+		assert.strictEqual(manifestIsFor({ version: null }, '0.9.6a'), false);
+		assert.strictEqual(manifestIsFor(null, '0.9.6a'), false);
+		assert.strictEqual(manifestIsFor({ version: '0.9.6a' }, null), false);
 	});
 });
 

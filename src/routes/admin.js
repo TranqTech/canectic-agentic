@@ -45,6 +45,7 @@ import * as systemAddresses from "../models/systemAddresses.js";
 import * as userAccounts from "../models/useraccounts.js";
 import * as sessionStore from "../middleware/db/sessionstore.js";
 import * as alogger from "../utils/alogger.js";
+import * as systeminfo from "../utils/systeminfo.js";
 import * as jobs from "../queues/jobs.js";
 import { updateTimedEventSchedule, removeTimedEventSchedule, updateSegmentSchedule, removeSegmentSchedule } from "../queues/schedules.js";
 import { maintenanceQueue } from "../queues/queues.js";
@@ -64,6 +65,7 @@ import * as ftnNodelist from '../models/ftnNodelist.js';
 import * as mailerSessions from '../models/mailerSessions.js';
 import * as outboundFileLog from '../models/outboundFileLog.js';
 import * as netmailRelayLog from '../models/netmailRelayLog.js';
+import * as updateChecks from '../models/updateChecks.js';
 import * as mailerFormat from '../utils/mailerFormat.js';
 import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
@@ -6478,6 +6480,54 @@ router.get('/relay-log', requireAdmin, async (req, res) => {
 		days, decision, stuckHours,
 		relayMode: appConfig.get('netmail_relay_mode', 'nodelist')
 	});
+});
+
+// -------------------------------------------------------
+// Update
+//
+// Read-only in this phase: it reports what the last check found and lets a
+// sysop ask for another one. Nothing here downloads or applies anything.
+//
+// Both channels are shown whatever is selected, since someone on development
+// needs to be told stable is available and reachable. A blocked release is
+// shown as blocked with its reasons rather than hidden, because a sysop who
+// cannot see why they are stuck cannot do anything about it.
+// -------------------------------------------------------
+
+router.get('/update', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+
+	var last = await updateChecks.latest();
+	var result = null;
+	if (last && last.result) {
+		result = (typeof last.result === 'string') ? JSON.parse(last.result) : last.result;
+	}
+
+	res.render('admin/update/index', {
+		sufficientAccess, title: 'Software Update', activelink: 'update',
+		activenav: 'update', currentuser,
+		running:   systeminfo.canonicalVersion(),
+		nodeVersion: process.versions.node,
+		enabled:   appConfig.getBoolean('update_check_enabled', false),
+		channel:   appConfig.get('update_channel', 'stable'),
+		checkUrl:  appConfig.get('update_check_url', ''),
+		last, result,
+		history:   await updateChecks.getRecent(20)
+	});
+});
+
+// A check the sysop asked for runs even when the daily check is off. The
+// opt-out is about this system reaching out on its own; a person pressing the
+// button is not that.
+router.post('/update/check', urlencodedParser, requireAdmin, async (req, res) => {
+	var updateCheck = await import('../maintenance/updateCheck.js');
+	try {
+		await updateCheck.runCheck({ source: 'manual', force: true });
+	} catch (e) {
+		alogger.writeAlog(2, '[Admin] Manual update check failed: ' + e.message, 'yellowbright');
+	}
+	res.redirect('/admin/update');
 });
 
 // -------------------------------------------------------

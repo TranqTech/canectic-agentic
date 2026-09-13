@@ -311,6 +311,14 @@ Last updated: 2026-09-13
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
+- [x] Update checking (`/admin/update`): opt-in daily job, off by default, that
+      resolves a release index and raises a sysop notification when something
+      newer exists. Read-only: it never downloads and never applies. A release
+      is reported as blocked, with reasons, when this database has applied a
+      migration the target does not ship, when the install is below the target's
+      upgrade floor, or when Node is too old. The notification deduplicates on
+      version and verdict together, so a blocked release becoming reachable is
+      still news. No telemetry: the request is a plain GET for a static file
 - [x] Release engineering (`scripts/release.mjs` + `src/release/`): one command
       cuts a stable or a development build, closes the changelog `Pending`
       section into the version, writes the release note skeleton, builds the

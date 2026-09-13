@@ -210,6 +210,31 @@ async function settledIds() {
 	}
 }
 
+// Migration ids this database actually APPLIED.
+//
+// Deliberately narrower than settledIds(). The update move rule asks whether a
+// target release understands the state this database is in, and only `applied`
+// means a migration transformed data here. `skipped` means the migration
+// decided this system did not need it, and `preinstalled` means the database
+// was born current and never needed it either; in neither case is there a
+// transformation for a target to understand, so neither should block a move.
+//
+// Getting that wrong in the conservative direction would refuse upgrades to
+// every fresh install, since a fresh database records every migration as
+// preinstalled.
+async function appliedIds() {
+	try {
+		var rows = await postgres.query(
+			'SELECT DISTINCT migration_id FROM schema_migrations WHERE outcome = $1',
+			[OUTCOME_APPLIED]
+		);
+		return (rows || []).map(function (r) { return r.migration_id; }).sort();
+	} catch (_) {
+		// No table means nothing has been recorded, which is the same answer.
+		return [];
+	}
+}
+
 async function record(migration, outcome, opts) {
 	var o = opts || {};
 	var res = await postgres.insertObject({
@@ -385,6 +410,7 @@ export {
 	normaliseMigration,
 	loadMigrations,
 	settledIds,
+	appliedIds,
 	recordFreshInstall,
 	runPhase,
 	recordManualCompletion,

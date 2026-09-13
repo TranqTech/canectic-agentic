@@ -23,6 +23,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { compareVersions } from '../utils/version.js';
 
 var MANIFEST_VERSION = 1;
 var MANIFEST_FILENAME = 'MANIFEST';
@@ -200,6 +201,24 @@ function pathsToRemove(localManifest, targetManifest) {
 	return diffManifests(localManifest, targetManifest).removed;
 }
 
+/**
+ * Is this the manifest of the version it is claimed to be?
+ *
+ * A delta is only reconstructable if it was computed against the tree the
+ * metadata names. Nothing else catches a mismatch: the version and the `base`
+ * field agree with each other because both are derived from the version string,
+ * so a manifest loaded from the wrong place slips straight past validation and
+ * produces an artifact nobody can rebuild. The manifest states which tree it
+ * describes, so the check costs one comparison.
+ *
+ * Fails closed on a manifest that names no version. Refusing to build against
+ * an unidentified tree is the whole point.
+ */
+function manifestIsFor(manifest, version) {
+	if (!manifest || !manifest.version || !version) return false;
+	return compareVersions(manifest.version, version) === 0;
+}
+
 /** Total bytes a manifest describes, used to size a delta against a full tree. */
 function totalBytes(manifest) {
 	var sum = 0;
@@ -220,5 +239,6 @@ export {
 	deltaFiles,
 	verifyTree,
 	pathsToRemove,
+	manifestIsFor,
 	totalBytes
 };
