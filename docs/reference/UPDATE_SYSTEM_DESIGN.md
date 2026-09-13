@@ -658,7 +658,11 @@ Resolved during design:
 5. ~~Update check and notification (read-only, no apply)~~ **done**:
    `src/release/updateVerdict.js`, `src/maintenance/updateCheck.js`,
    `src/models/updateChecks.js`, `/admin/update`. See section 14
-6. The updater, with the handoff model
+6. The updater, with the handoff model. **Partly built**: staging (download,
+   verify, reconstruct, verify against the manifest), the apply plan, the
+   applier with backup and rollback, and `src/tools/update.js`. The handoff
+   itself, process control, dependencies, schema, steps and progress rows are
+   not. See section 15
 7. Bootstrap installer
 8. FTN transport
 
@@ -821,3 +825,102 @@ points at `setup/update.sh`.
 The FTN transport is phase 8, so an install with no outbound HTTP cannot check
 yet. It also cannot be harmed by one: with `update_check_enabled` off, which is
 the default, this system makes no outbound request at all.
+
+---
+
+## 15. Phase 6 so far
+
+Half of phase 6 exists: everything up to and including putting files on disk,
+with nothing that touches a running system. `docs/sysop/UPDATING.md` covers the
+tool. This records the decisions.
+
+### What is built
+
+| Piece | Where |
+|-------|-------|
+| Download, verify, extract, reconstruct a delta, verify against the manifest | `src/maintenance/updateStaging.js` |
+| What applying a release does to an install | `src/release/applyPlan.js` |
+| Carrying that out, with backup and rollback | `src/maintenance/updateApply.js` |
+| Describing an installation the way an artifact is described | `shippedTree.scanInstalledFiles` |
+| The tool | `src/tools/update.js` |
+
+### What is not, and is deliberately absent rather than half done
+
+The detached handoff that spawns the updater from the staged tree; stopping and
+starting the processes; `npm install`; the schema and migration run; the
+declared upgrade steps; the durable progress rows; preflight beyond the move
+rule; the admin page's Update button.
+
+Until those exist this is a tool a sysop runs by hand with the BBS stopped, and
+it prints the remaining steps after it finishes rather than pretending they are
+done.
+
+### The plan is a value, not a loop
+
+`buildApplyPlan` is pure and returns a decision per file. The alternative, a
+function that walks the tree writing as it goes, is how `install.sh` came to
+delete every sysop-added asset under `public/`: the rule about what may be
+overwritten was expressed as control flow in a shell script, so it could not be
+read, tested, or shown to anybody before it ran.
+
+A dry run is now the same code path with the writes turned off, so what a sysop
+is shown is what will happen rather than a separate description of it.
+
+### Categories are claims about whose file it is
+
+`code` ours, overwrite and delete strays. `overlay` ours to add to, theirs to
+extend. `overlay-seed` theirs the moment it exists. `data` theirs once touched.
+`art` theirs.
+
+**Removal is limited to `code`.** Present locally and absent from the manifest
+means remove only there. Everywhere else a file we did not ship and do not ship
+now is the sysop's, and the general form of the rule would delete their door
+icons, their branding and their art. That is the install.sh bug restated, and it
+is the assertion the tests care most about.
+
+**An unknown category falls to conflict.** A release that adds a category this
+code predates must not have its files written blindly, because the updater runs
+from the new tree onto an old install and the categoriser it uses is whichever
+one is on disk.
+
+### The data rule is what the manifest was for
+
+`update.sh` compares mtimes, which say when a file was written and nothing about
+whether it differs from what shipped, so it has to stop and ask about every data
+file. With the previous release's hashes the question is answerable: still
+exactly what the last release shipped means nobody touched it, so take the
+update.
+
+An install with no `MANIFEST`, which is every install predating the release
+machinery, cannot answer it and **fails to conflict**: their file is kept and
+they are told. Guessing the other way would overwrite edits nobody can recover.
+The first upgrade off a pre-manifest install will therefore report every changed
+data file as a conflict, and the one after it will not.
+
+### The install's MANIFEST is written last, and is part of the backup
+
+`MANIFEST` describes the tree so it cannot appear in its own file list, and no
+plan will ever write it. It needs an explicit step, it happens only after
+everything else succeeded, and it is recorded in the backup like any other file.
+
+Both halves were bugs during the build. Without the write, an install stays at
+the old release's hashes and every data file the new release legitimately
+changed reads as a sysop edit for ever after. Without the backup entry, a
+rollback leaves the install claiming the release it just backed out of, which is
+the one lie that makes the next update reason from the wrong hashes.
+
+### Reconstruct, never patch
+
+A delta is laid over its base in staging and the result is pruned to the
+manifest and verified. The revert case is why: a file changed in an earlier
+development build and put back in a later one appears in neither delta at its
+correct content, so patching a live tree leaves it silently wrong. Rebuilding
+from the base makes reverts, deletions and half-applied states correct by
+construction, and the manifest check is an end-state assertion the full-tarball
+path never had.
+
+### Still to decide before this is finished
+
+Open decisions 1, 3 and 4 all land in the rest of this phase: signing, whether a
+database dump is required before migrating, and how the cached stable base is
+stored and retired. Nothing built so far forecloses any of them.

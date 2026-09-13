@@ -29,6 +29,8 @@
 // Pure except for listTrackedFiles, which shells out to git.
 
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 
 var CATEGORY_CODE         = 'code';
 var CATEGORY_OVERLAY      = 'overlay';
@@ -150,6 +152,63 @@ function listTrackedFiles(root) {
 	return out.toString('utf8').split('\0').filter(function (p) { return p.length > 0; });
 }
 
+/** The top-level directories any shipped path can live under. */
+function categoryRoots() {
+	return DIRECTORY_CATEGORIES.map(function (r) { return r.prefix.replace(/\/$/, ''); });
+}
+
+/**
+ * Every shipped-category file present in an installation.
+ *
+ * Walks only the directories a release can own, plus the root files it ships.
+ * That is the difference between this and a whole-tree walk: an install also
+ * holds the ftn spool, logs, uploaded files and node_modules, none of which a
+ * release has any business looking at, and some of which are enormous.
+ *
+ * Used to work out what applying a release would do. The categories come from
+ * the same rules the artifact was built with, so a file is treated the same way
+ * on both sides.
+ *
+ * @returns {Array<{path:string, category:string}>} sorted, same shape as
+ *          selectShippedFiles
+ */
+function scanInstalledFiles(root) {
+	var found = [];
+
+	function walk(rel) {
+		var abs = path.join(root, rel);
+		var entries;
+		try {
+			entries = fs.readdirSync(abs, { withFileTypes: true });
+		} catch (_) {
+			return; // a directory this install does not have is not an error
+		}
+		for (var e of entries) {
+			var childRel = rel ? rel + '/' + e.name : e.name;
+			if (e.isSymbolicLink()) continue; // never follow: a link out of the tree is not ours
+			if (e.isDirectory()) { walk(childRel); continue; }
+			if (!e.isFile()) continue;
+			var category = categoryForPath(childRel);
+			if (category === null) continue;
+			found.push({ path: childRel, category: category });
+		}
+	}
+
+	for (var dir of categoryRoots()) walk(dir);
+
+	for (var file of Object.keys(FILE_CATEGORIES)) {
+		if (file.indexOf('/') !== -1) continue; // nested files are covered by the walk
+		try {
+			if (fs.statSync(path.join(root, file)).isFile()) {
+				found.push({ path: file, category: FILE_CATEGORIES[file] });
+			}
+		} catch (_) { /* not installed */ }
+	}
+
+	found.sort(function (a, b) { return a.path < b.path ? -1 : (a.path > b.path ? 1 : 0); });
+	return found;
+}
+
 export {
 	CATEGORIES,
 	CATEGORY_CODE,
@@ -164,5 +223,7 @@ export {
 	categoryForPath,
 	isShipped,
 	selectShippedFiles,
-	listTrackedFiles
+	listTrackedFiles,
+	categoryRoots,
+	scanInstalledFiles
 };

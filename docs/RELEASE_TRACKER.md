@@ -311,6 +311,15 @@ Last updated: 2026-09-13
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
+- [~] Update staging and applying (`src/tools/update.js`): fetches a release,
+      verifies its checksum before unpacking, reconstructs a development delta
+      against its base and checks it against the manifest, then plans and
+      optionally applies it with a backup of everything displaced. The plan is a
+      pure value per file, so a dry run is the same code path with the writes
+      off. Sysop content survives by category, and removal happens only in code
+      directories. **Half of phase 6**: no process control, dependency install,
+      schema run, upgrade steps, detached handoff or progress rows, so
+      `setup/update.sh` is still the supported path for a normal update
 - [x] Update checking (`/admin/update`): opt-in daily job, off by default, that
       resolves a release index and raises a sysop notification when something
       newer exists. Read-only: it never downloads and never applies. A release
