@@ -136,11 +136,28 @@ describe('messageBase MSGID split marker', function () {
 });
 
 describe('dbmigrations no longer runs the MSGID split', function () {
+	// These properties have outlived two implementations. The repair was once
+	// inline in dbmigrations.js, then advertised by a bespoke function there,
+	// and is now an entry in the migration ledger. What must stay true is the
+	// same each time: migrations do not pay for the scan, and a system that
+	// still needs the repair is told so.
+	//
+	// Asserted against the loaded migration rather than the text of
+	// dbmigrations.js, because the previous version of this test pinned where
+	// the code lived rather than what it did, and failed when it moved while
+	// every property it cared about still held.
 	var src = null;
+	var migration = null;
+
 	before(async function () {
 		try {
 			var fs = await import('fs');
 			src = fs.readFileSync('src/tools/dbmigrations.js', 'utf8');
+			var ledger = await import('../src/maintenance/migrationLedger.js');
+			var loaded = await ledger.loadMigrations('db/migrations');
+			migration = loaded.migrations.filter(function (m) {
+				return m.slug === 'msgid-tuple-split';
+			})[0] || null;
 		} catch (_) { this.skip(); }
 	});
 
@@ -148,22 +165,29 @@ describe('dbmigrations no longer runs the MSGID split', function () {
 		// The whole point: every update used to scan every message table in
 		// full to establish there was nothing to do.
 		assert.ok(!/fixLegacyMsgIds/.test(src),
-			'migrations must not run the repair, only advertise it');
+			'migrations must not run the repair, only report it');
+	});
+
+	it('is declared as a migration rather than a special case', function () {
+		assert.ok(migration, 'expected db/migrations to carry the MSGID split');
+		assert.strictEqual(migration.automatic, false,
+			'it must never be run automatically; a sysop chooses when to pay for the scan');
+		assert.strictEqual(migration.run, null);
 	});
 
 	it('still tells the sysop how to run it', function () {
-		assert.ok(/--fix-msgids/.test(src),
+		assert.ok(/--fix-msgids/.test(migration.instructions),
 			'removing it silently would leave an unrepaired system with no way to find out');
 	});
 
-	it('checks the marker rather than scanning to decide', function () {
-		assert.ok(/msgidSplitCompleted/.test(src));
-
-		// Comments stripped: the file explains the expensive predicate in
-		// prose, and matching that explanation is not the same as running it.
-		var code = src.split('\n')
+	it('decides from a cheap lookup rather than the scan', async function () {
+		var fs = await import('fs');
+		var body = fs.readFileSync('db/migrations/' + migration.file, 'utf8');
+		var code = body.split('\n')
 			.filter(function (l) { return !/^\s*(\/\/|\*|\/\*)/.test(l); })
 			.join('\n');
 		assert.ok(!/msg_id LIKE/.test(code), 'that predicate is the expensive scan');
+		assert.ok(/msgid_tuple_split_completed_at/.test(code),
+			'a system that ran the repair before the ledger existed must not be told to do it again');
 	});
 });

@@ -546,6 +546,10 @@ async function columnExists(table, column) {
 // run this" without paying for the scan to find out.
 const MSGID_SPLIT_MARKER = 'msgid_tuple_split_completed_at';
 
+// The ledger id for the same one-time step. db/migrations/0002 reports it as
+// pending; this module records it when the repair is actually performed.
+const MSGID_MIGRATION_ID = '0002-msgid-tuple-split';
+
 /**
  * Has the one-time MSGID tuple split been run on this system?
  */
@@ -581,18 +585,38 @@ function shouldMarkComplete(options) {
  * migration tool on a system that has no message bases to repair.
  */
 async function markMsgidSplitCompleted(note) {
+	var ok = true;
 	try {
 		await postgres.write(
 			'INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ' +
 			'ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()',
 			[MSGID_SPLIT_MARKER, note || new Date().toISOString()]
 		);
-		return true;
 	} catch (err) {
 		alogger.writeAlog(3, '[FixMsgIds] could not record completion marker: ' +
 			(err?.message || err), 'yellow');
-		return false;
+		ok = false;
 	}
+
+	// Also record it in the migration ledger, which is where one-time steps are
+	// tracked now. The settings marker is kept because systems that predate the
+	// ledger have one and migration 0002 reads it to decide it has nothing to
+	// tell them; this is the other half of that bridge, so a repair run today
+	// leaves a row in the general place rather than only in the private one.
+	try {
+		var ledger = await import('./migrationLedger.js');
+		if (!(await ledger.isSettled(MSGID_MIGRATION_ID))) {
+			await ledger.recordManualCompletion(MSGID_MIGRATION_ID, {
+				description: 'Split legacy "address serial" MSGIDs into the msg_id / msg_orig_addr tuple',
+				note: note || 'completed via maintenance.js --fix-msgids'
+			});
+		}
+	} catch (err) {
+		alogger.writeAlog(3, '[FixMsgIds] could not record ledger entry: ' +
+			(err?.message || err), 'yellow');
+	}
+
+	return ok;
 }
 
 async function fixLegacyMsgIds(options) {
@@ -764,5 +788,6 @@ export {
 	msgidSplitCompleted,
 	shouldMarkComplete,
 	markMsgidSplitCompleted,
-	MSGID_SPLIT_MARKER
+	MSGID_SPLIT_MARKER,
+	MSGID_MIGRATION_ID
 };

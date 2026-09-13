@@ -7,12 +7,14 @@ import { maintainAllAreaTables } from "../models/messageMaint.js";
 // Aliased: this file already has a getTableColumns that reads column
 // definitions out of a .conf file. The imported one reads the live table.
 import { getTableColumns as getLiveTableColumns, columnNameFromDefinition } from "../middleware/db/tableTools.js";
+import * as ledger from "../maintenance/migrationLedger.js";
 
 //setup
 dotenv.config();
 const workingdir = process.cwd();
 const seedDir = workingdir + "/db/seed";
 const schemaDir = workingdir + "/db/schema";
+const migrationsDir = workingdir + "/db/migrations";
 
 // Simple name validation for table/column names from config files
 const validNameRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -223,112 +225,9 @@ async function checkOrCreateTable(tablename, summary) {
 
 // --- Targeted migrations ---
 
-// Split the legacy "addr serial" msg_id / reply_to string format into
-// the new tuple storage (msg_id = 8-char serial, msg_orig_addr = origin
-// address). This runs after the column auto-add step so the new columns
-// exist, then scans each affected table and backfills the new columns
-// from the old strings.
-//
-// Rules:
-//   - If msg_id contains a space: split on first space. First token
-//     is the address (goes into msg_orig_addr), second token is the
-//     serial (stays in msg_id).
-//   - If msg_id is already 8 hex chars with no space: assume it's
-//     already in the new format, skip.
-//   - If msg_id is empty or NULL: skip.
-//   - Same rules for reply_to → reply_orig_addr.
-//
-// Idempotent: running on an already-migrated DB finds no rows with
-// spaces in msg_id and does nothing.
-async function migrateMenuLayout() {
-	try {
-		// Step 1: Migrate display_entries from BOOLEAN to VARCHAR(8)
-		var typeRows = await pgdb.query(
-			"SELECT data_type FROM information_schema.columns WHERE table_name = 'menus' AND column_name = 'display_entries'",
-			[]
-		);
-		if (typeRows.length > 0 && typeRows[0].data_type === 'boolean') {
-			console.log("  Migrating menus.display_entries from BOOLEAN to VARCHAR(8)...");
-			var err = await pgdb.write(
-				"ALTER TABLE menus ALTER COLUMN display_entries TYPE VARCHAR(8) USING CASE WHEN display_entries THEN 'auto' ELSE 'off' END"
-			);
-			if (err) {
-				console.log("  ERROR migrating display_entries type:", err.message);
-				return;
-			}
-			var err2 = await pgdb.write(
-				"ALTER TABLE menus ALTER COLUMN display_entries SET DEFAULT 'auto'"
-			);
-			if (err2) {
-				console.log("  ERROR setting display_entries default:", err2.message);
-				return;
-			}
-			console.log("  display_entries migrated to VARCHAR(8) (true->auto, false->off)");
-		}
-
-		// Step 2: Migrate offset values to margin values before columns are dropped
-		var offsetRows = await pgdb.query(
-			"SELECT data_type FROM information_schema.columns WHERE table_name = 'menus' AND column_name = 'entries_x_offset'",
-			[]
-		);
-		if (offsetRows.length > 0) {
-			var marginRows = await pgdb.query(
-				"SELECT data_type FROM information_schema.columns WHERE table_name = 'menus' AND column_name = 'margin_left'",
-				[]
-			);
-			if (marginRows.length > 0) {
-				console.log("  Migrating entries_x_offset/entries_y_offset to margin_left/margin_top...");
-				var err3 = await pgdb.write(
-					"UPDATE menus SET margin_left = COALESCE(entries_x_offset, 0) + 2, margin_top = COALESCE(entries_y_offset, 0) + 3 WHERE entries_x_offset IS NOT NULL AND entries_x_offset != 0 OR entries_y_offset IS NOT NULL AND entries_y_offset != 0"
-				);
-				if (err3) {
-					console.log("  ERROR migrating offset values:", err3.message);
-				} else {
-					console.log("  Offset values migrated to margins");
-				}
-			}
-		}
-	} catch (error) {
-		console.log("  ERROR in migrateMenuLayout:", error.message);
-	}
-}
-
 // --- Main ---
 
-async function setupTables() {
-	var summary = {
-		tablesDropped: [],
-		tablesCreated: [],
-		tablesUnchanged: [],
-		columnsAdded: [],
-		columnsRemoved: [],
-		errors: []
-	};
-
-	// Drop tables
-	var dropTableNames = getDropTableNames();
-	if (dropTableNames.length > 0) {
-		console.log("\n--- Dropping tables ---");
-		for (var dtable of dropTableNames) {
-			console.log("  Dropping: " + dtable);
-			var ok = await dropTable(dtable);
-			if (ok) summary.tablesDropped.push(dtable);
-		}
-	}
-
-	// Targeted migrations (must run before column add/remove)
-	console.log("\n--- Targeted migrations ---");
-	await migrateMenuLayout();
-
-	// Check/create tables
-	var tableNames = getTableNames();
-	console.log("\n--- Checking tables ---");
-	for (var table of tableNames) {
-		console.log("\n  Processing: " + table);
-		await checkOrCreateTable(table, summary);
-	}
-
-	// Print summary
+function printSummary(summary) {
 	console.log("\n========================================");
 	console.log("  Migration Summary");
 	console.log("========================================");
@@ -354,63 +253,164 @@ async function setupTables() {
 		console.log("  No changes needed.");
 	}
 	console.log("========================================\n");
+}
+
+// Run one migration phase and report it. Returns the phase result so the caller
+// can stop the whole run on a failure.
+async function runLedgerPhase(migrations, phase) {
+	var version = null;
+	try {
+		version = JSON.parse(fs.readFileSync(workingdir + "/package.json", "utf8")).version;
+	} catch (_) {}
+
+	var result = await ledger.runPhase(migrations, phase, {
+		version: version,
+		log: function (line) { console.log(line); }
+	});
+
+	for (var r of result.results) {
+		if (r.outcome === 'applied') console.log("  applied: " + r.id);
+		if (r.outcome === 'skipped') console.log("  not needed: " + r.id);
+	}
+
+	if (result.failed) {
+		console.log("");
+		console.log("  MIGRATION FAILED: " + result.failed.id);
+		console.log("  " + result.failed.error);
+		console.log("");
+		console.log("  Nothing after it has run. Fix the cause and run this again;");
+		console.log("  migrations that already succeeded will not be repeated.");
+		return result;
+	}
+
+	// Manual migrations are reported, never run. The tool that performs one
+	// records it.
+	for (var m of result.manual) {
+		console.log("");
+		console.log("  ACTION NEEDED: " + m.id);
+		console.log("  " + m.description);
+		console.log("");
+		for (var line of String(m.instructions).split("\n")) {
+			console.log("      " + line);
+		}
+	}
+
+	if (result.applied === 0 && result.skipped === 0 && result.manual.length === 0) {
+		console.log("  Nothing pending.");
+	}
+
+	return result;
+}
+
+async function setupTables() {
+	var summary = {
+		tablesDropped: [],
+		tablesCreated: [],
+		tablesUnchanged: [],
+		columnsAdded: [],
+		columnsRemoved: [],
+		errors: []
+	};
+
+	// Drop tables
+	var dropTableNames = getDropTableNames();
+	if (dropTableNames.length > 0) {
+		console.log("\n--- Dropping tables ---");
+		for (var dtable of dropTableNames) {
+			console.log("  Dropping: " + dtable);
+			var ok = await dropTable(dtable);
+			if (ok) summary.tablesDropped.push(dtable);
+		}
+	}
+
+	// Load and validate every migration before anything touches the database.
+	// A typo in one of them should stop the run here, not after three others
+	// have already altered things.
+	var loaded = await ledger.loadMigrations(migrationsDir);
+	if (loaded.errors.length > 0) {
+		console.log("\n--- Migration ledger ---");
+		console.log("  REFUSING TO RUN. Migrations failed validation:");
+		for (var le of loaded.errors) console.log("    " + le);
+		summary.errors.push("migration ledger: " + loaded.errors.length + " invalid migration(s)");
+		printSummary(summary);
+		process.exitCode = 1;
+		return;
+	}
+
+	// Is this a database that has never held a Canectic install?
+	//
+	// It decides whether migrations are applied or recorded as never needed, so
+	// it is checked BEFORE the table pass creates anything. Getting it wrong in
+	// the "fresh" direction is the dangerous one: an existing install marked
+	// preinstalled would skip every repair it actually needed, silently. So the
+	// test is the presence of the users table, which every real install has had
+	// since the beginning.
+	var freshDatabase = !(await checkTable('users'));
+	if (freshDatabase) {
+		console.log("\n--- Migration ledger ---");
+		console.log("  Fresh database: recording " + loaded.migrations.length +
+			" migration(s) as not needed.");
+	}
+
+	// Bootstrap the ledger table before anything can need to write to it.
+	//
+	// It cannot wait for the general table pass below, because pre-schema
+	// migrations run first and have to record themselves. The ledger is the
+	// thing every other migration reports into, so it is created explicitly
+	// rather than discovered in the ordinary sweep.
+	await checkOrCreateTable('schema_migrations', summary);
+
+	// Pre-schema migrations: anything that has to read data the declarative
+	// pass is about to drop.
+	if (!freshDatabase && loaded.migrations.length > 0) {
+		console.log("\n--- Migrations (pre-schema) ---");
+		var preResult = await runLedgerPhase(loaded.migrations, ledger.PHASE_PRE);
+		if (preResult.stopped) {
+			summary.errors.push("migration " + preResult.failed.id + " failed");
+			printSummary(summary);
+			process.exitCode = 1;
+			return;
+		}
+	}
+
+	// Check/create tables
+	var tableNames = getTableNames();
+	console.log("\n--- Checking tables ---");
+	for (var table of tableNames) {
+		console.log("\n  Processing: " + table);
+		await checkOrCreateTable(table, summary);
+	}
+
+	printSummary(summary);
 
 	// Apply template-driven schema maintenance to all dynamic message/thread tables
 	console.log("\n--- Message Table Maintenance ---");
 	await maintainAllAreaTables();
 
-	// The MSGID tuple split is NOT run here. It is a one-time repair for message
-	// bases written before msg_id and msg_orig_addr were separate columns, and
-	// running it on every migration meant a full scan of every per-area message
-	// table on every update: its predicate is `msg_id LIKE '% %'`, which no
-	// index helps. On a hub with hundreds of areas that is minutes of work to
-	// establish there is nothing to do.
-	//
-	// Instead, say whether it still needs running. The check is a single
-	// lookup, not a scan.
-	await advertiseMsgidSplit();
-}
+	// A fresh database is born current: there is no legacy data for a migration
+	// to repair, so every one is recorded as never needed. This happens after
+	// the table pass, because the ledger table has to exist before it can be
+	// written to.
+	if (freshDatabase) {
+		var version = null;
+		try {
+			version = JSON.parse(fs.readFileSync(workingdir + "/package.json", "utf8")).version;
+		} catch (_) {}
+		var recorded = await ledger.recordFreshInstall(loaded.migrations, { version: version });
+		console.log("\n--- Migration ledger ---");
+		console.log("  Recorded " + recorded + " migration(s) as not needed on a fresh database.");
+		return;
+	}
 
-/**
- * Tell the sysop whether the one-time MSGID tuple split still needs running.
- *
- * A system with no per-area message tables has nothing to repair and is marked
- * done immediately, so a fresh install never sees the notice.
- */
-async function advertiseMsgidSplit() {
-	console.log("\n--- MSGID tuple split ---");
-	try {
-		var messageBase = await import('../maintenance/messageBase.js');
-
-		if (await messageBase.msgidSplitCompleted()) {
-			console.log("  Already done on this system.");
-			return;
+	// Post-schema migrations: everything that needs the schema to be current.
+	// This is where a one-shot data repair belongs, and where the manual ones
+	// are reported.
+	if (loaded.migrations.length > 0) {
+		console.log("\n--- Migrations (post-schema) ---");
+		var postResult = await runLedgerPhase(loaded.migrations, ledger.PHASE_POST);
+		if (postResult.stopped) {
+			process.exitCode = 1;
 		}
-
-		var areaRow = await pgdb.queryOne(
-			"SELECT COUNT(*) AS cnt FROM information_schema.tables " +
-			"WHERE table_schema = 'public' AND table_name LIKE 'mb\\_%\\_msgs'"
-		);
-		var areaTables = areaRow ? parseInt(areaRow.cnt) : 0;
-
-		if (areaTables === 0) {
-			await messageBase.markMsgidSplitCompleted('no message bases at install time');
-			console.log("  No message bases yet, nothing to repair.");
-			return;
-		}
-
-		console.log("  NOT RUN on this system yet.");
-		console.log("");
-		console.log("  If this message base predates the msg_id / msg_orig_addr split, run:");
-		console.log("");
-		console.log("      node src/tools/maintenance.js --fix-msgids --dry-run   (report only)");
-		console.log("      node src/tools/maintenance.js --fix-msgids             (repair)");
-		console.log("");
-		console.log("  It needs the worker running, and only ever needs doing once.");
-		console.log("  It is no longer part of migrations because it scans every message");
-		console.log("  table in full, which made every update slow for no benefit.");
-	} catch (err) {
-		console.log("  Could not determine status: " + err.message);
 	}
 }
 

@@ -519,12 +519,20 @@ On refusal, name the migration id and what it was for. "You cannot move to
 stable" is not actionable; "your database has applied `0007-fileecho-hashes`,
 which stable 0.9.6a does not ship" is.
 
-**Dependency:** this rule needs a recorded migration ledger, which does not exist
-yet. Today there is no migrations table and four different ad-hoc answers to
-"has this one-time step run" (schema sniffing in `migrateMenuLayout`, a marker
+**Dependency: built.** This rule needs a recorded migration ledger, which now
+exists: `schema_migrations` plus `db/migrations/` and
+`src/maintenance/migrationLedger.js`. Migration ids in release metadata are the
+ids in that table.
+
+Before it there was no migrations table and four different ad-hoc answers to
+"has this one-time step run": schema sniffing in `migrateMenuLayout`, a marker
 row in `settings` for the MSGID split, nothing at all for `qwkConfRenumber`, and
-an unanswerable question for `allow_netmail_relay`). That work is a prerequisite
-and is designed separately.
+an unanswerable question for `allow_netmail_relay`. The first two are now
+ledger entries. `qwkConfRenumber` should become one. `allow_netmail_relay`
+remains unanswerable, because it is a config problem rather than a migration
+one: `configStore` seeds every default into `settings`, so a deliberately-set
+value cannot be told from an untouched key. Fixing that needs the settings table
+to record whether a row was seeded or set by a person.
 
 ### Preflight
 
@@ -631,8 +639,9 @@ Resolved during design:
 
 ## 12. Phasing
 
-1. Fix #44 so the two scripts stop disagreeing while the rest is built
-2. Migration ledger (prerequisite, designed separately)
+1. ~~Migration ledger~~ **done**: `schema_migrations`, `db/migrations/`,
+   `src/maintenance/migrationLedger.js`
+2. Fix #44 so the two scripts stop disagreeing while the rest is built
 3. Version parsing and comparison, with tests, since everything depends on it
 4. Release script and metadata, published by hand at first
 5. Update check and notification (read-only, no apply)

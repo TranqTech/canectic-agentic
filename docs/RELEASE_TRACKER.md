@@ -295,6 +295,12 @@ Last updated: 2026-09-12
 - [x] Apply a `.env` edit without restarting (Reload button on `/admin/config`,
       POST `/admin/config/reload`, fans out via CONFIG_CHANGED)
 - [x] Database migrations (declarative schema management)
+- [x] Migration ledger (`schema_migrations` + `db/migrations/`): ordered,
+      recorded, one-shot data migrations, which the declarative schema cannot
+      express because it converges on a shape rather than performing an event.
+      Pre and post phases relative to the schema pass, manual migrations that
+      are reported rather than run, one row per attempt so a failure is history,
+      and a fresh database recorded as born current
 - [x] Startup DB/Redis validation (fail fast with clear error)
 - [x] Health check endpoint (GET /health)
 - [x] Worker liveness. The worker publishes a heartbeat with its per-queue
