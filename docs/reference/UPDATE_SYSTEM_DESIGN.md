@@ -66,23 +66,29 @@ retired.
 The phase letters line up with the release codenames: Handshake is the alpha
 era, Carrier the beta, First Call is 1.0.
 
-### Nightly
+### Development
 
 ```
 MAJOR.MINOR.PATCH[phase].YYYYMMDD
 ```
 
-A nightly carries **the version it is heading toward**, not the last one
-released. While work is going on toward `0.9.6a`, nightlies are
+A development build carries **the version it is heading toward**, not the last
+one released. While work is going on toward `0.9.6a`, development builds are
 `0.9.6a.20260913`.
 
-"Nightly" names the branch, not a cadence. A build is cut when there is
-something worth having rather than on a timer, so the gap between two nightlies
-may be a day or may be two months. The date is the build date and nothing
-depends on them being consecutive.
+A build is cut when there is something worth having rather than on a timer, so
+the gap between two of them may be a day or may be two months. The date is the
+build date and nothing depends on them being consecutive.
 
 If two builds are ever cut on one day, a counter is appended:
 `0.9.6a.20260913.2`.
+
+**Why not "nightly".** The obvious name promises a cadence this channel does not
+have. In common use it means an automated daily build off tip, so a sysop who
+subscribes and then sees nothing for two months has a fair question about
+whether it is broken, and that is a support burden created entirely by a word.
+It also undersells what these are: they go through the same release machinery as
+stable and are meant to be run on live boards, not merely inspected.
 
 ### Ordering
 
@@ -97,16 +103,16 @@ build is lower than the undated one it is heading toward.
 Read as: more prerelease is lower. A dated build is a prerelease of its target
 version, and an earlier phase is a prerelease of a later one.
 
-The property this buys is that **a nightly always converges onto its stable**.
-Whoever is running `0.9.6a.<anything>` can move to `0.9.6a` the day it ships,
-because it sorts above every nightly of that version.
+The property this buys is that **a development build always converges onto its
+stable**. Whoever is running `0.9.6a.<anything>` can move to `0.9.6a` the day it
+ships, because it sorts above every development build of that version.
 
 ### The obligation this creates
 
-Cutting stable `0.9.6a` must bump the nightly branch to `0.9.7a` in the same
-motion. Without that, nightlies keep claiming `0.9.6a.<date>`, which now sorts
-*below* the stable that just shipped, and every nightly user is told they are
-behind by a build that is actually ahead.
+Cutting stable `0.9.6a` must bump the development branch to `0.9.7a` in the same
+motion. Without that, development builds keep claiming `0.9.6a.<date>`, which now
+sorts *below* the stable that just shipped, and everyone on the channel is told
+they are behind by a build that is actually ahead.
 
 This is a step in the release script, not a thing to remember.
 
@@ -119,25 +125,26 @@ Two channels:
 | Channel | Contents | Cut when |
 |---------|----------|----------|
 | `stable` | Tagged releases | Deliberately, with release notes and the test checklist |
-| `nightly` | Builds off the development branch | When there is something worth shipping |
+| `development` | Builds off the development branch | When there is something worth shipping |
 
-A nightly build still goes through the release machinery: it gets a version,
+A development build still goes through the release machinery: it gets a version,
 metadata, an artifact and a checksum. What it skips is the ceremony -- the full
 manual test checklist and the written release notes.
 
 ### Branches
 
 Only `main` exists today. The channel model needs a development branch and a
-stable branch. Which of the two `main` becomes is an open decision (section 11).
+stable branch, named for the channels they feed so the two are one concept
+rather than two. Which of them `main` becomes is an open decision (section 11).
 
 ### Notification visibility
 
 | Selected channel | Notified about |
 |------------------|----------------|
 | `stable` | stable only |
-| `nightly` | nightly **and** stable |
+| `development` | development **and** stable |
 
-Someone on nightly needs to know a stable shipped, both because it may be the
+Someone on development needs to know a stable shipped, both because it may be the
 version they want to settle on and because it is often the safer move. Someone
 on stable has not asked to hear about development builds.
 
@@ -196,21 +203,22 @@ when missed.
 `migrations` lists the migration ids the release ships. That list is what makes
 the safety check in section 7 possible.
 
-### Nightly artifacts are deltas against stable
+### Development artifacts are deltas against stable
 
-A nightly ships only the files that differ from **the most recent stable**, plus
-a full manifest of the complete target tree.
+A development build ships only the files that differ from **the most recent
+stable**, plus a full manifest of the complete target tree.
 
 ```
 canectic-0.9.6a.20260913.delta.tar.gz    bodies of differing files only
 canectic-0.9.6a.20260913.json            metadata, including "base": "0.9.5a"
 ```
 
-Down a file echo this matters: a nightly that touches five files ships five
-files rather than the whole tree, on links that are often slow and sometimes
+Down a file echo this matters: a build that touches five files ships five files
+rather than the whole tree, on links that are often slow and sometimes
 metered.
 
-**Always against stable, never against the previous nightly.** One hop, always.
+**Always against stable, never against the previous development build.** One
+hop, always.
 Chaining deltas would mean replaying every intermediate build to reconstruct the
 current one, and a single pruned artifact would break the chain for everyone
 downstream of it.
@@ -224,7 +232,8 @@ which is precisely why `update.sh` uses `rm -rf` on code directories today.
 target tree from base plus delta in the staging directory, checks it against the
 manifest, and only then replaces the live tree. It never patches in place.
 
-That is not fussiness. Going from one nightly to a later one, a file that changed
+That is not fussiness. Going from one development build to a later one, a file
+that changed
 in the earlier build and was reverted in the later one appears in neither delta
 at its correct content: the local copy holds the earlier change, the target
 manifest wants the base version, and the delta carries no body for it because it
@@ -234,12 +243,14 @@ construction, and verifying the result against the manifest gives an end-state
 check the full-tarball path does not have.
 
 **The base is usually already on disk.** A sysop on stable `0.9.5a` moving to a
-nightly based on `0.9.5a` already holds the base, so only the delta is fetched.
+development build based on `0.9.5a` already holds the base, so only the delta is
+fetched.
 Otherwise the base stable artifact is fetched once and cached.
 
 Two consequences:
 
-- **A stable artifact cannot be pruned while a nightly references it.** The
+- **A stable artifact cannot be pruned while a development build references it.**
+  The
   current stable base must stay available on both transports. This is a
   constraint, not a retention preference.
 - **The delta size is a useful signal.** It grows through a cycle and resets to
@@ -268,8 +279,8 @@ A script, because there is no CI and the current manual process already let
 7. Write the release metadata, including steps and notices
 8. Write and sign `SHA256SUMS`
 9. Tag
-10. Bump the nightly branch version if this was a stable cut, which also
-    resets the nightly delta base to the version just cut
+10. Bump the development branch version if this was a stable cut, which also
+    resets the development delta base to the version just cut
 
 ---
 
@@ -293,7 +304,13 @@ reachable.
 |------|------|---------|
 | `CANECTIC` | Message | Release announcements and support |
 | `CANECTIC_FILES` | File | Stable artifacts |
-| `CANECTIC_NIGHTLY` | File | Nightly artifacts |
+| `CANECTIC_DEV` | File | Development artifacts |
+
+Areatags are kept short deliberately. Other sysops type these by hand into
+AreaFix requests and read them in echolists, so the abbreviation is worth more
+than the extra clarity of a longer tag. It is also the one place where the
+channel name is expensive to change later: renaming a config value costs
+nothing, renaming an echo other systems have already subscribed to does not.
 
 The file echoes carry artifacts only. The announcement is a message in the
 message echo, written for a person to read.
@@ -311,7 +328,7 @@ and echolist scan areas are configured today.
 ## 5. The update check
 
 A daily maintenance job, opt-in, off by default, that resolves the newest
-release on the selected channel (plus stable, if the channel is nightly) and
+release on the selected channel (plus stable, if the channel is development) and
 writes a sysop notification when something newer exists.
 
 It never downloads and never applies.
@@ -328,7 +345,7 @@ icon in both nav bars, so this needs no new delivery mechanism.
 | `update_check_transport` | `http` | system | `http`, `ftn`, or `both` |
 | `update_check_url` | (release index) | system | Where the HTTP index lives |
 | `update_stable_file_area` | null | system | File area carrying stable artifacts |
-| `update_nightly_file_area` | null | system | File area carrying nightly artifacts |
+| `update_dev_file_area` | null | system | File area carrying development artifacts |
 
 Off by default because an outbound request from a sysop's box should be
 something they turned on, not something they have to discover and turn off.
@@ -389,15 +406,17 @@ start, verify.
 A move is safe when **every migration already applied to this database also
 exists in the target release**.
 
-Channel is not the test. Neither is version, quite. Someone on a nightly from
+Channel is not the test. Neither is version, quite. Someone on a development
+build from
 1 September moving to a stable released on the 10th is moving forward, and
 should be allowed. What actually constrains them is whether the target
 understands the state their database is in.
 
-The case version comparison misses is work that was in nightly and got deferred
+The case version comparison misses is work that was on development and got
+deferred
 out of the stable cut. Version-wise the move is forward; in practice the
 database carries a migration the target does not ship and cannot reason about.
-Normal convergence, nightly `0.9.6a.*` to stable `0.9.6a`, is always safe
+Normal convergence, development `0.9.6a.*` to stable `0.9.6a`, is always safe
 because stable contains every migration its nightlies had.
 
 On refusal, name the migration id and what it was for. "You cannot move to
@@ -468,7 +487,8 @@ provenance and it costs one line of documentation.
 - An Update button, gated on preflight passing
 - The outcome of the last update, read from the durable phase rows
 
-Both channels are shown whatever is selected, since a nightly user needs to be
+Both channels are shown whatever is selected, since someone on development needs
+to be
 told stable is available and reachable.
 
 ---
@@ -504,10 +524,12 @@ told stable is available and reachable.
 
 Resolved during design:
 
-- *Nightly artifact contents* -- deltas against the most recent stable, with a
+- *Development artifact contents* -- deltas against the most recent stable, with
+  a
   full manifest. See section 3.
-- *File echo retention* -- nightly can prune freely on `max_files`, but the
-  stable base a nightly references must be retained. Not a preference.
+- *File echo retention* -- development can prune freely on `max_files`, but the
+  stable base a development build references must be retained. Not a
+  preference.
 
 ---
 
