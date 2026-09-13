@@ -104,6 +104,11 @@ sorts below present**, because a dated build comes after the release it names.
 Read as: a dated build is a *post*release of the version in its name, and an
 earlier phase is a prerelease of a later one.
 
+Implemented in `src/utils/version.js`, which is pure and has no dependencies.
+`tests/version.test.js` asserts that chain as a whole, sorted from shuffled, as
+well as pairwise and transitively, because a set of pairwise checks can all pass
+while the overall order is incoherent. Inverting the date rule fails six of them.
+
 **This is the rule to get right.** Which side of its base a dated build sorts on
 is the single load-bearing decision in the scheme, and reversing it inverts every
 comparison in the system: every sysop on development would be told they are
@@ -641,8 +646,9 @@ Resolved during design:
 
 1. ~~Migration ledger~~ **done**: `schema_migrations`, `db/migrations/`,
    `src/maintenance/migrationLedger.js`
-2. Fix #44 so the two scripts stop disagreeing while the rest is built
-3. Version parsing and comparison, with tests, since everything depends on it
+2. ~~Fix #44 so the two scripts stop disagreeing~~ **done**: `install.sh`
+   refuses to update and its duplicate implementation is gone
+3. ~~Version parsing and comparison~~ **done**: `src/utils/version.js`
 4. Release script and metadata, published by hand at first
 5. Update check and notification (read-only, no apply)
 6. The updater, with the handoff model

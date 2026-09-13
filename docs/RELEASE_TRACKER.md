@@ -295,6 +295,11 @@ Last updated: 2026-09-12
 - [x] Apply a `.env` edit without restarting (Reload button on `/admin/config`,
       POST `/admin/config/reload`, fans out via CONFIG_CHANGED)
 - [x] Database migrations (declarative schema management)
+- [x] Version parsing and comparison (`src/utils/version.js`): the scheme the
+      update system rests on. A development build carries the last stable plus
+      its build date and sorts above the version it names, which is the rule
+      that inverts every comparison if reversed. `baseStable()` derives a
+      build's delta base from its own version
 - [x] Settings provenance: `settings.source` records whether a value was chosen
       by a sysop or seeded from the defaults, which the table could not express
       before and which is what made a config key impossible to deprecate in
