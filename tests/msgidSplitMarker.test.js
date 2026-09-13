@@ -59,6 +59,7 @@ describe('messageBase MSGID split marker', function () {
 	var pg = null;
 	var priorValue = null;
 	var hadPrior = false;
+	var ledgerHighWater = 0;
 
 	before(async function () {
 		this.timeout(15000);
@@ -73,6 +74,15 @@ describe('messageBase MSGID split marker', function () {
 			var row = await pg.queryOne('SELECT value FROM settings WHERE key = $1',
 				[messageBase.MSGID_SPLIT_MARKER]);
 			if (row) { hadPrior = true; priorValue = row.value; }
+
+			// markMsgidSplitCompleted also records the completion in the
+			// migration ledger now, so this suite writes real ledger rows as a
+			// side effect. Take a high water mark and delete above it in after();
+			// matching on content would miss a row whose fields are null, which
+			// is how the relay log suite once left fourteen rows behind and
+			// broke the admin page that read them.
+			var hw = await pg.queryOne('SELECT COALESCE(MAX(id), 0) AS id FROM schema_migrations', []);
+			ledgerHighWater = hw ? parseInt(hw.id, 10) : 0;
 		} catch (_) { available = false; }
 	});
 
@@ -88,6 +98,10 @@ describe('messageBase MSGID split marker', function () {
 			} else {
 				await pg.write('DELETE FROM settings WHERE key = $1', [messageBase.MSGID_SPLIT_MARKER]);
 			}
+			// Every ledger row this suite caused. Recording 0002 as applied on a
+			// system that has not run the repair would settle the migration and
+			// silence the only notice telling its sysop to run it.
+			await pg.write('DELETE FROM schema_migrations WHERE id > $1', [ledgerHighWater]);
 		} catch (_) {}
 	});
 
