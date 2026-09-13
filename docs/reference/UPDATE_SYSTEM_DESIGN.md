@@ -328,9 +328,41 @@ A script, because there is no CI and the current manual process already let
 8. Write and sign `SHA256SUMS`
 9. Tag
 
+On a stable cut, one more check belongs here, and it is the reason the version
+scheme matters beyond tidiness. See below.
+
 Note there is no branch version to bump. A development build derives its version
 from the most recent stable tag plus its build date, so cutting a stable
 automatically re-bases every development build that follows it.
+
+### Checking the development to stable pipeline at release time
+
+Because a development build names its base, the published set is enumerable: every
+build whose version begins `0.9.5a.` was based on stable `0.9.5a`, readable
+straight out of the release index. From that follows the set of migrations those
+builds have already put into people's databases.
+
+So when cutting stable `0.9.6a`, the release script can ask whether it ships every
+one of them. If a migration went out on development and then got deferred out of
+the stable cut, the answer is no, and everyone running development is about to be
+refused the upgrade.
+
+That is the same property the runtime rule in section 7 enforces, checked one step
+earlier. The runtime rule is a net under the sysop; this is a check on the
+maintainer's own machine before anything is published. The failure it catches is
+identical, but here it costs a warning rather than a bug report from someone who
+cannot move off development.
+
+The same naming makes two other things derivable rather than asserted:
+
+- **The delta base.** The version, the metadata `base` field, and the tag the
+  build was actually made from must all agree. Three independent statements of
+  one fact is a build-time check, and any disagreement is a packaging bug caught
+  before publication.
+- **How overdue a stable is.** A development delta grows through a cycle and
+  resets when stable is cut. Since the base is named, the delta size relative to
+  the full tree is computable per build, and one approaching full size says a
+  release is due.
 
 **The build stamps the version into the artifact.** `package.json` in the
 repository carries the last stable released, because that is the only version the
@@ -479,6 +511,9 @@ out of the stable cut. Version-wise the move is forward; in practice the
 database carries a migration the target does not ship and cannot reason about.
 Normal convergence, development `0.9.6a.*` to stable `0.9.6a`, is always safe
 because stable contains every migration its development builds had.
+
+This is also checkable before publication rather than only at update time: see
+"Checking the development to stable pipeline at release time" in section 3.
 
 On refusal, name the migration id and what it was for. "You cannot move to
 stable" is not actionable; "your database has applied `0007-fileecho-hashes`,
