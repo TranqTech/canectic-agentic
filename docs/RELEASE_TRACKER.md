@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 ---
 
@@ -311,6 +311,14 @@ Last updated: 2026-09-12
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
+- [x] Release engineering (`scripts/release.mjs` + `src/release/`): one command
+      cuts a stable or a development build, closes the changelog `Pending`
+      section into the version, writes the release note skeleton, builds the
+      tarball with a content-hash `MANIFEST`, and publishes metadata, a
+      per-channel index and `SHA256SUMS`. Upgrade steps and notices are declared
+      in `docs/releases/pending.json` rather than living only as changelog
+      prose. A stable cut refuses to publish if it drops a migration its own
+      development builds already applied
 - [x] Startup DB/Redis validation (fail fast with clear error)
 - [x] Health check endpoint (GET /health)
 - [x] Worker liveness. The worker publishes a heartbeat with its per-queue

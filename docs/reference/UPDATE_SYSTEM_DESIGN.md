@@ -649,8 +649,92 @@ Resolved during design:
 2. ~~Fix #44 so the two scripts stop disagreeing~~ **done**: `install.sh`
    refuses to update and its duplicate implementation is gone
 3. ~~Version parsing and comparison~~ **done**: `src/utils/version.js`
-4. Release script and metadata, published by hand at first
+4. ~~Release script and metadata, published by hand at first~~ **done**:
+   `scripts/release.mjs`, `src/release/`, `docs/releases/pending.json`. See
+   `RELEASE_PROCESS.md` and section 13 below for what was decided while
+   building it
 5. Update check and notification (read-only, no apply)
 6. The updater, with the handoff model
 7. Bootstrap installer
 8. FTN transport
+
+---
+
+## 13. Phase 4 as built
+
+The release script and the metadata format exist. `RELEASE_PROCESS.md` is the
+maintainer-facing guide; this records what the build decided that the design
+above did not.
+
+### Steps and notices are declared beside the changelog, not parsed out of it
+
+`docs/releases/pending.json` accumulates the machine-readable half of a cycle
+while the changelog `Pending` section accumulates the human half. Deriving one
+from the other was the obvious saving and is the wrong trade: parsing prose to
+decide what to execute on someone's live board works right up until a bullet is
+reworded, and the failure is silent.
+
+What the script does instead is cross check. A changelog carrying upgrade notes
+with nothing declared, or declarations with no upgrade notes, is reported at cut
+time, when the person who wrote one of them is still in the room. It is presence
+based rather than count based, because one note can be two steps and a notice
+and matching them one to one would be a rule nobody could follow.
+
+`min_upgrade_from` and `node_min` survive a cut; `steps` and `notices` do not.
+The floor is a standing fact about what the software can upgrade from and run
+on, and clearing it would leave every release after the first declaring none.
+
+### The pipeline check refuses rather than warns
+
+Section 3 called for a warning when a stable does not ship every migration its
+development builds already applied. It is a refusal, with
+`--allow-migration-gap` to override.
+
+A warning in script output is a warning nobody reads, and what it is warning
+about is a class of user who cannot upgrade at all until the next release. The
+override exists because retiring a migration that never reached anybody is a
+legitimate thing to do.
+
+Only builds on the stable being superseded are considered. Builds on an older
+base were checked when their own stable was cut, and considering every build
+ever published would mean no migration could ever be retired.
+
+### The file categories moved into the manifest
+
+`src/release/shippedTree.js` is the single definition section 10 promised, and
+the category travels per file inside the manifest rather than being re-derived
+by the updater. A release that adds a directory then carries the rule for it,
+which matters because the updater runs from the NEW version's tree: without the
+category in the data, an old install's updater would be applying new
+directories under rules it does not have.
+
+A path with no rule does not ship, rather than defaulting. Defaulting a new
+top-level directory to `code` would mean the first release after somebody adds
+one deletes whatever a sysop keeps in it, silently.
+
+`scripts/` is excluded, so the release script does not ship inside its own
+artifact. Beyond being dead weight on an install, shipping it invites cutting a
+release from a deployed board.
+
+### A development build refuses to publish nothing
+
+Every development build rewrites the version in the staged `package.json`, so
+that one file always differs from the base and "nothing has changed since the
+last build" would never be true. The script re-hashes the staged file with the
+base's version put back, which answers the question exactly, because the base's
+own hash was computed over a file written by the same serialisation.
+
+### Bookkeeping happens before the artifact is staged
+
+A release tarball contains its own release notes and its own changelog entry.
+Building first would ship a tarball whose changelog says the release is still
+pending, which is the state v0.9.5a shipped in.
+
+### Still open after phase 4
+
+- Publishing is by hand. There is no upload step and no channel host.
+- Signing is wired (`--sign` runs `gpg --detach-sign --armor`) but no key is
+  published and no verification path is documented. Open decision 1 stands.
+- Nothing consumes the index yet. That is phase 5.
+- The manifest's `verifyTree` and `pathsToRemove` are written and tested but
+  have no caller until the updater exists in phase 6.
