@@ -475,5 +475,6 @@ Last updated: 2026-09-12
 | `API_DESIGN.md` | [x] |
 | `PEER_INTEROP.md` | [x] |
 | `HUB_COORDINATOR_DESIGN.md` | [x] |
+| `UPDATE_SYSTEM_DESIGN.md` | [x] design, unimplemented |
 | `INSTALL.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |

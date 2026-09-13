@@ -133,6 +133,7 @@ var TOPIC_TAGS = {
     'WEB_CALLFLOW_DESIGN.md':       ['callflow', 'web', 'design'],
     'WALL_DESIGN.md':               ['wall', 'oneliners', 'design'],
     'QWK_USER_DESIGN.md':           ['qwk', 'pm', 'user', 'design'],
+    'UPDATE_SYSTEM_DESIGN.md':      ['updates', 'releases', 'install', 'distribution', 'design'],
     'FILEBOX_WILDCARD_DESIGN.md':   ['ftn', 'files', 'filebox', 'design'],
     'HUB_COORDINATOR_DESIGN.md':    ['coordinator', 'ftn', 'nodelist', 'design'],
     'API_DESIGN.md':                ['api', 'rest', 'auth', 'design'],
