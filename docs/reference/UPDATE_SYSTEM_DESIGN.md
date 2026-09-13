@@ -131,11 +131,37 @@ A development build still goes through the release machinery: it gets a version,
 metadata, an artifact and a checksum. What it skips is the ceremony -- the full
 manual test checklist and the written release notes.
 
-### Branches
+### Channels are not branches
 
-Only `main` exists today. The channel model needs a development branch and a
-stable branch, named for the channels they feed so the two are one concept
-rather than two. Which of them `main` becomes is an open decision (section 11).
+The channel model needs two channels. It does not need two long-lived branches,
+and treating those as the same thing would cost something every day for a
+benefit that is only occasionally needed.
+
+A channel is a claim about a build: this one was blessed, that one is current. A
+tag carries that claim, and the release metadata states the channel outright.
+Nothing in resolution, verification, the handoff or the delta machinery asks
+which branch a build came from.
+
+So: **`main` is the trunk.** A stable release is a tag that has been through the
+test checklist and has release notes. A development build is a tag that has not.
+Topic branches for larger pieces of work continue as they already do, merging
+back to `main`.
+
+The one thing a long-lived `stable` branch would buy is hotfixing a shipped
+release after development has moved on: `0.9.6a` ships, `main` advances to
+half-finished `0.9.7a` work, and a bad bug in `0.9.6a` cannot be fixed by
+cutting from `main`. That branch can be created from the tag at the moment it is
+needed, which is a five second operation, so nothing is lost by not having it in
+advance.
+
+Having it in advance is not free. The version in `package.json` differs by
+branch, so every stable-to-main merge conflicts on it, forever. `CHANGELOG.md`
+has the same shape: `Pending` lives on the trunk and a hotfix entry would need to
+exist on both sides. Both are solvable with merge drivers, but that is machinery
+maintained for a problem created by the arrangement itself.
+
+Revisit if two stable lines ever need supporting at once. One maintainer and an
+alpha-stage board do not.
 
 ### Notification visibility
 
@@ -417,7 +443,7 @@ deferred
 out of the stable cut. Version-wise the move is forward; in practice the
 database carries a migration the target does not ship and cannot reason about.
 Normal convergence, development `0.9.6a.*` to stable `0.9.6a`, is always safe
-because stable contains every migration its nightlies had.
+because stable contains every migration its development builds had.
 
 On refusal, name the migration id and what it was for. "You cannot move to
 stable" is not actionable; "your database has applied `0007-fileecho-hashes`,
@@ -508,25 +534,25 @@ told stable is available and reachable.
 
 ## 11. Open decisions
 
-1. **Which branch is which.** Does `main` become the development branch with
-   `stable` cut from it, or does `main` stay stable with development elsewhere?
-2. **Signing.** GPG-signed `SHA256SUMS` is the right answer for a sysop
+1. **Signing.** GPG-signed `SHA256SUMS` is the right answer for a sysop
    audience, but it means key management and a documented verification path.
    Checksums alone are weaker but free.
-3. **Does the update page offer "check now"?** If the daily check is off, a
+2. **Does the update page offer "check now"?** If the daily check is off, a
    sysop still needs a way to ask, and that is an outbound request they opted
    out of. Probably allowed as an explicit action, since it is a human asking.
-4. **Is a database dump required before migrating**, offered, or only warned
+3. **Is a database dump required before migrating**, offered, or only warned
    about?
-5. **How is the cached stable base stored**, and when is it discarded? It has to
-   outlive the nightlies that reference it, which means it cannot simply be
+4. **How is the cached stable base stored**, and when is it discarded? It has to
+   outlive the development builds that reference it, so it cannot simply be
    cleaned up with the staging directory.
 
 Resolved during design:
 
+- *Branch layout* -- no stable branch. `main` is the trunk, stable releases are
+  blessed tags, and the stable branch is created from a tag the first time a
+  hotfix is actually needed. See section 2.
 - *Development artifact contents* -- deltas against the most recent stable, with
-  a
-  full manifest. See section 3.
+  a full manifest. See section 3.
 - *File echo retention* -- development can prune freely on `max_files`, but the
   stable base a development build references must be retained. Not a
   preference.
