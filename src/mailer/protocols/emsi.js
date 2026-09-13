@@ -13,6 +13,7 @@
 import { EventEmitter } from 'node:events';
 import { crc16 } from '../../transfers/crc.js';
 import * as alogger from '../../utils/alogger.js';
+import * as systeminfo from '../../utils/systeminfo.js';
 
 // --- EMSI packet constants ---
 // Fixed EMSI packets — CRC is computed over the body WITHOUT the ** prefix
@@ -24,7 +25,12 @@ var EMSI_NAK = '**EMSI_NAKEEC3\r';      // Negative acknowledge
 var EMSI_DAT_PREFIX = '{EMSI_DAT}';
 
 var PRODUCT_NAME = 'Canectic BBS Mailer';
-var PRODUCT_VERSION = '0.1';
+
+// Resolved when the handshake is built, not at import: appConfig has not been
+// loaded when this module is first imported. Was hardcoded '0.1'.
+function productVersion() {
+	return systeminfo.canonicalVersion();
+}
 
 var MAX_RETRIES = 6;
 var RETRY_TIMEOUT = 5000;  // 5s between retries
@@ -330,7 +336,7 @@ class EmsiProtocol extends EventEmitter {
 			'XA,CM,IBN,IFC',                           // flags
 			'8N1',                                     // link codes
 			'ZMO,ZAP',                                 // compat codes (ZMODEM + ZedZap)
-			PRODUCT_NAME + ' ' + PRODUCT_VERSION,      // mailer code
+			PRODUCT_NAME + ' ' + productVersion(),    // mailer code
 			this._localAddresses.join(' '),            // addresses
 			this._sessionPassword                      // password
 		];

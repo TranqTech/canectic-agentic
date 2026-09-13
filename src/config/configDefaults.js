@@ -34,7 +34,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'bbsname',           defaultValue: 'BBS',            type: 'string',  category: 'system',      description: 'Short BBS name for drop files and Synchronet shims' },
 	{ key: 'system_name',       defaultValue: 'Canectic BBS',   type: 'string',  category: 'system',      description: 'System name for login handler title' },
 	{ key: 'boardphone',        defaultValue: 'N/A',            type: 'string',  category: 'system',      description: 'BBS phone number for QWK control.dat' },
-	{ key: 'currentversion',    defaultValue: _pkgVersion,      type: 'string',  category: 'system',      description: 'Software version (auto-read from package.json, overridable)' },
+	{ key: 'currentversion',    defaultValue: _pkgVersion,      type: 'string',  category: 'system',      description: 'Software version, shown for reference. Read from package.json at runtime: setting it here does not change what is running, and is corrected back on migration unless deliberately set.' },
 	{ key: 'DefaultUser',       defaultValue: 'John Doe',       type: 'string',  category: 'system',      description: 'Default poster name (legacy)' },
 	{ key: 'SYSOP_USERNAME',    defaultValue: '',                type: 'string',  category: 'system',      description: 'Sysop username for PM system' },
 

@@ -19,6 +19,7 @@ import * as terminalText from '../utils/terminalText.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from "../config/appConfig.js";
+import * as systeminfo from "../utils/systeminfo.js";
 
 
 const default_tzutc   = "-0600";
@@ -600,7 +601,7 @@ async function startNewThread(formObj, shortcode) {
 		system_time: currtime,
 		path: addrInfo.path,
 		origin_line: addrInfo.origin_line,
-		product_string: "Canectic BBS v" + appConfig.get('currentversion', '0.1a')
+		product_string: systeminfo.versionMsg()
 	};
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);
@@ -711,7 +712,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 		system_time: currtime,
 		path: addrInfo.path,
 		origin_line: addrInfo.origin_line,
-		product_string: "Canectic BBS v" + appConfig.get('currentversion', '0.1a')
+		product_string: systeminfo.versionMsg()
 	};
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);

@@ -8,6 +8,7 @@ import { maintainAllAreaTables } from "../models/messageMaint.js";
 // definitions out of a .conf file. The imported one reads the live table.
 import { getTableColumns as getLiveTableColumns, columnNameFromDefinition } from "../middleware/db/tableTools.js";
 import * as ledger from "../maintenance/migrationLedger.js";
+import * as systeminfo from "../utils/systeminfo.js";
 
 //setup
 dotenv.config();
@@ -258,10 +259,7 @@ function printSummary(summary) {
 // Run one migration phase and report it. Returns the phase result so the caller
 // can stop the whole run on a failure.
 async function runLedgerPhase(migrations, phase) {
-	var version = null;
-	try {
-		version = JSON.parse(fs.readFileSync(workingdir + "/package.json", "utf8")).version;
-	} catch (_) {}
+	var version = systeminfo.softwareVersion();
 
 	var result = await ledger.runPhase(migrations, phase, {
 		version: version,
@@ -392,10 +390,7 @@ async function setupTables() {
 	// the table pass, because the ledger table has to exist before it can be
 	// written to.
 	if (freshDatabase) {
-		var version = null;
-		try {
-			version = JSON.parse(fs.readFileSync(workingdir + "/package.json", "utf8")).version;
-		} catch (_) {}
+		var version = systeminfo.softwareVersion();
 		var recorded = await ledger.recordFreshInstall(loaded.migrations, { version: version });
 		console.log("\n--- Migration ledger ---");
 		console.log("  Recorded " + recorded + " migration(s) as not needed on a fresh database.");

@@ -22,6 +22,7 @@
 import { EventEmitter } from 'node:events';
 import * as crypto from 'crypto';
 import * as alogger from '../../utils/alogger.js';
+import * as systeminfo from '../../utils/systeminfo.js';
 
 // --- binkp command IDs ---
 const M_NUL  = 0;   // Informational / capabilities
@@ -40,7 +41,13 @@ const CMD_NAMES = ['M_NUL','M_ADR','M_PWD','M_FILE','M_OK','M_EOB','M_GOT','M_ER
 
 const BINKP_MAX_FRAME = 32767;
 const PRODUCT_NAME    = 'Canectic BBS Mailer';
-const PRODUCT_VERSION = '0.1';
+
+// Resolved when the banner is sent rather than at import, because appConfig has
+// not been loaded when this module is first imported. It was a hardcoded '0.1',
+// so every peer this system ever called was told that.
+function productVersion() {
+	return systeminfo.canonicalVersion();
+}
 
 // binkp/1.1 multi-batch limits — see _checkSessionEnd().
 // MAX_BATCHES is a runaway guard only; a healthy session uses one or two.
@@ -148,7 +155,7 @@ class BinkpProtocol extends EventEmitter {
 		// Send M_NUL capabilities
 		this._sendCmd(M_NUL, 'SYS ' + (this._options.systemName || 'Canectic BBS'));
 		this._sendCmd(M_NUL, 'ZYZ ' + (this._options.sysopName  || 'Sysop'));
-		this._sendCmd(M_NUL, 'VER ' + PRODUCT_NAME + '/' + PRODUCT_VERSION + ' binkp/1.1');
+		this._sendCmd(M_NUL, 'VER ' + PRODUCT_NAME + '/' + productVersion() + ' binkp/1.1');
 		this._sendCmd(M_NUL, 'TIME ' + new Date().toUTCString());
 
 		// OPT flags

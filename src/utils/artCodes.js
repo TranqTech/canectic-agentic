@@ -11,6 +11,7 @@
 // character width (4 for @XX@) is used.
 
 import appConfig from "../config/appConfig.js";
+import * as systeminfo from './systeminfo.js';
 import * as postgres from "../middleware/db/postgres.js";
 import { getOnlineUsers } from "../middleware/webActivity.js";
 
@@ -41,7 +42,7 @@ var UNIVERSAL_CODES = {
 	MA: function(call) { return call?.msg_area_title || ''; },
 	FG: function(call) { return call?.file_group_title || ''; },
 	FA: function(call) { return call?.file_area_title || ''; },
-	VR: function() { return appConfig.get('currentversion', '0.0.0'); },
+	VR: function() { return systeminfo.softwareVersion(); },
 };
 
 // Async resolvers.
