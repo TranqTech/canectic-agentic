@@ -2,18 +2,21 @@
 set -euo pipefail
 
 # =============================================================================
-# Canectic BBS — Install / Update Script
+# Canectic BBS — Install Script
 # =============================================================================
 #
 # Copies application files from a source directory (git clone or extracted
 # release archive) into a run directory, keeping user data and configuration
 # intact across updates.
 #
-# Install mode:  copies everything, creates directory structure, copies
-#                .env.example as .env template if no .env exists.
+# Installs only. If it finds an existing installation it refuses and points
+# at setup/update.sh rather than doing it itself.
 #
-# Update mode:   overwrites code files, prompts before overwriting data/config
-#                files that the user may have modified.
+# It used to have an update mode, and the two drifted: update.sh moved public/
+# out of CODE_DIRS into an overlay so sysop-added assets and custom.css survive,
+# and this script never received that change, so its update mode deleted them.
+# Rather than duplicate the categorisation a second time, the mode is gone.
+# See issue #44.
 #
 # Usage:
 #   ./setup/install.sh              # interactive — prompts for everything
@@ -36,7 +39,7 @@ ok()    { echo -e "${GREEN}✓${NC} $1"; }
 warn()  { echo -e "${YELLOW}!${NC} $1"; }
 err()   { echo -e "${RED}✗${NC} $1"; }
 
-# --- Code directories (always overwritten on update) ---
+# --- Code directories (copied on install) ---
 CODE_DIRS=(
     bin
     db
@@ -56,7 +59,7 @@ CODE_FILES=(
     .mocharc.yml
 )
 
-# --- Data directories (created on install, merge-prompted on update) ---
+# --- Data directories (created on install) ---
 DATA_DIRS=(
     config
     txtfiles
@@ -230,119 +233,6 @@ do_install() {
 }
 
 # =============================================================================
-# Update (existing installation)
-# =============================================================================
-
-do_update() {
-    echo ""
-    info "Updating Canectic BBS at: $TARGET_DIR"
-    echo ""
-
-    # Overwrite code directories
-    for dir in "${CODE_DIRS[@]}"; do
-        if [[ -d "$SOURCE_DIR/$dir" ]]; then
-            info "Updating $dir/"
-            # Remove old code dir and replace — ensures deleted files don't linger
-            rm -rf "$TARGET_DIR/$dir"
-            cp -a "$SOURCE_DIR/$dir" "$TARGET_DIR/"
-        fi
-    done
-
-    # Overwrite code root files
-    for f in "${CODE_FILES[@]}"; do
-        if [[ -f "$SOURCE_DIR/$f" ]]; then
-            cp -a "$SOURCE_DIR/$f" "$TARGET_DIR/"
-        fi
-    done
-
-    # Merge data directories — prompt for files newer in target
-    for dir in "${DATA_DIRS[@]}"; do
-        if [[ -d "$SOURCE_DIR/$dir" ]]; then
-            merge_data_dir "$dir"
-        fi
-    done
-
-    # Ensure logs directory exists
-    mkdir -p "$TARGET_DIR/logs/production"
-
-    echo ""
-    ok "Update complete!"
-    echo ""
-    post_update_message
-}
-
-# =============================================================================
-# Data directory merge — prompts for modified files
-# =============================================================================
-
-merge_data_dir() {
-    local dir="$1"
-
-    if [[ ! -d "$TARGET_DIR/$dir" ]]; then
-        # Target doesn't have this dir yet — copy wholesale
-        info "Adding new directory: $dir/"
-        cp -a "$SOURCE_DIR/$dir" "$TARGET_DIR/"
-        return
-    fi
-
-    # Walk source files and compare
-    local src_dir="$SOURCE_DIR/$dir"
-    local changed=0
-
-    while IFS= read -r -d '' src_file; do
-        local rel_path="${src_file#$src_dir/}"
-        local tgt_file="$TARGET_DIR/$dir/$rel_path"
-
-        # New file in source — always copy
-        if [[ ! -e "$tgt_file" ]]; then
-            local tgt_parent
-            tgt_parent="$(dirname "$tgt_file")"
-            mkdir -p "$tgt_parent"
-            cp -a "$src_file" "$tgt_file"
-            continue
-        fi
-
-        # Skip if identical
-        if cmp -s "$src_file" "$tgt_file"; then
-            continue
-        fi
-
-        # Files differ — check if target is newer
-        if [[ "$tgt_file" -nt "$src_file" ]]; then
-            # Target is newer — prompt
-            changed=1
-            echo ""
-            warn "$dir/$rel_path has been modified locally (and is newer)"
-            echo "  Source: $(stat -c '%y' "$src_file" 2>/dev/null || stat -f '%Sm' "$src_file" 2>/dev/null)"
-            echo "  Target: $(stat -c '%y' "$tgt_file" 2>/dev/null || stat -f '%Sm' "$tgt_file" 2>/dev/null)"
-            read -rp "  Overwrite with source version? [y/N/d(iff)]: " answer
-            case "${answer,,}" in
-                y|yes)
-                    cp -a "$src_file" "$tgt_file"
-                    ok "  Overwritten"
-                    ;;
-                d|diff)
-                    diff --color=auto "$tgt_file" "$src_file" || true
-                    read -rp "  Overwrite? [y/N]: " answer2
-                    if [[ "${answer2,,}" == "y" || "${answer2,,}" == "yes" ]]; then
-                        cp -a "$src_file" "$tgt_file"
-                        ok "  Overwritten"
-                    else
-                        info "  Kept local version"
-                    fi
-                    ;;
-                *)
-                    info "  Kept local version"
-                    ;;
-            esac
-        else
-            # Source is newer — overwrite silently
-            cp -a "$src_file" "$tgt_file"
-        fi
-    done < <(find "$src_dir" -type f -print0 2>/dev/null)
-}
-
-# =============================================================================
 # Post-install messages
 # =============================================================================
 
@@ -394,12 +284,24 @@ select_target "${1:-}"
 preflight
 detect_mode
 
-echo ""
-if [[ "$MODE" == "install" ]]; then
-    info "Mode: ${BOLD}Fresh Install${NC}"
-else
-    info "Mode: ${BOLD}Update${NC} (existing installation detected)"
+if [[ "$MODE" == "update" ]]; then
+    echo ""
+    err "That is an existing Canectic installation. This script only installs."
+    echo ""
+    echo "  Use the update script instead:"
+    echo ""
+    echo -e "      ${CYAN}./setup/update.sh $TARGET_DIR${NC}"
+    echo ""
+    echo "  It is not an alias. update.sh preserves things this script would"
+    echo "  delete: public/ is overlaid rather than replaced, so sysop-added"
+    echo "  door icons, collection images and branding survive, and"
+    echo "  public/css/custom.css is never overwritten once it exists."
+    echo ""
+    exit 1
 fi
+
+echo ""
+info "Mode: ${BOLD}Fresh Install${NC}"
 info "Source: $SOURCE_DIR"
 info "Target: $TARGET_DIR"
 echo ""
@@ -409,8 +311,4 @@ if [[ "${confirm,,}" == "n" || "${confirm,,}" == "no" ]]; then
     exit 0
 fi
 
-if [[ "$MODE" == "install" ]]; then
-    do_install
-else
-    do_update
-fi
+do_install
