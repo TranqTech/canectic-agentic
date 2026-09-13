@@ -295,6 +295,11 @@ Last updated: 2026-09-12
 - [x] Apply a `.env` edit without restarting (Reload button on `/admin/config`,
       POST `/admin/config/reload`, fans out via CONFIG_CHANGED)
 - [x] Database migrations (declarative schema management)
+- [x] Settings provenance: `settings.source` records whether a value was chosen
+      by a sysop or seeded from the defaults, which the table could not express
+      before and which is what made a config key impossible to deprecate in
+      place. Also fixes the `/admin/config` source badge, which reported the
+      database for every seeded default
 - [x] Migration ledger (`schema_migrations` + `db/migrations/`): ordered,
       recorded, one-shot data migrations, which the declarative schema cannot
       express because it converges on a shape rather than performing an event.

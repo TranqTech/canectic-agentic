@@ -75,8 +75,8 @@ async function getValue(key) {
  */
 async function setValue(key, value) {
 	var err = await postgres.write(
-		"INSERT INTO " + TABLE + " (key, value, updated_at) VALUES ($1, $2, NOW()) " +
-		"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()",
+		"INSERT INTO " + TABLE + " (key, value, updated_at, source) VALUES ($1, $2, NOW(), 'sysop') " +
+		"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), source = 'sysop'",
 		[key, value]
 	);
 	if (err) return false;
@@ -93,8 +93,8 @@ async function setValues(kvArray) {
 
 	for (var kv of kvArray) {
 		var err = await postgres.write(
-			"INSERT INTO " + TABLE + " (key, value, updated_at) VALUES ($1, $2, NOW()) " +
-			"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()",
+			"INSERT INTO " + TABLE + " (key, value, updated_at, source) VALUES ($1, $2, NOW(), 'sysop') " +
+			"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), source = 'sysop'",
 			[kv.key, kv.value]
 		);
 		if (err) {
@@ -149,8 +149,8 @@ async function seedDefaults(definitions) {
 	for (var def of definitions) {
 		try {
 			var result = await postgres.pgpool.query(
-				"INSERT INTO " + TABLE + " (key, value, type, category, description, readonly) " +
-				"VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (key) DO NOTHING",
+				"INSERT INTO " + TABLE + " (key, value, type, category, description, readonly, source) " +
+				"VALUES ($1, $2, $3, $4, $5, $6, 'default') ON CONFLICT (key) DO NOTHING",
 				[def.key, def.defaultValue, def.type, def.category, def.description, false]
 			);
 			if (result.rowCount > 0) inserted++;
@@ -159,6 +159,25 @@ async function seedDefaults(definitions) {
 	if (inserted > 0) {
 		alogger.writeAlog(3, "[configStore] Seeded " + inserted + " new default config keys", "cyan");
 	}
+}
+
+/**
+ * Did a sysop set this key, or is it sitting at the value it was seeded with?
+ *
+ * The question the settings table could not answer before it recorded `source`.
+ * Every default is seeded into the table on first run, so the presence of a row
+ * says nothing, and a deliberate choice looked exactly like an untouched key.
+ * That is why allow_netmail_relay had to be deprecated and ignored rather than
+ * migrated: either reading of it would have been wrong for half the installs.
+ *
+ * Use this before honouring an old key's value in a migration. A missing row
+ * means nothing was ever written, which is not the same as "set to the
+ * default", and both answer false.
+ */
+async function wasSetBySysop(key) {
+	var row = await postgres.queryOne(
+		"SELECT source FROM " + TABLE + " WHERE key = $1", [key]);
+	return !!(row && row.source === 'sysop');
 }
 
 // ---------------------------------------------------------------------------
@@ -198,9 +217,16 @@ async function ensureTable() {
 		"  description TEXT," +
 		"  readonly BOOLEAN DEFAULT false," +
 		"  created_at TIMESTAMPTZ DEFAULT NOW()," +
-		"  updated_at TIMESTAMPTZ DEFAULT NOW()" +
+		"  updated_at TIMESTAMPTZ DEFAULT NOW()," +
+		"  source VARCHAR(16) DEFAULT 'default'" +
 		")"
 	);
+
+	// Added after the table shipped, so an existing install needs it here as
+	// well as in db/schema. appConfig.load() calls ensureTable before anything
+	// reads a setting, and it can run long before dbmigrations does.
+	await postgres.write(
+		"ALTER TABLE " + TABLE + " ADD COLUMN IF NOT EXISTS source VARCHAR(16) DEFAULT 'default'");
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +257,7 @@ export {
 	loadAllWithMeta,
 	getValue,
 	setValue,
+	wasSetBySysop,
 	setValues,
 	deleteSetting,
 	getByCategory,

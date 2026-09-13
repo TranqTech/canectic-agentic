@@ -145,6 +145,29 @@ function warnOnDivergence() {
 // Three-tier merge
 // ---------------------------------------------------------------------------
 
+/**
+ * Which tier should a stored setting be reported as coming from?
+ *
+ * Pure, and extracted because it is the rule that was wrong. A row's presence
+ * says nothing: configStore seeds every default into the table on first run, so
+ * reporting 'db' for any row that exists meant the admin badge claimed the
+ * database for essentially every key, including ones nobody had ever touched.
+ *
+ * It is from the database when a sysop set it, or when what is stored is not
+ * what this release ships. The second half matters because a seeded value goes
+ * stale when a default changes between releases: the stored value is still what
+ * takes effect, so calling that 'default' would be wrong the other way.
+ *
+ * @param {object} row       settings row, carrying value and source
+ * @param {*}      shipped   the default this release declares for that key
+ * @returns {string} 'db' or 'default'
+ */
+function sourceForStoredValue(row, shipped) {
+	if (!row) return 'default';
+	if (row.source === 'sysop') return 'db';
+	return String(row.value) !== String(shipped) ? 'db' : 'default';
+}
+
 function buildMergedCache(dbRows) {
 	var defaults = getDefaults();
 	var merged = {};
@@ -157,11 +180,22 @@ function buildMergedCache(dbRows) {
 	}
 
 	// Phase 2: DB values overlay defaults (skip null, undefined, and empty strings)
+	//
+	// A row's presence says nothing about whether anyone chose its value:
+	// configStore seeds every default into the table on first run, so this used
+	// to report 'db' for essentially every key and the admin badge claimed the
+	// database for settings nobody had ever touched.
+	//
+	// It counts as coming from the database when a sysop set it, or when what is
+	// stored is not what this release ships as the default. The second half
+	// matters because a seeded value goes stale when a default changes between
+	// releases: the stored value is still what takes effect, so calling it the
+	// default would be wrong in the other direction.
 	if (dbRows) {
 		for (var row of dbRows) {
 			if (row.key && row.value !== null && row.value !== undefined && row.value !== '') {
 				merged[row.key] = row.value;
-				sources[row.key] = 'db';
+				sources[row.key] = sourceForStoredValue(row, defaults[row.key]);
 			}
 		}
 	}
@@ -427,6 +461,8 @@ function getEnvFilePath() {
 // ---------------------------------------------------------------------------
 // Export singleton
 // ---------------------------------------------------------------------------
+
+export { sourceForStoredValue };
 
 export default {
 	load,
