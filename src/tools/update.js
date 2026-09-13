@@ -27,8 +27,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import appConfig from '../config/appConfig.js';
-import { scanInstalledFiles } from '../release/shippedTree.js';
-import { buildManifest, parseManifest, MANIFEST_FILENAME } from '../release/manifest.js';
+import { MANIFEST_FILENAME } from '../release/manifest.js';
+import { installedVersion, describeInstall } from '../maintenance/installTarget.js';
 import { buildApplyPlan, pathsFor, warningsFor,
 	ACTION_CREATE, ACTION_OVERWRITE, ACTION_UNCHANGED, ACTION_KEEP, ACTION_CONFLICT, ACTION_REMOVE
 } from '../release/applyPlan.js';
@@ -38,7 +38,9 @@ import {
 	dirSource, httpSource, resolveRelease, stageRelease, discardStaging
 } from '../maintenance/updateStaging.js';
 import { applyPlan, verifyApplied } from '../maintenance/updateApply.js';
-import { formatVersion as canonicalVersion } from '../utils/version.js';
+import { launchUpdater, stagingRootFor, validateHandoff } from '../maintenance/updateHandoff.js';
+import * as runStore from '../maintenance/updateRunStore.js';
+import { summarise } from '../release/updatePhases.js';
 
 var RED = '\x1b[0;31m', GREEN = '\x1b[0;32m', YELLOW = '\x1b[1;33m', CYAN = '\x1b[0;36m', BOLD = '\x1b[1m', NC = '\x1b[0m';
 function info(m) { console.log(CYAN + '->' + NC + ' ' + m); }
@@ -58,8 +60,11 @@ function usage() {
 		'  --channel NAME     stable or development (default: update_channel)',
 		'  --version V        a specific release (default: the newest on the channel)',
 		'  --target DIR       the installation to plan against (default: this tree)',
-		'  --staging DIR      where to build the release (default: a temp directory)',
-		'  --apply            actually write it. Stop the BBS first',
+		'  --staging DIR      where to build the release (default: <target>/.canectic-update)',
+		'  --apply            actually write it, in this process. Stop the BBS first',
+		'  --handoff          hand off to the NEW release\'s updater, detached,',
+		'                     and return. Survives the BBS being stopped',
+		'  --status           report the last update run on --target and stop',
 		'  --keep-staging     do not delete the staging directory afterwards',
 		'  --verbose          list every file, not just a summary',
 		'',
@@ -72,7 +77,7 @@ function parseArgs(argv) {
 	var o = {
 		fromDir: null, url: null, channel: null, version: null,
 		target: process.cwd(), staging: null,
-		apply: false, keepStaging: false, verbose: false
+		apply: false, handoff: false, keepStaging: false, verbose: false, status: false
 	};
 	for (var i = 0; i < argv.length; i++) {
 		var a = argv[i];
@@ -83,6 +88,8 @@ function parseArgs(argv) {
 		else if (a === '--target')       o.target = path.resolve(argv[++i]);
 		else if (a === '--staging')      o.staging = argv[++i];
 		else if (a === '--apply')        o.apply = true;
+		else if (a === '--handoff')      { o.handoff = true; o.apply = true; }
+		else if (a === '--status')       o.status = true;
 		else if (a === '--keep-staging') o.keepStaging = true;
 		else if (a === '--verbose')      o.verbose = true;
 		else if (a === '--plan-only')    o.apply = false;
@@ -92,43 +99,13 @@ function parseArgs(argv) {
 	return o;
 }
 
+var LEDGER_TIMEOUT_MS = 10000;
+
 function humanBytes(n) {
 	if (!n) return '0 B';
 	if (n < 1024) return n + ' B';
 	if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
 	return (n / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-/**
- * What the installation looks like now, described the same way an artifact is.
- *
- * Two manifests come out of this. `local` is what is on disk right now.
- * `installed` is the MANIFEST the last release left behind, which answers the
- * only question that matters for a data file: is this still exactly what we
- * shipped, or did the sysop edit it. An install predating the release machinery
- * has no MANIFEST and every differing data file is then treated as theirs.
- */
-/** What the installation says it is. Its package.json is the authority, the
- *  same source systeminfo uses for the running process. */
-function installedVersion(root) {
-	try {
-		var pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-		return canonicalVersion(pkg.version);
-	} catch (_) {
-		return null;
-	}
-}
-
-function describeInstall(root) {
-	var files = scanInstalledFiles(root);
-	var local = buildManifest({ root: root, files: files, version: null, generated: new Date().toISOString() });
-
-	var installed = null;
-	var manifestFile = path.join(root, MANIFEST_FILENAME);
-	if (fs.existsSync(manifestFile)) {
-		try { installed = parseManifest(fs.readFileSync(manifestFile, 'utf8')); } catch (_) { installed = null; }
-	}
-	return { local: local, installed: installed, scanned: files.length };
 }
 
 function reportPlan(plan, verbose) {
@@ -172,9 +149,64 @@ function reportPlan(plan, verbose) {
 	}
 }
 
+/**
+ * The applied migration ids, or null when the database will not answer.
+ *
+ * Bounded, because the pg pool retries internally and an update tool that hangs
+ * for ever on a stopped database is worse than one that says so. Null is
+ * distinct from an empty list on purpose: empty means a fresh database with
+ * nothing applied, null means we do not know, and the caller must not treat the
+ * second as the first.
+ */
+async function readLedger() {
+	var timer = null;
+	var bound = new Promise(function (resolve) { timer = setTimeout(function () { resolve(null); }, LEDGER_TIMEOUT_MS); });
+	try {
+		return await Promise.race([appliedIds().catch(function () { return null; }), bound]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/**
+ * What the last run did, read from the state file rather than from a process.
+ *
+ * This is the whole reason progress is durable: by the time anybody asks, the
+ * thing that launched the updater has usually been replaced by it.
+ */
+function reportStatus(target) {
+	var state = runStore.latest(target);
+	if (!state) {
+		info('no update has ever run against ' + target);
+		return;
+	}
+	var s = summarise(state);
+	console.log('');
+	console.log('  run      ' + s.runId + '   ' + s.status.toUpperCase());
+	console.log('  moving   ' + (s.from || '?') + ' -> ' + (s.to || '?'));
+	console.log('  elapsed  ' + Math.round((s.elapsedMs || 0) / 1000) + 's');
+	if (s.current) console.log('  now      ' + s.current);
+	if (s.error) console.log('  error    ' + s.error);
+	console.log('');
+	for (var p of state.phases) {
+		var mark = p.status === 'done' ? GREEN + 'done ' + NC
+			: p.status === 'failed' ? RED + 'FAIL ' + NC
+			: p.status === 'skipped' ? YELLOW + 'skip ' + NC
+			: p.status === 'running' ? CYAN + 'now  ' + NC
+			: '     ';
+		console.log('    ' + mark + ' ' + p.name.padEnd(13) + (p.detail || p.error || ''));
+	}
+	console.log('');
+	for (var w of (state.warnings || [])) warn(w);
+	if (state.logFile) console.log('  log      ' + state.logFile);
+	console.log('');
+}
+
 async function main() {
 	var o = parseArgs(process.argv.slice(2));
 	await appConfig.load();
+
+	if (o.status) { reportStatus(o.target); return; }
 
 	var source = o.fromDir ? dirSource(o.fromDir)
 		: httpSource(o.url || appConfig.get('update_check_url', ''));
@@ -204,27 +236,49 @@ async function main() {
 
 	// The move rule, before anything is downloaded. Refusing after a 20 MB
 	// fetch would be rude and refusing after extraction would be worse.
-	{
-		var blockers = blockersFor({
-			current: running,
-			release: entry,
-			appliedMigrations: await appliedIds(),
-			nodeVersion: process.versions.node
-		});
-		if (blockers.length) {
-			console.log('');
-			for (var b of blockers) warn(b.detail);
-			console.log('');
-			die('this system cannot move to ' + version + ' yet. Nothing was downloaded.');
-		}
+	var applied = await readLedger();
+
+	// Only the migration half of the rule needs the ledger. The upgrade floor
+	// and the Node requirement are answerable from the release and this machine
+	// alone, so a database that will not answer must not take those checks down
+	// with it: they are the ones a fresh or misconfigured install is most
+	// likely to trip.
+	var blockers = blockersFor({
+		current: running,
+		release: entry,
+		appliedMigrations: applied || [],
+		nodeVersion: process.versions.node
+	});
+
+	if (applied === null) {
+		// Fail closed on the half we could not check. An unreadable ledger is
+		// not "no migrations applied": treating it as an empty list would clear
+		// every migration blocker and wave through exactly the move the rule
+		// exists to stop.
+		warn('could not read the migration ledger, so whether this move is safe cannot be fully established');
+		if (o.apply) die('refusing to apply without it. Bring the database up, or drop --apply to look.');
 	}
+
+	if (blockers.length) {
+		console.log('');
+		for (var b of blockers) warn(b.detail);
+		console.log('');
+		die('this system cannot move to ' + version + ' yet. Nothing was downloaded.');
+	}
+
+	// Staging goes inside the installation by default. node_modules resolves by
+	// walking up from a module's own directory and a release ships none, so an
+	// updater staged in /tmp cannot import anything with a dependency. Under
+	// the install it walks up and finds the install's. The dot directory is not
+	// a shipped category, so nothing scans or replaces it.
+	var stagingDir = o.staging || path.join(stagingRootFor(o.target), version);
 
 	var staged = null;
 	try {
 		staged = await stageRelease({
 			source: source,
 			version: version,
-			stagingDir: o.staging,
+			stagingDir: stagingDir,
 			onPhase: function (phase, detail) { info(phase + ': ' + detail); }
 		});
 		ok('staged ' + staged.meta.version + ', ' + staged.verification.checked + ' files verified against ' + MANIFEST_FILENAME);
@@ -247,6 +301,34 @@ async function main() {
 
 		if (!o.apply) {
 			info('report only. Pass --apply to write it.');
+			return;
+		}
+
+		if (o.handoff) {
+			// Hand over to the NEW release's updater and stop. From here the
+			// state file is the only channel: this process is expected to go
+			// away, and on a real update it is the thing being replaced.
+			var problems = validateHandoff({ stagedRoot: staged.treeRoot, target: o.target });
+			if (problems.length) {
+				for (var pr of problems) warn(pr);
+				die('cannot hand off to ' + version);
+			}
+
+			var handle = launchUpdater({
+				stagedRoot: staged.treeRoot, target: o.target,
+				from: running, to: version, launchedBy: 'src/tools/update.js',
+				phases: ['preflight', 'backup', 'files', 'verify']
+			});
+			ok('handed off to ' + version + '\'s own updater, pid ' + handle.pid);
+			console.log('');
+			console.log('    run      ' + handle.runId);
+			console.log('    progress ' + handle.stateFile);
+			console.log('    log      ' + handle.logFile);
+			console.log('');
+			console.log('  It is detached and will outlive this process and the BBS being stopped.');
+			console.log('  Watch it with:  node src/tools/update.js --status --target ' + o.target);
+			console.log('');
+			o.keepStaging = true;
 			return;
 		}
 

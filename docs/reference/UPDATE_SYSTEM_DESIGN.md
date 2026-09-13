@@ -658,11 +658,10 @@ Resolved during design:
 5. ~~Update check and notification (read-only, no apply)~~ **done**:
    `src/release/updateVerdict.js`, `src/maintenance/updateCheck.js`,
    `src/models/updateChecks.js`, `/admin/update`. See section 14
-6. The updater, with the handoff model. **Partly built**: staging (download,
-   verify, reconstruct, verify against the manifest), the apply plan, the
-   applier with backup and rollback, and `src/tools/update.js`. The handoff
-   itself, process control, dependencies, schema, steps and progress rows are
-   not. See section 15
+6. The updater, with the handoff model. **Mostly built**: staging, the apply
+   plan, the applier with backup and rollback, the detached handoff, and durable
+   progress. Process control, dependencies, schema, migrations, the declared
+   steps and the rest of preflight are not. See section 15
 7. Bootstrap installer
 8. FTN transport
 
@@ -844,16 +843,60 @@ tool. This records the decisions.
 | Describing an installation the way an artifact is described | `shippedTree.scanInstalledFiles` |
 | The tool | `src/tools/update.js` |
 
-### What is not, and is deliberately absent rather than half done
+### The handoff
 
-The detached handoff that spawns the updater from the staged tree; stopping and
-starting the processes; `npm install`; the schema and migration run; the
-declared upgrade steps; the durable progress rows; preflight beyond the move
-rule; the admin page's Update button.
+`src/tools/update.js --handoff` stages, then spawns
+`<staged>/src/tools/applyUpdate.js` detached and returns. The child applies the
+release as the new version, against an installation that is still the old one.
+
+**Detachment is the load-bearing property.** `pm2 stop all` signals the process
+group, so an updater launched from the gateway without `detached: true` dies
+with the thing it was updating, halfway through. Verified by SIGKILLing the
+launcher's entire process group immediately after the spawn and confirming the
+update still completed.
+
+**The contract between the two releases is a JSON run file, not a command
+line.** One argument, `--run <path>`. The release that launches and the release
+that applies are different versions of this software and both will keep
+changing: a newer updater reading an older file defaults what is missing, an
+older updater ignores what it does not know, and a positional argument list can
+do neither.
+
+**Staging lives inside the installation**, under `.canectic-update/`. Not
+tidiness: `node_modules` resolves by walking up from a module's own directory
+and a release artifact ships none, so an updater staged in `/tmp` cannot import
+anything with a dependency, which includes `alogger`. The dot directory is not a
+shipped category, so nothing scans or replaces it. The updater's working
+directory is the installation, where `.env` and `node_modules` are; only its
+code comes from staging.
+
+A release that ships no `src/tools/applyUpdate.js` cannot be handed off to, and
+the launcher says so and points at `--apply` instead. That is not hypothetical:
+it is every release cut before this existed.
+
+### Progress is a file, not a database row
+
+The design says "durable row". It is a JSON file under `logs/update/`, because
+the updater is replacing `src/` including the database layer and may be running
+while the BBS is stopped. Making the one record of what happened depend on
+Postgres would put it out of reach exactly when it is wanted. Writes are atomic,
+and `latest.json` is a copy rather than a symlink.
+
+`completeRun` refuses over a failed or still-running phase. A run reporting
+success across a failure would tell a sysop their board is updated when it is
+half replaced, and nothing else in the system would contradict it. "Never
+reached" and "deliberately not done" are also distinct: this updater performs
+four of the ten phases and records the other six as skipped with reasons, so the
+run reads as incomplete on purpose rather than as stuck.
+
+### What is still not built
+
+Stopping and starting the processes; `npm install`; the schema and migration
+run; the declared upgrade steps; preflight beyond the move rule (disk,
+toolchain, jobs in flight, connected callers); the admin page's Update button.
 
 Until those exist this is a tool a sysop runs by hand with the BBS stopped, and
-it prints the remaining steps after it finishes rather than pretending they are
-done.
+it prints the remaining steps rather than pretending they are done.
 
 ### The plan is a value, not a loop
 
@@ -918,6 +961,19 @@ correct content, so patching a live tree leaves it silently wrong. Rebuilding
 from the base makes reverts, deletions and half-applied states correct by
 construction, and the manifest check is an end-state assertion the full-tarball
 path never had.
+
+### The ledger read is bounded, and fails closed on the half it covers
+
+The pg pool retries internally, so an update tool that asks the migration ledger
+a question on a stopped database hangs for ever. It is raced against a bound,
+and an unreadable ledger comes back as null rather than as an empty list:
+treating "we do not know" as "nothing has been applied" would clear every
+migration blocker and wave through exactly the move the rule exists to stop.
+
+The upgrade floor and the Node requirement are still evaluated, because neither
+needs the ledger, and they are the checks a fresh or misconfigured install is
+most likely to trip. `--apply` is refused outright; a plan-only run continues
+with a warning saying which half could not be checked.
 
 ### Still to decide before this is finished
 

@@ -311,6 +311,13 @@ Last updated: 2026-09-13
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
+- [~] Update handoff: `--handoff` stages a release then launches the NEW
+      version's own updater detached, so it survives the BBS being stopped and a
+      release can ship a fixed updater that applies itself. The contract between
+      the two releases is a JSON run file rather than a command line, so it can
+      grow in both directions. Progress is a durable file under `logs/update/`,
+      readable with `--status` long after the process that started it was
+      replaced, and a run cannot report success over a failed phase
 - [~] Update staging and applying (`src/tools/update.js`): fetches a release,
       verifies its checksum before unpacking, reconstructs a development delta
       against its base and checks it against the manifest, then plans and
