@@ -72,9 +72,10 @@ era, Carrier the beta, First Call is 1.0.
 MAJOR.MINOR.PATCH[phase].YYYYMMDD
 ```
 
-A development build carries **the version it is heading toward**, not the last
-one released. While work is going on toward `0.9.6a`, development builds are
-`0.9.6a.20260913`.
+A development build carries **the last stable released**, plus its build date. A
+build made on 13 September after stable `0.9.5a` shipped is `0.9.5a.20260913`.
+
+It names where it came from, not where it is going.
 
 A build is cut when there is something worth having rather than on a timer, so
 the gap between two of them may be a day or may be two months. The date is the
@@ -93,28 +94,47 @@ stable and are meant to be run on live boards, not merely inspected.
 ### Ordering
 
 Compare left to right: major, minor, patch numerically; then phase, where `a` is
-lower than `b` and both are lower than absent; then the date, where a dated
-build is lower than the undated one it is heading toward.
+lower than `b` and both are lower than absent; then the date, where **absent
+sorts below present**, because a dated build comes after the release it names.
 
 ```
-0.9.5a.20260901 < 0.9.5a.20260913 < 0.9.5a < 0.9.5b < 0.9.5 < 0.9.6a.20261001 < 0.9.6a
+0.9.5a < 0.9.5a.20260901 < 0.9.5a.20260913 < 0.9.5b < 0.9.5b.20261005 < 0.9.5 < 0.9.6a
 ```
 
-Read as: more prerelease is lower. A dated build is a prerelease of its target
-version, and an earlier phase is a prerelease of a later one.
+Read as: a dated build is a *post*release of the version in its name, and an
+earlier phase is a prerelease of a later one.
 
-The property this buys is that **a development build always converges onto its
-stable**. Whoever is running `0.9.6a.<anything>` can move to `0.9.6a` the day it
-ships, because it sorts above every development build of that version.
+**This is the rule to get right.** Which side of its base a dated build sorts on
+is the single load-bearing decision in the scheme, and reversing it inverts every
+comparison in the system: every sysop on development would be told they are
+behind by builds they are ahead of. It belongs in one tested function, and the
+tests should assert the full chain above rather than pairs.
 
-### The obligation this creates
+### Why the last stable and not the next one
 
-Cutting stable `0.9.6a` must bump the development branch to `0.9.7a` in the same
-motion. Without that, development builds keep claiming `0.9.6a.<date>`, which now
-sorts *below* the stable that just shipped, and everyone on the channel is told
-they are behind by a build that is actually ahead.
+The obvious alternative is to name the version a build is heading toward, so work
+toward `0.9.6a` produces `0.9.6a.20260913`. That was the first design and it is
+worse in three ways.
 
-This is a step in the release script, not a thing to remember.
+**It makes a promise about the future that can turn out false.** Publish a run of
+`0.9.6a.*` builds, then decide the work warrants calling it `1.0.0`, and every one
+of them permanently names a release that never existed.
+
+**It creates an obligation at release time.** Cutting stable `0.9.6a` would have
+to bump the branch to `0.9.7a` in the same motion, or development builds keep
+claiming `0.9.6a.<date>`, which now sorts below the stable that just shipped, and
+everyone on the channel is told they are behind by a build that is ahead. Naming
+the last stable removes that entirely: the version is derived from the most
+recent tag plus today's date, so cutting `0.9.6a` makes the next development
+build `0.9.6a.<date>` with nothing to remember.
+
+**It hides the delta base.** Development artifacts are deltas against the most
+recent stable (section 3). Naming that stable means the version states its own
+base rather than relying on a metadata field that could disagree with it.
+
+The cost is that a development build no longer advertises what release it is
+heading toward. That was speculation, and speculation is the thing that went
+wrong.
 
 ---
 
@@ -202,7 +222,8 @@ file the sysop edited from one they never touched.
   "artifact": "canectic-0.9.6a.tar.gz",
   "sha256": "...",
   "min_upgrade_from": "0.9.0a",
-  "base": null,
+  "base": null,          // development builds: the stable they delta against,
+                        // which is also the version in their own name
   "node_min": "22.0.0",
   "migrations": ["0001-msgid-tuple-split", "0002-qwk-conference-blocks"],
   "steps": [
@@ -244,7 +265,8 @@ rather than the whole tree, on links that are often slow and sometimes
 metered.
 
 **Always against stable, never against the previous development build.** One
-hop, always.
+hop, always. The version names its own base (`0.9.5a.20260913` deltas against
+`0.9.5a`), so the base cannot be ambiguous or disagree with the metadata.
 Chaining deltas would mean replaying every intermediate build to reconstruct the
 current one, and a single pruned artifact would break the chain for everyone
 downstream of it.
@@ -305,8 +327,21 @@ A script, because there is no CI and the current manual process already let
 7. Write the release metadata, including steps and notices
 8. Write and sign `SHA256SUMS`
 9. Tag
-10. Bump the development branch version if this was a stable cut, which also
-    resets the development delta base to the version just cut
+
+Note there is no branch version to bump. A development build derives its version
+from the most recent stable tag plus its build date, so cutting a stable
+automatically re-bases every development build that follows it.
+
+**The build stamps the version into the artifact.** `package.json` in the
+repository carries the last stable released, because that is the only version the
+tree can honestly claim between releases. The build writes the full computed
+version into the `package.json` inside the artifact, so a development build
+installs as `0.9.5a.20260913` rather than reporting itself as `0.9.5a`.
+
+That matters because `currentversion` is read from `package.json` at startup and
+is what the update check compares against. Without the stamp, every development
+build would identify as the stable it was based on, be told it is up to date, and
+never see a newer development build at all.
 
 ---
 
