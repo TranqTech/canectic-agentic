@@ -28,6 +28,42 @@ async function getAllShortcodes() {
 	return (rows || []).map(r => r.shortcode.toLowerCase().trim());
 }
 
+// Columns that were VARCHAR before they were TEXT, and the tables they live on.
+// Pulled out of the loop so the decision is one testable rule rather than two
+// statements fired blind.
+const LEGACY_TEXT_COLUMNS = ['seen_by', 'path'];
+
+// Which of the legacy columns on this table still need widening.
+//
+// Pure, so the rule can be tested without a database: it takes the column map
+// checkOrCreateTable already read. A column that is absent needs nothing, since
+// it will have been added from the template, which says TEXT.
+function legacyColumnsNeedingWidening(columns) {
+	if (!columns) return [];
+	return LEGACY_TEXT_COLUMNS.filter(function (name) {
+		var col = columns.get(name);
+		return col && col.dataType !== 'text';
+	});
+}
+
+async function widenLegacyTextColumns(tablename, info) {
+	var todo = legacyColumnsNeedingWidening(info ? info.columns : null);
+	for (var name of todo) {
+		var err = await pgdb.write('ALTER TABLE ' + tablename + ' ALTER COLUMN ' + name + ' TYPE TEXT');
+		if (err) {
+			// Reported rather than swallowed: the old code ignored the return
+			// value entirely, and pgdb.write reports a failure that way rather
+			// than throwing, so a column that could not be widened looked
+			// exactly like one that did not need to be.
+			alogger.writeAlog(3, 'messageMaint: could not widen ' + tablename + '.' + name +
+				' to TEXT: ' + err.message, 'redbright');
+		} else {
+			alogger.writeAlog(5, 'messageMaint: widened ' + tablename + '.' + name + ' to TEXT', 'cyan');
+		}
+	}
+	return todo.length;
+}
+
 // Run template-driven schema maintenance across all area tables.
 async function maintainAllAreaTables() {
 	// Load template column definitions once — shared across all areas
@@ -53,23 +89,40 @@ async function maintainAllAreaTables() {
 
 	alogger.writeAlog(5, 'messageMaint: checking ' + shortcodes.length + ' area(s)', 'cyan');
 
+	var widened = 0;
+
 	for (var shortcode of shortcodes) {
 		var shorty = shortcode.toLowerCase().trim();
 		var mTable = 'mb_' + shorty + '_msgs';
 		var tTable = 'mb_' + shorty + '_threads';
 
-		await tableTools.checkOrCreateTable(mTable, msgCols,    msgRemove);
+		var mInfo = await tableTools.checkOrCreateTable(mTable, msgCols,    msgRemove);
 		await tableTools.checkOrCreateTable(tTable, threadCols, threadRemove);
-		// Migrate seen_by and path from VARCHAR(255) to TEXT on existing tables
-		await pgdb.write("ALTER TABLE " + mTable + " ALTER COLUMN seen_by TYPE TEXT");
-		await pgdb.write("ALTER TABLE " + mTable + " ALTER COLUMN path TYPE TEXT");
+
+		// Legacy type migration: seen_by and path were VARCHAR(255) before they
+		// were TEXT, and a long SEEN-BY does not fit in 255 characters.
+		//
+		// This used to run unconditionally, two ALTER TABLE statements per area
+		// on every pass, each taking an ACCESS EXCLUSIVE lock on a live message
+		// table, overwhelmingly to change nothing: the template has said TEXT
+		// for a long time, so any table created since is already correct and
+		// any older one was widened by the first run that saw it.
+		//
+		// checkOrCreateTable hands back the columns it read, so deciding costs
+		// nothing extra. Note the map describes the table before that call's
+		// own ALTERs, which is right here: a seen_by it just added came from the
+		// template and is already TEXT.
+		widened += await widenLegacyTextColumns(mTable, mInfo);
 	}
 
-	alogger.writeAlog(5, 'messageMaint: done', 'greenbright');
+	alogger.writeAlog(5, 'messageMaint: done' +
+		(widened > 0 ? ' (' + widened + ' legacy column(s) widened to TEXT)' : ''), 'greenbright');
 }
 
 export {
-	maintainAllAreaTables
+	maintainAllAreaTables,
+	legacyColumnsNeedingWidening,
+	LEGACY_TEXT_COLUMNS
 };
 
 // Run as CLI if invoked directly

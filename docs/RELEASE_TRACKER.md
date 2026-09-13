@@ -329,6 +329,12 @@ Last updated: 2026-09-12
       explicitly rather than omitted so the decision is visible
 - [x] Both Redis clients pinned to RESP2 so the client majors could not silently
       change reply shapes. Adopting RESP3 is tracked separately as high priority
+- [x] Schema maintenance reads a table's columns in one query rather than one
+      per column, on both the static tables and the per-area message tables,
+      sharing the reader so the two cannot drift. 31 areas went from 6.9s to
+      0.47s and the static pass from 3.2s to 0.95s, paid on every migration run.
+      The per-area varchar-to-TEXT widening is now conditional instead of two
+      ALTER TABLE locks per area per run
 - [x] Databases created as UTF8 explicitly, with `setup/convert_db_encoding.sh`
       to convert an existing SQL_ASCII database (invalid-byte preflight, row
       count verification, name swap so `.env` needs no edit)

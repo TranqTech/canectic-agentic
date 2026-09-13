@@ -4,6 +4,9 @@ import * as pgdb from "../middleware/db/postgres.js";
 import * as fs from 'fs';
 import * as alogger from "../utils/alogger.js";
 import { maintainAllAreaTables } from "../models/messageMaint.js";
+// Aliased: this file already has a getTableColumns that reads column
+// definitions out of a .conf file. The imported one reads the live table.
+import { getTableColumns as getLiveTableColumns, columnNameFromDefinition } from "../middleware/db/tableTools.js";
 
 //setup
 dotenv.config();
@@ -72,14 +75,22 @@ async function checkTable(tablename) {
 	}
 }
 
-async function checkColumn(tablename, columnname) {
-	var sql = "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema LIKE 'public' AND table_name=$1 AND column_name=$2)";
+// One read of the table's columns, shared with tableTools so the static tables
+// here and the per-area tables there cannot drift.
+//
+// This replaced a checkColumn(table, column) doing its own information_schema
+// round trip per column. With roughly 127 tables in tablenames.conf, that was
+// thousands of queries on every migration run to establish, almost always, that
+// nothing needed doing. Returns null when the read failed, which the caller
+// must treat as "do not alter this table" rather than as "no columns": the old
+// per-column version returned false on error, so a database hiccup made every
+// column look missing and produced an ALTER TABLE adding all of them.
+async function readTableColumns(tablename) {
 	try {
-		var rows = await pgdb.query(sql, [tablename, columnname]);
-		return rows[0] && rows[0].exists === true;
+		return await getLiveTableColumns(tablename);
 	} catch (error) {
-		console.log("  Error checking column:", error.message);
-		return false;
+		console.log("  Error reading columns for " + tablename + ":", error.message);
+		return null;
 	}
 }
 
@@ -160,12 +171,17 @@ async function checkOrCreateTable(tablename, summary) {
 	var addClauses = [];
 	var removeClauses = [];
 
+	var existingCols = await readTableColumns(tablename);
+	if (!existingCols) {
+		summary.errors.push(tablename + ": could not read columns");
+		return;
+	}
+
 	// Check columns to add
 	for (var col of colarray) {
-		var colName = col.split(" ")[0].replace(/\s/g, '');
+		var colName = columnNameFromDefinition(col);
 		if (!colName) continue;
-		var exists = await checkColumn(tablename, colName);
-		if (!exists) {
+		if (!existingCols.has(colName.toLowerCase())) {
 			console.log("    + Adding column: " + colName);
 			addClauses.push("ADD COLUMN " + col);
 		}
@@ -173,10 +189,9 @@ async function checkOrCreateTable(tablename, summary) {
 
 	// Check columns to remove
 	for (var rcol of rcolarray) {
-		var rcolName = rcol.split(" ")[0].replace(/\s/g, '');
+		var rcolName = columnNameFromDefinition(rcol);
 		if (!rcolName) continue;
-		var exists = await checkColumn(tablename, rcolName);
-		if (exists) {
+		if (existingCols.has(rcolName.toLowerCase())) {
 			console.log("    - Removing column: " + rcolName);
 			removeClauses.push("DROP COLUMN " + rcolName);
 		}
