@@ -71,7 +71,7 @@ done
 # -----------------------------------------------------------------------------
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is needed and was not found"; }
-need tar
+need unzip
 need sha256sum
 
 if [[ -z "$FROM" ]]; then
@@ -198,7 +198,7 @@ if [[ "$DOWNLOAD_ONLY" == "true" ]]; then
     ok "downloaded and verified into $DEST"
     echo ""
     echo "  To install it yourself:"
-    echo "    tar -xzf $ARTIFACT && cd canectic-$VERSION"
+    echo "    unzip $ARTIFACT && cd canectic-$VERSION"
     echo "    node src/tools/install.js --target /opt/canectic"
     echo ""
     exit 0
@@ -209,7 +209,7 @@ fi
 # -----------------------------------------------------------------------------
 
 info "extracting"
-tar -xzf "$WORK/$ARTIFACT" -C "$WORK"
+unzip -q -o "$WORK/$ARTIFACT" -d "$WORK"
 TREE="$WORK/canectic-${VERSION}"
 [[ -d "$TREE" ]] || die "the archive did not contain canectic-${VERSION}/"
 [[ -f "$TREE/src/tools/install.js" ]] || die "this release ships no installer. Extract it and follow docs/sysop/INSTALL.md"

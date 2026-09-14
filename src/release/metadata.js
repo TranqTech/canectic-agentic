@@ -39,11 +39,23 @@ function codenameFor(version) {
 	return CODENAME_FINAL;
 }
 
-/** canectic-0.9.6a.tar.gz, or canectic-0.9.6a.20260913.delta.tar.gz */
+/**
+ * canectic-0.9.6a.zip, or canectic-0.9.6a.20260913.delta.zip
+ *
+ * ZIP rather than tar.gz, for one reason that matters to this audience:
+ * FILE_ID.DIZ. Every BBS file-area system knows how to pull a description out
+ * of a ZIP and almost none can do it from a tarball, so a release travelling
+ * down a file echo as a tarball sits there with no description, which is a file
+ * nobody downloads.
+ *
+ * The usual objection to ZIP is Unix permissions, and it does not apply here:
+ * MANIFEST records each file's mode and the updater chmods from it, so the
+ * archive's own permission handling was already irrelevant.
+ */
 function artifactName(version, opts) {
 	var v = formatVersion(version);
 	if (!v) return null;
-	return 'canectic-' + v + ((opts && opts.delta) ? '.delta' : '') + '.tar.gz';
+	return 'canectic-' + v + ((opts && opts.delta) ? '.delta' : '') + '.zip';
 }
 
 function metadataName(version) {

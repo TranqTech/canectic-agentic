@@ -67,7 +67,7 @@ describe('inertness to the update machinery', function () {
 	it('is not a shipped category, so nothing in it is ever shipped or removed', function () {
 		for (var p of [
 			UPDATE_DIRNAME + '/staging/0.9.8a/tree/src/a.js',
-			UPDATE_DIRNAME + '/base/canectic-0.9.6a.tar.gz',
+			UPDATE_DIRNAME + '/base/canectic-0.9.6a.zip',
 			UPDATE_DIRNAME + '/backup/run-1/src/a.js'
 		]) {
 			assert.strictEqual(categoryForPath(p), null, p);
@@ -79,7 +79,7 @@ describe('inertness to the update machinery', function () {
 		// the manifest of the install.
 		var root = write(tmp(), {
 			'src/a.js': 'code',
-			[UPDATE_DIRNAME + '/base/canectic-0.9.6a.tar.gz']: 'tarball',
+			[UPDATE_DIRNAME + '/base/canectic-0.9.6a.zip']: 'archive',
 			[UPDATE_DIRNAME + '/staging/0.9.8a/tree/src/a.js']: 'staged'
 		});
 		var paths = scanInstalledFiles(root).map(function (f) { return f.path; });
@@ -110,7 +110,7 @@ describe('reclaimable', function () {
 		// "I need that disk back" should have an answer that is not guesswork.
 		var root = tmp();
 		write(root, {
-			[UPDATE_DIRNAME + '/base/canectic-0.9.6a.tar.gz']: 'x'.repeat(500),
+			[UPDATE_DIRNAME + '/base/canectic-0.9.6a.zip']: 'x'.repeat(500),
 			[UPDATE_DIRNAME + '/staging/0.9.8a/tree/a.js']: 'y'.repeat(100),
 			[UPDATE_DIRNAME + '/backup/run-1/a.js']: 'z'.repeat(50)
 		});

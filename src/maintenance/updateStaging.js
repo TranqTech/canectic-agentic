@@ -130,12 +130,38 @@ function verifyChecksum(file, expected) {
 	return actual;
 }
 
-/** Unpack a release tarball, dropping its top-level canectic-<version>/ wrapper. */
-function extractInto(tarball, dir) {
+/**
+ * Unpack a release archive, dropping its top-level canectic-<version>/ wrapper.
+ *
+ * The wrapper has to go because a delta is laid over its base and the two carry
+ * different version directories; keeping them would produce two trees side by
+ * side rather than one reconstructed one. ZIP has no --strip-components, so
+ * this unpacks to a scratch directory and copies the wrapper's contents across.
+ *
+ * The copy is `force: true` deliberately: laying a delta over a base IS an
+ * overwrite, and that is the whole mechanism.
+ *
+ * Anything at the archive root beside the wrapper is left behind, which is
+ * where FILE_ID.DIZ lives. It describes the archive, not the software, and has
+ * no business in the installed tree.
+ */
+function extractInto(archive, dir) {
 	fs.mkdirSync(dir, { recursive: true });
-	execFileSync('tar', ['-xzf', tarball, '-C', dir, '--strip-components=1'], {
-		maxBuffer: 64 * 1024 * 1024
-	});
+	var scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-unzip-'));
+	try {
+		execFileSync('unzip', ['-q', '-o', archive, '-d', scratch], { maxBuffer: 64 * 1024 * 1024 });
+
+		var tops = fs.readdirSync(scratch, { withFileTypes: true })
+			.filter(function (e) { return e.isDirectory(); })
+			.map(function (e) { return e.name; });
+		if (tops.length !== 1) {
+			throw new Error(path.basename(archive) + ' should contain exactly one directory and contains ' +
+				(tops.length === 0 ? 'none' : tops.length + ': ' + tops.join(', ')));
+		}
+		fs.cpSync(path.join(scratch, tops[0]), dir, { recursive: true, force: true });
+	} finally {
+		try { fs.rmSync(scratch, { recursive: true, force: true }); } catch (_) {}
+	}
 }
 
 /**

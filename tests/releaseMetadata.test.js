@@ -58,10 +58,10 @@ describe('codenames', function () {
 
 describe('artifact naming', function () {
 
-	it('names a stable tarball and a development delta differently', function () {
-		assert.strictEqual(artifactName('0.9.6a'), 'canectic-0.9.6a.tar.gz');
+	it('names a stable archive and a development delta differently', function () {
+		assert.strictEqual(artifactName('0.9.6a'), 'canectic-0.9.6a.zip');
 		assert.strictEqual(artifactName('0.9.6a.20260913', { delta: true }),
-			'canectic-0.9.6a.20260913.delta.tar.gz');
+			'canectic-0.9.6a.20260913.delta.zip');
 	});
 
 	it('names the metadata and the standalone manifest after the version', function () {
@@ -70,7 +70,7 @@ describe('artifact naming', function () {
 	});
 
 	it('normalises a stray v prefix rather than baking it into a filename', function () {
-		assert.strictEqual(artifactName('v0.9.6a'), 'canectic-0.9.6a.tar.gz');
+		assert.strictEqual(artifactName('v0.9.6a'), 'canectic-0.9.6a.zip');
 	});
 });
 
@@ -110,7 +110,7 @@ describe('buildMetadata', function () {
 		var dev = buildMetadata({ version: '0.9.6a.20260913', released: '2026-09-13' });
 		assert.strictEqual(dev.channel, 'development');
 		assert.strictEqual(dev.base, '0.9.6a');
-		assert.strictEqual(dev.base_artifact, 'canectic-0.9.6a.tar.gz');
+		assert.strictEqual(dev.base_artifact, 'canectic-0.9.6a.zip');
 		assert.strictEqual(dev.delta, true);
 	});
 

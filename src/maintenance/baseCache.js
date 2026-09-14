@@ -4,7 +4,7 @@
 // A development build ships only what differs from its base stable, so applying
 // one means having that base. A sysop tracking development moves from
 // 0.9.6a.20260913 to 0.9.6a.20260920 to 0.9.6a.20260928 and needs the same
-// 0.9.6a tarball every time; fetching 7.6 MB again each time is waste over HTTP
+// 0.9.6a archive every time; fetching 7.6 MB again each time is waste over HTTP
 // and considerably worse down a file echo, which is often slow and sometimes
 // metered.
 //
@@ -118,7 +118,7 @@ function cachedVersions(target) {
 	var names;
 	try { names = fs.readdirSync(dir); } catch (_) { return []; }
 	for (var name of names) {
-		var m = /^canectic-(.+)\.tar\.gz$/.exec(name);
+		var m = /^canectic-(.+)\.zip$/.exec(name);
 		if (!m) continue;
 		if (!parseVersion(m[1])) continue;
 		out.push(m[1]);

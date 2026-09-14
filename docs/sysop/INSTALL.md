@@ -16,7 +16,7 @@ sudo apt install build-essential python3 postgresql redis-server
 sudo apt install lrzsz
 
 # Required for QWK packet creation
-sudo apt install zip
+sudo apt install zip unzip
 
 # Recommended
 sudo npm install -g pm2        # Process management (or: npm install -g pm2)
@@ -122,7 +122,7 @@ gets you a verified artifact and stops:
 
 ```bash
 bash bootstrap.sh --download-only
-tar -xzf canectic-0.9.6a.tar.gz
+unzip canectic-0.9.6a.zip
 cd canectic-0.9.6a
 node src/tools/install.js --target /opt/canectic
 ```
@@ -142,8 +142,8 @@ Canectic itself rather than running it.
 
 Download the latest release from the [Canectic Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases) and extract:
 ```bash
-tar xzf canectic-v0.9.5a.tar.gz
-cd canectic-v0.9.5a
+unzip canectic-0.9.5a.zip
+cd canectic-0.9.5a
 ```
 
 **From git (specific release):**

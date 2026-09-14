@@ -41,8 +41,8 @@ after(function () {
 
 /** Put a real, self-consistent cache entry in place. */
 function cache(target, version, body) {
-	var src = path.join(tmp(), 'artifact.tar.gz');
-	fs.writeFileSync(src, body || ('pretend tarball for ' + version));
+	var src = path.join(tmp(), 'artifact.zip');
+	fs.writeFileSync(src, body || ('pretend archive for ' + version));
 	var meta = buildMetadata({
 		version: version, released: '2026-09-20', sha256: hashFile(src), node_min: '22.0.0'
 	});

@@ -226,7 +226,7 @@ function publishRelease(pub, version, extraFiles) {
 
 	fs.mkdirSync(pub, { recursive: true });
 	var artifact = path.join(pub, artifactName(version));
-	execFileSync('tar', ['--sort=name', '--owner=0', '--group=0', '--numeric-owner', '-czf', artifact, '-C', staging, treeName]);
+	execFileSync('zip', ['-X', '-q', '-r', artifact, treeName], { cwd: staging });
 
 	var meta = buildMetadata({
 		version: version, released: '2026-09-20', sha256: hashFile(artifact),

@@ -14,8 +14,8 @@
 //   and the install ends up claiming the version it started at.
 //   Refusal. A corrupted artifact is never unpacked.
 //
-// Builds its own tiny releases with tar rather than using a real artifact, so
-// the test is self-contained and fast.
+// Builds its own tiny releases rather than using a real artifact, so the test
+// is self-contained and fast.
 
 import assert from 'assert';
 import * as fs from 'fs';
@@ -69,8 +69,7 @@ function buildRelease(publishDir, version, files, opts) {
 
 	fs.mkdirSync(publishDir, { recursive: true });
 	var artifact = path.join(publishDir, artifactName(version, { delta: !!o.deltaMembers }));
-	execFileSync('tar', ['--sort=name', '--owner=0', '--group=0', '--numeric-owner',
-		'-czf', artifact, '-C', staging, treeName]);
+	execFileSync('zip', ['-X', '-q', '-r', artifact, treeName], { cwd: staging });
 
 	var meta = buildMetadata({
 		version: version, released: '2026-09-20', sha256: hashFile(artifact),
@@ -301,6 +300,9 @@ describe('applyPlan', function () {
 	});
 
 	it('preserves the executable bit on a script', async function () {
+		// The one real objection to shipping ZIP rather than tar, and it does
+		// not hold: MANIFEST records the mode and placeFile chmods from it, so
+		// whatever the archive format does with permissions is irrelevant.
 		var pub = tmpDir('pub');
 		var staging = tmpDir('build2');
 		var treeRoot = path.join(staging, 'canectic-0.9.7a');
@@ -310,7 +312,7 @@ describe('applyPlan', function () {
 		fs.writeFileSync(path.join(treeRoot, MANIFEST_FILENAME), serialiseManifest(manifest));
 		var artifact = path.join(pub, artifactName('0.9.7a'));
 		fs.mkdirSync(pub, { recursive: true });
-		execFileSync('tar', ['-czf', artifact, '-C', staging, 'canectic-0.9.7a']);
+		execFileSync('zip', ['-X', '-q', '-r', artifact, 'canectic-0.9.7a'], { cwd: staging });
 		fs.writeFileSync(path.join(pub, metadataName('0.9.7a')), serialiseMetadata(buildMetadata({
 			version: '0.9.7a', released: '2026-09-20', sha256: hashFile(artifact), node_min: '22.0.0'
 		})));

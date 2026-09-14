@@ -41,6 +41,9 @@ import {
 	manifestName, developmentVersionFor, normalisePending, emptyPending, codenameFor
 } from '../src/release/metadata.js';
 import {
+	IDENTITY_FILENAME, DIZ_FILENAME, serialiseIdentity, buildFileIdDiz, withoutSelfChecksum
+} from '../src/release/identity.js';
+import {
 	emptyIndex, addRelease, findRelease, newestRelease, releasesBasedOn,
 	serialiseIndex, parseIndex, indexName
 } from '../src/release/releaseIndex.js';
@@ -202,11 +205,11 @@ function loadBaseManifest(outputDir, base, override) {
 		return verifiedBase(fs.readFileSync(standalone, 'utf8'), base, manifestName(base));
 	}
 
-	// Fall back to the copy inside the stable tarball, which is the authority
+	// Fall back to the copy inside the stable archive, which is the authority
 	// and is what a maintainer who only kept the published files will have.
 	var tarball = path.join(outputDir, artifactName(base, { delta: false }));
 	if (fs.existsSync(tarball)) {
-		var text = execFileSync('tar', ['-xzOf', tarball, 'canectic-' + base + '/' + MANIFEST_FILENAME],
+		var text = execFileSync('unzip', ['-p', tarball, 'canectic-' + base + '/' + MANIFEST_FILENAME],
 			{ maxBuffer: 64 * 1024 * 1024 }).toString('utf8');
 		return verifiedBase(text, base, artifactName(base, { delta: false }));
 	}
@@ -260,19 +263,64 @@ function stageTree(version, files) {
 	return { staging: staging, treeRoot: treeRoot, treeName: treeName };
 }
 
+/**
+ * Give every staged file the same timestamp.
+ *
+ * ZIP stores a DOS timestamp per member and has no equivalent of tar's
+ * --mtime, so without this two builds of one commit differ in bytes purely
+ * because the files were checked out at different times.
+ */
+function normaliseTimes(root, when) {
+	var stamp = new Date(when);
+	(function walk(dir) {
+		for (var e of fs.readdirSync(dir, { withFileTypes: true })) {
+			var p = path.join(dir, e.name);
+			if (e.isDirectory()) walk(p);
+			else if (e.isFile()) fs.utimesSync(p, stamp, stamp);
+		}
+	})(root);
+}
+
+/**
+ * Build the release archive.
+ *
+ * Names are fed on stdin, sorted, so the archive's member order is the same on
+ * every build of the same tree. `-X` drops the extra fields (uid, gid, extended
+ * timestamps) that would otherwise vary between machines. Combined with the
+ * mtime normalisation in stageTree, two builds of one commit produce the same
+ * bytes, which is a property worth having even though the published sha256 is
+ * the authority regardless.
+ *
+ * FILE_ID.DIZ goes in at the archive ROOT, outside the version wrapper. Our own
+ * extractor finds it anywhere, but plenty of other BBS software only looks at
+ * the top, and the whole reason this is a ZIP is so other software can read it.
+ */
 function pack(opts) {
-	var args = [
-		'--sort=name', '--owner=0', '--group=0', '--numeric-owner',
-		'--mtime=' + opts.mtime,
-		'-czf', opts.out,
-		'-C', opts.staging
-	];
+	var names = [];
 	if (opts.members) {
-		for (var m of opts.members) args.push(path.join(opts.treeName, m));
+		for (var m of opts.members) names.push(path.join(opts.treeName, m));
 	} else {
-		args.push(opts.treeName);
+		names = walkRelative(path.join(opts.staging, opts.treeName), opts.treeName);
 	}
-	execFileSync('tar', args, { maxBuffer: 16 * 1024 * 1024 });
+	names.sort();
+	if (opts.rootFiles) names = names.concat(opts.rootFiles);
+
+	execFileSync('zip', ['-X', '-q', '-@', opts.out], {
+		cwd: opts.staging,
+		input: names.join('\n') + '\n',
+		maxBuffer: 16 * 1024 * 1024
+	});
+}
+
+/** Every file under `dir`, as paths prefixed with `prefix`, for zip's -@. */
+function walkRelative(dir, prefix) {
+	var out = [];
+	for (var e of fs.readdirSync(dir, { withFileTypes: true })) {
+		var rel = prefix + '/' + e.name;
+		if (e.isDirectory()) out = out.concat(walkRelative(path.join(dir, e.name), rel));
+		else if (e.isFile()) out.push(rel);
+	}
+	return out;
 }
 
 function writeSums(outputDir, sign) {
@@ -492,6 +540,26 @@ function buildArtifact(opts) {
 	var manifest = buildManifest({ root: staged.treeRoot, files: files, version: version, generated: new Date().toISOString() });
 	fs.writeFileSync(path.join(staged.treeRoot, MANIFEST_FILENAME), serialiseManifest(manifest));
 
+	// All three sidecars go at the archive ROOT, outside the version wrapper,
+	// because they describe the ARCHIVE rather than the software. Inside the
+	// wrapper they would be extracted into the installed tree, where they are
+	// two more files to keep in step with what the install actually is, and a
+	// delta would then prune them on every update because no manifest lists
+	// them. At the root they are read with a fixed path that carries no version
+	// in it, which is what the FTN transport wants.
+	//
+	// Over HTTP a sibling metadata file is better, since 3 KB decides whether
+	// you want 8 MB. Over a file echo the archive is already on disk and a
+	// sibling becomes a liability: two TIC'd files arrive independently,
+	// possibly out of order, possibly one lost, leaving an artifact whose
+	// metadata never comes. So it travels both ways, generated once from one
+	// source so the two cannot disagree.
+	fs.writeFileSync(path.join(staged.staging, IDENTITY_FILENAME), serialiseIdentity(meta));
+	fs.writeFileSync(path.join(staged.staging, metadataName(version)), serialiseMetadata(withoutSelfChecksum(meta)));
+	fs.writeFileSync(path.join(staged.staging, DIZ_FILENAME), buildFileIdDiz(meta));
+
+	normaliseTimes(staged.staging, opts.released + 'T00:00:00Z');
+
 	var members = null;
 	var fullBytes = totalBytes(manifest);
 	var payloadBytes = fullBytes;
@@ -523,7 +591,7 @@ function buildArtifact(opts) {
 	var artifact = path.join(opts.output, meta.artifact);
 	pack({
 		out: artifact, staging: staged.staging, treeName: staged.treeName,
-		members: members, mtime: opts.released + 'T00:00:00Z'
+		members: members, rootFiles: [DIZ_FILENAME, IDENTITY_FILENAME, metadataName(version)]
 	});
 	fs.rmSync(staged.staging, { recursive: true, force: true });
 

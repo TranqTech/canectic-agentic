@@ -64,7 +64,7 @@ describe('summariseRelease', function () {
 	it('names the base artifact a client would have to fetch first', function () {
 		var s = summariseRelease(meta('0.9.6a.20260913'));
 		assert.strictEqual(s.base, '0.9.6a');
-		assert.strictEqual(s.base_artifact, 'canectic-0.9.6a.tar.gz');
+		assert.strictEqual(s.base_artifact, 'canectic-0.9.6a.zip');
 		assert.strictEqual(s.delta, true);
 	});
 });
