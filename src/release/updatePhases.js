@@ -22,14 +22,24 @@
 //   silently did nothing would leave a phase pending for ever while the run
 //   carried on around it.
 
-// The full sequence, in order. A run states which of these it intends to
-// perform; the rest are skipped with a reason, so a tool that only does some of
-// them is honest about it rather than appearing to hang.
+// The full sequence, in order, and it is ONE sequence for both installing and
+// updating. Principle 1 of the design: install is update from nothing. An
+// install skips `backup` because there is nothing to preserve and `stop`
+// because nothing is running; an update skips `env` because the .env is the
+// sysop's. Expressing both as the same list with different skips is what stops
+// a second copier growing beside the first, which is how install.sh came to
+// delete every sysop-added asset under public/.
+//
+// A run states which of these it intends to perform; the rest are skipped with
+// a reason, so a tool that only does some of them is honest about it rather
+// than appearing to hang.
 var PHASES = [
 	'preflight',
 	'backup',
 	'stop',
 	'files',
+	'directories',
+	'env',
 	'dependencies',
 	'schema',
 	'migrations',

@@ -669,7 +669,8 @@ Resolved during design:
    the apply plan, the applier with backup and rollback, the detached handoff,
    durable progress, the whole phase sequence, preflight, and the Update button.
    See section 15
-7. Bootstrap installer
+7. ~~Bootstrap installer~~ **done**: `setup/bootstrap.sh`, `src/tools/install.js`,
+   `src/maintenance/installer.js`. See section 16
 8. FTN transport
 
 ---
@@ -1080,3 +1081,92 @@ with a warning saying which half could not be checked.
 Open decisions 1, 3 and 4 all land in the rest of this phase: signing, whether a
 database dump is required before migrating, and how the cached stable base is
 stored and retired. Nothing built so far forecloses any of them.
+
+---
+
+## 16. Phase 7 as built
+
+`setup/bootstrap.sh` is the only thing a new sysop touches. It resolves a
+release, downloads it, verifies its checksum, extracts it, and hands off to that
+release's own installer. No `git clone`, and no second tree afterwards.
+
+`docs/sysop/INSTALL.md` is the sysop-facing guide; this records the decisions.
+
+### Install is update from nothing, literally
+
+`buildApplyPlan` against an empty directory. Every file comes out as `create`
+and the categories that protect a sysop's work on an update simply have nothing
+to protect. There is no second copier, which is the point: the first one was
+`install.sh`, and it drifted from `update.sh` until it deleted every sysop-added
+asset under `public/`.
+
+The phase vocabulary is shared too. An install skips `backup` because there is
+nothing to preserve and `stop` because nothing is running; an update skips `env`
+because the `.env` is the sysop's. Two new phases, `directories` and `env`, join
+the sequence for that.
+
+### The installer's imports must resolve with no node_modules
+
+A hard constraint, discovered by the first end-to-end run failing on
+`Cannot find package 'luxon'`. A fresh machine has an extracted release and
+nothing else: `npm install` is something the installer RUNS, so it cannot be
+something the installer needs.
+
+`updateApply.js` lost its `alogger` import, and `runCommand`, `nodeCommand` and
+`createRuntimeDirs` moved out of `updateRunner.js` into `updateCommands.js`,
+because the runner reaches `appConfig` and therefore `dotenv`.
+`tests/installPath.test.js` walks the import graph from `src/tools/install.js`
+and fails on anything non-builtin, because this is exactly the kind of rule that
+holds until somebody adds one convenient import. The updater is deliberately not
+held to it and the test asserts the difference.
+
+### Runtime directories are created on BOTH paths
+
+A release ships no empty directories, because an empty directory is not a file,
+so the FTN spool, the logs and the art tree have to be made. That used to be a
+block of `mkdir` calls in `install.sh` that an update never ran, which means a
+release that starts writing somewhere new works on a fresh install and fails on
+every upgraded one, at the moment the feature is first used rather than at
+update time. `runtimeDirs()` is a list, `createRuntimeDirs()` is idempotent, and
+the update sequence runs it as its own phase.
+
+### `.env` is written once and never rewritten
+
+From `examples/env.example`, with the values the installer was given filled in,
+at mode 600 because it holds the database password. A directory that already has
+one belongs to somebody who set it up, and their credentials are worth more than
+the template. A password is never defaulted or generated: a credential nobody
+was told about, in a file nobody looked at, is worse than being asked.
+
+### Installing over an installation is refused
+
+It would treat every one of the sysop's files as new. The refusal names the
+version it found and prints the updater command instead. `--force` overrides it.
+
+### Where automation stops
+
+The role and the database need `sudo -u postgres`, which is restricted on plenty
+of hosts and absent on managed Postgres. `--create-database` runs the script that
+already handles that case properly; without it the schema phase is skipped and
+the command is printed. Everything after the credentials exist is automated:
+dependencies, schema, seed, and starting the processes.
+
+A failed install is not rolled back. There was nothing underneath, so deleting
+the directory and starting again is simpler and safer than unpicking it, and the
+run says so.
+
+### A development build cannot be installed from nothing
+
+It is a delta against a stable, so the bootstrap refuses one and names the
+stable to install first. The alternative would be the bootstrap reimplementing
+reconstruction, which is the updater's job and already tested.
+
+### Verify before you run
+
+The documented path is download, check the published checksum, then run.
+`curl | bash` works and is not what the docs lead with. This audience cares
+about provenance and it costs one line.
+
+Signature verification is wired: when `SHA256SUMS.asc` is published and `gpg` is
+present it is checked, and a signature that cannot be verified warns loudly. No
+key is published yet, so its absence is not yet a refusal.

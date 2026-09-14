@@ -311,6 +311,13 @@ Last updated: 2026-09-13
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
+- [x] Bootstrap installer (`setup/bootstrap.sh`): resolves a release, verifies
+      its checksum before unpacking, extracts it and hands off to that release's
+      own installer. No git clone and no source tree afterwards. Install is the
+      updater's planner against an empty directory, so there is no second
+      copier. The installer's whole import graph is dependency-free, since
+      `npm install` is something it runs rather than something it can need, and
+      a test walks the graph to keep it that way
 - [x] Update phase sequence (`src/maintenance/updateRunner.js`): stop, files,
       dependencies, database dump, schema and migrations, the release's
       automatic upgrade steps, start, verify. One implementation for both

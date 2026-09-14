@@ -25,7 +25,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
 
 import appConfig from '../config/appConfig.js';
 import { parseManifest, verifyTree, MANIFEST_FILENAME } from '../release/manifest.js';
@@ -40,34 +39,12 @@ import { describeInstall } from './installTarget.js';
 import { applyPlan, verifyApplied, rollback } from './updateApply.js';
 import { backupDir, freeBytes } from './updateLayout.js';
 import { pruneBaseCache } from './baseCache.js';
+import { runCommand, nodeCommand, createRuntimeDirs, COMMAND_TIMEOUT_MS } from './updateCommands.js';
 
 // Everything up to and including this phase can be undone by putting the files
 // back. After it, a migrated database makes that the wrong thing to do.
 var LAST_ROLLBACKABLE_PHASE = 'dependencies';
 var ROLLBACK_SAFE = ['preflight', 'backup', 'stop', 'files', 'dependencies'];
-
-var COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
-
-/**
- * Run a command in the installation.
- *
- * `shell: true` because the stop and start commands are sysop-configured
- * strings, not argument vectors. Output is returned rather than inherited so it
- * can go to the run log, which is the only place anybody will read it from once
- * the gateway is gone.
- */
-function runCommand(command, cwd, log) {
-	log('$ ' + command);
-	var res = spawnSync(command, {
-		cwd: cwd, shell: true, encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS,
-		maxBuffer: 32 * 1024 * 1024
-	});
-	var out = ((res.stdout || '') + (res.stderr || '')).trim();
-	if (out) for (var line of out.split('\n').slice(-40)) log('  ' + line);
-	if (res.error) throw new Error(command + ': ' + res.error.message);
-	if (res.status !== 0) throw new Error(command + ' exited ' + res.status);
-	return out;
-}
 
 /** The pg_dump environment, from the installation's own .env keys. */
 function dumpEnv() {
@@ -232,6 +209,20 @@ async function runUpdate(opts) {
 		persist(finishPhase(state, 'files', applied.written.length + ' written, ' +
 			applied.removed.length + ' removed, ' + applied.backedUp.length + ' backed up'));
 
+		// ---- directories -----------------------------------------------
+		// Run on updates too, not only installs. A release that starts writing
+		// to a directory the previous one did not have works perfectly on a
+		// fresh install and fails on every upgraded one, at the moment the
+		// feature is first used rather than at update time.
+		persist(beginPhase(state, 'directories'));
+		var made = createRuntimeDirs(target);
+		if (made.length) log('directories: created ' + made.join(', '));
+		persist(finishPhase(state, 'directories', made.length
+			? made.length + ' new director' + (made.length === 1 ? 'y' : 'ies')
+			: 'all present'));
+
+		persist(skipPhase(state, 'env', 'an existing installation keeps its own .env'));
+
 		// ---- dependencies ----------------------------------------------
 		if (options.dependencies === false) {
 			persist(skipPhase(state, 'dependencies', 'skipped by request; run npm install --omit=dev yourself'));
@@ -361,19 +352,12 @@ function resolvedCommand(key, fallback) {
 	return resolveRestartCommand(configured, process.execPath, fs.existsSync, path);
 }
 
-/** Never a bare `node`: the interpreter is whichever one is running this. */
-function nodeCommand(script) {
-	return JSON.stringify(process.execPath) + ' ' + script;
-}
-
 export {
 	LAST_ROLLBACKABLE_PHASE,
 	ROLLBACK_SAFE,
-	runCommand,
 	dumpEnv,
 	databaseSize,
 	takeDump,
 	resolvedCommand,
-	nodeCommand,
 	runUpdate
 };

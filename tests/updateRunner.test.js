@@ -26,7 +26,7 @@ import { buildManifest, serialiseManifest, MANIFEST_FILENAME } from '../src/rele
 import { newRun } from '../src/release/updatePhases.js';
 import * as runStore from '../src/maintenance/updateRunStore.js';
 import { backupDir } from '../src/maintenance/updateLayout.js';
-import { runUpdate, ROLLBACK_SAFE, nodeCommand } from '../src/maintenance/updateRunner.js';
+import { runUpdate, ROLLBACK_SAFE } from '../src/maintenance/updateRunner.js';
 
 var roots = [];
 function tmp(tag) {

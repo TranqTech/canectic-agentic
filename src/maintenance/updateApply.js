@@ -25,7 +25,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as alogger from '../utils/alogger.js';
 import { hashFile } from '../release/manifest.js';
 import { filesToWrite, filesToRemove, warningsFor } from '../release/applyPlan.js';
 import { MANIFEST_FILENAME } from '../release/manifest.js';
@@ -168,10 +167,11 @@ function applyPlan(opts) {
 		manifestWritten = true;
 	}
 
-	if (!dryRun) {
-		alogger.writeAlog(2, '[Update] applied ' + (plan.version || 'release') + ': ' +
-			written.length + ' written, ' + removed.length + ' removed, ' +
-			backedUp.length + ' backed up', 'green');
+	if (!dryRun && opts.onProgress) {
+		// Deliberately no alogger here. This module runs on the INSTALL path,
+		// which happens before npm install has ever run, so anything it imports
+		// has to resolve with no node_modules at all. alogger pulls luxon,
+		// chalk and dotenv. The callers do the logging.
 	}
 
 	return {

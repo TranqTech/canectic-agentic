@@ -73,6 +73,69 @@ and check `node -v` after any OS upgrade.
 
 ## Quick Start
 
+### One command
+
+```bash
+curl -fsSLO https://canectic.tranqsoft.com/releases/bootstrap.sh
+curl -fsSLO https://canectic.tranqsoft.com/releases/bootstrap.sh.sha256
+sha256sum -c bootstrap.sh.sha256 && bash bootstrap.sh --target /opt/canectic
+```
+
+That resolves the newest stable release, downloads it, **verifies its checksum
+before unpacking anything**, extracts it, and hands off to that release's own
+installer. There is no git clone and no source directory to look after
+afterwards.
+
+Verifying the bootstrap first is two extra lines and it is the recommended path.
+Piping it straight into a shell works:
+
+```bash
+curl -fsSL https://canectic.tranqsoft.com/releases/bootstrap.sh | bash -s -- --target /opt/canectic
+```
+
+| Flag | Effect |
+|------|--------|
+| `--target DIR` | Where to install. Asked for if not given |
+| `--channel development` | Track development builds rather than stable |
+| `--version 0.9.6a` | A specific release |
+| `--from DIR` | Artifacts already on disk, from a file echo or copied by hand |
+| `--download-only` | Fetch and verify, then stop, so you can inspect it |
+| `--create-database` | Also create the PostgreSQL role and database |
+| `--no-deps` / `--no-database` / `--no-start` | Leave those to you |
+
+The installer asks where to install and for database credentials, writes `.env`
+at mode 600, creates the runtime directories, installs dependencies, runs the
+schema, and starts the processes. Anything it skips it names, with the command
+you now owe.
+
+It refuses to install over a directory that already holds Canectic, and points
+you at the updater instead, which knows which of your files to leave alone. See
+`docs/sysop/UPDATING.md`.
+
+**A development build cannot be installed from nothing.** It is a delta against
+a stable release, so install the stable it names first and then update to it.
+
+### Doing it by hand
+
+If you would rather not run a script that downloads things, `--download-only`
+gets you a verified artifact and stops:
+
+```bash
+bash bootstrap.sh --download-only
+tar -xzf canectic-0.9.6a.tar.gz
+cd canectic-0.9.6a
+node src/tools/install.js --target /opt/canectic
+```
+
+The installer inside the release is the same one the bootstrap would have run.
+
+---
+
+## Installing from the source repository
+
+The older path, still supported, and what you want if you are working on
+Canectic itself rather than running it.
+
 ### 1. Get the Source
 
 **From a release archive (recommended):**
