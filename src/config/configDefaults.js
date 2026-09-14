@@ -265,6 +265,17 @@ var CONFIG_DEFINITIONS = [
 	  ] },
 	{ key: 'update_check_url',      defaultValue: 'https://canectic.tranqsoft.com/releases/', type: 'string', category: 'updates',
 	  description: 'Base URL holding the channel indexes. The check fetches index-<channel>.json from here and nothing else.' },
+	{ key: 'update_check_transport', defaultValue: 'http', type: 'string', category: 'updates',
+	  description: 'Where releases come from. FTN needs no outbound connection at all: the TIC tosser files artifacts into a file area and a new one appearing there is the signal.',
+	  options: [
+	    { value: 'http', label: 'HTTP (default)',  hint: 'Fetch the channel index from update_check_url.' },
+	    { value: 'ftn',  label: 'FTN file echo',   hint: 'Take releases from the configured file areas only. No outbound request is made.' },
+	    { value: 'both', label: 'Both',            hint: 'Look in both and offer whichever is newer. Useful while a file echo is being set up.' }
+	  ] },
+	{ key: 'update_stable_file_area', defaultValue: '', type: 'string', category: 'updates',
+	  description: 'File area shortcode carrying stable release artifacts (the CANECTIC_FILES echo). Only used when the transport includes FTN.' },
+	{ key: 'update_dev_file_area',    defaultValue: '', type: 'string', category: 'updates',
+	  description: 'File area shortcode carrying development build artifacts (the CANECTIC_DEV echo). Only used when the transport includes FTN.' },
 	{ key: 'update_check_retention_days', defaultValue: '90', type: 'number', category: 'maintenance',
 	  description: 'Days of update check history to keep (0 = never purge)' },
 	{ key: 'update_process_control', defaultValue: 'true', type: 'boolean', category: 'updates',

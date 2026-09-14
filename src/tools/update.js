@@ -38,6 +38,7 @@ import {
 	dirSource, httpSource, resolveRelease, stageRelease, discardStaging
 } from '../maintenance/updateStaging.js';
 import { launchUpdater, validateHandoff } from '../maintenance/updateHandoff.js';
+import { buildChannelIndex, sourceForRelease, isFtnRelease } from '../maintenance/ftnReleaseSource.js';
 import { runUpdate } from '../maintenance/updateRunner.js';
 import { stagingDir, reclaimable } from '../maintenance/updateLayout.js';
 import { makeRunId, newRun } from '../release/updatePhases.js';
@@ -219,9 +220,13 @@ async function main() {
 
 	if (o.status) { reportStatus(o.target); return; }
 
+	// An explicit --from-dir or --url overrides the configured transport, since
+	// somebody naming a source means it.
+	var useFtn = !o.fromDir && !o.url && appConfig.get('update_check_transport', 'http') === 'ftn';
+
 	var source = o.fromDir ? dirSource(o.fromDir)
 		: httpSource(o.url || appConfig.get('update_check_url', ''));
-	if (source.kind === 'http' && !source.baseUrl) {
+	if (!useFtn && source.kind === 'http' && !source.baseUrl) {
 		die('no release source. Pass --from-dir, or --url, or set update_check_url.');
 	}
 
@@ -242,7 +247,25 @@ async function main() {
 	// caller's word for it would mean naming a version is a way to skip the
 	// move rule, and the one time somebody names a version by hand is when they
 	// are trying to get past something.
-	var entry = await resolveRelease(source, channel, o.version || null);
+	//
+	// A file echo publishes no index, so one is derived from what the area
+	// holds. Everything after this point is identical either way, which is the
+	// whole reason the source abstraction takes a directory as well as a URL.
+	var entry;
+	if (useFtn) {
+		var shortcode = appConfig.get(channel === 'development' ? 'update_dev_file_area' : 'update_stable_file_area', '');
+		if (!shortcode) die('the FTN transport is selected but no file area is configured for the ' + channel + ' channel');
+		var ftnIndex = await buildChannelIndex(shortcode, channel);
+		if (!ftnIndex) die('no file area "' + shortcode + '" for the ' + channel + ' channel');
+		entry = o.version
+			? (ftnIndex.releases.filter(function (r) { return r.version === o.version; })[0] || null)
+			: (ftnIndex.releases[0] || null);
+		if (!entry) die('the ' + channel + ' file area holds no' + (o.version ? ' ' + o.version : ' release'));
+		source = sourceForRelease(entry);
+		info('from the ' + shortcode + ' file area: ' + entry.artifact);
+	} else {
+		entry = await resolveRelease(source, channel, o.version || null);
+	}
 	var version = entry.version;
 
 	// The move rule, before anything is downloaded. Refusing after a 20 MB
@@ -291,6 +314,7 @@ async function main() {
 			version: version,
 			stagingDir: staging,
 			target: o.target,
+			allowUnpublishedChecksum: isFtnRelease(entry),
 			onPhase: function (phase, detail) { info(phase + ': ' + detail); }
 		});
 		ok('staged ' + staged.meta.version + ', ' + staged.verification.checked + ' files verified against ' + MANIFEST_FILENAME);

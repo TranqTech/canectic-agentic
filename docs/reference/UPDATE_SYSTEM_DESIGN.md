@@ -671,7 +671,9 @@ Resolved during design:
    See section 15
 7. ~~Bootstrap installer~~ **done**: `setup/bootstrap.sh`, `src/tools/install.js`,
    `src/maintenance/installer.js`. See section 16
-8. FTN transport
+8. ~~FTN transport~~ **done**: `src/maintenance/ftnReleaseSource.js`, the
+   `update_check_transport` keys, and the sidecars that let an archive describe
+   itself. See section 17
 
 ---
 
@@ -1170,3 +1172,89 @@ about provenance and it costs one line.
 Signature verification is wired: when `SHA256SUMS.asc` is published and `gpg` is
 present it is checked, and a signature that cannot be verified warns loudly. No
 key is published yet, so its absence is not yet a refusal.
+
+---
+
+## 17. Phase 8 as built
+
+Releases travel down file echoes. This is how BBS software was distributed for
+twenty years, it works for a system with an FTN link and no outbound HTTP, and
+it does not depend on the web host being reachable.
+
+Almost nothing new happens on this path, which was the point of building it
+last. By the time a release is interesting the TIC tosser has received it,
+checked its CRC against the TIC, hashed it and filed it in a file area. So
+detection is a database query, and downloading is a copy.
+
+### There is no index document
+
+A file echo carries files, not indexes. So the channel index is DERIVED from
+what the area holds: each archive carries `CANECTIC.ID` and its own metadata at
+the root, which is exactly why those sidecars exist.
+
+Everything after derivation is the HTTP path unchanged. `dirSource` was written
+to take a directory as well as a URL for this, and the whole FTN transport is a
+`file_entries` lookup in front of it.
+
+### An archive that cannot identify itself is dropped
+
+Not offered with an empty description: dropped. Its migration list would be
+empty, and an empty migration list clears every blocker in the move rule, so an
+unidentifiable file would be presented as safe to install against a database it
+says nothing about.
+
+The filename is a hint and nothing more. It survives a distribution chain that
+may rename, truncate or uppercase it, and nothing stops anybody naming a file
+anything. `CANECTIC.ID` inside settles it. Uppercased names are normalised,
+because 8.3 habits are still alive in parts of the network.
+
+### What FTN integrity actually guarantees, stated plainly
+
+A file echo does not carry the published checksum unless the sibling metadata
+file was TIC'd too, and two TIC'd files travel independently so one can be lost.
+
+What is guaranteed: the TIC's CRC-32, verified by the tosser on arrival, and the
+SHA-256 the tosser computed and stored. Both prove the file has not changed
+since it got here.
+
+What is NOT guaranteed: that it is the file the maintainer built. The locally
+computed hash is therefore never put in the `sha256` field, which means
+"published checksum". It goes in `local_sha256`, and the difference is the
+difference between integrity and provenance.
+
+Staging a release with no published checksum requires `allowUnpublishedChecksum`
+from the caller. Refusing outright would make the transport useless; skipping
+quietly would make the HTTP path a lie. The FTN path sets it and the reason is
+logged and recorded on the run.
+
+Over FTN the trust boundary is the link password and, when a key is published,
+the signature. The manifest end-state check still runs and still catches a
+corrupted or truncated tree.
+
+### Absent metadata is normal; corrupt metadata is not
+
+The sibling is tried first, because over HTTP it is always there and 3 KB
+decides whether you want 8 MB. When it is absent the archive's own copy is used.
+When it is PRESENT and does not parse, staging stops: that is somebody telling
+you something is wrong, and quietly using a different copy would hide it. The
+two cases are distinguished by a flag on the error rather than by catching
+everything.
+
+### Echo tags
+
+| Echo | Type | Carries |
+|------|------|---------|
+| `CANECTIC` | Message | Release announcements and support |
+| `CANECTIC_FILES` | File | Stable artifacts |
+| `CANECTIC_DEV` | File | Development artifacts |
+
+Confirmed as designed. Short because other sysops type them into AreaFix
+requests by hand, and renaming an echo other systems have subscribed to is the
+one genuinely expensive change here.
+
+### Publishing is still by hand
+
+Consistent with phase 4. The maintainer drops the artifact into their own file
+area and the existing TIC machinery distributes it, which is a path already
+built and tested. A `--publish` flag can wait until a release has actually gone
+out this way once.

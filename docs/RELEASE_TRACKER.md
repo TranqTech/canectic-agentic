@@ -311,6 +311,14 @@ Last updated: 2026-09-13
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
+- [x] FTN release transport (`src/maintenance/ftnReleaseSource.js`): releases
+      arrive down a file echo with no outbound connection at all. The TIC tosser
+      has already verified and filed the artifact, so detection is a database
+      query and downloading is a copy. No index is published on this path, so
+      one is derived from each archive's `CANECTIC.ID`; an archive that cannot
+      identify itself is dropped rather than offered, since an empty migration
+      list would clear every blocker in the move rule. What FTN integrity does
+      and does not prove is documented rather than assumed
 - [x] Bootstrap installer (`setup/bootstrap.sh`): resolves a release, verifies
       its checksum before unpacking, extracts it and hands off to that release's
       own installer. No git clone and no source tree afterwards. Install is the

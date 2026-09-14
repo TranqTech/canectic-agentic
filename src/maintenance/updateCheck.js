@@ -10,6 +10,10 @@
 // IP address asked for a file, which is what any static host learns about any
 // fetch, and nothing about who or what asked.
 //
+// Over FTN there is no outbound request at all. The TIC tosser has already
+// filed the artifact in a file area, so the check is a database query and a
+// read of CANECTIC.ID out of an archive that is already on this disk.
+//
 // The impure half. Every rule that can be got backwards lives in
 // src/release/updateVerdict.js, which is pure and tested; this fetches, writes
 // and notifies.
@@ -24,6 +28,7 @@ import { parseIndex, indexName } from '../release/releaseIndex.js';
 import {
 	evaluate, shouldNotify, notificationFor, channelsToCheck, VERDICT_UNKNOWN
 } from '../release/updateVerdict.js';
+import { buildChannelIndex } from './ftnReleaseSource.js';
 
 var FETCH_TIMEOUT_MS = 20000;
 var MAX_INDEX_BYTES = 4 * 1024 * 1024;
@@ -69,6 +74,28 @@ async function fetchIndex(url) {
 }
 
 /**
+ * Combine what two transports found for one channel.
+ *
+ * HTTP entries win a tie on version, because only they carry the PUBLISHED
+ * checksum: the FTN copy of a release can be verified as unchanged since it
+ * arrived but not as the file the maintainer built. When a version is only on
+ * the file echo, its entry is used as it stands and the staging step is told it
+ * has no published checksum to check against.
+ */
+function mergeIndexes(channel, fromHttp, fromFtn) {
+	if (!fromHttp && !fromFtn) return null;
+	if (!fromFtn) return fromHttp;
+	if (!fromHttp) return fromFtn;
+
+	var seen = new Set();
+	var releases = [];
+	for (var r of (fromHttp.releases || [])) { seen.add(r.version); releases.push(r); }
+	for (var f of (fromFtn.releases || [])) { if (!seen.has(f.version)) releases.push(f); }
+
+	return { index_version: 1, channel: channel, updated: new Date().toISOString(), releases: releases };
+}
+
+/**
  * Run one check.
  *
  * @param {object} [opts]
@@ -90,22 +117,47 @@ async function runCheck(opts) {
 	var channel = appConfig.get('update_channel', 'stable');
 	var base = appConfig.get('update_check_url', '');
 
+	var transport = appConfig.get('update_check_transport', 'http');
+	var useHttp = transport === 'http' || transport === 'both';
+	var useFtn  = transport === 'ftn'  || transport === 'both';
+
 	var indexes = {};
 	var error = null;
 
 	for (var name of channelsToCheck(channel)) {
-		var url = indexUrl(base, name);
-		if (!url) { error = 'update_check_url is not set'; break; }
-		try {
-			var got = await fetchIndex(url);
-			if (got.index) indexes[name] = got.index;
-			else alogger.writeAlog(3, '[UpdateCheck] no index published for the ' + name + ' channel', 'cyan');
-		} catch (e) {
-			// One channel failing should not discard the other. The error is
-			// recorded, and whatever did resolve is still evaluated.
-			error = e.message;
-			alogger.writeAlog(2, '[UpdateCheck] ' + name + ' channel: ' + e.message, 'yellowbright');
+		var fromHttp = null;
+		var fromFtn = null;
+
+		if (useHttp) {
+			var url = indexUrl(base, name);
+			if (!url) {
+				error = 'update_check_url is not set';
+			} else {
+				try {
+					var got = await fetchIndex(url);
+					if (got.index) fromHttp = got.index;
+					else alogger.writeAlog(3, '[UpdateCheck] no index published for the ' + name + ' channel', 'cyan');
+				} catch (e) {
+					// One channel failing should not discard the other, and one
+					// transport failing should not discard the other either.
+					error = e.message;
+					alogger.writeAlog(2, '[UpdateCheck] ' + name + ' channel over HTTP: ' + e.message, 'yellowbright');
+				}
+			}
 		}
+
+		if (useFtn) {
+			var shortcode = appConfig.get(name === 'development' ? 'update_dev_file_area' : 'update_stable_file_area', '');
+			try {
+				fromFtn = await buildChannelIndex(shortcode, name);
+			} catch (e2) {
+				error = e2.message;
+				alogger.writeAlog(2, '[UpdateCheck] ' + name + ' channel over FTN: ' + e2.message, 'yellowbright');
+			}
+		}
+
+		var merged = mergeIndexes(name, fromHttp, fromFtn);
+		if (merged) indexes[name] = merged;
 	}
 
 	var applied = await appliedIds();

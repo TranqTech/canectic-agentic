@@ -27,6 +27,7 @@ import { buildApplyPlan } from '../src/release/applyPlan.js';
 import { stageRelease, dirSource, verifyChecksum, pruneToManifest } from '../src/maintenance/updateStaging.js';
 import { applyPlan, rollback, verifyApplied, pruneEmptyDirs } from '../src/maintenance/updateApply.js';
 import { buildMetadata, serialiseMetadata, artifactName, metadataName } from '../src/release/metadata.js';
+import { withoutSelfChecksum } from '../src/release/identity.js';
 
 var tmpRoots = [];
 
@@ -76,6 +77,14 @@ function buildRelease(publishDir, version, files, opts) {
 		migrations: [], node_min: '22.0.0'
 	});
 	fs.writeFileSync(path.join(publishDir, metadataName(version)), serialiseMetadata(meta));
+
+	// A real release carries its metadata at the archive root too, so the thing
+	// can describe itself when the sibling did not travel.
+	if (o.embedMetadata) {
+		fs.writeFileSync(path.join(staging, metadataName(version)),
+			serialiseMetadata(withoutSelfChecksum(meta)));
+		execFileSync('zip', ['-X', '-q', artifact, metadataName(version)], { cwd: staging });
+	}
 	return { manifest: manifest, artifact: artifact, meta: meta };
 }
 
@@ -143,6 +152,46 @@ describe('stageRelease', function () {
 			assert.ok(/not unpacked/.test(e.message));
 		});
 		assert.strictEqual(fs.existsSync(path.join(stagingDir, 'tree')), false);
+	});
+
+	it('falls back to the copy inside the archive when none was published beside it', async function () {
+		// Normal down a file echo: two TIC'd files travel independently and one
+		// can be lost. The archive describes itself so it is still usable, and
+		// the missing published checksum is the thing the caller has to accept.
+		var pub = tmpDir('pub');
+		var built = buildRelease(pub, '0.9.7a', { 'src/a.js': 'alpha' }, { embedMetadata: true });
+		fs.unlinkSync(path.join(pub, metadataName('0.9.7a')));
+
+		await stageRelease({ source: dirSource(pub), version: '0.9.7a', stagingDir: tmpDir('stage') }).then(function () {
+			assert.fail('should have refused without permission');
+		}, function (e) {
+			assert.ok(/no published checksum/.test(e.message), e.message);
+		});
+
+		var staged = await stageRelease({
+			source: dirSource(pub), version: '0.9.7a', stagingDir: tmpDir('stage'),
+			allowUnpublishedChecksum: true
+		});
+		assert.strictEqual(staged.meta.version, '0.9.7a');
+		assert.strictEqual(staged.unverified, true, 'and it has to say it was not checked');
+		assert.strictEqual(staged.verification.ok, true, 'the manifest check still runs');
+	});
+
+	it('stops on a metadata file that is there and wrong, rather than falling back', async function () {
+		// Absent is normal; corrupt is somebody telling you something is wrong.
+		// Quietly using a different copy would hide it.
+		var pub = tmpDir('pub');
+		buildRelease(pub, '0.9.7a', { 'src/a.js': 'alpha' }, { embedMetadata: true });
+		fs.writeFileSync(path.join(pub, metadataName('0.9.7a')), '{ not json');
+
+		await stageRelease({
+			source: dirSource(pub), version: '0.9.7a', stagingDir: tmpDir('stage'),
+			allowUnpublishedChecksum: true
+		}).then(function () {
+			assert.fail('should have refused');
+		}, function (e) {
+			assert.ok(/not valid JSON/.test(e.message), e.message);
+		});
 	});
 
 	it('refuses a release whose metadata names a version it is not', async function () {

@@ -27,7 +27,8 @@ import * as alogger from '../utils/alogger.js';
 import {
 	parseManifest, verifyTree, hashFile, manifestIndex, MANIFEST_FILENAME
 } from '../release/manifest.js';
-import { parseMetadata, artifactName, metadataName } from '../release/metadata.js';
+import { parseMetadata, serialiseMetadata, artifactName, metadataName } from '../release/metadata.js';
+import { isDevelopment } from '../utils/version.js';
 import { parseIndex, findRelease } from '../release/releaseIndex.js';
 import { indexName } from '../release/releaseIndex.js';
 import { cachedBase, storeBase } from './baseCache.js';
@@ -55,11 +56,26 @@ function httpSource(baseUrl) {
 	return { kind: 'http', baseUrl: b };
 }
 
+/**
+ * An error meaning the file is not there, as distinct from one meaning
+ * something went wrong getting it.
+ *
+ * The difference decides whether a fallback is reasonable. A metadata file that
+ * never travelled is a normal state on a file echo and the archive's own copy
+ * covers it. A metadata file that IS there and does not parse is somebody
+ * telling you something is wrong, and falling back would hide it.
+ */
+function notFound(message) {
+	var e = new Error(message);
+	e.missing = true;
+	return e;
+}
+
 /** Copy or download one published file into `dest`. */
 async function fetchFile(source, filename, dest) {
 	if (source.kind === 'dir') {
 		var from = path.join(source.path, filename);
-		if (!fs.existsSync(from)) throw new Error('not found in ' + source.path + ': ' + filename);
+		if (!fs.existsSync(from)) throw notFound('not found in ' + source.path + ': ' + filename);
 		fs.copyFileSync(from, dest);
 		return dest;
 	}
@@ -69,6 +85,7 @@ async function fetchFile(source, filename, dest) {
 	var timer = setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT_MS);
 	try {
 		var res = await fetch(url, { signal: controller.signal, redirect: 'follow' });
+		if (res.status === 404) throw notFound('not published: ' + url);
 		if (!res.ok) throw new Error('HTTP ' + res.status + ' fetching ' + url);
 		var buf = Buffer.from(await res.arrayBuffer());
 		if (buf.length > MAX_ARTIFACT_BYTES) {
@@ -91,9 +108,57 @@ async function fetchText(source, filename) {
 	}
 }
 
-/** The release metadata for one version, validated. */
+/**
+ * The release metadata for one version.
+ *
+ * Tries the sibling file first, then the copy inside the archive. Over HTTP the
+ * sibling is always there and is better, since 3 KB decides whether you want
+ * 8 MB. Down a file echo it may never have arrived: two TIC'd files travel
+ * independently and one can be lost, so an archive that cannot describe itself
+ * would be unusable through no fault of its own.
+ *
+ * The embedded copy carries no `sha256`, because a number sealed inside the
+ * thing it vouches for vouches for nothing. The caller has to notice that and
+ * decide, which stageRelease does.
+ */
 async function fetchMetadata(source, version) {
 	return parseMetadata(await fetchText(source, metadataName(version)));
+}
+
+/**
+ * The sibling metadata, or null when none was published beside the artifact.
+ *
+ * Null means ABSENT, which is normal down a file echo and is covered by the
+ * copy inside the archive. Anything else is rethrown: a metadata file that is
+ * present and does not parse, or does not validate, is a fault worth stopping
+ * on, and quietly using a different copy would hide it.
+ */
+async function tryFetchMetadata(source, version) {
+	try {
+		return await fetchMetadata(source, version);
+	} catch (e) {
+		if (e && e.missing) return null;
+		throw e;
+	}
+}
+
+/**
+ * The metadata an archive carries at its root.
+ *
+ * Validated with the checksum requirement relaxed, because this copy
+ * deliberately has none. Everything else still has to be sound: a release that
+ * cannot say which migrations it ships is one the move rule cannot reason
+ * about, and accepting it would be worse than refusing.
+ */
+function readEmbedded(archivePath, version) {
+	try {
+		var text = execFileSync('unzip', ['-p', archivePath, metadataName(version)],
+			{ maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8');
+		var parsed = parseMetadata(text, { allowNoChecksum: true });
+		return (parsed && parsed.version === version) ? parsed : null;
+	} catch (_) {
+		return null;
+	}
 }
 
 /** The newest release on a channel, or a named one. */
@@ -224,14 +289,36 @@ async function stageRelease(opts) {
 	var treeRoot = path.join(staging, 'tree');
 	fs.mkdirSync(downloads, { recursive: true });
 
+	// The sibling metadata first: over HTTP it is always there and is the right
+	// order, since 3 KB decides whether you want 8 MB. Down a file echo it may
+	// never have arrived, because two TIC'd files travel independently and one
+	// can be lost, so the archive's own copy is the fallback. That costs
+	// fetching the artifact before knowing its size, which is free when the
+	// file is already on this disk, which is exactly the case where it happens.
 	report('resolve', 'reading metadata for ' + opts.version);
-	var meta = await fetchMetadata(opts.source, opts.version);
+	var artifactFile = null;
+	var meta = await tryFetchMetadata(opts.source, opts.version);
+
+	if (!meta) {
+		var candidate = artifactName(opts.version, { delta: isDevelopment(opts.version) });
+		report('download', candidate + ' (no metadata published beside it)');
+		artifactFile = path.join(downloads, candidate);
+		await fetchFile(opts.source, candidate, artifactFile);
+		meta = readEmbedded(artifactFile, opts.version);
+		if (!meta) {
+			throw new Error(candidate + ' carries no usable metadata and none was published ' +
+				'beside it, so there is no way to tell what it is. It was not unpacked.');
+		}
+		alogger.writeAlog(3, '[Update] ' + opts.version + ' described by the copy inside the archive; ' +
+			'no published checksum travelled with it', 'yellowbright');
+	}
 
 	// A delta is nothing without its base, so the base comes first and is
 	// verified on its own terms. The base is a full stable artifact and carries
 	// its own checksum in its own metadata.
 	var reconstructed = false;
 	var baseFromCache = false;
+	var unverified = false;
 	if (meta.delta) {
 		// The base is usually already here: a sysop tracking development needs
 		// the same stable tarball for every build cut on it. cachedBase
@@ -245,25 +332,53 @@ async function stageRelease(opts) {
 			baseFromCache = true;
 		} else {
 			report('download', 'base ' + meta.base);
-			var baseMetaText = await fetchText(opts.source, metadataName(meta.base));
-			var baseMeta = parseMetadata(baseMetaText);
-			baseFile = path.join(downloads, baseMeta.artifact);
-			await fetchFile(opts.source, baseMeta.artifact, baseFile);
-			report('verify', baseMeta.artifact);
-			verifyChecksum(baseFile, baseMeta.sha256);
-			if (opts.target) storeBase(opts.target, meta.base, baseFile, baseMetaText);
+			var baseArtifact = artifactName(meta.base, { delta: false });
+			baseFile = path.join(downloads, baseArtifact);
+			await fetchFile(opts.source, baseArtifact, baseFile);
+			var baseMeta = await tryFetchMetadata(opts.source, meta.base) || readEmbedded(baseFile, meta.base);
+			if (!baseMeta) throw new Error(baseArtifact + ' carries no usable metadata');
+			if (baseMeta.sha256) {
+				report('verify', baseArtifact);
+				verifyChecksum(baseFile, baseMeta.sha256);
+				if (opts.target) storeBase(opts.target, meta.base, baseFile, serialiseMetadata(baseMeta));
+			} else if (opts.allowUnpublishedChecksum) {
+				report('verify', baseArtifact + ' has no published checksum');
+				unverified = true;
+				// Deliberately NOT cached. The cache re-verifies on every use
+				// against the metadata it stored, and storing metadata with no
+				// checksum would make every future hit unverifiable too.
+			} else {
+				throw new Error(baseArtifact + ' carries no published checksum. It was not unpacked.');
+			}
 		}
 		report('extract', 'base ' + meta.base);
 		extractInto(baseFile, treeRoot);
 		reconstructed = true;
 	}
 
-	report('download', meta.artifact);
-	var artifactFile = path.join(downloads, meta.artifact);
-	await fetchFile(opts.source, meta.artifact, artifactFile);
+	if (!artifactFile) {
+		report('download', meta.artifact);
+		artifactFile = path.join(downloads, meta.artifact);
+		await fetchFile(opts.source, meta.artifact, artifactFile);
+	}
 
-	report('verify', meta.artifact);
-	verifyChecksum(artifactFile, meta.sha256);
+	// A release with no published checksum is one whose metadata came from
+	// inside the archive, which happens when it arrived down a file echo and
+	// the sibling did not. Refusing outright would make the FTN transport
+	// useless; skipping quietly would make the HTTP one a lie. So it is
+	// explicit: the caller has to say it knows, and the reason is reported.
+	if (meta.sha256) {
+		report('verify', meta.artifact);
+		verifyChecksum(artifactFile, meta.sha256);
+	} else if (opts.allowUnpublishedChecksum) {
+		report('verify', meta.artifact + ' has no published checksum');
+		alogger.writeAlog(2, '[Update] ' + meta.version + ' was not checked against a published ' +
+			'checksum: none travelled with it. Its integrity rests on the TIC CRC and the link.', 'yellowbright');
+		unverified = true;
+	} else {
+		throw new Error(meta.artifact + ' carries no published checksum and none was found beside it. ' +
+			'It was not unpacked.');
+	}
 
 	report('extract', meta.artifact);
 	extractInto(artifactFile, treeRoot);
@@ -299,6 +414,7 @@ async function stageRelease(opts) {
 		stagingDir: staging,
 		reconstructed: reconstructed,
 		baseFromCache: baseFromCache,
+		unverified: unverified,
 		pruned: pruned,
 		verification: verification
 	};
@@ -313,6 +429,8 @@ function discardStaging(stagingDir) {
 export {
 	FETCH_TIMEOUT_MS,
 	dirSource,
+	tryFetchMetadata,
+	readEmbedded,
 	httpSource,
 	fetchFile,
 	fetchText,

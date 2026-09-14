@@ -23,7 +23,10 @@ On `/admin/config`, under **Updates**:
 |---------|---------|--------------|
 | `update_check_enabled` | off | Run the check once a day |
 | `update_channel` | `stable` | Which channel this install follows |
-| `update_check_url` | the release host | Where the channel indexes live |
+| `update_check_url` | the release host | Where the channel indexes live (HTTP only) |
+| `update_check_transport` | `http` | `http`, `ftn`, or `both` |
+| `update_stable_file_area` | unset | File area carrying stable artifacts (FTN) |
+| `update_dev_file_area` | unset | File area carrying development builds (FTN) |
 | `update_check_retention_days` | 90 | How much check history to keep |
 
 Turning it on registers the daily job, which needs a gateway restart or
@@ -49,6 +52,51 @@ With `update_check_enabled` off and Check now unpressed, this system makes no
 outbound request at all.
 
 ---
+
+## Getting releases over FTN
+
+If your board has an FTN link and you would rather not have it reach out over
+HTTP at all, set `update_check_transport` to `ftn` and point
+`update_stable_file_area` at the file area carrying the release echo.
+
+| Echo | Type | Carries |
+|------|------|---------|
+| `CANECTIC` | Message | Release announcements and support |
+| `CANECTIC_FILES` | File | Stable releases |
+| `CANECTIC_DEV` | File | Development builds |
+
+Nothing else changes. The TIC tosser receives an artifact, checks it against the
+TIC, hashes it and files it, and a new one appearing in that area **is** the
+signal. There is no announcement to wait for and no outbound request of any
+kind: the check becomes a database query and a read of a file already on your
+disk.
+
+There is no published index on this path, so one is worked out from what the
+area holds. Each archive carries a `CANECTIC.ID` at its root saying what it is,
+and an archive that does not carry one is ignored rather than offered, because
+nothing would be known about what it needs.
+
+### What this does and does not prove
+
+Worth being plain about, because it is weaker than the HTTP path.
+
+**Proved:** the file has not changed since it arrived. The TIC carries a CRC-32
+that the tosser checks on arrival, and Canectic computes and stores a SHA-256 of
+its own.
+
+**Not proved:** that it is the file that was built and published. The published
+checksum only travels if the sibling `.json` was TIC'd alongside the archive,
+and two files in a file echo travel independently, so one can be lost. When the
+published checksum is not there, the update tool says so rather than pretending
+it checked.
+
+Over FTN your trust rests on your link password and on whoever is feeding you
+the echo, the same as it does for every other file you receive that way. A
+signature will close that gap when a key is published.
+
+The end-state check still runs regardless: after unpacking, every file is
+verified against the manifest inside the archive, so a corrupted or truncated
+download is caught before anything is applied.
 
 ## Channels
 

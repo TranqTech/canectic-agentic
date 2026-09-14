@@ -306,6 +306,19 @@ Pressing it stops the BBS, so the page goes away. Come back to it and it reports
 what happened, read from a file the update writes as it goes rather than from
 the connection it was serving on.
 
+## Updating over FTN
+
+With `update_check_transport` set to `ftn`, the tool takes releases from your
+configured file area instead of over HTTP. Everything else is identical: the
+same plan, the same categories, the same phases.
+
+One difference it will tell you about. A release that arrived down a file echo
+may have no published checksum with it, because the sibling metadata file
+travels separately and can be lost. The tool says so rather than pretending it
+checked, and the manifest check after unpacking still runs.
+
+See `docs/sysop/UPDATES.md` for what FTN integrity does and does not guarantee.
+
 ## Related
 
 - `docs/sysop/UPDATES.md` for the update check, which tells you a release exists

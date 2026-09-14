@@ -164,7 +164,8 @@ function normaliseNotices(notices) {
  *
  * @returns {string[]} problems, empty when the metadata is sound
  */
-function validateMetadata(meta) {
+function validateMetadata(meta, opts) {
+	var allowNoChecksum = !!(opts && opts.allowNoChecksum);
 	var problems = [];
 	if (!meta || typeof meta !== 'object') return ['metadata is not an object'];
 
@@ -190,8 +191,13 @@ function validateMetadata(meta) {
 	}
 
 	if (!meta.artifact) problems.push('no artifact filename');
-	if (!meta.sha256 || !SHA256_PATTERN.test(String(meta.sha256))) {
-		problems.push('artifact sha256 is missing or malformed');
+	// The copy that ships INSIDE an archive has no sha256, deliberately: a
+	// number sealed in the thing it vouches for vouches for nothing. Callers
+	// reading that copy say so; everybody else still requires it.
+	if (!allowNoChecksum || meta.sha256) {
+		if (!meta.sha256 || !SHA256_PATTERN.test(String(meta.sha256))) {
+			problems.push('artifact sha256 is missing or malformed');
+		}
 	}
 	if (!meta.released || !DATE_PATTERN.test(String(meta.released))) {
 		problems.push('released date is missing or not YYYY-MM-DD');
@@ -242,14 +248,14 @@ function serialiseMetadata(meta) {
 	return JSON.stringify(meta, null, 2) + '\n';
 }
 
-function parseMetadata(text) {
+function parseMetadata(text, opts) {
 	var parsed;
 	try {
 		parsed = JSON.parse(text);
 	} catch (e) {
 		throw new Error('release metadata is not valid JSON: ' + e.message);
 	}
-	var problems = validateMetadata(parsed);
+	var problems = validateMetadata(parsed, opts);
 	if (problems.length) throw new Error('release metadata is invalid: ' + problems.join('; '));
 	return parsed;
 }
