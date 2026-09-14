@@ -19,8 +19,8 @@ only pass if both ends are real, listed nodes of one network you carry. Routed
 netmail works normally, including mail your nodes send outward and mail that
 comes back down to them.
 
-**Off** if you do not want to carry anyone else's mail at all. Points and leaf
-nodes with a single uplink lose nothing by this.
+**Off** if you do not want to carry anyone else's mail at all. Points and nodes
+with a single uplink that route for nobody lose nothing by this.
 
 **On** only if you intend to be a general transit point and understand what
 follows.

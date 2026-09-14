@@ -74,8 +74,8 @@ Network: FidoNet
 Existing columns remain. `role` determines what kind of entries this segment contains:
 - **ZC**: children are Region segments
 - **RC**: children are Net (Host) segments  
-- **NC**: children are Hub segments (optional), leaf nodes are individual systems
-- **Hub**: leaf nodes are systems routing through this hub
+- **NC**: children are Hub segments (optional), and individual systems below those
+- **Hub**: the systems routing through this hub
 
 **`managed_nodes` -- unchanged.** Nodes still belong to a segment via `segment_id`. The hierarchy is in the segments, not the nodes.
 

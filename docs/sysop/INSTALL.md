@@ -148,7 +148,7 @@ cd canectic-0.9.5a
 
 **From git (specific release):**
 ```bash
-git clone --branch v0.9.5a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
+git clone --branch v0.9.6a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
 cd canectic
 ```
 
@@ -464,7 +464,34 @@ Set any port to `0` to disable that listener. Port changes require a process res
 
 ## Updating
 
-### From Git
+### From 0.9.6a onward
+
+```bash
+node src/tools/update.js --handoff    # stage the release, hand off to its updater
+node src/tools/update.js --status     # what the last update did
+```
+
+Or press the button on `/admin/update`, which shows what is available, what
+applying it would do to your installation, and how many users are connected.
+
+Either route stops the processes, replaces the files, installs dependencies,
+dumps the database, migrates it, runs the release's declared upgrade steps and
+starts everything again. Your art, `public/css/custom.css`, door icons and
+anything you have edited under `config/` are kept, and the update tells you what
+it left alone.
+
+Everything it displaces is copied aside first. A failure before the database has
+been migrated puts your files back automatically; after that point it stops and
+tells you where the backup and the dump are.
+
+`docs/sysop/UPDATING.md` covers the flags, the phases and how to go back.
+`docs/sysop/UPDATES.md` covers the opt-in release check and taking releases over
+FTN.
+
+### From a source tree
+
+The old path, needed once to get an installation from 0.9.5a or earlier onto
+0.9.6a, and still supported afterwards.
 
 ```bash
 cd /path/to/canectic-bbs-repo
@@ -479,11 +506,16 @@ The update script:
 - Installs/updates npm dependencies
 - Runs database migrations automatically
 
-After the script completes, restart services:
+After the script completes, re-register the processes:
 
 ```bash
-pm2 restart all
+pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save
 ```
+
+`pm2 restart` is not enough. The four apps pin their interpreter when the config
+is evaluated, and `pm2 resurrect` replays the previously saved settings, so a
+restart can leave the board running on whichever Node was current when you last
+saved, with nothing to tell you.
 
 ### One-time repairs
 

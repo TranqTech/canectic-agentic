@@ -72,26 +72,53 @@ Canectic brings together the BBS experience with modern infrastructure: a full-f
 
 ```bash
 # System packages
-sudo apt install build-essential python3 postgresql redis-server zip lrzsz
+sudo apt install build-essential python3 postgresql redis-server zip unzip lrzsz
 sudo npm install -g pm2
 ```
 
 ### Install
 
-Download the latest release from the [Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases), or clone a specific version:
+One script. It resolves the current release, verifies its checksum before
+unpacking anything, and hands off to that release's own installer.
 
 ```bash
-git clone --branch v0.9.5a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
-cd canectic
-bash setup/install.sh          # choose install directory
-cd /opt/canectic               # or your chosen path
-
-bash setup/create_pg_db_user.sh   # create database and user (see below if this fails)
-$EDITOR .env                      # set database credentials
-npm install                       # install dependencies
-node src/tools/dbmigrations.js    # create tables
-pm2 start ecosystem.config.cjs    # start all processes
+curl -fsSLO https://canectic.tranqsoft.com/releases/bootstrap.sh
+curl -fsSLO https://canectic.tranqsoft.com/releases/bootstrap.sh.sha256
+sha256sum -c bootstrap.sh.sha256 && bash bootstrap.sh --target /opt/canectic --create-database
 ```
+
+The installer asks where to install and for database credentials, writes `.env`,
+creates the directory structure, installs dependencies, builds the schema and
+starts the processes. Drop `--create-database` if you have already created the
+PostgreSQL role and database yourself (see below).
+
+To read the documentation and run the setup scripts before committing to an
+install, unpack it first and stop:
+
+```bash
+bash bootstrap.sh --extract-only ~/canectic
+cd ~/canectic
+less docs/sysop/INSTALL.md
+bash setup/create_pg_db_user.sh
+node src/tools/install.js --target /opt/canectic
+```
+
+### Updating
+
+```bash
+node src/tools/update.js --handoff    # stage, then hand off to the new release
+node src/tools/update.js --status     # what the last update did
+```
+
+Or press the button on `/admin/update`, which shows what is available, what
+applying it would do, and how many users are connected. An opt-in daily check
+raises a notification when a release exists; it never downloads or applies
+anything by itself. Boards with an FTN link can take releases down a file echo
+instead, with no outbound connection at all.
+
+Installations predating 0.9.6a upgrade once with `setup/update.sh` from a source
+tree, and use the above from then on. See
+[docs/sysop/UPDATING.md](docs/sysop/UPDATING.md).
 
 ### Creating the database by hand
 
@@ -181,6 +208,9 @@ npm test
 ## Documentation
 
 - [Installation Guide](docs/sysop/INSTALL.md) - Full setup walkthrough
+- [Updating](docs/sysop/UPDATING.md) - Applying a release, and what it does to your files
+- [Update Checking](docs/sysop/UPDATES.md) - The opt-in release check, channels and FTN delivery
+- [Changelog](docs/sysop/CHANGELOG.md) - Every change, by release
 - [Architecture Reference](docs/reference/) - Developer documentation for all subsystems
 - [Release Tracker](docs/RELEASE_TRACKER.md) - Feature completion status
 - [Example .env](examples/env.example) - Environment configuration template
