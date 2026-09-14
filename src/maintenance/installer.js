@@ -17,6 +17,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 
 import { buildApplyPlan } from '../release/applyPlan.js';
 import { parseManifest, verifyTree, MANIFEST_FILENAME } from '../release/manifest.js';
@@ -31,6 +32,38 @@ import { backupDir } from './updateLayout.js';
 import { runCommand, nodeCommand, createRuntimeDirs } from './updateCommands.js';
 
 var ENV_TEMPLATE = 'examples/env.example';
+
+/**
+ * Is the database this install needs actually there?
+ *
+ * Asked with `pg_isready`, which ships with the PostgreSQL client tools and is
+ * the right question. Its ABSENCE is not a failure: a board using a managed or
+ * remote database has no local client and is perfectly fine, so that reports
+ * and carries on. A `pg_isready` that is present and says no is a refusal,
+ * because the schema phase is going to fail and it is better to fail now.
+ *
+ * @returns {Array<{blocking:boolean, detail:string}>}
+ */
+function prerequisiteProblems(env) {
+	var out = [];
+	var args = ['-q'];
+	if (env.dbhost) args.push('-h', env.dbhost);
+	if (env.dbport) args.push('-p', String(env.dbport));
+
+	var res = spawnSync('pg_isready', args, { timeout: 15000, encoding: 'utf8' });
+	if (res.error && res.error.code === 'ENOENT') {
+		out.push({ blocking: false, detail: 'pg_isready is not installed, so PostgreSQL could not be checked ' +
+			'before starting. If the schema phase fails, that is why.' });
+	} else if (res.error) {
+		out.push({ blocking: false, detail: 'could not check PostgreSQL: ' + res.error.message });
+	} else if (res.status !== 0) {
+		out.push({ blocking: true, detail: 'PostgreSQL is not accepting connections' +
+			(env.dbhost ? ' at ' + env.dbhost : ' on this machine') +
+			'. Install and start it before installing Canectic, or the schema step will fail ' +
+			'after every file has already been written. Nothing has been written yet.' });
+	}
+	return out;
+}
 
 /**
  * Write .env from the shipped template, filling in what we were told.
@@ -122,6 +155,19 @@ async function runInstall(opts) {
 			throw new Error(target + ' already holds Canectic ' + existing +
 				'. Use the updater rather than the installer, which would treat every file as new.');
 		}
+		// Prerequisites, BEFORE a single file is written. Without this the
+		// install lays down the whole tree, writes .env, runs npm install and
+		// then fails at the schema phase on a box with no PostgreSQL, which is
+		// the worst place to stop: everything is on disk and nothing works.
+		if (options.database !== false) {
+			var missing = prerequisiteProblems(ins.env || {});
+			for (var problem of missing) {
+				if (problem.blocking) throw new Error(problem.detail);
+				log('preflight: ' + problem.detail);
+				persist(addWarning(state, problem.detail));
+			}
+		}
+
 		log('preflight: ' + staged.checked + ' staged files verified, Node ' + process.versions.node);
 		persist(finishPhase(state, 'preflight', staged.checked + ' files verified'));
 
@@ -224,6 +270,7 @@ async function runInstall(opts) {
 
 export {
 	ENV_TEMPLATE,
+	prerequisiteProblems,
 	writeEnv,
 	runInstall
 };

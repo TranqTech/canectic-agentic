@@ -35,6 +35,9 @@ set -euo pipefail
 #   ./bootstrap.sh --version 0.9.6a             a specific release
 #   ./bootstrap.sh --from ./dist/releases       artifacts already on disk
 #   ./bootstrap.sh --download-only              fetch and verify, do not install
+#   ./bootstrap.sh --extract-only ./canectic    unpack it and stop, so you can
+#                                               read the docs and run the setup
+#                                               scripts before installing
 # =============================================================================
 
 BASE_URL="${CANECTIC_RELEASES:-https://canectic.tranqsoft.com/releases}"
@@ -43,6 +46,7 @@ VERSION=""
 TARGET=""
 FROM=""
 DOWNLOAD_ONLY=false
+EXTRACT_TO=
 INSTALL_ARGS=()
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -59,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         --url)            BASE_URL="${2%/}"; shift 2 ;;
         --from)           FROM="$2"; shift 2 ;;
         --download-only)  DOWNLOAD_ONLY=true; shift ;;
+        --extract-only)   EXTRACT_TO="$2"; shift 2 ;;
         --help|-h)        sed -n '6,40p' "$0"; exit 0 ;;
         # Anything else is for the installer inside the release, so a flag it
         # gains does not need this script changed.
@@ -191,6 +196,24 @@ if [[ -z "$FROM" ]] && command -v gpg >/dev/null 2>&1; then
     fi
 fi
 
+# Unpack and stop. The docs and the setup scripts live inside the release, so
+# without this there is no moment at which a sysop can read INSTALL.md or run
+# create_pg_db_user.sh before committing to an install: the bootstrap unpacks
+# into a temporary directory and deletes it on the way out.
+if [[ -n "$EXTRACT_TO" ]]; then
+    info "extracting to $EXTRACT_TO"
+    mkdir -p "$EXTRACT_TO"
+    unzip -q -o "$WORK/$ARTIFACT" -d "$WORK"
+    cp -a "$WORK/canectic-${VERSION}/." "$EXTRACT_TO/"
+    ok "Canectic $VERSION unpacked into $EXTRACT_TO"
+    echo ""
+    echo "  Read first:   $EXTRACT_TO/docs/sysop/INSTALL.md"
+    echo "  Database:     cd $EXTRACT_TO && bash setup/create_pg_db_user.sh"
+    echo "  Then install: cd $EXTRACT_TO && node src/tools/install.js --target /opt/canectic"
+    echo ""
+    exit 0
+fi
+
 if [[ "$DOWNLOAD_ONLY" == "true" ]]; then
     DEST="${TARGET:-$PWD}"
     cp "$WORK/$ARTIFACT" "$DEST/"
@@ -199,6 +222,8 @@ if [[ "$DOWNLOAD_ONLY" == "true" ]]; then
     echo ""
     echo "  To install it yourself:"
     echo "    unzip $ARTIFACT && cd canectic-$VERSION"
+    echo "    less docs/sysop/INSTALL.md"
+    echo "    bash setup/create_pg_db_user.sh"
     echo "    node src/tools/install.js --target /opt/canectic"
     echo ""
     exit 0
