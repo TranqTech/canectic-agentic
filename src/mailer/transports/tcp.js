@@ -76,16 +76,7 @@ class TcpTransport extends BaseTransport {
 			this.emit('data', data);
 		});
 
-		this._socket.on('end', () => {
-			// Peer sent FIN (their half-close). Kept as a DIAG log point
-			// only — the session controller no longer reacts to this
-			// event, but seeing peer FIN in the log helps confirm close
-			// ordering on future teardown investigations.
-			alogger.writeClog(2, '[binkp DIAG] socket.end (peer FIN) t=' + Date.now() + ' remote=' + this.remoteAddress, 'mailer', 'magentabright');
-		});
-
 		this._socket.on('close', (hadError) => {
-			alogger.writeClog(2, '[binkp DIAG] socket.close t=' + Date.now() + ' hadError=' + hadError + ' remote=' + this.remoteAddress, 'mailer', 'magentabright');
 			this._connected = false;
 			this.emit('close', hadError);
 		});
@@ -106,7 +97,6 @@ class TcpTransport extends BaseTransport {
 
 	close() {
 		if (this._socket && !this._socket.destroyed) {
-			alogger.writeClog(2, '[binkp DIAG] transport.close -> socket.end() t=' + Date.now() + ' remote=' + this.remoteAddress, 'mailer', 'magentabright');
 			this._socket.end();
 		}
 		this._connected = false;

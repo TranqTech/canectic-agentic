@@ -394,7 +394,6 @@ class SessionController extends EventEmitter {
 			});
 			this.transfer.on('allSent', () => {
 				this._allLocalSent = true;
-				alogger.writeClog(2, '[binkp DIAG] allSent t=' + Date.now() + ' uuid=' + this.uuid + ' pendingGOTs=' + (this.protocol ? this.protocol.pendingGOTs : '?'), 'mailer', 'magentabright');
 				this._maybeSendLocalEOB();
 			});
 		}
@@ -806,7 +805,6 @@ class SessionController extends EventEmitter {
 		if (!this._allLocalSent) return;
 		if (this.protocol.pendingGOTs > 0) return;
 		this._localEobSent = true;
-		alogger.writeClog(2, '[binkp DIAG] sending local M_EOB t=' + Date.now() + ' uuid=' + this.uuid + ' batch=' + this.protocol.batchNumber, 'mailer', 'magentabright');
 		this.protocol.sendEOB();
 	}
 
@@ -838,7 +836,6 @@ class SessionController extends EventEmitter {
 	_endSession(reason) {
 		if (this.state === 'done' || this.state === 'error') return; // Already ended
 
-		alogger.writeClog(2, '[binkp DIAG] _endSession.enter t=' + Date.now() + ' reason=' + reason + ' uuid=' + this.uuid + ' sent=' + this.filesSent + ' received=' + this.filesReceived, 'mailer', 'magentabright');
 
 		this.state = reason === 'complete' ? 'done' : 'error';
 
@@ -873,7 +870,6 @@ class SessionController extends EventEmitter {
 			if (reason === 'complete') {
 				this._delayedClose(100);
 			} else {
-				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + this.uuid + ' (immediate, reason=' + reason + ')', 'mailer', 'magentabright');
 				this.transport.close();
 			}
 		}
@@ -900,10 +896,8 @@ class SessionController extends EventEmitter {
 	// time to process the last frame we wrote before it reads EOF.
 	_delayedClose(ms) {
 		var self = this;
-		alogger.writeClog(2, '[binkp DIAG] delayed close scheduled t=' + Date.now() + ' uuid=' + this.uuid + ' delay=' + ms + 'ms', 'mailer', 'magentabright');
 		setTimeout(function() {
 			if (self.transport && self.transport.isConnected) {
-				alogger.writeClog(2, '[binkp DIAG] transport.close() called t=' + Date.now() + ' uuid=' + self.uuid + ' (via=delayed)', 'mailer', 'magentabright');
 				self.transport.close();
 			}
 		}, ms);

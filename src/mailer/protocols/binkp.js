@@ -131,8 +131,6 @@ class BinkpProtocol extends EventEmitter {
 			// two M_EOBs, and BinkIt's close path documents the same case as
 			// benign. Treat it as a clean end, not a transport failure.
 			if (this._eobExchanges > 0 && !this._rxFile && this._pendingGOTs === 0) {
-				if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] peer closed after ' + this._eobExchanges +
-					' EOB exchange(s), nothing pending — treating as complete', 'mailer', 'magentabright');
 				this._state = 'done';
 				this.emit('sessionEnd');
 				return;
@@ -209,13 +207,9 @@ class BinkpProtocol extends EventEmitter {
 	// Acknowledge receipt of a file.
 	sendGOT(name, size, time) {
 		var ts = Math.floor(time / 1000);
-		var _t0 = Date.now();
-		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] sendGOT.enter t=' + _t0 + ' name=' + name + ' size=' + size + ' pendingGOTs=' + this._pendingGOTs + ' localEOB=' + this._localEOB + ' remoteEOB=' + this._remoteEOB, 'mailer', 'magentabright');
 		this._sendCmd(M_GOT, name + ' ' + size + ' ' + ts);
-		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] sendGOT.wrote t=' + Date.now() + ' dt=' + (Date.now() - _t0) + 'ms name=' + name, 'mailer', 'magentabright');
 		if (this._pendingGOTs > 0) this._pendingGOTs--;
 		this._checkSessionEnd();
-		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] sendGOT.exit t=' + Date.now() + ' pendingGOTs=' + this._pendingGOTs + ' state=' + this._state, 'mailer', 'magentabright');
 	}
 
 	// Skip a file offered by the remote.
@@ -659,9 +653,6 @@ class BinkpProtocol extends EventEmitter {
 		                  this._msgsInBatch > 2 &&
 		                  this._batchNumber < MAX_BATCHES;
 
-		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] batch ' + this._batchNumber + ' end t=' + Date.now() +
-			' msgsInBatch=' + this._msgsInBatch + ' peerBinkp=' + this.peerBinkpVersion +
-			' continue=' + canContinue, 'mailer', 'magentabright');
 
 		if (canContinue) {
 			var ended = this._batchNumber;
@@ -678,8 +669,6 @@ class BinkpProtocol extends EventEmitter {
 			return;
 		}
 
-		if (!this._quiet) alogger.writeClog(2, '[binkp DIAG] _checkSessionEnd: emitting sessionEnd t=' + Date.now() +
-			' batches=' + this._batchNumber, 'mailer', 'magentabright');
 		this._state = 'done';
 		this.emit('sessionEnd');
 	}
