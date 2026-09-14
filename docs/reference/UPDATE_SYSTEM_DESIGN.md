@@ -625,11 +625,18 @@ told stable is available and reachable.
    pressing a button is not that, and refusing them would mean the only way to
    ask a question is to change a setting. `/admin/update` offers it and it runs
    with `force`, whatever `update_check_enabled` says.
-3. **Is a database dump required before migrating**, offered, or only warned
-   about?
-4. **How is the cached stable base stored**, and when is it discarded? It has to
-   outlive the development builds that reference it, so it cannot simply be
-   cleaned up with the staging directory.
+3. ~~**Is a database dump required before migrating**, offered, or only warned
+   about?~~ **Resolved: offered, on by default.** It is taken unless `--no-dump`
+   is passed, and the free space is checked against the database size first so
+   it fails before starting rather than halfway. Required was rejected because a
+   hub whose message base outgrows its free disk would then be unable to update
+   at all; warn-only was rejected because the one time it matters there would be
+   nothing to restore from.
+4. ~~**How is the cached stable base stored**, and when is it discarded?~~
+   **Resolved:** `.canectic-update/base/`, holding the artifact, its metadata
+   and its manifest. Kept to `update_base_cache_keep` (2) most recent, with the
+   base the installed version deltas against never evicted and never consuming
+   the budget. Pruned after a successful update, not on a timer. See section 15.
 
 Resolved during design:
 
@@ -658,10 +665,10 @@ Resolved during design:
 5. ~~Update check and notification (read-only, no apply)~~ **done**:
    `src/release/updateVerdict.js`, `src/maintenance/updateCheck.js`,
    `src/models/updateChecks.js`, `/admin/update`. See section 14
-6. The updater, with the handoff model. **Mostly built**: staging, the apply
-   plan, the applier with backup and rollback, the detached handoff, and durable
-   progress. Process control, dependencies, schema, migrations, the declared
-   steps and the rest of preflight are not. See section 15
+6. ~~The updater, with the handoff model~~ **done**: staging with a base cache,
+   the apply plan, the applier with backup and rollback, the detached handoff,
+   durable progress, the whole phase sequence, preflight, and the Update button.
+   See section 15
 7. Bootstrap installer
 8. FTN transport
 
@@ -889,14 +896,107 @@ reached" and "deliberately not done" are also distinct: this updater performs
 four of the ten phases and records the other six as skipped with reasons, so the
 run reads as incomplete on purpose rather than as stuck.
 
-### What is still not built
+### One phase sequence, two ways in
 
-Stopping and starting the processes; `npm install`; the schema and migration
-run; the declared upgrade steps; preflight beyond the move rule (disk,
-toolchain, jobs in flight, connected callers); the admin page's Update button.
+`updateRunner.js` owns the ten phases. `update.js --apply` runs it in process
+and `applyUpdate.js` runs it detached after a handoff. One implementation on
+purpose: two programs that both claim to apply an update is the exact shape that
+let `install.sh` and `update.sh` drift until one of them deleted every
+sysop-added asset under `public/`.
 
-Until those exist this is a tool a sysop runs by hand with the BBS stopped, and
-it prints the remaining steps rather than pretending they are done.
+Two placements are worth stating. The FILE backup runs before the processes are
+stopped, because shipped files do not change while the BBS runs and there is no
+reason to pay downtime for it. The DATABASE dump runs at the top of the schema
+phase, after the stop and immediately before migrations, because it exists to
+protect the migration: taken any earlier it would not contain the writes in
+between, and taken before the stop that window would be as long as the dump.
+
+`schema` runs `dbmigrations.js`, which does the declarative pass and the ledger
+in one invocation, so `migrations` is recorded as skipped with that as the
+reason. Marking it done would imply a second thing happened.
+
+### The rollback line
+
+Up to and including `dependencies`, the only thing that changed is files, so
+putting them back is correct and complete. From `schema` onwards it is not: old
+code over a migrated database is a worse state than the failure, so the run
+stops, says the backup is there, and leaves the decision to a person.
+
+`ROLLBACK_SAFE` is written out rather than derived from the phase order,
+because a phase drifting to the wrong side of that line is silent and only shows
+up during a failure, which is the worst moment to discover it.
+
+A failure that stopped the BBS starts it again. A board left down by a failure
+partway through is its own problem, separate from whatever failed.
+
+### Process control
+
+`update_process_control` (on), `update_stop_command` (`pm2 stop all`) and
+`update_start_command` (`pm2 start ecosystem.config.cjs`). A bare `pm2` is
+resolved next to the running Node before PATH, reusing `resolveRestartCommand`
+from the worker watchdog, because under nvm the supervisor's PATH may never have
+held the version the BBS runs on.
+
+Starting from the ecosystem file starts every process in it, including one the
+sysop had deliberately stopped. That is a known consequence of the simpler
+option and is documented rather than worked around; the pm2 state is recorded in
+the run file so `--status` at least shows what was running beforehand.
+
+### Preflight runs twice, for different reasons
+
+At OFFER time, in the gateway or the tool, with the board up: connected callers,
+jobs in flight, disk, toolchain, database. Several of those are only answerable
+then, because once the updater has stopped the processes nobody is online and
+nothing is in flight, and asking would be asking a question the asking has
+already changed.
+
+Inside the updater it re-checks only the cheap invariants it can still see, as
+the new code, because by then the old release's word for them is worth less than
+its own.
+
+Blocking is reserved for things that make the update fail. Connected callers
+warn, because whether three people mid-door is a reason to wait is the sysop's
+call, and a preflight that refused on judgement calls is one they learn to
+bypass. Unknown is never treated as bad: free space that cannot be measured
+warns, since blocking would make every filesystem without `statfs` un-updatable.
+
+### The Update button
+
+`/admin/update` has one, gated on preflight passing and on no run already live.
+The ordering is the whole trick: check, **respond**, then stage and hand off in
+the background. The gateway is about to spawn something that stops the gateway,
+so the response has to be gone first, and the page has to be able to report
+afterwards from something other than the connection it was serving on. The run
+state exists from the moment the button is pressed, so a failure during staging
+is visible on the page rather than looking like nothing happened.
+
+### The base cache
+
+`.canectic-update/base/`. A delta is always one hop against its own named base,
+so a sysop tracking development needs the same stable tarball for every build
+cut on it, and re-fetching 7.6 MB each time is waste over HTTP and worse down a
+file echo.
+
+A cached base is re-verified on every use. A local file is not more trustworthy
+than a downloaded one: it can rot on disk or be edited, and it is the base
+everything else is rebuilt from, so a corrupted cache would silently produce a
+tree that passes its own manifest check while not being the release. A hit means
+verified, not present, and a failed check discards the entry rather than
+reporting it.
+
+The honest limit: storing the metadata alongside the artifact makes this trust
+on first fetch. The checksum is only as good as the fetch that brought it in,
+which is the gap a published signature closes.
+
+### Reclaiming disk
+
+`.canectic-update/` holds three things with three lifetimes: `staging/` per
+update, `base/` across updates, `backup/` until reclaimed. `reclaimable()` says
+what each costs to delete, and `/admin/update` shows it, so "I need that space
+back" has an answer that is not guesswork.
+
+The split from `logs/update/` is deliberate: that holds the RECORD, which is
+small and worth keeping for ever, and this holds the BYTES.
 
 ### The plan is a value, not a loop
 

@@ -9,13 +9,6 @@
       "command": "node src/tools/maintenance.js --fix-msgids"
     },
     {
-      "id": "dbmigrations",
-      "description": "Apply the declarative schema and the migration ledger",
-      "automatic": true,
-      "applies_when": "always",
-      "command": "node src/tools/dbmigrations.js"
-    },
-    {
       "id": "pm2-reregister",
       "description": "Re-register the pm2 apps so the pinned child interpreter takes effect",
       "automatic": false,

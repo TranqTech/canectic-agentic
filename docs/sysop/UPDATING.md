@@ -3,11 +3,12 @@
 `src/tools/update.js` fetches a release, proves it is the release, works out
 exactly what applying it would do to your installation, and optionally does it.
 
-**This is half of the update system.** It puts files on disk and nothing else.
-It does not stop your BBS, install dependencies, migrate the database, run the
-release's upgrade steps or restart anything, and it tells you so when it
-finishes. Until the rest is built, `setup/update.sh` remains the supported path
-for a normal update.
+It does the whole thing: stops the BBS, replaces the files, installs
+dependencies, dumps the database, migrates it, runs the release's automatic
+upgrade steps, and starts the BBS again. Anything it skips it names, with the
+command for you to run.
+
+`setup/update.sh` still works and is not going anywhere yet.
 
 ---
 
@@ -180,14 +181,54 @@ first, at its own relative path, before anything is touched. `--apply` puts it
 under the staging directory; `--handoff` puts it beside the run state in
 `logs/update/`. Both print the path.
 
-After it finishes, you still have to do the rest by hand:
+## What it does, in order
 
-```bash
-npm install --omit=dev
-node src/tools/dbmigrations.js
-# the upgrade steps listed in canectic-<version>.json
-pm2 start all
-```
+| Phase | What happens |
+|-------|--------------|
+| preflight | Verifies the staged tree against its manifest, checks Node and disk |
+| backup | Sets aside everything about to be overwritten or deleted |
+| stop | `pm2 stop all` |
+| files | Writes the release |
+| dependencies | `npm install --omit=dev` |
+| schema | **Dumps the database**, then runs `dbmigrations.js` |
+| migrations | Covered by the same `dbmigrations` run |
+| steps | Runs the release's automatic upgrade steps |
+| start | `pm2 start ecosystem.config.cjs` |
+| verify | Confirms every written file matches the release |
+
+The file backup happens before the stop, because shipped files do not change
+while the BBS is running and there is no reason to pay downtime for it. The
+database dump happens after the stop and immediately before the migration,
+because it exists to protect the migration: taken any earlier it would not
+contain the writes in between.
+
+**Starting from the ecosystem file starts every process in it.** If you had the
+mailer deliberately stopped, it comes back up. `--status` shows what was running
+before the update, so you can put it back.
+
+### Turning parts off
+
+| Flag | Effect |
+|------|--------|
+| `--no-dump` | Do not dump the database before migrating |
+| `--no-deps` | Do not run `npm install` |
+| `--no-schema` | Do not run `dbmigrations` |
+| `--no-restart` | Do not stop or start the BBS |
+
+Each one records itself as a skipped phase with the command you now owe.
+
+## If something fails partway
+
+**Before the database is migrated**, the files are put back automatically from
+the backup, and the BBS is started again. The only thing that changed was files,
+so undoing it is complete.
+
+**After the database is migrated**, the files are left alone deliberately. Old
+code over a migrated database is a worse state than the failure, so the update
+stops, tells you where the backup and the dump are, and leaves the decision to
+you. The BBS is still started again.
+
+`--status` shows which phase failed and why.
 
 ---
 
@@ -236,6 +277,34 @@ the order matters: apply files, confirm the BBS starts, and only then run
 `dbmigrations.js`.
 
 ---
+
+## Disk the updater is holding
+
+Everything lives in `.canectic-update/` with three different lifetimes:
+
+| Directory | Lifetime | Deleting it costs |
+|-----------|----------|-------------------|
+| `staging/` | One update | Nothing, once the update finished |
+| `base/` | Across updates | A development update re-downloads its base stable |
+| `backup/` | Until you reclaim it | Past updates can no longer be rolled back |
+
+`/admin/update` shows the size of each. Deleting the whole directory is safe and
+loses nothing but those three things.
+
+The base cache is why a development update is fast the second time: a delta is
+rebuilt against the stable it names, and that stable is kept rather than fetched
+again. It is re-verified against its checksum on every use, because a local file
+is no more trustworthy than a downloaded one.
+
+## Updating from the web
+
+`/admin/update` has an Update button when a release is available and nothing in
+the preflight is blocking. It shows you what the update will do first, including
+how many users it will disconnect.
+
+Pressing it stops the BBS, so the page goes away. Come back to it and it reports
+what happened, read from a file the update writes as it goes rather than from
+the connection it was serving on.
 
 ## Related
 

@@ -66,6 +66,12 @@ import * as mailerSessions from '../models/mailerSessions.js';
 import * as outboundFileLog from '../models/outboundFileLog.js';
 import * as netmailRelayLog from '../models/netmailRelayLog.js';
 import * as updateChecks from '../models/updateChecks.js';
+import { preflight as buildPreflight } from '../release/preflight.js';
+import { reclaimable, freeBytes } from '../maintenance/updateLayout.js';
+import * as updateRunStore from '../maintenance/updateRunStore.js';
+import { summarise as summariseRun } from '../release/updatePhases.js';
+import * as updatePhases from '../release/updatePhases.js';
+import * as updateLayout from '../maintenance/updateLayout.js';
 import * as mailerFormat from '../utils/mailerFormat.js';
 import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
@@ -6504,6 +6510,24 @@ router.get('/update', requireAdmin, async (req, res) => {
 		result = (typeof last.result === 'string') ? JSON.parse(last.result) : last.result;
 	}
 
+	// Preflight runs HERE, with the board up, because that is the only moment
+	// several of these are answerable. Once an update has stopped the
+	// processes, "how many callers are online" is zero and "is a job in
+	// flight" is no.
+	var target = process.cwd();
+	var best = result && result.best ? result.best : null;
+	var flight = await jobsInFlight();
+	var pre = buildPreflight({
+		nodeVersion: process.versions.node,
+		nodeMin: best && best.release ? best.release.node_min : null,
+		freeBytes: freeBytes(target),
+		artifactBytes: best && best.release ? best.release.bytes : null,
+		databaseReachable: await databaseReachable(),
+		callersOnline: await callersOnline(),
+		jobsInFlight: flight,
+		targetWritable: writable(target)
+	});
+
 	res.render('admin/update/index', {
 		sufficientAccess, title: 'Software Update', activelink: 'update',
 		activenav: 'update', currentuser,
@@ -6513,8 +6537,115 @@ router.get('/update', requireAdmin, async (req, res) => {
 		channel:   appConfig.get('update_channel', 'stable'),
 		checkUrl:  appConfig.get('update_check_url', ''),
 		last, result,
+		preflight: pre,
+		disk:      reclaimable(target),
+		lastRun:   summariseRun(updateRunStore.latest(target)),
+		runLive:   isRunLive(updateRunStore.latest(target)),
+		canApply:  pre.ok && best && best.verdict === 'available' && !isRunLive(updateRunStore.latest(target)),
 		history:   await updateChecks.getRecent(20)
 	});
+});
+
+// The probes the preflight needs. Each answers "unknown" rather than throwing:
+// a page that 500s because Redis is briefly unavailable is worse than one that
+// says it could not look.
+async function callersOnline() {
+	try {
+		var webActivity = await import('../middleware/webActivity.js');
+		var users = await webActivity.getOnlineUsers();
+		return (users || []).length;
+	} catch (_) { return undefined; }
+}
+
+async function jobsInFlight() {
+	try {
+		var queues = await import('../queues/queues.js');
+		var counts = await queues.tossQueue.getJobCounts('active', 'waiting');
+		return (counts.active || 0) + (counts.waiting || 0);
+	} catch (_) { return undefined; }
+}
+
+async function databaseReachable() {
+	try {
+		await postgres.query('SELECT 1', []);
+		return true;
+	} catch (_) { return false; }
+}
+
+// A run is live while it has not settled. The updater may have been killed, so
+// this is a claim about the record rather than about a process; the page says
+// "in progress" and the log is there to check.
+function isRunLive(state) {
+	return !!state && state.status === 'running';
+}
+
+function writable(dir) {
+	try { fs.accessSync(dir, fs.constants.W_OK); return true; } catch (_) { return false; }
+}
+
+// Start an update from the web.
+//
+// This is the payoff of the handoff and the durable run state: the gateway
+// spawns an updater that will stop the gateway, so the response has to be sent
+// BEFORE any of that happens, and the page has to be able to report afterwards
+// from something other than the connection it was serving on.
+//
+// So: check, respond, then stage and hand off in the background. The run state
+// exists from the moment the button is pressed, which means a failure during
+// staging is visible on the page rather than looking like nothing happened.
+router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) => {
+	var target = process.cwd();
+	var running = systeminfo.canonicalVersion();
+	var channel = appConfig.get('update_channel', 'stable');
+
+	var runId = updatePhases.makeRunId();
+	updateRunStore.save(target, updatePhases.newRun({
+		runId: runId, from: running, to: req.body.version || null, target: target
+	}));
+
+	// Answer now. Everything after this happens while the browser is on its way
+	// back to the status page, and quite possibly while this process is being
+	// replaced.
+	res.redirect('/admin/update');
+
+	try {
+		var staging = await import('../maintenance/updateStaging.js');
+		var handoff = await import('../maintenance/updateHandoff.js');
+		var verdict = await import('../release/updateVerdict.js');
+		var ledger = await import('../maintenance/migrationLedger.js');
+
+		var source = staging.httpSource(appConfig.get('update_check_url', ''));
+		var entry = await staging.resolveRelease(source, channel, req.body.version || null);
+
+		var blockers = verdict.blockersFor({
+			current: running, release: entry,
+			appliedMigrations: await ledger.appliedIds(),
+			nodeVersion: process.versions.node
+		});
+		if (blockers.length) {
+			throw new Error(blockers.map(function (b) { return b.detail; }).join('; '));
+		}
+
+		var staged = await staging.stageRelease({
+			source: source, version: entry.version, target: target,
+			stagingDir: updateLayout.stagingDir(target, entry.version)
+		});
+
+		handoff.launchUpdater({
+			stagedRoot: staged.treeRoot, target: target, runId: runId,
+			from: running, to: entry.version, base: staged.meta.base || null,
+			nodeMin: staged.meta.node_min, steps: staged.meta.steps || [],
+			launchedBy: 'admin ' + (req.session && req.session.username ? req.session.username : 'web'),
+			options: {}
+		});
+		alogger.writeAlog(1, '[Admin] update to ' + entry.version + ' handed off, run ' + runId, 'green');
+	} catch (e) {
+		// The run row already exists, so this lands on the page rather than
+		// vanishing into a log nobody is watching.
+		var state = updateRunStore.load(target, runId);
+		if (state) updateRunStore.save(target, updatePhases.failRun(state, e));
+		alogger.writeAlog(1, '[Admin] update could not start: ' + e.message, 'red');
+	}
 });
 
 // A check the sysop asked for runs even when the daily check is off. The

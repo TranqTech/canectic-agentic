@@ -311,22 +311,36 @@ Last updated: 2026-09-13
       Pre and post phases relative to the schema pass, manual migrations that
       are reported rather than run, one row per attempt so a failure is history,
       and a fresh database recorded as born current
-- [~] Update handoff: `--handoff` stages a release then launches the NEW
+- [x] Update phase sequence (`src/maintenance/updateRunner.js`): stop, files,
+      dependencies, database dump, schema and migrations, the release's
+      automatic upgrade steps, start, verify. One implementation for both
+      `--apply` and the detached updater. Files are rolled back on a failure up
+      to and including the dependency install and deliberately not after the
+      database has been migrated; a failure that stopped the BBS starts it again
+- [x] Update preflight: runs while the board is up, because connected callers
+      and jobs in flight are only answerable then. Blocking is reserved for what
+      makes an update fail; callers only warn. Shown on `/admin/update`
+- [x] Update button on `/admin/update`, gated on preflight. Responds before
+      handing off, since the gateway is about to spawn something that stops the
+      gateway, and reports afterwards from the run file
+- [x] Stable release base cache (`.canectic-update/base/`): a development delta
+      is rebuilt against the stable it names rather than re-fetching it. Keeps
+      two, never evicts the base in use, and re-verifies on every use
+- [x] Update handoff: `--handoff` stages a release then launches the NEW
       version's own updater detached, so it survives the BBS being stopped and a
       release can ship a fixed updater that applies itself. The contract between
       the two releases is a JSON run file rather than a command line, so it can
       grow in both directions. Progress is a durable file under `logs/update/`,
       readable with `--status` long after the process that started it was
       replaced, and a run cannot report success over a failed phase
-- [~] Update staging and applying (`src/tools/update.js`): fetches a release,
+- [x] Update staging and applying (`src/tools/update.js`): fetches a release,
       verifies its checksum before unpacking, reconstructs a development delta
       against its base and checks it against the manifest, then plans and
       optionally applies it with a backup of everything displaced. The plan is a
       pure value per file, so a dry run is the same code path with the writes
       off. Sysop content survives by category, and removal happens only in code
-      directories. **Half of phase 6**: no process control, dependency install,
-      schema run, upgrade steps, detached handoff or progress rows, so
-      `setup/update.sh` is still the supported path for a normal update
+      directories.
+      `setup/update.sh` remains available
 - [x] Update checking (`/admin/update`): opt-in daily job, off by default, that
       resolves a release index and raises a sysop notification when something
       newer exists. Read-only: it never downloads and never applies. A release

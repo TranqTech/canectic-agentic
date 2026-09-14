@@ -37,8 +37,10 @@ import { appliedIds } from '../maintenance/migrationLedger.js';
 import {
 	dirSource, httpSource, resolveRelease, stageRelease, discardStaging
 } from '../maintenance/updateStaging.js';
-import { applyPlan, verifyApplied } from '../maintenance/updateApply.js';
-import { launchUpdater, stagingRootFor, validateHandoff } from '../maintenance/updateHandoff.js';
+import { launchUpdater, validateHandoff } from '../maintenance/updateHandoff.js';
+import { runUpdate } from '../maintenance/updateRunner.js';
+import { stagingDir, reclaimable } from '../maintenance/updateLayout.js';
+import { makeRunId, newRun } from '../release/updatePhases.js';
 import * as runStore from '../maintenance/updateRunStore.js';
 import { summarise } from '../release/updatePhases.js';
 
@@ -65,6 +67,10 @@ function usage() {
 		'  --handoff          hand off to the NEW release\'s updater, detached,',
 		'                     and return. Survives the BBS being stopped',
 		'  --status           report the last update run on --target and stop',
+		'  --no-dump          do not dump the database before migrating',
+		'  --no-deps          do not run npm install',
+		'  --no-schema        do not run dbmigrations',
+		'  --no-restart       do not stop or start the BBS',
 		'  --keep-staging     do not delete the staging directory afterwards',
 		'  --verbose          list every file, not just a summary',
 		'',
@@ -77,7 +83,8 @@ function parseArgs(argv) {
 	var o = {
 		fromDir: null, url: null, channel: null, version: null,
 		target: process.cwd(), staging: null,
-		apply: false, handoff: false, keepStaging: false, verbose: false, status: false
+		apply: false, handoff: false, keepStaging: false, verbose: false, status: false,
+		dump: true, dependencies: true, schema: true, processControl: true
 	};
 	for (var i = 0; i < argv.length; i++) {
 		var a = argv[i];
@@ -90,6 +97,10 @@ function parseArgs(argv) {
 		else if (a === '--apply')        o.apply = true;
 		else if (a === '--handoff')      { o.handoff = true; o.apply = true; }
 		else if (a === '--status')       o.status = true;
+		else if (a === '--no-dump')      o.dump = false;
+		else if (a === '--no-deps')      o.dependencies = false;
+		else if (a === '--no-schema')    o.schema = false;
+		else if (a === '--no-restart')   o.processControl = false;
 		else if (a === '--keep-staging') o.keepStaging = true;
 		else if (a === '--verbose')      o.verbose = true;
 		else if (a === '--plan-only')    o.apply = false;
@@ -271,14 +282,15 @@ async function main() {
 	// updater staged in /tmp cannot import anything with a dependency. Under
 	// the install it walks up and finds the install's. The dot directory is not
 	// a shipped category, so nothing scans or replaces it.
-	var stagingDir = o.staging || path.join(stagingRootFor(o.target), version);
+	var staging = o.staging || stagingDir(o.target, version);
 
 	var staged = null;
 	try {
 		staged = await stageRelease({
 			source: source,
 			version: version,
-			stagingDir: stagingDir,
+			stagingDir: staging,
+			target: o.target,
 			onPhase: function (phase, detail) { info(phase + ': ' + detail); }
 		});
 		ok('staged ' + staged.meta.version + ', ' + staged.verification.checked + ' files verified against ' + MANIFEST_FILENAME);
@@ -316,8 +328,11 @@ async function main() {
 
 			var handle = launchUpdater({
 				stagedRoot: staged.treeRoot, target: o.target,
-				from: running, to: version, launchedBy: 'src/tools/update.js',
-				phases: ['preflight', 'backup', 'files', 'verify']
+				from: running, to: version, launchedBy: 'src/tools/update.js --handoff',
+				nodeMin: staged.meta.node_min, steps: staged.meta.steps || [],
+				base: staged.meta.base || null,
+				options: { dump: o.dump, dependencies: o.dependencies, schema: o.schema,
+					processControl: o.processControl }
 			});
 			ok('handed off to ' + version + '\'s own updater, pid ' + handle.pid);
 			console.log('');
@@ -332,28 +347,33 @@ async function main() {
 			return;
 		}
 
+		// In process, through the same runner the detached updater uses. One
+		// implementation of the phases: two programs that both claim to apply
+		// an update is how install.sh and update.sh drifted.
 		warn('applying to ' + o.target);
-		var backupDir = path.join(staged.stagingDir, 'backup');
-		var result = applyPlan({
-			plan: plan, stagedRoot: staged.treeRoot, targetRoot: o.target, backupDir: backupDir
+		var runId = makeRunId();
+		runStore.save(o.target, newRun({
+			runId: runId, from: running, to: version, target: o.target,
+			stagedRoot: staged.treeRoot, logFile: null
+		}));
+		var runFile = runStore.writeRunFile(o.target, runId, {
+			handoff_version: 1, runId: runId, target: o.target, stagedRoot: staged.treeRoot,
+			from: running, to: version, nodeMin: staged.meta.node_min,
+			steps: staged.meta.steps || [], base: staged.meta.base || null,
+			launchedBy: 'src/tools/update.js --apply', launchedAt: new Date().toISOString(),
+			options: { dump: o.dump, dependencies: o.dependencies, schema: o.schema,
+				processControl: o.processControl }
 		});
 
-		var check = verifyApplied({ plan: plan, targetRoot: o.target });
-		if (!check.ok) {
-			die('applied, but ' + (check.missing.length + check.mismatched.length) +
-				' file(s) do not match the release. The backup is at ' + backupDir);
-		}
+		var state = await runUpdate({
+			instructions: runStore.readRunFile(runFile),
+			log: function (m) { console.log('   ' + m); }
+		});
 
-		ok(result.written.length + ' written, ' + result.removed.length + ' removed, verified');
-		ok('displaced files backed up to ' + backupDir);
 		console.log('');
-		console.log('  Not done by this tool yet, and still needed:');
-		console.log('    npm install --omit=dev');
-		console.log('    node src/tools/dbmigrations.js');
-		console.log('    the upgrade steps in canectic-' + staged.meta.version + '.json');
-		console.log('    restart the processes');
-		console.log('');
-		o.keepStaging = true;  // the backup lives there
+		reportStatus(o.target);
+		if (state.status !== 'complete') die('the update did not finish. Nothing further was attempted.');
+		o.keepStaging = true;
 	} finally {
 		if (staged && !o.keepStaging) discardStaging(staged.stagingDir);
 		else if (staged) info('staging kept at ' + staged.stagingDir);

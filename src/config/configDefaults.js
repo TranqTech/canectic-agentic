@@ -267,6 +267,16 @@ var CONFIG_DEFINITIONS = [
 	  description: 'Base URL holding the channel indexes. The check fetches index-<channel>.json from here and nothing else.' },
 	{ key: 'update_check_retention_days', defaultValue: '90', type: 'number', category: 'maintenance',
 	  description: 'Days of update check history to keep (0 = never purge)' },
+	{ key: 'update_process_control', defaultValue: 'true', type: 'boolean', category: 'updates',
+	  description: 'Let an update stop and start the BBS itself. Turn off if the processes are supervised by something the commands below do not cover, and stop the BBS yourself before updating.' },
+	{ key: 'update_stop_command',    defaultValue: 'pm2 stop all', type: 'string', category: 'updates',
+	  description: 'How an update stops the BBS. A bare pm2 is resolved next to the running Node binary first, since under nvm the supervisor PATH may not hold the version the BBS runs on.' },
+	{ key: 'update_start_command',   defaultValue: 'pm2 start ecosystem.config.cjs', type: 'string', category: 'updates',
+	  description: 'How an update starts the BBS again. Note that starting from the ecosystem file starts every process in it, including one you had deliberately stopped.' },
+	{ key: 'update_base_cache_keep', defaultValue: '2', type: 'number', category: 'updates',
+	  description: 'How many stable release artifacts to keep cached for rebuilding development deltas. The base of the installed version is never discarded regardless.' },
+	{ key: 'update_require_signature', defaultValue: 'false', type: 'boolean', category: 'updates',
+	  description: 'Refuse a release whose checksums carry no valid signature. No signing key is published yet, so leaving this off is currently the only workable setting.' },
 
 	// -----------------------------------------------------------------------
 	// Call Flow (web login experience)

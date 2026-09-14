@@ -68,6 +68,58 @@ block content
                 |  to have it look once a day and raise a notification, or press
                 | Check now below, which asks straight away.
 
+        //- Preflight. Here rather than in the updater because several of these
+        //- are only answerable while the board is up: once the processes are
+        //- stopped, nobody is online and nothing is in flight.
+        if preflight && preflight.checks && preflight.checks.length
+          .card.bg-dark.border-secondary.mb-3
+            .card-header.d-flex.align-items-center
+              strong Before you update
+              span.badge.ms-auto(class=preflight.ok ? 'bg-success' : 'bg-danger')
+                = preflight.ok ? 'Nothing blocking' : 'Blocked'
+            .card-body.py-2
+              ul.list-unstyled.mb-0
+                each c in preflight.checks
+                  li.small.py-1
+                    if c.level === 'block'
+                      i.bi.bi-x-circle-fill.text-danger.me-2
+                    else if c.level === 'warn'
+                      i.bi.bi-exclamation-triangle-fill.text-warning.me-2
+                    else
+                      i.bi.bi-check-circle.text-success.me-2
+                    = c.summary
+                    if c.detail
+                      span.text-muted  (#{c.detail})
+
+        //- Last update run, read from the state file rather than from a
+        //- process: by the time anybody looks, whatever launched it has usually
+        //- been replaced by it.
+        if lastRun
+          .card.bg-dark.border-secondary.mb-3
+            .card-header.d-flex.align-items-center
+              strong Last update
+              span.badge.ms-auto(class=lastRun.status === 'complete' ? 'bg-success' : (lastRun.status === 'failed' ? 'bg-danger' : 'bg-info'))
+                = lastRun.status
+            .card-body.py-2.small
+              div #{lastRun.from || '?'} to #{lastRun.to || '?'}, #{Math.round((lastRun.elapsedMs || 0) / 1000)}s
+              if lastRun.error
+                .text-danger.mt-1= lastRun.error
+              each w in (lastRun.warnings || [])
+                .text-warning.mt-1
+                  i.bi.bi-exclamation-triangle.me-1
+                  = w
+
+        //- Disk held by the updater, so "I need that space back" has an answer.
+        if disk && disk.total > 0
+          p.text-muted.small
+            | The updater is holding #{Math.round(disk.total / 1048576)} MB in
+            code.mx-1 .canectic-update
+            | : #{Math.round(disk.base.bytes / 1048576)} MB of cached release bases,
+            | #{Math.round(disk.backup.bytes / 1048576)} MB of update backups,
+            | #{Math.round(disk.staging.bytes / 1048576)} MB staged.
+            | Deleting it costs the ability to roll back a past update and makes the next
+            | development update re-download its base.
+
         //- Last check
         .d-flex.align-items-center.mb-2
           h4.mb-0 Last check
@@ -146,12 +198,26 @@ block content
                                 li
                                   strong #{blockerLabel[b.kind] || b.kind}:
                                   |  #{b.detail}
+                        else if (name === channel && canApply)
+                          .alert.alert-success.small.mb-2
+                            | Nothing blocks this move.
+                          form(method='post' action='/admin/update/apply'
+                               onsubmit=`return confirm('Update to ${chan.available}?\n\nThis stops the BBS, replaces the files, migrates the database and starts it again. Connected users are disconnected. This page will be unavailable while the gateway restarts; come back to it to see what happened.')`)
+                            input(type='hidden' name='version' value=chan.available)
+                            button.btn.btn-warning.w-100(type='submit')
+                              i.bi.bi-arrow-up-circle.me-1
+                              | Update to #{chan.available}
+                          p.text-muted.small.mt-2.mb-0
+                            | Or from a shell:
+                            code.ms-1 node src/tools/update.js --handoff
+                        else if runLive
+                          .alert.alert-info.small.mb-0
+                            | An update is in progress. Reload this page to follow it.
                         else
                           .alert.alert-success.small.mb-0
-                            | Nothing blocks this move. Applying it is not implemented yet;
-                            | update with
-                            code.mx-1 setup/update.sh
-                            | for now.
+                            | Nothing blocks this move, but something above has to be cleared first.
+                            | From a shell:
+                            code.ms-1 node src/tools/update.js --handoff
 
         //- History
         if history && history.length

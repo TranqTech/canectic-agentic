@@ -33,6 +33,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { categoryRoots } from '../release/shippedTree.js';
+import { UPDATE_DIRNAME, stagingRoot } from './updateLayout.js';
 import * as runStore from './updateRunStore.js';
 import { makeRunId, newRun } from '../release/updatePhases.js';
 
@@ -40,13 +41,15 @@ import { makeRunId, newRun } from '../release/updatePhases.js';
 // staged tree root.
 var UPDATER_ENTRY = 'src/tools/applyUpdate.js';
 
-// Where staging lives inside the installation.
-var STAGING_DIRNAME = '.canectic-update';
+// Where staging lives inside the installation. The layout itself is owned by
+// updateLayout.js, which is the one definition of what goes where and for how
+// long; re-deriving it here is how two copies of a directory list drift.
+var STAGING_DIRNAME = UPDATE_DIRNAME;
 
 var HANDOFF_VERSION = 1;
 
 function stagingRootFor(target) {
-	return path.join(target, STAGING_DIRNAME);
+	return stagingRoot(target);
 }
 
 function updaterEntry(stagedRoot) {
@@ -153,6 +156,9 @@ function launchUpdater(opts) {
 		stagedRoot: stagedRoot,
 		from: opts.from || null,
 		to: opts.to || null,
+		base: opts.base || null,
+		nodeMin: opts.nodeMin || null,
+		steps: opts.steps || [],
 		logFile: logFile,
 		launchedBy: opts.launchedBy || 'unknown',
 		launchedAt: new Date().toISOString(),

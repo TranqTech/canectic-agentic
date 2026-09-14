@@ -30,6 +30,7 @@ import {
 import { parseMetadata, artifactName, metadataName } from '../release/metadata.js';
 import { parseIndex, findRelease } from '../release/releaseIndex.js';
 import { indexName } from '../release/releaseIndex.js';
+import { cachedBase, storeBase } from './baseCache.js';
 
 var FETCH_TIMEOUT_MS = 120000;
 var MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
@@ -180,6 +181,9 @@ function pruneToManifest(treeRoot, manifest) {
  * @param {object} opts.source     dirSource() or httpSource()
  * @param {string} opts.version    the release to stage
  * @param {string} [opts.stagingDir] where to build it; a temp dir otherwise
+ * @param {string} [opts.target]   the installation, so a delta's base can come
+ *                                 from and be added to its cache. Omit and
+ *                                 every delta re-fetches its base.
  * @param {function} [opts.onPhase] progress callback (name, detail)
  * @returns {{treeRoot, manifest, meta, stagingDir, reconstructed, pruned, verification}}
  */
@@ -201,13 +205,28 @@ async function stageRelease(opts) {
 	// verified on its own terms. The base is a full stable artifact and carries
 	// its own checksum in its own metadata.
 	var reconstructed = false;
+	var baseFromCache = false;
 	if (meta.delta) {
-		report('download', 'base ' + meta.base);
-		var baseMeta = await fetchMetadata(opts.source, meta.base);
-		var baseFile = path.join(downloads, baseMeta.artifact);
-		await fetchFile(opts.source, baseMeta.artifact, baseFile);
-		report('verify', baseMeta.artifact);
-		verifyChecksum(baseFile, baseMeta.sha256);
+		// The base is usually already here: a sysop tracking development needs
+		// the same stable tarball for every build cut on it. cachedBase
+		// re-verifies before answering, so a hit is a hit on something that
+		// still checks out rather than on something that is merely present.
+		var cached = opts.target ? cachedBase(opts.target, meta.base) : null;
+		var baseFile;
+		if (cached) {
+			report('base', 'using the cached ' + meta.base);
+			baseFile = cached.tarball;
+			baseFromCache = true;
+		} else {
+			report('download', 'base ' + meta.base);
+			var baseMetaText = await fetchText(opts.source, metadataName(meta.base));
+			var baseMeta = parseMetadata(baseMetaText);
+			baseFile = path.join(downloads, baseMeta.artifact);
+			await fetchFile(opts.source, baseMeta.artifact, baseFile);
+			report('verify', baseMeta.artifact);
+			verifyChecksum(baseFile, baseMeta.sha256);
+			if (opts.target) storeBase(opts.target, meta.base, baseFile, baseMetaText);
+		}
 		report('extract', 'base ' + meta.base);
 		extractInto(baseFile, treeRoot);
 		reconstructed = true;
@@ -253,6 +272,7 @@ async function stageRelease(opts) {
 		meta: meta,
 		stagingDir: staging,
 		reconstructed: reconstructed,
+		baseFromCache: baseFromCache,
 		pruned: pruned,
 		verification: verification
 	};
