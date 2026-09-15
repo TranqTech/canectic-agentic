@@ -2,6 +2,26 @@
 //
 // Tests: packet encoding/decoding, CRC validation, field escaping,
 // caller/answerer handshake loopback.
+//
+// EVERY PROTOCOL BUILT HERE MUST BE TORN DOWN. A caller that has sent its DAT
+// has a retry chain armed: ACK_TIMEOUT is 10s and MAX_RETRIES is 6, so an
+// abandoned instance spends a minute retrying and then emits 'error' on an
+// object nobody is listening to, which throws and takes the process with it.
+//
+// That is what issue #45 was. It stayed invisible because `.mocharc.yml` sets
+// `exit: true`, so mocha force-exited before the timer could fire: the suite
+// reported 3,831 passing over a process that was about to die.
+//
+// That setting is still there, and has to be for now: the tests that touch
+// PostgreSQL and Redis leave process-lifetime connection pools open, so without
+// force-exit the run never drains. Until that is dealt with, a leak like this
+// one is caught by running `npx mocha --no-exit` deliberately rather than by
+// the suite failing on its own.
+//
+// The protocol itself is not at fault. `sendERR` closes the transport, and on a
+// real socket that kills the caller too. These mocks are wired by overriding
+// `write`, so a close on one never reaches the other and the caller retries
+// into nothing. Hence `track()`.
 
 import assert from 'assert';
 import { EventEmitter } from 'node:events';
@@ -35,6 +55,20 @@ class MockTransport extends EventEmitter {
 		this.emit('data', Buffer.isBuffer(data) ? data : Buffer.from(data, 'binary'));
 	}
 }
+
+// Every protocol an individual test creates, cleaned up after it whatever the
+// test did or how it ended.
+var live = [];
+function track(proto) {
+	live.push(proto);
+	return proto;
+}
+afterEach(function () {
+	for (var proto of live) {
+		try { proto._cleanup(); } catch (_) { /* already gone */ }
+	}
+	live = [];
+});
 
 // =========================================================================
 // Encoding / decoding
@@ -167,19 +201,19 @@ describe('EMSI handshake loopback', function() {
 		var callerTransport = new MockTransport();
 		var answererTransport = new MockTransport();
 
-		var callerProto = new EmsiProtocol(callerTransport, {
+		var callerProto = track(new EmsiProtocol(callerTransport, {
 			quiet: true,
 			localAddresses: ['1:100/100@fidonet'],
 			sessionPassword: 'testpw',
 			systemName: 'CallerBBS'
-		});
+		}));
 
-		var answererProto = new EmsiProtocol(answererTransport, {
+		var answererProto = track(new EmsiProtocol(answererTransport, {
 			quiet: true,
 			localAddresses: ['1:200/200@fidonet'],
 			sessionPassword: 'testpw',
 			systemName: 'AnswererBBS'
-		});
+		}));
 
 		// Wire transports together
 		callerTransport.on('data', function() {}); // Already wired in constructor
@@ -238,19 +272,19 @@ describe('EMSI handshake loopback', function() {
 		var callerTransport = new MockTransport();
 		var answererTransport = new MockTransport();
 
-		var callerProto = new EmsiProtocol(callerTransport, {
+		var callerProto = track(new EmsiProtocol(callerTransport, {
 			quiet: true,
 			localAddresses: ['1:100/100'],
 			sessionPassword: 'wrongpw',
 			systemName: 'CallerBBS'
-		});
+		}));
 
-		var answererProto = new EmsiProtocol(answererTransport, {
+		var answererProto = track(new EmsiProtocol(answererTransport, {
 			quiet: true,
 			localAddresses: ['1:200/200'],
 			sessionPassword: 'correctpw',
 			systemName: 'AnswererBBS'
-		});
+		}));
 
 		callerTransport.write = function(buf) {
 			setImmediate(function() { answererTransport.inject(buf); });
@@ -280,11 +314,11 @@ describe('EMSI handshake loopback', function() {
 describe('EMSI pushInitialData', function() {
 	it('should process peeked bytes from auto-detection', function(done) {
 		var transport = new MockTransport();
-		var proto = new EmsiProtocol(transport, {
+		var proto = track(new EmsiProtocol(transport, {
 			quiet: true,
 			localAddresses: ['1:200/200'],
 			systemName: 'TestBBS'
-		});
+		}));
 
 		proto.startSession('answerer');
 
@@ -302,7 +336,7 @@ describe('EMSI pushInitialData', function() {
 describe('EMSI detachTransport', function() {
 	it('should remove data listener from transport', function() {
 		var transport = new MockTransport();
-		var proto = new EmsiProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] });
+		var proto = track(new EmsiProtocol(transport, { quiet: true, localAddresses: ['1:1/1'] }));
 
 		var listenersBefore = transport.listenerCount('data');
 		proto.detachTransport();
