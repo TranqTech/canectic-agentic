@@ -23,8 +23,8 @@ set -euo pipefail
 # exercise: it means the secret primary is not here.
 # =============================================================================
 
-REAL_NAME="Canectic BBS Release Signing"
-EMAIL="releases@tranqsoft.com"
+REAL_NAME="${CANECTIC_KEY_NAME:-Canectic BBS Release Signing}"
+EMAIL="${CANECTIC_KEY_EMAIL:-}"
 PRIMARY_EXPIRY="5y"
 SUBKEY_EXPIRY="2y"
 BACKUP_DIR="${1:-$HOME/canectic-signing-key-backup}"
@@ -57,6 +57,37 @@ fi
 echo ""
 echo -e "${BOLD}Canectic release signing key${NC}"
 echo ""
+
+# Asked for, not assumed. The first version of this script hardcoded an address
+# and nobody was told it had been chosen for them, let alone that it might need
+# to be a real mailbox.
+#
+# What the address is and is not: the user ID is a LABEL. Nothing in Canectic
+# reads it. Verification runs off the fingerprint and the self-signature, so the
+# key works whether or not mail is ever delivered there, both for the copy
+# shipped inside a release and for the one published beside it.
+#
+# It matters in exactly one place. keys.openpgp.org will not distribute identity
+# information until the address is confirmed, and a key served without its user
+# ID is served without the self-signature that lives over it, which makes it
+# unusable: gpg imports it "w/o user IDs", refuses to export it, and cannot
+# verify with it. So a deliverable address is what a keyserver copy costs, and
+# nothing else depends on it.
+if [[ -z "$EMAIL" ]]; then
+    echo "  The user ID on this key is a label. Nothing in Canectic reads it, and"
+    echo "  verification works off the fingerprint whether or not mail is ever"
+    echo "  delivered to it."
+    echo ""
+    echo "  It matters for one thing: keys.openpgp.org will not publish the user ID"
+    echo "  until you confirm the address, and it serves a key without its user ID"
+    echo "  in a form that cannot verify anything. If you want the key on a"
+    echo "  keyserver, use an address you can receive mail at."
+    echo ""
+    read -r -p "  Email address for the key: " EMAIL
+    [[ -n "$EMAIL" ]] || die "no address given"
+    echo ""
+fi
+
 echo "  name     $REAL_NAME"
 echo "  email    $EMAIL"
 echo "  primary  ed25519, certify only, expires in $PRIMARY_EXPIRY"
@@ -159,7 +190,12 @@ echo ""
 echo "  1. Move $BACKUP_DIR onto offline media and delete it from this disk."
 echo "     It holds the secret primary and the revocation certificate. On this"
 echo "     box they are exactly what the split above was meant to prevent."
-echo "  2. Upload the public key somewhere that outlives the release host:"
-echo "     gpg --keyserver keys.openpgp.org --send-keys $FPR"
+echo "  2. Optional: upload the public key somewhere that outlives the release host."
+echo "     Uploading is not enough on its own. keys.openpgp.org will serve the key"
+echo "     but strip the user ID until you confirm $EMAIL, and a key served"
+echo "     without its user ID cannot verify anything. Upload through the web form"
+echo "     at https://keys.openpgp.org/upload so you are offered the confirmation"
+echo "     mail, rather than with --send-keys, which leaves it unverified:"
+echo "     gpg --armor --export $FPR > canectic-release.asc"
 echo "  3. Commit setup/canectic-release.asc"
 echo ""
