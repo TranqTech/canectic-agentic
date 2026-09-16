@@ -46,6 +46,9 @@ import {
 } from '../src/release/identity.js';
 import { publishEntryPoint } from '../src/release/entryPoint.js';
 import {
+	PUBLIC_KEY_FILENAME, signatureName, detachSign, keyFingerprint, formatFingerprint
+} from '../src/release/signing.js';
+import {
 	emptyIndex, addRelease, findRelease, newestRelease, releasesBasedOn,
 	serialiseIndex, parseIndex, indexName
 } from '../src/release/releaseIndex.js';
@@ -325,6 +328,20 @@ function walkRelative(dir, prefix) {
 	return out;
 }
 
+/**
+ * The fingerprint of the key this release ships, which is the key it must be
+ * signed with. Read out of the published key rather than configured, so the two
+ * cannot disagree: a cut signed with some other key on the box would verify for
+ * nobody who pinned the fingerprint in the docs.
+ */
+function releaseKeyFingerprint() {
+	var keyFile = path.join(ROOT, 'setup', PUBLIC_KEY_FILENAME);
+	if (!fs.existsSync(keyFile)) die('--sign needs setup/' + PUBLIC_KEY_FILENAME + ', and it is not in the tree');
+	var fpr = keyFingerprint(keyFile);
+	if (!fpr) die('could not read a fingerprint out of setup/' + PUBLIC_KEY_FILENAME);
+	return fpr;
+}
+
 function writeSums(outputDir, sign) {
 	var names = checksummedNames(fs.readdirSync(outputDir, { withFileTypes: true })
 		.filter(function (e) { return e.isFile(); })
@@ -455,13 +472,18 @@ function cutStable(opts) {
 	if (opts.tag) {
 		git(['add', 'package.json', 'docs/sysop/CHANGELOG.md', 'docs/releases']);
 		git(['commit', '-m', 'Release: v' + version]);
-		git(['tag', '-a', 'v' + version, '-m', 'Canectic BBS v' + version]);
-		ok('committed and tagged v' + version);
+		if (opts.sign) {
+			git(['tag', '-s', '-u', opts.signKey, 'v' + version, '-m', 'Canectic BBS v' + version], { stdio: 'inherit' });
+			ok('committed and signed tag v' + version);
+		} else {
+			git(['tag', '-a', 'v' + version, '-m', 'Canectic BBS v' + version]);
+			ok('committed and tagged v' + version);
+		}
 	} else {
 		warn('--no-tag: the bump, changelog and notes are uncommitted');
 	}
 
-	buildArtifact({ version: version, meta: meta, output: opts.output, index: stableIndex, sign: opts.sign, released: released });
+	buildArtifact({ version: version, meta: meta, output: opts.output, index: stableIndex, sign: opts.sign, signKey: opts.signKey, released: released });
 }
 
 function cutDevelopment(opts) {
@@ -514,7 +536,7 @@ function cutDevelopment(opts) {
 
 	buildArtifact({
 		version: version, meta: meta, output: opts.output, index: index,
-		baseManifest: baseManifest, sign: opts.sign, released: meta.released
+		baseManifest: baseManifest, sign: opts.sign, signKey: opts.signKey, released: meta.released
 	});
 }
 
@@ -541,6 +563,16 @@ function buildArtifact(opts) {
 	var staged = stageTree(version, files);
 	var manifest = buildManifest({ root: staged.treeRoot, files: files, version: version, generated: new Date().toISOString() });
 	fs.writeFileSync(path.join(staged.treeRoot, MANIFEST_FILENAME), serialiseManifest(manifest));
+
+	// Signed INSIDE the archive, because this is the only signature that reaches
+	// a board fed by a file echo: SHA256SUMS lives at the release root on the
+	// host and never travels down an echo. Before normaliseTimes so the
+	// signature is stamped like everything else, and before pack so it is in
+	// the archive at all.
+	if (opts.sign) {
+		detachSign(path.join(staged.treeRoot, MANIFEST_FILENAME), opts.signKey);
+		ok(MANIFEST_FILENAME + ' signed with ' + opts.signKey);
+	}
 
 	// All three sidecars go at the archive ROOT, outside the version wrapper,
 	// because they describe the ARCHIVE rather than the software. Inside the
@@ -569,7 +601,9 @@ function buildArtifact(opts) {
 	if (opts.baseManifest) {
 		var changed = deltaFiles(opts.baseManifest, manifest);
 		var diff = diffManifests(opts.baseManifest, manifest);
-		members = changed.concat([MANIFEST_FILENAME]);
+		members = changed.concat(opts.sign
+			? [MANIFEST_FILENAME, signatureName(MANIFEST_FILENAME)]
+			: [MANIFEST_FILENAME]);
 		payloadBytes = changed.reduce(function (sum, p) {
 			var e = manifest.files.find(function (f) { return f.path === p; });
 			return sum + (e ? e.size : 0);
@@ -640,6 +674,11 @@ function main() {
 				'and an artifact built from uncommitted work is not. Pass --allow-dirty to override.');
 		}
 		warn('building from a dirty tree (--allow-dirty)');
+	}
+
+	if (opts.sign) {
+		opts.signKey = releaseKeyFingerprint();
+		info('signing with ' + formatFingerprint(opts.signKey));
 	}
 
 	if (!opts.skipTests) runTests();

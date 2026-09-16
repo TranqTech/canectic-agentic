@@ -81,16 +81,20 @@ function manifestName(version) {
  * to include has to be revisited every time something new is published and
  * fails silently when it is not. This one does not.
  *
- * `SHA256SUMS` cannot list itself, and a detached signature vouches for the
- * list rather than being vouched for by it.
+ * The two names held back are `SHA256SUMS`, which cannot list itself, and the
+ * detached signature over it, which vouches for the list rather than being
+ * vouched for by it. Those two and nothing else: an earlier version held back
+ * every `.asc`, which silently swallowed the published public key the moment
+ * one existed, since an armored key carries the same extension as a signature.
  */
+var SUMS_FILENAME = 'SHA256SUMS';
+
 function checksummedNames(names) {
+	var held = [SUMS_FILENAME, SUMS_FILENAME + '.asc'];
 	return (names || [])
 		.filter(function (n) {
 			if (!n || n.charAt(0) === '.') return false;
-			if (n === 'SHA256SUMS') return false;
-			if (/\.asc$/.test(n)) return false;
-			return true;
+			return held.indexOf(n) === -1;
 		})
 		.sort();
 }
@@ -341,6 +345,7 @@ export {
 	artifactName,
 	metadataName,
 	manifestName,
+	SUMS_FILENAME,
 	checksummedNames,
 	releaseDate,
 	buildStamp,

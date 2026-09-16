@@ -23,6 +23,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { hashFile } from './manifest.js';
+import { PUBLIC_KEY_FILENAME } from './signing.js';
 
 var BOOTSTRAP_NAME = 'bootstrap.sh';
 var BOOTSTRAP_SUMS_NAME = 'bootstrap.sh.sha256';
@@ -32,7 +33,15 @@ var INSTALL_DOC_NAME = 'INSTALL.md';
 function entryPointSources(root) {
 	return [
 		{ name: BOOTSTRAP_NAME, from: path.join(root, 'setup', BOOTSTRAP_NAME), mode: 0o755 },
-		{ name: INSTALL_DOC_NAME, from: path.join(root, 'docs', 'sysop', INSTALL_DOC_NAME), mode: null }
+		{ name: INSTALL_DOC_NAME, from: path.join(root, 'docs', 'sysop', INSTALL_DOC_NAME), mode: null },
+		// The public key. Published here so a sysop can import it before they
+		// have anything, and committed in the tree so it also travels inside
+		// every release, which is how a board fed by a file echo gets the
+		// rotated subkeys without making an HTTP call. Deliberately NOT excluded
+		// from SHA256SUMS: a key listed in a file signed by that key is not
+		// circular in any harmful way, since an attacker who swaps the key
+		// cannot re-sign the list, and listing it catches plain corruption.
+		{ name: PUBLIC_KEY_FILENAME, from: path.join(root, 'setup', PUBLIC_KEY_FILENAME), mode: null }
 	];
 }
 
@@ -70,6 +79,7 @@ function publishEntryPoint(opts) {
 
 export {
 	BOOTSTRAP_NAME,
+	PUBLIC_KEY_FILENAME,
 	BOOTSTRAP_SUMS_NAME,
 	INSTALL_DOC_NAME,
 	entryPointSources,

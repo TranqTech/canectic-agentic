@@ -28,7 +28,7 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import {
-	BOOTSTRAP_NAME, BOOTSTRAP_SUMS_NAME, INSTALL_DOC_NAME,
+	BOOTSTRAP_NAME, BOOTSTRAP_SUMS_NAME, INSTALL_DOC_NAME, PUBLIC_KEY_FILENAME,
 	entryPointSources, publishEntryPoint
 } from '../src/release/entryPoint.js';
 import { checksummedNames, releaseDate, artifactName, metadataName, manifestName } from '../src/release/metadata.js';
@@ -59,6 +59,15 @@ describe('the checksum list over a publish directory', function () {
 	it('covers the bootstrap and its checksum file', function () {
 		var names = checksummedNames([BOOTSTRAP_NAME, BOOTSTRAP_SUMS_NAME, INSTALL_DOC_NAME]);
 		assert.deepStrictEqual(names, [BOOTSTRAP_SUMS_NAME, BOOTSTRAP_NAME, INSTALL_DOC_NAME].sort());
+	});
+
+	// Deliberately listed rather than excluded. A key whose checksum appears in
+	// a file signed by that key is not circular in any harmful way: an attacker
+	// who swaps the key cannot re-sign the list, and listing it catches plain
+	// corruption in transit. Excluding it would also mean a name-specific
+	// exception in a rule whose whole point is that it has none.
+	it('covers the public key', function () {
+		assert.deepStrictEqual(checksummedNames([PUBLIC_KEY_FILENAME]), [PUBLIC_KEY_FILENAME]);
 	});
 
 	it('does not list itself, and does not list a signature over itself', function () {
@@ -113,10 +122,10 @@ describe('publishing the entry point', function () {
 		}
 	});
 
-	it('writes the bootstrap, its checksum and the install guide', function () {
+	it('writes the bootstrap, its checksum, the install guide and the key', function () {
 		var written = publishEntryPoint({ root: ROOT, output: work });
 		assert.deepStrictEqual(written.slice().sort(),
-			[BOOTSTRAP_NAME, BOOTSTRAP_SUMS_NAME, INSTALL_DOC_NAME].sort());
+			[BOOTSTRAP_NAME, BOOTSTRAP_SUMS_NAME, INSTALL_DOC_NAME, PUBLIC_KEY_FILENAME].sort());
 		for (var name of written) {
 			assert.ok(fs.existsSync(path.join(work, name)), name + ' was not published');
 		}

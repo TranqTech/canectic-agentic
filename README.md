@@ -87,6 +87,14 @@ curl -fsSLO https://canectic.tranqsoft.com/releases/bootstrap.sh.sha256
 sha256sum -c bootstrap.sh.sha256 && bash bootstrap.sh --target /opt/canectic --create-database
 ```
 
+Releases are signed. To have the bootstrap check the signature as well as the
+checksum, import the key first and compare its fingerprint with this one:
+
+```bash
+curl -fsSLO https://canectic.tranqsoft.com/releases/canectic-release.asc
+gpg --import canectic-release.asc      # F3F1 6D36 59AF 25FB F947  4C6D B5D8 AB14 3016 761F
+```
+
 The installer asks where to install and for database credentials, writes `.env`,
 creates the directory structure, installs dependencies, builds the schema and
 starts the processes. Drop `--create-database` if you have already created the

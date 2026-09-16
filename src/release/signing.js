@@ -1,0 +1,121 @@
+// signing.js -- the release signature, and the fingerprint a board pins.
+//
+// Two layers, with different jobs and different reach.
+//
+// SHA256SUMS.asc sits at the release root on the host and says the publish
+// directory is ours, before anything is unpacked. It covers the artifact, the
+// metadata, the manifest and the channel index, so it is what closes the gap
+// between "the archive matches the checksum in its metadata" and "that metadata
+// is ours". It only exists on the HTTP path.
+//
+// MANIFEST.asc rides INSIDE the archive and says the tree is ours, after. That
+// is the one that reaches a board fed by a file echo, where the only thing that
+// arrives is a ZIP: SHA256SUMS never travels down an echo, so a release signed
+// only at the host can never be verified by the boards the FTN transport
+// exists for. It is also the stronger of the two, because it vouches for the
+// content rather than the container and survives a chain renaming, truncating
+// or re-archiving the file. MANIFEST already carries a sha256 for every shipped
+// file and updateStaging already verifies the tree against it, so signing it
+// puts a signature on a step that was already load-bearing.
+//
+// What a board pins is the PRIMARY key's fingerprint, never a copy of the
+// keyring. A pinned keyring is a snapshot: an expired signing subkey still
+// verifies against it, but a ROTATED one does not, so every routine subkey
+// rotation would strand exactly the boards that cannot make an HTTP call to
+// refresh. Pinning the primary and taking the key material out of each release
+// makes rotation a non-event and reserves refusal for a primary change, which
+// is the case that should be refused.
+//
+// The pin is the full 40 hex fingerprint and never the 64 bit key id. Short ids
+// are cheap to collide and there are public demonstrations of exactly that.
+
+import * as fs from 'fs';
+import { execFileSync } from 'child_process';
+
+var SIGNATURE_SUFFIX = '.asc';
+var PUBLIC_KEY_FILENAME = 'canectic-release.asc';
+
+/** The detached signature that belongs beside `name`. */
+function signatureName(name) {
+	return name + SIGNATURE_SUFFIX;
+}
+
+/**
+ * A fingerprint in the one form everything compares: 40 upper case hex digits,
+ * no spaces.
+ *
+ * gpg prints it in spaced groups, people paste it that way, and the docs print
+ * it that way because it is the only form a human can check by eye. Comparing
+ * the printed form directly is how a match gets missed over whitespace.
+ *
+ * @returns {string|null} null when it is not a v4 fingerprint at all
+ */
+function normaliseFingerprint(text) {
+	if (typeof text !== 'string') return null;
+	var bare = text.replace(/\s+/g, '').replace(/^0x/i, '').toUpperCase();
+	return /^[0-9A-F]{40}$/.test(bare) ? bare : null;
+}
+
+/** Do two fingerprints name the same key, however either was written? */
+function fingerprintsMatch(a, b) {
+	var x = normaliseFingerprint(a);
+	var y = normaliseFingerprint(b);
+	return x !== null && y !== null && x === y;
+}
+
+/** The spaced form, for printing. Five groups of four, two groups of four,
+ *  which is what gpg --fingerprint produces and what the docs carry. */
+function formatFingerprint(text) {
+	var bare = normaliseFingerprint(text);
+	if (!bare) return null;
+	var groups = bare.match(/.{4}/g);
+	return groups.slice(0, 5).join(' ') + '  ' + groups.slice(5).join(' ');
+}
+
+/**
+ * The primary fingerprint of the key in an armored public key file.
+ *
+ * The FIRST fpr record is the primary. Subkeys have their own fpr records after
+ * their sub record, and taking the last one would pin a subkey, which is the
+ * mistake this module exists to avoid.
+ */
+function keyFingerprint(keyFile) {
+	var out = execFileSync('gpg', ['--show-keys', '--with-colons', keyFile], { encoding: 'utf8' });
+	for (var line of out.split('\n')) {
+		if (line.indexOf('fpr:') === 0) {
+			var fpr = normaliseFingerprint(line.split(':')[9] || '');
+			if (fpr) return fpr;
+		}
+	}
+	return null;
+}
+
+/**
+ * Detach-sign `file`, writing `<file>.asc` beside it.
+ *
+ * Signs with an explicit key rather than gpg's default, because the default is
+ * whatever matches the committer's own identity and that is not the release
+ * key. A cut that quietly signed with the maintainer's personal key would
+ * verify for nobody who pinned the release fingerprint.
+ */
+function detachSign(file, keyId) {
+	var sig = signatureName(file);
+	if (fs.existsSync(sig)) fs.unlinkSync(sig);
+	var args = ['--detach-sign', '--armor'];
+	if (keyId) args = args.concat(['--local-user', keyId]);
+	args.push(file);
+	execFileSync('gpg', args, { stdio: 'inherit' });
+	if (!fs.existsSync(sig)) throw new Error('gpg reported success but wrote no signature for ' + file);
+	return sig;
+}
+
+export {
+	SIGNATURE_SUFFIX,
+	PUBLIC_KEY_FILENAME,
+	signatureName,
+	normaliseFingerprint,
+	fingerprintsMatch,
+	formatFingerprint,
+	keyFingerprint,
+	detachSign
+};

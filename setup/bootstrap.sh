@@ -152,8 +152,80 @@ fi
 
 ok "release $VERSION"
 
+# -----------------------------------------------------------------------------
+# Trust, in order.
+#
+# SHA256SUMS is fetched FIRST and everything else is checked against it, because
+# it is the only file with a signature over it. The previous shape checked the
+# archive against the sha256 inside its own metadata JSON, then verified the
+# signature over SHA256SUMS and never opened the file: the metadata that the
+# archive was actually trusted against was vouched for by nothing, while the
+# sysop was told "signature verified". Anyone able to write to the host swapped
+# the archive and the metadata together, left the genuine signed list alone, and
+# both checks passed.
+#
+# The chain now runs signature -> SHA256SUMS -> metadata -> artifact, and every
+# link is checked. The metadata's own sha256 is still compared at the end as an
+# independent second statement of the same fact.
+# -----------------------------------------------------------------------------
+
+SUMS="$WORK/SHA256SUMS"
+HAVE_SUMS=false
+SIGNED=false
+
+fetch_optional() {
+    local name="$1" dest="$2"
+    if [[ -n "$FROM" ]]; then
+        [[ -f "$FROM/$name" ]] && cp "$FROM/$name" "$dest" && return 0
+        return 1
+    fi
+    $FETCH_OUT "$dest" "$BASE_URL/$name" 2>/dev/null
+}
+
+# What SHA256SUMS says a file should hash to, empty when it says nothing.
+sums_expects() {
+    awk -v n="$1" '$2 == n { print $1; exit }' "$SUMS"
+}
+
+# Check a file we already hold against the signed list. A file the list does not
+# mention is a refusal and not a pass: a published release lists everything it
+# publishes, so an absent line means either the list or the file is not the one
+# it should be.
+check_against_sums() {
+    local name="$1" file="$2"
+    local expected actual
+    expected="$(sums_expects "$name")"
+    [[ -n "$expected" ]] || die "SHA256SUMS does not mention $name.
+  Either the checksum list or $name is not from this release. Nothing has been unpacked."
+    actual="$(sha256sum "$file" | cut -d' ' -f1)"
+    [[ "$actual" == "$expected" ]] || die "$name does not match the published checksum list.
+  expected $expected
+  got      $actual
+  Nothing has been unpacked."
+}
+
+if fetch_optional "SHA256SUMS" "$SUMS"; then
+    HAVE_SUMS=true
+    if command -v gpg >/dev/null 2>&1 && fetch_optional "SHA256SUMS.asc" "$WORK/SHA256SUMS.asc"; then
+        if gpg --verify "$WORK/SHA256SUMS.asc" "$SUMS" >/dev/null 2>&1; then
+            SIGNED=true
+            ok "signature verified"
+        else
+            warn "the published checksums carry a signature this system cannot verify"
+            warn "that means either the signing key is not in your keyring, or something is wrong"
+            warn "import it with: gpg --import canectic-release.asc"
+        fi
+    fi
+else
+    # A file echo delivers an archive and nothing else, so this is the normal
+    # shape there rather than a fault. The archive still carries a signed
+    # MANIFEST inside it, which is what verifies a release that arrived that way.
+    warn "no SHA256SUMS alongside the release; falling back to the checksum in its own metadata"
+fi
+
 META="$WORK/meta.json"
 fetch "canectic-${VERSION}.json" "$META"
+if $HAVE_SUMS; then check_against_sums "canectic-${VERSION}.json" "$META"; fi
 
 ARTIFACT="$(node -p "require('$META').artifact")"
 EXPECTED="$(node -p "require('$META').sha256")"
@@ -172,6 +244,8 @@ fi
 info "downloading $ARTIFACT"
 fetch "$ARTIFACT" "$WORK/$ARTIFACT"
 
+if $HAVE_SUMS; then check_against_sums "$ARTIFACT" "$WORK/$ARTIFACT"; fi
+
 ACTUAL="$(sha256sum "$WORK/$ARTIFACT" | cut -d' ' -f1)"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then
     die "$ARTIFACT does not match its published checksum.
@@ -181,19 +255,8 @@ if [[ "$ACTUAL" != "$EXPECTED" ]]; then
 fi
 ok "checksum verified"
 
-# A signature is checked when one is published and gpg is here. No key is
-# published yet, so its absence is a warning rather than a refusal; when one is,
-# this becomes the default and the flag to skip it becomes deliberate.
-if [[ -z "$FROM" ]] && command -v gpg >/dev/null 2>&1; then
-    if $FETCH_OUT "$WORK/SHA256SUMS.asc" "$BASE_URL/SHA256SUMS.asc" 2>/dev/null && \
-       $FETCH_OUT "$WORK/SHA256SUMS" "$BASE_URL/SHA256SUMS" 2>/dev/null; then
-        if gpg --verify "$WORK/SHA256SUMS.asc" "$WORK/SHA256SUMS" >/dev/null 2>&1; then
-            ok "signature verified"
-        else
-            warn "the published checksums carry a signature this system cannot verify"
-            warn "that means either the signing key is not in your keyring, or something is wrong"
-        fi
-    fi
+if ! $SIGNED; then
+    warn "this release was not signature checked"
 fi
 
 # Unpack and stop. The docs and the setup scripts live inside the release, so
