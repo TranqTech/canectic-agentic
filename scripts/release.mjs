@@ -62,7 +62,8 @@ import {
 } from '../src/release/releaseIndex.js';
 import { checkStableCoverage, deltaShare } from '../src/release/pipelineCheck.js';
 import {
-	pendingIsEmpty, findPending, closePending, crossCheckPending, releaseNoteSkeleton
+	pendingIsEmpty, findPending, closePending, crossCheckPending, releaseNoteSkeleton,
+	countPendingHeadings
 } from '../src/release/changelog.js';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -401,6 +402,13 @@ function cutStable(opts) {
 	var current = packageVersion();
 	if (!isNewer(version, current)) {
 		die(version + ' is not newer than ' + current + ', which is what this tree already claims to be');
+	}
+
+	var headings = countPendingHeadings(fs.readFileSync(CHANGELOG, 'utf8'));
+	if (headings > 1) {
+		die('the changelog carries ' + headings + ' "## Pending" headings and there must be one.\n' +
+			'  Only the first is read, and it stops at the next "## ", so every entry under the\n' +
+			'  others would be dropped from this release without a word. Merge them first.');
 	}
 
 	if (pendingIsEmpty(fs.readFileSync(CHANGELOG, 'utf8'))) {

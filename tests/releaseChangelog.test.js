@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
-	findPending, pendingIsEmpty, pendingSections, upgradeNotes,
+	findPending, countPendingHeadings, pendingIsEmpty, pendingSections, upgradeNotes,
 	closePending, crossCheckPending, releaseNoteSkeleton
 } from '../src/release/changelog.js';
 
@@ -260,5 +260,69 @@ describe('the changelog in this repository', function () {
 		assert.ok(closed.indexOf('## v9.9.9a (2026-01-01)') !== -1);
 		assert.ok(closed.indexOf('## v0.9.5a (2026-04-04)') !== -1);
 		assert.ok(closed.length > text.length);
+	});
+});
+
+// A second "## Pending" heading is invisible in a way that costs entries.
+// findPending takes the FIRST one and its body stops at the next "## ", so
+// everything written under a later heading is silently dropped from the release
+// it was written for. It happened here, from an edit that prepended a heading
+// rather than inserting under the existing one, and it was found by reading the
+// file rather than by anything failing.
+describe('how many Pending headings the changelog has', function () {
+
+	it('counts the one a healthy changelog carries', function () {
+		assert.strictEqual(countPendingHeadings(SAMPLE), 1);
+	});
+
+	// Still exactly one after a cut: closePending closes the old section and
+	// opens a fresh empty one for the next cycle, which is why the sibling test
+	// above asserts the result is EMPTY rather than absent.
+	it('still counts one after a release is closed, not zero', function () {
+		var closed = closePending(SAMPLE, '0.9.6a', '2026-09-16');
+		assert.strictEqual(countPendingHeadings(closed), 1);
+		assert.strictEqual(pendingIsEmpty(closed), true);
+	});
+
+	it('counts the duplicate that went unnoticed', function () {
+		var text = [
+			'# Changelog',
+			'',
+			'## Pending (since v0.9.6a)',
+			'',
+			'- something written for the next release',
+			'',
+			'## Pending (since v0.9.6a)',
+			'',
+			'## v0.9.6a (2026-09-16)',
+			''
+		].join('\n');
+		assert.strictEqual(countPendingHeadings(text), 2);
+	});
+
+	// The consequence, stated as a test so the reason for counting is on record.
+	it('shows what the duplicate costs: the second block is not read', function () {
+		var text = [
+			'# Changelog',
+			'',
+			'## Pending (since v0.9.6a)',
+			'',
+			'- read',
+			'',
+			'## Pending (since v0.9.6a)',
+			'',
+			'- LOST',
+			'',
+			'## v0.9.6a (2026-09-16)',
+			''
+		].join('\n');
+		var found = findPending(text);
+		assert.match(found.body, /read/);
+		assert.ok(found.body.indexOf('LOST') === -1,
+			'the second block is read after all, so the refusal would be unnecessary');
+	});
+
+	it('is happy with a changelog that has no Pending at all', function () {
+		assert.strictEqual(countPendingHeadings('# Changelog\n'), 0);
 	});
 });

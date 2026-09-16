@@ -29,6 +29,11 @@ function splitLines(text) {
  *          bodyEnd is exclusive and stops at the next `## ` heading.
  */
 function findPending(text) {
+	// The FIRST Pending heading wins, and its body stops at the next `## `,
+	// which means a second one left behind by a hand edit silently truncates
+	// the block rather than being reported. That happened once, from a script
+	// that prepended a heading instead of inserting under the existing one.
+	// `duplicatePendingHeadings` is the check worth running before a cut.
 	var lines = splitLines(text);
 	var headingIndex = -1;
 	var since = null;
@@ -51,6 +56,19 @@ function findPending(text) {
 		bodyEnd: end,
 		body: lines.slice(headingIndex + 1, end).join('\n')
 	};
+}
+
+/**
+ * How many `## Pending` headings the document carries.
+ *
+ * Exactly one is correct. Zero means the section was closed and never reopened.
+ * More than one means a hand edit or a script put a second heading in, and
+ * since findPending takes the first and stops at the next `## `, the extras are
+ * invisible: the entries under them are silently dropped from the release they
+ * were written for.
+ */
+function countPendingHeadings(text) {
+	return splitLines(text).filter(function (l) { return PENDING_HEADING.test(l); }).length;
 }
 
 /**
@@ -228,6 +246,7 @@ export {
 	RELEASE_HEADING,
 	UPGRADE_SECTION,
 	findPending,
+	countPendingHeadings,
 	pendingIsEmpty,
 	pendingSections,
 	upgradeNotes,
