@@ -1,8 +1,8 @@
 {
   "name": "canectic-bbs",
   "type": "module",
-  "version": "0.9.6a",
-  "description": "Canectic BBS — Modern Bulletin Board System",
+  "version": "0.9.5a",
+  "description": "Canectic BBS \u2014 Modern Bulletin Board System",
   "engines": {
     "node": ">=22.0.0"
   },
