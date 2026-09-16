@@ -46,7 +46,8 @@ import {
 } from '../src/release/identity.js';
 import { publishEntryPoint } from '../src/release/entryPoint.js';
 import {
-	PUBLIC_KEY_FILENAME, signatureName, detachSign, keyFingerprint, formatFingerprint
+	PUBLIC_KEY_FILENAME, signatureName, detachSign, keyFingerprint, formatFingerprint,
+	assertCanSign
 } from '../src/release/signing.js';
 import {
 	emptyIndex, addRelease, findRelease, newestRelease, releasesBasedOn,
@@ -678,7 +679,14 @@ function main() {
 
 	if (opts.sign) {
 		opts.signKey = releaseKeyFingerprint();
-		info('signing with ' + formatFingerprint(opts.signKey));
+		// Before the suite, before the bookkeeping, before the commit. Having a
+		// key is not the same as being able to use it.
+		try {
+			assertCanSign(opts.signKey);
+		} catch (e) {
+			die(e.message);
+		}
+		ok('signing with ' + formatFingerprint(opts.signKey));
 	}
 
 	if (!opts.skipTests) runTests();

@@ -29,9 +29,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import * as os from 'os';
 import {
 	PUBLIC_KEY_FILENAME, signatureName, normaliseFingerprint,
-	fingerprintsMatch, formatFingerprint, keyFingerprint
+	fingerprintsMatch, formatFingerprint, keyFingerprint, assertCanSign
 } from '../src/release/signing.js';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -151,5 +152,87 @@ describe('the key this release ships', function () {
 			assert.ok(fingerprintsMatch(printed[0], fpr),
 				rel + ' prints ' + printed[0] + ', but the shipped key is ' + formatFingerprint(fpr));
 		}
+	});
+});
+
+// A cut got as far as closing the changelog, clearing the pending declarations,
+// bumping package.json and committing, then failed on `git tag -s` because gpg
+// could not reach a terminal to ask for the passphrase. It left a repository
+// holding a release commit for a release that does not exist.
+//
+// Having a key is not the same as being able to use it, and the difference only
+// appears at the moment of use. So the cut uses it first, on a throwaway file,
+// before it has written anything it would have to undo.
+describe('proving the key can actually sign, before a cut touches anything', function () {
+	this.timeout(30000);
+
+	var savedHome;
+
+	beforeEach(function () { savedHome = process.env.GNUPGHOME; });
+	afterEach(function () {
+		if (savedHome === undefined) delete process.env.GNUPGHOME;
+		else process.env.GNUPGHOME = savedHome;
+	});
+
+	function keyringWith(passphrase) {
+		var home = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-signprobe-'));
+		fs.chmodSync(home, 0o700);
+		fs.writeFileSync(path.join(home, 'gpg-agent.conf'), 'allow-loopback-pinentry\n');
+		execFileSync('gpg', ['--batch', '--passphrase', passphrase, '--pinentry-mode', 'loopback',
+			'--quick-generate-key', 'Probe Test <probe@example.invalid>', 'ed25519', 'sign', '1y'],
+			{ env: Object.assign({}, process.env, { GNUPGHOME: home }), stdio: 'ignore' });
+		var out = execFileSync('gpg', ['--list-keys', '--with-colons'],
+			{ env: Object.assign({}, process.env, { GNUPGHOME: home }), encoding: 'utf8' });
+		var fpr = null;
+		for (var line of out.split('\n')) {
+			if (line.indexOf('fpr:') === 0) { fpr = normaliseFingerprint(line.split(':')[9]); break; }
+		}
+		return { home: home, fpr: fpr };
+	}
+
+	it('passes when the key is usable', function () {
+		if (!haveGpg()) return this.skip();
+		var k = keyringWith('');
+		process.env.GNUPGHOME = k.home;
+		try {
+			assert.strictEqual(assertCanSign(k.fpr), true);
+		} finally {
+			fs.rmSync(k.home, { recursive: true, force: true });
+		}
+	});
+
+	it('fails when the key is not in the keyring at all', function () {
+		if (!haveGpg()) return this.skip();
+		var empty = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-nokey-'));
+		fs.chmodSync(empty, 0o700);
+		process.env.GNUPGHOME = empty;
+		try {
+			assert.throws(function () {
+				assertCanSign('F3F16D3659AF25FBF9474C6DB5D8AB143016761F');
+			}, /cannot sign|Nothing has been changed/);
+		} finally {
+			fs.rmSync(empty, { recursive: true, force: true });
+		}
+	});
+
+	// "Inappropriate ioctl for device" names an ioctl rather than the thing to
+	// fix, and it is the error an unset GPG_TTY produces, so the message has to
+	// say the thing to fix.
+	it('names GPG_TTY when gpg could not reach a terminal', function () {
+		var message = 'gpg: signing failed: Inappropriate ioctl for device';
+		assert.ok(/ioctl|pinentry|No such device/i.test(message),
+			'the hint would not fire for the error this actually produces');
+	});
+
+	it('leaves no probe files behind, whether it passed or failed', function () {
+		if (!haveGpg()) return this.skip();
+		var before = fs.readdirSync(os.tmpdir()).filter(function (f) { return f.indexOf('canectic-sign-probe-') === 0; });
+		var empty = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-nokey-'));
+		fs.chmodSync(empty, 0o700);
+		process.env.GNUPGHOME = empty;
+		try { assertCanSign('F3F16D3659AF25FBF9474C6DB5D8AB143016761F'); } catch (ignore) { /* expected */ }
+		fs.rmSync(empty, { recursive: true, force: true });
+		var after = fs.readdirSync(os.tmpdir()).filter(function (f) { return f.indexOf('canectic-sign-probe-') === 0; });
+		assert.deepStrictEqual(after, before, 'a probe file was left in the temp directory');
 	});
 });

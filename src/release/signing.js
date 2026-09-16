@@ -30,6 +30,8 @@
 // are cheap to collide and there are public demonstrations of exactly that.
 
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { execFileSync } from 'child_process';
 
 var SIGNATURE_SUFFIX = '.asc';
@@ -98,15 +100,65 @@ function keyFingerprint(keyFile) {
  * key. A cut that quietly signed with the maintainer's personal key would
  * verify for nobody who pinned the release fingerprint.
  */
-function detachSign(file, keyId) {
+function detachSign(file, keyId, opts) {
 	var sig = signatureName(file);
 	if (fs.existsSync(sig)) fs.unlinkSync(sig);
 	var args = ['--detach-sign', '--armor'];
 	if (keyId) args = args.concat(['--local-user', keyId]);
 	args.push(file);
-	execFileSync('gpg', args, { stdio: 'inherit' });
+
+	// Inherit by default so the passphrase prompt reaches the person running
+	// the cut. `capture` is for the probe, which needs gpg's own words in order
+	// to say something more useful than "Command failed". pinentry draws on the
+	// terminal named by GPG_TTY rather than on this process's stdio, so piping
+	// does not stop a prompt appearing on a correctly configured machine.
+	try {
+		execFileSync('gpg', args, (opts && opts.capture)
+			? { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' }
+			: { stdio: 'inherit' });
+	} catch (e) {
+		var said = String((e && e.stderr) || '').trim();
+		throw new Error(said ? said : (e && e.message) || String(e));
+	}
 	if (!fs.existsSync(sig)) throw new Error('gpg reported success but wrote no signature for ' + file);
 	return sig;
+}
+
+/**
+ * Prove the agent can actually sign, before a cut touches anything.
+ *
+ * Written after a cut got as far as closing the changelog, clearing the pending
+ * declarations, bumping package.json and committing, and THEN failed on `git
+ * tag -s` because gpg could not reach a terminal to ask for the passphrase. The
+ * repository was left holding a release commit for a release that does not
+ * exist, which is a state nothing in the script knows how to be in.
+ *
+ * Having a key is not the same as being able to use it, and the difference only
+ * shows up at the moment of use. So use it, on a throwaway file, first.
+ *
+ * The usual cause is GPG_TTY being unset: pinentry has no terminal to draw the
+ * prompt on and fails with "Inappropriate ioctl for device", which names an
+ * ioctl rather than the thing to fix, so the message says the thing to fix.
+ */
+function assertCanSign(keyId) {
+	var probe = path.join(os.tmpdir(), 'canectic-sign-probe-' + process.pid);
+	try {
+		fs.writeFileSync(probe, 'probe\n');
+		detachSign(probe, keyId, { capture: true });
+	} catch (e) {
+		var hint = /ioctl|pinentry|No such device/i.test(String(e.message || e))
+			? '\n  gpg cannot reach a terminal to ask for the passphrase.' +
+			  '\n  Set GPG_TTY and try again:  export GPG_TTY=$(tty)' +
+			  '\n  If you are running this through something that is not a real terminal, use one.'
+			: '';
+		throw new Error('gpg cannot sign with ' + keyId + '.' + hint +
+			'\n  Nothing has been changed.\n  Original error: ' + (e.message || e));
+	} finally {
+		for (var f of [probe, signatureName(probe)]) {
+			try { fs.unlinkSync(f); } catch (ignore) { /* it may never have been written */ }
+		}
+	}
+	return true;
 }
 
 export {
@@ -117,5 +169,6 @@ export {
 	fingerprintsMatch,
 	formatFingerprint,
 	keyFingerprint,
-	detachSign
+	detachSign,
+	assertCanSign
 };
