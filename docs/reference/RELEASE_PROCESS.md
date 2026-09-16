@@ -87,6 +87,8 @@ node scripts/release.mjs --stable 0.9.6a --dry-run
 7. Stages the shipped tree, builds `MANIFEST`, packs the archive
 8. Writes the metadata, the standalone manifest, the channel index, the
    bootstrap and its checksum, and `SHA256SUMS`
+9. Creates the GitLab release for the tag, with the release notes as its
+   description and the artifacts attached (see section 3)
 
 The bookkeeping happens **before** the artifact is staged, so a release archive
 contains its own release notes and its own changelog entry. Building first would
@@ -137,6 +139,31 @@ a ZIP and never matched the channel index at all, so the published list vouched
 for the sidecars and not for the software. A rule that enumerates what to
 include has to be revisited whenever something new is published, and fails
 silently when it is not.
+
+### The GitLab releases page
+
+A cut also creates the release object for its tag, with `docs/releases/v<version>.md`
+as the description and the archive, its two sidecars, `SHA256SUMS`,
+`SHA256SUMS.asc` and the public key uploaded to the project's generic package
+registry. `--no-gitlab` skips it, and a missing or unauthenticated `glab` is
+reported rather than failing a cut that is already complete.
+
+The release host stays canonical: `update_check_url` points there and the
+bootstrap fetches from there. The page is where a person finds a release.
+
+A second fetch location is safe because the release is signed. The signature is
+over the content rather than over a location, so a copy elsewhere cannot say
+anything the original does not. Mirroring unsigned artifacts would be adding a
+second thing that can drift.
+
+`bootstrap.sh` is deliberately not attached, because it defaults to fetching
+from the release host and a copy taken from a release page would be a trap while
+that host is not serving.
+
+Left alone, GitLab shows "Source code (zip)" for a tag, which looks like a
+download and is a git tree: no `MANIFEST`, no `CANECTIC.ID`, and installing it
+takes the from-source path. Every release before v0.9.6a offered that and
+nothing else.
 
 The bootstrap is the one file that cannot ship inside a release, because
 resolving a release is its job, so the release script copies it out of `setup/`

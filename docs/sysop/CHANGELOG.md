@@ -2,6 +2,14 @@
 
 ## Pending (since v0.9.6a)
 
+### Release Engineering
+
+- **Cutting a release now also puts it on the GitLab releases page,** with the release notes as its description and the real artifacts attached: the archive, its metadata and manifest, `SHA256SUMS`, the signature over it, and the public key. The page has carried an entry for every tag since v0.9.0-alpha.1, all of them made by hand, so the first release cut by script would have been the first one missing from the page people actually look at.
+- Missing would not have been the worst of it. GitLab generates a "Source code (zip)" for any tag by itself, so a release page looks like it offers a download when what it offers is a git tree: no `MANIFEST`, no `CANECTIC.ID`, no `FILE_ID.DIZ`, and installing it takes the from-source path rather than the bootstrap one. Every release before this one offered exactly that and nothing else.
+- The release host stays canonical. `update_check_url` points there, the bootstrap fetches from there, and a file echo carries the same archive; GitLab is where a person finds a release and reads what changed. A second fetch location is safe precisely because the release is signed: the signature is over the content rather than over a location, so a copy elsewhere cannot say anything the original does not. Mirroring unsigned artifacts would be adding a second thing that can drift.
+- `bootstrap.sh` is deliberately not attached there. It defaults to fetching from the release host, so a copy downloaded from a release page would be a trap for as long as that host is not serving, and the archive on its own installs perfectly well.
+- Creating the page entry is the last thing a cut does and it is never fatal. By then the archive exists and has been verified, the commit is made and the tag is signed, so a `glab` that is missing or unauthenticated is reported with the command to run by hand rather than failing a release that is already complete. `--no-gitlab` skips it.
+
 ## v0.9.6a (2026-09-16)
 
 ### Upgrade Notes

@@ -51,6 +51,7 @@ import {
 	IDENTITY_FILENAME, DIZ_FILENAME, serialiseIdentity, buildFileIdDiz, withoutSelfChecksum
 } from '../src/release/identity.js';
 import { publishEntryPoint } from '../src/release/entryPoint.js';
+import { gitlabAvailable, publishToGitLab, releaseTitle } from '../src/release/gitlabRelease.js';
 import {
 	PUBLIC_KEY_FILENAME, signatureName, detachSign, keyFingerprint, formatFingerprint,
 	assertCanSign
@@ -100,6 +101,7 @@ function parseArgs(argv) {
 		else if (a === '--allow-dirty')         { opts.allowDirty = true; }
 		else if (a === '--allow-migration-gap') { opts.allowMigrationGap = true; }
 		else if (a === '--no-tag')              { opts.tag = false; }
+		else if (a === '--no-gitlab')           { opts.gitlab = false; }
 		else if (a === '--sign')                { opts.sign = true; }
 		else if (a === '--help' || a === '-h')  { usage(); process.exit(0); }
 		else die('unknown argument: ' + a);
@@ -121,6 +123,7 @@ function usage() {
 		'  --allow-dirty            build from a dirty tree (never for a real release)',
 		'  --allow-migration-gap    publish a stable that drops a development migration',
 		'  --no-tag                 skip the release commit and tag (stable only)',
+		'  --no-gitlab              do not mirror the release onto the GitLab releases page',
 		'  --sign                   gpg sign SHA256SUMS',
 		'  --base-manifest PATH     the stable manifest a development delta is against',
 		'  --date YYYY-MM-DD        override the release date',
@@ -497,6 +500,32 @@ function cutStable(opts) {
 	}
 
 	buildArtifact({ version: version, meta: meta, output: opts.output, index: stableIndex, sign: opts.sign, signKey: opts.signKey, released: released });
+
+	// The releases page is where a person looks, and it has carried an entry for
+	// every tag since v0.9.0-alpha.1. Left to itself GitLab shows "Source code
+	// (zip)" for a tag, which looks like a download and is a git tree: no
+	// MANIFEST, no CANECTIC.ID, and installing it takes the from-source path.
+	//
+	// Last, and never fatal. The artifact exists and is verified by this point,
+	// the commit and the tag are made, and nothing here can undo any of that.
+	if (opts.gitlab !== false && opts.tag) {
+		if (!gitlabAvailable()) {
+			warn('glab is not available or not authenticated, so the GitLab release was not created');
+			warn('create it with: glab release create v' + version + ' --name "' + releaseTitle(version) + '" ...');
+		} else {
+			try {
+				var mirrored = publishToGitLab({
+					version: version, output: opts.output, cwd: ROOT,
+					notes: fs.readFileSync(notesFile, 'utf8')
+				});
+				ok('GitLab release v' + version + ' with ' + mirrored.present.length + ' assets');
+				if (mirrored.absent.length) warn('not attached (absent): ' + mirrored.absent.join(', '));
+			} catch (e) {
+				warn('the GitLab release was not created: ' + (e.message || e));
+				warn('the cut itself is complete; this is the releases page only');
+			}
+		}
+	}
 }
 
 function cutDevelopment(opts) {
