@@ -10,20 +10,66 @@ Canectic BBS runs on Linux. Tested on Debian/Ubuntu-based systems. Other distrib
 
 ```bash
 # Required
-sudo apt install build-essential python3 postgresql redis-server
-
-# Required for file transfers (native engines are used by default; lrzsz is a legacy fallback)
-sudo apt install lrzsz
-
-# Required for QWK packet creation
-sudo apt install zip unzip
+sudo apt install build-essential python3 postgresql redis-server zip unzip gnupg
 
 # Recommended
 sudo npm install -g pm2        # Process management (or: npm install -g pm2)
-
-# Optional — for DOS door games
-sudo apt install dosemu2
 ```
+
+`zip` and `unzip` are not optional in practice: `zip` builds outbound QWK and
+REP packets, and `unzip` is what reads an inbound nodelist, echolist or filebone
+ZIP and pulls `FILE_ID.DIZ` out of an upload. `gnupg` is what checks the
+signature on a release.
+
+A local `postgresql` brings `postgresql-client` with it, which is where
+`pg_dump` comes from. If your database is remote or managed, install the client
+separately:
+
+```bash
+sudo apt install postgresql-client
+```
+
+That one matters more than it looks. `pg_dump` is what an update uses to back
+the database up immediately before migrating it, which is the thing that makes a
+failed migration recoverable. Without it an update has to run with `--no-dump`.
+
+### DOS door games
+
+Skip this if you are not running DOS doors. If you are, you need both packages,
+and `dosemu2` is not in the Ubuntu archive:
+
+```bash
+sudo add-apt-repository ppa:dosemu2/ppa
+sudo apt update
+sudo apt install dosemu2 socat
+```
+
+`socat` is the part that is easy to miss. The **DosemuPty** launch type, which
+is the recommended one for interactive DOS doors, gives the door a serial port
+to talk to the caller over, and `socat` is what creates the pseudo-terminal
+pair. Without it that launch type cannot allocate a port and the door fails when
+a caller runs it. The **Dosemu** console-only type does not need `socat`, but it
+is for sysop utilities rather than for doors people call in to play.
+
+Because `dosemu2` comes from a PPA rather than the archive, an OS release
+upgrade disables it and the source has to be re-pointed afterwards. See
+`OS_UPGRADE.md`.
+
+### Legacy file transfer
+
+```bash
+sudo apt install lrzsz        # optional
+```
+
+The native XMODEM and ZMODEM engines are used by default and `lrzsz` is only a
+fallback for terminals that need one. Nothing breaks without it.
+
+### What the installer tells you
+
+The installer checks for all of these and names the ones that are missing, along
+with what each one would have enabled and the command to install it. None of
+them stop an install: a board runs without any of them right up until somebody
+uses the feature that needs one.
 
 ### Node.js
 

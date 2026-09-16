@@ -67,6 +67,8 @@ import * as outboundFileLog from '../models/outboundFileLog.js';
 import * as netmailRelayLog from '../models/netmailRelayLog.js';
 import * as updateChecks from '../models/updateChecks.js';
 import { preflight as buildPreflight } from '../release/preflight.js';
+import { missingTools } from '../maintenance/optionalTools.js';
+import { spawnSync } from 'child_process';
 import { reclaimable, freeBytes } from '../maintenance/updateLayout.js';
 import * as updateRunStore from '../maintenance/updateRunStore.js';
 import { summarise as summariseRun } from '../release/updatePhases.js';
@@ -6525,7 +6527,11 @@ router.get('/update', requireAdmin, async (req, res) => {
 		databaseReachable: await databaseReachable(),
 		callersOnline: await callersOnline(),
 		jobsInFlight: flight,
-		targetWritable: writable(target)
+		targetWritable: writable(target),
+		dumpTool: onPath('pg_dump'),
+		missingTools: missingTools(onPath)
+			.filter(function (t) { return t.command !== 'pg_dump'; })
+			.map(function (t) { return t.command; })
 	});
 
 	res.render('admin/update/index', {
@@ -6545,6 +6551,14 @@ router.get('/update', requireAdmin, async (req, res) => {
 		history:   await updateChecks.getRecent(20)
 	});
 });
+
+/** Is a program on PATH? `command -v` rather than `which`, which is not
+ *  installed everywhere and reports differently when it is. */
+function onPath(command) {
+	try {
+		return spawnSync('sh', ['-c', 'command -v ' + command], { timeout: 5000 }).status === 0;
+	} catch (_) { return true; }   // unknown is not missing: do not invent a warning
+}
 
 // The probes the preflight needs. Each answers "unknown" rather than throwing:
 // a page that 500s because Redis is briefly unavailable is worse than one that

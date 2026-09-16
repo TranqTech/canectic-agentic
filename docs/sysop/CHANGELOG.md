@@ -2,6 +2,15 @@
 
 ## Pending (since v0.9.6a)
 
+### Prerequisites
+
+- **`socat` was not named in any install instruction anywhere,** despite being what the DosemuPty launch type needs to give a DOS door a serial port to talk to the caller over, and DosemuPty is the mode recommended for interactive DOS doors. A board set up by following the documentation exactly would have had DOS doors fail the first time a caller ran one.
+- `dosemu2` was documented as `sudo apt install dosemu2`, which fails on a stock Ubuntu because it exists only in a PPA. A command that does not work is worse than no command, because the reader concludes the package is gone rather than that they need the repository. `INSTALL.md` and the README now give the `add-apt-repository` line, and say plainly that `socat` is needed alongside it.
+- `postgresql-client` is now named too. A local PostgreSQL brings it along, so this only bites a board whose database is remote or managed, and what it costs is specific: `pg_dump` is what an update uses to back the database up immediately before migrating, which is the thing that makes a failed migration recoverable.
+- **The installer now names what is missing.** Every external program Canectic uses is declared in one place with what it enables and what is lost without it, and the installer reports the absent ones with the command to install each. None of them block an install, because none of them are needed to run a board: that is precisely why each was previously discovered at the moment a caller first tried the feature it belonged to, where a DOS door that exits instantly looks like a Canectic bug rather than a missing package.
+- `/admin/update` reports them as well, which is not a duplicate of the install check. An OS release upgrade disables third-party repositories, which is where `dosemu2` comes from, and has been observed removing `build-essential` outright, so a board can arrive at an update having quietly lost a tool it had when it was installed.
+- The declaration is what the documentation is tested against, so a program added to the list and not written down now fails the suite. Prose drifts from the code that needs it, and that drift is the whole reason `socat` went unmentioned for as long as it did.
+
 ### Release Engineering
 
 - **Cutting a release now also puts it on the GitLab releases page,** with the release notes as its description and the real artifacts attached: the archive, its metadata and manifest, `SHA256SUMS`, the signature over it, and the public key. The page has carried an entry for every tag since v0.9.0-alpha.1, all of them made by hand, so the first release cut by script would have been the first one missing from the page people actually look at.

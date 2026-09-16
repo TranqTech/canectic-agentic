@@ -134,3 +134,59 @@ describe('unknown is not bad', function () {
 		assert.strictEqual(r.ok, true);
 	});
 });
+
+// Added after noticing that socat, which the recommended DOS door launch type
+// needs, appeared in no install instruction anywhere. The general problem is
+// that none of Canectic's external programs are needed to BOOT a board, so each
+// is discovered missing at the moment a caller first uses the feature it
+// belongs to.
+//
+// Update time is a second place worth saying it, not a duplicate of install
+// time: an OS release upgrade disables third-party repositories, which is where
+// dosemu2 comes from, and has been observed removing build-essential outright.
+// A board can therefore arrive at an update having quietly lost a tool it had
+// when it was installed.
+describe('external programs the board needs but does not need to boot', function () {
+
+	it('warns about a missing pg_dump, and says what is lost', function () {
+		var r = preflight({ dumpTool: false });
+		var c = find(r, 'dump');
+		assert.ok(c, 'nothing was said about pg_dump');
+		assert.strictEqual(c.level, LEVEL_WARN);
+		assert.match(c.summary + ' ' + (c.detail || ''), /postgresql-client|backed up/);
+	});
+
+	// Not blocking: --no-dump is a supported way to run an update, and refusing
+	// the update outright would strand a board with a remote database and no
+	// local client.
+	it('does not block an update over pg_dump', function () {
+		assert.strictEqual(preflight({ dumpTool: false }).ok, true);
+	});
+
+	it('says nothing when pg_dump is there', function () {
+		assert.strictEqual(find(preflight({ dumpTool: true }), 'dump'), undefined);
+	});
+
+	it('names the other missing programs in one line', function () {
+		var r = preflight({ missingTools: ['dosemu', 'socat'] });
+		var c = find(r, 'tools');
+		assert.ok(c, 'nothing was said about the missing tools');
+		assert.strictEqual(c.level, LEVEL_WARN);
+		assert.match(c.summary, /dosemu/);
+		assert.match(c.summary, /socat/);
+	});
+
+	it('says nothing when none are missing', function () {
+		assert.strictEqual(find(preflight({ missingTools: [] }), 'tools'), undefined);
+		assert.strictEqual(find(preflight({}), 'tools'), undefined);
+	});
+
+	// Same rule the disk check follows: a probe that could not run must not
+	// invent a warning, because a preflight nobody trusts is a preflight
+	// everybody clicks past.
+	it('says nothing when the probe did not run', function () {
+		var r = preflight({ nodeVersion: '26.8.1' });
+		assert.strictEqual(find(r, 'dump'), undefined);
+		assert.strictEqual(find(r, 'tools'), undefined);
+	});
+});

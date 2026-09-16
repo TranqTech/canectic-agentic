@@ -72,7 +72,12 @@ Canectic brings together the BBS experience with modern infrastructure: a full-f
 
 ```bash
 # System packages
-sudo apt install build-essential python3 postgresql redis-server zip unzip lrzsz
+sudo apt install build-essential python3 postgresql redis-server zip unzip gnupg lrzsz
+
+# DOS doors also need dosemu2, which comes from a PPA rather than the archive,
+# and socat, which is what gives the door a serial port to talk to the caller on
+sudo add-apt-repository ppa:dosemu2/ppa && sudo apt update
+sudo apt install dosemu2 socat
 sudo npm install -g pm2
 ```
 

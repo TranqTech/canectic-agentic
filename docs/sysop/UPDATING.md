@@ -232,6 +232,30 @@ you. The BBS is still started again.
 
 ---
 
+## Programs the update expects to find
+
+`/admin/update` checks for the external programs Canectic uses and names any
+that are absent. None of them block an update and none are needed to run a
+board, which is exactly why they go unnoticed: each one is discovered missing at
+the moment somebody first uses the feature that needs it.
+
+Two are worth acting on rather than noting.
+
+**`pg_dump`.** The updater dumps the database immediately before migrating it,
+and that dump is the thing that makes a failed migration recoverable. Without
+it, the update has to run with `--no-dump` and a migration that goes wrong has
+nothing to restore from. It comes with `postgresql-client`, which a local
+PostgreSQL installs for you; a board using a remote or managed database has to
+install it separately.
+
+**`dosemu` and `socat`.** DOS doors need both, and `dosemu2` comes from a PPA
+rather than the Ubuntu archive. This matters here and not only at install time,
+because **an OS release upgrade disables third-party repositories**, so a board
+that upgrades its operating system can arrive at a Canectic update having
+quietly lost DOS door support. `OS_UPGRADE.md` covers re-pointing the source.
+
+The full list, with what each one is for, is in `INSTALL.md`.
+
 ## When it refuses
 
 **"this system cannot move to X yet."** The move rule. Your database has applied

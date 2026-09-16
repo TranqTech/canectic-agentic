@@ -57,6 +57,8 @@ function check(id, level, summary, detail) {
  * @param {boolean} [f.buildToolchain] whether a compiler is present
  * @param {boolean} [f.nativeModules]  whether this release changes one
  * @param {boolean} [f.targetWritable]
+ * @param {boolean} [f.dumpTool]       whether pg_dump is present
+ * @param {string[]} [f.missingTools]  other external programs that are absent
  * @returns {{ok:boolean, blocking:Array, warnings:Array, checks:Array}}
  */
 function preflight(f) {
@@ -109,6 +111,28 @@ function preflight(f) {
 		checks.push(check('jobs', LEVEL_WARN,
 			f.jobsInFlight + ' job(s) in flight; an update now lands mid-toss',
 			'they are retried, but a packet half tossed is worth waiting out'));
+	}
+
+	// pg_dump gets its own line rather than joining the general list, because
+	// its consequence is specific to updating: the dump is taken immediately
+	// before the migration and is the thing that makes a failed migration
+	// recoverable. Not blocking, since --no-dump is a supported way to run.
+	if (f.dumpTool === false) {
+		checks.push(check('dump', LEVEL_WARN,
+			'pg_dump is not installed, so the database cannot be backed up before migrating',
+			'install postgresql-client, or run the update with --no-dump and accept that a ' +
+			'failed migration has nothing to restore from'));
+	}
+
+	// Everything else that is absent. Worth saying at update time and not only
+	// at install time: an OS release upgrade disables third-party repositories
+	// and has been observed removing build-essential outright, so a board can
+	// arrive at an update having quietly lost a tool it had when it was built.
+	if (f.missingTools && f.missingTools.length) {
+		checks.push(check('tools', LEVEL_WARN,
+			'not installed: ' + f.missingTools.join(', '),
+			'the board runs without them, but the features that need them do not. ' +
+			'See INSTALL.md'));
 	}
 
 	if (f.nativeModules && f.buildToolchain === false) {

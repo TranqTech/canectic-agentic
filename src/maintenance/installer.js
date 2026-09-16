@@ -30,6 +30,7 @@ import { describeInstall, installedVersion } from './installTarget.js';
 import { applyPlan } from './updateApply.js';
 import { backupDir } from './updateLayout.js';
 import { runCommand, nodeCommand, createRuntimeDirs } from './updateCommands.js';
+import { missingTools, describeMissing } from './optionalTools.js';
 
 var ENV_TEMPLATE = 'examples/env.example';
 
@@ -62,7 +63,23 @@ function prerequisiteProblems(env) {
 			'. Install and start it before installing Canectic, or the schema step will fail ' +
 			'after every file has already been written. Nothing has been written yet.' });
 	}
+
+	// Never blocking: a board runs perfectly well without any of them. Reported
+	// because otherwise each one is discovered at the moment a caller first
+	// tries the feature it belongs to, and a DOS door that exits instantly
+	// looks like a Canectic bug rather than a missing package.
+	for (var detail of describeMissing(missingTools(onPath))) {
+		out.push({ blocking: false, detail: detail });
+	}
+
 	return out;
+}
+
+/** Is a program on PATH? `command -v` rather than `which`, which is not
+ *  installed everywhere and reports differently when it is. */
+function onPath(command) {
+	var res = spawnSync('sh', ['-c', 'command -v ' + command], { timeout: 5000 });
+	return !res.error && res.status === 0;
 }
 
 /**
