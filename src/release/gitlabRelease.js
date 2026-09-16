@@ -24,6 +24,19 @@
 // Publishing happens AFTER the artifact exists and is verified, and a failure
 // here is reported rather than fatal: everything durable is already on disk and
 // in the repository by then, and the manual command is one line.
+//
+// THE TAG MUST BE ON THE REMOTE FIRST, and this refuses when it is not. `glab
+// release create` does not require an existing tag: given a tag name it does
+// not recognise, it CREATES one, as a lightweight tag at the remote's current
+// head. During a cut that is the commit before the release commit, because the
+// cut has not pushed anything yet.
+//
+// The first signed release went out that way. The signed annotated tag stayed
+// on the maintainer's machine, the remote got an unsigned lightweight tag
+// pointing at the wrong commit, and the release page hung off that. Nothing
+// about it looked wrong: the page was there, the assets were right, and the
+// signature that was the whole point of the exercise was simply not present
+// anywhere a person could check it.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -85,6 +98,47 @@ function resolveAssets(dir, version, opts) {
 	return { present: present, absent: absent };
 }
 
+/**
+ * Does the remote already carry this tag, and is it the one we mean?
+ *
+ * `git ls-remote` rather than a local check: the local tag proves nothing about
+ * what a reader of the release page will find. The dereferenced `^{}` line is
+ * the commit an annotated tag points at, and its ABSENCE means the remote tag
+ * is lightweight, which for a release tag means unsigned.
+ *
+ * @returns {{present:boolean, annotated:boolean, commit:string|null}}
+ */
+function remoteTag(version, cwd) {
+	var out;
+	try {
+		out = execFileSync('git', ['ls-remote', '--tags', 'origin', 'refs/tags/v' + version,
+			'refs/tags/v' + version + '^{}'], { cwd: cwd || process.cwd(), encoding: 'utf8' });
+	} catch (e) {
+		return { present: false, annotated: false, commit: null };
+	}
+	return parseRemoteTag(out);
+}
+
+/**
+ * Read `git ls-remote --tags` output.
+ *
+ * Split out so the one distinction that matters can be tested without a remote:
+ * a `^{}` line is the commit an annotated tag points at, and its ABSENCE means
+ * the remote tag is lightweight. For a release tag, lightweight means unsigned,
+ * which is the failure this whole guard exists to catch.
+ */
+function parseRemoteTag(out) {
+	var lines = String(out || '').trim().split('\n').filter(Boolean);
+	if (!lines.length) return { present: false, annotated: false, commit: null };
+
+	var deref = lines.find(function (l) { return l.indexOf('^{}') !== -1; });
+	return {
+		present: true,
+		annotated: !!deref,
+		commit: (deref || lines[0]).split(/\s+/)[0]
+	};
+}
+
 /** Is glab here and authenticated against the project's host? */
 function gitlabAvailable() {
 	try {
@@ -108,6 +162,21 @@ function publishToGitLab(opts) {
 	var resolved = resolveAssets(dir, version, opts);
 	if (!resolved.present.length) throw new Error('none of the release files are in ' + dir);
 
+	// Refuse rather than let glab invent a tag. See the note at the top: it
+	// creates one silently, unsigned, at whatever the remote head happens to be.
+	var tag = remoteTag(version, opts.cwd);
+	if (!tag.present) {
+		throw new Error('the tag v' + version + ' is not on the remote yet, and creating the ' +
+			'release now would make glab invent an unsigned one at the wrong commit.\n' +
+			'  Push it first:   git push origin v' + version + '\n' +
+			'  Then publish:    node scripts/release.mjs --publish ' + version);
+	}
+	if (!tag.annotated) {
+		throw new Error('the tag v' + version + ' on the remote is lightweight, so it carries no ' +
+			'signature.\n  Replace it with the signed one:\n' +
+			'    git push origin :refs/tags/v' + version + ' && git push origin v' + version);
+	}
+
 	var notesFile = path.join(dir, '.gitlab-release-notes.md');
 	fs.writeFileSync(notesFile, releaseDescription(opts.notes));
 
@@ -120,7 +189,30 @@ function publishToGitLab(opts) {
 	for (var name of resolved.present) args.push(path.join(dir, name));
 
 	try {
-		execFileSync('glab', args, { cwd: opts.cwd || process.cwd(), stdio: 'inherit' });
+		// Captured, not inherited. Inheriting shows the upload progress live and
+		// leaves nothing to read when it fails, which is how the duplicate-asset
+		// case below arrived as a bare "Command failed" with the actual reason
+		// printed somewhere this code could not see. The step takes seconds;
+		// live progress is not worth being unable to explain a failure.
+		execFileSync('glab', args, {
+			cwd: opts.cwd || process.cwd(),
+			stdio: ['ignore', 'pipe', 'pipe'],
+			encoding: 'utf8'
+		});
+	} catch (e) {
+		// GitLab refuses an asset link whose name or path is already on the
+		// release, so a second publish of the same version fails here rather
+		// than replacing anything. Worth saying plainly: the release and its
+		// notes DO get updated before the assets are attempted, so a repeat run
+		// is not a no-op even though it reports a failure.
+		var said = String(e.stderr || '') + String(e.stdout || '');
+		if (/already been taken/i.test(said + String(e.message || e))) {
+			throw new Error('the GitLab release v' + version + ' already carries these assets, so ' +
+				'they were not replaced. Its name and notes have been updated.\n' +
+				'  To replace the files, remove the release and publish again:\n' +
+				'    glab api --method DELETE "projects/:id/releases/v' + version + '"');
+		}
+		throw new Error(said.trim() || e.message || String(e));
 	} finally {
 		try { fs.unlinkSync(notesFile); } catch (ignore) { /* best effort */ }
 	}
@@ -129,6 +221,8 @@ function publishToGitLab(opts) {
 
 export {
 	PACKAGE_NAME,
+	remoteTag,
+	parseRemoteTag,
 	releaseTitle,
 	releaseDescription,
 	releaseAssets,

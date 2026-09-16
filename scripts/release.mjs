@@ -102,6 +102,7 @@ function parseArgs(argv) {
 		else if (a === '--allow-migration-gap') { opts.allowMigrationGap = true; }
 		else if (a === '--no-tag')              { opts.tag = false; }
 		else if (a === '--no-gitlab')           { opts.gitlab = false; }
+		else if (a === '--publish')             { opts.mode = 'publish'; opts.version = argv[++i]; }
 		else if (a === '--sign')                { opts.sign = true; }
 		else if (a === '--help' || a === '-h')  { usage(); process.exit(0); }
 		else die('unknown argument: ' + a);
@@ -124,6 +125,7 @@ function usage() {
 		'  --allow-migration-gap    publish a stable that drops a development migration',
 		'  --no-tag                 skip the release commit and tag (stable only)',
 		'  --no-gitlab              do not mirror the release onto the GitLab releases page',
+		'  --publish <version>      only mirror an already cut release onto GitLab',
 		'  --sign                   gpg sign SHA256SUMS',
 		'  --base-manifest PATH     the stable manifest a development delta is against',
 		'  --date YYYY-MM-DD        override the release date',
@@ -508,23 +510,39 @@ function cutStable(opts) {
 	//
 	// Last, and never fatal. The artifact exists and is verified by this point,
 	// the commit and the tag are made, and nothing here can undo any of that.
-	if (opts.gitlab !== false && opts.tag) {
-		if (!gitlabAvailable()) {
-			warn('glab is not available or not authenticated, so the GitLab release was not created');
-			warn('create it with: glab release create v' + version + ' --name "' + releaseTitle(version) + '" ...');
-		} else {
-			try {
-				var mirrored = publishToGitLab({
-					version: version, output: opts.output, cwd: ROOT,
-					notes: fs.readFileSync(notesFile, 'utf8')
-				});
-				ok('GitLab release v' + version + ' with ' + mirrored.present.length + ' assets');
-				if (mirrored.absent.length) warn('not attached (absent): ' + mirrored.absent.join(', '));
-			} catch (e) {
-				warn('the GitLab release was not created: ' + (e.message || e));
-				warn('the cut itself is complete; this is the releases page only');
-			}
-		}
+	if (opts.gitlab !== false && opts.tag) mirrorToGitLab(version, opts);
+}
+
+/**
+ * Put the cut release on the GitLab releases page.
+ *
+ * Never fatal. By the time this runs the archive is built and verified, the
+ * commit is made and the tag is signed, so nothing here can undo any of it, and
+ * the step can be repeated on its own with --publish.
+ *
+ * It will refuse while the tag is not on the remote, which is the normal state
+ * at the end of a cut, because a cut deliberately does not push. That refusal
+ * is the point: glab creates a tag it does not find, unsigned, at the remote's
+ * current head, and the first signed release went out with exactly that.
+ */
+function mirrorToGitLab(version, opts) {
+	var notesFile = path.join(ROOT, 'docs', 'releases', 'v' + version + '.md');
+	if (!gitlabAvailable()) {
+		warn('glab is not available or not authenticated, so the GitLab release was not created');
+		warn('after pushing, run: node scripts/release.mjs --publish ' + version);
+		return;
+	}
+	try {
+		var mirrored = publishToGitLab({
+			version: version, output: opts.output, cwd: ROOT,
+			notes: fs.readFileSync(notesFile, 'utf8')
+		});
+		ok('GitLab release ' + releaseTitle(version) + ' with ' + mirrored.present.length + ' assets');
+		if (mirrored.absent.length) warn('not attached (absent): ' + mirrored.absent.join(', '));
+	} catch (e) {
+		warn('the GitLab release was not created:');
+		for (var line of String(e.message || e).split('\n')) warn('  ' + line);
+		warn('the cut itself is complete; this is the releases page only');
 	}
 }
 
@@ -710,6 +728,12 @@ function main() {
 	var opts = parseArgs(process.argv.slice(2));
 	if (!opts.mode) { usage(); die('choose --stable <version> or --dev'); }
 
+	if (opts.mode === 'publish') {
+		if (!opts.version) die('--publish needs a version');
+		mirrorToGitLab(opts.version, opts);
+		return;
+	}
+
 	if (!treeIsClean()) {
 		if (!opts.allowDirty) {
 			die('the working tree is dirty. A release must be reproducible from a commit, ' +
@@ -733,7 +757,8 @@ function main() {
 	if (!opts.skipTests) runTests();
 	else warn('skipping the test suite (--skip-tests)');
 
-	if (opts.mode === 'stable') cutStable(opts);
+	if (opts.mode === 'publish') mirrorToGitLab(opts.version, opts);
+	else if (opts.mode === 'stable') cutStable(opts);
 	else cutDevelopment(opts);
 }
 

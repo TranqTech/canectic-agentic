@@ -27,7 +27,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
-	releaseTitle, releaseDescription, releaseAssets, resolveAssets, PACKAGE_NAME
+	releaseTitle, releaseDescription, releaseAssets, resolveAssets, PACKAGE_NAME, parseRemoteTag
 } from '../src/release/gitlabRelease.js';
 import { artifactName, metadataName, manifestName, SUMS_FILENAME } from '../src/release/metadata.js';
 import { PUBLIC_KEY_FILENAME, signatureName } from '../src/release/signing.js';
@@ -123,5 +123,64 @@ describe('what gets attached', function () {
 		if (!fs.existsSync(path.join(dir, artifactName('0.9.6a')))) return this.skip();
 		var r = resolveAssets(dir, '0.9.6a');
 		assert.deepStrictEqual(r.absent, [], 'the cut did not produce: ' + r.absent.join(', '));
+	});
+});
+
+// The first signed release went out with an unsigned tag, and nothing looked
+// wrong. `glab release create` does not require the tag to exist: given a name
+// it does not recognise it CREATES one, as a lightweight tag at the remote's
+// current head. Run during a cut, before anything has been pushed, that is the
+// commit BEFORE the release commit.
+//
+// So the signed annotated tag stayed on the maintainer's machine, the remote
+// got an unsigned lightweight tag pointing at the wrong commit, and the release
+// page hung off that one. The page was there and the assets were right; the
+// signature that was the entire point was simply not anywhere a reader could
+// check it.
+//
+// The guard is a `git ls-remote` before publishing, and what it turns on is a
+// single character sequence in that output.
+describe('reading what tag the remote actually has', function () {
+
+	// An annotated tag produces two lines: the tag object, and a "^{}" line for
+	// the commit it points at. A lightweight tag produces only the first, so the
+	// absence of "^{}" is what says unsigned.
+	it('recognises an annotated tag by its dereference line', function () {
+		var out = [
+			'5fbd81a313a19ecc8893180e4c48dab45f33f8a8\trefs/tags/v0.9.6a',
+			'4dbd8ce5186c985ffa8cb924faed8cecd64a4cbc\trefs/tags/v0.9.6a^{}'
+		].join('\n');
+		var t = parseRemoteTag(out);
+		assert.strictEqual(t.present, true);
+		assert.strictEqual(t.annotated, true);
+		assert.strictEqual(t.commit, '4dbd8ce5186c985ffa8cb924faed8cecd64a4cbc',
+			'the commit should come from the dereference line, not the tag object');
+	});
+
+	// The bug, as the remote reported it.
+	it('recognises a lightweight tag by the absence of one', function () {
+		var t = parseRemoteTag('305c0568beb0f30e580b93912cdd6656dbda838a\trefs/tags/v0.9.6a');
+		assert.strictEqual(t.present, true);
+		assert.strictEqual(t.annotated, false, 'a lightweight tag was read as annotated');
+		assert.strictEqual(t.commit, '305c0568beb0f30e580b93912cdd6656dbda838a');
+	});
+
+	it('reports a tag the remote does not have', function () {
+		for (var empty of ['', '   \n', null, undefined]) {
+			var t = parseRemoteTag(empty);
+			assert.strictEqual(t.present, false, 'claimed a tag for ' + JSON.stringify(empty));
+			assert.strictEqual(t.annotated, false);
+			assert.strictEqual(t.commit, null);
+		}
+	});
+
+	it('is not confused by the dereference line arriving first', function () {
+		var out = [
+			'4dbd8ce5186c985ffa8cb924faed8cecd64a4cbc\trefs/tags/v0.9.6a^{}',
+			'5fbd81a313a19ecc8893180e4c48dab45f33f8a8\trefs/tags/v0.9.6a'
+		].join('\n');
+		var t = parseRemoteTag(out);
+		assert.strictEqual(t.annotated, true);
+		assert.strictEqual(t.commit, '4dbd8ce5186c985ffa8cb924faed8cecd64a4cbc');
 	});
 });

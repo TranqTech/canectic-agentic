@@ -2,6 +2,14 @@
 
 ## Pending (since v0.9.6a)
 
+### Release Engineering
+
+- Fix: **the GitLab release step could create an unsigned tag at the wrong commit, and nothing about the result looked wrong.** `glab release create` does not require the tag to exist: given a name it does not recognise, it creates one, as a lightweight tag at the remote's current head. Run at the end of a cut, before anything has been pushed, that head is the commit *before* the release commit. So the signed annotated tag stayed on the maintainer's machine, the remote got an unsigned lightweight one pointing somewhere else, and the release page hung off that. The page was there and the assets were right; the signature that is the entire point of signing was not anywhere a reader could check it. The step now reads `git ls-remote` first and refuses on a tag that is absent or lightweight, naming the command to fix it.
+- A cut still does not push, deliberately, so the GitLab step normally refuses at the end of one. `--publish <version>` does that half on its own once the tag is pushed, and the cut says so rather than leaving it to be remembered.
+- Publishing a second time over the same release now says what happened: GitLab refuses an asset link whose name is already on the release, so the files are not replaced, though the name and notes are updated. It names the command to remove the release if replacing them is what was meant.
+
+## Pending (since v0.9.6a)
+
 ## v0.9.6a (2026-09-16)
 
 ### Upgrade Notes
