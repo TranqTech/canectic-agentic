@@ -207,7 +207,7 @@ on stable has not asked to hear about development builds.
 
 | File | Purpose |
 |------|---------|
-| `canectic-<version>.tar.gz` | The software |
+| `canectic-<version>.zip` | The software |
 | `canectic-<version>.json` | Machine-readable release metadata |
 | `SHA256SUMS` | Checksums for both |
 | `SHA256SUMS.asc` | Detached signature (optional, see section 11) |
@@ -224,7 +224,7 @@ file the sysop edited from one they never touched.
   "channel": "stable",
   "codename": "Handshake",
   "released": "2026-09-20",
-  "artifact": "canectic-0.9.6a.tar.gz",
+  "artifact": "canectic-0.9.6a.zip",
   "sha256": "...",
   "min_upgrade_from": "0.9.0a",
   "base": null,          // development builds: the stable they delta against,
@@ -261,7 +261,7 @@ A development build ships only the files that differ from **the most recent
 stable**, plus a full manifest of the complete target tree.
 
 ```
-canectic-0.9.6a.20260913.delta.tar.gz    bodies of differing files only
+canectic-0.9.6a.20260913.delta.zip       bodies of differing files only
 canectic-0.9.6a.20260913.json            metadata, including "base": "0.9.5a"
 ```
 

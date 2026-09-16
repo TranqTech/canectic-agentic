@@ -70,6 +70,42 @@ function manifestName(version) {
 	return v ? 'canectic-' + v + '.manifest.json' : null;
 }
 
+/**
+ * Which of the files in a publish directory `SHA256SUMS` should cover.
+ *
+ * Stated as "everything published except the checksums themselves" rather than
+ * as a pattern over release filenames, because a pattern is exactly what went
+ * wrong: it named `.tar.gz` and went on matching nothing after the artifact
+ * became a ZIP, so the list vouched for the sidecars and not the software, and
+ * it never matched `index-<channel>.json` at all. A rule that enumerates what
+ * to include has to be revisited every time something new is published and
+ * fails silently when it is not. This one does not.
+ *
+ * `SHA256SUMS` cannot list itself, and a detached signature vouches for the
+ * list rather than being vouched for by it.
+ */
+function checksummedNames(names) {
+	return (names || [])
+		.filter(function (n) {
+			if (!n || n.charAt(0) === '.') return false;
+			if (n === 'SHA256SUMS') return false;
+			if (/\.asc$/.test(n)) return false;
+			return true;
+		})
+		.sort();
+}
+
+/**
+ * The release date as YYYY-MM-DD, in LOCAL time for the same reason
+ * `buildStamp` is local: the date a maintainer means is the one on their wall.
+ * A UTC date puts a release cut on a September evening in Alberta into the
+ * following day, in the changelog heading and the metadata both, for ever.
+ */
+function releaseDate(date) {
+	var d = date || new Date();
+	return String(d.getFullYear()) + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2);
+}
+
 function pad(n, width) {
 	var s = String(n);
 	while (s.length < width) s = '0' + s;
@@ -305,6 +341,8 @@ export {
 	artifactName,
 	metadataName,
 	manifestName,
+	checksummedNames,
+	releaseDate,
 	buildStamp,
 	developmentVersionFor,
 	buildMetadata,

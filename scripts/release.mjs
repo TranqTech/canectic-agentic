@@ -38,11 +38,13 @@ import {
 } from '../src/release/manifest.js';
 import {
 	buildMetadata, validateMetadata, serialiseMetadata, artifactName, metadataName,
-	manifestName, developmentVersionFor, normalisePending, emptyPending, codenameFor
+	manifestName, developmentVersionFor, normalisePending, emptyPending, codenameFor,
+	checksummedNames, releaseDate
 } from '../src/release/metadata.js';
 import {
 	IDENTITY_FILENAME, DIZ_FILENAME, serialiseIdentity, buildFileIdDiz, withoutSelfChecksum
 } from '../src/release/identity.js';
+import { publishEntryPoint } from '../src/release/entryPoint.js';
 import {
 	emptyIndex, addRelease, findRelease, newestRelease, releasesBasedOn,
 	serialiseIndex, parseIndex, indexName
@@ -324,9 +326,9 @@ function walkRelative(dir, prefix) {
 }
 
 function writeSums(outputDir, sign) {
-	var names = fs.readdirSync(outputDir)
-		.filter(function (f) { return /^canectic-.*\.(tar\.gz|json)$/.test(f); })
-		.sort();
+	var names = checksummedNames(fs.readdirSync(outputDir, { withFileTypes: true })
+		.filter(function (e) { return e.isFile(); })
+		.map(function (e) { return e.name; }));
 	var lines = names.map(function (n) { return hashFile(path.join(outputDir, n)) + '  ' + n; });
 	var sums = path.join(outputDir, 'SHA256SUMS');
 	fs.writeFileSync(sums, lines.join('\n') + '\n');
@@ -405,7 +407,7 @@ function cutStable(opts) {
 		ok('ships every migration from ' + coverage.checked + ' development build(s) on this base');
 	}
 
-	var released = opts.date || new Date().toISOString().substring(0, 10);
+	var released = opts.date || releaseDate();
 
 	// Bookkeeping first, so the artifact carries its own release notes.
 	var changelogText = fs.readFileSync(CHANGELOG, 'utf8');
@@ -496,7 +498,7 @@ function cutDevelopment(opts) {
 
 	var meta = buildMetadata({
 		version: version,
-		released: opts.date || new Date().toISOString().substring(0, 10),
+		released: opts.date || releaseDate(),
 		migrations: shippedMigrations(),
 		steps: pending.steps,
 		notices: pending.notices,
@@ -610,6 +612,7 @@ function buildArtifact(opts) {
 	fs.writeFileSync(path.join(opts.output, metadataName(version)), serialiseMetadata(meta));
 	fs.writeFileSync(path.join(opts.output, manifestName(version)), serialiseManifest(manifest));
 	fs.writeFileSync(path.join(opts.output, indexName(meta.channel)), serialiseIndex(addRelease(opts.index, meta)));
+	var entryPoint = publishEntryPoint({ root: ROOT, output: opts.output });
 	writeSums(opts.output, opts.sign);
 
 	console.log('');
@@ -617,6 +620,7 @@ function buildArtifact(opts) {
 	ok(metadataName(version));
 	ok(manifestName(version));
 	ok(indexName(meta.channel));
+	ok(entryPoint.join(', '));
 	ok('SHA256SUMS');
 	console.log('');
 	console.log('  sha256 ' + meta.sha256);

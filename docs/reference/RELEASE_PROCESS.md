@@ -84,13 +84,13 @@ node scripts/release.mjs --stable 0.9.6a --dry-run
    the closed changelog body
 5. Clears `pending.json`, keeping the standing floor
 6. Bumps `package.json`, commits, tags `v<version>`
-7. Stages the shipped tree, builds `MANIFEST`, packs the tarball
-8. Writes the metadata, the standalone manifest, the channel index and
-   `SHA256SUMS`
+7. Stages the shipped tree, builds `MANIFEST`, packs the archive
+8. Writes the metadata, the standalone manifest, the channel index, the
+   bootstrap and its checksum, and `SHA256SUMS`
 
-The bookkeeping happens **before** the artifact is staged, so a release tarball
+The bookkeeping happens **before** the artifact is staged, so a release archive
 contains its own release notes and its own changelog entry. Building first would
-ship a tarball whose changelog says the release is still pending.
+ship an archive whose changelog says the release is still pending.
 
 ### What a development cut does
 
@@ -117,15 +117,32 @@ tell a real change from the stamp.
 
 | File | Purpose |
 |------|---------|
-| `canectic-<version>.tar.gz` | The software. A delta for development builds, with `.delta` in the name |
+| `canectic-<version>.zip` | The software. A delta for development builds, with `.delta` in the name |
 | `canectic-<version>.json` | Release metadata: steps, notices, migrations, checksum |
 | `canectic-<version>.manifest.json` | The full tree manifest, standalone |
 | `index-<channel>.json` | Every release on the channel, newest first |
+| `bootstrap.sh` | The installer a new sysop fetches, from `setup/` |
+| `bootstrap.sh.sha256` | Its checksum, in `sha256sum -c` format |
+| `INSTALL.md` | The install guide, readable without downloading a release |
 | `SHA256SUMS` | Checksums for everything above |
 | `SHA256SUMS.asc` | Detached signature, with `--sign` |
 
-The tarball unpacks to `canectic-<version>/` and carries a `MANIFEST` at its
+The archive unpacks to `canectic-<version>/` and carries a `MANIFEST` at its
 root.
+
+`SHA256SUMS` is built by exclusion: everything in the publish directory except
+the list itself and a signature over it. It used to be built from a pattern
+naming release filenames, which stopped matching the artifact the day it became
+a ZIP and never matched the channel index at all, so the published list vouched
+for the sidecars and not for the software. A rule that enumerates what to
+include has to be revisited whenever something new is published, and fails
+silently when it is not.
+
+The bootstrap is the one file that cannot ship inside a release, because
+resolving a release is its job, so the release script copies it out of `setup/`
+on every cut. A stale bootstrap on the host is invisible: it resolves the newest
+release perfectly well and then hands off to an installer it was never checked
+against.
 
 ### The manifest
 
