@@ -21,14 +21,20 @@
 // would ship a tarball whose changelog says the release is still pending.
 //
 // Nothing here talks to a database or a running BBS. The pure parts live in
-// src/release/ and are unit tested; this file is orchestration and process
-// control, which is the part a test cannot usefully assert.
+// src/release/ and are unit tested.
+//
+// This file used to say the orchestration was the part a test cannot usefully
+// assert. Two bugs in one evening said otherwise, both of them in the handful
+// of lines between "the suite passed" and "the artifact exists", which is the
+// worst place in the program to be wrong because the repository has already
+// been written to by then. So main() runs only when this file is the program,
+// and the helpers below are importable and tested.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 import { parseVersion, formatVersion, compareVersions, isNewer, baseStable, channelOf } from '../src/utils/version.js';
 import { listTrackedFiles, selectShippedFiles } from '../src/release/shippedTree.js';
@@ -128,7 +134,13 @@ function usage() {
 // ---------------------------------------------------------------------------
 
 function git(args, opts) {
-	return execFileSync('git', ['-C', ROOT].concat(args), Object.assign({ encoding: 'utf8' }, opts || {})).trim();
+	// execFileSync returns null for stdout when stdio is inherited rather than
+	// captured, so trimming the result unconditionally turns a command that
+	// SUCCEEDED into a TypeError. That is how a signed tag got created and the
+	// cut then died on the line after it, with the artifact never built and the
+	// repository holding a release commit.
+	var out = execFileSync('git', ['-C', ROOT].concat(args), Object.assign({ encoding: 'utf8' }, opts || {}));
+	return out == null ? '' : String(out).trim();
 }
 
 function treeIsClean() {
@@ -474,7 +486,7 @@ function cutStable(opts) {
 		git(['add', 'package.json', 'docs/sysop/CHANGELOG.md', 'docs/releases']);
 		git(['commit', '-m', 'Release: v' + version]);
 		if (opts.sign) {
-			git(['tag', '-s', '-u', opts.signKey, 'v' + version, '-m', 'Canectic BBS v' + version], { stdio: 'inherit' });
+			git(['tag', '-s', '-u', opts.signKey, 'v' + version, '-m', 'Canectic BBS v' + version]);
 			ok('committed and signed tag v' + version);
 		} else {
 			git(['tag', '-a', 'v' + version, '-m', 'Canectic BBS v' + version]);
@@ -696,4 +708,8 @@ function main() {
 	else cutDevelopment(opts);
 }
 
-main();
+// Only when this file IS the program. Imported, it is a library of helpers,
+// which is what lets the orchestration be tested at all.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+
+export { git, writeSums, releaseKeyFingerprint, publishEntryPoint };
