@@ -29,25 +29,45 @@
 // Requires the Tranqsoft MCP server reachable at MCP_URL. The script does
 // the MCP HTTP handshake (initialize + notifications/initialized) before
 // making tool calls, and parses SSE responses inline.
+//
+// The server requires an API key in an X-Api-Key header and answers anything
+// without one with a JSON-RPC -32001, "Unauthorized: missing or invalid MCP API
+// key". It publishes no OAuth metadata at all, so there is nothing to negotiate
+// and nothing to discover: the key is the whole of the authentication.
+//
+//   MCP_API_KEY=... node scripts/syncMcpDocs.mjs $(git rev-parse --short HEAD)
+//
+// Checked before the first request rather than after, because the failure
+// otherwise arrives as an unauthorised handshake several steps in and reads
+// like the server being down.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 var MCP_URL = process.env.MCP_URL || 'http://janus.lan:3000/mcp';
+var MCP_API_KEY = process.env.MCP_API_KEY || '';
 var REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 var COMMIT = process.argv[2] || 'unknown';
 
 var sessionId = null;
 var rpcId = 0;
 
-async function rpc(method, params) {
-    rpcId += 1;
+/** One definition of what every request carries, so a second call site cannot
+ *  be added without the key the way both of these originally were. */
+function requestHeaders() {
     var headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/event-stream'
     };
+    if (MCP_API_KEY) headers['X-Api-Key'] = MCP_API_KEY;
     if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+    return headers;
+}
+
+async function rpc(method, params) {
+    rpcId += 1;
+    var headers = requestHeaders();
 
     var res = await fetch(MCP_URL, {
         method: 'POST',
@@ -59,27 +79,30 @@ async function rpc(method, params) {
     if (sid && !sessionId) sessionId = sid;
 
     var text = await res.text();
-    // SSE response: parse `data: {...}` line
+
+    // Two shapes, ONE set of rules. The server answers tool calls as SSE and
+    // errors as plain JSON, and the plain branch used to return the parsed body
+    // whole, without looking for `error` and without unwrapping `result`. An
+    // unauthorised run therefore handed the error object back as though it were
+    // a result and carried on: the 401 was printed once under [ping] and then
+    // 49 documents were reported as created against a server refusing every
+    // request. A sync that achieves nothing while reporting progress is worse
+    // than one that fails.
     var dataLine = text.split('\n').find(function(l) { return l.startsWith('data: '); });
-    if (!dataLine) {
-        // Maybe plain JSON
-        if (text.trim().startsWith('{')) return JSON.parse(text);
-        return null;
-    }
-    var payload = JSON.parse(dataLine.slice(6));
+    var payload = null;
+    if (dataLine) payload = JSON.parse(dataLine.slice(6));
+    else if (text.trim().startsWith('{')) payload = JSON.parse(text);
+    else return null;
+
     if (payload.error) {
-        throw new Error(method + ' failed: ' + JSON.stringify(payload.error));
+        throw new Error(method + ' failed (HTTP ' + res.status + '): ' + JSON.stringify(payload.error));
     }
     return payload.result;
 }
 
 async function notify(method, params) {
     rpcId += 1;
-    var headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream'
-    };
-    if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+    var headers = requestHeaders();
 
     await fetch(MCP_URL, {
         method: 'POST',
@@ -218,6 +241,14 @@ async function loadExistingIndex() {
 }
 
 async function main() {
+    // Up front, not after the handshake. Without it the run fails partway with
+    // an unauthorised JSON-RPC error that reads like the server being down,
+    // which is how this sat unexplained long enough to become an issue.
+    if (!MCP_API_KEY) {
+        console.error('[init] MCP_API_KEY is not set, and the server requires one in an X-Api-Key header.');
+        console.error('       MCP_API_KEY=... node scripts/syncMcpDocs.mjs ' + COMMIT);
+        process.exit(1);
+    }
     console.log('[init] connecting to MCP at', MCP_URL);
     await rpc('initialize', {
         protocolVersion: '2025-06-18',
