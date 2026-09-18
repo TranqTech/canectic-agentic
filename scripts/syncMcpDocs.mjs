@@ -43,7 +43,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 var MCP_URL = process.env.MCP_URL || 'http://janus.lan:3000/mcp';
 var MCP_API_KEY = process.env.MCP_API_KEY || '';
@@ -80,24 +80,7 @@ async function rpc(method, params) {
 
     var text = await res.text();
 
-    // Two shapes, ONE set of rules. The server answers tool calls as SSE and
-    // errors as plain JSON, and the plain branch used to return the parsed body
-    // whole, without looking for `error` and without unwrapping `result`. An
-    // unauthorised run therefore handed the error object back as though it were
-    // a result and carried on: the 401 was printed once under [ping] and then
-    // 49 documents were reported as created against a server refusing every
-    // request. A sync that achieves nothing while reporting progress is worse
-    // than one that fails.
-    var dataLine = text.split('\n').find(function(l) { return l.startsWith('data: '); });
-    var payload = null;
-    if (dataLine) payload = JSON.parse(dataLine.slice(6));
-    else if (text.trim().startsWith('{')) payload = JSON.parse(text);
-    else return null;
-
-    if (payload.error) {
-        throw new Error(method + ' failed (HTTP ' + res.status + '): ' + JSON.stringify(payload.error));
-    }
-    return payload.result;
+    return readReply(method, res.status, text);
 }
 
 async function notify(method, params) {
@@ -111,13 +94,65 @@ async function notify(method, params) {
     });
 }
 
-async function callTool(name, args) {
-    var result = await rpc('tools/call', { name: name, arguments: args });
+/** The first line of an error page, with the markup stripped, so a 413 reads as
+ *  "PayloadTooLargeError: request entity too large" rather than a wall of HTML. */
+function describeUnreadable(text) {
+    var plain = text.replace(/<head[\s\S]*?<\/head>/i, ' ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    var at = plain.indexOf(' at ');
+    if (at > 0) plain = plain.slice(0, at);
+    return plain.slice(0, 200) || '(empty response)';
+}
+
+// What one reply means: the JSON-RPC `result`, or a thrown Error naming the
+// method and the HTTP status. Pure, so the rules are testable without a server.
+//
+// Two shapes, ONE set of rules. The server answers tool calls as SSE and
+// errors as plain JSON, and the plain branch used to return the parsed body
+// whole, without looking for `error` and without unwrapping `result`. An
+// unauthorised run therefore handed the error object back as though it were
+// a result and carried on: the 401 was printed once under [ping] and then
+// 49 documents were reported as created against a server refusing every
+// request. A sync that achieves nothing while reporting progress is worse
+// than one that fails.
+//
+// The same hole had a second way in: anything that was neither shape
+// returned null, and null counted as success. Express answers an oversized
+// body with an HTML 413 page before the MCP layer sees it, so once the
+// changelog outgrew the limit it was reported as updated while the server
+// went on holding the April copy. A reply we cannot read is a failure,
+// whatever the status line says.
+export function readReply(method, status, text) {
+    var dataLine = text.split('\n').find(function(l) { return l.startsWith('data: '); });
+    var payload = null;
+    if (dataLine) payload = JSON.parse(dataLine.slice(6));
+    else if (text.trim().startsWith('{')) payload = JSON.parse(text);
+
+    var failed = method + ' failed (HTTP ' + status + '): ';
+    if (!payload) throw new Error(failed + describeUnreadable(text));
+    if (payload.error) throw new Error(failed + JSON.stringify(payload.error));
+    if (status < 200 || status >= 300 || !('result' in payload)) {
+        throw new Error(failed + JSON.stringify(payload).slice(0, 200));
+    }
+    return payload.result;
+}
+
+/** The content of a tool call's result, parsed as JSON when it is JSON. */
+export function toolResult(name, result) {
+    // A tool that fails reports it inside a successful JSON-RPC result, per the
+    // MCP spec, so the envelope checks in rpc() cannot see it.
+    if (result && result.isError) {
+        var why = (result.content || []).map(function(c) { return c.text || ''; }).join(' ').trim();
+        throw new Error(name + ' reported an error: ' + (why || '(no detail)'));
+    }
     if (result && result.content && result.content[0] && result.content[0].type === 'text') {
         var t = result.content[0].text;
         try { return JSON.parse(t); } catch (e) { return t; }
     }
     return result;
+}
+
+async function callTool(name, args) {
+    return toolResult(name, await rpc('tools/call', { name: name, arguments: args }));
 }
 
 function extractTitle(content, fallback) {
@@ -350,10 +385,16 @@ async function main() {
         failed: failed,
         skipped: skipped
     }));
+
+    // Non-zero on any failure, so nothing driving this can read a partial sync
+    // as a finished one.
+    if (failed.length) process.exitCode = 1;
 }
 
-main().catch(function(e) {
-    console.error('FATAL:', e.message);
-    console.error(e.stack);
-    process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    main().catch(function(e) {
+        console.error('FATAL:', e.message);
+        console.error(e.stack);
+        process.exit(1);
+    });
+}
