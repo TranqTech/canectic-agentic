@@ -313,7 +313,7 @@ async function main() {
                     id: existing.id,
                     body: content,
                     tags: tags,
-                    reason: 'Sync from repo @ ' + COMMIT + ' (2026-04-10)'
+                    reason: 'Sync from repo @ ' + COMMIT + ' (' + new Date().toISOString().slice(0, 10) + ')'
                 });
                 updated += 1;
                 console.log('[update] ' + (i + 1) + '/' + all.length + ' ' + entry.file + ' (id=' + existing.id + ')');
