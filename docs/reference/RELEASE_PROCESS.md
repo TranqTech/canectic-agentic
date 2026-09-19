@@ -251,9 +251,59 @@ a dated build sorts **above** the stable in its name.
 
 ## 6. Publishing
 
-By hand, for now. Copy the contents of `dist/releases/` to wherever the channel
-index is served, push the tag, and write the release notes the skeleton is
-waiting for.
+```bash
+node scripts/publish.mjs               # publish, then verify over HTTPS
+node scripts/publish.mjs --dry-run     # show what would be sent, change nothing
+node scripts/publish.mjs --no-verify   # publish without the read-back
+```
+
+Write the release notes the skeleton is waiting for first, since they go out
+with the release. The tag and the GitLab release page are a separate step, see
+section 3.
+
+| From | To, under the host's site root | Served at |
+|------|--------------------------------|-----------|
+| `dist/releases/*` | `releases/` | `/releases/<file>` |
+| `docs/sysop/CHANGELOG.md` | `docs/CHANGELOG.md` | `/docs/changelog` |
+| `docs/releases/v<version>.md` | `docs/releases/<version>.md` | `/releases/<version>/notes` |
+
+Release notes lose their leading `v` on the way, because the site looks them up
+by the version in the channel index. Only versions a published index names are
+sent, so `v<version>-changes.md` and anything else kept beside the notes never
+is.
+
+Before sending, the script checks `dist/releases` against its own `SHA256SUMS`,
+counting an unlisted file as a problem because the list is built by exclusion,
+and verifies `SHA256SUMS.asc` when there is one. After sending, it downloads
+every release file through the public URL and compares bytes, checks that a
+missing file is a real 404 (the update check reads a 404 as "nothing published
+on this channel"), and checks the changelog and notes pages answer. A file can
+arrive intact on the host and still be served wrong.
+
+The changelog goes as the tree has it, `Pending` included, so running the
+script between releases is how the site's copy stays current. Re-sending an
+unchanged release costs nothing.
+
+**The host.** An ssh alias, `canectic-release` by default, with a key used for
+nothing else:
+
+```
+Host canectic-release
+    HostName <the web host>
+    User <the account that owns the site>
+    IdentityFile ~/.ssh/canectic_release
+    IdentitiesOnly yes
+```
+
+`CANECTIC_PUBLISH_HOST`, `CANECTIC_PUBLISH_ROOT` (the site root relative to that
+account's home, default `tranqsoft-website/canectic`) and `CANECTIC_PUBLISH_URL`
+(default `https://canectic.tranqsoft.com`) override the defaults.
+
+**Nothing is ever deleted on the host**, and no rsync the script runs may carry
+`--delete`; `tests/publish.test.js` holds it to that. `dist/releases` holds only
+what this machine cut, so mirroring it would remove whatever was published from
+anywhere else, and the first constraint below would be broken without an error
+anywhere.
 
 Two retention constraints, neither of them a preference:
 
@@ -269,6 +319,7 @@ Two retention constraints, neither of them a preference:
 | Path | What |
 |------|------|
 | `scripts/release.mjs` | The CLI. Orchestration and process control |
+| `scripts/publish.mjs` | Sending a cut, the changelog and release notes to the host, and reading them back |
 | `src/release/shippedTree.js` | What ships, and how each file may be treated |
 | `src/release/manifest.js` | Content hashes and the diff between two trees |
 | `src/release/metadata.js` | What a release says about itself, and its validation |
