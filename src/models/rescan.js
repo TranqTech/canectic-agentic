@@ -167,7 +167,8 @@ async function rescanMessageAreas(opts) {
 	var days = windowed.days;
 
 	var sql =
-		'SELECT pas.id, pas.area_id, pas.msg_idx, na.areatag, ma.shortcode ' +
+		'SELECT pas.id, pas.area_id, pas.msg_idx, na.areatag, ma.shortcode, ' +
+		'       ma.max_age_days, ma.max_messages ' +
 		'FROM peer_area_subscriptions pas ' +
 		'JOIN network_areas na ON na.area_id = pas.area_id AND na.network_id = $1 ' +
 		'JOIN message_areas ma ON ma.id = pas.area_id ' +
@@ -187,6 +188,8 @@ async function rescanMessageAreas(opts) {
 	}
 
 	var rewound = 0;
+	var sawRetention = false;
+	var sawImported = false;
 	for (var sub of subs) {
 		try {
 			var msgTable = 'mb_' + String(sub.shortcode).toLowerCase() + '_msgs';
@@ -206,6 +209,20 @@ async function rescanMessageAreas(opts) {
 			);
 			rewound++;
 			lines.push('  ' + sub.areatag + ': pointer ' + current + ' -> ' + newIdx);
+
+			// Only claim a caveat that is true of the areas actually rewound.
+			if (sub.max_age_days > 0 || sub.max_messages > 0) sawRetention = true;
+			if (!sawImported) {
+				// Cheap: stop at the first imported row above the new pointer.
+				// Asked per area only while the answer is still no.
+				try {
+					var imp = await postgres.queryOne(
+						'SELECT 1 AS found FROM ' + msgTable + ' WHERE imported = true AND id > $1 LIMIT 1',
+						[newIdx]
+					);
+					if (imp) sawImported = true;
+				} catch (_) { /* older base without the column: say nothing */ }
+			}
 		} catch (err) {
 			lines.push('  ' + sub.areatag + ': failed (' + (err.message || err) + ')');
 			alogger.writeAlog(2, 'AreaFix rescan failed for ' + sub.areatag + ': ' +
@@ -214,7 +231,11 @@ async function rescanMessageAreas(opts) {
 	}
 
 	lines.unshift(headerFor(opts.full, days, rewound, 'area'));
-	appendCaveats(lines, windowed.capped, windowed.maxDays, true);
+	appendCaveats(lines, {
+		capped: windowed.capped, maxDays: windowed.maxDays,
+		retention: sawRetention, imported: sawImported,
+		delivery: rewound > 0 ? 'Delivery happens on the next toss cycle.' : ''
+	});
 
 	alogger.writeAlog(2, 'AreaFix: rescan rewound ' + rewound + ' area(s) for connection ' +
 		opts.connectionId + (opts.full ? ' (full)' : ' (' + days + ' days)'), 'cyan');
@@ -242,7 +263,8 @@ async function rescanFileAreas(opts) {
 	var days = windowed.days;
 
 	var sql =
-		'SELECT fps.id, fps.file_area_id, fna.areatag, fa.shortcode ' +
+		'SELECT fps.id, fps.file_area_id, fna.areatag, fa.shortcode, ' +
+		'       fa.max_age_days, fa.max_files ' +
 		'FROM file_peer_subscriptions fps ' +
 		'JOIN file_network_areas fna ON fna.area_id = fps.file_area_id AND fna.network_id = $1 ' +
 		'JOIN file_areas fa ON fa.id = fps.file_area_id ' +
@@ -263,7 +285,9 @@ async function rescanFileAreas(opts) {
 
 	var queuedTotal = 0;
 	var areasTouched = 0;
+	var sawRetention = false;
 	for (var sub of subs) {
+		if (sub.max_age_days > 0 || sub.max_files > 0) sawRetention = true;
 		try {
 			var where = 'fe.area_id = $1 AND fe.active = true';
 			var qp = [sub.file_area_id];
@@ -315,7 +339,17 @@ async function rescanFileAreas(opts) {
 
 	lines.unshift(headerFor(opts.full, days, areasTouched, 'file area') +
 		' (' + queuedTotal + ' file(s))');
-	appendCaveats(lines, windowed.capped, windowed.maxDays, false);
+	appendCaveats(lines, {
+		capped: windowed.capped, maxDays: windowed.maxDays,
+		retention: sawRetention,
+		// A file rescan has no imported-history equivalent: file_distribution
+		// rows are per file per peer, with no imported flag to exclude.
+		imported: false,
+		// Not "the next toss cycle": this executor enqueues tic:outbound itself
+		// once the rows are written, which is what stopped a rescan replying
+		// cheerfully and sending nothing.
+		delivery: queuedTotal > 0 ? 'An outbound pass has been queued to send them.' : ''
+	});
 
 	alogger.writeAlog(2, 'FileFix: rescan queued ' + queuedTotal + ' file(s) across ' +
 		areasTouched + ' area(s) for connection ' + opts.connectionId, 'cyan');
@@ -361,18 +395,52 @@ function headerFor(full, days, count, noun) {
 
 // Both of these surprise people, so say them rather than let a downlink wonder
 // why the numbers do not match what was asked for.
-function appendCaveats(lines, capped, maxDays, isMessages) {
-	if (capped) {
-		lines.push('');
-		lines.push('  Window reduced to the system maximum of ' + maxDays + ' days.');
+/**
+ * The notes that follow a rescan report.
+ *
+ * Each one is printed ONLY when it applies to this rescan. They used to print
+ * every time, so a downlink asking for 60 days of one area that is nowhere
+ * near any limit was told about retention windows and imported history it
+ * does not have. Read cold by somebody waiting on mail, an unconditional
+ * caveat reads as a warning that something went wrong, and the reply looks
+ * like a refusal rather than a confirmation.
+ *
+ * A caveat that is always true is not a caveat, it is noise, and noise is what
+ * stops the real one being read.
+ *
+ * @param {object} f
+ * @param {boolean} f.capped        - the window was reduced to the system maximum
+ * @param {number}  f.maxDays       - that maximum
+ * @param {boolean} f.retention     - at least one area rescanned prunes old content
+ * @param {boolean} f.imported      - at least one area holds imported history in range
+ * @param {string}  f.delivery      - how delivery happens, or '' to say nothing
+ */
+function buildCaveats(f) {
+	var notes = [];
+	f = f || {};
+
+	if (f.capped) {
+		notes.push('Window reduced to the system maximum of ' + f.maxDays + ' days.');
 	}
-	lines.push('');
-	lines.push('  Only content still held is replayed. Areas with a retention');
-	lines.push('  limit hold less than the window you asked for.');
-	if (isMessages) {
-		lines.push('  Imported message base history is never replayed.');
+	if (f.retention) {
+		notes.push('Some of these areas prune old content, so they hold less than');
+		notes.push('the window you asked for. Only what is still held is replayed.');
 	}
-	lines.push('  Delivery happens on the next toss cycle.');
+	if (f.imported) {
+		notes.push('Imported message base history is never replayed.');
+	}
+	if (f.delivery) {
+		notes.push(f.delivery);
+	}
+
+	return notes;
 }
 
-export { parseRescanRequest, pointerForWindow, rescanMessageAreas, rescanFileAreas };
+function appendCaveats(lines, f) {
+	var notes = buildCaveats(f);
+	if (notes.length === 0) return;
+	lines.push('');
+	for (var n of notes) lines.push('  ' + n);
+}
+
+export { parseRescanRequest, pointerForWindow, rescanMessageAreas, rescanFileAreas, buildCaveats };

@@ -27,6 +27,10 @@ describe('areafix.handleRequest', function () {
 	var available = false;
 	var pg = null, areafix = null, peers = null, peerConnections = null, msgAreas = null;
 	var peerId = null, connId = null, networkId = null, areaId = null;
+	// Notifications raised as a side effect of handleRequest. Deleted by id
+	// above this mark AND by the fixture address, so a real sysop notification
+	// can never be caught by the cleanup.
+	var notifHighWater = 0;
 	var AREA = 'ZZAFTEST';
 
 	before(async function () {
@@ -36,6 +40,11 @@ describe('areafix.handleRequest', function () {
 			if (!available) return;
 
 			pg              = await import('../src/middleware/db/postgres.js');
+
+			try {
+				var hw = await pg.queryOne('SELECT COALESCE(MAX(id), 0) AS id FROM notifications');
+				notifHighWater = hw ? parseInt(hw.id) || 0 : 0;
+			} catch (_) { notifHighWater = 0; }
 			areafix         = await import('../src/models/areafix.js');
 			peers           = await import('../src/models/peers.js');
 			peerConnections = await import('../src/models/peerConnections.js');
@@ -93,6 +102,15 @@ describe('areafix.handleRequest', function () {
 			if (connId) await pg.write('DELETE FROM peer_area_subscriptions WHERE peer_connection_id = $1', [connId]);
 			if (connId) await pg.write('DELETE FROM peer_connections WHERE id = $1', [connId]);
 			if (peerId) await pg.write('DELETE FROM peers WHERE id = $1', [peerId]);
+			// handleRequest raises a sysop notification per request, which this
+			// suite makes a dozen of per run. Left behind they accumulate in
+			// the live sysop's bell for ever: 3252 of them had built up before
+			// anyone noticed, because nothing about a test leaving rows in a
+			// shared database announces itself.
+			await pg.write(
+				"DELETE FROM notifications WHERE id > $1 AND title LIKE $2",
+				[notifHighWater, '%' + ADDRESS + '%']
+			);
 		} catch (_) {}
 	});
 

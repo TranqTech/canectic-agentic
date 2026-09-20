@@ -384,3 +384,81 @@ describe('rescan.rescanMessageAreas', function () {
 		assert.strictEqual(res.full, false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Rescan caveats: say only what applies
+// ---------------------------------------------------------------------------
+//
+// These printed unconditionally, so a downlink asking for 60 days of one area
+// with no retention limit and no imported history got:
+//
+//     OTHERNETS: pointer 3570 -> 3414
+//
+//     Only content still held is replayed. Areas with a retention
+//     limit hold less than the window you asked for.
+//     Imported message base history is never replayed.
+//     Delivery happens on the next toss cycle.
+//
+// Nothing there was true of that request. Read cold by somebody waiting on
+// mail, a caveat that always fires reads as a warning that something went
+// wrong, and a successful rescan looks like a refusal. A note that is always
+// printed is not a caveat, it is noise, and the noise is what stops the real
+// one being read on the day it matters.
+
+describe('rescan caveats', function () {
+	var buildCaveats = null;
+
+	before(async function () {
+		try {
+			buildCaveats = (await import('../src/models/rescan.js')).buildCaveats;
+		} catch (_) { this.skip(); }
+	});
+
+	function text(flags) { return buildCaveats(flags).join(' '); }
+
+	it('says nothing about retention when no area prunes', function () {
+		var notes = buildCaveats({ retention: false, imported: false, delivery: 'Delivery happens on the next toss cycle.' });
+		assert.strictEqual(notes.length, 1, 'only the delivery line: ' + JSON.stringify(notes));
+		assert.ok(!/retention|prune|still held/i.test(text({ retention: false, delivery: 'x' })));
+	});
+
+	it('says nothing about imported history when there is none in range', function () {
+		assert.ok(!/imported/i.test(text({ retention: true, imported: false, delivery: 'x' })));
+	});
+
+	it('warns about retention when an area actually prunes', function () {
+		assert.ok(/prune/i.test(text({ retention: true })));
+	});
+
+	it('warns about imported history when an area holds some in range', function () {
+		assert.ok(/imported message base history/i.test(text({ imported: true })));
+	});
+
+	it('reports a capped window only when the window was capped', function () {
+		assert.ok(/maximum of 30 days/.test(text({ capped: true, maxDays: 30 })));
+		assert.ok(!/maximum/.test(text({ capped: false, maxDays: 30 })));
+	});
+
+	it('produces no notes at all when nothing applies', function () {
+		// A rescan that rewound nothing has nothing to add, and an empty
+		// caveat block used to leave a bare blank line under the report.
+		assert.deepStrictEqual(buildCaveats({}), []);
+		assert.deepStrictEqual(buildCaveats(), []);
+	});
+
+	it('carries whatever delivery wording the caller chose', function () {
+		// Message and file rescans differ: one waits for the next toss, the
+		// other enqueues an outbound pass itself.
+		assert.ok(/next toss cycle/.test(text({ delivery: 'Delivery happens on the next toss cycle.' })));
+		assert.ok(/outbound pass has been queued/.test(text({ delivery: 'An outbound pass has been queued to send them.' })));
+	});
+
+	it('reproduces the reported message with only the line that applies', function () {
+		// The exact case from the report: one area, well inside the window,
+		// no retention limit, no imported history.
+		assert.deepStrictEqual(
+			buildCaveats({ capped: false, retention: false, imported: false,
+			               delivery: 'Delivery happens on the next toss cycle.' }),
+			['Delivery happens on the next toss cycle.']);
+	});
+});
