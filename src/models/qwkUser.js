@@ -164,7 +164,7 @@ async function buildQwkForUser(userId) {
 					from_user: pm.from_user || '',
 					to_user: pm.to_user || user.username,
 					subject: pm.subject || '',
-					body_text: pm.utf8 || pm.body_text || '',
+					body_text: pm.body_text || '',
 					utf8: pm.utf8 ? pm.utf8 : null,
 					system_time: pm.system_time || pm.created_at || new Date(),
 					msg_id: pm.msg_id || '',
@@ -613,7 +613,7 @@ async function importRepWall(user, msg) {
 	if (!wall.canPost(user)) {
 		return { status: false, error: 'wall posting denied for this user' };
 	}
-	var rawBody = (msg.utf8 || msg.bodyText || msg.body || '').toString();
+	var rawBody = (msg.bodyText || msg.body || '').toString();
 	// Strip carriage returns, split on first newline of any flavour
 	var firstLine = rawBody.replace(/\r/g, '').split('\n')[0] || '';
 	firstLine = firstLine.replace(/\s+$/, '').replace(/^\s+/, '');
@@ -682,7 +682,7 @@ async function importRepPM(user, msg) {
 		return { status: false, error: 'Recipient "' + toUser + '" not found' };
 	}
 
-	var bodyText = msg.utf8 || msg.bodyText || '';
+	var bodyText = msg.bodyText || '';
 	var messageObj = {
 		user_id: resolution.userId,
 		from_user: user.username,
@@ -708,7 +708,7 @@ async function importRepPM(user, msg) {
 
 // Import an area message from a REP packet.
 async function importRepMessage(user, msg, area) {
-	var bodyText = msg.utf8 || msg.bodyText || '';
+	var bodyText = msg.bodyText || '';
 	var subject = (msg.subject || '').trim();
 	if (!subject) return { status: false, error: 'Empty subject' };
 	if (!bodyText.trim()) return { status: false, error: 'Empty message body' };

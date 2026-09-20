@@ -157,7 +157,7 @@ async function importParsedMessages(source, target, toDbObj, options) {
 			}
 
 			// Generate body_html
-			var displayText = dbObj.utf8 || dbObj.body_text || '';
+			var displayText = dbObj.body_text || '';
 			try {
 				dbObj.body_html = await formatBodyHtml(displayText);
 			} catch (e) {

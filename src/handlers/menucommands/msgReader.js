@@ -387,7 +387,7 @@ class msgReader extends BaseSubModule {
 			});
 		} else {
 			// Fallback — no formatter available, basic display with body color
-			var rawText = msg.utf8 || msg.body_text || "";
+			var rawText = msg.body_text || "";
 			rawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 			var lines = rawText.split("\n");
 			this._bodyLines = [];
@@ -2325,16 +2325,13 @@ class msgReader extends BaseSubModule {
 		this.call.cmds.senddata("  Date: " + this._formatFullDate(msg.system_time) + "\r\n");
 		this.call.cmds.senddata("  -------------------\r\n");
 
-		var rawText = msg.utf8 || msg.body_text || "";
+		// body_text is canonical Unicode for every source (migration 0006).
+		var rawText = msg.body_text || "";
 
 		// Apply codepage conversions
 		var fmtMod = await getFmtMod();
 		this._fmtModRef = fmtMod;
 		if (fmtMod) {
-			if (this._isUTF8 && !msg.utf8 && msg.body_text) {
-				// Terminal is UTF-8, text is CP437 → convert to UTF-8
-				rawText = fmtMod.convertCP437toUTF8(rawText);
-			}
 			// Convert pipe/ctrl-a codes (they produce pure ASCII ANSI sequences)
 			if (fmtMod.hasPipeCodes(rawText)) rawText = fmtMod.convertPipeCodes(rawText);
 			if (fmtMod.hasCtrlACodes(rawText)) rawText = fmtMod.convertCtrlACodes(rawText);

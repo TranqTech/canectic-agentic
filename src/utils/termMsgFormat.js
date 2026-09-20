@@ -399,14 +399,11 @@ function processMessageBody(msg, options) {
 	var clrOrigin  = colors.origin  !== undefined ? colors.origin  : DF_CLR_ORIGIN;
 	var clrKludge  = colors.kludge  !== undefined ? colors.kludge  : DF_CLR_KLUDGE;
 
-	// Get raw text — prefer utf8 field if available
-	var rawText = msg.utf8 || msg.body_text || "";
-
-	// CP437 → UTF-8 conversion if terminal is UTF-8 and text is not already UTF-8
-	// If msg.utf8 exists, it's already converted. Otherwise body_text may be CP437.
-	if (isUTF8 && !msg.utf8 && msg.body_text) {
-		rawText = convertCP437toUTF8(rawText);
-	}
+	// body_text is canonical Unicode for every source (migration 0006). There
+	// is nothing left to convert here, and the conversion that used to happen
+	// was wrong: it fired whenever utf8 was null, which is every NNTP message,
+	// and ran already-decoded text through the CP437 table.
+	var rawText = msg.body_text || "";
 
 	// Detect what kind of color codes are present BEFORE conversion
 	var hasPipe = hasPipeCodes(rawText);

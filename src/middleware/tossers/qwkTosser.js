@@ -140,7 +140,7 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 	}
 
 	// Pre-format body as HTML for display (non-fatal)
-	var displayText = qwkMsg.utf8 || qwkMsg.bodyText || '';
+	var displayText = qwkMsg.bodyText || '';
 	var bodyHtml = await formatBodyHtml(displayText);
 
 	// Build message object and let unified threadMessage() handle threading
@@ -226,7 +226,7 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) 
 			from_address: remoteQwkId,
 			to_address: '',
 			subject: qwkMsg.subject || '',
-			body_text: qwkMsg.utf8 || qwkMsg.bodyText || '',
+			body_text: qwkMsg.bodyText || '',
 			transport_type: 'QWK',
 			transport_data: JSON.stringify({
 				source: remoteQwkId,
@@ -246,7 +246,7 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) 
 	}
 
 	// Build the message object for delivery
-	var bodyText = qwkMsg.utf8 || qwkMsg.bodyText || '';
+	var bodyText = qwkMsg.bodyText || '';
 	var msgId = '';
 	if (qwkMsg.kludges && qwkMsg.kludges.MSGID) {
 		msgId = qwkMsg.kludges.MSGID;
@@ -1031,7 +1031,7 @@ async function pushToQwkPeer(peerConnectionUUID) {
 					from_user: pm.from_user || '',
 					to_user: pm.to_user || '',
 					subject: pm.subject || '',
-					body_text: pm.utf8 || pm.body_text || '',
+					body_text: pm.body_text || '',
 					utf8: null, // null so buildRepPacket runs utf8ToCp437 conversion
 					system_time: pm.system_time || new Date(),
 					reply_ref: 0

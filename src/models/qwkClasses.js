@@ -23,7 +23,6 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import AdmZip from 'adm-zip';
 import { cp437ToUtf8, utf8ToCp437 } from '../utils/codepageConversions.js';
-import { canonicalText } from '../utils/messageText.js';
 
 const QWK_RECORD_SIZE   = 128;
 const QWK_HEADER_BLOCKS = 1;
@@ -229,14 +228,24 @@ function parseMessagesDAT(buffer) {
 			originLine = originMatch[1].trim();
 		}
 
-		// cp437 → UTF-8 conversion (on clean body only)
-		var bodyText = bodyClean;
-		var utf8     = null;
+		// cp437 → UTF-8 conversion (on clean body only).
+		//
+		// bodyText carries the DECODED text, same as every other importer.
+		// It used to carry the raw CP437 bytes held as latin-1 characters,
+		// which made body_text mean one thing for a QWK message and another
+		// for an FTN one, and every exporter had to guess which. The QWK
+		// packer guessed wrong for FTN messages and corrupted them.
+		//
+		// utf8 is still written, identical, for one release: it is the only
+		// copy of the decoded text for rows migration 0006 rewrites, so
+		// keeping it is what makes that rewrite reversible.
+		var utf8 = null;
 		try {
 			utf8 = cp437ToUtf8(bodyClean);
 		} catch (_) {
 			// leave utf8 null on failure
 		}
+		var bodyText = utf8 === null ? bodyClean : utf8;
 
 		// rawBody gets cp437 conversion too
 		var rawUtf8 = null;
@@ -567,7 +576,7 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 		// which is true of a QWK message and false of an FTN one — relaying an
 		// FTN message into a QWK packet turned `Γöî` into `ô÷ε`.
 		var bodyForPack;
-		var canonical = canonicalText(item.msg);
+		var canonical = item.msg.body_text || '';
 		var cp437Bytes = utf8ToCp437(canonical);
 		bodyForPack = '';
 		for (var i = 0; i < cp437Bytes.length; i++) {

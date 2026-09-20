@@ -301,7 +301,7 @@ async function tossOutbound() {
 			envelope: { from: sender.envelopeFrom, to: emailAddress },
 			to: emailAddress,
 			subject: pm.subject || '(no subject)',
-			text: pm.utf8 || pm.body_text || '',
+			text: pm.body_text || '',
 		};
 		if (sender.replyTo) {
 			mailOptions.replyTo = sender.replyTo;

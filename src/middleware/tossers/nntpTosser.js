@@ -18,7 +18,6 @@ import * as peerConnections from '../../models/peerConnections.js';
 import * as networkAreas from '../../models/networkAreas.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
 import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
-import { canonicalText } from '../../utils/messageText.js';
 import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
 
 
@@ -782,7 +781,7 @@ function formatNntpArticle(msg, areatag, domain) {
 
 	// Body: ask what the message says rather than reading body_text directly,
 	// which holds raw CP437 bytes for anything that arrived over QWK.
-	var bodyText  = canonicalText(msg).replace(/\r/g, '\n');
+	var bodyText  = (msg.body_text || '').replace(/\r/g, '\n');
 	var bodyLines = bodyText.split('\n').map(line => line.startsWith('.') ? '.' + line : line);
 
 	return headers.join('\r\n') + '\r\n\r\n' + bodyLines.join('\r\n');

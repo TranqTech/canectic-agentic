@@ -269,12 +269,12 @@ async function getMessagesForThread(shortcode, threadid) {
 		// Use pre-rendered body_html if available (populated at import time).
 		// Fall back to on-the-fly formatting for older messages.
 		if (!msg.body_html) {
-			var displayText = msg.utf8 || msg.body_text || '';
+			var displayText = msg.body_text || '';
 			msg.body_html = await formatBodyHtml(displayText);
 			msg.isAnsi = detectIsAnsi(displayText);
 		} else {
 			// Pre-rendered — still need to detect if terminal rendering is needed
-			var checkText = msg.utf8 || msg.body_text || '';
+			var checkText = msg.body_text || '';
 			msg.isAnsi = detectIsAnsi(checkText);
 		}
 	}
@@ -304,11 +304,11 @@ async function getMessagesForArea(shortcode, options) {
 
 	for (var msg of msglist) {
 		if (!msg.body_html) {
-			var displayText = msg.utf8 || msg.body_text || '';
+			var displayText = msg.body_text || '';
 			msg.body_html = await formatBodyHtml(displayText);
 			msg.isAnsi = detectIsAnsi(displayText);
 		} else {
-			var checkText = msg.utf8 || msg.body_text || '';
+			var checkText = msg.body_text || '';
 			msg.isAnsi = detectIsAnsi(checkText);
 		}
 	}
@@ -326,11 +326,11 @@ async function getMessage(id, shortcode) {
 	if (!msg) return null;
 
 	if (!msg.body_html) {
-		var displayText = msg.utf8 || msg.body_text || '';
+		var displayText = msg.body_text || '';
 		msg.body_html = await formatBodyHtml(displayText);
 		msg.isAnsi = detectIsAnsi(displayText);
 	} else {
-		var checkText = msg.utf8 || msg.body_text || '';
+		var checkText = msg.body_text || '';
 		msg.isAnsi = detectIsAnsi(checkText);
 	}
 
@@ -432,11 +432,11 @@ async function getMessages(shortcode, options) {
 
 	for (var msg of msglist) {
 		if (!msg.body_html) {
-			var displayText = msg.utf8 || msg.body_text || '';
+			var displayText = msg.body_text || '';
 			msg.body_html = await formatBodyHtml(displayText);
 			msg.isAnsi = detectIsAnsi(displayText);
 		} else {
-			var checkText = msg.utf8 || msg.body_text || '';
+			var checkText = msg.body_text || '';
 			msg.isAnsi = detectIsAnsi(checkText);
 		}
 	}
@@ -1111,7 +1111,7 @@ async function handleInboundEchoMessage(message) {
 	}
 
 	// Pre-format body as HTML for display (non-fatal)
-	var displayText = dbObj.utf8 || dbObj.body_text || '';
+	var displayText = dbObj.body_text || '';
 	dbObj.body_html = await formatBodyHtml(displayText);
 
 	// Resolve source_network_id so outbound delivery can suppress re-sending

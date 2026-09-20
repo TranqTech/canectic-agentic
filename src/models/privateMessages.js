@@ -325,7 +325,7 @@ async function deliverMessage(messageObj) {
   // Generate body_html from display text. formatBodyHtml is async --
   // without the await you get a Promise that fails the string check
   // below and silently falls back to simpleTextToHtml for every message.
-  var displayText = messageObj.utf8 || messageObj.body_text || '';
+  var displayText = messageObj.body_text || '';
   if (displayText && typeof displayText === 'string' && displayText.trim().length > 0) {
     try {
       var generatedHtml = await formatBodyHtml(displayText);
@@ -811,7 +811,7 @@ async function queueMessage(messageObj, userSession, options) {
   // Generate body_html for the outbox copy. formatBodyHtml is async --
   // missing the await silently produces Promise objects that fail the
   // string check and fall through to simpleTextToHtml.
-  var displayText = messageObj.utf8 || messageObj.body_text || '';
+  var displayText = messageObj.body_text || '';
   if (displayText && typeof displayText === 'string' && displayText.trim().length > 0) {
     try {
       var generatedHtml = await formatBodyHtml(displayText);

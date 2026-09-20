@@ -318,7 +318,7 @@ class pmReader extends BaseSubModule {
 				}
 			});
 		} else {
-			var rawText = msg.utf8 || msg.body_text || "";
+			var rawText = msg.body_text || "";
 			rawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 			var lines = rawText.split("\n");
 			this._bodyLines = [];
@@ -1215,7 +1215,7 @@ class pmReader extends BaseSubModule {
 			"  Via: " + (msg.transport_type || "LOCAL") + "\r\n");
 		this.call.cmds.senddata("\r\n");
 
-		var bodyText = msg.utf8 || msg.body_text || "";
+		var bodyText = msg.body_text || "";
 		bodyText = bodyText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 		var lines = bodyText.split("\n");
 		for (var i = 0; i < lines.length; i++) {

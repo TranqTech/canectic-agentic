@@ -252,7 +252,7 @@ class pmEditor extends BaseSubModule {
 	_prepareQuoteLines() {
 		if (this._mode !== "reply" || !this._replyToMsg) return;
 
-		var bodyText = this._replyToMsg.utf8 || this._replyToMsg.body_text || "";
+		var bodyText = this._replyToMsg.body_text || "";
 		bodyText = bodyText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 		var rawLines = bodyText.split("\n");
 

@@ -223,7 +223,7 @@ class msgEditor extends BaseSubModule {
 			this._quoteLines = [];
 			return;
 		}
-		var rawText = this._replyToMsg.utf8 || this._replyToMsg.body_text || "";
+		var rawText = this._replyToMsg.body_text || "";
 		rawText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 		var sourceLines = rawText.split("\n");
 

@@ -99,7 +99,7 @@ function renderRfc2822(pmRow, mailDomain, attachments) {
 	var date = formatDate2822(pmRow.system_time || pmRow.created_at);
 	var subject = pmRow.subject || '(no subject)';
 
-	var plainBody = pmRow.utf8 || pmRow.body_text || '';
+	var plainBody = pmRow.body_text || '';
 	var htmlBody = pmRow.body_html || '';
 	var hasAttachments = attachments && attachments.length > 0;
 
@@ -310,7 +310,7 @@ function trashUidToSource(uid) {
 // Build IMAP BODYSTRUCTURE response for a message.
 // Returns the parenthesised BODYSTRUCTURE string.
 function renderBodyStructure(pmRow, attachments) {
-	var plainBody = pmRow.utf8 || pmRow.body_text || '';
+	var plainBody = pmRow.body_text || '';
 	var htmlBody = pmRow.body_html || '';
 	var hasAttachments = attachments && attachments.length > 0;
 

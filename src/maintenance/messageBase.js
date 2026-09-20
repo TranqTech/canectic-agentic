@@ -150,7 +150,7 @@ async function regenerateAreaBodyHtml(shortcode, options) {
 			lastId = row.id;
 			areaResult.processed++;
 
-			var displayText = row.utf8 || row.body_text || '';
+			var displayText = row.body_text || '';
 			if (!displayText) {
 				areaResult.skipped++;
 				continue;
@@ -298,7 +298,7 @@ async function regeneratePmTableBodyHtml(tableName, options) {
 			lastId = row.id;
 			tableResult.processed++;
 
-			var displayText = row.utf8 || row.body_text || '';
+			var displayText = row.body_text || '';
 			if (!displayText) {
 				tableResult.skipped++;
 				continue;

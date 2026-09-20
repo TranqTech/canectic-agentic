@@ -23,7 +23,6 @@ import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
 import * as privateMessages from './privateMessages.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
-import { canonicalText } from '../utils/messageText.js';
 import {
 	QWK_RECORD_SIZE,
 	QWK_LINE_TERM,
@@ -131,7 +130,7 @@ function buildMessagesDat(messageItems, qwkId) {
 		// See messageText.canonicalText: "utf8 is set, so body_text is raw
 		// CP437" holds for a QWK message and not for an FTN one.
 		var bodyForPack = '';
-		var cp437Bytes = utf8ToCp437(canonicalText(item.msg));
+		var cp437Bytes = utf8ToCp437(item.msg.body_text || '');
 		for (var j = 0; j < cp437Bytes.length; j++) {
 			bodyForPack += String.fromCharCode(cp437Bytes[j]);
 		}
@@ -495,7 +494,7 @@ async function buildQwkForNode(peerConnectionUUID) {
 					from_user: pm.from_user || '',
 					to_user: pm.to_user || '',
 					subject: pm.subject || '',
-					body_text: pm.utf8 || pm.body_text || '',
+					body_text: pm.body_text || '',
 					utf8: null, // null so buildMessagesDat runs utf8ToCp437 conversion
 					system_time: pm.system_time || new Date(),
 					reply_ref: 0
