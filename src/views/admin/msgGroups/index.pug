@@ -112,6 +112,15 @@ block content
                           option(value='subscribe_only') Subscribe Only
                         .form-text.text-muted
                           | How areas in this group read by default. New areas inherit this.
+                    .row
+                      .col-12
+                        label.form-label(for="ng_charset") Outbound Character Set:
+                        select#ng_charset.form-select(name='charset')
+                          option(value='auto' selected) Automatic (CP437 where it fits)
+                          option(value='cp437') Always CP437
+                          option(value='utf8') Always UTF-8
+                        .form-text.text-muted
+                          | Default wire encoding for areas in this group. New areas inherit this.
                       .col-6
                         label.form-label(for="ng_newscan") Newscan Default:
                         select#ng_newscan.form-select(name='newscan_default')

@@ -65,6 +65,9 @@ block content
                         | Thread Mode:
                         = threadModeLabel(msgGroup.thread_mode)
                       h5
+                        | Character Set:
+                        = charsetModeLabel(msgGroup.charset)
+                      h5
                         | Newscan Default:
                         = msgGroup.newscan_default ? 'Yes' : 'No'
               .card
@@ -391,6 +394,12 @@ block content
                               option(value='username' selected=(msgGroup.post_as !== 'realname')) Username
                               option(value='realname' selected=(msgGroup.post_as === 'realname')) Real Name
                           .col-4
+                            label.form-label(for='edit_charset') Character Set:
+                            select#edit_charset.form-select(name='charset')
+                              option(value='auto' selected=(msgGroup.charset !== 'cp437' && msgGroup.charset !== 'utf8')) Automatic
+                              option(value='cp437' selected=(msgGroup.charset === 'cp437')) Always CP437
+                              option(value='utf8' selected=(msgGroup.charset === 'utf8')) Always UTF-8
+                          .col-4
                             label.form-label(for='edit_thread_mode') Thread Mode:
                             select#edit_thread_mode.form-select(name='thread_mode')
                               option(value='standard' selected=(msgGroup.thread_mode !== 'no_threads' && msgGroup.thread_mode !== 'subscribe_only')) Standard (threaded)
@@ -520,6 +529,10 @@ block content
                     .form-check.mb-2
                       input.form-check-input#push_post_as(type='checkbox' name='fields' value='post_as' checked)
                       label.form-check-label(for='push_post_as') Post As (#{msgGroup.post_as || 'username'})
+                    .form-check.mb-2
+                      input.form-check-input#push_charset(type='checkbox' name='fields' value='charset')
+                      label.form-check-label(for='push_charset') Outbound Character Set (#{charsetModeLabel(msgGroup.charset)})
+                      .form-text.text-muted Unticked by default, since this replaces any per-area choice.
                     .form-check.mb-2
                       input.form-check-input#push_thread_mode(type='checkbox' name='fields' value='thread_mode')
                       label.form-check-label(for='push_thread_mode') Thread Mode (#{threadModeLabel(msgGroup.thread_mode)})

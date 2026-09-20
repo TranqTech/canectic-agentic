@@ -247,3 +247,33 @@ describe('optional attribute round trip', function () {
 		assert.deepStrictEqual(parseOptionalAttributes([null, undefined, 42]), []);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Group default
+// ---------------------------------------------------------------------------
+
+describe('charset inheritance from the group', function () {
+
+	// A network that has agreed on UTF-8 should be settable once on the group
+	// rather than on every area by hand, and again on every area added later.
+	// msgAreas.newArea falls back to the group's value, which is what makes
+	// the group setting worth having: a default new areas ignored would be
+	// worse than not offering one.
+
+	it('an area with no explicit choice takes the group default', function () {
+		assert.strictEqual(normaliseCharsetMode('', normaliseCharsetMode('utf8')), 'utf8');
+		assert.strictEqual(normaliseCharsetMode(undefined, normaliseCharsetMode('cp437')), 'cp437');
+	});
+
+	it('an explicit choice on the area beats the group', function () {
+		assert.strictEqual(normaliseCharsetMode('cp437', normaliseCharsetMode('utf8')), 'cp437');
+	});
+
+	it('a group with nothing set leaves areas on auto', function () {
+		assert.strictEqual(normaliseCharsetMode('', normaliseCharsetMode(null)), 'auto');
+	});
+
+	it('a nonsense group value cannot smuggle an invalid mode into an area', function () {
+		assert.strictEqual(normaliseCharsetMode('', normaliseCharsetMode('klingon')), 'auto');
+	});
+});

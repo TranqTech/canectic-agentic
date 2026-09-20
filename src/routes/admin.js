@@ -14,6 +14,7 @@ import * as msgNetworks from '../models/msgNetworks.js';
 import * as msgZones from '../models/msgZones.js';
 import * as msgGroups from '../models/msgGroups.js';
 import { threadModeLabel } from "../utils/threadMode.js";
+import { charsetModeLabel } from "../utils/charsetPolicy.js";
 import * as msgAreas from '../models/msgAreas.js';
 // netmail import removed -- legacy admin netmail routes replaced by PM system
 import * as messages from '../models/messages.js';
@@ -120,6 +121,7 @@ router.use(async function(req, res, next) {
 	// which is a 500 on a page nothing tests. A local set once cannot be
 	// forgotten by a route added later.
 	res.locals.threadModeLabel = threadModeLabel;
+	res.locals.charsetModeLabel = charsetModeLabel;
 	if (req.cookies.sessionid) {
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {

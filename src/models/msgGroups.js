@@ -6,6 +6,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
 import { normaliseThreadMode, isThreadMode } from "../utils/threadMode.js";
+import { normaliseCharsetMode, isCharsetMode } from "../utils/charsetPolicy.js";
 import appConfig from "../config/appConfig.js";
 
 // QWK conference number block model
@@ -181,6 +182,8 @@ async function newGroup(formObj) {
 		// Default thread mode for areas created in this group. Areas keep
 		// their own column; this is what a new one starts from.
 		thread_mode: normaliseThreadMode(formObj.thread_mode),
+		// Default outbound wire encoding for areas created in this group.
+		charset: normaliseCharsetMode(formObj.charset),
 		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true,
 		// Retention defaults for areas created in this group. NULL means no
 		// pruning, which is what every group and area starts as.
@@ -283,6 +286,9 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.post_rest_flags !== undefined) updateObj.post_rest_flags = normalizeFlags(formObj.post_rest_flags);
 	if (formObj.thread_mode !== undefined && isThreadMode(formObj.thread_mode)) {
 		updateObj.thread_mode = normaliseThreadMode(formObj.thread_mode);
+	}
+	if (formObj.charset !== undefined && isCharsetMode(formObj.charset)) {
+		updateObj.charset = normaliseCharsetMode(formObj.charset);
 	}
 	if (formObj.post_as !== undefined) {
 		var postAs = (formObj.post_as || '').trim().toLowerCase();
@@ -589,6 +595,9 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	}
 	if (pushAll || fields.includes('thread_mode')) {
 		updateObj.thread_mode = normaliseThreadMode(group.thread_mode);
+	}
+	if (pushAll || fields.includes('charset')) {
+		updateObj.charset = normaliseCharsetMode(group.charset);
 	}
 	if (pushAll || fields.includes('newscan_default')) {
 		updateObj.newscan_default = group.newscan_default || false;

@@ -225,7 +225,9 @@ async function newArea(formObj) {
 		// Wire encoding for outbound FTN. 'auto' sends CP437 whenever the body
 		// fits it, which is nearly always, and UTF-8 only when it would lose
 		// something. Either way the message declares what it carries.
-		charset: normaliseCharsetMode(formObj.charset),
+		// Falls back to the GROUP's default, so a network-wide UTF-8 policy
+		// does not have to be set on every area by hand.
+		charset: normaliseCharsetMode(formObj.charset, normaliseCharsetMode(dbgroup.charset)),
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase()
 			: 'username',
