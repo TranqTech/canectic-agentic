@@ -131,3 +131,49 @@ describe('admin unauthorized page renders', function () {
 			'expected the login partial for an unauthenticated caller');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// View helpers must be on res.locals, not passed per render
+// ---------------------------------------------------------------------------
+//
+// threadModeLabel was passed in the locals object of each render that needed
+// it. There are three renders of admin/msgGroups/view and I updated two, so
+// the third threw "threadModeLabel is not a function" — a 500 on a page the
+// suite never loads, found by a person opening it.
+//
+// A general "does every identifier a template calls resolve?" check is not
+// worth having: run against these views it reports 583 candidates, nearly all
+// CSS class names and inline JavaScript. So this is a declared list instead.
+// Adding a helper to it is the moment to decide it belongs in res.locals, and
+// once it is there no route added later can forget it.
+
+describe('admin view helpers', function () {
+
+	var VIEW_HELPERS = ['threadModeLabel'];
+
+	var adminSource = fs.readFileSync(path.join(ROUTES, 'admin.js'), 'utf8');
+
+	function adminViews(dir, out) {
+		out = out || [];
+		for (var entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			var full = path.join(dir, entry.name);
+			if (entry.isDirectory()) adminViews(full, out);
+			else if (entry.name.endsWith('.pug')) out.push(full);
+		}
+		return out;
+	}
+
+	VIEW_HELPERS.forEach(function (helper) {
+		it(helper + ' is set on res.locals, so no render can omit it', function () {
+			var users = adminViews(path.join(VIEWS, 'admin')).filter(function (f) {
+				return new RegExp('\\b' + helper + '\\s*\\(').test(fs.readFileSync(f, 'utf8'));
+			});
+			if (users.length === 0) this.skip();
+
+			assert.ok(new RegExp('res\\.locals\\.' + helper + '\\s*=').test(adminSource),
+				helper + ' is called by ' + users.length + ' admin view(s) but src/routes/admin.js ' +
+				'never assigns res.locals.' + helper + '. Passing it per render means every ' +
+				'render site has to remember, and one of them will not.');
+		});
+	});
+});

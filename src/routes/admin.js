@@ -115,6 +115,11 @@ router.use(async function(req, res, next) {
 	res.locals.faviconlink  = appConfig.get('faviconlink', '/images/favicon.ico');
 	res.locals.currentPath  = '/admin' + req.path;
 	res.locals.activelink   = '';
+	// View helpers go here rather than on each render. threadModeLabel was
+	// passed per-render and one of the three msgGroups/view sites was missed,
+	// which is a 500 on a page nothing tests. A local set once cannot be
+	// forgotten by a route added later.
+	res.locals.threadModeLabel = threadModeLabel;
 	if (req.cookies.sessionid) {
 		var pmSession = await sessionStore.sessionGet(req.cookies.sessionid);
 		if (pmSession) {
@@ -337,7 +342,6 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 			errormessages: result.errormessages,
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions(),
-			threadModeLabel: threadModeLabel,
 			DateTime: DateTime
 		});
 	}
@@ -403,7 +407,6 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 			errormessages: result.errormessages,
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions(),
-			threadModeLabel: threadModeLabel,
 			DateTime: DateTime
 		});
 	}
