@@ -29,15 +29,12 @@ import { fileURLToPath } from 'url';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// acorn arrives as a transitive dependency of pug rather than a declared one,
-// so treat it as optional: skip rather than fail if it is missing or too old
-// to parse what these files contain.
-var ACORN_ECMA = 2020;
-var acorn = null;
-try {
-	acorn = (await import('acorn')).default || (await import('acorn'));
-	acorn.parse('const a = b?.c ?? 1;', { ecmaVersion: ACORN_ECMA, sourceType: 'module' });
-} catch (_) { acorn = null; }
+// acorn is a declared devDependency. It is deliberately NOT optional: this
+// file is the only thing that reads the process entry points at all, so a
+// silent skip would put them back where they were, unchecked, while the suite
+// still reported green. pug pulls in its own acorn 7 as well; that one stays
+// nested under is-expression and this import gets the declared 8.x.
+var acorn = (await import('acorn')).default || (await import('acorn'));
 
 // Files that are loaded by a process rather than by a test.
 var ENTRY_POINTS = [
@@ -115,11 +112,12 @@ function collectPattern(node, into) {
 }
 
 function analyse(source) {
-	// ecmaVersion is a NUMBER, not 'latest': the acorn on hand is 7.x (pug pulls
-	// it in), where a string makes the internal version comparisons NaN and the
-	// parser spins instead of failing. allowHashBang is for the bin/ shebangs.
+	// allowHashBang is for the bin/ shebangs. Note that 'latest' needs acorn 8:
+	// on 7.x a string ecmaVersion makes the internal version comparisons NaN and
+	// the parser spins rather than failing, which is why the version floor in
+	// package.json matters more than it looks.
 	var ast = acorn.parse(source, {
-		ecmaVersion: ACORN_ECMA,
+		ecmaVersion: 'latest',
 		sourceType: 'module',
 		allowHashBang: true,
 		allowAwaitOutsideFunction: true,
@@ -185,7 +183,6 @@ function analyse(source) {
 }
 
 describe('process entry point bindings', function () {
-	before(function () { if (!acorn) this.skip(); });
 
 	ENTRY_POINTS.forEach(function (rel) {
 		it(rel + ' references nothing it has not declared or imported', function () {
