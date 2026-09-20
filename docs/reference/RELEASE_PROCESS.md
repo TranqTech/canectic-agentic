@@ -65,6 +65,8 @@ node scripts/release.mjs --stable 0.9.6a --dry-run
 | `--dry-run` | Report the plan, write nothing |
 | `--output DIR` | Where artifacts land, default `dist/releases` |
 | `--skip-tests` | Re-cut after a failure without waiting for the suite |
+| `--skip-audit` | Do not audit dependencies. For a cut with no network |
+| `--allow-advisories` | Cut despite a fixable high or critical advisory |
 | `--allow-dirty` | Build from uncommitted work. Never for a real release |
 | `--allow-migration-gap` | Publish a stable that drops a development migration |
 | `--no-tag` | Skip the release commit and the tag |
@@ -73,10 +75,51 @@ node scripts/release.mjs --stable 0.9.6a --dry-run
 | `--date YYYY-MM-DD` | Override the release date |
 | `--counter N` | Force a same-day development build counter |
 
+### The dependency audit
+
+Both kinds of cut run `npm audit --json --omit=dev` and **refuse** on a high or
+critical advisory in a production dependency that has a published fix.
+
+Every clause of that rule is doing work, and loosening any of them makes the
+gate useless in a different way:
+
+- **Production**, because dev dependencies are not installed on a board, and a
+  release held up by mocha's tree is noise.
+- **High or critical**, because a cut blocked by a low-severity advisory in
+  something transitive is a cut that never happens.
+- **Fix available**, because a gate that cannot be satisfied gets bypassed every
+  time until nobody reads it. An advisory with no published fix is reported
+  loudly and does not block.
+
+Everything the audit saw is printed either way, so nothing is silently passed
+over. `--allow-advisories` overrides the refusal; `--skip-audit` skips the check
+entirely, which is for cutting with no network.
+
+An audit that could not run is **not** treated as a clean one. It warns that the
+release has not been checked and carries on, rather than printing a tick for
+something that never happened.
+
+Why at cut time: a dependency sweep is correct on the day it is done and stale a
+week later. adm-zip went to 0.6 on 2026-09-04, clearing every advisory that then
+existed; 0.6.1 landed on 2026-09-11 fixing two more, and nothing would have
+noticed until somebody happened to run an audit by hand. The cut is the moment
+the tree stops being the maintainer's and starts being everybody's, so it is the
+moment to look.
+
+The rule itself is `summariseAudit` in `src/release/auditCheck.js`, pure and
+tested in `tests/releaseAudit.test.js`, because "is this release safe to ship"
+is not a question to answer with a regex over console output.
+
+Note that `npm audit` reads the **lockfile**, not `node_modules`. That is the
+right thing here: `package-lock.json` ships in the artifact and is what a board
+installs from, so the audit describes what sysops will actually get rather than
+what happens to be on the maintainer's disk.
+
 ### What a stable cut does
 
-1. Refuses a dirty tree, a failing suite, an empty `Pending`, or a version that
-   is not newer than what `package.json` claims
+1. Refuses a dirty tree, a failing suite, a fixable high/critical advisory in a
+   production dependency, an empty `Pending`, or a version that is not newer
+   than what `package.json` claims
 2. Checks that it ships every migration its own development builds already
    applied (section 4)
 3. Closes `Pending` into `## v<version> (<date>)` and opens a fresh one

@@ -61,6 +61,7 @@ import {
 	serialiseIndex, parseIndex, indexName
 } from '../src/release/releaseIndex.js';
 import { checkStableCoverage, deltaShare } from '../src/release/pipelineCheck.js';
+import { summariseAudit, formatAdvisory } from '../src/release/auditCheck.js';
 import {
 	pendingIsEmpty, findPending, closePending, crossCheckPending, releaseNoteSkeleton,
 	countPendingHeadings
@@ -99,6 +100,8 @@ function parseArgs(argv) {
 		else if (a === '--counter')             { opts.counter = parseInt(argv[++i], 10); }
 		else if (a === '--dry-run')             { opts.dryRun = true; }
 		else if (a === '--skip-tests')          { opts.skipTests = true; }
+		else if (a === '--skip-audit')          { opts.skipAudit = true; }
+		else if (a === '--allow-advisories')    { opts.allowAdvisories = true; }
 		else if (a === '--allow-dirty')         { opts.allowDirty = true; }
 		else if (a === '--allow-migration-gap') { opts.allowMigrationGap = true; }
 		else if (a === '--no-tag')              { opts.tag = false; }
@@ -122,6 +125,8 @@ function usage() {
 		'  --output DIR             where artifacts land (default dist/releases)',
 		'  --dry-run                report what would happen, write nothing',
 		'  --skip-tests             do not run the suite (for a re-cut after a failure)',
+		'  --skip-audit             do not audit dependencies (offline cut)',
+		'  --allow-advisories       cut despite a fixable high or critical advisory',
 		'  --allow-dirty            build from a dirty tree (never for a real release)',
 		'  --allow-migration-gap    publish a stable that drops a development migration',
 		'  --no-tag                 skip the release commit and tag (stable only)',
@@ -192,6 +197,64 @@ function runTests() {
 		die('the test suite failed, so there is nothing to release');
 	}
 	ok('tests pass');
+}
+
+// A dependency sweep is correct on the day it is done and stale a week later.
+// A cut is the moment the tree stops being ours and starts being everybody's,
+// so it is the moment to look. See src/release/auditCheck.js for why the rule
+// blocks on so narrow a set.
+function auditDependencies(opts) {
+	info('auditing production dependencies');
+
+	var raw = null;
+	try {
+		// --omit=dev: a board installs production dependencies, and holding a
+		// release over mocha's tree is noise.
+		raw = execFileSync('npm', ['audit', '--json', '--omit=dev'],
+			{ cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+	} catch (e) {
+		// npm exits non-zero WHEN IT FINDS SOMETHING, which is the case this
+		// check exists for, so the report is on stdout and is not an error.
+		raw = e.stdout ? e.stdout.toString() : null;
+	}
+
+	var report = null;
+	try { report = JSON.parse(raw); } catch (_) { report = null; }
+
+	var verdict = summariseAudit(report);
+
+	if (!verdict.usable) {
+		// Never print a tick for an audit that did not run. Offline is the
+		// normal reason and is not worth failing a cut over.
+		warn('could not audit dependencies (' + verdict.reason + ') - this release has NOT been checked');
+		return;
+	}
+
+	for (var v of verdict.reported) {
+		if (verdict.blocking.indexOf(v) === -1) warn(formatAdvisory(v));
+	}
+
+	if (verdict.blocking.length === 0) {
+		var n = verdict.reported.length;
+		ok('no fixable high or critical advisories' + (n ? ' (' + n + ' other advisory/ies reported above)' : ''));
+		return;
+	}
+
+	console.log('');
+	for (var b of verdict.blocking) console.log('  ' + RED + 'x' + NC + ' ' + formatAdvisory(b));
+	console.log('');
+	console.log('  These are production dependencies, so they ship to every board that');
+	console.log('  installs this release, and each one has a published fix.');
+	console.log('');
+	console.log('    npm audit fix          (or npm update <package> for an in-range bump)');
+	console.log('');
+
+	if (opts.allowAdvisories) {
+		warn('cutting anyway (--allow-advisories)');
+		return;
+	}
+	die(verdict.blocking.length + ' fixable high/critical advisory/ies in production dependencies. ' +
+		'Pass --allow-advisories to cut regardless.');
 }
 
 // ---------------------------------------------------------------------------
@@ -764,6 +827,9 @@ function main() {
 
 	if (!opts.skipTests) runTests();
 	else warn('skipping the test suite (--skip-tests)');
+
+	if (!opts.skipAudit) auditDependencies(opts);
+	else warn('skipping the dependency audit (--skip-audit)');
 
 	if (opts.mode === 'publish') mirrorToGitLab(opts.version, opts);
 	else if (opts.mode === 'stable') cutStable(opts);
