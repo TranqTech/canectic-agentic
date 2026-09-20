@@ -105,6 +105,14 @@ block content
                         .form-text.text-muted
                           | Whether messages carry the user's handle or their real name. New areas inherit this.
                       .col-6
+                        label.form-label(for="ng_thread_mode") Thread Mode:
+                        select#ng_thread_mode.form-select(name='thread_mode')
+                          option(value='standard' selected) Standard (threaded)
+                          option(value='no_threads') No Threads (flat)
+                          option(value='subscribe_only') Subscribe Only
+                        .form-text.text-muted
+                          | How areas in this group read by default. New areas inherit this.
+                      .col-6
                         label.form-label(for="ng_newscan") Newscan Default:
                         select#ng_newscan.form-select(name='newscan_default')
                           option(value='false' selected) No

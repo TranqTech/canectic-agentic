@@ -62,6 +62,9 @@ block content
                         | Post As:
                         = msgGroup.post_as === 'realname' ? 'Real Name' : 'Username'
                       h5
+                        | Thread Mode:
+                        = threadModeLabel(msgGroup.thread_mode)
+                      h5
                         | Newscan Default:
                         = msgGroup.newscan_default ? 'Yes' : 'No'
               .card
@@ -388,6 +391,12 @@ block content
                               option(value='username' selected=(msgGroup.post_as !== 'realname')) Username
                               option(value='realname' selected=(msgGroup.post_as === 'realname')) Real Name
                           .col-4
+                            label.form-label(for='edit_thread_mode') Thread Mode:
+                            select#edit_thread_mode.form-select(name='thread_mode')
+                              option(value='standard' selected=(msgGroup.thread_mode !== 'no_threads' && msgGroup.thread_mode !== 'subscribe_only')) Standard (threaded)
+                              option(value='no_threads' selected=(msgGroup.thread_mode === 'no_threads')) No Threads (flat)
+                              option(value='subscribe_only' selected=(msgGroup.thread_mode === 'subscribe_only')) Subscribe Only
+                          .col-4
                             label.form-label(for='edit_newscan') Newscan Default:
                             select#edit_newscan.form-select(name='newscan_default')
                               option(value='false' selected=(!msgGroup.newscan_default)) No
@@ -511,6 +520,10 @@ block content
                     .form-check.mb-2
                       input.form-check-input#push_post_as(type='checkbox' name='fields' value='post_as' checked)
                       label.form-check-label(for='push_post_as') Post As (#{msgGroup.post_as || 'username'})
+                    .form-check.mb-2
+                      input.form-check-input#push_thread_mode(type='checkbox' name='fields' value='thread_mode')
+                      label.form-check-label(for='push_thread_mode') Thread Mode (#{threadModeLabel(msgGroup.thread_mode)})
+                      .form-text.text-muted Unticked by default, since this replaces any per-area choice.
                     .form-check.mb-2
                       input.form-check-input#push_newscan(type='checkbox' name='fields' value='newscan_default' checked)
                       label.form-check-label(for='push_newscan') Newscan Default (#{msgGroup.newscan_default ? 'Yes' : 'No'})

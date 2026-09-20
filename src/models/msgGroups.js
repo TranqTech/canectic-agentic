@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
 import * as msgAreas from "./msgAreas.js";
+import { normaliseThreadMode, isThreadMode } from "../utils/threadMode.js";
 import appConfig from "../config/appConfig.js";
 
 // QWK conference number block model
@@ -177,6 +178,9 @@ async function newGroup(formObj) {
 		post_rest_flags: normalizeFlags(formObj.post_rest_flags),
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase() : 'username',
+		// Default thread mode for areas created in this group. Areas keep
+		// their own column; this is what a new one starts from.
+		thread_mode: normaliseThreadMode(formObj.thread_mode),
 		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true,
 		// Retention defaults for areas created in this group. NULL means no
 		// pruning, which is what every group and area starts as.
@@ -277,6 +281,9 @@ async function updateGroup(shortcode, formObj) {
 	if (formObj.read_rest_flags !== undefined) updateObj.read_rest_flags = normalizeFlags(formObj.read_rest_flags);
 	if (formObj.post_perm_flags !== undefined) updateObj.post_perm_flags = normalizeFlags(formObj.post_perm_flags);
 	if (formObj.post_rest_flags !== undefined) updateObj.post_rest_flags = normalizeFlags(formObj.post_rest_flags);
+	if (formObj.thread_mode !== undefined && isThreadMode(formObj.thread_mode)) {
+		updateObj.thread_mode = normaliseThreadMode(formObj.thread_mode);
+	}
 	if (formObj.post_as !== undefined) {
 		var postAs = (formObj.post_as || '').trim().toLowerCase();
 		if (['username', 'realname'].includes(postAs)) updateObj.post_as = postAs;
@@ -579,6 +586,9 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	}
 	if (pushAll || fields.includes('post_as')) {
 		updateObj.post_as = group.post_as || 'username';
+	}
+	if (pushAll || fields.includes('thread_mode')) {
+		updateObj.thread_mode = normaliseThreadMode(group.thread_mode);
 	}
 	if (pushAll || fields.includes('newscan_default')) {
 		updateObj.newscan_default = group.newscan_default || false;

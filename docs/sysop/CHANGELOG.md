@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.6a)
 
+### Messages
+
+- **Thread mode can now be set on a message group.** It was per area only, so a sysop wanting a whole network to read flat had to set every area by hand and set each new one again afterwards. The group carries a default that new areas inherit, an explicit choice on the area form still wins, and Push Group Defaults gained a Thread Mode tickbox for applying it to areas that already exist. It is unticked by default, like Retention, because pushing it replaces whatever each area was set to. Existing groups default to Standard, so nothing changes until you set one.
+
 ### File Echoes
 
 - Fix: **files received from an uplink were never passed on to your downlinks.** A TIC file arriving from a peer was filed into the local area correctly and its outbound rows were written correctly, and then nothing ever staged them. The periodic outbound sweep, which is the safety net that catches whatever was not sent on demand, covered echomail, QWK, NNTP and email but had never included file echoes; and the inbound toss did not signal an outbound one the way the design had always described. The only things that actually staged a file echo were a local upload, the admin Trigger Event button and a manual toss, so a downlink received files only when somebody on your board happened to upload one. Nothing failed and nothing was logged. Inbound tossing now signals outbound immediately, and file echoes are part of the outbound sweep, so a board with no local uploads at all still feeds its downlinks.

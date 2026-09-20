@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as tableTools from '../middleware/db/tableTools.js';
 import * as msgGroups from "./msgGroups.js";
+import { normaliseThreadMode, isThreadMode } from "../utils/threadMode.js";
 import * as networkAreas from "./networkAreas.js";
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
@@ -215,9 +216,11 @@ async function newArea(formObj) {
 		created_by_uuid: formObj.createdByUUID,
 		created_by_name: formObj.createdByName,
 		msg_count: 0,
-		thread_mode: ['standard', 'subscribe_only', 'no_threads'].includes((formObj.thread_mode || '').trim().toLowerCase())
-			? formObj.thread_mode.trim().toLowerCase()
-			: 'standard',
+		// Falls back to the GROUP's default rather than straight to
+		// 'standard', so a group set to flat does not hand every area created
+		// in it a threaded default the sysop then undoes one at a time. An
+		// explicit choice on the form still wins.
+		thread_mode: normaliseThreadMode(formObj.thread_mode, normaliseThreadMode(dbgroup.thread_mode)),
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase()
 			: 'username',
@@ -460,12 +463,8 @@ async function updateArea(shortcode, formObj) {
 	if (formObj.max_messages  !== undefined) updateObj.max_messages  =
 		(formObj.max_messages !== '' && parseInt(formObj.max_messages) > 0) ? parseInt(formObj.max_messages) : null;
 	if (formObj.active      !== undefined) updateObj.active          = (formObj.active === "true" || formObj.active === true);
-	if (formObj.thread_mode !== undefined) {
-		var validModes = ['standard', 'subscribe_only', 'no_threads'];
-		var mode = (formObj.thread_mode || '').trim().toLowerCase();
-		if (validModes.includes(mode)) {
-			updateObj.thread_mode = mode;
-		}
+	if (formObj.thread_mode !== undefined && isThreadMode(formObj.thread_mode)) {
+		updateObj.thread_mode = normaliseThreadMode(formObj.thread_mode);
 	}
 	if (formObj.post_as !== undefined) {
 		var validPostAs = ['username', 'realname'];

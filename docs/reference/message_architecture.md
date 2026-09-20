@@ -92,6 +92,20 @@ Each row represents a message area (forum/conference) belonging to a message gro
   - `standard` — normal threaded view with thread listing
   - `no_threads` — flat message list only, no thread grouping
   - `subscribe_only` — (future) only show subscribed threads in newscan
+
+  Also on `message_groups`, where it is the default a new area inherits when
+  the create form does not specify one. An explicit choice on the area form
+  wins, and Push Group Defaults can apply the group value to existing areas
+  (unticked by default, since it replaces a per-area choice).
+
+  The three values are defined once in `src/utils/threadMode.js` and validated
+  from there by both models and both admin forms. They were previously checked
+  by four inline copies of the same array, and an unrecognised value is
+  silently replaced with `standard` rather than rejected, so a copy falling out
+  of step would quietly return an area to threaded on some paths and not
+  others. `normaliseThreadMode(value, fallback)` coerces; `isThreadMode(value)`
+  is separate so an update can distinguish "not submitted" (leave the stored
+  value alone) from "submitted as nonsense" (do not write it).
 - `post_as` — VARCHAR(16), DEFAULT 'username'. Controls how the poster's name appears:
   - `username` — posts display the user's login name
   - `realname` — posts display the user's full name (falling back to username)
@@ -650,7 +664,7 @@ Stacked two-line layout on all screen sizes: from/to/subject on top, date below.
 
 Separate from area newscan subscriptions. Allows users to subscribe to or ignore individual threads, independent of whether they're subscribed to the area's newscan. Some areas may also be flagged to function in "subscribe-to-threads" mode rather than "read everything" mode.
 
-The `thread_mode` column on `message_areas` is implemented (standard/subscribe_only/no_threads). The `user_thread_prefs` table and model logic are pending.
+The `thread_mode` column is implemented on `message_areas` and on `message_groups` (standard/subscribe_only/no_threads), the group value acting as the default for areas created in it. The `user_thread_prefs` table and model logic are pending.
 
 ### Schema
 

@@ -13,6 +13,7 @@ import * as privateMessages from '../models/privateMessages.js';
 import * as msgNetworks from '../models/msgNetworks.js';
 import * as msgZones from '../models/msgZones.js';
 import * as msgGroups from '../models/msgGroups.js';
+import { threadModeLabel } from "../utils/threadMode.js";
 import * as msgAreas from '../models/msgAreas.js';
 // netmail import removed -- legacy admin netmail routes replaced by PM system
 import * as messages from '../models/messages.js';
@@ -336,6 +337,7 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 			errormessages: result.errormessages,
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions(),
+			threadModeLabel: threadModeLabel,
 			DateTime: DateTime
 		});
 	}
@@ -401,6 +403,7 @@ router.post('/msgGroup/:shortcode/delete', urlencodedParser, requireAdmin, async
 			errormessages: result.errormessages,
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions(),
+			threadModeLabel: threadModeLabel,
 			DateTime: DateTime
 		});
 	}
