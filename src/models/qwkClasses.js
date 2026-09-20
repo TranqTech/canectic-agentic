@@ -23,6 +23,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import AdmZip from 'adm-zip';
 import { cp437ToUtf8, utf8ToCp437 } from '../utils/codepageConversions.js';
+import { canonicalText } from '../utils/messageText.js';
 
 const QWK_RECORD_SIZE   = 128;
 const QWK_HEADER_BLOCKS = 1;
@@ -561,15 +562,16 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 
 	for (var item of workItems) {
 		// Determine the CP437 body to pack
+		// Ask what the body says rather than guessing from which column is
+		// set. The old test was "utf8 is set, so body_text must be raw CP437",
+		// which is true of a QWK message and false of an FTN one — relaying an
+		// FTN message into a QWK packet turned `Γöî` into `ô÷ε`.
 		var bodyForPack;
-		if (item.msg.utf8) {
-			bodyForPack = item.msg.body_text || '';
-		} else {
-			var cp437Bytes = utf8ToCp437(item.msg.body_text || '');
-			bodyForPack = '';
-			for (var i = 0; i < cp437Bytes.length; i++) {
-				bodyForPack += String.fromCharCode(cp437Bytes[i]);
-			}
+		var canonical = canonicalText(item.msg);
+		var cp437Bytes = utf8ToCp437(canonical);
+		bodyForPack = '';
+		for (var i = 0; i < cp437Bytes.length; i++) {
+			bodyForPack += String.fromCharCode(cp437Bytes[i]);
 		}
 
 		var bodyBuf = buildQwkBody(bodyForPack);

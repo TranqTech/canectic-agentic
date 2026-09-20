@@ -18,6 +18,7 @@ import * as peerConnections from '../../models/peerConnections.js';
 import * as networkAreas from '../../models/networkAreas.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
 import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
+import { canonicalText } from '../../utils/messageText.js';
 import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
 
 
@@ -134,7 +135,11 @@ class NNTPClient {
 
 	_write(data) {
 		return new Promise((resolve, reject) => {
-			this.socket.write(data, 'binary', (err) => {
+			// UTF-8, not 'binary'. latin-1 takes the LOW BYTE of each
+			// character, so every codepoint above U+00FF was truncated on its
+			// way out. Commands are ASCII, for which UTF-8 is identical, so
+			// this is safe for both.
+			this.socket.write(data, 'utf8', (err) => {
 				if (err) reject(err);
 				else resolve();
 			});
@@ -318,9 +323,22 @@ function normaliseBodyText(decodedBody, charset) {
 		}
 	}
 
-	// UTF-8, ASCII, latin-1, ISO-8859-x, windows-125x — all already correct
-	// Unicode after the transfer-encoding decode step (String.fromCharCode maps
-	// byte values directly to Unicode codepoints for these charsets).
+	// UTF-8 needs a real decode. The transfer-encoding step maps each BYTE to
+	// the codepoint of the same value, which is correct for latin-1 and its
+	// relatives and wrong for UTF-8: a multi-byte sequence becomes one
+	// character per byte, so U+2588 arrives as "Γûê". The comment that used to
+	// sit here claimed otherwise and that is how UTF-8 articles were stored
+	// mangled.
+	if (cs === 'utf8') {
+		try {
+			return { bodyText: Buffer.from(decodedBody, 'latin1').toString('utf8'), utf8: null };
+		} catch (_) {
+			return { bodyText: decodedBody, utf8: null };
+		}
+	}
+
+	// ASCII, latin-1, ISO-8859-x, windows-125x — already correct Unicode,
+	// because for these a byte value IS the codepoint.
 	return { bodyText: decodedBody, utf8: null };
 }
 
@@ -722,13 +740,28 @@ function formatNntpArticle(msg, areatag, domain) {
 		? new Date(msg.system_time).toUTCString()
 		: new Date().toUTCString();
 
+	// Headers carrying non-ASCII must be RFC 2047 encoded words; a raw 8-bit
+	// header is not legal and is mangled or rejected by strict servers.
+	var encodeHeader = function (value) {
+		var text = String(value == null ? '' : value);
+		// eslint-disable-next-line no-control-regex
+		if (!/[^\x00-\x7F]/.test(text)) return text;
+		return '=?UTF-8?B?' + Buffer.from(text, 'utf8').toString('base64') + '?=';
+	};
+
 	var headers = [
-		'From: '       + fromAddr,
+		'From: '       + encodeHeader(fromAddr),
 		'Newsgroups: ' + areatag,
-		'Subject: '    + (msg.subject || '(no subject)'),
+		'Subject: '    + encodeHeader(msg.subject || '(no subject)'),
 		'Date: '       + date,
 		'Message-ID: ' + msgId,
-		'Path: '       + hostPart
+		'Path: '       + hostPart,
+		// Declare the body encoding. Without this the article defaults to
+		// US-ASCII per RFC 5536 and every non-ASCII character is undefined
+		// behaviour on the receiving side.
+		'MIME-Version: 1.0',
+		'Content-Type: text/plain; charset=utf-8',
+		'Content-Transfer-Encoding: 8bit'
 	];
 
 	if (msg.reply_to) {
@@ -747,8 +780,9 @@ function formatNntpArticle(msg, areatag, domain) {
 		'cyan'
 	);
 
-	// Body: stored with \r line endings — convert to \n, then dot-stuff
-	var bodyText  = (msg.body_text || '').replace(/\r/g, '\n');
+	// Body: ask what the message says rather than reading body_text directly,
+	// which holds raw CP437 bytes for anything that arrived over QWK.
+	var bodyText  = canonicalText(msg).replace(/\r/g, '\n');
 	var bodyLines = bodyText.split('\n').map(line => line.startsWith('.') ? '.' + line : line);
 
 	return headers.join('\r\n') + '\r\n\r\n' + bodyLines.join('\r\n');

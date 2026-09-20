@@ -23,6 +23,7 @@ import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
 import * as privateMessages from './privateMessages.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
+import { canonicalText } from '../utils/messageText.js';
 import {
 	QWK_RECORD_SIZE,
 	QWK_LINE_TERM,
@@ -126,17 +127,13 @@ function buildMessagesDat(messageItems, qwkId) {
 	for (var i = 0; i < messageItems.length; i++) {
 		var item = messageItems[i];
 
-		// Determine the CP437 body
-		var bodyForPack;
-		if (item.msg.utf8) {
-			// body_text is already CP437
-			bodyForPack = item.msg.body_text || '';
-		} else {
-			var cp437Bytes = utf8ToCp437(item.msg.body_text || '');
-			bodyForPack = '';
-			for (var j = 0; j < cp437Bytes.length; j++) {
-				bodyForPack += String.fromCharCode(cp437Bytes[j]);
-			}
+		// Ask what the body says rather than guessing from which column is set.
+		// See messageText.canonicalText: "utf8 is set, so body_text is raw
+		// CP437" holds for a QWK message and not for an FTN one.
+		var bodyForPack = '';
+		var cp437Bytes = utf8ToCp437(canonicalText(item.msg));
+		for (var j = 0; j < cp437Bytes.length; j++) {
+			bodyForPack += String.fromCharCode(cp437Bytes[j]);
 		}
 
 		var bodyBuf = buildQwkBody(bodyForPack);
