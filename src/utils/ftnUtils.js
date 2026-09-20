@@ -533,7 +533,117 @@ async function getSystemTime(dtstring, TZString){
 	return systemTime;
 }
 
+/**
+ * Normalise stored optional_attributes back into { attribute, value } objects.
+ *
+ * The column is text[], and each element goes in as a JSON STRING. Read back
+ * it is still a string, so `attr.attribute` is undefined — and the outbound
+ * tosser does exactly that, writing `\x01undefined: ` for every kludge it was
+ * asked to carry. A packet captured off the wire had 772 of them across 157
+ * messages, with CHRS gone entirely and REPLY surviving on 10.
+ *
+ * Nothing failed. The packet is well formed, the messages arrive, and the
+ * receiving system simply never learns the charset or the reply linkage. That
+ * is why this parses on READ rather than fixing the write alone: every row
+ * already stored is in the string form, and they have to keep working.
+ *
+ * Accepts objects too, so a caller that already has the right shape, or a row
+ * written after the write side is cleaned up, passes through untouched.
+ */
+function parseOptionalAttributes(stored) {
+	var out = [];
+
+	// A kludge literally named "undefined" with no value is not a kludge, it
+	// is the scar this bug leaves: an earlier hop read the strings as objects,
+	// got undefined for both halves, and wrote `\x01undefined: ` into the
+	// packet. Carrying those forward would spread damage we can no longer
+	// undo, so they are dropped rather than relayed.
+	var damaged = function (name, value) {
+		return String(name).toLowerCase() === 'undefined' && String(value == null ? '' : value).trim() === '';
+	};
+
+	for (var entry of (stored || [])) {
+		if (!entry) continue;
+
+		if (typeof entry === 'object') {
+			if (entry.attribute && !damaged(entry.attribute, entry.value)) {
+				out.push({ attribute: entry.attribute, value: entry.value == null ? '' : entry.value });
+			}
+			continue;
+		}
+
+		if (typeof entry !== 'string') continue;
+
+		var text = entry.trim();
+		if (text.startsWith('{')) {
+			try {
+				var parsed = JSON.parse(text);
+				if (parsed && parsed.attribute) {
+					if (!damaged(parsed.attribute, parsed.value)) {
+						out.push({ attribute: parsed.attribute, value: parsed.value == null ? '' : parsed.value });
+					}
+					continue;
+				}
+			} catch (_) { /* fall through to the kludge-text reading below */ }
+		}
+
+		// A bare kludge line, with or without the leading SOH. Tolerated so a
+		// hand-written row or another writer's format is not silently dropped.
+		var line = text.replace(/^\x01/, '');
+		var colon = line.indexOf(':');
+		if (colon > 0) {
+			var name = line.substring(0, colon).trim();
+			var val  = line.substring(colon + 1).trim();
+			if (!damaged(name, val)) out.push({ attribute: name, value: val });
+		}
+	}
+	return out;
+}
+
+/**
+ * Which character set a message body declares, per FTS-5003.
+ *
+ * The CHRS kludge lives inside the message text as a control line, so this
+ * takes the raw bytes and reads it out before anything decides how to decode
+ * them. Identifiers are ASCII, so a latin1 scan is safe whatever the body is.
+ *
+ * FTN's default is CP437 when nothing is declared, and that default is what
+ * the ecosystem actually runs on: of 113,079 messages held here, 163 carry a
+ * CHRS at all. So "absent" means CP437, not "unknown".
+ *
+ * Returns one of 'utf8', 'latin1', 'cp437'.
+ */
+function charsetFromKludge(bytes) {
+	if (!bytes || !bytes.length) return 'cp437';
+
+	var text = Buffer.isBuffer(bytes) ? bytes.toString('latin1') : String(bytes);
+	var m = /\x01CHRS:?\s*([A-Za-z0-9-]+)/i.exec(text);
+	if (!m) return 'cp437';
+
+	var id = m[1].toUpperCase();
+	if (id === 'UTF-8' || id === 'UTF8') return 'utf8';
+	if (id === 'LATIN-1' || id === 'LATIN1' || id === 'ISO-8859-1') return 'latin1';
+	// CP437, IBMPC, ASCII and anything unrecognised all decode through the
+	// CP437 table. ASCII is a strict subset of it, so that is lossless, and an
+	// unknown identifier is better served by the ecosystem default than by a
+	// guess.
+	return 'cp437';
+}
+
+/**
+ * The CHRS value to declare for a charset we are about to write.
+ * Levels are from FTS-5003: 2 for an 8-bit single-byte set, 4 for UTF-8.
+ */
+function chrsValueFor(charset) {
+	if (charset === 'utf8') return 'UTF-8 4';
+	if (charset === 'latin1') return 'LATIN-1 2';
+	return 'CP437 2';
+}
+
 export{
+	parseOptionalAttributes,
+	charsetFromKludge,
+	chrsValueFor,
 	sanitiseMessageDate,
 	getDateTimeString,
 	genMsgId,

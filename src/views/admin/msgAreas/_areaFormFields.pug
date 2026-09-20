@@ -116,6 +116,15 @@ mixin areaFormFields(prefix, mode, opts)
               option(value='no_threads') No Threads (flat)
               option(value='subscribe_only') Subscribe Only
       .row.mb-3
+        .col-12
+          label.form-label(for=prefix + 'charset') Outbound Character Set
+          select.form-select(id=prefix + 'charset' name='charset')
+            option(value='auto') Automatic (CP437 where it fits)
+            option(value='cp437') Always CP437
+            option(value='utf8') Always UTF-8
+          .form-text.text-muted
+            | Automatic sends CP437 whenever the message fits it, and UTF-8 only when CP437 would lose characters. Either way the message declares what it carries, so a receiver need not guess.
+      .row.mb-3
         .col-6
           label.form-label(for=prefix + 'post_as') Post As
           select.form-select(id=prefix + 'post_as' name='post_as')

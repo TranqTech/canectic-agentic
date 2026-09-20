@@ -97,7 +97,9 @@ async function ftnToDb(ftnMessage) {
 }
 
 async function dbToFtn(dbMessage) {
-	var optional_attributes = dbMessage.optional_attributes || [];
+	// Stored as JSON strings in a text[]; the outbound tosser needs objects,
+	// and got `undefined` for every kludge without this.
+	var optional_attributes = ftnUtils.parseOptionalAttributes(dbMessage.optional_attributes);
 
 	// Reassemble the full "address serial" MSGID for the outbound FTN
 	// message object from the tuple columns. Legacy rows where the split
@@ -329,7 +331,7 @@ async function getOutboundForConnection(conn) {
 	// from network_areas so we can stamp the FTN AreaTag on each message
 	var enabledSubs = await postgres.query(
 		`SELECT pas.id, pas.area_id, pas.msg_idx,
-		        ma.shortcode, na.areatag
+		        ma.shortcode, ma.charset, na.areatag
 		 FROM peer_area_subscriptions pas
 		 JOIN message_areas ma ON ma.id = pas.area_id
 		 JOIN network_areas na ON na.area_id = pas.area_id
@@ -414,6 +416,9 @@ async function getOutboundForConnection(conn) {
 
 							msg.path = systemaddress.netnode;
 							var ftnObj = await dbToFtn(msg);
+							// The area decides the wire encoding; the tosser
+							// needs it to pick bytes and to declare CHRS.
+							ftnObj.Charset = sub.charset || 'auto';
 							ftnObj.AreaTag = sub.areatag;
 							tossableArray.push(ftnObj);
 						} else {

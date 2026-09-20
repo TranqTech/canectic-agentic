@@ -6,6 +6,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as tableTools from '../middleware/db/tableTools.js';
 import * as msgGroups from "./msgGroups.js";
 import { normaliseThreadMode, isThreadMode } from "../utils/threadMode.js";
+import { normaliseCharsetMode, isCharsetMode } from "../utils/charsetPolicy.js";
 import * as networkAreas from "./networkAreas.js";
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
@@ -221,6 +222,10 @@ async function newArea(formObj) {
 		// in it a threaded default the sysop then undoes one at a time. An
 		// explicit choice on the form still wins.
 		thread_mode: normaliseThreadMode(formObj.thread_mode, normaliseThreadMode(dbgroup.thread_mode)),
+		// Wire encoding for outbound FTN. 'auto' sends CP437 whenever the body
+		// fits it, which is nearly always, and UTF-8 only when it would lose
+		// something. Either way the message declares what it carries.
+		charset: normaliseCharsetMode(formObj.charset),
 		post_as: ['username', 'realname'].includes((formObj.post_as || '').trim().toLowerCase())
 			? formObj.post_as.trim().toLowerCase()
 			: 'username',
@@ -465,6 +470,9 @@ async function updateArea(shortcode, formObj) {
 	if (formObj.active      !== undefined) updateObj.active          = (formObj.active === "true" || formObj.active === true);
 	if (formObj.thread_mode !== undefined && isThreadMode(formObj.thread_mode)) {
 		updateObj.thread_mode = normaliseThreadMode(formObj.thread_mode);
+	}
+	if (formObj.charset !== undefined && isCharsetMode(formObj.charset)) {
+		updateObj.charset = normaliseCharsetMode(formObj.charset);
 	}
 	if (formObj.post_as !== undefined) {
 		var validPostAs = ['username', 'realname'];

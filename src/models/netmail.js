@@ -264,9 +264,9 @@ async function dbToFtn(dbObj) {
 	// Reassemble the full "address serial" MSGID from the tuple columns
 	// for the outbound FTN Message object.
 	ftnMessage.MsgId           = ftnUtils.joinMsgidTuple(dbObj.msg_orig_addr, dbObj.msg_id);
-	ftnMessage.OptionalAttributes = (dbObj.optional_attributes && dbObj.optional_attributes.length > 0)
-		? dbObj.optional_attributes
-		: [];
+	// Same text[]-of-JSON-strings shape as echomail; parse or every kludge
+	// exports as `undefined`.
+	ftnMessage.OptionalAttributes = ftnUtils.parseOptionalAttributes(dbObj.optional_attributes);
 	ftnMessage.OriginLine = dbObj.origin_line;
 	ftnMessage.DateTime   = dbObj.datetime_string;
 	ftnMessage.Id         = dbObj.id;

@@ -18,6 +18,7 @@ import * as systemAddresses from '../../models/systemAddresses.js'
 import * as echomail from '../../models/echomail.js'
 import * as messages from '../../models/messages.js'
 import * as ftnUtils from "../../utils/ftnUtils.js"
+import * as charsetPolicy from "../../utils/charsetPolicy.js"
 import * as peerConnections from '../../models/peerConnections.js'
 import * as codepageConversions from "../../utils/codepageConversions.js"
 import appConfig from "../../config/appConfig.js"
@@ -563,9 +564,26 @@ function ReadPkt(filepath) {
 			offset += message.Subject.length + 1;
 			
 			var TextBuffer = readNullTerminatedByteArray(buffer, offset);
-			
-			message.RawText = codepageConversions.cp437ToUtf8(TextBuffer);
-			offset += message.RawText.length + 1;
+
+			// Decode by what the message DECLARES, not by assumption. FTN's
+			// default is CP437 and almost nothing declares otherwise, but a
+			// message that says UTF-8 and is decoded through the CP437 table
+			// turns every multi-byte character into mojibake, permanently,
+			// because body_html is rendered from it at toss time.
+			message.Charset = ftnUtils.charsetFromKludge(TextBuffer);
+			if (message.Charset === 'utf8') {
+				message.RawText = TextBuffer.toString('utf8');
+			} else if (message.Charset === 'latin1') {
+				message.RawText = TextBuffer.toString('latin1');
+			} else {
+				message.RawText = codepageConversions.cp437ToUtf8(TextBuffer);
+			}
+
+			// Advance by the BYTE length, not the decoded string length. They
+			// are equal for CP437 and latin1, where one byte is one character,
+			// and they are not for UTF-8: using the string length there walks
+			// the packet short and desynchronises every message after it.
+			offset += TextBuffer.length + 1;
 			
 			// Process message text for control lines and body text
 			processMessageText(message);
@@ -1095,6 +1113,20 @@ function WritePktToNode(messageArray, conn, systemaddress){
 			msg.OptionalAttributes.push(newattrib)
 		}
 
+		// Declare the wire encoding. The area's policy decides it; `auto`
+		// means CP437 whenever the body fits, which is nearly always. Writing
+		// undeclared UTF-8 is what mangled inbound art on every receiver that
+		// followed the FTN default, and that default is what the ecosystem
+		// runs on: of 113,079 messages held here, 163 carry a CHRS at all.
+		const wireCharset = charsetPolicy.charsetForMessage(
+			msg.Charset, (msg.BodyText || '') + (msg.Subject || ''), codepageConversions);
+		if (!setattribs.chrs) {
+			msg.OptionalAttributes.push({
+				attribute: "CHRS",
+				value: ftnUtils.chrsValueFor(wireCharset)
+			})
+		}
+
 		// Message type 0002
 		buffer.writeUInt16LE(0x0002, offset); offset += 2;
 
@@ -1110,9 +1142,16 @@ function WritePktToNode(messageArray, conn, systemaddress){
 		const dtStr = (msg.DateTime || '').padEnd(20, '\0');
 		Buffer.from(dtStr).copy(buffer, offset); offset += 20;
 
-		// Null-terminated strings
+		// Null-terminated strings, in the charset this message declares.
+		// Buffer.from() defaults to UTF-8, so every packet this tosser has
+		// ever written carried UTF-8 bytes under an implicit CP437 contract.
+		const encodeWire = (str) => {
+			if (wireCharset === 'utf8') return Buffer.from(str, 'utf8');
+			if (wireCharset === 'latin1') return Buffer.from(str, 'latin1');
+			return Buffer.from(codepageConversions.utf8ToCp437(str, true));
+		};
 		const writeNullStr = (str) => {
-			const b = Buffer.from(str + '\0');
+			const b = Buffer.concat([encodeWire(str), Buffer.from([0])]);
 			b.copy(buffer, offset);
 			offset += b.length;
 		};
@@ -1450,6 +1489,16 @@ async function WritePkts(messageArray){
 					msg.OptionalAttributes.push(newattrib)
 				}
 
+				// Netmail decides its encoding per message, and declares it.
+				const nmWire = charsetPolicy.charsetForMessage(
+					'auto', (msg.BodyText || '') + (msg.Subject || ''), codepageConversions);
+				if (!setattribs.chrs) {
+					msg.OptionalAttributes.push({
+						attribute: "CHRS",
+						value: ftnUtils.chrsValueFor(nmWire)
+					})
+				}
+
 				// Message type 0002
 				buffer.writeUInt16LE(0x0002, offset); offset += 2;
 
@@ -1465,9 +1514,16 @@ async function WritePkts(messageArray){
 				const dtStr = (msg.DateTime || '').padEnd(20, '\0');
 				Buffer.from(dtStr).copy(buffer, offset); offset += 20;
 
-				// Null-terminated strings
+				// Same wire-encoding rule as the echomail writer. Netmail has
+				// no area to carry a policy, so it decides per message: CP437
+				// when the body fits it, UTF-8 when it does not.
+				const nmEncode = (str) => {
+					if (nmWire === 'utf8') return Buffer.from(str, 'utf8');
+					if (nmWire === 'latin1') return Buffer.from(str, 'latin1');
+					return Buffer.from(codepageConversions.utf8ToCp437(str, true));
+				};
 				const writeNullStr = (str) => {
-					const b = Buffer.from(str + '\0');
+					const b = Buffer.concat([nmEncode(str), Buffer.from([0])]);
 					b.copy(buffer, offset);
 					offset += b.length;
 				};
