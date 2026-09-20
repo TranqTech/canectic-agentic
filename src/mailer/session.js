@@ -331,7 +331,7 @@ class SessionController extends EventEmitter {
 					if (extraCd.session_password !== expectedPassword) continue;
 					// Password matches -- safe to group
 					this.peerConnections.push(extraConn);
-					alogger.writeClog(5, 'Session ' + this.uuid + ': grouped additional connection for ' + bareAddr, 'mailer', 'cyan');
+					alogger.writeClog(5, 'Session ' + this.uuid + ': grouped additional connection for ' + normalAddr, 'mailer', 'cyan');
 					break;
 				}
 			}
@@ -420,7 +420,7 @@ class SessionController extends EventEmitter {
 						// Already in list?
 						if (this.peerConnections.some(function(c) { return c.id === extraConn.id; })) continue;
 						this.peerConnections.push(extraConn);
-						alogger.writeClog(5, 'Session ' + this.uuid + ': grouped additional connection for ' + bareAddr + ' (caller)', 'mailer', 'cyan');
+						alogger.writeClog(5, 'Session ' + this.uuid + ': grouped additional connection for ' + normalAddr + ' (caller)', 'mailer', 'cyan');
 						break;
 					}
 				}

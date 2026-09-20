@@ -267,7 +267,7 @@ async function _scanNetworkArea(areaShortcode, nameMap, label, fileEntriesModel,
 			'still looking for: ' + Array.from(nameMap.keys()).join(', '),
 			'yellow'
 		);
-		return imported;
+		return counts;
 	}
 
 	var zipPath = _resolveFilePath(newestZip, areaPath);

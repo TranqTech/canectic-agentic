@@ -449,7 +449,7 @@ class tEditor{
 	}
 	setTimeouts(){
 		if (this.cmdTO){
-			this.stageTO = setTimeout(this.cmdTimeout.bind(this), cmdTO)
+			this.stageTO = setTimeout(this.cmdTimeout.bind(this), this.cmdTO)
 		}
 	}
 	clearTimeouts(){

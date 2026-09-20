@@ -352,7 +352,7 @@ function buildCanectic(call, rs, useRealNames) {
 		u.username,
 		displayName,
 		u.security,
-		bbsname,
+		cfgBbsName(),
 		c.term_type,
 		c.timeleft
 	];

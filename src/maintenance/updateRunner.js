@@ -25,6 +25,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+// pg_dump and psql are spawned directly here rather than through
+// updateCommands.runCommand, because the dump needs its own env and its
+// failure is handled differently. That is why this import is separate, and
+// why its absence was invisible until the schema phase ran on a live board.
+import { spawnSync } from 'child_process';
 
 import appConfig from '../config/appConfig.js';
 import { parseManifest, verifyTree, MANIFEST_FILENAME } from '../release/manifest.js';

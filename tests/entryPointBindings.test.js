@@ -36,15 +36,51 @@ var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // nested under is-expression and this import gets the declared 8.x.
 var acorn = (await import('acorn')).default || (await import('acorn'));
 
-// Files that are loaded by a process rather than by a test.
-var ENTRY_POINTS = [
-	'bin/gateway.js',
-	'bin/worker.js',
-	'bin/mail.js',
-	'bin/mailer.js',
-	'bin/doorserver.js',
-	'src/queues/embedded.js',
-];
+// Every .js file under bin/ and src/.
+//
+// This began as a list of process entry points, on the reasoning that those
+// were the files no test imports. That reasoning was too narrow and a live
+// board paid for it: src/maintenance/updateRunner.js called spawnSync without
+// importing it, and the update reached a customer's database before anyone
+// found out — the schema phase died with "spawnSync is not defined" after the
+// files had been replaced and npm install had run, which is past the point
+// where rolling back is safe.
+//
+// The file was untested for the same reason bin/ is: it runs detached, during
+// an update, with the board stopped. But the lesson is that "which files does
+// a test import" is not a property anyone can track by hand, so the check
+// covers everything instead of guessing.
+function jsFilesUnder(dir, out) {
+	out = out || [];
+	for (var entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		var full = path.join(dir, entry.name);
+		if (entry.isDirectory()) jsFilesUnder(full, out);
+		else if (entry.name.endsWith('.js')) out.push(full);
+	}
+	return out;
+}
+
+// Excluded, with reasons. Nothing here is excluded for being inconvenient.
+//
+//   Old/, old-*        superseded copies kept for reference, not loaded
+//   external/synchronet, shims/  Synchronet door scripts and the shim that
+//                      provides their globals (print, log, argv, file_*).
+//                      Those names are injected by the SyncJS runtime, so
+//                      "undeclared" is correct and expected here
+//   filehelpers/dropfiles.js  Synchronet-flavoured syntax acorn cannot parse
+function excluded(rel) {
+	return /(^|\/)Old\//.test(rel)
+		|| /(^|\/)old-/.test(rel)
+		|| rel.indexOf('src/external/synchronet/') === 0
+		|| rel.indexOf('src/shims/') === 0
+		|| rel === 'src/filehelpers/dropfiles.js';
+}
+
+var ENTRY_POINTS = jsFilesUnder(path.join(ROOT, 'bin'))
+	.concat(jsFilesUnder(path.join(ROOT, 'src')))
+	.map(function (f) { return path.relative(ROOT, f); })
+	.filter(function (rel) { return !excluded(rel); })
+	.sort();
 
 var GLOBALS = new Set([
 	// Language
@@ -184,15 +220,28 @@ function analyse(source) {
 
 describe('process entry point bindings', function () {
 
-	ENTRY_POINTS.forEach(function (rel) {
-		it(rel + ' references nothing it has not declared or imported', function () {
-			var source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-			var undeclared = analyse(source);
+	it('covers every file under bin/ and src/, so the list cannot go stale', function () {
+		assert.ok(ENTRY_POINTS.length > 200,
+			'expected the whole tree, found ' + ENTRY_POINTS.length + ' files');
+	});
 
-			assert.deepStrictEqual(undeclared, [],
-				rel + ' uses names that are declared nowhere in the file — a missing import ' +
-				'throws ReferenceError only when that code path first runs: ' + undeclared.join(', '));
-		});
+	it('finds no name that is declared nowhere in its file', function () {
+		var broken = [];
+		for (var rel of ENTRY_POINTS) {
+			var undeclared;
+			try {
+				undeclared = analyse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+			} catch (e) {
+				broken.push(rel + ': could not parse (' + e.message + ')');
+				continue;
+			}
+			if (undeclared.length) broken.push(rel + ': ' + undeclared.join(', '));
+		}
+
+		assert.deepStrictEqual(broken, [],
+			'these use names declared nowhere in the file. A missing import throws ' +
+			'ReferenceError only when that code path first runs, which for an update ' +
+			'phase means on somebody else\'s board:\n  ' + broken.join('\n  '));
 	});
 
 	it('detects a missing import, so this file cannot pass vacuously', function () {
