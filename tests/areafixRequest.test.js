@@ -230,12 +230,36 @@ describe('areafix.handleRequest', function () {
 		assert.ok(joined(res).includes('Rescan (full)'));
 	});
 
-	it('warns that retention and imported history limit what comes back', async function () {
-		var res = await areafix.handleRequest(netmail('%RESCAN ' + AREA));
-		var text = joined(res);
-		assert.ok(text.toLowerCase().includes('retention'),
-			'a downlink getting fewer messages than asked for should be told why');
-		assert.ok(text.toLowerCase().includes('imported'));
+	// The caveats used to print on every rescan, so a downlink asking for a
+	// window nowhere near any limit was warned about retention and imported
+	// history it did not have. Read by somebody waiting on mail, a caveat that
+	// always fires makes a successful rescan look like a refusal.
+	it('does not mention retention or imported history when neither applies', async function () {
+		// The fixture area has no limits and no imported rows.
+		var text = joined(await areafix.handleRequest(netmail('%RESCAN ' + AREA))).toLowerCase();
+		assert.ok(!text.includes('prune') && !text.includes('still held'),
+			'nothing prunes here, so say nothing about retention: ' + text);
+		assert.ok(!text.includes('imported'),
+			'no imported history here, so say nothing about it: ' + text);
+	});
+
+	it('does warn about retention once the area actually prunes', async function () {
+		// Same request, same area, one limit set: now the note is earned.
+		await pg.write('UPDATE message_areas SET max_age_days = 30 WHERE id = $1', [areaId]);
+		// Push the pointer ahead so the rescan actually rewinds something. The
+		// notes are gated on a rewind: an area reported as "already at or
+		// behind that point, unchanged" is sending nothing, so there is
+		// nothing to qualify.
+		await pg.write(
+			'UPDATE peer_area_subscriptions SET msg_idx = 999999 WHERE peer_connection_id = $1 AND area_id = $2',
+			[connId, areaId]);
+		try {
+			var text = joined(await areafix.handleRequest(netmail('%RESCAN ' + AREA))).toLowerCase();
+			assert.ok(text.includes('prune'),
+				'an area with a retention limit holds less than the window asked for: ' + text);
+		} finally {
+			await pg.write('UPDATE message_areas SET max_age_days = NULL WHERE id = $1', [areaId]);
+		}
 	});
 
 	// -----------------------------------------------------------------------
