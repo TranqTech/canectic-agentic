@@ -29,6 +29,10 @@ block content
                     span.input-group-text
                       i.bi.bi-search
                     input#areaSearch.form-control(type='text' placeholder='Filter areas...')
+                  a.btn.btn-sm.btn-outline-light.me-2(href='/files/new' title='New Files')
+                    i.bi.bi-stars
+                    if totalNew && totalNew > 0
+                      span.badge.bg-info.ms-1= totalNew
                   a.btn.btn-sm.btn-outline-light.me-2(href='/files/search' title='Search Files')
                     i.bi.bi-search
                   button.btn.btn-sm.btn-outline-light(data-bs-toggle='modal' data-bs-target='#helpModal' title='Help')

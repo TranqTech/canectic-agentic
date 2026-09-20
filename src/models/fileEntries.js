@@ -185,6 +185,35 @@ async function getNewFileCount(areaId, sinceId) {
 	return result ? parseInt(result.cnt) : 0;
 }
 
+/**
+ * The new file entries themselves, rather than just how many there are.
+ *
+ * getNewFileCount has always been able to say "3 new" without anything being
+ * able to say WHICH three, which is why the web could badge an area and then
+ * offer no way to look at what the badge was counting.
+ *
+ * Defaults to newest first, matching getEntriesForArea so the two listings read
+ * the same way round.  `oldestFirst` is for a catch-up view that advances the
+ * scan pointer as it goes: there the page has to start at the OLDEST unseen
+ * file, because advancing past the newest of a capped page would mark the
+ * backlog underneath it as read without ever showing it.
+ */
+function newEntriesOrderBy(opts) {
+	return (opts && opts.oldestFirst) ? 'upload_date ASC, id ASC' : 'upload_date DESC, id DESC';
+}
+
+async function getNewEntriesForArea(areaId, sinceId, opts) {
+	var limit = (opts && opts.limit) || 50;
+	var offset = (opts && opts.offset) || 0;
+
+	var rows = await postgres.query(
+		"SELECT * FROM file_entries WHERE area_id = $1 AND id > $2 AND active = true " +
+		"ORDER BY " + newEntriesOrderBy(opts) + " LIMIT $3 OFFSET $4",
+		[areaId, sinceId || 0, limit, offset]
+	);
+	return rows || [];
+}
+
 async function getMaxIdForArea(areaId) {
 	var result = await postgres.queryOne(
 		"SELECT COALESCE(MAX(id), 0) AS max_id FROM file_entries WHERE area_id = $1",
@@ -510,6 +539,8 @@ export {
 	flagEntry,
 	deleteEntry,
 	getNewFileCount,
+	getNewEntriesForArea,
+	newEntriesOrderBy,
 	getMaxIdForArea,
 	regenerateDescHtml,
 	scanAreaDirectory,

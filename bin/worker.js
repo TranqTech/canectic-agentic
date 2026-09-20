@@ -407,38 +407,13 @@ function createTossProcessor() {
 
 				case 'outbound-sweep': {
 					alogger.writeAlog(3, "[Worker] Outbound sweep: tossing all protocols", "cyan");
-					try { await ftnTosser.TossOutbound(); } catch (e) {
-						alogger.writeAlog(3, "[Worker] FTN outbound sweep error: " + e.message, "yellow");
-					}
-					// QWK and NNTP push for all active connections
-					try {
-						var qwkConns = await peerConnections.getActiveConnectionsByNetworkType('QWK');
-						for (var qc of (qwkConns || [])) {
-							if (!qc.poll_enabled) continue;
-							var qcd = qc.connection_data || {};
-							if (qcd.transport === 'hub') continue;
-							try { await qwkTosser.pushToQwkPeer(qc.uuid); } catch (e) {
-								alogger.writeAlog(3, "[Worker] QWK push error (" + qc.uuid + "): " + e.message, "yellow");
-							}
-						}
-					} catch (e) {
-						alogger.writeAlog(3, "[Worker] QWK outbound sweep error: " + e.message, "yellow");
-					}
-					try {
-						var nntpConns = await peerConnections.getActiveConnectionsByNetworkType('NNTP');
-						for (var nc of (nntpConns || [])) {
-							if (!nc.poll_enabled) continue;
-							try { await nntpTosser.pushToNntpPeer(nc.uuid); } catch (e) {
-								alogger.writeAlog(3, "[Worker] NNTP push error (" + nc.uuid + "): " + e.message, "yellow");
-							}
-						}
-					} catch (e) {
-						alogger.writeAlog(3, "[Worker] NNTP outbound sweep error: " + e.message, "yellow");
-					}
-					// Email outbound
-					try { await emailTosser.tossOutbound(); } catch (e) {
-						alogger.writeAlog(3, "[Worker] Email outbound sweep error: " + e.message, "yellow");
-					}
+					await outboundSweep.runOutboundSweep({
+						ticTosser, ftnTosser, qwkTosser, nntpTosser, emailTosser,
+						peerConnections,
+						log: function (level, message, colour) {
+							alogger.writeAlog(level, message, colour);
+						},
+					});
 					eventPublisher.publish(EVENTS.TOSS_COMPLETE, {
 						source: 'sweep', direction: 'outbound'
 					});

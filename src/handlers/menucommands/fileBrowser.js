@@ -233,7 +233,11 @@ class fileBrowser extends BaseSubModule {
 	}
 
 	_isNewFile(file) {
-		return file.id > this._scanPointer;
+		// parseInt both sides: postgres returns id as a string, and once
+		// _scanPointer has been assigned one of those strings the comparison
+		// turns lexicographic, where '10' > '9' is false and a genuinely new
+		// file stops being marked.
+		return parseInt(file.id, 10) > parseInt(this._scanPointer, 10);
 	}
 
 	_wordWrap(text, maxWidth) {
@@ -354,10 +358,13 @@ class fileBrowser extends BaseSubModule {
 	async _advancePointerToFile(file) {
 		if (!this._userId || !file) return;
 		try {
-			await userFilePointers.advancePointer(this._userId, this._areaShortcode, file.id);
-			// Update local pointer if we moved forward
-			if (file.id > this._scanPointer) {
-				this._scanPointer = file.id;
+			var fileId = parseInt(file.id, 10);
+			await userFilePointers.advancePointer(this._userId, this._areaShortcode, fileId);
+			// Update local pointer if we moved forward.  Keep it a number:
+			// storing the string id here is what used to break _isNewFile for
+			// the rest of the session.
+			if (fileId > parseInt(this._scanPointer, 10)) {
+				this._scanPointer = fileId;
 			}
 		} catch (err) {
 			alogger.writeAlog(3, this.loggingId + " pointer advance error: " + (err?.stack || err), "redbright");

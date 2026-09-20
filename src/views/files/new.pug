@@ -1,0 +1,83 @@
+extends ../layouts/user
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../partials/users/login.pug
+    else
+      .row
+        .col-12
+          br
+          br
+      .row
+        .col-1
+        .col-10
+          nav(aria-label='breadcrumb')
+            ol.breadcrumb
+              li.breadcrumb-item
+                a(href='/files') Files
+              li.breadcrumb-item.active(aria-current='page') New Files
+
+          .card
+            .card-header.bg-darkblue.text-white
+              .d-flex.justify-content-between.align-items-center
+                h2.mb-0
+                  i.bi.bi-stars.me-2
+                  | New Files
+                  if totalNew > 0
+                    span.badge.bg-info.ms-2= totalNew
+                .btn-group.btn-group-sm
+                  a.btn.btn-outline-light(href='/files/new' class=(showAll ? '' : 'active')) Subscribed
+                  a.btn.btn-outline-light(href='/files/new?all=1' class=(showAll ? 'active' : '')) All Areas
+            .card-body
+              if groupedAreas && groupedAreas.length > 0
+                each entry in groupedAreas
+                  .mb-4
+                    h5.text-info.mb-2
+                      i.bi.bi-folder2-open.me-1
+                      = entry.group.name
+                    each area in entry.areas
+                      .card.bg-dark.border-secondary.mb-2
+                        .card-header.py-2.d-flex.justify-content-between.align-items-center
+                          div
+                            a.text-decoration-none.fw-bold(href='/files/area/' + area.shortcode)= area.name
+                            span.badge.bg-info.ms-2= area.new_count
+                            if !area.subscribed
+                              span.badge.bg-secondary.ms-1 not subscribed
+                          a.btn.btn-sm.btn-outline-info(href='/files/area/' + area.shortcode + '?new=1')
+                            | View new
+                            i.bi.bi-arrow-right.ms-1
+                        .card-body.py-2
+                          .table-responsive
+                            table.table.table-sm.table-hover.mb-0
+                              tbody
+                                each file in area.preview
+                                  tr(data-file-uuid=file.uuid style='cursor:pointer')
+                                    td
+                                      i.bi.bi-file-earmark.me-1
+                                      strong= file.filename
+                                    td.text-center.text-nowrap(style='width:90px')= formatBytes(file.file_size || 0)
+                                    td.text-nowrap(style='width:130px')
+                                      if file.upload_date
+                                        - var fdate = Date.parse(file.upload_date)
+                                        - var fd = DateTime.fromMillis(fdate)
+                                        = fd.toFormat('MMM dd, yyyy')
+                                      else
+                                        span.text-muted —
+                                    td.text-muted.small= file.short_desc || ''
+                          if area.new_count > area.preview.length
+                            .text-muted.small.mt-1
+                              | and #{area.new_count - area.preview.length} more
+              else
+                .text-center.py-4
+                  i.bi.bi-check2-circle.text-muted(style='font-size:2rem')
+                  h5.text-muted.mt-2 No new files
+                  if !showAll
+                    p.text-muted.small Nothing new in the areas you are subscribed to.
+                    a.btn.btn-sm.btn-outline-secondary(href='/files/new?all=1') Check all areas
+                  else
+                    p.text-muted.small Nothing new in any area you can browse.
+
+  include partials/_fileInfoModal

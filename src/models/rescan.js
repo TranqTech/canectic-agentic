@@ -319,6 +319,21 @@ async function rescanFileAreas(opts) {
 
 	alogger.writeAlog(2, 'FileFix: rescan queued ' + queuedTotal + ' file(s) across ' +
 		areasTouched + ' area(s) for connection ' + opts.connectionId, 'cyan');
+
+	// A file rescan only writes pending rows; something has to stage them.
+	// Unlike a message rescan, which rewinds a pointer the next export scan
+	// reads, these rows are inert until tic:outbound runs, so a downlink's
+	// %RESCAN used to get a cheerful reply and no files.
+	if (queuedTotal > 0) {
+		try {
+			var jobsMod = await import('../queues/jobs.js');
+			await jobsMod.enqueueTicOutbound();
+		} catch (qErr) {
+			alogger.writeAlog(3, 'FileFix: rescan could not signal tic:outbound: ' +
+				(qErr.message || qErr), 'yellow');
+		}
+	}
+
 	return { lines: lines, queued: queuedTotal, areas: areasTouched, days: days,
 	         full: !!opts.full, capped: windowed.capped, maxDays: windowed.maxDays };
 }

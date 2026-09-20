@@ -280,10 +280,85 @@ router.get('/', async (req, res) => {
 		});
 	}
 
+	var totalNew = 0;
+	for (var ge of groupedAreas) {
+		for (var ga of ge.areas) {
+			if (ga.subscribed && ga.new_count > 0) totalNew += ga.new_count;
+		}
+	}
+
 	res.render('files/index', {
 		title: 'Files',
 		currentuser: currentuser,
-		groupedAreas: groupedAreas
+		groupedAreas: groupedAreas,
+		totalNew: totalNew
+	});
+});
+
+// New files across every area the user is subscribed to.
+//
+// The area list has badged new counts since file areas shipped, but nothing
+// could show WHAT they were counting without visiting each area in turn. This
+// is the web equivalent of the terminal's file newscan (fileNewscan.js), and
+// like that one it is read-only: it reports, and advances no pointer. Pointers
+// move when the user opens an area, which is where the files actually are.
+router.get('/new', async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) {
+		return res.render('files/new', {
+			title: 'New Files', currentuser: null, groupedAreas: [], totalNew: 0, showAll: false
+		});
+	}
+
+	var userId = await resolveUserId(currentuser);
+	var showAll = req.query.all === '1';
+
+	var grouplist = await fileGroups.getActiveGroups();
+	grouplist = grouplist.filter(function(g) { return checkFileAreaBrowseAccess(currentuser, g); });
+
+	var groupedAreas = [];
+	var totalNew = 0;
+
+	for (var group of grouplist) {
+		var areas = await fileAreas.getAreasInGroup(group.shortcode);
+		areas = areas.filter(function(a) { return a.active && checkFileAreaBrowseAccess(currentuser, a); });
+		if (areas.length === 0) continue;
+
+		var subMap = userId ? await userFileSubs.getSubscriptionMap(userId, areas) : {};
+		var withNew = [];
+
+		for (var area of areas) {
+			var subscribed = subMap[area.shortcode] !== undefined
+				? subMap[area.shortcode]
+				: (area.newscan_default !== false);
+			if (!showAll && !subscribed) continue;
+
+			var pointer = userId ? await userFilePointers.getPointer(userId, area.shortcode) : 0;
+			var count = userId ? await fileEntries.getNewFileCount(area.id, pointer) : 0;
+			if (count === 0) continue;
+
+			// A preview only. The area page is where the full list lives, and
+			// pulling every new file of every area into one page is how this
+			// turns into the slowest page on the board.
+			var preview = await fileEntries.getNewEntriesForArea(area.id, pointer, { limit: 5 });
+
+			area.subscribed = subscribed;
+			area.new_count = count;
+			area.preview = preview;
+			withNew.push(area);
+			totalNew += count;
+		}
+
+		if (withNew.length > 0) groupedAreas.push({ group: group, areas: withNew });
+	}
+
+	res.render('files/new', {
+		title: 'New Files',
+		currentuser: currentuser,
+		groupedAreas: groupedAreas,
+		totalNew: totalNew,
+		showAll: showAll,
+		formatBytes: formatBytes
 	});
 });
 
@@ -383,17 +458,28 @@ router.get('/area/:shortcode', async (req, res) => {
 	// Load parent group for breadcrumb
 	var fileGroup = await fileGroups.getGroupByShortcode(fileArea.group_shortcode);
 
+	var userId = await resolveUserId(currentuser);
+	var newOnly = req.query.new === '1';
+
+	// Snapshot the pointer BEFORE advancing it. Rendering this page moves the
+	// pointer to the newest file listed, so without the snapshot the NEW
+	// markers would all be gone by the time the page was drawn and the count
+	// in the header would disagree with the rows underneath it.
+	var scanPointer = userId ? await userFilePointers.getPointer(userId, fileArea.shortcode) : 0;
+	var newCount = userId ? await fileEntries.getNewFileCount(fileArea.id, scanPointer) : 0;
+
 	var totalFiles = await fileEntries.getEntryCount(fileArea.id);
-	var filelist = await fileEntries.getEntriesForArea(fileArea.id, { limit: 50, offset: 0 });
+	// Oldest new file first, so that advancing the pointer below covers exactly
+	// the rows on this page and a backlog larger than the page is walked
+	// through over successive visits rather than skipped.
+	var filelist = newOnly
+		? await fileEntries.getNewEntriesForArea(fileArea.id, scanPointer, { limit: 50, offset: 0, oldestFirst: true })
+		: await fileEntries.getEntriesForArea(fileArea.id, { limit: 50, offset: 0 });
 
 	// Advance scan pointer to highest file ID in results
-	var userId = await resolveUserId(currentuser);
 	if (userId && filelist.length > 0) {
-		var maxId = 0;
-		for (var f of filelist) {
-			if (f.id > maxId) maxId = f.id;
-		}
-		await userFilePointers.advancePointer(userId, fileArea.shortcode, maxId);
+		await userFilePointers.advancePointer(userId, fileArea.shortcode,
+			userFilePointers.highestId(filelist));
 	}
 
 	res.render('files/areas/view', {
@@ -406,6 +492,9 @@ router.get('/area/:shortcode', async (req, res) => {
 		fileGroup: fileGroup,
 		filelist: filelist,
 		totalFiles: totalFiles,
+		scanPointer: scanPointer,
+		newCount: newCount,
+		newOnly: newOnly,
 		formatBytes: formatBytes,
 		uploaded: req.query.uploaded || null,
 		error: req.query.error || null
@@ -578,11 +667,8 @@ router.get('/area/:shortcode/files.json', async (req, res) => {
 	// Advance scan pointer
 	var userId = await resolveUserId(currentuser);
 	if (userId && filelist.length > 0) {
-		var maxId = 0;
-		for (var f of filelist) {
-			if (f.id > maxId) maxId = f.id;
-		}
-		await userFilePointers.advancePointer(userId, fileArea.shortcode, maxId);
+		await userFilePointers.advancePointer(userId, fileArea.shortcode,
+			userFilePointers.highestId(filelist));
 	}
 
 	res.json({

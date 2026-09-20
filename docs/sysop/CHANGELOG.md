@@ -2,6 +2,17 @@
 
 ## Pending (since v0.9.6a)
 
+### File Echoes
+
+- Fix: **files received from an uplink were never passed on to your downlinks.** A TIC file arriving from a peer was filed into the local area correctly and its outbound rows were written correctly, and then nothing ever staged them. The periodic outbound sweep, which is the safety net that catches whatever was not sent on demand, covered echomail, QWK, NNTP and email but had never included file echoes; and the inbound toss did not signal an outbound one the way the design had always described. The only things that actually staged a file echo were a local upload, the admin Trigger Event button and a manual toss, so a downlink received files only when somebody on your board happened to upload one. Nothing failed and nothing was logged. Inbound tossing now signals outbound immediately, and file echoes are part of the outbound sweep, so a board with no local uploads at all still feeds its downlinks.
+- Fix: **a downlink's `%RESCAN` for a file area replied cheerfully and sent nothing.** A file rescan writes pending rows rather than rewinding a pointer, so unlike a message rescan there is nothing that picks them up on the next pass. The admin Rescan button carried the same promise. Both now signal an outbound toss once the rows are written.
+- Fix: **file echoes did not work in either direction in embedded mode** (`PROCESS_MODE=embedded`). The embedded worker had no case for the TIC jobs, so BullMQ handed each one over, the switch fell through to its default, and the job was marked complete without the work being done. Outbound email and the outbound sweep were missing for the same reason. A test now holds the two workers to the same set of job names, since a job nothing handles is indistinguishable from one that succeeded.
+
+### Files on the Web
+
+- Fix: **viewing a file area did not clear its new-file badge.** The area page advances your scan pointer to the newest file it listed, but it picked that file by comparing ids straight out of the database, and PostgreSQL returns them as text. After the first comparison the rest were being sorted as words rather than numbers, where "9" comes after "37", so the pointer was set to the lowest-numbered file on the page instead of the highest. Pointers only ever move forward, so the wrong value was discarded and the pointer simply stopped, leaving a count that nothing could clear. The same mistake made the terminal file browser stop marking files as new once you had opened one.
+- **New files are now visible on the web, not just counted.** `/files` has a New Files button showing the total across every area you are subscribed to, and `/files/new` lists those areas with a preview of what has arrived in each. Each file area has an All / New toggle, and new files are marked in the listing. The new-only listing shows the oldest unseen file first and walks forward on each visit, so a backlog larger than one page is worked through rather than skipped.
+
 ### Release Engineering
 
 - A cut refuses when the changelog carries more than one `## Pending` heading. Only the first is read and its body stops at the next `## `, so entries written under a second one are dropped from the release they were written for without a word. This changelog grew a duplicate from a hand edit and nothing noticed; it was found by reading the file.

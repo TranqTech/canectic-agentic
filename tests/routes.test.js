@@ -61,6 +61,10 @@ describe('routes/files.js', function() {
 		assert.ok(hasRoute(filesRoutes, 'GET', '/search'), 'Missing GET /search');
 	});
 
+	it('registers GET /new (new files across subscribed areas)', function() {
+		assert.ok(hasRoute(filesRoutes, 'GET', '/new'), 'Missing GET /new');
+	});
+
 	it('registers GET /info/:uuid.json', function() {
 		assert.ok(hasRoute(filesRoutes, 'GET', '/info/:uuid.json'), 'Missing GET /info/:uuid.json');
 	});

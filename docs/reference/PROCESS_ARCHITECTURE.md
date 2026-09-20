@@ -197,7 +197,7 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `nntp:pull` | Scheduler (repeatable), Admin | Worker | `{ connectionUUID }` | Pull articles from NNTP server |
 | `nntp:push` | Scheduler (repeatable), Admin | Worker | `{ connectionUUID }` | Post local messages to NNTP server |
 | `tic:inbound` | Mailer (after file receive), Admin, CLI | Worker | `{ connectionUUID?, sourceDir? }` | Process inbound .tic files and attached files |
-| `tic:outbound` | Upload handler (networked area), tic:inbound (forwarding), Admin, CLI | Worker | `{ connectionUUID? }` | Build TIC descriptors and stage outbound files |
+| `tic:outbound` | tic:inbound (forwarding), upload handler (networked area), file-area rescan, `outbound-sweep`, Admin | Worker | `{ connectionUUID? }` | Build TIC descriptors and stage outbound files |
 | `email:outbound` | PM model (_triggerOutboundToss), Admin | Worker | `{}` | Process pending EMAIL transport PMs via email tosser |
 
 ### `mailer` queue
@@ -226,7 +226,7 @@ Three BullMQ queues, each with named job types. All share the same Redis instanc
 | `scan-file-area` | Admin, CLI | Worker | `{ areaShortcode }` | Scan file area directory for untracked files |
 | `user-maintenance` | Scheduler (daily 5AM) | Worker | `{}` | Mailtype reconciliation, unverified user purge based on `unverified_retention_days` |
 | `file-maintenance` | Scheduler, Admin | Worker | `{}` | Duplicate cleanup, missing file removal, retention limit enforcement (max_age_days/max_files) |
-| `outbound-sweep` | Scheduler (configurable, default 120 min) | Worker | `{}` | All-protocol periodic outbound toss cycle |
+| `outbound-sweep` | Scheduler (configurable, default 120 min) | Worker | `{}` | All-protocol periodic outbound toss cycle. The protocol list lives in `src/maintenance/outboundSweep.js` (`SWEEP_PROTOCOLS`), not in the worker's switch, so that which protocols it covers is testable. TIC was missing from it until 0.9.6a and file echoes were never forwarded |
 | `scan-inbound` | Scheduler (configurable, default 300s) | Worker | `{}` | Periodic scan of FTN inbound directory for unprocessed .pkt/.tic files |
 | `scan-nodelists` | Scheduler (daily 4AM) | Worker | `{}` | Auto-import nodelists from configured file areas |
 | `scan-echolists` | Scheduler (daily 4:15AM), Admin | Worker | `{}` | Auto-scan network infopack/echolist/filebone areas for updated list files |

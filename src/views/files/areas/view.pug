@@ -58,6 +58,14 @@ block content
                       | File Area
                 .col-4
                   .text-end
+                    if newCount && newCount > 0
+                      .btn-group.btn-group-sm.me-2
+                        a.btn.btn-outline-light(href='/files/area/' + fileArea.shortcode class=(newOnly ? '' : 'active')) All
+                        a.btn.btn-outline-light(href='/files/area/' + fileArea.shortcode + '?new=1' class=(newOnly ? 'active' : ''))
+                          | New
+                          span.badge.bg-info.ms-1= newCount
+                    else if newOnly
+                      a.btn.btn-sm.btn-outline-light.me-2(href='/files/area/' + fileArea.shortcode) All
                     if fileGroup
                       a.btn.btn-sm.btn-outline-light.me-2(href=`/files/group/${fileGroup.shortcode}`)
                         i.bi.bi-arrow-left
@@ -91,10 +99,15 @@ block content
                         th.text-center(scope='col') Downloads
                     tbody
                       for file of filelist
-                        tr(data-file-uuid=file.uuid style='cursor:pointer')
+                        //- Compared as integers: postgres returns id as a
+                        //- string, and '9' > '37' is true.
+                        - var isNew = scanPointer !== undefined && parseInt(file.id, 10) > parseInt(scanPointer, 10)
+                        tr(data-file-uuid=file.uuid data-is-new=(isNew ? 'true' : 'false') style='cursor:pointer')
                           td
                             i.bi.bi-file-earmark.me-1
                             strong= file.filename
+                            if isNew
+                              span.badge.bg-info.ms-2 NEW
                           td.text-center.text-nowrap= formatBytes(file.file_size || 0)
                           td.text-nowrap
                             if file.upload_date
@@ -106,10 +119,19 @@ block content
                           td= file.short_desc || ''
                           td.text-center= file.download_count || 0
                 .text-muted.small.mt-2
-                  | Showing #{filelist.length} of #{totalFiles} files
+                  if newOnly
+                    | Showing #{filelist.length} of #{newCount} new files, oldest first
+                    if newCount > filelist.length
+                      |  — reload to continue
+                  else
+                    | Showing #{filelist.length} of #{totalFiles} files
               else
                 .text-center.py-4
-                  h5.text-muted No files in this area
+                  if newOnly
+                    h5.text-muted No new files in this area
+                    a.btn.btn-sm.btn-outline-secondary.mt-2(href='/files/area/' + fileArea.shortcode) Show all files
+                  else
+                    h5.text-muted No files in this area
 
   include ../partials/_fileInfoModal
 

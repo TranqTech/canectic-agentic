@@ -32,6 +32,10 @@ export async function startEmbeddedWorkers(opts = {}) {
 	const ftnTosser = await import("../middleware/tossers/ftnTosser.js");
 	const nntpTosser = await import("../middleware/tossers/nntpTosser.js");
 	const qwkTosser = await import("../middleware/tossers/qwkTosser.js");
+	const ticTosser = await import("../middleware/tossers/ticTosser.js");
+	const emailTosser = await import("../middleware/tossers/emailTosser.js");
+	const outboundSweep = await import("../maintenance/outboundSweep.js");
+	const peerConnections = await import("../models/peerConnections.js");
 	const messages = await import("../models/messages.js");
 	const msgAreas = await import("../models/msgAreas.js");
 	const messageBase = await import("../maintenance/messageBase.js");
@@ -127,6 +131,34 @@ export async function startEmbeddedWorkers(opts = {}) {
 
 			case 'nntp:push-all':
 				await nntpTosser.pushAllNNTP();
+				break;
+
+			// TIC (file echoes).  These were absent, so in embedded mode the
+			// job was consumed, marked complete and silently did nothing: file
+			// echoes did not work in either direction and nothing said so.
+			case 'tic:inbound':
+				await ticTosser.tossInbound();
+				eventPublisher.publish(EVENTS.FILES_IMPORTED, { source: 'tic', direction: 'inbound' });
+				break;
+
+			case 'tic:outbound':
+				await ticTosser.tossOutbound();
+				eventPublisher.publish(EVENTS.TOSS_COMPLETE, { source: 'tic', direction: 'outbound' });
+				break;
+
+			case 'email:outbound':
+				await emailTosser.tossOutbound();
+				break;
+
+			case 'outbound-sweep':
+				await outboundSweep.runOutboundSweep({
+					ticTosser, ftnTosser, qwkTosser, nntpTosser, emailTosser,
+					peerConnections,
+					log: function (level, message, colour) {
+						alogger.writeAlog(level, message, colour);
+					},
+				});
+				eventPublisher.publish(EVENTS.TOSS_COMPLETE, { source: 'sweep', direction: 'outbound' });
 				break;
 
 			default:

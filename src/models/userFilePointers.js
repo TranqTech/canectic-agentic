@@ -39,10 +39,41 @@ async function ensureConstraintsAndIndexes() {
 // ---------------------------------------------------------------------------
 
 /**
+ * The highest file id in a set of entry rows, as a number.
+ *
+ * Exists because postgres hands `id` back as a STRING, and the obvious loop
+ * over rows comparing `f.id > maxId` silently becomes a lexicographic string
+ * comparison the moment maxId holds one of those strings.  '9' > '37' is true,
+ * so an area whose ids have run into double digits advanced the pointer to 9
+ * and then, because the write uses GREATEST, could never advance past it.  The
+ * visible symptom was a new-file badge that viewing the area would not clear.
+ *
+ * Anything unparseable is ignored rather than poisoning the result with NaN,
+ * since every comparison against NaN is false and the pointer would simply
+ * stop moving again.
+ */
+function highestId(entries) {
+	var max = 0;
+	for (var entry of (entries || [])) {
+		if (!entry) continue;
+		var id = parseInt(entry.id, 10);
+		if (Number.isFinite(id) && id > max) max = id;
+	}
+	return max;
+}
+
+/**
  * Advance the scan pointer for a user in an area.
  * Only moves forward (GREATEST).
  */
 async function advancePointer(userId, areaShortcode, maxFileId) {
+	// Coerce here as well as at the call sites: a string id reaching the SQL
+	// casts cleanly to bigint, so a caller that forgot would not fail, it
+	// would just be wrong somewhere else first.
+	var target = parseInt(maxFileId, 10);
+	if (!Number.isFinite(target)) return;
+	maxFileId = target;
+
 	await postgres.write(
 		"INSERT INTO " + TABLE + " (user_id, area_shortcode, scan_pointer, last_read_at) " +
 		"VALUES ($1, $2, $3, NOW()) " +
@@ -140,6 +171,7 @@ async function initPointersForUser(userId) {
 
 export {
 	ensureConstraintsAndIndexes,
+	highestId,
 	advancePointer,
 	markAreaRead,
 	getPointer,

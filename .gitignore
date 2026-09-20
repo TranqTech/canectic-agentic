@@ -40,23 +40,26 @@ bower_components
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
 
-#Temporary and testing directories
-tmp/
-
 # Dependency directories
 node_modules/
 jspm_packages/
 
 #Network/Message transfer directories
-qwk/
-ftn/
-qnet/
+#Anchored with a leading slash on purpose. Unanchored, `files/` matches a
+#directory of that name at ANY depth, so it also ignored src/views/files/ and
+#src/views/qwk/. The views already committed stayed tracked, since an ignore
+#rule does not touch a tracked file, so the only symptom was that a NEW view
+#added under either directory was silently left out of every commit.
+/qwk/
+/ftn/
+/qnet/
 
-#potential file store
-files/
+#potential file store, and the upload staging inside it
+/files/
+/tmp/
 
-#File upload staging
-files/staging/
+#Test scratch output
+tests/tmp/
 
 # TypeScript v1 declaration files
 typings/

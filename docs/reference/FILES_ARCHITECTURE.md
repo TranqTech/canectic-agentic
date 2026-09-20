@@ -9,7 +9,7 @@ Unlike the message system's per-area backing tables, the file system uses a **si
 The file system integrates with the three-process model:
 
 - **Gateway** — serves web file routes (`/files/*`), admin CRUD routes (`/admin/fileGroup/*`, `/admin/fileArea/*`, `/admin/fileEntry/*`), and runs terminal file handlers (area selector, file browser, batch download, upload)
-- **Worker** — consumes `tic:inbound` and `tic:outbound` jobs on the `toss` BullMQ queue, runs the TIC tosser
+- **Worker** — consumes `tic:inbound`, `tic:outbound` and `outbound-sweep` jobs on the `toss` BullMQ queue, runs the TIC tosser
 - **Mailer** — picks up staged outbound files (TIC + attachments) from the outbound directory
 
 Cross-references:
@@ -29,11 +29,11 @@ Cross-references:
 |------|---------|
 | `fileGroups.js` | File group CRUD. `newGroup` (creates record + base directory), `updateGroup`, `removeGroup` (cascading area removal, optional disk cleanup), `getGroupByShortcode`, `getAllGroups`, `getActiveGroups`, `getAllGroupsWithAreas` (joins areas + network mappings), `recalculateAreaCounts`. `normalizeFlags(input)` coerces form input to JSONB array. |
 | `fileAreas.js` | File area CRUD. `newArea` (creates record, area directory, pointer rows, group count recalc), `updateArea`, `removeArea` (cascading cleanup of entries, network areas, peer subscriptions, pointers, user subscriptions, optional disk deletion), `getAreaByShortcode`, `getAreasInGroup`, `getAllAreas`, `getActiveAreas`. `resolveAreaPath(group, area)` — three-level directory resolution. `updateStatsForArea(shortcode)` — refreshes `file_count`, `total_bytes`, `last_upload`, `last_filename`, `last_uploader` from live data. `recalculateFileCounts()` — batch recalc across all active areas. |
-| `fileEntries.js` | File entry CRUD, search, dupe checking. `addFileEntry`, `getEntryByUUID`, `getEntryById`, `getEntriesForArea` (paginated with configurable sort), `getEntryCount`, `searchEntries` (ILIKE across filename, short_desc, long_desc, full_text), `checkDupe` (by area + filename + optional CRC-32), `updateEntry`, `incrementDownloadCount`, `deactivateEntry`, `flagEntry`, `deleteEntry` (cascading distribution row cleanup), `getNewFileCount` (entries above scan pointer), `getMaxIdForArea`. |
+| `fileEntries.js` | File entry CRUD, search, dupe checking. `addFileEntry`, `getEntryByUUID`, `getEntryById`, `getEntriesForArea` (paginated with configurable sort), `getEntryCount`, `searchEntries` (ILIKE across filename, short_desc, long_desc, full_text), `checkDupe` (by area + filename + optional CRC-32), `updateEntry`, `incrementDownloadCount`, `deactivateEntry`, `flagEntry`, `deleteEntry` (cascading distribution row cleanup), `getNewFileCount` (entries above scan pointer), `getNewEntriesForArea` (the entries themselves, `oldestFirst` for a catch-up listing that advances a pointer as it goes), `newEntriesOrderBy`, `getMaxIdForArea`. |
 | `fileDistribution.js` | Outbound file distribution tracking. Each row = one file to one peer. `createDistributionRows` (bulk, idempotent via existence check), `getPendingForConnection` (joined with file_entries), `getAllPending` (joined with file_entries + peer_connections), `getDistributionForEntry`, `markSent`, `markFailed`, `markSkipped`, `retryFailed`. Status lifecycle: `pending` -> `sent` / `failed` / `skipped`. |
 | `fileNetworkAreas.js` | Maps file areas to FTN networks with areatags. `getAreaByTag(networkId, areatag)` — resolves inbound TIC area tags. `getNetworksByFileArea`, `getMappingsForNetwork`, `getMapping`, `getMappingById`, `addMapping` (dupe checks on both network+area and network+areatag), `removeMapping`, `updateMapping`. |
 | `filePeerSubscriptions.js` | Per-connection subscription state for file areas. Two-flag model: `allowed` (sysop permits) + `enabled` (sysop activates). `getSubscriptionsByConnection`, `getSubscribedConnections` (requires both allowed AND enabled AND connection active), `isSubscribed`, `setSubscriptions` (bulk toggle by field), `syncConnectionToFileAreas` (bootstrap missing rows), `allowAllFileAreas`, `enableAllAllowed`, `syncFileAreaToConnections` (propagate new area to all connections on a network), `removeSubscriptionsForFileArea`. |
-| `userFilePointers.js` | Per-user per-area scan pointers (mirrors `userMsgPointers.js`). Floor-based: any file with `id <= scan_pointer` is considered "seen". `ensureConstraintsAndIndexes` (table bootstrap), `advancePointer` (GREATEST — only moves forward), `markAreaRead` (jump to current max), `getPointer`, `getNewCount`, `initPointersForArea` (pre-populate all users when area created, pointer=0), `initPointersForUser` (pre-populate all areas when user created, pointer=max to hide history). |
+| `userFilePointers.js` | Per-user per-area scan pointers (mirrors `userMsgPointers.js`). Floor-based: any file with `id <= scan_pointer` is considered "seen". `ensureConstraintsAndIndexes` (table bootstrap), `advancePointer` (GREATEST — only moves forward; coerces its argument, since postgres returns ids as strings), `highestId(rows)` (the numeric max id of a result set — the obvious loop comparing `row.id > max` turns lexicographic after the first assignment, where `'9' > '37'`, which pinned pointers below the true maximum and left new-file counts that nothing could clear), `markAreaRead` (jump to current max), `getPointer`, `getNewCount`, `initPointersForArea` (pre-populate all users when area created, pointer=0), `initPointersForUser` (pre-populate all areas when user created, pointer=max to hide history). |
 
 ### Utilities
 
@@ -83,7 +83,7 @@ Cross-references:
 
 | File | Purpose |
 |------|---------|
-| `routes/files.js` | User-facing file routes. Group listing (`/files`), area listing (`/files/group/:shortcode`), file listing (`/files/area/:shortcode`), file detail (`/files/view/:uuid`), download (`/files/download/:uuid`), JSON pagination (`/files/area/:shortcode/files.json`), upload form + POST (`/files/area/:shortcode/upload`). Access checks on all routes. |
+| `routes/files.js` | User-facing file routes. Group listing (`/files`), new files (`/files/new`), area listing (`/files/group/:shortcode`), file listing (`/files/area/:shortcode`), file detail (`/files/view/:uuid`), download (`/files/download/:uuid`), JSON pagination (`/files/area/:shortcode/files.json`), upload form + POST (`/files/area/:shortcode/upload`). Access checks on all routes. |
 | `routes/admin.js` | Admin file CRUD. Groups: list, create, update, delete, recalculate counts. Areas: list, view (with file entries + network mappings), create, update, delete. Entries: update, delete (optional disk removal), move between areas. Network area mappings: add, update, remove (with peer subscription sync). Peer file subscriptions: set allowed, set enabled. |
 
 ### Views
@@ -446,7 +446,15 @@ Worker: tic:inbound job
   16. Move .tic to ftn/tossed/
   17. Update area stats
   18. Publish FILES_IMPORTED event
+  19. Enqueue tic:outbound if anything was processed, to forward to downlinks
 ```
+
+Step 19 is what makes this board a hub rather than a leaf. Steps 15 and 19 are
+separate for a reason worth remembering: step 15 records the *intent* to send,
+and nothing about a pending row causes it to be sent. Between shipping and
+0.9.6a this step did not exist and neither did TIC in the outbound sweep, so
+every file received was filed, queued and then left, and no downlink of a board
+whose users did not upload ever received anything.
 
 ### Outbound Flow
 
@@ -496,10 +504,15 @@ Multi-value keys (LDesc, Path, Seenby) accumulate into arrays. The parser is cas
 
 | Job Name | Queue | Trigger | Handler |
 |----------|-------|---------|---------|
-| `tic:inbound` | `toss` | CLI tosser (`--in --ftn`), mailer file arrival, admin | `ticTosser.tossInbound()` |
-| `tic:outbound` | `toss` | CLI tosser (`--out --ftn`), after inbound processing, admin | `ticTosser.tossOutbound()` |
+| `tic:inbound` | `toss` | Mailer file arrival, `scan-inbound` maintenance job, admin | `ticTosser.tossInbound()` |
+| `tic:outbound` | `toss` | End of `tic:inbound` (forwarding), local upload to a networked area, file-area rescan, admin | `ticTosser.tossOutbound()` |
+| `outbound-sweep` | `toss` | Repeatable, `outbound_toss_interval` (120 min) | `outboundSweep.runOutboundSweep()`, which includes `ticTosser.tossOutbound()` |
 
 Job ID deduplication: `tic-inbound--<connectionUUID or timestamp>`, `tic-outbound--<connectionUUID or timestamp>`.
+
+**Both consumers of the `toss` queue must handle every one of these names.** There are two: `bin/worker.js` and, under `PROCESS_MODE=embedded`, `src/queues/embedded.js`. A name missing from either does not raise anything — BullMQ delivers the job, the switch falls through to `default`, one line is logged at level 3, and the job is marked complete. The queue drains and the work never happens. `tests/tossJobCoverage.test.js` derives the required set from the producers and holds both switches to it.
+
+`tic:outbound` is reachable two ways on purpose. The signal at the end of `tic:inbound` is the fast path, and the outbound sweep is the backstop for anything it misses: a worker restarted mid-toss, a signal that failed to enqueue, rows left pending by a rescan. Distribution rows are inert until something stages them, so a file echo with only the on-demand path is one missed signal away from stopping for ever, with nothing to show for it.
 
 ### Events
 
@@ -609,9 +622,10 @@ Standalone upload sub-module. Validates area selection and upload access, prompt
 
 | Method | Route | View | Description |
 |--------|-------|------|-------------|
-| GET | `/files` | `files/index` | File group listing (filtered by read access, new counts) |
+| GET | `/files` | `files/index` | File group listing (filtered by read access, new counts, total-new button) |
+| GET | `/files/new` | `files/new` | New files across subscribed areas, with a per-area preview. Read-only: advances no pointer |
 | GET | `/files/group/:shortcode` | `files/groups/view` | Areas in a group (filtered, new counts, upload indicators) |
-| GET | `/files/area/:shortcode` | `files/areas/view` | File listing in area (paginated, advances scan pointer) |
+| GET | `/files/area/:shortcode` | `files/areas/view` | File listing in area (paginated, advances scan pointer). `?new=1` lists only files above the pointer, oldest first |
 | GET | `/files/view/:uuid` | `files/view` | Single file detail (breadcrumb to area/group) |
 | GET | `/files/download/:uuid` | — | File download (increments count, `res.download()`) |
 | GET | `/files/area/:shortcode/files.json` | — | JSON pagination (sortable, advances pointer) |

@@ -324,6 +324,21 @@ async function tossInbound() {
 		summary.errors > 0 ? 'yellowbright' : 'greenbright'
 	);
 
+	// Forward what just arrived to our own downlinks.  processOneTicFile has
+	// created the file_distribution rows by now; without this nothing consumes
+	// them until somebody uploads a file locally or a sysop presses the admin
+	// button, so a pure downlink of ours would never receive a thing.
+	if (summary.processed > 0) {
+		try {
+			var jobsMod = await import('../../queues/jobs.js');
+			await jobsMod.enqueueTicOutbound();
+		} catch (fwdErr) {
+			// The outbound sweep will pick the rows up regardless; this only
+			// costs latency, so it must not fail the inbound toss.
+			alogger.writeAlog(3, '[TIC] Forward signal error: ' + fwdErr.message, 'yellow');
+		}
+	}
+
 	return summary;
 }
 
