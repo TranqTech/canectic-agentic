@@ -2,8 +2,8 @@
  * What a stored message body actually says, whatever convention wrote it.
  *
  * ---------------------------------------------------------------------------
- * THIS FILE IS A BRIDGE. It exists to be deleted. See issue on normalising
- * body_text, and the NORMALISATION note at the bottom.
+ * THIS FILE IS A BRIDGE. It exists to be deleted. See issue #51, and the
+ * NORMALISATION note at the bottom.
  * ---------------------------------------------------------------------------
  *
  * `body_text` and `utf8` have no single agreed meaning. Three importers write
@@ -76,7 +76,7 @@ export function looksLikeRawBytes(text) {
  * NORMALISATION
  * -------------
  * When body_text becomes canonical Unicode for every source and the utf8
- * column is retired:
+ * column is retired (issue #51):
  *
  *   1. canonicalText collapses to `return msg.body_text || ''`
  *   2. Its callers can then read body_text directly and this file goes
