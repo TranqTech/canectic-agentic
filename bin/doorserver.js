@@ -156,7 +156,7 @@ async function exitWatch(){
 		lastservercount = servercount
 	}
 	if (servercount < 1){
-		if (!logtoconsole){
+		if (!alogger.isConsoleLogging()){
 			console.log("\n", chalk.yellowBright.bold(systemshutdownmsg))
 		}
 		alogger.writeAlog(1, systemshutdownmsg, "yellowbright", true)

@@ -35,11 +35,10 @@ export async function startEmbeddedWorkers(opts = {}) {
 	const ticTosser = await import("../middleware/tossers/ticTosser.js");
 	const emailTosser = await import("../middleware/tossers/emailTosser.js");
 	const outboundSweep = await import("../maintenance/outboundSweep.js");
+	const maintenanceJobs = await import("../maintenance/maintenanceJobs.js");
 	const peerConnections = await import("../models/peerConnections.js");
 	const messages = await import("../models/messages.js");
 	const msgAreas = await import("../models/msgAreas.js");
-	const messageBase = await import("../maintenance/messageBase.js");
-	const privateMessages = await import("../models/privateMessages.js");
 
 	// --- Post-toss maintenance (same as standalone worker) ---
 	async function postTossMaint() {
@@ -202,54 +201,16 @@ export async function startEmbeddedWorkers(opts = {}) {
 	var maintConnection = createQueueConnection();
 	var maintWorker = new Worker('maintenance', async (job) => {
 		alogger.writeAlog(3, `[Embedded/Maint] ${job.name}`, "cyan");
-		switch (job.name) {
-			case 'regen-html':
-				await messageBase.regenerateAllBodyHtml({
-					areas: job.data.areas,
-					batchSize: job.data.batchSize,
-					forceWidth: job.data.forceWidth,
-				});
-				break;
-			case 'regen-pm-html':
-				await messageBase.regeneratePmBodyHtml({
-					batchSize: job.data.batchSize,
-					forceWidth: job.data.forceWidth,
-				});
-				break;
-			case 'purge-pm-trash':
-				await privateMessages.purgeDeleted(job.data.days);
-				break;
-			case 'fix-msgids':
-				await messageBase.fixLegacyMsgIds({
-					areas: job.data.areas,
-					dryRun: job.data.dryRun,
-					batchSize: job.data.batchSize,
-				});
-				break;
-			case 'bulk-msgbase-import': {
-				var msgBaseBulk = await import("../maintenance/msgBaseBulk.js");
-				await msgBaseBulk.importMessageBases(job.data.mappings || [], {
-					seal: job.data.seal !== false,
-				});
-				break;
-			}
-			case 'pm-purged-cleanup': {
-				// Background hard-delete of rows tagged via purgeMessage /
-				// purgeDeleted. Drains in batches until exhausted so a
-				// backlog catches up in one run.
-				var pmCleanupResult;
-				do {
-					pmCleanupResult = await privateMessages.executePurgedCleanup({
-						batchSize: job.data.batchSize || 500,
-					});
-				} while (pmCleanupResult && pmCleanupResult.pendingMore);
-				break;
-			}
-			case 'recalc-area-counts':
-				await msgAreas.recalculateAreaCounts();
-				break;
-			default:
-				alogger.writeAlog(3, `[Embedded/Maint] Unknown job: ${job.name}`, "yellowbright");
+
+		// Shared with bin/worker.js. This switch used to be a separate copy
+		// and had drifted to 7 of 33 job names; the other 26 fell through to
+		// default and were marked complete, so an embedded board silently
+		// never purged a log, enforced retention, or ran a timed event.
+		var handled = await maintenanceJobs.runMaintenanceJob(job.name, job.data, {
+			logPrefix: '[Embedded/Maint]',
+		});
+		if (!handled) {
+			alogger.writeAlog(3, `[Embedded/Maint] Unknown job: ${job.name}`, "yellowbright");
 		}
 	}, {
 		connection: maintConnection,

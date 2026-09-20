@@ -442,8 +442,23 @@ function setTerminalTitle(title)
   );
 }
 
+/**
+ * Whether the logger is already echoing to the console.
+ *
+ * Exported because bin/gateway.js and bin/doorserver.js both need it to avoid
+ * double-printing the shutdown banner, and both referenced the bare name
+ * `logtoconsole` as though it were in scope. It is a module-level const in
+ * here, so those were undefined references that threw ReferenceError the
+ * moment the last server stopped — inside a setTimeout callback, so it
+ * surfaced as an unhandled rejection and the shutdown message never printed.
+ */
+function isConsoleLogging() {
+	return !!logtoconsole;
+}
+
 export{
 	writeAlog,
+	isConsoleLogging,
 	writeClog,
 	setTerminalTitle,
 	setProcessName,

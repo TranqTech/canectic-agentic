@@ -1,0 +1,209 @@
+// tests/entryPointBindings.test.js — the process entry points reference only
+// names they actually declare.
+//
+// Nothing in this suite imports bin/*.js. They call main() on load, start
+// servers and open sockets, so a test cannot simply require them, and that
+// leaves the one file per process that is never exercised until it runs.
+//
+// The gap is not theoretical. A change to bin/worker.js added a call to
+// `outboundSweep.runOutboundSweep()` and not the import for it. Every test
+// passed, because the module the call lived in was the one module no test
+// loads. In production the periodic sweep would have thrown ReferenceError on
+// every run, retried three times and gone to the failed set, so outbound mail
+// and file echoes would have stopped with the queue looking busy.
+//
+// This is the cheap half of a linter: collect every binding the file declares
+// anywhere, collect every identifier it references, and report references that
+// match neither a binding nor a known global. Scope is deliberately ignored,
+// so a name declared in the wrong place is NOT reported — that keeps the check
+// free of false positives, and the case worth catching is a name declared
+// nowhere at all.
+//
+// Pure: parses source, executes nothing.
+// Run: npx mocha --no-config --no-package tests/entryPointBindings.test.js
+
+import assert from 'assert';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// acorn arrives as a transitive dependency of pug rather than a declared one,
+// so treat it as optional: skip rather than fail if it is missing or too old
+// to parse what these files contain.
+var ACORN_ECMA = 2020;
+var acorn = null;
+try {
+	acorn = (await import('acorn')).default || (await import('acorn'));
+	acorn.parse('const a = b?.c ?? 1;', { ecmaVersion: ACORN_ECMA, sourceType: 'module' });
+} catch (_) { acorn = null; }
+
+// Files that are loaded by a process rather than by a test.
+var ENTRY_POINTS = [
+	'bin/gateway.js',
+	'bin/worker.js',
+	'bin/mail.js',
+	'bin/mailer.js',
+	'bin/doorserver.js',
+	'src/queues/embedded.js',
+];
+
+var GLOBALS = new Set([
+	// Language
+	'globalThis', 'undefined', 'NaN', 'Infinity', 'Object', 'Array', 'Function',
+	'String', 'Number', 'Boolean', 'Symbol', 'BigInt', 'Math', 'JSON', 'Date',
+	'RegExp', 'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError',
+	'EvalError', 'URIError', 'AggregateError', 'Promise', 'Map', 'Set', 'WeakMap',
+	'WeakSet', 'WeakRef', 'Proxy', 'Reflect', 'ArrayBuffer', 'SharedArrayBuffer',
+	'DataView', 'Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array',
+	'Uint16Array', 'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array',
+	'BigInt64Array', 'BigUint64Array', 'Atomics', 'Intl', 'escape', 'unescape',
+	'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'decodeURI', 'decodeURIComponent',
+	'encodeURI', 'encodeURIComponent', 'eval', 'arguments',
+	// Node
+	'process', 'console', 'Buffer', 'URL', 'URLSearchParams', 'TextEncoder',
+	'TextDecoder', 'AbortController', 'AbortSignal', 'Event', 'EventTarget',
+	'MessageChannel', 'MessagePort', 'BroadcastChannel', 'structuredClone',
+	'queueMicrotask', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+	'setImmediate', 'clearImmediate', 'fetch', 'Headers', 'Request', 'Response',
+	'Blob', 'File', 'FormData', 'performance', 'crypto', 'require', 'module',
+	'exports', '__dirname', '__filename',
+]);
+
+// Walk every node in the tree, calling visit(node, parent).
+function walk(node, parent, visit) {
+	if (!node || typeof node !== 'object') return;
+	if (Array.isArray(node)) {
+		for (var item of node) walk(item, parent, visit);
+		return;
+	}
+	if (typeof node.type !== 'string') return;
+
+	visit(node, parent);
+
+	for (var key of Object.keys(node)) {
+		if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' || key === 'range' || key === 'sourceFile') continue;
+		walk(node[key], node, visit);
+	}
+}
+
+// Every name introduced by a binding pattern (identifier, array, object, rest,
+// default). Destructuring in a parameter list is still a declaration.
+function collectPattern(node, into) {
+	if (!node || typeof node !== 'object') return;
+	switch (node.type) {
+		case 'Identifier':
+			into.add(node.name);
+			break;
+		case 'ObjectPattern':
+			for (var prop of node.properties) {
+				if (prop.type === 'RestElement') collectPattern(prop.argument, into);
+				else collectPattern(prop.value, into);
+			}
+			break;
+		case 'ArrayPattern':
+			for (var el of node.elements) collectPattern(el, into);
+			break;
+		case 'AssignmentPattern':
+			collectPattern(node.left, into);
+			break;
+		case 'RestElement':
+			collectPattern(node.argument, into);
+			break;
+	}
+}
+
+function analyse(source) {
+	// ecmaVersion is a NUMBER, not 'latest': the acorn on hand is 7.x (pug pulls
+	// it in), where a string makes the internal version comparisons NaN and the
+	// parser spins instead of failing. allowHashBang is for the bin/ shebangs.
+	var ast = acorn.parse(source, {
+		ecmaVersion: ACORN_ECMA,
+		sourceType: 'module',
+		allowHashBang: true,
+		allowAwaitOutsideFunction: true,
+		locations: true,
+	});
+
+	var declared = new Set();
+	var referenced = new Map(); // name -> first line
+
+	walk(ast, null, function (node, parent) {
+		switch (node.type) {
+			case 'ImportDefaultSpecifier':
+			case 'ImportNamespaceSpecifier':
+			case 'ImportSpecifier':
+				declared.add(node.local.name);
+				return;
+			case 'VariableDeclarator':
+				collectPattern(node.id, declared);
+				return;
+			case 'FunctionDeclaration':
+			case 'FunctionExpression':
+			case 'ArrowFunctionExpression':
+				if (node.id) declared.add(node.id.name);
+				for (var param of node.params) collectPattern(param, declared);
+				return;
+			case 'ClassDeclaration':
+			case 'ClassExpression':
+				if (node.id) declared.add(node.id.name);
+				return;
+			case 'CatchClause':
+				if (node.param) collectPattern(node.param, declared);
+				return;
+			case 'LabeledStatement':
+				declared.add(node.label.name);
+				return;
+		}
+
+		if (node.type !== 'Identifier') return;
+		if (!parent) return;
+
+		// Not a reference: property access, object literal key, member of a
+		// class body, or the label of a break/continue.
+		if (parent.type === 'MemberExpression' && parent.property === node && !parent.computed) return;
+		if (parent.type === 'Property' && parent.key === node && !parent.computed) return;
+		if (parent.type === 'PropertyDefinition' && parent.key === node && !parent.computed) return;
+		if (parent.type === 'MethodDefinition' && parent.key === node && !parent.computed) return;
+		if (parent.type === 'ExportSpecifier') return;
+		if (parent.type === 'ImportSpecifier' && parent.imported === node) return;
+		if ((parent.type === 'BreakStatement' || parent.type === 'ContinueStatement')) return;
+		if (parent.type === 'MetaProperty') return;
+
+		if (!referenced.has(node.name)) {
+			referenced.set(node.name, node.loc ? node.loc.start.line : 0);
+		}
+	});
+
+	var undeclared = [];
+	for (var [name, line] of referenced) {
+		if (declared.has(name) || GLOBALS.has(name)) continue;
+		undeclared.push(name + ' (line ' + line + ')');
+	}
+	return undeclared.sort();
+}
+
+describe('process entry point bindings', function () {
+	before(function () { if (!acorn) this.skip(); });
+
+	ENTRY_POINTS.forEach(function (rel) {
+		it(rel + ' references nothing it has not declared or imported', function () {
+			var source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+			var undeclared = analyse(source);
+
+			assert.deepStrictEqual(undeclared, [],
+				rel + ' uses names that are declared nowhere in the file — a missing import ' +
+				'throws ReferenceError only when that code path first runs: ' + undeclared.join(', '));
+		});
+	});
+
+	it('detects a missing import, so this file cannot pass vacuously', function () {
+		// The exact shape of the bug: a namespace used without its import.
+		var bad = 'import * as a from "a.js";\nasync function f(){ await b.doThing(); }\n';
+		assert.deepStrictEqual(analyse(bad), ['b (line 2)']);
+
+		var good = 'import * as a from "a.js";\nimport * as b from "b.js";\nasync function f(){ await b.doThing(); }\n';
+		assert.deepStrictEqual(analyse(good), []);
+	});
+});

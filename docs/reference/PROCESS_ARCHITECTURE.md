@@ -948,6 +948,19 @@ In embedded mode, `gateway.js` keeps `MailerManager` and starts it as before. Th
 
 The key: **the job enqueue helpers (`jobs.js`) are used identically in both modes**. Gateway routes call `jobs.enqueueFtnOutbound()` regardless of whether the consumer is in-process or across the network. This means switching between embedded and separate mode is purely a startup configuration change — no business logic changes anywhere.
 
+### Embedded mode must handle every job name the standalone worker does
+
+This is the invariant embedded mode kept breaking. `registerSchedules()` runs in **both** modes (`bin/gateway.js`, outside the `processMode` branch), so an embedded board registers the full set of schedulers and they fire on time. If the embedded consumer has no `case` for a name, BullMQ hands the job over, the switch falls to `default`, one line is logged at level 3 — verbose, so nothing at a normal log level — and the job is marked **complete**. The queue drains, `schedules.js` reports every scheduler healthy, and the work never happened.
+
+It went wrong twice. The TIC jobs were absent, so file echoes did not work in either direction. The maintenance switch handled 7 of 33 names, so an embedded board never purged a log, never enforced message or file retention, never ran a timed event or an update check, and reported success on admin buttons that did nothing.
+
+Two structural answers, one per queue:
+
+- **Maintenance** has exactly one switch, in `src/maintenance/maintenanceJobs.js`. Both consumers call `runMaintenanceJob(name, data, { logPrefix })`, which returns `false` for a name it does not handle so the caller can log it as unknown rather than report silent success. `MAINTENANCE_JOBS` is the declared list. Each case loads its own dependencies dynamically, which is what most already did and what keeps this module cheap for a process that may never run one.
+- **Toss** still has a switch per consumer, because each publishes different events around the work. `src/maintenance/outboundSweep.js` holds the one piece that was genuinely shared.
+
+`tests/queueJobCoverage.test.js` derives the producible names from the enqueue sites and holds both consumers to them, checks that `MAINTENANCE_JOBS` matches the cases actually implemented, and asserts neither consumer has grown a private maintenance switch again. `tests/entryPointBindings.test.js` covers the other half of the same blind spot: nothing imports `bin/*.js`, so a missing import there is invisible until the process runs.
+
 ### gateway.js embedded mode startup
 
 ```javascript
