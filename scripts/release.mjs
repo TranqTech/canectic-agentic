@@ -61,6 +61,7 @@ import {
 	serialiseIndex, parseIndex, indexName
 } from '../src/release/releaseIndex.js';
 import { checkStableCoverage, deltaShare } from '../src/release/pipelineCheck.js';
+import { markSuperseded } from '../src/release/releaseIndex.js';
 import { summariseAudit, formatAdvisory } from '../src/release/auditCheck.js';
 import {
 	pendingIsEmpty, findPending, closePending, crossCheckPending, releaseNoteSkeleton,
@@ -107,6 +108,9 @@ function parseArgs(argv) {
 		else if (a === '--no-tag')              { opts.tag = false; }
 		else if (a === '--no-gitlab')           { opts.gitlab = false; }
 		else if (a === '--publish')             { opts.mode = 'publish'; opts.version = argv[++i]; }
+		else if (a === '--supersede')           { opts.mode = 'supersede'; opts.version = argv[++i]; }
+		else if (a === '--by')                  { opts.supersededBy = argv[++i]; }
+		else if (a === '--reason')              { opts.reason = argv[++i]; }
 		else if (a === '--sign')                { opts.sign = true; }
 		else if (a === '--help' || a === '-h')  { usage(); process.exit(0); }
 		else die('unknown argument: ' + a);
@@ -132,6 +136,9 @@ function usage() {
 		'  --no-tag                 skip the release commit and tag (stable only)',
 		'  --no-gitlab              do not mirror the release onto the GitLab releases page',
 		'  --publish <version>      only mirror an already cut release onto GitLab',
+		'  --supersede <version>    withdraw a published release',
+		'  --by <version>           the release that replaces it (with --supersede)',
+		'  --reason "..."           why it was withdrawn (with --supersede)',
 		'  --sign                   gpg sign SHA256SUMS',
 		'  --base-manifest PATH     the stable manifest a development delta is against',
 		'  --date YYYY-MM-DD        override the release date',
@@ -798,6 +805,44 @@ function buildArtifact(opts) {
 function main() {
 	var opts = parseArgs(process.argv.slice(2));
 	if (!opts.mode) { usage(); die('choose --stable <version> or --dev'); }
+
+	if (opts.mode === 'supersede') {
+		// Withdrawing a published release. The artifact is not touched: its
+		// bytes are signed and a board verifies them, so the withdrawal goes
+		// in the index, which is the regenerated part.
+		if (!opts.version) die('--supersede needs the version being withdrawn');
+		if (!opts.supersededBy) die('--supersede needs --by <version>, so a board has somewhere to go');
+		if (opts.version === opts.supersededBy) die('a release cannot supersede itself');
+
+		var chan = channelOf(opts.version);
+		var idxPath = path.join(opts.output, indexName(chan));
+		if (!fs.existsSync(idxPath)) die('no ' + indexName(chan) + ' in ' + opts.output);
+
+		var idx = readJSON(idxPath);
+		var replacement = (idx.releases || []).find(function (r) { return r.version === opts.supersededBy; });
+		if (!replacement) {
+			die(opts.supersededBy + ' is not in the ' + chan + ' index. Cut it first: withdrawing a ' +
+				'release before its replacement exists leaves every board with nowhere to go.');
+		}
+
+		var updated = markSuperseded(idx, opts.version, opts.supersededBy, opts.reason || null);
+		if (opts.dryRun) {
+			info('dry run: would withdraw ' + opts.version + ' in favour of ' + opts.supersededBy);
+			return;
+		}
+
+		fs.writeFileSync(idxPath, JSON.stringify(updated, null, 2) + '\n');
+		ok('withdrew ' + opts.version + ' in favour of ' + opts.supersededBy);
+		if (opts.reason) info('reason: ' + opts.reason);
+
+		// The index is covered by SHA256SUMS, so the sums and their signature
+		// have to be rebuilt or every published file fails verification.
+		writeSums(opts.output, opts.sign ? opts.signKey : null);
+		ok('SHA256SUMS rewritten' + (opts.sign ? ' and signed' : ' (UNSIGNED)'));
+		if (!opts.sign) warn('publish will refuse an unsigned SHA256SUMS over a signed one; re-run with --sign');
+		info('now run: node scripts/publish.mjs');
+		return;
+	}
 
 	if (opts.mode === 'publish') {
 		if (!opts.version) die('--publish needs a version');

@@ -133,10 +133,26 @@ function evaluateChannel(opts) {
 	var channel = (index && index.channel) || opts.channel || null;
 	var releases = (index && index.releases) || [];
 
+	// A withdrawn release is not a candidate. Offering one is worse than
+	// offering nothing: the board takes it, meets the fault it was withdrawn
+	// for, and is now stranded on a version nobody intends to fix.
 	var best = null;
 	for (var r of releases) {
 		if (!parseVersion(r.version)) continue;
+		if (r.superseded_by) continue;
 		if (best === null || compareVersions(r.version, best.version) > 0) best = r;
+	}
+
+	// Whether the version they are RUNNING has been withdrawn. Separate from
+	// the choice above, and worth surfacing even when nothing newer is
+	// available: it is the difference between "you are current" and "you are
+	// on a release that was pulled".
+	var withdrawn = null;
+	for (var w of releases) {
+		if (w.version === opts.current && w.superseded_by) {
+			withdrawn = { by: w.superseded_by, reason: w.superseded_reason || null };
+			break;
+		}
 	}
 
 	if (!best || !isNewer(best.version, opts.current)) {
@@ -146,7 +162,8 @@ function evaluateChannel(opts) {
 			current: opts.current,
 			available: null,
 			release: null,
-			blockers: []
+			blockers: [],
+			withdrawn: withdrawn
 		};
 	}
 
@@ -163,7 +180,8 @@ function evaluateChannel(opts) {
 		current: opts.current,
 		available: best.version,
 		release: best,
-		blockers: blockers
+		blockers: blockers,
+		withdrawn: withdrawn
 	};
 }
 

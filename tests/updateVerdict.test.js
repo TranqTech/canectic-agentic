@@ -339,3 +339,78 @@ describe('notificationFor', function () {
 		assert.strictEqual(notificationFor(r), null);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// A withdrawn release must not be offered
+// ---------------------------------------------------------------------------
+//
+// Marking a release superseded in the index is decoration unless the check
+// honours it. Offering a withdrawn release is worse than offering nothing: the
+// board takes it, meets the fault it was withdrawn for, and is now stranded on
+// a version nobody intends to fix. That is what happened with 0.9.7a, whose
+// updater died in the schema phase — past the point where rolling back is safe.
+
+describe('superseded releases', function () {
+	var v = null;
+
+	before(async function () {
+		try { v = await import('../src/release/updateVerdict.js'); } catch (_) { this.skip(); }
+	});
+
+	function index(extra) {
+		return {
+			channel: 'stable',
+			releases: [
+				{ version: '0.9.8a', migrations: [], min_upgrade_from: '0.9.0a' },
+				Object.assign({ version: '0.9.7a', migrations: [], min_upgrade_from: '0.9.0a' }, extra || {}),
+				{ version: '0.9.6a', migrations: [], min_upgrade_from: '0.9.0a' },
+			],
+		};
+	}
+
+	function evaluate(idx, current) {
+		return v.evaluateChannel({
+			index: idx, current: current, appliedMigrations: [], nodeVersion: process.versions.node
+		});
+	}
+
+	it('skips a withdrawn release when choosing what to offer', function () {
+		var r = evaluate(index({ superseded_by: '0.9.8a' }), '0.9.6a');
+		assert.strictEqual(r.available, '0.9.8a');
+	});
+
+	it('offers a withdrawn release normally when it has not been withdrawn', function () {
+		// The control: without the mark, the same index behaves as before.
+		var idx = index();
+		idx.releases = idx.releases.filter(function (x) { return x.version !== '0.9.8a'; });
+		assert.strictEqual(evaluate(idx, '0.9.6a').available, '0.9.7a');
+	});
+
+	it('tells a board that the version it is RUNNING was withdrawn', function () {
+		// Distinct from what to offer, and worth knowing on its own: the
+		// difference between "you are current" and "you are on a pulled release".
+		var r = evaluate(index({ superseded_by: '0.9.8a', superseded_reason: 'updater fails' }), '0.9.7a');
+		assert.deepStrictEqual(r.withdrawn, { by: '0.9.8a', reason: 'updater fails' });
+	});
+
+	it('says nothing about withdrawal when the running version is fine', function () {
+		assert.strictEqual(evaluate(index({ superseded_by: '0.9.8a' }), '0.9.6a').withdrawn, null);
+	});
+
+	it('still reports a withdrawal when there is nothing newer to offer', function () {
+		// A board on the newest release, which has since been pulled, with no
+		// replacement cut yet. It is not "current" in any useful sense.
+		var idx = { channel: 'stable', releases: [
+			{ version: '0.9.7a', migrations: [], min_upgrade_from: '0.9.0a',
+			  superseded_by: '0.9.8a', superseded_reason: 'updater fails' },
+		]};
+		var r = evaluate(idx, '0.9.7a');
+		assert.strictEqual(r.available, null);
+		assert.deepStrictEqual(r.withdrawn, { by: '0.9.8a', reason: 'updater fails' });
+	});
+
+	it('leaves the reason null when none was recorded', function () {
+		var r = evaluate(index({ superseded_by: '0.9.8a' }), '0.9.7a');
+		assert.deepStrictEqual(r.withdrawn, { by: '0.9.8a', reason: null });
+	});
+});

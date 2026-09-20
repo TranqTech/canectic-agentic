@@ -158,6 +158,49 @@ tell a real change from the stamp.
 
 ---
 
+### Withdrawing a release
+
+A release can only be found defective after it is published. By then it is
+signed, indexed, and reachable by every board that checks — so the problem is
+not naming the fix, it is that nothing could say the broken one should not be
+taken.
+
+```bash
+node scripts/release.mjs --supersede 0.9.7a --by 0.9.8a --reason "the updater fails in the schema phase" --sign
+node scripts/publish.mjs
+```
+
+Cut the replacement **first**. The command refuses otherwise, because
+withdrawing a release before its successor exists leaves every board with
+nowhere to go.
+
+The mark lands in the channel index, not in the release's own metadata sidecar.
+The sidecar describes the archive, is covered by `SHA256SUMS`, and is what a
+board verifies on download; rewriting it would invalidate a signature over
+bytes that must never change. The index is the regenerated part, which is why a
+withdrawal belongs there — and why `SHA256SUMS` has to be rebuilt and re-signed
+afterwards, which the command does.
+
+`updateVerdict` then honours it two ways, and both matter:
+
+- a withdrawn release is **not a candidate**, so a board is steered past it
+- a board **running** a withdrawn release is told so, with the reason, even when
+  no replacement is available yet — that is the difference between "you are
+  current" and "you are on a release that was pulled"
+
+Nothing is deleted from the release host. The artifact stays downloadable,
+because a development build may be based on it and because removing a file
+people may already hold solves nothing.
+
+On the notes and the changelog: the changelog needs no special handling, being
+append-only and chronological — the replacement gets its own section and the
+withdrawn release keeps its own, which is exactly right for somebody reading
+what they are about to receive. The release **notes** are a different matter,
+since a sysop jumping from the version before the withdrawal to the replacement
+would otherwise only read about the fix. Copy the withdrawn release's notes
+into the replacement and add the hotfix section at the top. They are hand
+written anyway, so this costs a minute and keeps the page complete.
+
 ## 3. What gets published
 
 | File | Purpose |

@@ -44,8 +44,50 @@ function summariseRelease(meta) {
 		node_min: meta.node_min || null,
 		min_upgrade_from: meta.min_upgrade_from || null,
 		migrations: (meta.migrations || []).slice(),
-		bytes: meta.bytes || null
+		bytes: meta.bytes || null,
+		// Set when a release is withdrawn after publication. Null on a normal
+		// cut; written later by markSuperseded, because the fault that
+		// withdraws a release is by definition discovered after it shipped.
+		superseded_by: meta.superseded_by || null,
+		superseded_reason: meta.superseded_reason || null
 	};
+}
+
+/**
+ * Withdraw a published release, pointing at the one that replaces it.
+ *
+ * A release can only be found defective after it is published — by then the
+ * artifact is signed, indexed, and reachable by every board that checks. There
+ * was no way to say so: an index entry carried version, artifact, checksum and
+ * migrations, and nothing else. A board on an older version would be offered
+ * the broken release, take it, and meet the same fault.
+ *
+ * Marking it here rather than in the release's own metadata sidecar is
+ * deliberate. The sidecar describes the ARCHIVE, is covered by SHA256SUMS, and
+ * is what a board verifies; rewriting it would invalidate a signature over a
+ * file whose bytes should never change. The index is the mutable, regenerated
+ * part, so a withdrawal belongs there.
+ *
+ * Returns a new index; does not mutate the one given.
+ */
+function markSuperseded(index, version, supersededBy, reason) {
+	var idx = index || emptyIndex(null);
+	var found = false;
+
+	var releases = (idx.releases || []).map(function (r) {
+		if (r.version !== version) return r;
+		found = true;
+		return Object.assign({}, r, {
+			superseded_by: supersededBy || null,
+			superseded_reason: reason || null
+		});
+	});
+
+	if (!found) {
+		throw new Error('no release ' + version + ' in the ' + (idx.channel || 'unknown') + ' index to supersede');
+	}
+
+	return Object.assign({}, idx, { releases: releases, updated: new Date().toISOString() });
 }
 
 /**
@@ -126,6 +168,7 @@ function parseIndex(text) {
 }
 
 export {
+	markSuperseded,
 	INDEX_VERSION,
 	indexName,
 	emptyIndex,

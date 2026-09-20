@@ -177,3 +177,74 @@ describe('serialise and parse', function () {
 		assert.throws(function () { parseIndex('nope'); }, /not valid JSON/);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Withdrawing a published release
+// ---------------------------------------------------------------------------
+//
+// A release can only be found defective after it is published: by then it is
+// signed, indexed, and reachable by every board that checks. 0.9.7a shipped
+// with an updater that died in the schema phase, after the files were replaced
+// and npm install had run, which is past the point where rolling back is safe.
+//
+// There was no way to say so. An index entry carried version, artifact,
+// checksum and migrations and nothing else, so a board on an older version
+// would be offered the broken release, take it, and meet the same fault.
+//
+// The mark goes in the INDEX rather than the release's own metadata sidecar.
+// The sidecar describes the archive, is covered by SHA256SUMS, and is what a
+// board verifies; rewriting it would invalidate a signature over bytes that
+// should never change.
+
+describe('markSuperseded', function () {
+	var mod = null;
+
+	before(async function () {
+		try { mod = await import('../src/release/releaseIndex.js'); } catch (_) { this.skip(); }
+	});
+
+	function index() {
+		return {
+			channel: 'stable',
+			releases: [
+				{ version: '0.9.8a', artifact: 'a.zip' },
+				{ version: '0.9.7a', artifact: 'b.zip' },
+				{ version: '0.9.6a', artifact: 'c.zip' },
+			],
+		};
+	}
+
+	it('marks the named release and leaves the others alone', function () {
+		var out = mod.markSuperseded(index(), '0.9.7a', '0.9.8a', 'updater fails');
+		var byVersion = {};
+		for (var r of out.releases) byVersion[r.version] = r;
+
+		assert.strictEqual(byVersion['0.9.7a'].superseded_by, '0.9.8a');
+		assert.strictEqual(byVersion['0.9.7a'].superseded_reason, 'updater fails');
+		assert.strictEqual(byVersion['0.9.8a'].superseded_by, undefined);
+		assert.strictEqual(byVersion['0.9.6a'].superseded_by, undefined);
+	});
+
+	it('does not mutate the index it was given', function () {
+		var original = index();
+		mod.markSuperseded(original, '0.9.7a', '0.9.8a', 'x');
+		assert.strictEqual(original.releases[1].superseded_by, undefined);
+	});
+
+	it('refuses a version that is not in the index', function () {
+		// Silently doing nothing would report a withdrawal that never happened.
+		assert.throws(function () { mod.markSuperseded(index(), '9.9.9a', '0.9.8a', 'x'); },
+			/no release 9\.9\.9a/);
+	});
+
+	it('keeps the reason optional', function () {
+		var out = mod.markSuperseded(index(), '0.9.7a', '0.9.8a', null);
+		assert.strictEqual(out.releases[1].superseded_by, '0.9.8a');
+		assert.strictEqual(out.releases[1].superseded_reason, null);
+	});
+
+	it('stamps the index as updated', function () {
+		var out = mod.markSuperseded(index(), '0.9.7a', '0.9.8a', 'x');
+		assert.ok(out.updated, 'a withdrawal changes the index and should say when');
+	});
+});
