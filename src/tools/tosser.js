@@ -167,6 +167,22 @@ async function main() {
 			}
 		}
 
+		// TIC file echoes ride the same --ftn switch. They were missing here
+		// while the docs listed this tool as one of their triggers, so a sysop
+		// tossing by hand moved mail and no files, with nothing to say so.
+		if (opts.doFtn) {
+			if (opts.doInbound) {
+				var job = await jobs.enqueueTicInbound();
+				enqueuedJobs.push(job);
+				console.log('  + tic:inbound');
+			}
+			if (opts.doOutbound) {
+				var job = await jobs.enqueueTicOutbound();
+				enqueuedJobs.push(job);
+				console.log('  + tic:outbound');
+			}
+		}
+
 		// QWK — uses the "all" helpers for CLI compatibility
 		if (opts.doQwk) {
 			if (opts.doInbound) {

@@ -254,6 +254,16 @@ class fileUpload extends BaseSubModule {
 				var networkMappings = await fileNetworkAreas.getNetworksByFileArea(area.id);
 				if (networkMappings && networkMappings.length > 0) {
 					var subscribedConns = await filePeerSubscriptions.getSubscribedConnections(area.id);
+					// Same rule as the tosser and the web upload: a subscriber
+					// on a network this area has no areatag for cannot be sent
+					// to, so no row is created for it.
+					var hatchable = fileDistribution.partitionByAreatag(subscribedConns, networkMappings);
+					for (var unreachable of hatchable.undeliverable) {
+						alogger.writeAlog(2, "FileUpload: " + (unreachable.peer_name || 'connection ' + unreachable.peer_connection_id) +
+							" is subscribed to " + areaShortcode + " but that area carries no areatag on network " +
+							unreachable.network_id, "yellowbright");
+					}
+					subscribedConns = hatchable.deliverable;
 					if (subscribedConns && subscribedConns.length > 0) {
 						var connIds = subscribedConns.map(function(c) { return c.peer_connection_id; });
 						for (var eid of entryIds) {

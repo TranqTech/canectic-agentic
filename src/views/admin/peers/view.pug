@@ -465,6 +465,56 @@ block content
                       //- permanently empty and read as a broken link.
                       //- ----------------------------------------------------
                       if conn.network_type === 'FTN'
+                        if conn.fileDist && conn.fileDist.total > 0
+                          .row.mt-3
+                            .col-12
+                              .card
+                                .card-header.d-flex.justify-content-between.align-items-center
+                                  span
+                                    i.bi.bi-files.me-2
+                                    | File echo delivery
+                                    small.text-muted.ms-3
+                                      if conn.fileDist.pending > 0
+                                        span.badge.bg-secondary.me-1 #{conn.fileDist.pending} pending
+                                      if conn.fileDist.sent > 0
+                                        span.badge.bg-success.me-1 #{conn.fileDist.sent} sent
+                                      if conn.fileDist.failed > 0
+                                        span.badge.bg-danger.me-1 #{conn.fileDist.failed} failed
+                                      if conn.fileDist.skipped > 0
+                                        span.badge.bg-warning.text-dark.me-1 #{conn.fileDist.skipped} skipped
+                                  if conn.fileDist.failed > 0
+                                    form(method='POST' action='/admin/connection/' + conn.uuid + '/retry-files' style='display:inline')
+                                      button.btn.btn-sm.btn-outline-warning(type='submit'
+                                        title='Queue the failed transfers again and run an outbound toss')
+                                        i.bi.bi-arrow-clockwise.me-1
+                                        | Retry failed
+                                if conn.fileDist.failures && conn.fileDist.failures.length > 0
+                                  .card-body.p-0
+                                    .table-responsive
+                                      table.table.table-sm.table-hover.mb-0
+                                        thead
+                                          tr
+                                            th File
+                                            th Area
+                                            th Reason
+                                            th.text-end Tries
+                                            th.text-end Last tried
+                                        tbody
+                                          each f in conn.fileDist.failures
+                                            tr
+                                              td.monospace= f.filename
+                                              td= f.area_shortcode || ''
+                                              td.text-danger.small= f.error_message || 'unknown'
+                                              td.text-end= f.attempts || 0
+                                              td.text-end.small
+                                                if f.last_attempt
+                                                  | #{fmt.relativeAge(f.last_attempt, now)} ago
+                                                else
+                                                  span.text-muted never
+                                    if conn.fileDist.failed > conn.fileDist.failures.length
+                                      .px-3.py-2.text-muted.small
+                                        | and #{conn.fileDist.failed - conn.fileDist.failures.length} more
+
                         .row.mt-3
                           .col-12
                             .card

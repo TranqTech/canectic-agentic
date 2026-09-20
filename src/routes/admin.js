@@ -59,6 +59,7 @@ import * as fileAreas from '../models/fileAreas.js';
 import * as fileEntries from '../models/fileEntries.js';
 import * as fileNetworkAreas from '../models/fileNetworkAreas.js';
 import * as filePeerSubscriptions from '../models/filePeerSubscriptions.js';
+import * as fileDistribution from '../models/fileDistribution.js';
 import { applyDescriptions } from '../utils/fileDescExtractor.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as ftnNodelist from '../models/ftnNodelist.js';
@@ -874,6 +875,10 @@ router.get('/peer/:uuid', async (req, res, next) => {
 					conn.sessions     = await mailerSessions.recentForConnection(conn.id, 15);
 					conn.lastInbound  = await inboundFileLog.lastForConnection(conn.id);
 					conn.lastOutbound = await outboundFileLog.lastForConnection(conn.id);
+					// File echo delivery state. Nothing displayed this before,
+					// so a row that reached 'failed' was invisible as well as
+					// permanent: the file simply never arrived at one downlink.
+					conn.fileDist     = await fileDistribution.summaryForConnection(conn.id);
 				}
 			}
 		}
@@ -1145,6 +1150,45 @@ router.post('/connection/:uuid/rescan', urlencodedParser, requireAdmin, async (r
 	} catch (err) {
 		alogger.writeAlog(2, '[admin/rescan] ' + uuid + ': ' + err.message, 'redbright');
 		await flash.setOne(req, 'danger', 'Rescan failed: ' + err.message);
+	}
+
+	res.redirect(back);
+});
+
+// Put a connection's failed file distributions back in the queue.
+//
+// A file_distribution row that reaches 'failed' is terminal: the outbound pass
+// only ever reads pending rows. Until this existed there was no way back from
+// one, and no way to see one either, so the only symptom of a failure here was
+// a file that every downlink received except one. The common causes are a
+// transient disk problem and an areatag mapping that was missing at the time
+// and has since been added, both of which are worth another attempt.
+router.post('/connection/:uuid/retry-files', urlencodedParser, requireAdmin, async (req, res) => {
+	var uuid = req.params.uuid.toLowerCase().trim();
+	var conn = await peerConnections.getConnectionByUUID(uuid);
+	if (!conn) {
+		await flash.setOne(req, 'danger', 'Connection not found.');
+		return res.redirect('/admin/peers');
+	}
+
+	var peer = await peers.getPeerById(conn.peer_id);
+	var back = peer ? '/admin/peer/' + peer.uuid : '/admin/peers';
+
+	try {
+		var reset = await fileDistribution.retryFailed(conn.id);
+		if (reset > 0) {
+			// Queue the work as well as resetting it. Leaving the rows pending
+			// and saying "next toss cycle" is what made the file rescan button
+			// promise delivery it never produced.
+			await jobs.enqueueTicOutbound();
+			await flash.setOne(req, 'success', reset + ' failed file transfer(s) queued again for ' +
+				(peer ? peer.name : 'this peer') + '.');
+		} else {
+			await flash.setOne(req, 'info', 'No failed file transfers to retry.');
+		}
+	} catch (err) {
+		alogger.writeAlog(2, '[admin/retry-files] ' + uuid + ': ' + err.message, 'redbright');
+		await flash.setOne(req, 'danger', 'Could not retry file transfers: ' + err.message);
 	}
 
 	res.redirect(back);

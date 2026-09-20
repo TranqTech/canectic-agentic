@@ -581,7 +581,21 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	}
 
 	// 13. Create distribution rows for all subscribed peers EXCEPT source
-	var subscribers = await filePeerSubscriptions.getSubscribedConnections(fileAreaId);
+	var allSubscribers = await filePeerSubscriptions.getSubscribedConnections(fileAreaId);
+
+	// A subscriber on a network this area carries no areatag for cannot be
+	// sent to: the outbound pass needs the areatag to build the descriptor.
+	// It used to create the row anyway, fail it on 'No areatag mapping', and
+	// leave it failed for ever, one dead row per file per misconfigured peer.
+	var areaNetworks = await fileNetworkAreas.getNetworksByFileArea(fileAreaId);
+	var reachable = fileDistribution.partitionByAreatag(allSubscribers, areaNetworks);
+	var subscribers = reachable.deliverable;
+
+	for (var unreachable of reachable.undeliverable) {
+		alogger.writeAlog(2, '[TIC] ' + (unreachable.peer_name || 'connection ' + unreachable.peer_connection_id) +
+			' is subscribed to ' + areaShortcode + ' but that area carries no areatag on network ' +
+			unreachable.network_id + ' — map the area or unsubscribe the peer', 'yellowbright');
+	}
 
 	// Build seenby set for exclusion (includes source connection + TIC seenby)
 	var seenbySet = new Set();

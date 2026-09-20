@@ -174,13 +174,111 @@ async function markSkipped(id, reason) {
 
 /**
  * Reset failed rows to pending for retry.
+ *
+ * Returns the number of rows reset, because the caller has to tell "nothing
+ * was wrong" apart from "the reset did not happen", and those look identical
+ * from a boolean.
+ *
+ * Unlike most writes in this module this one THROWS on a database error,
+ * because it goes through postgres.query for the RETURNING clause. That is
+ * the behaviour we want here: this is a sysop pressing a button and waiting
+ * for an answer, so a failure belongs on their screen rather than in a return
+ * value nobody reads. The admin route catches it.
  */
 async function retryFailed(peerConnectionId) {
-	var err = await postgres.write(
-		"UPDATE file_distribution SET status = 'pending', error_message = NULL WHERE peer_connection_id = $1 AND status = 'failed'",
+	var rows = await postgres.query(
+		"UPDATE file_distribution SET status = 'pending', error_message = NULL, attempts = 0 " +
+		"WHERE peer_connection_id = $1 AND status = 'failed' RETURNING id",
 		[parseInt(peerConnectionId)]
 	);
-	return !err;
+	return rows ? rows.length : 0;
+}
+
+/**
+ * Status counts plus the most recent failures for one peer connection.
+ *
+ * There was no way to see any of this. A row that reached `failed` stayed
+ * there for ever: nothing called retryFailed, nothing displayed the row, and
+ * the only symptom was a file that one downlink never received while every
+ * other downlink got it.
+ */
+async function summaryForConnection(peerConnectionId, failureLimit) {
+	var connId = parseInt(peerConnectionId);
+	var limit = failureLimit || 10;
+
+	var counts = await postgres.query(
+		'SELECT status, COUNT(*) AS cnt FROM file_distribution WHERE peer_connection_id = $1 GROUP BY status',
+		[connId]
+	);
+
+	var summary = { pending: 0, sent: 0, failed: 0, skipped: 0, total: 0, failures: [] };
+	for (var row of (counts || [])) {
+		var n = parseInt(row.cnt) || 0;
+		if (Object.prototype.hasOwnProperty.call(summary, row.status)) summary[row.status] = n;
+		summary.total += n;
+	}
+
+	if (summary.failed > 0) {
+		summary.failures = await postgres.query(
+			`SELECT fd.id, fd.error_message, fd.attempts, fd.last_attempt,
+			        fe.filename, fe.area_shortcode
+			 FROM file_distribution fd
+			 JOIN file_entries fe ON fe.id = fd.file_entry_id
+			 WHERE fd.peer_connection_id = $1 AND fd.status = 'failed'
+			 ORDER BY fd.last_attempt DESC NULLS LAST
+			 LIMIT $2`,
+			[connId, limit]
+		) || [];
+	}
+
+	return summary;
+}
+
+// ---------------------------------------------------------------------------
+// Deliverability
+// ---------------------------------------------------------------------------
+
+/**
+ * Split subscribers into those a file can actually be sent to and those it
+ * cannot, by whether the area carries an areatag on that peer's network.
+ *
+ * Pure, so the rule is testable without a database, and shared so that every
+ * path which creates distribution rows applies it: an inbound TIC, a web
+ * upload and a terminal upload all used to create a row for every subscriber
+ * regardless.
+ *
+ * The outbound pass needs an areatag to build the TIC descriptor and calls
+ * markFailed('No areatag mapping') when it cannot find one. Since nothing
+ * retried a failed row, a peer subscribed to an area that is not mapped to
+ * its network accumulated one dead row per file, for ever, silently. Not
+ * creating the row is the honest answer: there is no work to do until the
+ * sysop maps the area or unsubscribes the peer, and this is a configuration
+ * question rather than a delivery failure.
+ *
+ * Undeliverable subscribers are RETURNED rather than dropped, because a
+ * subscription that cannot be honoured is exactly the thing the sysop needs
+ * told about.
+ *
+ * @param {object[]} subscribers - rows from filePeerSubscriptions.getSubscribedConnections
+ * @param {object[]} mappings    - rows from fileNetworkAreas.getNetworksByFileArea
+ */
+function partitionByAreatag(subscribers, mappings) {
+	var networksWithAreatag = new Set();
+	for (var m of (mappings || [])) {
+		if (m && m.areatag && m.network_id !== undefined && m.network_id !== null) {
+			networksWithAreatag.add(Number(m.network_id));
+		}
+	}
+
+	var deliverable = [];
+	var undeliverable = [];
+	for (var sub of (subscribers || [])) {
+		if (!sub) continue;
+		if (networksWithAreatag.has(Number(sub.network_id))) deliverable.push(sub);
+		else undeliverable.push(sub);
+	}
+
+	return { deliverable: deliverable, undeliverable: undeliverable };
 }
 
 export {
@@ -191,5 +289,7 @@ export {
 	markSent,
 	markFailed,
 	markSkipped,
-	retryFailed
+	retryFailed,
+	summaryForConnection,
+	partitionByAreatag
 };

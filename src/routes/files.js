@@ -852,6 +852,16 @@ router.post('/area/:shortcode/upload', upload.single('file'), async (req, res) =
 			var networkMappings = await fileNetworkAreas.getNetworksByFileArea(fileArea.id);
 			if (networkMappings && networkMappings.length > 0) {
 				var subscribedConns = await filePeerSubscriptions.getSubscribedConnections(fileArea.id);
+				// Only peers whose network carries an areatag for this area: a
+				// row for any other subscriber can never be staged and would
+				// sit failed for ever.
+				var hatchable = fileDistribution.partitionByAreatag(subscribedConns, networkMappings);
+				for (var unreachable of hatchable.undeliverable) {
+					alogger.writeAlog(2, "File upload: " + (unreachable.peer_name || 'connection ' + unreachable.peer_connection_id) +
+						" is subscribed to " + fileArea.shortcode + " but that area carries no areatag on network " +
+						unreachable.network_id, "yellowbright");
+				}
+				subscribedConns = hatchable.deliverable;
 				if (subscribedConns && subscribedConns.length > 0) {
 					var connIds = subscribedConns.map(function(c) { return c.peer_connection_id; });
 					await fileDistribution.createDistributionRows(result.entryId, connIds, 'tic');

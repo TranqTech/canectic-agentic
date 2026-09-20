@@ -117,6 +117,34 @@ describe('toss queue job coverage', function () {
 });
 
 // ---------------------------------------------------------------------------
+// The CLI tosser is a producer too, and was missing half of FTN
+// ---------------------------------------------------------------------------
+
+describe('src/tools/tosser.js', function () {
+
+	var source = read('src/tools/tosser.js');
+
+	it('tosses file echoes whenever it tosses FTN', function () {
+		// --ftn covers echomail, netmail AND file echoes: they share the
+		// inbound directory, the outbound directory and the mailer. The tool
+		// enqueued only the message half, while CLAUDE.md and
+		// FILES_ARCHITECTURE.md both listed it as a trigger for the TIC jobs,
+		// so a sysop tossing by hand moved mail, moved no files, and was told
+		// nothing had gone wrong.
+		var pairs = [
+			['enqueueFtnInbound', 'enqueueTicInbound'],
+			['enqueueFtnOutbound', 'enqueueTicOutbound'],
+		];
+		for (var pair of pairs) {
+			if (!source.includes(pair[0])) continue;
+			assert.ok(source.includes(pair[1]),
+				'the CLI tosser calls ' + pair[0] + ' but not ' + pair[1] +
+				', so --ftn would move messages and silently skip file echoes');
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Maintenance queue — one shared switch, so the question is different
 // ---------------------------------------------------------------------------
 
