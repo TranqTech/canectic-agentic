@@ -36,6 +36,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { execFileSync } from 'child_process';
+import { unfilledPlaceholders } from '../src/release/changelog.js';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { parseIndex } from '../src/release/releaseIndex.js';
@@ -203,6 +204,26 @@ async function main(argv) {
 	}
 
 	var notes = notesPlan(versions, fs.readdirSync(NOTES_DIR));
+
+	// Refuse notes that still carry the fields a human is meant to fill in.
+	// The cut generates everything except a one-line summary and the
+	// Highlights, and leaves those as placeholders. v0.9.7a went to the
+	// website with both of them still there: the release verified perfectly,
+	// because every check was about bytes and signatures rather than about
+	// what the page said. This is the check that would have caught it.
+	var unfilled = [];
+	for (var candidate of notes) {
+		var text = fs.readFileSync(path.join(NOTES_DIR, candidate.from), 'utf8');
+		for (var missing of unfilledPlaceholders(text)) {
+			unfilled.push(candidate.from + ' still has ' + missing);
+		}
+	}
+	if (unfilled.length) {
+		fail('release notes are not finished', unfilled.concat([
+			'Fill them in, or remove the file if the release should have none.'
+		]));
+	}
+
 	var stage = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-publish-'));
 	try {
 		copyKeepingTime(CHANGELOG, path.join(stage, 'CHANGELOG.md'));

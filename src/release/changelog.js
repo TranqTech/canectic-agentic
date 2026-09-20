@@ -18,6 +18,28 @@ var RELEASE_HEADING = /^## (v?\d[^\s(]*)\s*\((\d{4}-\d{2}-\d{2})\)\s*$/;
 var SECTION_HEADING = /^### (.+?)\s*$/;
 var UPGRADE_SECTION = 'Upgrade Notes';
 
+// The two fields a human fills in. Everything else in a release notes file is
+// generated: the upgrade block comes from the notices and the whole Changes
+// section from the changelog.
+//
+// They are named constants rather than literals because the publish step
+// refuses to send a notes file that still contains them, and a guard matching
+// a string typed out twice is a guard that stops matching the first time
+// somebody reworded one. v0.9.7a reached the website with both still in place.
+export const NOTES_SUMMARY_PLACEHOLDER = '**One sentence saying what this release is for.**';
+export const NOTES_HIGHLIGHTS_PLACEHOLDER = 'TODO: the two or three things a sysop would notice.';
+
+/**
+ * Which placeholders a notes file still carries. Empty means it is ready.
+ */
+export function unfilledPlaceholders(text) {
+	var found = [];
+	if (!text) return found;
+	if (text.indexOf(NOTES_SUMMARY_PLACEHOLDER) !== -1) found.push('the one-line summary');
+	if (text.indexOf(NOTES_HIGHLIGHTS_PLACEHOLDER) !== -1) found.push('the Highlights section');
+	return found;
+}
+
 function splitLines(text) {
 	return String(text || '').split('\n');
 }
@@ -200,13 +222,13 @@ function releaseNoteSkeleton(opts) {
 
 	out.push('# Canectic BBS v' + version);
 	out.push('');
-	out.push('**One sentence saying what this release is for.**');
+	out.push(NOTES_SUMMARY_PLACEHOLDER);
 	out.push('');
 	out.push('Released ' + meta.released + (meta.codename ? ' (' + meta.codename + ')' : '') + '.');
 	out.push('');
 	out.push('## Highlights');
 	out.push('');
-	out.push('TODO: the two or three things a sysop would notice.');
+	out.push(NOTES_HIGHLIGHTS_PLACEHOLDER);
 	out.push('');
 
 	var steps = meta.steps || [];

@@ -326,3 +326,67 @@ describe('how many Pending headings the changelog has', function () {
 		assert.strictEqual(countPendingHeadings('# Changelog\n'), 0);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Release notes placeholders
+// ---------------------------------------------------------------------------
+//
+// A cut generates everything in a notes file except two prose fields: the
+// one-line summary and the Highlights. Those are left as placeholders for a
+// human, and v0.9.7a reached the website with both still in place.
+//
+// It passed every check, because every check was about bytes and signatures:
+// six files byte-identical to local, the signature verified from the published
+// pair alone, the index correct, a 200 on the notes URL. Nothing read the page.
+//
+// publish.mjs now refuses a notes file still carrying them, which only works
+// while the guard and the generator agree on the exact strings — hence the
+// shared constants, and hence this.
+
+describe('release notes placeholders', function () {
+	var mod = null;
+
+	before(async function () {
+		try { mod = await import('../src/release/changelog.js'); } catch (_) { this.skip(); }
+	});
+
+	it('exports the placeholders the generator writes', function () {
+		assert.strictEqual(typeof mod.NOTES_SUMMARY_PLACEHOLDER, 'string');
+		assert.strictEqual(typeof mod.NOTES_HIGHLIGHTS_PLACEHOLDER, 'string');
+		assert.ok(mod.NOTES_SUMMARY_PLACEHOLDER.length > 10);
+		assert.ok(mod.NOTES_HIGHLIGHTS_PLACEHOLDER.length > 10);
+	});
+
+	it('finds both in a freshly generated file', function () {
+		var text = mod.NOTES_SUMMARY_PLACEHOLDER + '\n\n' + mod.NOTES_HIGHLIGHTS_PLACEHOLDER;
+		assert.deepStrictEqual(mod.unfilledPlaceholders(text),
+			['the one-line summary', 'the Highlights section']);
+	});
+
+	it('finds one when only the other was filled in', function () {
+		// The likely half-done case, and the one a person would miss.
+		assert.deepStrictEqual(
+			mod.unfilledPlaceholders('Real summary.\n\n' + mod.NOTES_HIGHLIGHTS_PLACEHOLDER),
+			['the Highlights section']);
+	});
+
+	it('passes a finished file', function () {
+		assert.deepStrictEqual(mod.unfilledPlaceholders('# v1\n\nReal summary.\n\n## Highlights\n\nReal content.'), []);
+	});
+
+	it('survives empty and missing input', function () {
+		assert.deepStrictEqual(mod.unfilledPlaceholders(''), []);
+		assert.deepStrictEqual(mod.unfilledPlaceholders(null), []);
+	});
+
+	it('the notes this repo ships are finished', function () {
+		// Catches a notes file committed with placeholders still in it, which
+		// is how the last one got as far as the publish step at all.
+		var dir = 'docs/releases';
+		for (var f of fs.readdirSync(dir)) {
+			if (!f.endsWith('.md')) continue;
+			var left = mod.unfilledPlaceholders(fs.readFileSync(path.join(dir, f), 'utf8'));
+			assert.deepStrictEqual(left, [], f + ' still has ' + left.join(' and '));
+		}
+	});
+});
