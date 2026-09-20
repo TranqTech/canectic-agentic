@@ -234,6 +234,64 @@ async function resolveSourceConnection(fromAddress) {
 }
 
 /**
+ * Normalise an FTN address for loop comparison.
+ *
+ * Bare, lowercase, no domain, no `.0` point suffix. A system writes itself in
+ * with a domain on one hop and without it on the next, and `1:123/456` and
+ * `1:123/456.0` are the same node, so comparing the strings as they arrive
+ * misses the match that matters.
+ */
+function normaliseAddress(addr) {
+	if (!addr) return '';
+	var a = String(addr).trim().toLowerCase();
+	var at = a.indexOf('@');
+	if (at !== -1) a = a.slice(0, at);
+	a = a.replace(/\.0$/, '');
+	return a;
+}
+
+/**
+ * Have we already handled this file?
+ *
+ * A TIC carries Seenby (systems that have it) and Path (systems it travelled
+ * through), and we stamp ourselves into both on the way out. So our own
+ * address arriving back in either list means this file has been round to us
+ * before, and passing it on again is how a mesh becomes a carousel.
+ *
+ * This is the guard FTN relies on, and it was absent: the only thing standing
+ * between this system and a loop was the dupe check, which is a different
+ * question (do we hold this file) asked of a table that retention prunes.
+ *
+ * Pure, and exported, because the addresses come from the database and the
+ * rule should be testable without one.
+ *
+ * @param {object} tic - parsed TIC with `seenby` and `path` arrays
+ * @param {string[]} ourAddresses - our system addresses on this network
+ * @returns {string|null} the address that matched, or null
+ */
+function ticHasPassedThrough(tic, ourAddresses) {
+	if (!tic || !ourAddresses || ourAddresses.length === 0) return null;
+
+	var mine = new Set();
+	for (var a of ourAddresses) {
+		var n = normaliseAddress(a);
+		if (n) mine.add(n);
+	}
+	if (mine.size === 0) return null;
+
+	for (var sb of (tic.seenby || [])) {
+		var s = normaliseAddress(sb);
+		if (s && mine.has(s)) return s;
+	}
+	for (var p of (tic.path || [])) {
+		// Path entries are "address timestamp"; the address is the first token.
+		var pAddr = normaliseAddress(String(p).split(/\s+/)[0]);
+		if (pAddr && mine.has(pAddr)) return pAddr;
+	}
+	return null;
+}
+
+/**
  * Check if a 'To' address matches one of our system addresses.
  */
 async function validateToAddress(toAddress, networkId) {
@@ -473,8 +531,31 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		}
 	}
 
-	// 9. Dupe check
-	var isDupe = await fileEntries.checkDupe(fileAreaId, tic.file, hashes.crc32);
+	// 8b. Loop check. Our own address in Seenby or Path means this file has
+	// already been through here, whatever the dupe table currently says. This
+	// catches the case the dupe check cannot: a file we held, pruned by
+	// retention, and were then sent again by a peer who still had it.
+	if (networkId) {
+		var ourAddrs = (await systemAddresses.getAddressesByNetwork(networkId) || [])
+			.map(function (a) { return a.address; })
+			.filter(Boolean);
+		var loopedVia = ticHasPassedThrough(tic, ourAddrs);
+		if (loopedVia) {
+			alogger.writeAlog(2, '[TIC] ' + ticFilename + ': loop — ' + tic.file +
+				' already lists ' + loopedVia + ' in Seenby/Path, not importing or forwarding', 'yellowbright');
+			await moveToTossed(ticFilePath, ticFilename, tossedDir);
+			try {
+				await fs.promises.rename(attachedFilePath, path.join(tossedDir, tic.file));
+			} catch (_) {}
+			return 'dupe';
+		}
+	}
+
+	// 9. Dupe check. Size as well as CRC, so the same bytes under a name a
+	// chain has uppercased or truncated are still recognised.
+	var inboundSize = 0;
+	try { inboundSize = fs.statSync(attachedFilePath).size; } catch (_) { inboundSize = 0; }
+	var isDupe = await fileEntries.checkDupe(fileAreaId, tic.file, hashes.crc32, inboundSize);
 	if (isDupe) {
 		alogger.writeAlog(3, '[TIC] ' + ticFilename + ': dupe — ' + tic.file + ' already exists in area ' + areaShortcode, 'yellow');
 		// Move TIC and attached file to tossed (not bad — it's a valid dupe)
@@ -995,5 +1076,7 @@ export {
 	parseTicFile,
 	buildTicDescriptor,
 	tossInbound,
-	tossOutbound
+	tossOutbound,
+	ticHasPassedThrough,
+	normaliseAddress
 };

@@ -793,7 +793,7 @@ router.post('/area/:shortcode/upload', upload.single('file'), async (req, res) =
 		var hashes = computeHashes(stagingPath);
 
 		// Dupe check
-		var isDupe = await fileEntries.checkDupe(fileArea.id, originalName, hashes.crc32);
+		var isDupe = await fileEntries.checkDupe(fileArea.id, originalName, hashes.crc32, req.file.size);
 		if (isDupe) {
 			fs.unlinkSync(stagingPath);
 			return res.redirect('/files/area/' + shortcode + '?error=Duplicate+file');

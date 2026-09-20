@@ -436,7 +436,10 @@ Worker: tic:inbound job
   7. Validate To address against system addresses
   8. Check peer subscription (logged but not rejected)
   9. Verify CRC-32 hash
-  10. Dupe check (area + filename + CRC-32)
+   9b. LOOP CHECK: our own address in Seenby or Path means the file has been
+       through here before — tossed, not imported, not forwarded
+  10. Dupe check (area + filename case-insensitively + CRC-32, or CRC-32 + size
+      under any name)
   11. Handle Replaces (deactivate old entry)
   12. Move file to area directory
   13. Extract descriptions (TIC LDesc or FILE_ID.DIZ)
@@ -456,6 +459,41 @@ and nothing about a pending row causes it to be sent. Between shipping and
 0.9.6a this step did not exist and neither did TIC in the outbound sweep, so
 every file received was filed, queued and then left, and no downlink of a board
 whose users did not upload ever received anything.
+
+### Loop prevention
+
+A file that reads as new is imported **and hatched onward to every subscribed
+downlink**. In a mesh that means an unrecognised file does not simply get stored
+twice: it circulates, and every system that fails to recognise it forwards it
+again. Two independent brakes, answering different questions:
+
+| Guard | Question | Survives retention? |
+|---|---|---|
+| Seenby / Path (`ticHasPassedThrough`) | Has this file been through **this system** before? | Yes — it travels with the file |
+| Dupe check (`fileEntries.checkDupe`) | Does this area hold this file **now**? | No — `file-maintenance` hard-deletes rows |
+
+Neither substitutes for the other, which is why both are needed. The dupe check
+consults a table that retention prunes, so a file held, pruned, and then offered
+again by a peer who still has it reads as brand new to it. Only the Seenby stamp
+survives that, because it lives in the file rather than here.
+
+Both had holes. The Seenby check did not exist at all — Seenby was read on
+inbound only to decide who *not* to forward to, never to ask whether we were
+already in it. And the dupe check compared filenames case-sensitively and
+required an exact name match even when the CRC matched, so a file coming back
+from a chain that had uppercased it (which chains do — see the same note on
+`ftnReleaseSource.js`) read as new with an identical checksum.
+
+Matching rules now:
+
+- Name compared with `LOWER()`, so case changes in transit do not defeat it
+- **or** CRC-32 **and** size both matching, under any name at all
+- `active` is deliberately ignored, so a file deactivated by a `Replaces` still
+  counts as seen
+- Size is in the content comparison on purpose: CRC-32 alone is too weak to
+  reject a file over, since across ten thousand files in one area the chance of
+  some pair colliding is around one percent, and a false dupe silently refuses a
+  legitimate file
 
 ### Outbound Flow
 

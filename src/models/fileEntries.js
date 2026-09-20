@@ -115,17 +115,59 @@ async function searchEntries(searchTerm, opts) {
 // Dupe checking
 // ---------------------------------------------------------------------------
 
-async function checkDupe(areaId, filename, crc32) {
+/**
+ * Has this area already got this file?
+ *
+ * In a networked file area this is the loop brake, not merely a tidiness
+ * check: a file that reads as new is imported and hatched onward to every
+ * subscribed downlink, so a dupe check that misses turns a mesh into a
+ * carousel. It deliberately ignores `active`, because a file deactivated by a
+ * Replaces must still count as seen.
+ *
+ * Two ways to match, and both are needed:
+ *
+ * 1. Name, compared CASE-INSENSITIVELY. Chains rename, truncate and uppercase
+ *    (the same reason `ftnReleaseSource.js` treats a filename as a hint), so
+ *    an exact comparison let LORD.ZIP back in past lord.zip with the identical
+ *    CRC and sent it round again.
+ * 2. Content: CRC-32 and size together. A file that comes back under a name we
+ *    cannot match on is still the same file. Size is in the comparison because
+ *    CRC-32 alone is not enough to bet on — across ten thousand files in one
+ *    area the odds of some pair colliding are around one in a hundred, and a
+ *    false dupe silently refuses a legitimate file. Identical CRC AND identical
+ *    size with different content is not a thing that happens by accident.
+ *
+ * @param {number} areaId
+ * @param {string} filename
+ * @param {string} [crc32]    - uppercase hex
+ * @param {number} [fileSize] - enables the content match
+ */
+async function checkDupe(areaId, filename, crc32, fileSize) {
+	var area = parseInt(areaId);
+
 	if (crc32) {
-		var row = await postgres.queryOne(
-			"SELECT id FROM file_entries WHERE area_id = $1 AND file_hash_crc32 = $2 AND filename = $3",
-			[areaId, crc32, filename]
+		var byName = await postgres.queryOne(
+			"SELECT id FROM file_entries WHERE area_id = $1 AND file_hash_crc32 = $2 AND LOWER(filename) = LOWER($3)",
+			[area, crc32, filename]
 		);
-		return !!row;
+		if (byName) return true;
+
+		// Same bytes under another name. Only asked when we know the size,
+		// since CRC-32 on its own is too weak to reject a file over.
+		var size = parseInt(fileSize);
+		if (Number.isFinite(size) && size > 0) {
+			var byContent = await postgres.queryOne(
+				"SELECT id FROM file_entries WHERE area_id = $1 AND file_hash_crc32 = $2 AND file_size = $3",
+				[area, crc32, size]
+			);
+			if (byContent) return true;
+		}
+		return false;
 	}
+
 	var row = await postgres.queryOne(
-		"SELECT id FROM file_entries WHERE area_id = $1 AND filename = $2",
-		[areaId, filename]
+		"SELECT id FROM file_entries WHERE area_id = $1 AND LOWER(filename) = LOWER($2)",
+		[area, filename]
 	);
 	return !!row;
 }

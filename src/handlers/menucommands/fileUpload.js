@@ -197,8 +197,11 @@ class fileUpload extends BaseSubModule {
 				// Compute hashes
 				var hashes = computeHashes(sf.fullPath);
 
-				// Dupe check
-				var isDupe = await checkDupe(area.id, sf.filename, hashes.crc32);
+				// Dupe check — size as well as CRC, so the same bytes under a
+				// different name are recognised as already held.
+				var uploadSize = 0;
+				try { uploadSize = fs.statSync(sf.fullPath).size; } catch (_) { uploadSize = 0; }
+				var isDupe = await checkDupe(area.id, sf.filename, hashes.crc32, uploadSize);
 				if (isDupe) {
 					dupes++;
 					fs.unlinkSync(sf.fullPath);
