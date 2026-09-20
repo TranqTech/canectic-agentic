@@ -8,6 +8,10 @@
 - Fix: **a downlink's `%RESCAN` for a file area replied cheerfully and sent nothing.** A file rescan writes pending rows rather than rewinding a pointer, so unlike a message rescan there is nothing that picks them up on the next pass. The admin Rescan button carried the same promise. Both now signal an outbound toss once the rows are written.
 - Fix: **file echoes did not work in either direction in embedded mode** (`PROCESS_MODE=embedded`). The embedded worker had no case for the TIC jobs, so BullMQ handed each one over, the switch fell through to its default, and the job was marked complete without the work being done. Outbound email and the outbound sweep were missing for the same reason. A test now holds the two workers to the same set of job names, since a job nothing handles is indistinguishable from one that succeeded.
 
+### Security
+
+- **adm-zip updated to 0.6.1**, clearing two advisories against 0.6.0: extraction followed symlinks in the destination, allowing a crafted archive to overwrite files outside the target directory, and a declared uncompressed size could be used to exhaust memory. This matters here because both archive paths read files that arrive from outside the board: FILE_ID.DIZ extraction from uploaded and tossed files, and infopack scanning for echolists and filebones. The fix is a patch release inside the range already declared, so `npm install` picks it up with no configuration change.
+
 ### Embedded Mode
 
 - Fix: **the clean shutdown message never printed, and shutdown ended on an unhandled error instead.** Both the gateway and the door server tested a bare `logtoconsole` when the last server stopped, but that name is a private constant inside the logger and was never in scope, so the check threw `ReferenceError` from inside a timer callback. The logger now exposes the setting properly.
