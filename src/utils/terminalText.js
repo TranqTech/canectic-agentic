@@ -595,14 +595,21 @@ async function formatBodyHtml(displayText, forceWidth) {
 
 	try {
 		var wrapAt = forceWidth || 80;
-		// Reflow paragraphs to reassemble text from wider editors
-		var reflowed = reflowText(displayText, wrapAt);
+
+		// Ask whether this is art BEFORE touching it, and skip reflow if it
+		// is. The order used to be the other way round, and it cost the art:
+		// reflowParagraphs joins any consecutive line at or above 80% of the
+		// wrap width, which every 78-to-80 column art row is, so three rows
+		// became one line and detection then ran on the wreckage. Nothing
+		// downstream can put the breaks back, and body_html is written once
+		// at toss time. This is what processMessageBody already does for the
+		// terminal (termMsgFormat.js: detect on raw text, guard the reflow).
+		var isArt = detectAnsiArt(displayText);
+		var reflowed = isArt ? displayText : reflowText(displayText, wrapAt);
 
 		if (reflowed.includes("\x1b[") ||
 			/\|\d{2}/.test(reflowed) ||
 			reflowed.includes("\x01")) {
-			// Check if this is ANSI art (cursor positioning) vs just color codes
-			var isArt = detectAnsiArt(reflowed);
 			return await formatTerminalText(reflowed, {
 				terminalWidth: wrapAt,
 				noWrap: !isArt && !forceWidth,

@@ -4,6 +4,12 @@
 
 ### Messages
 
+- Fix: **ANSI art drawn with block characters was flattened into a single line.** Paragraph reflow joins consecutive lines that are close to the full width, which is how text from a wider editor gets reassembled — but every row of 78-to-80 column art looks exactly like that. Two faults combined: art detection only recognised art that moves the cursor, so art drawn as colour plus block characters read as ordinary text, and on the web the reflow ran *before* anything asked whether the body was art at all. Three rows of art became one line, and since the web copy of a message is rendered once when it arrives, nothing later could put the breaks back. Art detection now also recognises block-drawn art, and the web asks before it reflows rather than after, which is what the terminal already did.
+
+  Fixing this does not repair messages already stored. Run `node src/tools/maintenance.js --regen-html --area <SHORTCODE>` on an affected area, and note that it can only recover art whose plain-text copy survived import intact.
+
+  One deliberate trade: a message that is ordinary prose but carries two or more full-width rules now reads as art and will not be reflowed. Nothing about its shape distinguishes it from a drawing, and reflow was previously merging such a rule onto the end of the sentence above it, so leaving it alone is not obviously the worse outcome.
+
 - **Thread mode can now be set on a message group.** It was per area only, so a sysop wanting a whole network to read flat had to set every area by hand and set each new one again afterwards. The group carries a default that new areas inherit, an explicit choice on the area form still wins, and Push Group Defaults gained a Thread Mode tickbox for applying it to areas that already exist. It is unticked by default, like Retention, because pushing it replaces whatever each area was set to. Existing groups default to Standard, so nothing changes until you set one.
 
 ### File Echoes

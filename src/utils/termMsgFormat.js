@@ -129,18 +129,100 @@ function hasColorCodes(text) {
 	return hasAnsiCodes(text) || hasPipeCodes(text) || hasCtrlACodes(text);
 }
 
+// Box drawing (U+2500-U+257F) and block elements (U+2580-U+259F), which is
+// what CP437 0xB0-0xDF becomes after convertCP437toUTF8.
+var ART_GLYPH = /[\u2500-\u259F]/g;
+var ART_GLYPH_RUN = /[\u2500-\u259F]{2,}/g;
+
+// A line is art-like if it is built substantially out of box/block glyphs:
+// either a run of several together, or glyphs making up a third of it.
+var ART_MIN_RUN = 8;
+var ART_MIN_DENSITY = 0.30;
+
+// ...and the message is art if at least two such lines exist and at least one
+// of them spans a real width. The width test is what separates a drawing from
+// a signature rule: `----` under a sig is two narrow art-like lines, a drawn
+// header and footer are two wide ones.
+var ART_MIN_LINES = 2;
+var ART_MIN_WIDTH = 40;
+
+// Visible width of a line, with escape sequences removed.
+function _bareLine(line) {
+	return line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+}
+
+/**
+ * Widths of the art-like lines in a message, in the order they appear.
+ * Exported so a test can say WHY a verdict came out as it did rather than
+ * only that it did.
+ */
+function artLineWidths(text) {
+	var widths = [];
+	if (!text) return widths;
+
+	for (var line of String(text).split(/\r\n|\r|\n/)) {
+		var bare = _bareLine(line).trim();
+		if (!bare) continue;
+
+		var glyphs = (bare.match(ART_GLYPH) || []).length;
+		if (glyphs === 0) continue;
+
+		var longestRun = 0;
+		for (var run of (bare.match(ART_GLYPH_RUN) || [])) {
+			if (run.length > longestRun) longestRun = run.length;
+		}
+
+		if (longestRun >= ART_MIN_RUN || (glyphs / bare.length) >= ART_MIN_DENSITY) {
+			widths.push(bare.length);
+		}
+	}
+	return widths;
+}
+
 // Detect ANSI art vs. simple colored text.
-// ANSI art uses cursor positioning (CSI sequences ending in A/B/C/D/H/f/J/K/s/u).
-// Simple colored messages only use SGR (CSI sequences ending in 'm').
+//
+// Two independent signals, because art is drawn two different ways:
+//
+//   1. Cursor positioning (CSI ending in A/B/C/D/H/f/J/K/s/u). Classic .ANS.
+//   2. SGR colour plus CP437 block glyphs, which contains no cursor movement
+//      at all and so read as ordinary coloured text under signal 1 alone.
+//
+// Signal 2 was missing, and its absence is not cosmetic. The caller uses this
+// answer to decide whether to run paragraph reflow, and reflow JOINS any
+// consecutive line at or above 80% of the wrap width — which every 78-to-80
+// column art row is. Three rows of block art became one line, in a way no
+// later stage could undo, and body_html is written once at toss time.
+//
+// Signal 2 is deliberately a whole-message test rather than a per-line one.
+// Protecting only the glyph-dense lines leaves the text laid out BETWEEN a
+// drawn header and footer still being joined to itself and to the footer,
+// which is the same damage one row down.
+//
+// Known limit: prose carrying two or more full-width rules reads as art and
+// loses paragraph reflow. That is the deliberate trade — reflow currently
+// merges such a rule onto the end of the preceding sentence, so treating it as
+// art is not obviously the worse answer, and no shape test separates the two.
+//
 // Pipe codes and Ctrl-A codes are always simple color — never art.
 function detectAnsiArt(text) {
 	if (!text) return false;
-	// Look for any CSI sequence that is NOT just SGR (color).
+
+	// Signal 1: any CSI sequence that is NOT just SGR (color).
 	// CSI = ESC [ <params> <final byte>
 	// SGR final byte is 'm'. Cursor positioning uses A,B,C,D,H,f,J,K,s,u etc.
-	return /\x1b\[\d*[ABCDHJKfsu]/.test(text) ||          // Single-param positioning
-	       /\x1b\[\d+;\d+[Hf]/.test(text) ||               // Two-param cursor position
-	       /\x1b\[2?[JK]/.test(text);                       // Screen/line clear
+	if (/\x1b\[\d*[ABCDHJKfsu]/.test(text) ||          // Single-param positioning
+	    /\x1b\[\d+;\d+[Hf]/.test(text) ||               // Two-param cursor position
+	    /\x1b\[2?[JK]/.test(text)) {                     // Screen/line clear
+		return true;
+	}
+
+	// Signal 2: drawn with block glyphs.
+	var widths = artLineWidths(text);
+	if (widths.length < ART_MIN_LINES) return false;
+	for (var w of widths) {
+		if (w >= ART_MIN_WIDTH) return true;
+	}
+	return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +753,7 @@ function reflowText(text, wrapWidth) {
 }
 
 export {
+	artLineWidths,
 	processMessageBody,
 	convertCP437toUTF8,
 	convertUTF8toCP437,
