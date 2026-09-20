@@ -8,6 +8,10 @@
     {
       "level": "warning",
       "text": "If you carry file echoes, expect a burst of outbound files the first time the tosser runs after updating. A file arriving from an uplink was correctly queued for your downlinks and then never sent, because nothing ran the outbound pass for file echoes. That queue has been growing for as long as you have been receiving files. The first outbound pass after this update sends all of it, so a downlink that has had nothing from you for months may receive a great deal at once. Nothing was lost and nothing needs doing; it is the volume that may surprise you and your links. If you would rather meter it, update at a quiet hour and watch the first pass on the peer page, which now shows pending, sent and failed counts per connection."
+    },
+    {
+      "level": "info",
+      "text": "This update rewrites stored message bodies. Three parts of the system had been storing text three different ways in the same database columns, which is what allowed messages relayed between networks to be corrupted, and the update normalises them. It runs automatically during the update and asks nothing of you. On the development board it rewrote 4,707 messages across 9 areas, all of them received over QWK; your own figures will differ. The older column is deliberately left in place and unread for this release, so it holds the previous copy of every rewritten message and the change can be reversed if it ever needs to be. Messages that were already displaying incorrectly before this update are not repaired by it."
     }
   ],
   "min_upgrade_from": "0.9.0a",
