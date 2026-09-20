@@ -17,6 +17,14 @@
 script.
   (function() {
     var TARGET_COLS_DESKTOP = 80;
+    // 40 on a phone is a deliberate READABILITY choice, not a shortcut.
+    // This script scales the font so the target number of columns fills the
+    // width, so asking for 80 on a ~400px screen lands somewhere near 9px:
+    // above MIN_FONT_PX, and too small to read comfortably. 40 columns gives
+    // roughly double that. The cost is that 80-column art reflows and breaks;
+    // the trade was made in favour of text, which is what most messages are.
+    // Changing this back to 80 makes every mobile reader squint so that art
+    // areas hold their shape. See issue #49 before doing that.
     var TARGET_COLS_MOBILE = 40;
     var MOBILE_BREAKPOINT = 992; // below Bootstrap lg
     var MIN_FONT_PX = 7;
