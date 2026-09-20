@@ -2,6 +2,13 @@
 
 ## Pending (since v0.9.6a)
 
+### Upgrade Notes
+
+Everything in this block is something that happens to your board on the first run after updating. Read it before updating a live system.
+
+- **Embedded mode only (`PROCESS_MODE=embedded`): maintenance that has never run starts running.** The embedded worker recognised 7 of 33 maintenance jobs and silently completed the rest without doing them, so log purges, message and file retention, nodelist and echolist scanning, timed events and the update check have all been idle. They begin on the first daily run after you update, and clear the whole backlog at once. **The part to check before updating is retention:** if you ever set `max_age_days` or `max_messages` on a message or file area, it has been ignored until now and will be enforced on that first run. The Retention Preview on an area's admin page reports what a limit would remove without removing anything. Boards on the normal four-process setup are unaffected — their worker has always run these.
+- **If you carry file echoes, expect a burst of outbound files on the first toss after updating.** A file arriving from an uplink was correctly queued for your downlinks and then never sent, because nothing ran the outbound pass for file echoes. That queue has been growing for as long as you have been receiving files, so a downlink that has had nothing from you for months may receive a great deal at once. Nothing was lost and nothing needs doing; it is the volume that may surprise you and your links. To meter it, update at a quiet hour and watch the first pass on the peer page, which now shows pending, sent and failed counts per connection.
+
 ### Messages
 
 - Fix: **ANSI art drawn with block characters was flattened into a single line.** Paragraph reflow joins consecutive lines that are close to the full width, which is how text from a wider editor gets reassembled — but every row of 78-to-80 column art looks exactly like that. Two faults combined: art detection only recognised art that moves the cursor, so art drawn as colour plus block characters read as ordinary text, and on the web the reflow ran *before* anything asked whether the body was art at all. Three rows of art became one line, and since the web copy of a message is rendered once when it arrives, nothing later could put the breaks back. Art detection now also recognises block-drawn art, and the web asks before it reflows rather than after, which is what the terminal already did.
