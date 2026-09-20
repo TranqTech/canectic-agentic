@@ -8,6 +8,7 @@
 // Run: npx mocha tests/qwkClasses.test.js
 
 import assert from 'assert';
+import { cp437ToUtf8, utf8ToCp437 } from '../src/utils/codepageConversions.js';
 import {
 	QWK_RECORD_SIZE,
 	QWK_LINE_TERM,
@@ -693,5 +694,62 @@ describe('buildQwkBody', function () {
 	it('should handle null/undefined without throwing', function () {
 		var buf = buildQwkBody(null);
 		assert.ok(Buffer.isBuffer(buf));
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Packing a body that is not ASCII
+// ---------------------------------------------------------------------------
+//
+// The packer used to decide how to read a stored body from which database
+// column was populated: "utf8 is set, therefore body_text holds raw CP437".
+// True of a message that arrived over QWK, false of one that arrived over FTN,
+// where both columns hold the same Unicode text. So relaying an FTN message
+// into a QWK packet ran Unicode through Buffer.from(x, 'binary'), which keeps
+// the LOW BYTE of each character, and `Γöî` went out as `ô÷ε`.
+//
+// Since migration 0006 body_text is canonical Unicode for every source, so the
+// packer converts unconditionally. These cover the path that was wrong; the
+// ASCII cases above never exercised it, because ASCII survives either way.
+
+describe('buildQwkBody with non-ASCII content', function () {
+
+	var BLOCK = '█';      // U+2588, CP437 0xDB
+	var ACCENT = 'é';     // é, CP437 0x82
+
+	// What the packers do now: canonical text in, CP437 bytes out.
+	function packAndRead(text) {
+		var bytes = utf8ToCp437(text, true);
+		var asChars = '';
+		for (var i = 0; i < bytes.length; i++) asChars += String.fromCharCode(bytes[i]);
+		var buf = buildQwkBody(asChars);
+		return cp437ToUtf8(buf).replace(/\s+$/, '');   // trim the 128-byte padding
+	}
+
+	it('round-trips block art', function () {
+		assert.strictEqual(packAndRead(BLOCK + BLOCK), BLOCK + BLOCK);
+	});
+
+	it('round-trips accented latin', function () {
+		assert.strictEqual(packAndRead('caf' + ACCENT), 'caf' + ACCENT);
+	});
+
+	it('shows what the old path did to the same input', function () {
+		// Reading canonical text as though it were raw bytes: the low byte of
+		// U+2588 is 0x88, which is not a block in CP437.
+		var wrong = cp437ToUtf8(Buffer.from(BLOCK + BLOCK, 'binary'));
+		assert.notStrictEqual(wrong, BLOCK + BLOCK);
+	});
+
+	it('substitutes rather than corrupting when CP437 cannot hold a character', function () {
+		// QWK is a CP437 format; there is nowhere for Cyrillic to go. A
+		// visible '?' is the honest outcome.
+		assert.strictEqual(packAndRead('При'), '???');
+	});
+
+	it('still pads to the 128-byte record boundary', function () {
+		var bytes = utf8ToCp437(BLOCK, true);
+		var asChars = String.fromCharCode(bytes[0]);
+		assert.strictEqual(buildQwkBody(asChars).length % 128, 0);
 	});
 });

@@ -123,3 +123,105 @@ describe('fileDistribution.partitionByAreatag', function () {
 		assert.strictEqual(maps.length, 1);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// The way back from a failed transfer
+// ---------------------------------------------------------------------------
+//
+// A file_distribution row that reaches 'failed' is terminal: the outbound pass
+// reads pending rows only. Until the peer page grew a Retry button there was
+// no way back from one and no way to see one either, so the sole symptom of a
+// failure here was a file that every downlink received except one.
+//
+// retryFailed returns a COUNT rather than a boolean on purpose: the caller has
+// to tell "nothing was wrong" from "the reset did not happen", and those are
+// indistinguishable from a boolean.
+//
+// Needs a database; the queries are the behaviour.
+
+describe('fileDistribution failure recovery', function () {
+	this.timeout(30000);
+
+	var available = false;
+	var pg = null, fd = null;
+	var CONN = 999902;          // no such connection; nothing else writes these
+	var ENTRY = 999903;
+
+	before(async function () {
+		var mod = await import('./helpers/dbAvailable.js');
+		available = await mod.dbAvailable();
+		if (!available) return;
+		pg = await import('../src/middleware/db/postgres.js');
+		fd = await import('../src/models/fileDistribution.js');
+	});
+
+	after(async function () {
+		if (!pg) return;
+		await pg.write('DELETE FROM file_distribution WHERE peer_connection_id = $1', [CONN]);
+	});
+
+	beforeEach(async function () {
+		if (!available) this.skip();
+		await pg.write('DELETE FROM file_distribution WHERE peer_connection_id = $1', [CONN]);
+	});
+
+	async function seed(status, n) {
+		for (var i = 0; i < n; i++) {
+			await pg.write(
+				'INSERT INTO file_distribution (file_entry_id, peer_connection_id, protocol, status, attempts, created_at) ' +
+				"VALUES ($1, $2, 'tic', $3, 1, NOW())",
+				[ENTRY + i, CONN, status]);
+		}
+	}
+
+	it('reports zero when there is nothing to retry, rather than claiming success', async function () {
+		await seed('sent', 2);
+		assert.strictEqual(await fd.retryFailed(CONN), 0);
+	});
+
+	it('resets failed rows and says how many', async function () {
+		await seed('failed', 3);
+		assert.strictEqual(await fd.retryFailed(CONN), 3);
+	});
+
+	it('leaves sent and pending rows alone', async function () {
+		await seed('failed', 1);
+		await seed('sent', 1);
+		await fd.retryFailed(CONN);
+		var counts = await pg.query(
+			'SELECT status, COUNT(*) n FROM file_distribution WHERE peer_connection_id = $1 GROUP BY status',
+			[CONN]);
+		var byStatus = {};
+		for (var r of counts) byStatus[r.status] = parseInt(r.n, 10);
+		assert.strictEqual(byStatus.sent, 1, 'a sent file must not be sent again');
+		assert.strictEqual(byStatus.pending, 1);
+	});
+
+	it('clears the error message and attempt count on the rows it resets', async function () {
+		// Otherwise the peer page still shows the old reason against a row
+		// that is queued again.
+		await seed('failed', 1);
+		await pg.write("UPDATE file_distribution SET error_message = 'old reason' WHERE peer_connection_id = $1", [CONN]);
+		await fd.retryFailed(CONN);
+		var row = await pg.queryOne('SELECT error_message, attempts FROM file_distribution WHERE peer_connection_id = $1', [CONN]);
+		assert.strictEqual(row.error_message, null);
+		assert.strictEqual(parseInt(row.attempts, 10), 0);
+	});
+
+	it('summarises the statuses for the peer page', async function () {
+		await seed('failed', 2);
+		await seed('sent', 1);
+		var s = await fd.summaryForConnection(CONN);
+		assert.strictEqual(s.failed, 2);
+		assert.strictEqual(s.sent, 1);
+		assert.strictEqual(s.total, 3);
+	});
+
+	it('reports zero counts for a connection with no rows at all', async function () {
+		var s = await fd.summaryForConnection(CONN);
+		assert.deepStrictEqual(
+			{ pending: s.pending, sent: s.sent, failed: s.failed, total: s.total },
+			{ pending: 0, sent: 0, failed: 0, total: 0 });
+		assert.deepStrictEqual(s.failures, []);
+	});
+});

@@ -1087,6 +1087,10 @@ async function pushAllNNTP() {
 }
 
 export {
+	// Exported for tests: the charset decisions are where this went wrong,
+	// and they are not reachable through pushToNntpPeer without a live server.
+	normaliseBodyText,
+	formatNntpArticle,
 	pullFromPeer,
 	pullAllNNTP,
 	pushToNntpPeer,
