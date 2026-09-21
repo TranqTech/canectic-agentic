@@ -6579,7 +6579,7 @@ router.get('/update', requireAdmin, async (req, res) => {
 		freeBytes: freeBytes(target),
 		artifactBytes: best && best.release ? best.release.bytes : null,
 		databaseReachable: await databaseReachable(),
-		callersOnline: await callersOnline(),
+		callersOnline: await callersOnline(req),
 		jobsInFlight: flight,
 		targetWritable: writable(target),
 		dumpTool: onPath('pg_dump'),
@@ -6601,6 +6601,7 @@ router.get('/update', requireAdmin, async (req, res) => {
 		disk:      reclaimable(target),
 		lastRun:   summariseRun(updateRunStore.latest(target)),
 		runLive:   isRunLive(updateRunStore.latest(target)),
+		graceSeconds: appConfig.getNumber('maintenance_grace_seconds', 300),
 		canApply:  pre.ok && best && best.verdict === 'available' && !isRunLive(updateRunStore.latest(target)),
 		history:   await updateChecks.getRecent(20)
 	});
@@ -6617,11 +6618,19 @@ function onPath(command) {
 // The probes the preflight needs. Each answers "unknown" rather than throwing:
 // a page that 500s because Redis is briefly unavailable is worse than one that
 // says it could not look.
-async function callersOnline() {
+// Terminal callers and web users together. It counted web presence alone,
+// so a board with three people in a door and nobody on the web said "nobody is
+// online". A web door player is a terminal node AND a web presence, so those
+// nodes are left out of the terminal count rather than counted twice.
+async function callersOnline(req) {
 	try {
 		var webActivity = await import('../middleware/webActivity.js');
 		var users = await webActivity.getOnlineUsers();
-		return (users || []).length;
+		var nm = req && req.app && req.app.locals ? req.app.locals.nodeManager : null;
+		var terminal = nm && typeof nm.getActiveNodes === 'function'
+			? nm.getActiveNodes().filter(function (n) { return n && !n.web_originated; }).length
+			: 0;
+		return (users || []).length + terminal;
 	} catch (_) { return undefined; }
 }
 

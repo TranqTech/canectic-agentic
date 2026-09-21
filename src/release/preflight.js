@@ -98,11 +98,12 @@ function preflight(f) {
 	}
 
 	// The most useful line on the page. Not blocking: it is the sysop's call
-	// whether three people mid-door is a reason to wait.
+	// whether three people mid-door is a reason to wait. The update closes the
+	// board for maintenance first, so they are warned before they go.
 	if (f.callersOnline > 0) {
 		checks.push(check('callers', LEVEL_WARN,
-			'this will disconnect ' + f.callersOnline + ' connected ' +
-			(f.callersOnline === 1 ? 'user' : 'users')));
+			'this will warn ' + f.callersOnline + ' connected ' +
+			(f.callersOnline === 1 ? 'user' : 'users') + ', then disconnect them when the maintenance grace runs out'));
 	} else if (f.callersOnline === 0) {
 		checks.push(check('callers', LEVEL_OK, 'nobody is online'));
 	}

@@ -202,7 +202,7 @@ block content
                           .alert.alert-success.small.mb-2
                             | Nothing blocks this move.
                           form(method='post' action='/admin/update/apply'
-                               onsubmit=`return confirm('Update to ${chan.available}?\n\nThis stops the BBS, replaces the files, migrates the database and starts it again. Connected users are disconnected. This page will be unavailable while the gateway restarts; come back to it to see what happened.')`)
+                               onsubmit=`return confirm('Update to ${chan.available}?\n\nThis closes the board for maintenance. Connected callers and web users get ${Math.round((graceSeconds || 0) / 60)} minute(s) warning, and the update waits for binkp sessions and jobs to finish before it stops the BBS, replaces the files, migrates the database and starts it again. The board reopens once the update is verified; if it fails, it stays closed until you reopen it from the Maintenance page.\n\nThis page will be unavailable while the gateway restarts; come back to it to see what happened.')`)
                             input(type='hidden' name='version' value=chan.available)
                             button.btn.btn-warning.w-100(type='submit')
                               i.bi.bi-arrow-up-circle.me-1
