@@ -25,10 +25,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-// pg_dump and psql are spawned directly here rather than through
-// updateCommands.runCommand, because the dump needs its own env and its
-// failure is handled differently. That is why this import is separate, and
-// why its absence was invisible until the schema phase ran on a live board.
+// psql is spawned directly for the database size, which is one quick query
+// before the stop, so blocking is harmless there. pg_dump goes through
+// spawnAsync because it can take minutes while the progress page is being
+// served. This import's absence was once invisible until the schema phase ran
+// on a live board.
 import { spawnSync } from 'child_process';
 
 import appConfig from '../config/appConfig.js';
@@ -44,8 +45,14 @@ import { describeInstall } from './installTarget.js';
 import { applyPlan, verifyApplied, rollback } from './updateApply.js';
 import { backupDir, freeBytes } from './updateLayout.js';
 import { pruneBaseCache } from './baseCache.js';
-import { runCommand, nodeCommand, createRuntimeDirs, COMMAND_TIMEOUT_MS } from './updateCommands.js';
+import { runCommandAsync, spawnAsync, nodeCommand, createRuntimeDirs, COMMAND_TIMEOUT_MS } from './updateCommands.js';
 import * as maintFlags from './maintenanceFlag.js';
+import { startUpdateStatusServer } from './updateStatusServer.js';
+import { readSysopHashes, clearSysopHashes } from './sysopSessions.js';
+
+// Recent log lines kept for the progress page the updater serves while the BBS
+// is stopped. The full log goes wherever `log` sends it.
+var PROGRESS_LOG_LINES = 300;
 
 // A failure in one of these changed nothing: no process was stopped and no
 // file was written. Only then does the updater reopen the board itself. Any
@@ -79,7 +86,7 @@ function dumpEnv() {
  * than failing part way through and leaving a truncated file that looks like a
  * backup.
  */
-function takeDump(target, runId, log) {
+async function takeDump(target, runId, log) {
 	var dir = backupDir(target, runId);
 	fs.mkdirSync(dir, { recursive: true });
 	var file = path.join(dir, 'database.dump');
@@ -94,13 +101,11 @@ function takeDump(target, runId, log) {
 
 	var env = dumpEnv();
 	log('$ pg_dump -Fc -f ' + file);
-	var res = spawnSync('pg_dump', ['-Fc', '--no-password', '-f', file], {
-		cwd: target, env: env, encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS
+	// Not spawnSync: a large board's dump takes minutes, and the progress page
+	// is served from this process's event loop.
+	await spawnAsync('pg_dump', ['-Fc', '--no-password', '-f', file], {
+		cwd: target, env: env, timeoutMs: COMMAND_TIMEOUT_MS, log: log, label: 'pg_dump'
 	});
-	if (res.error) throw new Error('pg_dump: ' + res.error.message);
-	if (res.status !== 0) {
-		throw new Error('pg_dump exited ' + res.status + ': ' + ((res.stderr || '').trim() || 'no output'));
-	}
 	var bytes = fs.statSync(file).size;
 	log('dump: ' + Math.round(bytes / 1048576) + ' MB at ' + file);
 	return { file: file, bytes: bytes };
@@ -142,10 +147,29 @@ async function runUpdate(opts) {
 	var stagedRoot = ins.stagedRoot;
 	var runId = ins.runId;
 	var options = ins.options || {};
-	var log = opts.log || function () {};
-	var exec = opts.exec || runCommand;
+	var logOut = opts.log || function () {};
+	var recentLog = [];
+	function log(msg) {
+		recentLog.push(new Date().toISOString().substring(11, 19) + '  ' + msg);
+		if (recentLog.length > PROGRESS_LOG_LINES) recentLog.shift();
+		logOut(msg);
+	}
+	// Commands run without blocking (runCommandAsync), so the progress page
+	// keeps answering through npm install and the migration. A seam returning
+	// synchronously still works: every call is awaited.
+	var exec = opts.exec || runCommandAsync;
 	var dump = opts.dump || takeDump;
 	var waitDrain = opts.waitForDrain || maintFlags.waitForDrain;
+	var startStatusServer = opts.startStatusServer || startUpdateStatusServer;
+	var statusServer = null;
+
+	// Everything the progress page needs from config, read now: once the
+	// dependencies phase starts, nothing may be loaded that was not already.
+	var progressPage = {
+		enabled:   appConfig.getBoolean('update_progress_page', true),
+		port:      parseInt(appConfig.get('webport', process.env.webport || 8080), 10) || 8080,
+		boardName: appConfig.get('boardname', 'Canectic BBS')
+	};
 
 	var state = runStore.load(target, runId);
 	if (!state) throw new Error('no run state for ' + runId);
@@ -245,9 +269,10 @@ async function runUpdate(opts) {
 		} else {
 			persist(beginPhase(state, 'stop'));
 			var drainNote = closedForUpdate ? await drainBeforeStop() : 'board was not closed';
-			exec(resolvedCommand('update_stop_command', 'pm2 stop all'), target, log);
+			await exec(resolvedCommand('update_stop_command', 'pm2 stop all'), target, log);
 			processesStopped = true;
 			persist(finishPhase(state, 'stop', 'processes stopped (' + drainNote + ')'));
+			await takeOverWebPort();
 		}
 
 		// ---- files -----------------------------------------------------
@@ -281,7 +306,7 @@ async function runUpdate(opts) {
 			persist(skipPhase(state, 'dependencies', 'skipped by request; run npm install --omit=dev yourself'));
 		} else {
 			persist(beginPhase(state, 'dependencies'));
-			exec('npm install --omit=dev', target, log);
+			await exec('npm install --omit=dev', target, log);
 			persist(finishPhase(state, 'dependencies', 'npm install --omit=dev'));
 		}
 
@@ -295,11 +320,11 @@ async function runUpdate(opts) {
 				persist(addWarning(state, 'no database dump was taken before migrating'));
 				log('no dump taken (--no-dump)');
 			} else {
-				var taken = dump(target, runId, log);
+				var taken = await dump(target, runId, log);
 				persist(addWarning(state, 'database dumped to ' + taken.file +
 					' (' + Math.round(taken.bytes / 1048576) + ' MB)'));
 			}
-			exec(nodeCommand('src/tools/dbmigrations.js'), target, log);
+			await exec(nodeCommand('src/tools/dbmigrations.js'), target, log);
 			persist(finishPhase(state, 'schema', 'declarative schema and migration ledger applied'));
 			// One dbmigrations run does both. Recording migrations as skipped
 			// with that reason is honest; marking it done would imply a second
@@ -319,7 +344,7 @@ async function runUpdate(opts) {
 			persist(beginPhase(state, 'steps'));
 			for (var st of automatic) {
 				log('step ' + st.id + ': ' + st.description);
-				exec(st.command, target, log);
+				await exec(st.command, target, log);
 			}
 			persist(finishPhase(state, 'steps', automatic.length + ' automatic step(s)'));
 		}
@@ -334,7 +359,9 @@ async function runUpdate(opts) {
 			persist(skipPhase(state, 'start', 'process control is off; start the BBS yourself'));
 		} else {
 			persist(beginPhase(state, 'start'));
-			exec(resolvedCommand('update_start_command', 'pm2 start ecosystem.config.cjs'), target, log);
+			// Give the port back first, or the gateway cannot take it.
+			await releaseWebPort();
+			await exec(resolvedCommand('update_start_command', 'pm2 start ecosystem.config.cjs'), target, log);
 			processesStopped = false;
 			persist(finishPhase(state, 'start', 'processes started'));
 		}
@@ -362,6 +389,7 @@ async function runUpdate(opts) {
 		// Last, once verify has passed: the processes came back up closed, and
 		// only now is there reason to believe the board is fit to open.
 		reopenBoard('update complete');
+		clearSysopHashes(target);
 
 		persist(completeRun(state));
 		log('complete');
@@ -391,7 +419,8 @@ async function runUpdate(opts) {
 		// A board left down by a failure partway through is its own problem.
 		if (processesStopped) {
 			try {
-				exec(resolvedCommand('update_start_command', 'pm2 start ecosystem.config.cjs'), target, log);
+				await releaseWebPort();
+				await exec(resolvedCommand('update_start_command', 'pm2 start ecosystem.config.cjs'), target, log);
 				persist(addWarning(state, 'the BBS was started again after the failure'));
 			} catch (se) {
 				persist(addWarning(state, 'the BBS is still stopped: ' + se.message));
@@ -407,6 +436,49 @@ async function runUpdate(opts) {
 
 		persist(failPhase(state, where, e));
 		return state;
+	} finally {
+		// Whatever happened, the port is not ours to keep.
+		await releaseWebPort();
+	}
+
+	/**
+	 * With the BBS stopped, answer on its web port: the progress for a sysop,
+	 * the maintenance page for everybody else. Never fails the update.
+	 */
+	async function takeOverWebPort() {
+		if (!progressPage.enabled) return;
+		var sysops = readSysopHashes(target, runId);
+		if (!sysops.size) {
+			log('progress page: no sysop sessions were recorded for this run (it was not started from the web, ' +
+				'or nobody was logged in), so every visitor gets the maintenance page');
+		}
+		try {
+			statusServer = await startStatusServer({
+				port:        progressPage.port,
+				root:        target,
+				sysopHashes: sysops,
+				getState:    function () { return state; },
+				getLog:      function () { return recentLog.slice(-40); },
+				info:        { boardName: progressPage.boardName, reason: 'Updating to ' + (ins.to || 'a new release') },
+				log:         log
+			});
+		} catch (se) {
+			log('progress page: ' + se.message + '; the update carries on without it');
+			statusServer = null;
+		}
+		if (!statusServer) persist(addWarning(state, 'the progress page could not be served while the BBS was stopped'));
+	}
+
+	async function releaseWebPort() {
+		if (!statusServer) return;
+		var s = statusServer;
+		statusServer = null;
+		try {
+			await s.close();
+			log('progress page: port handed back');
+		} catch (ce) {
+			log('progress page: closing failed: ' + ce.message);
+		}
 	}
 
 	/**

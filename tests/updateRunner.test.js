@@ -97,8 +97,16 @@ function drainStub(verdict, record) {
 		return { verdict: verdict || 'drained', assessment: { processes: [], reporting: 0, drained: true } };
 	};
 }
+// And the progress page listener: the real one would try to take the web
+// port, which a dev box's gateway is sitting on.
+function listenerStub(record) {
+	return async function (opts) {
+		if (record) record.push({ event: 'start', opts: opts });
+		return { port: opts.port, close: async function () { if (record) record.push({ event: 'close' }); } };
+	};
+}
 function run(o) {
-	return runUpdate(Object.assign({ waitForDrain: drainStub('drained') }, o));
+	return runUpdate(Object.assign({ waitForDrain: drainStub('drained'), startStatusServer: listenerStub() }, o));
 }
 
 function phase(state, name) {
@@ -449,5 +457,123 @@ describe('maintenance mode around an update', function () {
 		assert.strictEqual(state.status, 'complete');
 		assert.strictEqual(waited.length, 0);
 		assert.strictEqual(flags.isActive(s.target), false);
+	});
+});
+
+describe('the progress page while the BBS is stopped', function () {
+	var sysopMod = null;
+	before(async function () { sysopMod = await import('../src/maintenance/sysopSessions.js'); });
+
+	// One ordered record of commands and listener events.
+	function recorder() {
+		var events = [];
+		return {
+			events: events,
+			exec: function (failOn) {
+				return function (command) {
+					events.push('exec:' + (/stop/.test(command) ? 'stop' : /start/.test(command) ? 'start' : command));
+					if (failOn && failOn.test(command)) throw new Error('pretend failure: ' + command);
+					return '';
+				};
+			},
+			listener: function (seen) {
+				return async function (opts) {
+					events.push('listen:' + opts.port);
+					if (seen) seen.opts = opts;
+					return { port: opts.port, close: async function () { events.push('close'); } };
+				};
+			}
+		};
+	}
+
+	it('takes the web port only after the stop, and gives it back before the start', async function () {
+		var s = scenario();
+		var r = recorder();
+		var state = await run({ instructions: s.instructions, exec: r.exec(), startStatusServer: r.listener() });
+		assert.strictEqual(state.status, 'complete');
+		var seq = r.events.filter(function (e) { return /^exec:(stop|start)$|^listen|^close$/.test(e); });
+		assert.deepStrictEqual(seq.map(function (e) { return e.replace(/:\d+$/, ''); }),
+			['exec:stop', 'listen', 'close', 'exec:start'],
+			'the gateway cannot start on a port the updater is still holding: ' + r.events.join(' | '));
+	});
+
+	it('gives the port back before restarting the BBS after a failure', async function () {
+		var s = scenario();
+		var r = recorder();
+		var state = await run({ instructions: s.instructions, exec: r.exec(/npm install/), startStatusServer: r.listener() });
+		assert.strictEqual(state.status, 'failed');
+		var closeAt = r.events.indexOf('close');
+		var startAt = r.events.indexOf('exec:start');
+		assert.ok(closeAt !== -1 && closeAt < startAt, r.events.join(' | '));
+	});
+
+	it('lets go of the port even when a failure leaves the BBS stopped', async function () {
+		var s = scenario();
+		var r = recorder();
+		// Both the install and the restart fail: the BBS stays down, and the
+		// port still must not be held by an updater that is about to exit.
+		await run({ instructions: s.instructions, exec: r.exec(/npm install|start/), startStatusServer: r.listener() });
+		assert.ok(r.events.indexOf('close') !== -1, r.events.join(' | '));
+	});
+
+	it('does not take the port when the sysop runs the BBS themselves', async function () {
+		var s = scenario({ options: { processControl: false } });
+		var r = recorder();
+		await run({ instructions: s.instructions, exec: r.exec(), startStatusServer: r.listener() });
+		assert.ok(!r.events.some(function (e) { return /^listen/.test(e); }),
+			'with nobody to say when the gateway lets go, taking its port could stop it starting');
+	});
+
+	it('knows the sysops recorded for this run, and only this run', async function () {
+		var s = scenario();
+		sysopMod.writeSysopHashes(s.target, ['hash-a', 'hash-b'], s.runId);
+		var seen = {};
+		await run({ instructions: s.instructions, exec: execStub([]), startStatusServer: recorder().listener(seen) });
+		assert.deepStrictEqual(Array.from(seen.opts.sysopHashes).sort(), ['hash-a', 'hash-b']);
+
+		var s2 = scenario();
+		sysopMod.writeSysopHashes(s2.target, ['hash-a'], 'some-other-run');
+		var seen2 = {};
+		await run({ instructions: s2.instructions, exec: execStub([]), startStatusServer: recorder().listener(seen2) });
+		assert.strictEqual(seen2.opts.sysopHashes.size, 0);
+	});
+
+	it('clears the recorded sysops once the update completes', async function () {
+		var s = scenario();
+		sysopMod.writeSysopHashes(s.target, ['hash-a'], s.runId);
+		await run({ instructions: s.instructions, exec: execStub([]) });
+		assert.strictEqual(fs.existsSync(sysopMod.sessionsPath(s.target)), false);
+	});
+
+	it('serves the live run state, not a copy from the start', async function () {
+		var s = scenario();
+		var seen = {};
+		var during = null;
+		await run({
+			instructions: s.instructions,
+			startStatusServer: recorder().listener(seen),
+			exec: function (command) {
+				if (/npm install/.test(command) && seen.opts) {
+					during = seen.opts.getState().phases.filter(function (p) { return p.status === 'running'; })[0].name;
+				}
+				return '';
+			}
+		});
+		assert.strictEqual(during, 'dependencies', 'the page must show the phase the updater is actually in');
+		assert.ok(seen.opts.getLog().some(function (l) { return /preflight: .* staged files verified/.test(l); }),
+			'and its recent log: ' + seen.opts.getLog().join(' | '));
+	});
+
+	it('awaits a command that returns a promise, so the loop stays free', async function () {
+		var s = scenario();
+		var order = [];
+		await run({ instructions: s.instructions, exec: function (command) {
+			return new Promise(function (resolve) {
+				setTimeout(function () { order.push(command); resolve(''); }, 5);
+			});
+		} });
+		var npm = order.findIndex(function (c) { return /npm install/.test(c); });
+		var migrate = order.findIndex(function (c) { return /dbmigrations/.test(c); });
+		assert.ok(npm !== -1 && npm < migrate, 'each command finishes before the next starts: ' + order.join(' | '));
 	});
 });

@@ -97,6 +97,11 @@ queue jobs finished. It waits at most the rest of the grace plus
 running after that is ended by the stop, and a job ended that way is retried
 when the board starts again.
 
+While the BBS itself is stopped, the update answers on the board's web port in
+its place: visitors keep seeing the maintenance page, and sysops who were logged
+in when the update started see its progress. See "Updating from the web" in
+[UPDATING.md](UPDATING.md).
+
 The BBS comes back up still closed, and the update reopens it only once it has
 checked every file it wrote. So:
 
