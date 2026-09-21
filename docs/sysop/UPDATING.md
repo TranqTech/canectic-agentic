@@ -338,9 +338,32 @@ is no more trustworthy than a downloaded one.
 the preflight is blocking. It shows you what the update will do first, including
 how many callers and web users will be warned and then disconnected.
 
-Pressing it stops the BBS, so the page goes away. Come back to it and it reports
-what happened, read from a file the update writes as it goes rather than from
-the connection it was serving on.
+Pressing it takes you to the update's progress page, which follows the update
+from start to finish: the drain, each phase as it runs, the recent log, and any
+warnings.
+
+**The page keeps going while the BBS is stopped.** Between stopping the BBS and
+starting it again, the update answers on the board's web port itself, the same
+port the BBS uses, so it works behind a reverse proxy without any change to the
+proxy. It shows the progress to sysops who were logged in when the update was
+started, and the maintenance page to everybody else. It hands the port back
+before starting the BBS, and the page carries on from the BBS once it answers
+again. For the few seconds in between, the page says the BBS is restarting and
+keeps trying.
+
+Who counts as a sysop for that stretch is decided when you press the button: the
+BBS writes down which logged-in sessions belong to sysops, and the update reads
+that, because it cannot use the BBS's own session store while it is replacing
+the BBS. A sysop who logs in after the button is pressed sees the maintenance
+page until the BBS is back. An update started from the command line records no
+sessions, so everybody gets the maintenance page; follow it with
+`node src/tools/update.js --status` or the log it names.
+
+If the port cannot be taken (something else grabbed it), the update carries on
+without the page. `update_progress_page` turns the page off altogether.
+
+Come back to `/admin/update` afterwards and it reports what happened, read from
+a file the update writes as it goes.
 
 ## Updating over FTN
 

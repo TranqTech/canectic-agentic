@@ -1388,6 +1388,36 @@ the OLD release's phase list.
 Processes that predate maintenance mode never report, so the first update into
 it gets `nobody` after the 20s no-report window and proceeds.
 
+### The progress page while the BBS is stopped (#53)
+
+Between the stop and the start, `runUpdate` serves the board's web port itself
+(`updateStatusServer.js`): the SAME port as the gateway (`webport`, resolved
+before the dependencies phase), so it works behind a reverse proxy unchanged.
+Sysops get the progress page, everybody else the gateway's maintenance page as a
+503, WebSocket upgrades a 503. The page is rendered by `updateProgress.js`,
+which the gateway also serves at `/admin/update/progress`, and polls that path
+and swaps its content in, so it carries on whichever server answers.
+
+- **Who is a sysop** comes from `tmp/maintenance/sysop-sessions.json`, written
+  ONCE by the gateway in `POST /admin/update/apply` before it stages anything
+  (`maintenanceWeb.recordSysopSessions`), holding SHA-256s of sysop session ids
+  and the run id. The updater cannot use the session store: it is the new
+  release's code on the old release's packages, and the packages are replaced
+  mid-run. A file for another run is ignored. CLI-launched updates record none.
+- **Builtins only**: the listener, the renderer and the session file module run
+  while node_modules is replaced; enforced by `installPath.test.js`.
+- **Non-blocking commands**: the updater now runs commands through
+  `runCommandAsync` / `spawnAsync` (updateCommands.js) and the dump through
+  `spawnAsync`, because `spawnSync` would freeze the listener for all of npm
+  install, the dump and the migration. `runCommand` stays for the installer.
+- **Lifecycle**: bound after the stop command (retrying `EADDRINUSE` for a few
+  seconds), closed before the start command and before the restart after a
+  failure, and in a `finally`. Closing tears down open connections, because
+  `server.close()` waits for a half-received request up to the header timeout
+  and the start is awaited behind it. A bind failure never fails the update.
+  Not started when process control is off, since nobody would say when the
+  gateway lets go. `update_progress_page` turns it off.
+
 ## Failure Scenarios
 
 | Scenario | Impact | Recovery |
