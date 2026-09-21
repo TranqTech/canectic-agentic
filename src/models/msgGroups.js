@@ -296,11 +296,11 @@ async function updateGroup(shortcode, formObj) {
 	}
 	if (formObj.newscan_default !== undefined) {
 		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
+	}
 	if (formObj.max_age_days !== undefined) updateObj.max_age_days =
 		(formObj.max_age_days !== '' && parseInt(formObj.max_age_days) > 0) ? parseInt(formObj.max_age_days) : null;
 	if (formObj.max_messages !== undefined) updateObj.max_messages =
 		(formObj.max_messages !== '' && parseInt(formObj.max_messages) > 0) ? parseInt(formObj.max_messages) : null;
-	}
 
 	// QWK conference start. If supplied and different from the current
 	// value, validate it and queue a renumber of every area in this
