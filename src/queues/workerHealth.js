@@ -28,6 +28,7 @@ var STATE_STOPPED   = 'stopped';   // shut down on purpose, leave it alone
 var STATE_MISSING   = 'missing';   // no key at all: never started, or gone long enough to expire
 var STATE_STALE     = 'stale';     // key present but the beat has stopped
 var STATE_UNHEALTHY = 'unhealthy'; // beating, but a queue consumer is not running
+var STATE_PAUSED    = 'paused';    // beating, consumers deliberately paused for maintenance mode
 
 /**
  * Build the heartbeat payload. Kept separate from writing it so a test can
@@ -123,10 +124,15 @@ function assessWorker(hb, now, opts) {
 
 	var toss = hb.toss || {};
 	var maint = hb.maint || {};
-	if (!toss.running || !maint.running) {
+	// A consumer paused for maintenance mode has stopped on purpose. BullMQ
+	// reports it as not running, so without this every closure of the board
+	// would read as a dead worker and the watchdog would restart it.
+	var tossUp  = !!(toss.running || toss.paused);
+	var maintUp = !!(maint.running || maint.paused);
+	if (!tossUp || !maintUp) {
 		return { state: STATE_UNHEALTHY, ageMs: ageMs, alarm: true,
-			detail: 'queue consumer not running (toss=' + (toss.running ? 'up' : 'down') +
-				' maintenance=' + (maint.running ? 'up' : 'down') + ')' };
+			detail: 'queue consumer not running (toss=' + (tossUp ? 'up' : 'down') +
+				' maintenance=' + (maintUp ? 'up' : 'down') + ')' };
 	}
 
 	// The four day case. The process beats, both consumers are up, and every
@@ -134,6 +140,13 @@ function assessWorker(hb, now, opts) {
 	if (hb.longestActiveMs && hb.longestActiveMs > stallMs) {
 		return { state: STATE_UNHEALTHY, ageMs: ageMs, alarm: true,
 			detail: 'a job has been active for ' + formatDuration(hb.longestActiveMs) };
+	}
+
+	// After the stall check on purpose: a wedged job is exactly what stops a
+	// maintenance drain from ever finishing, so it must stay visible.
+	if (toss.paused || maint.paused) {
+		return { state: STATE_PAUSED, ageMs: ageMs, alarm: false,
+			detail: 'queues paused for maintenance mode' };
 	}
 
 	return { state: STATE_OK, ageMs: ageMs, alarm: false, detail: 'healthy' };
@@ -252,6 +265,7 @@ export {
 	STATE_MISSING,
 	STATE_STALE,
 	STATE_UNHEALTHY,
+	STATE_PAUSED,
 	buildHeartbeat,
 	writeHeartbeat,
 	readHeartbeat,

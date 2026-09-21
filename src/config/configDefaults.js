@@ -288,6 +288,10 @@ var CONFIG_DEFINITIONS = [
 	  description: 'How many stable release artifacts to keep cached for rebuilding development deltas. The base of the installed version is never discarded regardless.' },
 	{ key: 'update_require_signature', defaultValue: 'false', type: 'boolean', category: 'updates',
 	  description: 'Refuse a release whose checksums carry no valid signature. No signing key is published yet, so leaving this off is currently the only workable setting.' },
+	{ key: 'update_drain_timeout',   defaultValue: '900', type: 'number', category: 'updates',
+	  description: 'Seconds an update waits, after the maintenance grace has run out, for binkp sessions and jobs already in flight to finish before stopping the BBS anyway. A job that never finishes is ended by the stop and retried later.' },
+	{ key: 'maintenance_grace_seconds', defaultValue: '300', type: 'number', category: 'system',
+	  description: 'How long connected terminal callers and logged-in web users get between maintenance mode starting and the board closing to them. 0 closes it immediately. Can be set per closure from the Maintenance page or the maintenanceMode tool.' },
 
 	// -----------------------------------------------------------------------
 	// Call Flow (web login experience)

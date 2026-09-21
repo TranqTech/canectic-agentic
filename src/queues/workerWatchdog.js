@@ -124,7 +124,10 @@ async function _tick() {
 			alogger.writeAlog(1, '[Watchdog] worker is healthy again', 'greenbright', true);
 			_resetTracker();
 		}
-		await _checkScheduleLag(now);
+		// A paused worker freezes every schedule where it stands, by design:
+		// the next iteration is created when a job is picked up. Warning that
+		// they are overdue would be noise for the whole maintenance window.
+		if (assessment.state !== workerHealth.STATE_PAUSED) await _checkScheduleLag(now);
 		return;
 	}
 
