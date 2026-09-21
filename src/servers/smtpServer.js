@@ -1266,6 +1266,7 @@ class SmtpServer {
 		this.options = options || {};
 		this.server = null;
 		this.sessions = new Set();
+		this._maintenance = false;
 
 		// Trusted mode: parse allowed hosts into exact-match Set + CIDR list
 		if (this.options.trusted) {
@@ -1276,35 +1277,7 @@ class SmtpServer {
 
 	start() {
 		var self = this;
-		this.server = net.createServer((socket) => {
-			// In trusted mode, verify connecting IP
-			if (self.options.trusted) {
-				var remoteAddr = socket.remoteAddress || '';
-				// Normalize IPv6-mapped IPv4 (::ffff:127.0.0.1 → 127.0.0.1)
-				var normalizedAddr = remoteAddr.replace(/^::ffff:/, '');
-				if (!_matchesTrustedHost(normalizedAddr, self._trustedHosts)) {
-					// Level 2 so sysops see this in default logs -- a blocked
-					// gateway usually looks like a mystery "undeliverable" on
-					// the sending side and nothing obvious on the receiving
-					// side if this line is hidden behind verbose logging.
-					alogger.writeAlog(2,
-						'SMTP inbound: rejected untrusted host ' + normalizedAddr +
-						' (allowlist has ' + _trustedHostListToString(self._trustedHosts) +
-						'). Add this IP or a containing CIDR block to ' +
-						'email_trusted_hosts in /admin/config if the sender is legitimate.',
-						'yellow');
-					// More informative 5.7.1 reply so the remote postfix log
-					// shows "access denied" rather than just "connection refused".
-					socket.write('554 5.7.1 Access denied: ' + normalizedAddr +
-						' is not in this host\'s SMTP allowlist\r\n');
-					socket.end();
-					return;
-				}
-			}
-			var session = new SmtpSession(socket, self.mailDomain, self.options);
-			self.sessions.add(session);
-			socket.on('close', () => self.sessions.delete(session));
-		});
+		this.server = net.createServer((socket) => this._onConnection(socket));
 
 		this.server.on('error', (err) => {
 			alogger.writeAlog(0, 'SMTP server error: ' + err.message, 'redbright');
@@ -1317,11 +1290,63 @@ class SmtpServer {
 		});
 	}
 
+	// Split out of start() so the accept path is testable without a listener.
+	_onConnection(socket) {
+		var self = this;
+		// In trusted mode, verify connecting IP
+		if (self.options.trusted) {
+			var remoteAddr = socket.remoteAddress || '';
+			// Normalize IPv6-mapped IPv4 (::ffff:127.0.0.1 → 127.0.0.1)
+			var normalizedAddr = remoteAddr.replace(/^::ffff:/, '');
+			if (!_matchesTrustedHost(normalizedAddr, self._trustedHosts)) {
+				// Level 2 so sysops see this in default logs -- a blocked
+				// gateway usually looks like a mystery "undeliverable" on
+				// the sending side and nothing obvious on the receiving
+				// side if this line is hidden behind verbose logging.
+				alogger.writeAlog(2,
+					'SMTP inbound: rejected untrusted host ' + normalizedAddr +
+					' (allowlist has ' + _trustedHostListToString(self._trustedHosts) +
+					'). Add this IP or a containing CIDR block to ' +
+					'email_trusted_hosts in /admin/config if the sender is legitimate.',
+					'yellow');
+				// More informative 5.7.1 reply so the remote postfix log
+				// shows "access denied" rather than just "connection refused".
+				socket.write('554 5.7.1 Access denied: ' + normalizedAddr +
+					' is not in this host\'s SMTP allowlist\r\n');
+				socket.end();
+				return null;
+			}
+		}
+		// Maintenance mode: 421 is the SMTP way of saying "not now", so a
+		// sending MTA queues the message and retries rather than bouncing
+		// it. Nothing is lost by closing the board.
+		if (self._maintenance) {
+			socket.write('421 4.3.2 ' + self.mailDomain + ' closed for maintenance, try again later\r\n');
+			socket.end();
+			return null;
+		}
+		var session = new SmtpSession(socket, self.mailDomain, self.options);
+		self.sessions.add(session);
+		socket.on('close', () => self.sessions.delete(session));
+		return session;
+	}
+
 	stop() {
 		for (var session of this.sessions) session.close();
 		if (this.server) {
 			this.server.close();
 			this.server = null;
+		}
+	}
+
+	setMaintenance(active) {
+		this._maintenance = !!active;
+	}
+
+	closeSessionsForMaintenance() {
+		for (var session of this.sessions) {
+			if (!session._closed) session._send('421 4.3.2 ' + this.mailDomain + ' closing for maintenance');
+			session.close();
 		}
 	}
 }

@@ -91,7 +91,7 @@ describe('what only warns', function () {
 		var r = preflight({ callersOnline: 3 });
 		assert.strictEqual(r.ok, true);
 		assert.strictEqual(find(r, 'callers').level, LEVEL_WARN);
-		assert.ok(/disconnect 3 connected users/.test(find(r, 'callers').summary));
+		assert.ok(/warn 3 connected users, then disconnect them/.test(find(r, 'callers').summary));
 	});
 
 	it('gets the singular right, because this line is read by a person', function () {

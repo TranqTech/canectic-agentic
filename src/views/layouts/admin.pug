@@ -22,6 +22,8 @@ html
   body
     include ../includes/admin-nav.pug
     div(style='padding-top: 70px')
+      - var bannerMode = 'admin'
+      include ../partials/maintenanceBanner
       block content
     if currentuser
       include ../partials/chatOverlay
@@ -137,6 +139,12 @@ html
             // Notifications
             if (msg.type === 'notification_count') {
               updateNotifBadge(msg.count);
+            }
+            if (msg.type === 'maintenance' && window.CanecticMaintenance) {
+              window.CanecticMaintenance.show(msg);
+            }
+            if (msg.type === 'maintenance_clear' && window.CanecticMaintenance) {
+              window.CanecticMaintenance.clear();
             }
             if (msg.type === 'notification') {
               addNotifToDropdown(msg);

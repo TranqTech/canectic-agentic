@@ -217,6 +217,7 @@ var TOPIC_TAGS = {
     'OS_UPGRADE.md':                ['installation', 'maintenance', 'postgresql', 'upgrade'],
     'UPDATES.md':                   ['updates', 'releases', 'maintenance', 'configuration'],
     'UPDATING.md':                  ['updates', 'releases', 'maintenance', 'upgrade'],
+    'MAINTENANCE.md':               ['maintenance', 'updates', 'operations', 'configuration'],
     'CHANGELOG.md':                 ['changelog']
 };
 

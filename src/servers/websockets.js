@@ -4,6 +4,8 @@ import { WebSocketServer } from 'ws';
 import { EventEmitter } from 'node:events';
 import * as net from 'net';
 import * as alogger from "../utils/alogger.js"
+import { currentMaintenance } from "../maintenance/maintenanceWatch.js";
+import { refuseNewCaller } from "../maintenance/terminalDrain.js";
 
 
 // variable setup
@@ -52,6 +54,16 @@ class WsConnection{
 	announceConnection(){
 		var connectionmsg = "Ws Path: " + this.path + "\n  New WS connection from " + this.rawsocket.remoteAddress
 		alogger.writeAlog(3, connectionmsg, "magenta", true)
+
+		// Maintenance mode: refuse before a node is allocated. Covers the web
+		// terminal, web doors and remote door clients alike.
+		var closedText = refuseNewCaller(currentMaintenance());
+		if (closedText) {
+			alogger.writeAlog(3, "Refused WS caller on " + this.path + ": maintenance mode", "yellow");
+			this.socket.send(closedText);
+			this.socket.close();
+			return;
+		}
 		//setTimeout(this.welcomemessage.bind(this), 2000)
 		//this.welcomemessage();
 		if (this.parentPool.forwardtoPool){

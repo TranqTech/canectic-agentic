@@ -34,6 +34,8 @@ import * as netmailRoutes from "../src/models/netmailRoutes.js";
 import { Worker } from 'bullmq';
 import appConfig from "../src/config/appConfig.js";
 import * as workerHealth from "../src/queues/workerHealth.js";
+import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
+import { startClosed, attachQueueDrain, consumerUp } from "../src/maintenance/queueDrain.js";
 import * as outboundSweep from "../src/maintenance/outboundSweep.js";
 import * as maintenanceJobs from "../src/maintenance/maintenanceJobs.js";
 import os from 'os';
@@ -85,6 +87,16 @@ var _selfCheckFailures = 0;
 
 function _jobKey(job) {
 	return String(job && job.queueName ? job.queueName : '?') + ':' + String(job && job.id ? job.id : '?');
+}
+
+// Jobs in flight per queue, for the maintenance drain status.
+function activeJobCounts() {
+	var toss = 0, maint = 0;
+	for (var key of _activeJobs.keys()) {
+		if (key.indexOf('toss:') === 0) toss++;
+		else maint++;
+	}
+	return { 'toss jobs': toss, 'maintenance jobs': maint };
 }
 
 function _longestActiveMs(now) {
@@ -139,8 +151,11 @@ function withJobTimeout(processor, timeoutKey, defaultMinutes) {
  */
 async function _beat() {
 	var now = Date.now();
-	var tossUp  = !!(tossWorker && tossWorker.isRunning());
-	var maintUp = !!(maintWorker && maintWorker.isRunning());
+	// Paused for maintenance is not down: BullMQ's pause() ends the main loop,
+	// so isRunning() goes false, and counting that as a dead consumer would
+	// exit the process mid-maintenance and bring it back unpaused.
+	var tossUp  = consumerUp(tossWorker);
+	var maintUp = consumerUp(maintWorker);
 
 	if (tossUp && maintUp) {
 		_selfCheckFailures = 0;
@@ -167,8 +182,8 @@ async function _beat() {
 		host:      os.hostname(),
 		startedAt: startedAt,
 		ts:        now,
-		toss:      { running: tossUp,  paused: !!(tossWorker && tossWorker.isPaused()),  active: 0 },
-		maint:     { running: maintUp, paused: !!(maintWorker && maintWorker.isPaused()), active: 0 },
+		toss:      { running: !!(tossWorker && tossWorker.isRunning()),  paused: !!(tossWorker && tossWorker.isPaused()),  active: 0 },
+		maint:     { running: !!(maintWorker && maintWorker.isRunning()), paused: !!(maintWorker && maintWorker.isPaused()), active: 0 },
 		lastJobAt: _lastJobAt,
 		longestActiveMs: _longestActiveMs(now)
 	}), appConfig.getNumber('worker_heartbeat_interval', 30) * 6);
@@ -515,9 +530,15 @@ async function main() {
 	var tossConnection = createQueueConnection();
 	var maintConnection = createQueueConnection();
 
+	// On a closed board (the updater restarts us with the flag still set) the
+	// consumers must not take a job before the maintenance watch has had its
+	// first look, so they are created without running and paused.
+	var closedAtStart = startClosed();
+
 	tossWorker = new Worker('toss', withJobTimeout(createTossProcessor(), 'toss_job_timeout', 30), {
 		connection: tossConnection,
 		concurrency: tossConcurrency,
+		autorun: !closedAtStart,
 	});
 
 	tossWorker.on('failed', (job, err) => {
@@ -531,7 +552,14 @@ async function main() {
 	maintWorker = new Worker('maintenance', withJobTimeout(createMaintenanceProcessor(), 'maintenance_job_timeout', 60), {
 		connection: maintConnection,
 		concurrency: 1,   // maintenance jobs run one at a time
+		autorun: !closedAtStart,
 	});
+
+	if (closedAtStart) {
+		await tossWorker.pause();
+		await maintWorker.pause();
+		alogger.writeAlog(1, '[Worker] Board is in maintenance mode: queues start paused', 'yellowbright', true);
+	}
 
 	maintWorker.on('failed', (job, err) => {
 		alogger.writeAlog(2, `[Worker] Maintenance FAILED: ${job?.name} — ${err.message}`, "redbright");
@@ -555,6 +583,19 @@ async function main() {
 			netmailRoutes.invalidateCache();
 		}
 	});
+
+	// Maintenance mode: pause both queues while the board is closed, and
+	// report jobs still in flight so the updater knows when the worker is idle.
+	var watch = initMaintenanceWatch({
+		process: 'worker',
+		graceDefault: function () { return appConfig.getNumber('maintenance_grace_seconds', 300); },
+		log: function (level, message) { alogger.writeAlog(level, '[Worker] ' + message, 'yellowbright'); }
+	});
+	attachQueueDrain(watch,
+		[{ name: 'toss', worker: tossWorker }, { name: 'maintenance', worker: maintWorker }],
+		function () { return activeJobCounts(); },
+		function (level, message) { alogger.writeAlog(level, '[Worker] ' + message, 'yellowbright'); });
+	watch.start();
 
 	startHeartbeat();
 

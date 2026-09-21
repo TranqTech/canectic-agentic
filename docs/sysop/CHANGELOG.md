@@ -2,7 +2,27 @@
 
 ## Pending (since v0.9.7a)
 
+### Upgrade Notes
+
+- **Clear your gateway's log after updating.** Until this release, every login on the web wrote the user's name and password, in plain text, to the gateway's pm2 output log (`logs/production/gateway-out.log` on a standard install). The logging is gone, but the log still holds whatever was written before. Empty it or delete it once you have updated, and treat any copies or backups of it the same way.
+- **This update cannot give your callers notice; later ones will.** Updates now close the board for maintenance, warn the people on it and wait for the network work in progress to finish before stopping the BBS. The processes this update replaces predate that, so they cannot be asked: after about twenty seconds the update carries on and stops the BBS as updates always have. Update at a quiet hour. Every update after this one drains properly.
+
+### Maintenance Mode
+
+- **New: close the board for maintenance, and know when it is safe to start.** Admin > Maintenance, or `node src/tools/maintenanceMode.js`, closes the board to everyone but you for an import, work on areas, database work by hand, or anything else that needs it to itself. Callers and logged-in web users get a countdown and are then disconnected or shown a maintenance page; visitors see your reason and when you expect to be back; mail clients and binkp links are told to try later, so no mail is lost; the worker stops taking new jobs, which queue up for when you reopen. A drain table shows what each part of the board still has in flight, and says so when nothing is. `--wait` on the tool holds until then, for scripts. See `docs/sysop/MAINTENANCE.md`.
+- **Updates close the board themselves.** An update warns callers and web users when it starts, waits until the board has drained before stopping it, and reopens it only once the update has checked every file it wrote. An update that fails after stopping the board leaves it closed, so nobody calls in while you find out what happened; reopen it from the Maintenance page when you are satisfied.
+
+### Security
+
+- Fix: **web logins wrote passwords to the log.** See the upgrade note above.
+
+### Networking
+
+- Fix: **a binkp link connecting over WebSocket while your mailer was at its session limit received an empty busy message.** The reason text was never copied into the frame. It now reads "System busy, try later", as it always did over TCP.
+
 ### Administration
+
+- **The Update page now counts terminal callers.** It counted people on the web only, so a board with three callers in a door and nobody on the web told you nobody was online.
 
 - **Errors in the web interface are now written to the system log.** Before, a page that failed showed you an error page and recorded nothing, so if a save on an admin page did not take, the logs could not tell you whether it had failed or had never been sent. Each server error is now logged with the page it happened on and where in the code it was raised. Pages that simply do not exist (the steady stream of 404s from scanners probing for WordPress and the like) are deliberately not logged, so they cannot bury the errors that matter.
 

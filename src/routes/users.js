@@ -13,6 +13,8 @@ import * as callers from '../models/callers.js';
 import * as alogger from '../utils/alogger.js';
 import * as apiTokens from '../models/apiTokens.js';
 import appConfig from "../config/appConfig.js";
+import { loginAllowed, sendClosed, viewModel as maintenanceViewModel } from '../middleware/maintenanceWeb.js';
+import { currentMaintenance } from '../maintenance/maintenanceWatch.js';
 
 //setup
 router.use(cookieParser());
@@ -141,6 +143,14 @@ router.post('/login', urlencodedParser, async (req, res) => {
 
 	var sessionid   = uuidv4();
 	var sessionData = userAccounts.buildSessionData(userobj);
+
+	// Maintenance mode: the login page stays reachable so a sysop can get in,
+	// but anybody else gets the maintenance page rather than a session every
+	// page would then refuse.
+	if (!loginAllowed(sessionData)) {
+		alogger.writeAlog(3, 'Login refused for ' + username + ': maintenance mode', 'yellow');
+		return sendClosed(res, maintenanceViewModel(currentMaintenance()), isAjax);
+	}
 	var rememberMe  = req.body.remember_me === 'on' || req.body.remember_me === 'true';
 	var sessionTtl  = rememberMe
 		? appConfig.getNumber('remember_me_days', 30) * 86400

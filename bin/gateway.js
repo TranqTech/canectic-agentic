@@ -32,7 +32,7 @@ import { seedDefaults as seedNodelistFlags } from '../src/models/nodelistFlags.j
 import { seedBuiltinEvents as seedTemplateEvents } from '../src/models/messageTemplates.js';
 
 // --- Queue infrastructure ---
-import { closeQueues } from "../src/queues/queues.js";
+import { closeQueues, tossQueue, mailerQueue, maintenanceQueue } from "../src/queues/queues.js";
 import * as jobs from "../src/queues/jobs.js";
 import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
@@ -40,6 +40,10 @@ import { startWorkerWatchdog } from "../src/queues/workerWatchdog.js";
 import { registerLogWebSocket } from "../src/routes/adminLogs.js";
 import { registerNodeSpyWebSocket } from "../src/servers/nodespySocket.js";
 import appConfig from "../src/config/appConfig.js";
+import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
+import { attachTerminalDrain } from "../src/maintenance/terminalDrain.js";
+import { attachWebDrain } from "../src/maintenance/webDrain.js";
+import { startClosed, attachQueueDrain } from "../src/maintenance/queueDrain.js";
 
 dotenv.config();
 alogger.setProcessName('gateway');
@@ -70,6 +74,7 @@ var imapServer        // IMAP server for PM access
 var smtpServer        // SMTP submission server for sending PMs
 var eventSubscriber
 var embeddedWorkers   // only used in embedded mode
+var maintWatch        // follows the maintenance mode flag, see startMaintenanceWatch()
 var mailerManager     // only used in embedded mode
 
 // --- Configuration ---
@@ -358,6 +363,7 @@ async function startImapServer(){
 	}
 
 	imapServer = new ImapServer(imapport, domain);
+	imapServer.setMaintenance(startClosed());
 	imapServer.start();
 	servercount += 1;
 }
@@ -375,6 +381,7 @@ async function startSmtpServer(){
 	}
 
 	smtpServer = new SmtpServer(smtpport, domain);
+	smtpServer.setMaintenance(startClosed());
 	smtpServer.start();
 	servercount += 1;
 }
@@ -434,6 +441,7 @@ async function startEmbeddedMailer(){
 		return;
 	}
 	mailerManager = new MailerManager();
+	if (startClosed()) mailerManager.setMaintenance(true);
 	mailerManager.start();
 	// Wire gateway's WsManager so binkp WS connections route to the mailer
 	if (wsManager) {
@@ -447,7 +455,64 @@ async function startEmbeddedWorkers(){
 	const { startEmbeddedWorkers: startWorkers } = await import("../src/queues/embedded.js");
 	embeddedWorkers = await startWorkers({
 		mailerManager: mailerManager,
+		startPaused: startClosed(),
 	});
+}
+
+// --- Maintenance mode ---
+// Created early in main() so a request or caller arriving during startup sees
+// the right answer, and started here, once every subsystem has subscribed, so
+// none of them misses the board closing.
+
+async function startMaintenanceWatch(){
+	var log = function (level, message) { alogger.writeAlog(level, '[Gateway] ' + message, 'yellowbright'); };
+
+	// Terminal callers: refused at connect (in the connection classes), warned
+	// and then disconnected when the grace runs out.
+	attachTerminalDrain(maintWatch, callManager, log);
+
+	// Web users: a countdown pushed to open pages and a notification, then the
+	// maintenance page once the grace runs out (maintenanceWeb.js). Not waited
+	// for, so not a drain source.
+	var notifMod = await import("../src/models/notifications.js");
+	attachWebDrain(maintWatch, presenceServer, notifMod, log);
+
+	if (processMode === 'embedded') {
+		if (mailerManager) {
+			maintWatch.on('enter', function () { mailerManager.setMaintenance(true); });
+			maintWatch.on('leave', function () { mailerManager.setMaintenance(false); });
+			maintWatch.on('deadline', function () { mailerManager.endSessionsForMaintenance(); });
+			maintWatch.registerDrainSource('mailer', function () { return mailerManager.drainCounts(); });
+		}
+		var mailServers = [imapServer, smtpServer].filter(Boolean);
+		if (mailServers.length) {
+			maintWatch.on('enter', function () { for (var s of mailServers) s.setMaintenance(true); });
+			maintWatch.on('leave', function () { for (var s of mailServers) s.setMaintenance(false); });
+			maintWatch.on('deadline', function () { for (var s of mailServers) s.closeSessionsForMaintenance(); });
+			maintWatch.registerDrainSource('mail', function () {
+				return {
+					'IMAP sessions': imapServer ? imapServer.sessions.size : 0,
+					'SMTP sessions': smtpServer ? smtpServer.sessions.size : 0
+				};
+			});
+		}
+		if (embeddedWorkers && embeddedWorkers.consumers) {
+			// One consumer per queue in embedded mode, so the queue's own active
+			// count is this process's jobs in flight.
+			attachQueueDrain(maintWatch, embeddedWorkers.consumers, async function () {
+				return {
+					'toss jobs': await tossQueue.getActiveCount(),
+					'maintenance jobs': await maintenanceQueue.getActiveCount(),
+					'mailer jobs': mailerManager ? await mailerQueue.getActiveCount() : 0
+				};
+			}, log);
+		}
+	}
+
+	maintWatch.start();
+	if (maintWatch.current().active) {
+		alogger.writeAlog(1, "Board is in MAINTENANCE MODE: callers are refused until it is cleared", "yellowbright", true);
+	}
 }
 
 // --- Exit watch ---
@@ -491,6 +556,11 @@ async function main(){
 	}
 
 	await appConfig.load()
+	maintWatch = initMaintenanceWatch({
+		process: 'gateway',
+		graceDefault: function () { return appConfig.getNumber('maintenance_grace_seconds', 300); },
+		log: function (level, message) { alogger.writeAlog(level, '[Gateway] ' + message, 'yellowbright'); }
+	})
 	await seedDefaultTheme()
 	await seedNodelistFlags()
 	await seedTemplateEvents()
@@ -535,6 +605,8 @@ async function main(){
 
 	// Event subscriber — runs in both modes
 	await startEventSubscriber()
+
+	await startMaintenanceWatch()
 
 	// Register job schedules (polls, toss cycles, maintenance)
 	await registerSchedules()

@@ -45,6 +45,14 @@ import { applyPlan, verifyApplied, rollback } from './updateApply.js';
 import { backupDir, freeBytes } from './updateLayout.js';
 import { pruneBaseCache } from './baseCache.js';
 import { runCommand, nodeCommand, createRuntimeDirs, COMMAND_TIMEOUT_MS } from './updateCommands.js';
+import * as maintFlags from './maintenanceFlag.js';
+
+// A failure in one of these changed nothing: no process was stopped and no
+// file was written. Only then does the updater reopen the board itself. Any
+// later failure leaves it closed, because a failed update is exactly when a
+// person should decide whether the board is fit to open. `stop` is not in the
+// list: a stop command that fails can leave the board half stopped.
+var REOPEN_ON_FAILURE = ['preflight', 'backup'];
 
 // Everything up to and including this phase can be undone by putting the files
 // back. After it, a migrated database makes that the wrong thing to do.
@@ -137,6 +145,7 @@ async function runUpdate(opts) {
 	var log = opts.log || function () {};
 	var exec = opts.exec || runCommand;
 	var dump = opts.dump || takeDump;
+	var waitDrain = opts.waitForDrain || maintFlags.waitForDrain;
 
 	var state = runStore.load(target, runId);
 	if (!state) throw new Error('no run state for ' + runId);
@@ -150,6 +159,44 @@ async function runUpdate(opts) {
 	function phaseNow() {
 		var running = state.phases.filter(function (p) { return p.status === 'running'; });
 		return running.length ? running[0].name : null;
+	}
+
+	// ---- maintenance mode -------------------------------------------
+	// Close the board for the whole run, as early as possible, so the grace
+	// runs alongside the backup rather than after it. A closure the sysop set
+	// before starting the update is remembered and put back afterwards: the
+	// updater reopening a board somebody closed on purpose would be wrong.
+	var priorClosure = maintFlags.readFlag(target);
+	var closedForUpdate = false;
+	try {
+		maintFlags.enterMaintenance(target, {
+			reason:        'Updating to ' + (ins.to || 'a new release'),
+			grace_seconds: priorClosure ? priorClosure.grace_seconds : null,
+			set_by:        'updater',
+			source:        'update',
+			run_id:        runId
+		});
+		closedForUpdate = true;
+		log('maintenance: board closed for the update' + (priorClosure ? ' (it was already closed; that closure is restored afterwards)' : ''));
+	} catch (me) {
+		persist(addWarning(state, 'could not close the board for maintenance: ' + me.message +
+			'. The update carries on, but callers were not warned.'));
+	}
+
+	function reopenBoard(why) {
+		if (!closedForUpdate) return;
+		try {
+			if (priorClosure) {
+				maintFlags.enterMaintenance(target, priorClosure);
+				log('maintenance: ' + why + '; the closure set before the update is back in place');
+			} else {
+				maintFlags.leaveMaintenance(target);
+				log('maintenance: ' + why + '; board reopened');
+			}
+		} catch (re) {
+			persist(addWarning(state, 'could not reopen the board: ' + re.message +
+				'. Clear it from the Maintenance page or with node src/tools/maintenanceMode.js --off'));
+		}
 	}
 
 	try {
@@ -197,9 +244,10 @@ async function runUpdate(opts) {
 			persist(skipPhase(state, 'stop', 'process control is off; stop the BBS yourself'));
 		} else {
 			persist(beginPhase(state, 'stop'));
+			var drainNote = closedForUpdate ? await drainBeforeStop() : 'board was not closed';
 			exec(resolvedCommand('update_stop_command', 'pm2 stop all'), target, log);
 			processesStopped = true;
-			persist(finishPhase(state, 'stop', 'processes stopped'));
+			persist(finishPhase(state, 'stop', 'processes stopped (' + drainNote + ')'));
 		}
 
 		// ---- files -----------------------------------------------------
@@ -311,6 +359,10 @@ async function runUpdate(opts) {
 			log('base cache prune failed, which changes nothing: ' + e.message);
 		}
 
+		// Last, once verify has passed: the processes came back up closed, and
+		// only now is there reason to believe the board is fit to open.
+		reopenBoard('update complete');
+
 		persist(completeRun(state));
 		log('complete');
 		return state;
@@ -346,8 +398,69 @@ async function runUpdate(opts) {
 			}
 		}
 
+		if (REOPEN_ON_FAILURE.indexOf(where) !== -1 && !processesStopped && !applied) {
+			reopenBoard('the update failed before changing anything');
+		} else if (closedForUpdate) {
+			persist(addWarning(state, 'the board is left closed for maintenance. Reopen it from the Maintenance ' +
+				'page, or with node src/tools/maintenanceMode.js --off, once you are satisfied it is fit to open'));
+		}
+
 		persist(failPhase(state, where, e));
 		return state;
+	}
+
+	/**
+	 * Wait for the board to drain before stopping it: callers disconnected at
+	 * the end of the grace, binkp sessions and queue jobs finished. Returns a
+	 * note for the stop phase. Never throws; a drain that does not finish is a
+	 * warning, and the stop ends whatever is left, which BullMQ retries.
+	 */
+	async function drainBeforeStop() {
+		var flag = maintFlags.readFlag(target);
+		var graceDefault = appConfig.getNumber('maintenance_grace_seconds', 300);
+		var deadline = flag ? maintFlags.deadlineOf(flag, graceDefault).getTime() : Date.now();
+		var timeoutMs = Math.max(0, deadline - Date.now()) + appConfig.getNumber('update_drain_timeout', 900) * 1000;
+		log('stop: waiting for the board to drain (up to ' + Math.round(timeoutMs / 1000) + 's)');
+
+		var lastLine = '';
+		var res = await waitDrain(target, {
+			timeoutMs: timeoutMs,
+			onProgress: function (a) {
+				var line = a.processes
+					.filter(function (p) { return p.state === 'draining'; })
+					.map(function (p) { return p.process + ': ' + maintFlags.describePending(p.pending); })
+					.join('; ');
+				if (line && line !== lastLine) log('stop: waiting on ' + line);
+				lastLine = line;
+			}
+		});
+
+		switch (res.verdict) {
+			case 'drained':
+				log('stop: drained, nothing in flight');
+				return 'drained cleanly';
+			case 'nobody':
+				// The first update into a release with maintenance mode lands here:
+				// the running processes predate it and never report.
+				log('stop: no process reported a drain status; the running release predates maintenance mode, or nothing is running');
+				return 'running release could not report a drain';
+			case 'open':
+				persist(addWarning(state, 'the board was reopened while the update was waiting to stop it; it was closed again'));
+				try {
+					maintFlags.enterMaintenance(target, { reason: 'Updating to ' + (ins.to || 'a new release'),
+						set_by: 'updater', source: 'update', run_id: runId });
+				} catch (_) {}
+				return 'board was reopened during the wait';
+			default: {
+				var left = res.assessment ? res.assessment.processes
+					.filter(function (p) { return p.state === 'draining'; })
+					.map(function (p) { return p.process + ': ' + maintFlags.describePending(p.pending); }).join('; ') : '';
+				persist(addWarning(state, 'stopped with work still in flight after waiting ' +
+					Math.round(timeoutMs / 1000) + 's' + (left ? ' (' + left + ')' : '') +
+					'; queue jobs are retried when the board starts again'));
+				return 'drain timed out';
+			}
+		}
 	}
 }
 
@@ -360,6 +473,7 @@ function resolvedCommand(key, fallback) {
 export {
 	LAST_ROLLBACKABLE_PHASE,
 	ROLLBACK_SAFE,
+	REOPEN_ON_FAILURE,
 	dumpEnv,
 	databaseSize,
 	takeDump,

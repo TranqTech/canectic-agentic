@@ -1,0 +1,22 @@
+//- Maintenance mode banner, driven by public/js/maintenanceBanner.js.
+//- Set bannerMode before including: 'admin' on the admin layout (a standing
+//- reminder that the board is closed), 'countdown' on the user layout (how
+//- long until it closes to them). The element is always rendered, hidden when
+//- there is nothing to say, so a presence push can reveal it on a page that
+//- was loaded before maintenance began.
+- var mbState = (typeof maintenance !== 'undefined' && maintenance) ? maintenance : null
+- var mbShow = !!(mbState && (bannerMode === 'admin' || (typeof maintenanceCountdown !== 'undefined' && maintenanceCountdown)))
+#maintenance-banner.alert.alert-warning.rounded-0.mb-0.py-2.text-center(
+  hidden=!mbShow
+  data-mode=bannerMode
+  data-deadline=(mbShow && mbState.deadline) ? mbState.deadline : false
+  data-reason=(mbShow && mbState.reason) ? mbState.reason : false
+  data-back=(mbShow && mbState.expectedBack) ? mbState.expectedBack : false
+)
+  i.bi.bi-tools.me-2
+  span.maintenance-banner-text
+    if mbShow
+      = bannerMode === 'admin' ? 'Maintenance mode is on.' : 'The board is closing for maintenance.'
+  if bannerMode === 'admin'
+    a.alert-link.ms-2(href='/admin/maintenance') Manage
+script(type='module' src='/js/maintenanceBanner.js')

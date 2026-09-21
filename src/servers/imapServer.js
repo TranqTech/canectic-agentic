@@ -1156,6 +1156,21 @@ class ImapServer {
 		this.sessions = new Set();
 		this._eventPublisher = null;
 		this._eventSubscriber = null;
+		this._maintenance = false;
+	}
+
+	// Maintenance mode. New connections are greeted with BYE, which RFC 3501
+	// allows in place of OK and which clients read as "server unavailable";
+	// sessions already open, IDLE included, stay until the grace runs out.
+	setMaintenance(active) {
+		this._maintenance = !!active;
+	}
+
+	closeSessionsForMaintenance() {
+		for (var session of this.sessions) {
+			if (!session._closed) session._send('* BYE Server closing for maintenance');
+			session.close();
+		}
 	}
 
 	start() {
@@ -1179,12 +1194,7 @@ class ImapServer {
 			}
 		});
 
-		this.server = net.createServer((socket) => {
-			var session = new ImapSession(socket, this.mailDomain);
-			session._eventPublisher = this._eventPublisher;
-			this.sessions.add(session);
-			socket.on('close', () => this.sessions.delete(session));
-		});
+		this.server = net.createServer((socket) => this._onConnection(socket));
 
 		this.server.on('error', (err) => {
 			alogger.writeAlog(0, 'IMAP server error: ' + err.message, 'redbright');
@@ -1194,6 +1204,21 @@ class ImapServer {
 			alogger.writeAlog(1, 'IMAP server listening on port ' + this.port +
 				' (domain: ' + this.mailDomain + ')', 'magentabright', true);
 		});
+	}
+
+	// Split out of start() so the accept path is testable without a listener
+	// and the Redis connections start() opens.
+	_onConnection(socket) {
+		if (this._maintenance) {
+			socket.write('* BYE Closed for maintenance, try again later\r\n');
+			socket.end();
+			return null;
+		}
+		var session = new ImapSession(socket, this.mailDomain);
+		session._eventPublisher = this._eventPublisher;
+		this.sessions.add(session);
+		socket.on('close', () => this.sessions.delete(session));
+		return session;
 	}
 
 	stop() {

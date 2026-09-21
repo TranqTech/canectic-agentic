@@ -89,6 +89,18 @@ function execStub(record, failOn) {
 	};
 }
 
+// The drain wait is injected too: the real one polls status files for up to
+// twenty seconds before deciding nothing is reporting. `drain` sets the verdict.
+function drainStub(verdict, record) {
+	return async function (root, opts) {
+		if (record) record.push({ root: root, timeoutMs: opts && opts.timeoutMs });
+		return { verdict: verdict || 'drained', assessment: { processes: [], reporting: 0, drained: true } };
+	};
+}
+function run(o) {
+	return runUpdate(Object.assign({ waitForDrain: drainStub('drained') }, o));
+}
+
 function phase(state, name) {
 	return state.phases.filter(function (p) { return p.name === name; })[0];
 }
@@ -101,7 +113,7 @@ describe('the whole sequence', function () {
 	it('runs every phase in order and finishes', async function () {
 		var s = scenario({ steps: [{ id: 'thing', description: 'a thing', automatic: true, command: 'do-the-thing' }] });
 		var ran = [];
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub(ran) });
+		var state = await run({ instructions: s.instructions, exec: execStub(ran) });
 
 		assert.strictEqual(state.status, 'complete', state.error || '');
 		for (var name of ['preflight', 'backup', 'stop', 'files', 'dependencies', 'schema', 'steps', 'start', 'verify']) {
@@ -116,7 +128,7 @@ describe('the whole sequence', function () {
 
 	it('lands the files', async function () {
 		var s = scenario();
-		await runUpdate({ instructions: s.instructions, exec: execStub([]) });
+		await run({ instructions: s.instructions, exec: execStub([]) });
 		assert.strictEqual(read(s.target, 'src/a.js'), 'NEW');
 		assert.strictEqual(read(s.target, 'src/added.js'), 'fresh');
 		assert.strictEqual(fs.existsSync(path.join(s.target, 'src/stray.js')), false);
@@ -127,7 +139,7 @@ describe('the whole sequence', function () {
 		// imply a second thing happened.
 		var s = scenario();
 		var ran = [];
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub(ran) });
+		var state = await run({ instructions: s.instructions, exec: execStub(ran) });
 		assert.strictEqual(phase(state, 'migrations').status, 'skipped');
 		assert.ok(/same dbmigrations run/.test(phase(state, 'migrations').detail));
 		assert.strictEqual(ran.filter(function (c) { return /dbmigrations/.test(c); }).length, 1);
@@ -138,7 +150,7 @@ describe('the whole sequence', function () {
 		// not hold the version it is running on.
 		var s = scenario();
 		var ran = [];
-		await runUpdate({ instructions: s.instructions, exec: execStub(ran) });
+		await run({ instructions: s.instructions, exec: execStub(ran) });
 		var migrate = ran.filter(function (c) { return /dbmigrations/.test(c); })[0];
 		assert.ok(migrate.indexOf(process.execPath) === 0 || migrate.indexOf(JSON.stringify(process.execPath)) === 0,
 			'should invoke this interpreter: ' + migrate);
@@ -153,7 +165,7 @@ describe('steps', function () {
 			{ id: 'manual', description: 'needs a person', automatic: false, command: 'you-run-me', applies_when: 'sometimes' }
 		] });
 		var ran = [];
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub(ran) });
+		var state = await run({ instructions: s.instructions, exec: execStub(ran) });
 
 		assert.ok(ran.indexOf('run-me') !== -1);
 		assert.ok(ran.indexOf('you-run-me') === -1, 'a manual step must never be run for them');
@@ -164,7 +176,7 @@ describe('steps', function () {
 	});
 
 	it('skips the phase when a release declares none', async function () {
-		var state = await runUpdate({ instructions: scenario().instructions, exec: execStub([]) });
+		var state = await run({ instructions: scenario().instructions, exec: execStub([]) });
 		assert.strictEqual(phase(state, 'steps').status, 'skipped');
 	});
 });
@@ -177,7 +189,7 @@ describe('the database dump', function () {
 		// window is as long as the dump.
 		var s = scenario({ options: { dump: true } });
 		var order = [];
-		await runUpdate({
+		await run({
 			instructions: s.instructions,
 			exec: function (c) { order.push('exec:' + c); return ''; },
 			dump: function () { order.push('dump'); return { file: '/tmp/x.dump', bytes: 1048576 }; }
@@ -191,14 +203,14 @@ describe('the database dump', function () {
 
 	it('says so loudly when there is no dump', async function () {
 		var s = scenario({ options: { dump: false } });
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub([]) });
+		var state = await run({ instructions: s.instructions, exec: execStub([]) });
 		assert.ok(state.warnings.some(function (w) { return /no database dump/.test(w); }),
 			JSON.stringify(state.warnings));
 	});
 
 	it('records where the dump went, so it can be found again', async function () {
 		var s = scenario({ options: { dump: true } });
-		var state = await runUpdate({
+		var state = await run({
 			instructions: s.instructions, exec: execStub([]),
 			dump: function () { return { file: '/somewhere/database.dump', bytes: 5 * 1048576 }; }
 		});
@@ -211,7 +223,7 @@ describe('the rollback line', function () {
 
 	it('puts the files back when the failure is before the database moved', async function () {
 		var s = scenario();
-		var state = await runUpdate({
+		var state = await run({
 			instructions: s.instructions, exec: execStub([], /npm install/)
 		});
 
@@ -227,7 +239,7 @@ describe('the rollback line', function () {
 		// Old code over a migrated database is a worse state than the failure,
 		// so this stops and tells a person rather than deciding for them.
 		var s = scenario({ steps: [{ id: 'boom', description: 'fails', automatic: true, command: 'explode' }] });
-		var state = await runUpdate({
+		var state = await run({
 			instructions: s.instructions, exec: execStub([], /explode/)
 		});
 
@@ -250,7 +262,7 @@ describe('the rollback line', function () {
 
 	it('has nothing to roll back when it fails before writing anything', async function () {
 		var s = scenario();
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub([], /stop/) });
+		var state = await run({ instructions: s.instructions, exec: execStub([], /stop/) });
 		assert.strictEqual(phase(state, 'stop').status, 'failed');
 		assert.strictEqual(read(s.target, 'src/a.js'), 'OLD');
 		assert.ok(!state.warnings.some(function (w) { return /rolled back/.test(w); }),
@@ -263,7 +275,7 @@ describe('after a failure', function () {
 	it('starts the BBS again rather than leaving the board down', async function () {
 		var s = scenario();
 		var ran = [];
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub(ran, /npm install/) });
+		var state = await run({ instructions: s.instructions, exec: execStub(ran, /npm install/) });
 		assert.strictEqual(state.status, 'failed');
 		assert.strictEqual(ran.filter(function (c) { return /start/.test(c); }).length, 1,
 			'it stopped the BBS, so it has to try to start it: ' + ran.join(' | '));
@@ -272,14 +284,14 @@ describe('after a failure', function () {
 
 	it('says the board is still down when it cannot start it', async function () {
 		var s = scenario();
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub([], /npm install|start/) });
+		var state = await run({ instructions: s.instructions, exec: execStub([], /npm install|start/) });
 		assert.ok(state.warnings.some(function (w) { return /still stopped/.test(w); }), JSON.stringify(state.warnings));
 	});
 
 	it('does not try to start what it never stopped', async function () {
 		var s = scenario({ options: { processControl: false } });
 		var ran = [];
-		await runUpdate({ instructions: s.instructions, exec: execStub(ran, /npm install/) });
+		await run({ instructions: s.instructions, exec: execStub(ran, /npm install/) });
 		assert.deepStrictEqual(ran.filter(function (c) { return /pm2|start/.test(c); }), []);
 	});
 });
@@ -289,7 +301,7 @@ describe('opting out', function () {
 	it('skips what it was told to skip, with the command to run by hand', async function () {
 		var s = scenario({ options: { dependencies: false, schema: false, processControl: false } });
 		var ran = [];
-		var state = await runUpdate({ instructions: s.instructions, exec: execStub(ran) });
+		var state = await run({ instructions: s.instructions, exec: execStub(ran) });
 
 		assert.strictEqual(state.status, 'complete');
 		for (var name of ['stop', 'dependencies', 'schema', 'migrations', 'start']) {
@@ -308,11 +320,134 @@ describe('the backup', function () {
 
 	it('goes under the update directory, not among the logs', async function () {
 		var s = scenario();
-		await runUpdate({ instructions: s.instructions, exec: execStub([]) });
+		await run({ instructions: s.instructions, exec: execStub([]) });
 		var dir = backupDir(s.target, s.runId);
 		assert.ok(fs.existsSync(path.join(dir, 'src/a.js')), 'the displaced file is in the backup');
 		assert.strictEqual(fs.readFileSync(path.join(dir, 'src/a.js'), 'utf8'), 'OLD');
 		assert.ok(dir.indexOf('.canectic-update') !== -1, dir);
 		assert.ok(dir.indexOf('logs') === -1, 'logs hold the record, not the bytes: ' + dir);
+	});
+});
+
+describe('maintenance mode around an update', function () {
+	var flags = null;
+	before(async function () { flags = await import('../src/maintenance/maintenanceFlag.js'); });
+
+	// Records each command with whether the board was closed when it ran.
+	function execWatching(target, record, failOn) {
+		return function (command) {
+			record.push({ command: command, closed: flags.isActive(target) });
+			if (failOn && failOn.test(command)) throw new Error('pretend failure: ' + command);
+			return '';
+		};
+	}
+
+	it('closes the board for the run and reopens it once verify passes', async function () {
+		var s = scenario();
+		var ran = [];
+		var state = await run({ instructions: s.instructions, exec: execWatching(s.target, ran) });
+		assert.strictEqual(state.status, 'complete', JSON.stringify(state.phases));
+		var stop = ran.filter(function (r) { return /stop/.test(r.command); })[0];
+		var start = ran.filter(function (r) { return /start/.test(r.command); })[0];
+		assert.strictEqual(stop.closed, true, 'the board must be closed before it is stopped');
+		assert.strictEqual(start.closed, true, 'processes must come back up closed, and open only after verify');
+		assert.strictEqual(flags.isActive(s.target), false, 'a completed update reopens the board');
+	});
+
+	it('marks the closure as the update\'s own, with the run id', async function () {
+		var s = scenario();
+		var seen = null;
+		await run({ instructions: s.instructions, exec: function (command) {
+			if (/stop/.test(command)) seen = flags.readFlag(s.target);
+			return '';
+		} });
+		assert.strictEqual(seen.source, 'update');
+		assert.strictEqual(seen.run_id, s.runId);
+		assert.ok(/0\.9\.8a/.test(seen.reason), seen.reason);
+	});
+
+	it('waits for the drain before running the stop command', async function () {
+		var s = scenario();
+		var order = [];
+		await run({
+			instructions: s.instructions,
+			exec: function (command) { order.push(command); return ''; },
+			waitForDrain: async function (root, opts) {
+				order.push('drain:' + opts.timeoutMs);
+				return { verdict: 'drained', assessment: { processes: [], reporting: 2, drained: true } };
+			}
+		});
+		var drainAt = order.findIndex(function (c) { return /^drain:/.test(c); });
+		var stopAt = order.findIndex(function (c) { return /stop/.test(c); });
+		assert.ok(drainAt !== -1 && drainAt < stopAt, order.join(' | '));
+		assert.ok(parseInt(order[drainAt].split(':')[1], 10) >= 900000,
+			'the wait covers the rest of the grace plus update_drain_timeout');
+	});
+
+	it('leaves the board closed when the update fails after the stop', async function () {
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([], /npm install/) });
+		assert.strictEqual(state.status, 'failed');
+		assert.strictEqual(flags.isActive(s.target), true, 'a failed update is when a person decides');
+		assert.ok(state.warnings.some(function (w) { return /left closed for maintenance/.test(w); }), state.warnings.join('\n'));
+	});
+
+	it('leaves the board closed when the stop command itself fails', async function () {
+		// A stop that fails can leave a half-stopped board, as one on the hub did.
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([], /stop/) });
+		assert.strictEqual(state.status, 'failed');
+		assert.strictEqual(flags.isActive(s.target), true);
+	});
+
+	it('reopens the board when the update fails before changing anything', async function () {
+		var s = scenario();
+		fs.unlinkSync(path.join(s.stagedRoot, MANIFEST_FILENAME));
+		var state = await run({ instructions: s.instructions, exec: execStub([]) });
+		assert.strictEqual(state.status, 'failed');
+		assert.strictEqual(phase(state, 'preflight').status, 'failed');
+		assert.strictEqual(flags.isActive(s.target), false, 'nothing was touched, so there is nothing to decide');
+	});
+
+	it('puts back a closure the sysop set before starting the update', async function () {
+		var s = scenario();
+		var before = flags.enterMaintenance(s.target, { reason: 'Rebuilding areas', expected_minutes: 90,
+			grace_seconds: 0, set_by: 'sysop', source: 'manual' });
+		var state = await run({ instructions: s.instructions, exec: execStub([]) });
+		assert.strictEqual(state.status, 'complete');
+		var after = flags.readFlag(s.target);
+		assert.ok(after, 'the update must not reopen a board somebody closed on purpose');
+		assert.strictEqual(after.reason, 'Rebuilding areas');
+		assert.strictEqual(after.source, 'manual');
+		assert.strictEqual(after.since, before.since, 'and the grace keeps its original start');
+	});
+
+	it('warns when the drain times out, and stops anyway', async function () {
+		var s = scenario();
+		var ran = [];
+		var state = await run({ instructions: s.instructions, exec: execStub(ran), waitForDrain: async function () {
+			return { verdict: 'timeout', assessment: { reporting: 1, drained: false,
+				processes: [{ process: 'worker', state: 'draining', pending: { 'toss jobs': 1 } }] } };
+		} });
+		assert.strictEqual(state.status, 'complete');
+		assert.ok(ran.some(function (c) { return /stop/.test(c); }));
+		assert.ok(state.warnings.some(function (w) { return /still in flight.*worker: 1 toss jobs/.test(w); }), state.warnings.join('\n'));
+	});
+
+	it('carries on quietly when the running release cannot report a drain', async function () {
+		// The first update into a release with maintenance mode.
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([]), waitForDrain: drainStub('nobody') });
+		assert.strictEqual(state.status, 'complete');
+		assert.ok(/could not report a drain/.test(phase(state, 'stop').note || phase(state, 'stop').detail || JSON.stringify(phase(state, 'stop'))));
+	});
+
+	it('does not wait for a drain when the sysop stops the BBS themselves', async function () {
+		var s = scenario({ options: { processControl: false } });
+		var waited = [];
+		var state = await run({ instructions: s.instructions, exec: execStub([]), waitForDrain: drainStub('drained', waited) });
+		assert.strictEqual(state.status, 'complete');
+		assert.strictEqual(waited.length, 0);
+		assert.strictEqual(flags.isActive(s.target), false);
 	});
 });

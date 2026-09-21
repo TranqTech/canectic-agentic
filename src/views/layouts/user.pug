@@ -21,6 +21,9 @@ html
   body
     include ../includes/user-nav.pug
     div(style='padding-top: 70px')
+      if currentuser
+        - var bannerMode = 'countdown'
+        include ../partials/maintenanceBanner
       if callflowPending && !callflowForce
         #callflow-resume-bar.text-center.py-3.mb-0(style='background: #375a7f; border-bottom: 2px solid #2c4a66;')
           h5.text-white.mb-2
@@ -155,6 +158,12 @@ html
             // Notifications
             if (msg.type === 'notification_count') {
               updateNotifBadge(msg.count);
+            }
+            if (msg.type === 'maintenance' && window.CanecticMaintenance) {
+              window.CanecticMaintenance.show(msg);
+            }
+            if (msg.type === 'maintenance_clear' && window.CanecticMaintenance) {
+              window.CanecticMaintenance.clear();
             }
             if (msg.type === 'notification') {
               addNotifToDropdown(msg);

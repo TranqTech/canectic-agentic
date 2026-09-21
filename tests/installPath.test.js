@@ -104,6 +104,24 @@ describe('the install path', function () {
 		});
 	}
 
+	// Maintenance mode is the tool for when the gateway will not start or the
+	// database is what is being repaired, and the updater sets it around the
+	// stop. None of it may need node_modules, for the same reason as above.
+	for (var builtinsOnly of [
+		'src/maintenance/maintenanceFlag.js',
+		'src/maintenance/maintenanceWatch.js',
+		'src/tools/maintenanceMode.js'
+	]) {
+		(function (entry) {
+			it(entry + ' imports nothing that needs node_modules', function () {
+				var result = externalImports(entry);
+				assert.deepStrictEqual(result.offenders, [],
+					'maintenance mode must work with the database or node_modules broken:\n  ' +
+					result.offenders.map(function (o) { return o.file + ' imports ' + o.imports; }).join('\n  '));
+			});
+		})(builtinsOnly);
+	}
+
 	it('the updater is deliberately NOT held to this', function () {
 		// The updater runs on an installation that already has dependencies, so
 		// it may use appConfig and alogger. Asserting the difference keeps

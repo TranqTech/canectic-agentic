@@ -86,6 +86,29 @@ describe('workerHealth.assessWorker', function () {
 		assert.ok(/active for 4d/.test(a.detail));
 	});
 
+	it('reports queues paused for maintenance as paused, not down', function () {
+		// BullMQ's pause() ends the main loop, so the heartbeat says running
+		// false. Reading that as a dead consumer would have the watchdog
+		// restart the worker every time the board is closed.
+		var a = wh.assessWorker(healthy({
+			toss:  { running: false, paused: true, active: 0 },
+			maint: { running: false, paused: true, active: 0 }
+		}), NOW, {});
+		assert.strictEqual(a.state, wh.STATE_PAUSED);
+		assert.strictEqual(a.alarm, false);
+	});
+
+	it('still reports a stuck job while the queues are paused', function () {
+		// A wedged job is exactly what stops a maintenance drain finishing.
+		var a = wh.assessWorker(healthy({
+			toss:  { running: true, paused: true, active: 1 },
+			maint: { running: false, paused: true, active: 0 },
+			longestActiveMs: 4 * 86400000
+		}), NOW, { stallMs: 30 * 60 * 1000 });
+		assert.strictEqual(a.state, wh.STATE_UNHEALTHY);
+		assert.strictEqual(a.alarm, true);
+	});
+
 	it('leaves a long but legitimate job alone', function () {
 		// A nodelist import or an echolist batch subscribe runs for minutes.
 		var a = wh.assessWorker(healthy({ longestActiveMs: 5 * 60 * 1000 }), NOW,
