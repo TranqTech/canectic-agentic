@@ -1305,6 +1305,89 @@ BullMQ uses the existing Redis instance. No new infrastructure required.
 
 ---
 
+## Maintenance Mode
+
+Closes the board to everyone but the sysop and drains it: new work refused in
+every process, in-flight work finished or ended at the grace deadline, and each
+process reporting what it still holds so the admin page, the CLI and the
+updater can tell when it is quiet. Sysop guide: `docs/sysop/MAINTENANCE.md`.
+
+### The flag is a file
+
+`.maintenance` at the install root (JSON: `since`, `reason`, `expected_minutes`,
+`grace_seconds`, `set_by`, `source` manual/update, `run_id`). Not a config row,
+because the database may be what is being worked on. Presence is the flag: an
+unreadable or empty file still closes the board. Re-entering keeps `since`, so
+editing the reason does not restart anybody's countdown. Written atomically
+(temp name + rename).
+
+`src/maintenance/maintenanceFlag.js` owns the file, the drain status files and
+the pure rules (`deadlineOf`, `assessDrain`, `drainVerdict`, `waitForDrain`).
+It, `maintenanceWatch.js` and the CLI `src/tools/maintenanceMode.js` are held to
+Node builtins by `tests/installPath.test.js`: the CLI is for when the gateway
+will not start.
+
+### How a process follows it
+
+`MaintenanceWatch` (one per process, `initMaintenanceWatch`) stats the flag
+every 2s and emits `enter`, `change`, `leave` and `deadline` (once per closure,
+when `since + grace` passes). Subsystems register **drain sources**, functions
+returning `{label: count}`; while the flag is set the watcher sums them into
+`tmp/maintenance/<process>.json` each tick. A source that throws counts as not
+drained. Polling rather than `fs.watch` or Redis pub/sub: nothing else watches
+files, and the flag must work with Redis or PostgreSQL down.
+
+Two ordering rules, both learned the hard way in design:
+
+- **A process starting on a closed board must not take work before the first
+  tick.** Queue consumers are created with `autorun: false` and paused
+  (`queueDrain.startClosed()`), the mailer and mail servers get
+  `setMaintenance(true)` before `start()`.
+- **The gateway creates its watcher early and starts it last.** Until the first
+  tick, `current()` reads the file directly without firing events, so a request
+  during startup is answered correctly and no late subscriber misses `enter`.
+
+`assessDrain` counts only statuses written for the current `since` (a leftover
+from an earlier closure says nothing about now) and treats a status older than
+15s as a stopped process, which has nothing in flight. `drainVerdict` refuses to
+believe "drained" until 6s after the flag appeared, so every process has ticked.
+
+### Per process
+
+| Process | New work | In flight | Drain source |
+|---|---|---|---|
+| gateway (terminal) | refused in each connection class's `announceConnection`, before `createCall` allocates a node (`terminalDrain.refuseNewCaller`) | bottom-line countdown with CSI s/u, reminders at 60s and 15s, `hangUpCall()` at the deadline | connected calls |
+| gateway (web) | `maintenanceWeb.js` middleware after static and CSRF, before activity tracking: anonymous gets the 503 maintenance page, `/api` a JSON 503, non-sysop login refused | logged-in users get a presence `maintenance` push plus a notification (`webDrain.js`), a server-rendered banner on page loads during the grace, then the page | none: web users are told, not waited for |
+| mail | IMAP greets `* BYE`, SMTP answers `421 4.3.2` (untrusted hosts still get 554) | `closeSessionsForMaintenance()` at the deadline | IMAP + SMTP sessions |
+| mailer | inbound `M_BSY`; `_connectToPeer` and `connectToNodelistAddress` refuse (even forced); BSO scanner skips; mailer queue paused | sessions finish; `endSessionsForMaintenance()` at the deadline | sessions + dials not yet sessions (expire after the connect timeout) |
+| worker | toss and maintenance consumers `pause()`d, new jobs wait in Redis | active jobs finish | `_activeJobs` per queue |
+
+Embedded mode wires the same pieces inside the gateway (`startMaintenanceWatch`
+in `bin/gateway.js`), with queue active counts from `Queue.getActiveCount()`.
+
+**BullMQ `pause()` ends the main loop, so `isRunning()` is false while paused.**
+Three things read that as a dead consumer and had to learn otherwise: the
+worker self-check (`queueDrain.consumerUp`), `assessWorker` (new `STATE_PAUSED`,
+after the stall check so a wedged job stays visible), and the watchdog's
+schedule-lag warning (skipped while paused, since a paused worker freezes
+schedules by design).
+
+### The updater
+
+`runUpdate` enters maintenance (`source: update`, `run_id`) before `preflight`,
+so the grace overlaps the backup. Inside `stop`, before the stop command, it
+waits via `waitForDrain` (an injectable seam) for at most the rest of the grace
+plus `update_drain_timeout`; a timeout is a warning, not a failure. It reopens
+the board only after `verify`. A failure in `preflight`/`backup`
+(`REOPEN_ON_FAILURE`) changed nothing and reopens; anything later, including a
+failed stop command, leaves the board closed with a warning. A closure the sysop
+set before the run is restored rather than cleared. The drain lives inside the
+existing `stop` phase rather than a new phase because the run file is created by
+the OLD release's phase list.
+
+Processes that predate maintenance mode never report, so the first update into
+it gets `nobody` after the 20s no-report window and proceeds.
+
 ## Failure Scenarios
 
 | Scenario | Impact | Recovery |

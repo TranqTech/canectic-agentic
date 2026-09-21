@@ -3,10 +3,11 @@
 `src/tools/update.js` fetches a release, proves it is the release, works out
 exactly what applying it would do to your installation, and optionally does it.
 
-It does the whole thing: stops the BBS, replaces the files, installs
-dependencies, dumps the database, migrates it, runs the release's automatic
-upgrade steps, and starts the BBS again. Anything it skips it names, with the
-command for you to run.
+It does the whole thing: closes the board for maintenance, waits for it to
+drain, stops the BBS, replaces the files, installs dependencies, dumps the
+database, migrates it, runs the release's automatic upgrade steps, starts the
+BBS again and reopens the board. Anything it skips it names, with the command
+for you to run.
 
 `setup/update.sh` still works and is not going anywhere yet.
 
@@ -187,7 +188,7 @@ under the staging directory; `--handoff` puts it beside the run state in
 |-------|--------------|
 | preflight | Verifies the staged tree against its manifest, checks Node and disk |
 | backup | Sets aside everything about to be overwritten or deleted |
-| stop | `pm2 stop all` |
+| stop | Waits for the board to drain, then `pm2 stop all` |
 | files | Writes the release |
 | dependencies | `npm install --omit=dev` |
 | schema | **Dumps the database**, then runs `dbmigrations.js` |
@@ -195,6 +196,12 @@ under the staging directory; `--handoff` puts it beside the run state in
 | steps | Runs the release's automatic upgrade steps |
 | start | `pm2 start ecosystem.config.cjs` |
 | verify | Confirms every written file matches the release |
+
+The board is closed for maintenance before any of this, as soon as the update
+starts, so connected callers and logged-in web users get their warning while the
+backup is taken. The stop waits until the board has drained, and the board
+reopens only after verify. What callers see, and what happens to the board if
+the update fails, is in [MAINTENANCE.md](MAINTENANCE.md).
 
 The file backup happens before the stop, because shipped files do not change
 while the BBS is running and there is no reason to pay downtime for it. The
@@ -227,6 +234,11 @@ so undoing it is complete.
 code over a migrated database is a worse state than the failure, so the update
 stops, tells you where the backup and the dump are, and leaves the decision to
 you. The BBS is still started again.
+
+Either way **the board stays closed for maintenance** after a failure at or
+after the stop, so nobody calls in while you look. Reopen it from the
+Maintenance page, or with `node src/tools/maintenanceMode.js --off`, once you
+are satisfied. A failure before the stop changed nothing and reopens it.
 
 `--status` shows which phase failed and why.
 
@@ -324,7 +336,7 @@ is no more trustworthy than a downloaded one.
 
 `/admin/update` has an Update button when a release is available and nothing in
 the preflight is blocking. It shows you what the update will do first, including
-how many users it will disconnect.
+how many callers and web users will be warned and then disconnected.
 
 Pressing it stops the BBS, so the page goes away. Come back to it and it reports
 what happened, read from a file the update writes as it goes rather than from

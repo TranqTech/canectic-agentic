@@ -1,6 +1,9 @@
 {
   "steps": [],
-  "notices": [],
+  "notices": [
+    { "level": "warning", "text": "Clear the gateway's pm2 output log (logs/production/gateway-out.log on a standard install) after updating. Every web login before this release wrote the user's password to it in plain text; the logging is gone but the old lines are not." },
+    { "level": "info", "text": "This update cannot warn your callers before it stops the BBS: the processes it replaces predate maintenance mode. Updates after this one close the board, warn callers and web users, and wait for network work in progress to finish first." }
+  ],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }
