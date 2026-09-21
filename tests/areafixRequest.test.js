@@ -57,6 +57,21 @@ describe('areafix.handleRequest', function () {
 			var grp = await pg.queryOne('SELECT shortcode FROM message_groups LIMIT 1');
 			if (!grp) { available = false; return; }
 
+			// Clear wreckage from an interrupted earlier run first. A leftover
+			// connection carries the same address, and handleRequest finds the
+			// connection BY address, so it would act on the old one and every
+			// assertion against the new one would fail. That happened for real
+			// after a run was killed mid-file on 2026-09-21.
+			var stale = await pg.query('SELECT id FROM peers WHERE name = $1', [PEER_NAME]);
+			for (var old of stale || []) {
+				var oldConns = await pg.query('SELECT id FROM peer_connections WHERE peer_id = $1', [old.id]);
+				for (var oc of oldConns || []) {
+					await pg.write('DELETE FROM peer_area_subscriptions WHERE peer_connection_id = $1', [oc.id]);
+					await pg.write('DELETE FROM peer_connections WHERE id = $1', [oc.id]);
+				}
+				await pg.write('DELETE FROM peers WHERE id = $1', [old.id]);
+			}
+
 			// Throwaway peer + connection carrying a known areafix password.
 			var p = await peers.newPeer({ name: PEER_NAME, sysop_name: 'ZZ Test' });
 			if (!p.status) { available = false; return; }
