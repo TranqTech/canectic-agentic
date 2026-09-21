@@ -109,7 +109,6 @@ router.get('/login', async (req, res) => {
           Caller is responsible for setting window.location.
 ----------------------------------------------- */
 router.post('/login', urlencodedParser, async (req, res) => {
-	console.log(req.body)
 	var username   = (req.body.username || '').trim();
 	var password   = req.body.password  || '';
 	var redirectTo = safeRedirect(req.body.redirect, '/');
