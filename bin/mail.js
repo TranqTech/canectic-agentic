@@ -32,6 +32,8 @@ import * as redis from "../src/middleware/db/redis.js";
 import { ImapServer } from "../src/servers/imapServer.js";
 import { SmtpServer } from "../src/servers/smtpServer.js";
 import appConfig from "../src/config/appConfig.js";
+import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
+import { isActive as isMaintenanceActive } from "../src/maintenance/maintenanceFlag.js";
 
 dotenv.config();
 alogger.setProcessName('mail');
@@ -150,6 +152,39 @@ async function main() {
 		alogger.writeAlog(1, "[Mail] No servers enabled — exiting", "yellow");
 		process.exit(0);
 	}
+
+	// Maintenance mode: refuse new mail client connections while the board is
+	// closed and close the ones still open when the grace runs out. Set before
+	// the first watcher tick, so a restart onto a closed board takes nobody in.
+	var servers = [imapServer, smtpServer, inboundSmtpServer].filter(Boolean);
+	var closedAtStart = isMaintenanceActive(process.cwd());
+	for (var srv of servers) srv.setMaintenance(closedAtStart);
+
+	var maintLog = function (level, message) { alogger.writeAlog(level, '[Mail] ' + message, 'yellowbright'); };
+	var watch = initMaintenanceWatch({
+		process: 'mail',
+		graceDefault: function () { return appConfig.getNumber('maintenance_grace_seconds', 300); },
+		log: maintLog
+	});
+	watch.on('enter', function () {
+		for (var s of servers) s.setMaintenance(true);
+		maintLog(2, 'Maintenance: refusing new mail client connections');
+	});
+	watch.on('leave', function () {
+		for (var s of servers) s.setMaintenance(false);
+		maintLog(2, 'Maintenance over: accepting mail client connections');
+	});
+	watch.on('deadline', function () {
+		for (var s of servers) s.closeSessionsForMaintenance();
+	});
+	watch.registerDrainSource('mail', function () {
+		return {
+			'IMAP sessions': imapServer ? imapServer.sessions.size : 0,
+			'SMTP sessions': (smtpServer ? smtpServer.sessions.size : 0) +
+				(inboundSmtpServer ? inboundSmtpServer.sessions.size : 0)
+		};
+	});
+	watch.start();
 
 	alogger.writeAlog(1, "[Mail] Ready — " + started + " server(s) running", "greenbright", true);
 }
