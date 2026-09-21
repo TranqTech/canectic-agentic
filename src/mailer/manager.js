@@ -41,6 +41,73 @@ class MailerManager extends EventEmitter {
 		this._pollTimers    = new Map(); // connectionUUID -> timer
 		this._nodelistBackoff = new Map(); // address -> { failures, nextAllowedAt }
 		this._running       = false;
+		this._maintenance   = false;     // closed for maintenance mode: no new sessions either way
+		this._dials         = new Map(); // dial id -> started ms, connects not yet a session
+		this._dialSeq       = 0;
+	}
+
+	// -----------------------------------------------------------------------
+	// Maintenance mode
+	//
+	// Closed means no new sessions in either direction. Inbound callers get
+	// M_BSY, which binkp mailers treat as "try later"; outbound mail stays in
+	// the BSO outbound and goes when the board reopens. Sessions already
+	// running are left to finish, and each has its own hard timeout.
+	// -----------------------------------------------------------------------
+
+	setMaintenance(active) {
+		var was = this._maintenance;
+		this._maintenance = !!active;
+		if (was !== this._maintenance) {
+			alogger.writeClog(2, this._maintenance
+				? 'Mailer: closed for maintenance, no new sessions (' + this._sessions.length + ' still running)'
+				: 'Mailer: maintenance over, accepting sessions again', 'mailer', 'yellowbright');
+		}
+	}
+
+	isInMaintenance() {
+		return this._maintenance;
+	}
+
+	/** End every running session, for when the maintenance grace runs out. */
+	endSessionsForMaintenance() {
+		for (var session of this._sessions) {
+			if (session.protocol) session.protocol.sendERR('System closing for maintenance');
+		}
+	}
+
+	/**
+	 * What is still in flight, for the maintenance drain status. A connect that
+	 * has not become a session yet counts too, until it is older than the
+	 * connect timeout, so a dial that never reports back cannot hold the drain
+	 * open for ever.
+	 */
+	drainCounts() {
+		var limitMs = (appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) + 10) * 1000;
+		var now = Date.now();
+		var dialing = 0;
+		for (var [id, started] of this._dials) {
+			if (now - started > limitMs) this._dials.delete(id);
+			else dialing++;
+		}
+		return { 'binkp sessions': this._sessions.length, 'binkp connects': dialing };
+	}
+
+	_trackDial(transport) {
+		var id = ++this._dialSeq;
+		this._dials.set(id, Date.now());
+		var done = () => { this._dials.delete(id); };
+		transport.once('connect', done);
+		transport.once('error', done);
+	}
+
+	_bsyFrame(text) {
+		var msg = Buffer.from(text);
+		var frame = Buffer.alloc(2 + 1 + msg.length);
+		frame.writeUInt16BE(0x8000 | (1 + msg.length), 0);
+		frame[2] = 8; // M_BSY
+		msg.copy(frame, 3);
+		return frame;
 	}
 
 	// -----------------------------------------------------------------------
@@ -173,15 +240,16 @@ class MailerManager extends EventEmitter {
 
 		var remoteAddr = (socket.remoteAddress || '?') + ':' + (socket.remotePort || '?');
 
+		if (this._maintenance) {
+			alogger.writeClog(3, 'Mailer: rejecting inbound from ' + remoteAddr + ' (maintenance mode)', 'mailer', 'yellow');
+			socket.write(this._bsyFrame('Closed for maintenance, try later'));
+			socket.end();
+			return;
+		}
+
 		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
 			alogger.writeClog(3, 'Mailer: rejecting inbound from ' + remoteAddr + ' (max sessions)', 'mailer', 'yellow');
-			// Send a binkp M_BSY frame before closing
-			var bsyMsg = Buffer.from('System busy, try later');
-			var frame  = Buffer.alloc(2 + 1 + bsyMsg.length);
-			frame.writeUInt16BE(0x8000 | (1 + bsyMsg.length), 0);
-			frame[2] = 8; // M_BSY
-			bsyMsg.copy(frame, 3);
-			socket.write(frame);
+			socket.write(this._bsyFrame('System busy, try later'));
 			socket.end();
 			return;
 		}
@@ -200,14 +268,18 @@ class MailerManager extends EventEmitter {
 
 		var remoteAddr = (request && request.socket ? request.socket.remoteAddress : '?') || '?';
 
+		if (this._maintenance) {
+			alogger.writeClog(3, 'Mailer: rejecting inbound WS from ' + remoteAddr + ' (maintenance mode)', 'mailer', 'yellow');
+			ws.send(this._bsyFrame('Closed for maintenance, try later'));
+			ws.close();
+			return;
+		}
+
+		// This copy used to build the frame without copying the message into
+		// it, so the peer received M_BSY followed by zero bytes.
 		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
 			alogger.writeClog(3, 'Mailer: rejecting inbound WS from ' + remoteAddr + ' (max sessions)', 'mailer', 'yellow');
-			// Send a binkp M_BSY frame before closing
-			var bsyMsg = Buffer.from('System busy, try later');
-			var frame  = Buffer.alloc(2 + 1 + bsyMsg.length);
-			frame.writeUInt16BE(0x8000 | (1 + bsyMsg.length), 0);
-			frame[2] = 8; // M_BSY
-			ws.send(frame);
+			ws.send(this._bsyFrame('System busy, try later'));
 			ws.close();
 			return;
 		}
@@ -305,6 +377,15 @@ class MailerManager extends EventEmitter {
 		var options = opts || {};
 		var cd = conn.connection_data || {};
 
+		// Every outbound route ends here or in connectToNodelistAddress, so a
+		// closed board is refused at the two choke points rather than at each
+		// caller. Even a forced poll: a drain that a button press can break is
+		// not a drain.
+		if (this._maintenance) {
+			alogger.writeClog(4, 'Mailer: not connecting to ' + (cd.address || conn.uuid) + ': maintenance mode', 'mailer', 'yellow');
+			return;
+		}
+
 		// The backoff guard lives here rather than at each call site. It used
 		// to be checked only in pollConnection, so the BSO scanner, which calls
 		// this directly whenever there is mail waiting, retried a failing peer
@@ -362,6 +443,7 @@ class MailerManager extends EventEmitter {
 
 		if (mailerTransport === 'tcp') {
 			var transport = TcpTransport.connect(host, port, appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) * 1000);
+			this._trackDial(transport);
 			transport.once('connect', () => {
 				this._createSession(transport, 'caller', { connectionUUID: conn.uuid });
 			});
@@ -386,6 +468,7 @@ class MailerManager extends EventEmitter {
 			alogger.writeClog(5, 'Mailer: connecting via WebSocket to ' + (cd.address || conn.uuid) + ' at ' + wsUrl, 'mailer', 'cyan');
 
 			var wsTransport = WsTransport.connect(wsUrl, appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) * 1000);
+			this._trackDial(wsTransport);
 			wsTransport.once('connect', () => {
 				this._createSession(wsTransport, 'caller', { connectionUUID: conn.uuid });
 			});
@@ -467,6 +550,11 @@ class MailerManager extends EventEmitter {
 		var host = nodelistData.hostname;
 		var port = nodelistData.binkpPort || BINKP_PORT;
 
+		if (this._maintenance) {
+			alogger.writeClog(4, 'Mailer: not connecting to ' + destinationAddress + ': maintenance mode', 'mailer', 'yellow');
+			return;
+		}
+
 		if (this._sessions.length >= appConfig.getNumber('MAILER_MAX_SESSIONS', 10)) {
 			alogger.writeClog(4, 'Mailer: cannot connect to ' + destinationAddress + ' — max sessions reached', 'mailer', 'yellow');
 			return;
@@ -494,6 +582,7 @@ class MailerManager extends EventEmitter {
 		);
 
 		var transport = TcpTransport.connect(host, port, appConfig.getNumber('MAILER_CONNECT_TIMEOUT', 30) * 1000);
+		this._trackDial(transport);
 		transport.once('connect', () => {
 			this._createSession(transport, 'caller', {
 				connectionUUID: null,

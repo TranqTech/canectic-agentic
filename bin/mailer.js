@@ -38,6 +38,8 @@ import { createEventPublisher, createEventSubscriber, EVENTS } from "../src/queu
 import * as fileWildcards from "../src/models/fileWildcards.js";
 import { Worker } from 'bullmq';
 import appConfig from "../src/config/appConfig.js";
+import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
+import { startClosed, attachQueueDrain } from "../src/maintenance/queueDrain.js";
 
 dotenv.config();
 alogger.setProcessName('mailer');
@@ -114,8 +116,12 @@ async function main() {
 	// Event publisher for notifying gateway and worker
 	eventPublisher = createEventPublisher();
 
-	// Start the mailer manager (TCP + WS listeners, session pool)
+	// Start the mailer manager (TCP + WS listeners, session pool). On a closed
+	// board (the updater restarts us with the flag still set) it starts closed,
+	// so nothing connects before the maintenance watch has had its first look.
+	var closedAtStart = startClosed();
 	mailerManager = new MailerManager();
+	if (closedAtStart) mailerManager.setMaintenance(true);
 	mailerManager.start();
 
 	// Wire the mailer's file-received event to enqueue a toss job
@@ -176,7 +182,9 @@ async function main() {
 	}, {
 		connection,
 		concurrency: 5,   // multiple polls can run concurrently
+		autorun: !closedAtStart,
 	});
+	if (closedAtStart) await mailerWorker.pause();
 
 	mailerWorker.on('failed', (job, err) => {
 		alogger.writeAlog(2, `[Mailer] Job FAILED: ${job?.name} — ${err.message}`, "redbright");
@@ -196,6 +204,22 @@ async function main() {
 			fileWildcards.invalidateCache();
 		}
 	});
+
+	// Maintenance mode: no new sessions in either direction while the board
+	// is closed, sessions still running when the grace ends are finished off,
+	// and the mailer queue pauses so scheduled polls wait rather than fire.
+	var maintLog = function (level, message) { alogger.writeAlog(level, '[Mailer] ' + message, 'yellowbright'); };
+	var watch = initMaintenanceWatch({
+		process: 'mailer',
+		graceDefault: function () { return appConfig.getNumber('maintenance_grace_seconds', 300); },
+		log: maintLog
+	});
+	watch.on('enter', function () { mailerManager.setMaintenance(true); });
+	watch.on('leave', function () { mailerManager.setMaintenance(false); });
+	watch.on('deadline', function () { mailerManager.endSessionsForMaintenance(); });
+	attachQueueDrain(watch, [{ name: 'mailer', worker: mailerWorker }],
+		function () { return mailerManager.drainCounts(); }, maintLog);
+	watch.start();
 
 	alogger.writeAlog(1, "[Mailer] Ready — consuming mailer queue", "greenbright", true);
 }

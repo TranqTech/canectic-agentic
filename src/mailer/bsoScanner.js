@@ -196,6 +196,9 @@ class BsoScanner {
 
 	async _scan() {
 		if (this._manager && !this._manager.isRunning()) return;
+		// Closed for maintenance: leave the outbound where it is. It goes when
+		// the board reopens, and scanning now would only log refusals.
+		if (this._manager && typeof this._manager.isInMaintenance === 'function' && this._manager.isInMaintenance()) return;
 
 		var baseDir = this._resolveOutboundDir();
 		if (!baseDir) return;
