@@ -88,3 +88,6 @@ typings/
 
 # Release artifacts
 dist/
+
+# Maintenance mode flag (src/maintenance/maintenanceFlag.js): runtime state, never committed
+.maintenance
