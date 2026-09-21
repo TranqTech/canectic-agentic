@@ -13,6 +13,10 @@
 - **Follow an update from the web while the BBS is stopped.** The Update button now takes you to a progress page that follows the update from start to finish, including the stretch where the BBS itself is stopped: the update answers on the board's web port in its place, showing the progress to the sysops who were logged in when it started and the maintenance page to everybody else. It uses the same port as the BBS, so it works behind a reverse proxy unchanged. See "Updating from the web" in `docs/sysop/UPDATING.md`.
 - **Updates close the board themselves.** An update warns callers and web users when it starts, waits until the board has drained before stopping it, and reopens it only once the update has checked every file it wrote. An update that fails after stopping the board leaves it closed, so nobody calls in while you find out what happened; reopen it from the Maintenance page when you are satisfied.
 
+### Updates
+
+- Fix: **an update started from the Admin UI stopped partway, leaving half the BBS stopped.** The gateway and mail processes went down, the mailer and worker kept running, and the update itself disappeared at its "stop" step with nothing on the Update page to say why. The update was being stopped along with the BBS it was updating. It now takes itself out of the way first. Updates started from a shell were not affected. This fix travels with the new release's updater, so the update INTO this release already benefits from it, including from the Admin UI.
+
 ### Security
 
 - Fix: **web logins wrote passwords to the log.** See the upgrade note above.
