@@ -117,7 +117,8 @@ describe('the install path', function () {
 		'src/tools/maintenanceMode.js',
 		'src/maintenance/updateStatusServer.js',
 		'src/maintenance/updateProgress.js',
-		'src/maintenance/sysopSessions.js'
+		'src/maintenance/sysopSessions.js',
+		'src/maintenance/processEscape.js'
 	]) {
 		(function (entry) {
 			it(entry + ' imports nothing that needs node_modules', function () {

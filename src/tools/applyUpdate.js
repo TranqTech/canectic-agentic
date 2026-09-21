@@ -27,6 +27,7 @@ import appConfig from '../config/appConfig.js';
 import * as runStore from '../maintenance/updateRunStore.js';
 import { runUpdate } from '../maintenance/updateRunner.js';
 import { summarise } from '../release/updatePhases.js';
+import { hasEscaped, escapeProcessTree } from '../maintenance/processEscape.js';
 
 function log(msg) {
 	// Goes to the log file the launcher opened, which is the only place anybody
@@ -44,8 +45,24 @@ async function main() {
 		process.exit(2);
 	}
 
+	// Leave the launcher's process tree before anything else. Launched from the
+	// Admin UI, this process is a descendant of the gateway, and pm2's treekill
+	// would kill it at the stop phase along with the gateway. See
+	// processEscape.js.
+	if (!hasEscaped()) {
+		var copy = escapeProcessTree();
+		log('relaunched as pid ' + copy + ', outside the launcher\'s process tree, so stopping the BBS cannot stop the update');
+		process.exit(0);
+	}
+
 	var instructions = runStore.readRunFile(runFile);
-	log('updater starting from ' + instructions.stagedRoot);
+	// The launcher recorded the pid of the process it started, which has
+	// exited. Record this one.
+	try {
+		var current = runStore.load(instructions.target, instructions.runId);
+		if (current) { current.pid = process.pid; runStore.save(instructions.target, current); }
+	} catch (_) {}
+	log('updater starting from ' + instructions.stagedRoot + ' (pid ' + process.pid + ', parent ' + process.ppid + ')');
 	log('target ' + instructions.target + ', ' +
 		(instructions.from || '?') + ' -> ' + (instructions.to || '?'));
 
