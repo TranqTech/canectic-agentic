@@ -61,7 +61,7 @@ Standard Express 4 setup with Pug view engine.
 
 ### Error Handling
 
-404s are caught by a fallback middleware and forwarded to the error handler. The error handler renders `views/error.pug` and only exposes stack traces in development mode (`NODE_ENV=development`).
+404s are caught by a fallback middleware and forwarded to the error handler (`src/middleware/errorHandler.js`). The error handler renders `views/error.pug` and only exposes stack traces on the page in development mode (`NODE_ENV=development`). It logs every 5xx at level 1 with the method, the path (query string removed) and the stack, in every mode, and deliberately does not log 4xx, since scanner 404s would bury real errors. It used to log nothing, so an exception in an admin route showed an error page and left the logs clean.
 
 ---
 

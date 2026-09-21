@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.7a)
 
+### Administration
+
+- **Errors in the web interface are now written to the system log.** Before, a page that failed showed you an error page and recorded nothing, so if a save on an admin page did not take, the logs could not tell you whether it had failed or had never been sent. Each server error is now logged with the page it happened on and where in the code it was raised. Pages that simply do not exist (the steady stream of 404s from scanners probing for WordPress and the like) are deliberately not logged, so they cannot bury the errors that matter.
+
 ## v0.9.7a (2026-09-20)
 
 ### Upgrade Notes

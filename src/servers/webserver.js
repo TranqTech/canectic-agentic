@@ -18,6 +18,7 @@ import { router as apiV1Router } from '../routes/api.js';
 import { pgpool } from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
 import { activityMiddleware } from '../middleware/webActivity.js';
+import { createErrorHandler } from '../middleware/errorHandler.js';
 import appConfig from '../config/appConfig.js';
 
 const node_env = process.env.NODE_ENV || "development"
@@ -142,17 +143,8 @@ webserver.use(function(req, res, next) {
   next(createError(404));
 });
 
-// error handler
-webserver.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  //res.locals.error = req.webserver.get('env') === 'development' ? err : {};
-  res.locals.error = node_env === 'development' ? err : {};
-
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
-});
+// error handler: logs server errors, see errorHandler.js
+webserver.use(createErrorHandler({ log: alogger.writeAlog, nodeEnv: node_env }));
 
 //module.exports = webserver;
 export{webserver}
