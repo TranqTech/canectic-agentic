@@ -161,6 +161,17 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
             if activenav === 'update'
               span.visually-hidden  (current)
 
+        //- Maintenance mode
+        li.nav-item
+          a.nav-link(
+            href='/admin/maintenance'
+            class=activenav === 'maintenance' ? 'active' : ''
+          )
+            i.bi.bi-tools.me-1
+            | Maintenance
+            if activenav === 'maintenance'
+              span.visually-hidden  (current)
+
         //- Node Spy
         li.nav-item
           a.nav-link(

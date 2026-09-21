@@ -82,6 +82,8 @@ import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
 import * as fileEcholist from '../models/fileEcholist.js';
 import * as flash from '../middleware/db/flash.js';
+import * as maintFlags from '../maintenance/maintenanceFlag.js';
+import { maintenanceWatch } from '../maintenance/maintenanceWatch.js';
 import { formatActivity } from '../utils/activityMap.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import * as redis from '../middleware/db/redis.js';
@@ -6725,6 +6727,90 @@ router.post('/update/check', urlencodedParser, requireAdmin, async (req, res) =>
 		alogger.writeAlog(2, '[Admin] Manual update check failed: ' + e.message, 'yellowbright');
 	}
 	res.redirect('/admin/update');
+});
+
+// -------------------------------------------------------
+// Maintenance mode
+// -------------------------------------------------------
+// The flag is a file at the install root (src/maintenance/maintenanceFlag.js),
+// not a setting, because the database may be exactly what is being worked on.
+// These routes write it, and read the drain status the processes report while
+// it is set, which is what answers "is it safe to start yet".
+
+function maintenanceStatus() {
+	var root = process.cwd();
+	var flag = maintFlags.readFlag(root);
+	if (!flag) return { active: false, flag: null, deadline: null, expectedBack: null, drain: null };
+	var drain = maintFlags.assessDrain(maintFlags.readDrainStatuses(root), { since: flag.since });
+	for (var p of drain.processes) p.pendingText = maintFlags.describePending(p.pending);
+	return {
+		active:       true,
+		flag:         flag,
+		deadline:     maintFlags.deadlineOf(flag, appConfig.getNumber('maintenance_grace_seconds', 300)),
+		expectedBack: maintFlags.expectedBackOf(flag),
+		drain:        drain
+	};
+}
+
+// The gateway's own watcher re-reads the flag at once rather than on its next
+// tick, so the page after the redirect shows the new state and the countdown
+// reaches web users and callers without the two second wait.
+function refreshMaintenanceWatch() {
+	var w = maintenanceWatch();
+	if (w) w.refreshNow();
+}
+
+router.get('/maintenance', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	res.locals.flash = await flash.get(req);
+	res.render('admin/maintenance/index', {
+		sufficientAccess, title: 'Maintenance Mode', activelink: 'maintenance',
+		activenav: 'maintenance', currentuser,
+		status: maintenanceStatus(),
+		graceDefault: appConfig.getNumber('maintenance_grace_seconds', 300)
+	});
+});
+
+router.get('/maintenance/status.json', requireAdmin, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	res.json(maintenanceStatus());
+});
+
+router.post('/maintenance/enter', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var wasActive = maintFlags.isActive(process.cwd());
+	try {
+		maintFlags.enterMaintenance(process.cwd(), {
+			reason:           (req.body.reason || '').trim() || null,
+			expected_minutes: req.body.expected_minutes,
+			grace_seconds:    req.body.grace_seconds,
+			set_by:           currentuser ? currentuser.name : 'admin',
+			source:           'manual'
+		});
+		refreshMaintenanceWatch();
+		alogger.writeAlog(1, '[Admin] Maintenance mode ' + (wasActive ? 'details updated' : 'ON') + ' by ' +
+			(currentuser ? currentuser.name : '?'), 'yellowbright', true);
+		await flash.setOne(req, 'success', wasActive
+			? 'Maintenance details updated. The grace still runs from when the board was first closed.'
+			: 'The board is closed for maintenance.');
+	} catch (err) {
+		await flash.setOne(req, 'danger', 'Could not write the maintenance flag: ' + err.message);
+	}
+	res.redirect('/admin/maintenance');
+});
+
+router.post('/maintenance/leave', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	try {
+		var removed = maintFlags.leaveMaintenance(process.cwd());
+		refreshMaintenanceWatch();
+		alogger.writeAlog(1, '[Admin] Maintenance mode OFF by ' + (currentuser ? currentuser.name : '?'), 'yellowbright', true);
+		await flash.setOne(req, removed ? 'success' : 'info', removed ? 'The board is open.' : 'The board was already open.');
+	} catch (err) {
+		await flash.setOne(req, 'danger', 'Could not remove the maintenance flag: ' + err.message);
+	}
+	res.redirect('/admin/maintenance');
 });
 
 // -------------------------------------------------------

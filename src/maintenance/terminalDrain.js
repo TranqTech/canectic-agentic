@@ -193,6 +193,7 @@ function refuseNewCaller(state) {
 }
 
 export {
+	clockTime,
 	countdown,
 	refusalText,
 	warningText,

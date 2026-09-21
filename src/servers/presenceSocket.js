@@ -597,6 +597,19 @@ class PresenceServer {
 		return this.clients.size;
 	}
 
+	/** Send to every open page, whoever is logged in on it. */
+	broadcast(obj) {
+		var json = JSON.stringify(obj);
+		for (var [ws] of this.clients) {
+			if (ws.readyState === 1) ws.send(json);
+		}
+	}
+
+	/** Users with at least one page open right now. */
+	connectedUserIds() {
+		return Array.from(this.userSockets.keys());
+	}
+
 	shutdown() {
 		if (this._checkTimer) {
 			clearInterval(this._checkTimer);

@@ -42,6 +42,7 @@ import { registerNodeSpyWebSocket } from "../src/servers/nodespySocket.js";
 import appConfig from "../src/config/appConfig.js";
 import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
 import { attachTerminalDrain } from "../src/maintenance/terminalDrain.js";
+import { attachWebDrain } from "../src/maintenance/webDrain.js";
 import { startClosed, attachQueueDrain } from "../src/maintenance/queueDrain.js";
 
 dotenv.config();
@@ -463,12 +464,18 @@ async function startEmbeddedWorkers(){
 // the right answer, and started here, once every subsystem has subscribed, so
 // none of them misses the board closing.
 
-function startMaintenanceWatch(){
+async function startMaintenanceWatch(){
 	var log = function (level, message) { alogger.writeAlog(level, '[Gateway] ' + message, 'yellowbright'); };
 
 	// Terminal callers: refused at connect (in the connection classes), warned
 	// and then disconnected when the grace runs out.
 	attachTerminalDrain(maintWatch, callManager, log);
+
+	// Web users: a countdown pushed to open pages and a notification, then the
+	// maintenance page once the grace runs out (maintenanceWeb.js). Not waited
+	// for, so not a drain source.
+	var notifMod = await import("../src/models/notifications.js");
+	attachWebDrain(maintWatch, presenceServer, notifMod, log);
 
 	if (processMode === 'embedded') {
 		if (mailerManager) {
@@ -599,7 +606,7 @@ async function main(){
 	// Event subscriber — runs in both modes
 	await startEventSubscriber()
 
-	startMaintenanceWatch()
+	await startMaintenanceWatch()
 
 	// Register job schedules (polls, toss cycles, maintenance)
 	await registerSchedules()

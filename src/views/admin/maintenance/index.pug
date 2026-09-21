@@ -1,0 +1,193 @@
+extends ../../layouts/admin
+
+block content
+  //- Maintenance mode: close the board for anything that needs it to itself,
+  //- see whether it has drained, and open it again. The flag is a file, not a
+  //- setting, so this works while the database is what is being worked on.
+  -
+    var stateLabel = { draining: 'Draining', drained: 'Drained', stopped: 'Not running', previous: 'Not reported yet' }
+    var stateClass = { draining: 'warning', drained: 'success', stopped: 'secondary', previous: 'secondary' }
+    var fmt = function (d) { return d ? new Date(d).toLocaleString() : '-' }
+    var flag = status.flag || {}
+
+  .container-fluid(style='max-width: 70rem;')
+    br
+    h2
+      i.bi.bi-tools.me-2
+      | Maintenance Mode
+    p.text-muted
+      | Close the board for anything that needs it to itself: an update, a message base import, area work, or database work by hand.
+    include ../../partials/flash
+
+    if status.active
+      .card.border-warning.mb-4
+        .card-header.bg-warning.text-dark
+          strong The board is closed
+          if flag.source === 'update'
+            span.badge.bg-dark.ms-2 set by an update
+        .card-body
+          if flag.source === 'update'
+            .alert.alert-info
+              i.bi.bi-info-circle.me-2
+              | This closure was set by an update
+              if flag.run_id
+                |  (run #{flag.run_id})
+              | . An update that completes reopens the board itself; one that failed leaves it closed on purpose, so check the
+              |
+              a(href='/admin/update') Update page
+              |  before letting callers back in.
+          if flag.malformed
+            .alert.alert-warning The flag file could not be read. It still closes the board.
+          dl.row.mb-0
+            dt.col-sm-3 Reason
+            dd.col-sm-9= flag.reason || '(none given)'
+            dt.col-sm-3 Closed since
+            dd.col-sm-9= fmt(flag.since)
+            dt.col-sm-3 Grace ends
+            dd.col-sm-9
+              span#grace-end(data-iso=status.deadline ? new Date(status.deadline).toISOString() : '')= fmt(status.deadline)
+              span#grace-left.text-muted.ms-2
+              .form-text Connected callers and logged-in web users are warned until then, then disconnected or shown the maintenance page.
+            dt.col-sm-3 Expected back
+            dd.col-sm-9= status.expectedBack ? fmt(status.expectedBack) : '(not given)'
+            dt.col-sm-3 Set by
+            dd.col-sm-9= (flag.set_by || '?') + ' (' + flag.source + ')'
+
+      .card.mb-4
+        .card-header
+          strong Drain
+          span#drain-summary.ms-2
+        .card-body
+          p.text-muted.small
+            | What each process still has in flight. Callers and mail clients are counted until the grace runs out;
+            | binkp sessions and queue jobs are left to finish. Web users are told and not waited for.
+          table.table.table-sm.mb-0
+            thead
+              tr
+                th Process
+                th State
+                th In flight
+            tbody#drain-rows
+              if status.drain && status.drain.processes.length
+                each p in status.drain.processes
+                  tr
+                    td= p.process
+                    td
+                      span.badge(class='bg-' + (stateClass[p.state] || 'secondary'))= stateLabel[p.state] || p.state
+                    td= p.pendingText || '-'
+              else
+                tr
+                  td.text-muted(colspan=3) No process has reported yet. Either nothing is running, or what is running predates maintenance mode.
+
+      .row.g-4
+        .col-lg-7
+          .card
+            .card-header Change the details
+            .card-body
+              form(method='POST' action='/admin/maintenance/enter')
+                .mb-3
+                  label.form-label(for='m_reason') Reason
+                  input#m_reason.form-control(type='text' name='reason' maxlength=200 value=flag.reason || '')
+                .row
+                  .col-6.mb-3
+                    label.form-label(for='m_expected') Expected minutes
+                    input#m_expected.form-control(type='number' min=0 name='expected_minutes' value=(flag.expected_minutes !== null && flag.expected_minutes !== undefined) ? flag.expected_minutes : '')
+                  .col-6.mb-3
+                    label.form-label(for='m_grace') Grace (seconds)
+                    input#m_grace.form-control(type='number' min=0 name='grace_seconds' value=(flag.grace_seconds !== null && flag.grace_seconds !== undefined) ? flag.grace_seconds : '' placeholder=graceDefault)
+                .form-text.mb-3 The grace still runs from when the board was first closed, so nobody is handed a fresh countdown.
+                button.btn.btn-outline-warning(type='submit') Update details
+        .col-lg-5
+          .card.border-success
+            .card-header Reopen
+            .card-body
+              p Callers, mail clients and binkp sessions are accepted again and the worker resumes its queues. Anything that queued up while the board was closed then runs.
+              form(method='POST' action='/admin/maintenance/leave'
+                onsubmit=(flag.source === 'update' ? "return confirm('This closure was set by an update. If that update failed, the board may not be fit to open. Reopen anyway?')" : "return confirm('Reopen the board?')"))
+                button.btn.btn-success(type='submit')
+                  i.bi.bi-door-open.me-1
+                  | Reopen the board
+
+    else
+      .card.border-success.mb-4
+        .card-body
+          i.bi.bi-door-open.text-success.me-2
+          strong The board is open.
+
+      .card
+        .card-header Close the board
+        .card-body
+          p Closing the board:
+          ul
+            li refuses new terminal callers, mail client connections and binkp sessions, and pauses the worker's queues so new jobs wait
+            li warns connected callers and logged-in web users, then disconnects callers and shows web users the maintenance page when the grace runs out
+            li shows anonymous visitors the maintenance page straight away
+            li leaves the admin pages working for you throughout
+          form(method='POST' action='/admin/maintenance/enter' onsubmit="return confirm('Close the board for maintenance?')")
+            .mb-3
+              label.form-label(for='m_reason') Reason
+              input#m_reason.form-control(type='text' name='reason' maxlength=200 placeholder='Shown to callers and visitors')
+            .row
+              .col-sm-6.mb-3
+                label.form-label(for='m_expected') Expected minutes
+                input#m_expected.form-control(type='number' min=0 name='expected_minutes' placeholder='Optional')
+                .form-text Shown as the time the board expects to be back.
+              .col-sm-6.mb-3
+                label.form-label(for='m_grace') Grace (seconds)
+                input#m_grace.form-control(type='number' min=0 name='grace_seconds' value=graceDefault)
+                .form-text 0 closes it at once. The board default is maintenance_grace_seconds.
+            button.btn.btn-warning(type='submit')
+              i.bi.bi-tools.me-1
+              | Close the board
+
+    p.text-muted.small.mt-4
+      | From a shell, in the install directory:
+      code.ms-1 node src/tools/maintenanceMode.js --on --reason "..." --wait
+      | , which also works when the gateway will not start.
+
+  if status.active
+    script.
+      (function () {
+        var labels = { draining: 'Draining', drained: 'Drained', stopped: 'Not running', previous: 'Not reported yet' };
+        var classes = { draining: 'warning', drained: 'success', stopped: 'secondary', previous: 'secondary' };
+        function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+        function left(iso) {
+          var ms = new Date(iso).getTime() - Date.now();
+          if (!iso || isNaN(ms)) return '';
+          if (ms <= 0) return '(over)';
+          var s = Math.ceil(ms / 1000), m = Math.floor(s / 60);
+          return '(' + m + ':' + String(s % 60).padStart(2, '0') + ' left)';
+        }
+        function tickGrace() {
+          var end = document.getElementById('grace-end');
+          var out = document.getElementById('grace-left');
+          if (end && out) out.textContent = left(end.getAttribute('data-iso'));
+        }
+        function render(st) {
+          if (!st.active) { location.reload(); return; }
+          var rows = document.getElementById('drain-rows');
+          var sum = document.getElementById('drain-summary');
+          var d = st.drain || { processes: [], reporting: 0, drained: true };
+          if (!d.processes.length) {
+            rows.innerHTML = '<tr><td class="text-muted" colspan="3">No process has reported yet. Either nothing is running, or what is running predates maintenance mode.</td></tr>';
+          } else {
+            rows.innerHTML = d.processes.map(function (p) {
+              return '<tr><td>' + esc(p.process) + '</td><td><span class="badge bg-' + (classes[p.state] || 'secondary') + '">' +
+                esc(labels[p.state] || p.state) + '</span></td><td>' + esc(p.pendingText || '-') + '</td></tr>';
+            }).join('');
+          }
+          sum.innerHTML = d.reporting === 0
+            ? '<span class="badge bg-secondary">Nothing reporting</span>'
+            : (d.drained ? '<span class="badge bg-success">Drained: nothing in flight</span>' : '<span class="badge bg-warning text-dark">Still draining</span>');
+        }
+        function poll() {
+          fetch('/admin/maintenance/status.json', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(render)
+            .catch(function () {});
+        }
+        tickGrace();
+        setInterval(tickGrace, 1000);
+        poll();
+        setInterval(poll, 3000);
+      })();

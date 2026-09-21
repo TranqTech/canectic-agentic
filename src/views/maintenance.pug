@@ -1,0 +1,46 @@
+doctype html
+//- Shown to everyone but sysops while the board is closed for maintenance.
+//- Standalone rather than on the user layout, which needs a logged-in user.
+//- Loads custom.css last like every layout, so a sysop's branding carries over.
+html
+  head
+    title= boardName + ' - closed for maintenance'
+    meta(charset='utf-8')
+    meta(name='viewport' content='width=device-width, initial-scale=1')
+    //- Check back every minute, so a visitor lands on the board once it reopens.
+    meta(http-equiv='refresh' content='60')
+    link(rel='stylesheet', href='/css/darkly/bootstrap.css')
+    link(rel='stylesheet', href='/css/bootstrap-icons.css')
+    link(rel='stylesheet', href='/css/styles.css')
+    link(rel='stylesheet', href='/css/custom.css')
+  body
+    .container.maintenance-page(style='max-width: 40rem; padding-top: 12vh;')
+      .card.border-warning
+        .card-body.text-center.p-5
+          i.bi.bi-tools.text-warning(style='font-size: 3rem;')
+          h1.h3.mt-3= boardName
+          p.lead.mb-4 is closed for maintenance.
+          if reason
+            p.mb-4= reason
+          if expectedBack
+            p.mb-1
+              | Expected back around
+              |
+              strong#maint-back(data-iso=expectedBack)= new Date(expectedBack).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              span#maint-back-rel.text-muted
+          else
+            p.mb-1 Please check back a little later.
+          p.text-muted.small.mt-4.mb-0 This page checks again every minute.
+      p.text-center.mt-3
+        a.small.text-muted(href='/users/login') Sysop login
+    script.
+      (function () {
+        var el = document.getElementById('maint-back');
+        if (!el) return;
+        var when = new Date(el.getAttribute('data-iso'));
+        if (isNaN(when.getTime())) return;
+        el.textContent = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        var mins = Math.round((when.getTime() - Date.now()) / 60000);
+        var rel = document.getElementById('maint-back-rel');
+        if (rel) rel.textContent = mins > 1 ? ' (in about ' + mins + ' minutes)' : (mins >= 0 ? ' (any minute now)' : ' (running a little late)');
+      })();

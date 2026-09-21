@@ -19,6 +19,7 @@ import { pgpool } from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
 import { activityMiddleware } from '../middleware/webActivity.js';
 import { createErrorHandler } from '../middleware/errorHandler.js';
+import { maintenanceMiddleware } from '../middleware/maintenanceWeb.js';
 import appConfig from '../config/appConfig.js';
 
 const node_env = process.env.NODE_ENV || "development"
@@ -95,6 +96,11 @@ webserver.use(function(req, res, next) {
 	alogger.writeAlog(4, 'CSRF: no Origin or Referer header on ' + req.method + ' ' + req.path, 'yellow');
 	return res.status(403).json({ error: 'Forbidden — missing origin verification' });
 });
+
+// --- Maintenance mode ---
+// After the static files, so the maintenance page still gets its CSS, and
+// before activity tracking, so a refused request is not logged as a call.
+webserver.use(maintenanceMiddleware());
 
 // --- Web activity tracking (call logging on idle resume) ---
 webserver.use(activityMiddleware);
