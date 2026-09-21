@@ -13,6 +13,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as net from 'net';
 import * as alogger from "../utils/alogger.js";
+import { currentMaintenance } from "../maintenance/maintenanceWatch.js";
+import { refuseNewCaller } from "../maintenance/terminalDrain.js";
 
 // --- Telnet constants ---
 var IAC  = 0xFF;  // Interpret As Command
@@ -327,6 +329,16 @@ class TelnetConnection {
 	announceConnection() {
 		var msg = "Telnet connection from " + this.socket.remoteAddress;
 		alogger.writeAlog(3, msg, "magenta", true);
+
+		// Maintenance mode: refuse before a node is allocated or anything is
+		// negotiated, with the reason and when the board expects to be back.
+		var closedText = refuseNewCaller(currentMaintenance());
+		if (closedText) {
+			alogger.writeAlog(3, "Refused Telnet caller from " + this.socket.remoteAddress + ": maintenance mode", "yellow");
+			this.socket.write(closedText);
+			this.socket.end();
+			return;
+		}
 
 		if (this.parentPool.forwardtoPool) {
 			alogger.writeAlog(4, "Forwarding Telnet call to pool " + this.parentPool.callPool.name, "cyan");

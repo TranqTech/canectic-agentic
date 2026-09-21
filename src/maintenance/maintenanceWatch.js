@@ -49,6 +49,7 @@ class MaintenanceWatch extends EventEmitter {
 		this._ticking   = false;
 		this._flag      = null;
 		this._key       = null;
+		this._primed    = false;
 		this._deadlineFiredFor = null;
 	}
 
@@ -76,9 +77,17 @@ class MaintenanceWatch extends EventEmitter {
 		this._sources.set(name, fn);
 	}
 
-	/** The current state, synchronously, as of the last check. */
+	/**
+	 * The current state, synchronously, as of the last check.
+	 *
+	 * Before the first check it reads the file directly, without firing any
+	 * events. A process creates its watcher early, so a request or a caller
+	 * arriving during startup sees the right answer, but starts it only once
+	 * every subsystem has subscribed; firing 'enter' before then would leave
+	 * the late subscribers never having heard the board is closed.
+	 */
 	current() {
-		var flag = this._flag;
+		var flag = this._primed ? this._flag : flags.readFlag(this.root);
 		return {
 			active:       !!flag,
 			flag:         flag,
@@ -120,6 +129,7 @@ class MaintenanceWatch extends EventEmitter {
 	}
 
 	_apply(flag) {
+		this._primed = true;
 		var prev = this._flag;
 		var key = flag ? JSON.stringify(flag) : null;
 		if (key === this._key) return;

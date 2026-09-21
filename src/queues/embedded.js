@@ -22,6 +22,9 @@ import { createEventPublisher, EVENTS } from "./events.js";
  *
  * @param {object} opts
  * @param {object} opts.mailerManager - MailerManager instance (if mailer is enabled)
+ * @param {boolean} opts.startPaused - the board is in maintenance mode: create the
+ *   consumers without running them and pause them, so none takes a job before the
+ *   maintenance watch has had its first look
  * @returns {{ shutdown: () => Promise<void> }}
  */
 export async function startEmbeddedWorkers(opts = {}) {
@@ -69,6 +72,7 @@ export async function startEmbeddedWorkers(opts = {}) {
 
 	// --- Embedded toss worker ---
 	var tossConnection = createQueueConnection();
+	var consumers = [];
 	var tossWorker = new Worker('toss', async (job) => {
 		alogger.writeAlog(3, `[Embedded/Toss] ${job.name}`, "cyan");
 
@@ -166,8 +170,10 @@ export async function startEmbeddedWorkers(opts = {}) {
 	}, {
 		connection: tossConnection,
 		concurrency: 2,
+		autorun: !opts.startPaused,
 	});
 	workers.push(tossWorker);
+	consumers.push({ name: 'toss', worker: tossWorker });
 	alogger.writeAlog(2, "  Embedded toss worker started", "cyan");
 
 	// --- Embedded mailer worker (if mailer is running in-process) ---
@@ -192,8 +198,10 @@ export async function startEmbeddedWorkers(opts = {}) {
 		}, {
 			connection: mailerConnection,
 			concurrency: 5,
+			autorun: !opts.startPaused,
 		});
 		workers.push(mailerWorker);
+		consumers.push({ name: 'mailer', worker: mailerWorker });
 		alogger.writeAlog(2, "  Embedded mailer worker started", "cyan");
 	}
 
@@ -215,12 +223,20 @@ export async function startEmbeddedWorkers(opts = {}) {
 	}, {
 		connection: maintConnection,
 		concurrency: 1,
+		autorun: !opts.startPaused,
 	});
 	workers.push(maintWorker);
+	consumers.push({ name: 'maintenance', worker: maintWorker });
 	alogger.writeAlog(2, "  Embedded maintenance worker started", "cyan");
+
+	if (opts.startPaused) {
+		for (var c of consumers) await c.worker.pause();
+		alogger.writeAlog(1, "  Board is in maintenance mode: embedded queues start paused", "yellowbright", true);
+	}
 
 	// --- Shutdown handle ---
 	return {
+		consumers: consumers,
 		async shutdown() {
 			await Promise.all(workers.map(w => w.close()));
 			eventPublisher.shutdown();
