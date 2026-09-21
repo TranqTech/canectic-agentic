@@ -107,10 +107,17 @@ describe('the install path', function () {
 	// Maintenance mode is the tool for when the gateway will not start or the
 	// database is what is being repaired, and the updater sets it around the
 	// stop. None of it may need node_modules, for the same reason as above.
+	//
+	// The updater's progress page listener runs while the dependencies phase
+	// replaces node_modules underneath it (#53), so it and everything it
+	// renders with are held to the same rule.
 	for (var builtinsOnly of [
 		'src/maintenance/maintenanceFlag.js',
 		'src/maintenance/maintenanceWatch.js',
-		'src/tools/maintenanceMode.js'
+		'src/tools/maintenanceMode.js',
+		'src/maintenance/updateStatusServer.js',
+		'src/maintenance/updateProgress.js',
+		'src/maintenance/sysopSessions.js'
 	]) {
 		(function (entry) {
 			it(entry + ' imports nothing that needs node_modules', function () {

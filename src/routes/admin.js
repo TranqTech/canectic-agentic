@@ -84,6 +84,8 @@ import * as fileEcholist from '../models/fileEcholist.js';
 import * as flash from '../middleware/db/flash.js';
 import * as maintFlags from '../maintenance/maintenanceFlag.js';
 import { maintenanceWatch } from '../maintenance/maintenanceWatch.js';
+import { recordSysopSessions } from '../middleware/maintenanceWeb.js';
+import { progressSnapshot, renderProgressPage, tailFile } from '../maintenance/updateProgress.js';
 import { formatActivity } from '../utils/activityMap.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import * as redis from '../middleware/db/redis.js';
@@ -6671,6 +6673,7 @@ function writable(dir) {
 // exists from the moment the button is pressed, which means a failure during
 // staging is visible on the page rather than looking like nothing happened.
 router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
 	var target = process.cwd();
 	var running = systeminfo.canonicalVersion();
 	var channel = appConfig.get('update_channel', 'stable');
@@ -6680,10 +6683,22 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 		runId: runId, from: running, to: req.body.version || null, target: target
 	}));
 
+	// Before anything else: write down which browsers are sysops'. While the
+	// BBS is stopped, the updater answers on this port and shows sysops the
+	// progress and everybody else the maintenance page, and it cannot ask Redis
+	// (see sysopSessions.js). Failing here costs the progress page, not the
+	// update.
+	try {
+		var recorded = await recordSysopSessions(target, runId);
+		alogger.writeAlog(3, '[Admin] recorded ' + recorded + ' sysop session(s) for the update progress page', 'cyan');
+	} catch (e) {
+		alogger.writeAlog(2, '[Admin] could not record sysop sessions for the progress page: ' + e.message, 'yellow');
+	}
+
 	// Answer now. Everything after this happens while the browser is on its way
-	// back to the status page, and quite possibly while this process is being
+	// to the progress page, and quite possibly while this process is being
 	// replaced.
-	res.redirect('/admin/update');
+	res.redirect('/admin/update/progress');
 
 	try {
 		var staging = await import('../maintenance/updateStaging.js');
@@ -6712,7 +6727,9 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 			stagedRoot: staged.treeRoot, target: target, runId: runId,
 			from: running, to: entry.version, base: staged.meta.base || null,
 			nodeMin: staged.meta.node_min, steps: staged.meta.steps || [],
-			launchedBy: 'admin ' + (req.session && req.session.username ? req.session.username : 'web'),
+			// req.session never exists here (sessions are not express-session),
+			// so this recorded every web launch as 'admin web'.
+			launchedBy: 'admin ' + (currentuser && currentuser.name ? currentuser.name : 'web'),
 			options: {}
 		});
 		alogger.writeAlog(1, '[Admin] update to ' + entry.version + ' handed off, run ' + runId, 'green');
@@ -6723,6 +6740,34 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 		if (state) updateRunStore.save(target, updatePhases.failRun(state, e));
 		alogger.writeAlog(1, '[Admin] update could not start: ' + e.message, 'red');
 	}
+});
+
+// The progress of the latest update run, as the gateway sees it: from the run
+// file and the tail of the updater's log. While the BBS is stopped the updater
+// serves this same page itself (updateStatusServer.js), from the same renderer,
+// so a sysop watching it sees one continuous account across the stop.
+function updateProgressSnapshot() {
+	var target = process.cwd();
+	var state = updateRunStore.latest(target);
+	var drain = null;
+	var flag = maintFlags.readFlag(target);
+	if (flag) drain = maintFlags.assessDrain(maintFlags.readDrainStatuses(target), { since: flag.since });
+	return progressSnapshot(state, {
+		log:       state ? tailFile(state.logFile, 40) : [],
+		drain:     drain,
+		servedBy:  'gateway',
+		boardName: appConfig.get('boardname', 'Canectic BBS')
+	});
+}
+
+router.get('/update/progress', requireAdmin, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	res.type('html').send(renderProgressPage(updateProgressSnapshot()));
+});
+
+router.get('/update/progress.json', requireAdmin, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	res.json(updateProgressSnapshot());
 });
 
 // A check the sysop asked for runs even when the daily check is off. The

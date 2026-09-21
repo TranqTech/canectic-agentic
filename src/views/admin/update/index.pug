@@ -212,7 +212,10 @@ block content
                             code.ms-1 node src/tools/update.js --handoff
                         else if runLive
                           .alert.alert-info.small.mb-0
-                            | An update is in progress. Reload this page to follow it.
+                            | An update is in progress.
+                            |
+                            a.alert-link(href='/admin/update/progress') Follow it
+                            |  (the page keeps going while the BBS is stopped).
                         else
                           .alert.alert-success.small.mb-0
                             | Nothing blocks this move, but something above has to be cleared first.

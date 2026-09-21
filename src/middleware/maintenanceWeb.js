@@ -23,6 +23,8 @@ import * as sessionStore from './db/sessionstore.js';
 import appConfig from '../config/appConfig.js';
 import { parseFlags } from '../utils/areaAccess.js';
 import { currentMaintenance } from '../maintenance/maintenanceWatch.js';
+import { hashSessionId } from '../maintenance/updateProgress.js';
+import { writeSysopHashes } from '../maintenance/sysopSessions.js';
 
 // Reachable whatever the state: the admin, the log viewer, the health check,
 // and the way in and out for a sysop.
@@ -128,6 +130,28 @@ function maintenanceMiddleware() {
 }
 
 /**
+ * Write down which sessions are sysops', for the updater's listener, which
+ * cannot ask Redis (see sysopSessions.js). Only hashes are written. Called once,
+ * when an update is started from the web, before anything else happens.
+ *
+ * @param {string} root
+ * @param {string} runId  the update run this is for; the updater ignores a file
+ *                        written for any other run
+ * @returns {Promise<number>} how many sysop sessions were recorded
+ */
+async function recordSysopSessions(root, runId) {
+	var keys = await sessionStore.sessionList();
+	var hashes = [];
+	for (var key of keys || []) {
+		var id = String(key).replace(/^session:/, '');
+		var user = null;
+		try { user = await sessionStore.sessionGet(id); } catch (_) {}
+		if (isSysop(user)) hashes.push(hashSessionId(id));
+	}
+	return writeSysopHashes(root || process.cwd(), hashes, runId);
+}
+
+/**
  * For the login route: may this user log in right now? Anybody may while the
  * board is open; only a sysop while it is closed.
  */
@@ -143,5 +167,6 @@ export {
 	viewModel,
 	sendClosed,
 	maintenanceMiddleware,
-	loginAllowed
+	loginAllowed,
+	recordSysopSessions
 };
