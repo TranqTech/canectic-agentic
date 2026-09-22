@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.9a)
 
+### Upgrade Notes
+
+- **From 0.9.9a there is nothing to do.** A board updating from an earlier release skips 0.9.9a, so the upgrade notes it carried for boards coming from 0.9.8a, 0.9.7a and 0.9.6a or earlier are repeated in this release's notes and shown by the updater.
+
 ### Networking
 
 - Fix: **echomail forwarded to your downlinks lost most of its SEEN-BY.** A message usually carries several SEEN-BY lines, and only the last one was kept, so downlinks were not told about most of the systems that already had the message. That is what SEEN-BY is for, and without it they can pass a message to a system that already has it. Every line is now kept, this system is added, and the list goes out as several short lines, as other software writes it. Messages already received keep what was stored; everything tossed from now on is complete.

@@ -1,6 +1,43 @@
 {
   "steps": [],
-  "notices": [],
+  "notices": [
+    {
+      "level": "info",
+      "text": "Coming from 0.9.8a: this is the first update that gives notice, so it takes longer: callers and logged-in web users get maintenance_grace_seconds (5 minutes unless changed) of warning before the BBS stops, and the update then waits for binkp sessions and jobs in progress to finish. Set a shorter grace on the Config page first if you would rather."
+    },
+    {
+      "level": "warning",
+      "text": "If an update to 0.9.8a stopped partway (BBS stopped, board closed, the update log ending in \"Unhandled 'error' event\" and ECONNRESET), finish it before updating again: from the install directory run the steps it had not reached, in order, npm install --omit=dev, node src/tools/dbmigrations.js, pm2 start ecosystem.config.cjs, then node src/tools/maintenanceMode.js --off once the processes are up. Then update to this release."
+    },
+    {
+      "level": "warning",
+      "text": "Coming from 0.9.7a or earlier: clear the gateway's pm2 output log (logs/production/gateway-out.log on a standard install) after updating. Every web login before 0.9.8a wrote the user's password to it in plain text; the logging is gone but the old lines are not."
+    },
+    {
+      "level": "info",
+      "text": "Coming from 0.9.7a or earlier: this update cannot warn your callers before it stops the BBS, because the processes it replaces predate maintenance mode; it carries on after about twenty seconds. If you start it from the web, you will see the maintenance page while the BBS is stopped; follow it with node src/tools/update.js --status or from the Update page afterwards."
+    },
+    {
+      "level": "warning",
+      "text": "If an update to 0.9.7a failed at its schema step, finish it before updating again. That update stopped with \"spawnSync is not defined\" after it had replaced the files and installed the dependencies, then started the BBS again on 0.9.7a's code over a database that had not been brought up to date. Run node src/tools/dbmigrations.js in the install directory and restart the BBS, which completes what the update was doing, then update to this release as normal."
+    },
+    {
+      "level": "info",
+      "text": "If you installed 0.9.6a or 0.9.7a and were told \"the install did not finish\", your board is installed correctly. The final check misread a routine change npm install makes to package-lock.json as a file that had not landed. Nothing needs removing or redoing."
+    },
+    {
+      "level": "warning",
+      "text": "Coming from 0.9.6a or earlier, embedded mode only (PROCESS_MODE=embedded): maintenance that has never run on your board starts running. An embedded worker recognised 7 of 33 maintenance jobs and silently completed the rest without doing them, so log purges, message and file retention, nodelist and echolist scanning, timed events and the update check have all been idle. They begin on the first daily run after you update, and clear the whole backlog at once. The part to check before updating is retention: if you ever set max_age_days or max_messages on a message or file area, it has been ignored until now and will be enforced on that first run. The Retention Preview on an area's admin page reports what a limit would remove without removing anything. Boards running the normal four-process setup are unaffected, because their worker has always run these."
+    },
+    {
+      "level": "warning",
+      "text": "Coming from 0.9.6a or earlier, if you carry file echoes: expect a burst of outbound files on the first toss after updating. A file arriving from an uplink was correctly queued for your downlinks and then never sent, because nothing ran the outbound pass for file echoes. That queue has been growing for as long as you have been receiving files, so a downlink that has had nothing from you for months may receive a great deal at once. Nothing was lost and nothing needs doing; it is the volume that may surprise you and your links. To meter it, update at a quiet hour and watch the first pass on the peer page, which now shows pending, sent and failed counts per connection."
+    },
+    {
+      "level": "info",
+      "text": "Coming from 0.9.6a or earlier: this update rewrites stored message bodies. Three parts of the system had been storing text three different ways in the same database columns, which is what allowed relayed messages to be corrupted. The update normalises them automatically and asks nothing of you. On the development board that was 4,707 messages across 9 areas, all received over QWK; your figures will differ. The previous copy of every rewritten message is retained in the old column, unread, so the change is reversible. Messages already displaying incorrectly before this update are not repaired by it."
+    }
+  ],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }
