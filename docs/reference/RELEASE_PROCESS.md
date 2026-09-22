@@ -227,6 +227,39 @@ would otherwise only read about the fix. Copy the withdrawn release's notes
 into the replacement and add the hotfix section at the top. They are hand
 written anyway, so this costs a minute and keeps the page complete.
 
+### Rehearsing a release
+
+Rehearse the artifact you will publish, on a machine that is not the one you
+cut it on, **before** it is published: a published release can only be
+withdrawn, never recalled. The kit is `scripts/rehearsal/`, copied to
+`~/rehearsal/` on the rehearsal box, with the publish directory copied to
+`~/rehearsal/releases/` and served locally.
+
+| File | What it does |
+|------|--------------|
+| `mkdb.sh` | creates the role and database the way INSTALL.md does; reads the sudo password from stdin |
+| `reset.sh` | stops and forgets the pm2 apps, removes the install, drops and recreates the database |
+| `pass.sh` | one pass: install a version, register a sysop, point the update check at the local server, attach the clients below, press Update in the Admin UI |
+| `caller.mjs` | a terminal caller that stays connected and logs the maintenance warnings it is sent |
+| `webtab.mjs` | a browser tab left open: keeps its presence WebSocket open and reconnects every second, resets refused upgrades the way browsers do, polls the progress page |
+| `watch.sh` | samples the run's phase, the pm2 states and what the web port serves, every few seconds |
+
+**Run every pass with the clients attached.** 0.9.8a passed three rehearsals
+driven by curl, then died on the first live board: a browser tab reset a
+WebSocket upgrade against the updater's web listener, and the unhandled error
+killed the update halfway through with the BBS stopped. `webtab.mjs` reproduces
+that exactly against 0.9.8a. What a real board has attached during an update is
+part of what is being rehearsed.
+
+The passes worth running for a stable: a fresh install with the new bootstrap
+choosing, and an update from each release boards are actually on, including the
+previous stable (which, from 0.9.8a on, is the first to exercise a real drain:
+warnings at 5 minutes, 60 and 15 seconds, then the disconnect). Withdrawn
+releases the new bootstrap refuses are installed as starting points with an
+older bootstrap (`BOOTSTRAP=...`). A development candidate built with
+`--dev --output <dir>` into a copy of the publish directory rehearses a fix
+before anything is cut.
+
 ## 3. What gets published
 
 | File | Purpose |

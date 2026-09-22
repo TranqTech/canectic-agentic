@@ -178,7 +178,7 @@ instead, covering every file in the tree.
 |------|--------|
 | `--target DIR` | Where to install. Asked for if not given |
 | `--channel development` | Track development builds rather than stable |
-| `--version 0.9.6a` | A specific release |
+| `--version 0.9.9a` | A specific release |
 | `--from DIR` | Artifacts already on disk, from a file echo or copied by hand |
 | `--download-only` | Fetch and verify, then stop, so you can inspect it |
 | `--create-database` | Also create the PostgreSQL role and database |
@@ -193,6 +193,10 @@ It refuses to install over a directory that already holds Canectic, and points
 you at the updater instead, which knows which of your files to leave alone. See
 `docs/sysop/UPDATING.md`.
 
+**A withdrawn release is never installed.** Left to choose, the bootstrap takes
+the newest release that has not been withdrawn; asked for one by name, it stops
+and says why it was withdrawn and what replaces it.
+
 **A development build cannot be installed from nothing.** It is a delta against
 a stable release, so install the stable it names first and then update to it.
 
@@ -203,8 +207,8 @@ gets you a verified artifact and stops:
 
 ```bash
 bash bootstrap.sh --download-only
-unzip canectic-0.9.6a.zip
-cd canectic-0.9.6a
+unzip canectic-0.9.9a.zip
+cd canectic-0.9.9a
 node src/tools/install.js --target /opt/canectic
 ```
 
@@ -223,13 +227,13 @@ Canectic itself rather than running it.
 
 Download the latest release from the [Canectic Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases) and extract:
 ```bash
-unzip canectic-0.9.5a.zip
-cd canectic-0.9.5a
+unzip canectic-0.9.9a.zip
+cd canectic-0.9.9a
 ```
 
 **From git (specific release):**
 ```bash
-git clone --branch v0.9.6a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
+git clone --branch v0.9.9a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
 cd canectic
 ```
 
@@ -555,9 +559,11 @@ node src/tools/update.js --status     # what the last update did
 Or press the button on `/admin/update`, which shows what is available, what
 applying it would do to your installation, and how many users are connected.
 
-Either route stops the processes, replaces the files, installs dependencies,
-dumps the database, migrates it, runs the release's declared upgrade steps and
-starts everything again. Your art, `public/css/custom.css`, door icons and
+Either route closes the board for maintenance and warns callers and web users,
+waits for the board to drain, then stops the processes, replaces the files,
+installs dependencies, dumps the database, migrates it, runs the release's
+declared upgrade steps, starts everything again, checks every file it wrote and
+reopens the board. `docs/sysop/MAINTENANCE.md` covers what callers see. Your art, `public/css/custom.css`, door icons and
 anything you have edited under `config/` are kept, and the update tells you what
 it left alone.
 

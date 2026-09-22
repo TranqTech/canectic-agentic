@@ -100,9 +100,11 @@ byte for byte what shipped, nobody touched it and the update is safe to take. If
 it differs, you changed it and yours is kept.
 
 An installation from before this machinery existed has no `MANIFEST`, so the
-question cannot be answered and **every changed data file is kept as yours**.
-The first upgrade off such an install will report several conflicts; the one
-after it will not.
+question cannot be answered: **any data file that differs from the release is
+kept as yours**, and the update names each one and says how many. Compare those
+with the release and replace any you never edited. If every file matched, it
+says nothing. The update records a `MANIFEST` as it finishes, so the next one can
+tell.
 
 ---
 
@@ -209,6 +211,13 @@ database dump happens after the stop and immediately before the migration,
 because it exists to protect the migration: taken any earlier it would not
 contain the writes in between.
 
+**Repairs it leaves to you.** A few one-off database repairs are too slow to
+run without asking. The schema phase reports any still waiting, and the update
+finishes with a warning for each, naming the commands, on the Update page and in
+`--status`. The one older boards are most likely to see is the MSGID split:
+`node src/tools/maintenance.js --fix-msgids --dry-run` to see what it would
+change, then the same without `--dry-run`, with the worker running.
+
 **Starting from the ecosystem file starts every process in it.** If you had the
 mailer deliberately stopped, it comes back up. `--status` shows what was running
 before the update, so you can put it back.
@@ -241,6 +250,25 @@ Maintenance page, or with `node src/tools/maintenanceMode.js --off`, once you
 are satisfied. A failure before the stop changed nothing and reopens it.
 
 `--status` shows which phase failed and why.
+
+**If the updater itself stops unexpectedly**, it records the phase it was in, and
+whether it left the BBS stopped, before it exits, so `--status` and the Update
+page show a failed run rather than one still running. A visitor's browser
+dropping its connection while the update answers on the web port is not a
+failure, and the update carries on.
+
+To finish an update that stopped after its files were written, run the phases
+it had not reached, in order, from the install directory:
+
+```bash
+npm install --omit=dev
+node src/tools/dbmigrations.js
+pm2 start ecosystem.config.cjs
+node src/tools/maintenanceMode.js --off    # once the processes are up
+```
+
+If it stopped before the files phase had finished, restore from the backup
+directory the run names (see Going back) and update again.
 
 ---
 
@@ -289,8 +317,15 @@ reconstruct into the published tree. Again, nothing is applied. Try a fresh
 staging directory; if it persists, the published artifact is wrong and it is
 worth reporting.
 
-All three happen in the staging directory, and none of them can leave your
-installation half updated.
+**"X is not newer than Y, which this system is running."** Asking for the
+version you already run, or an older one, is not an update. The Update page
+never offers one; this is the answer to a page left open from before your last
+update, or to a `--version` that names the running release.
+
+**"X has been withdrawn (reason); Y replaces it."** The release was pulled after
+it was published. Take the replacement.
+
+None of these can leave your installation half updated.
 
 ---
 
@@ -334,8 +369,11 @@ is no more trustworthy than a downloaded one.
 
 ## Updating from the web
 
-`/admin/update` has an Update button when a release is available and nothing in
-the preflight is blocking. It shows you what the update will do first, including
+`/admin/update` has an Update button when a release newer than the one you run
+is available and nothing in the preflight is blocking. The page judges the last
+check against the version running now, so straight after an update it does not
+offer the release you have just installed, and it says when the check was made
+on an older version. It shows you what the update will do first, including
 how many callers and web users will be warned and then disconnected.
 
 Pressing it takes you to the update's progress page, which follows the update
@@ -358,6 +396,9 @@ the BBS. A sysop who logs in after the button is pressed sees the maintenance
 page until the BBS is back. An update started from the command line records no
 sessions, so everybody gets the maintenance page; follow it with
 `node src/tools/update.js --status` or the log it names.
+
+Browsers that were on the board keep trying to reconnect while the update holds
+the port. They are turned away and the update is not affected.
 
 If the port cannot be taken (something else grabbed it), the update carries on
 without the page. `update_progress_page` turns the page off altogether.

@@ -158,10 +158,31 @@ published has no index, so this is the normal answer for development on a
 project that has only cut stables. A real failure (a timeout, a server error, a
 page that is not an index) is shown separately, with the error.
 
+**If the check is older than the board.** The page shows the last check, and
+the board may have changed version since, most often because it has just been
+updated. What that check found is judged against the version running now, so the
+page never offers the release you already run, and it says "The last check ran
+while this board was on X". Press Check now to refresh it.
+
 The History table lists every check, whether it found anything or not. That is
 deliberate: a page showing only the last result cannot tell a check that found
 nothing from a check that stopped running, and the second is the one worth
 seeing.
+
+---
+
+## Withdrawn releases
+
+A release found to be broken after it was published is withdrawn. It comes off
+the channel's list of releases, so no board is offered it and the bootstrap will
+not install it, including boards running releases from before withdrawal
+existed. Its files stay published, and so do its release notes.
+
+If the release you are **running** has been withdrawn, `/admin/update` says so at
+the top, with the reason and, once there is one, the release that replaces it.
+Until a replacement is published the advice is to stay where you are: the
+withdrawn release is only as broken as the reason says, and moving back to an
+older one is not something the updater does.
 
 ---
 
