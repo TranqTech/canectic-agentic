@@ -6,6 +6,7 @@
 
 - **Clear your gateway's log after updating.** Until this release, every login on the web wrote the user's name and password, in plain text, to the gateway's pm2 output log (`logs/production/gateway-out.log` on a standard install). The logging is gone, but the log still holds whatever was written before. Empty it or delete it once you have updated, and treat any copies or backups of it the same way.
 - **This update cannot give your callers notice; later ones will.** Updates now close the board for maintenance, warn the people on it and wait for the network work in progress to finish before stopping the BBS. The processes this update replaces predate that, so they cannot be asked: after about twenty seconds the update carries on and stops the BBS as updates always have. Update at a quiet hour. Every update after this one drains properly. For the same reason, if you start this update from the web, the progress page cannot recognise you while the BBS is stopped and you will see the maintenance page like everybody else; follow it from the Update page once the BBS is back, or with `node src/tools/update.js --status`.
+- **If an update to 0.9.7a failed at its schema step, finish it before updating again.** That update stopped with `spawnSync is not defined` after it had replaced the files and installed the dependencies, then started the BBS again on 0.9.7a's code over a database that had not been brought up to date. Run `node src/tools/dbmigrations.js` in the install directory and restart the BBS, which completes what the update was doing, then update to this release as normal.
 
 ### Maintenance Mode
 
@@ -15,6 +16,8 @@
 
 ### Updates
 
+- Fix: **an update into 0.9.7a stopped at its schema step with `spawnSync is not defined`.** By then the files had been replaced and the dependencies installed, which is past the point where an update puts the old files back, so the board was left on the new code over a database that had not been brought up to date. An update always runs the updater of the release it is installing, so the update into this release is not affected. See the upgrade note if your board is in that state.
+- **A release can now be withdrawn after it is published, and the update check says so.** A withdrawn release is no longer offered, and a board running one is told, with the reason, even before a replacement exists. This works from this release onwards: a board on 0.9.7a checks with 0.9.7a's code, which offers this release as an ordinary update without mentioning the withdrawal.
 - **An installed board now keeps the signature of the release it runs** (`MANIFEST.asc`) beside its `MANIFEST`. Installs never received it, so a board kept whatever it was first installed with, or nothing. Updating to an unsigned development build removes the old one rather than leaving a signature over the previous release in place.
 - Fix: **every install and update reported failure at its very last step, after everything had worked.** The last step checks that every file landed as released, and `npm install`, which runs just before it, rewrites `package-lock.json` as a matter of course. A fresh install was told it had not finished and that removing it and starting again was safe; an update was left closed for maintenance. The check now compares the lockfile by what it actually pins, which npm does not change, and names any file that genuinely did not land. If you installed 0.9.7a and saw "the install did not finish" at the verify step, your board was installed correctly.
 - **`update_require_signature` now does what it says.** It was read by nothing. An update now checks the release's signature against the release key your board already has before applying anything: a signature that fails is always refused, and with the setting on, so is an unsigned release (which includes every development build). See "Signatures" in `docs/sysop/UPDATES.md`.
@@ -28,6 +31,12 @@
 ### Networking
 
 - Fix: **a binkp link connecting over WebSocket while your mailer was at its session limit received an empty busy message.** The reason text was never copied into the frame. It now reads "System busy, try later", as it always did over TCP.
+- Fix: **binkp sessions failed straight after logging in when a link presented more than one address and you had a connection for another of them with the same session password.** Grouping those connections into one session, which is what the matching password is for, threw an error instead.
+- Fix: **automatic echolist and filebone scanning failed for a network whose area held no archive to unpack.** It logged that it was still looking for the lists, then threw instead of reporting what it had found.
+
+### Doors
+
+- Fix: **a door using the `canectic.sys` drop file never started.** Writing the drop file failed on the board name, so the door was never launched.
 
 ### Administration
 
@@ -35,6 +44,10 @@
 - **The Update page now counts terminal callers.** It counted people on the web only, so a board with three callers in a door and nobody on the web told you nobody was online.
 
 - **Errors in the web interface are now written to the system log.** Before, a page that failed showed you an error page and recorded nothing, so if a save on an admin page did not take, the logs could not tell you whether it had failed or had never been sent. Each server error is now logged with the page it happened on and where in the code it was raised. Pages that simply do not exist (the steady stream of 404s from scanners probing for WordPress and the like) are deliberately not logged, so they cannot bury the errors that matter.
+
+### Release Archives
+
+- **A release's `FILE_ID.DIZ` now describes the software and nothing else.** It carried the first sentence of each upgrade warning, which is not what a BBS listing is for and not where a sysop reads them. Upgrade notes are in the release notes and the release's metadata.
 
 ## v0.9.7a (2026-09-20)
 
