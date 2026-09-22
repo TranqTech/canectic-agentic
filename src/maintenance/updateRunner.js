@@ -49,6 +49,8 @@ import { runCommandAsync, spawnAsync, nodeCommand, createRuntimeDirs, COMMAND_TI
 import * as maintFlags from './maintenanceFlag.js';
 import { startUpdateStatusServer } from './updateStatusServer.js';
 import { readSysopHashes, clearSysopHashes } from './sysopSessions.js';
+import { forgiveNormalisedLockfile } from '../release/lockfile.js';
+import { verifyTreeSignature, PUBLIC_KEY_FILENAME } from '../release/signing.js';
 
 // Recent log lines kept for the progress page the updater serves while the BBS
 // is stopped. The full log goes wherever `log` sends it.
@@ -161,13 +163,20 @@ async function runUpdate(opts) {
 	var dump = opts.dump || takeDump;
 	var waitDrain = opts.waitForDrain || maintFlags.waitForDrain;
 	var startStatusServer = opts.startStatusServer || startUpdateStatusServer;
+	var verifySignature = opts.verifySignature || verifyTreeSignature;
+	var requireSignature = opts.requireSignature !== undefined
+		? !!opts.requireSignature
+		: appConfig.getBoolean('update_require_signature', false);
 	var statusServer = null;
 
 	// Everything the progress page needs from config, read now: once the
 	// dependencies phase starts, nothing may be loaded that was not already.
 	var progressPage = {
 		enabled:   appConfig.getBoolean('update_progress_page', true),
-		port:      parseInt(appConfig.get('webport', process.env.webport || 8080), 10) || 8080,
+		// The gateway reads webport from the environment only (bin/gateway.js), so
+		// the same order here, or a webport saved in the settings table, which
+		// the gateway ignores, would send the listener to a port nobody uses.
+		port:      parseInt(process.env.webport || appConfig.get('webport', 8080), 10) || 8080,
 		boardName: appConfig.get('boardname', 'Canectic BBS')
 	};
 
@@ -238,6 +247,26 @@ async function runUpdate(opts) {
 
 		if (ins.nodeMin && compareDotted(process.versions.node, ins.nodeMin) < 0) {
 			throw new Error('this release needs Node ' + ins.nodeMin + ' and this is ' + process.versions.node);
+		}
+
+		// The signature over MANIFEST, checked against the key the INSTALLED
+		// board trusts (signing.js). Checked here, in the new release's own
+		// updater, so it holds however the update was launched. A signature
+		// that fails is refused whatever the setting: that is somebody telling
+		// you something is wrong. A missing one is refused only when the sysop
+		// asked for signed releases.
+		var sig = verifySignature({
+			treeRoot:    stagedRoot,
+			keyMaterial: path.join(stagedRoot, 'setup', PUBLIC_KEY_FILENAME),
+			pinFrom:     path.join(target, 'setup', PUBLIC_KEY_FILENAME)
+		});
+		log('preflight: signature ' + sig.state + ': ' + sig.detail);
+		if (sig.state === 'bad') {
+			throw new Error('the release signature does not check out: ' + sig.detail);
+		}
+		if (requireSignature && sig.state !== 'verified') {
+			throw new Error('update_require_signature is on, and this release is ' + sig.state + ': ' + sig.detail +
+				(sig.state === 'unsigned' ? '. Development builds are never signed.' : ''));
 		}
 		log('preflight: ' + staged.checked + ' staged files verified, Node ' + process.versions.node);
 		persist(finishPhase(state, 'preflight', staged.checked + ' files verified'));
@@ -368,10 +397,17 @@ async function runUpdate(opts) {
 
 		// ---- verify ----------------------------------------------------
 		persist(beginPhase(state, 'verify'));
-		var check = verifyApplied({ plan: plan, targetRoot: target });
+		// npm install rewrites package-lock.json (lockfile.js); compare it by
+		// what it pins rather than byte for byte, or every update fails here
+		// after everything has worked.
+		var lockCheck = forgiveNormalisedLockfile(verifyApplied({ plan: plan, targetRoot: target }),
+			{ targetRoot: target, sourceRoot: stagedRoot });
+		if (lockCheck.note) log('verify: ' + lockCheck.note);
+		var check = lockCheck.result;
 		if (!check.ok) {
-			throw new Error((check.missing.length + check.mismatched.length) +
-				' file(s) do not match the release after writing');
+			var bad = check.missing.concat(check.mismatched);
+			throw new Error(bad.length + ' file(s) do not match the release after writing: ' +
+				bad.slice(0, 5).join(', ') + (bad.length > 5 ? ' and ' + (bad.length - 5) + ' more' : ''));
 		}
 		persist(finishPhase(state, 'verify', 'all written files match the release'));
 

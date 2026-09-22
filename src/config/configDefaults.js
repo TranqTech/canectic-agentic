@@ -287,7 +287,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'update_base_cache_keep', defaultValue: '2', type: 'number', category: 'updates',
 	  description: 'How many stable release artifacts to keep cached for rebuilding development deltas. The base of the installed version is never discarded regardless.' },
 	{ key: 'update_require_signature', defaultValue: 'false', type: 'boolean', category: 'updates',
-	  description: 'Refuse a release whose checksums carry no valid signature. No signing key is published yet, so leaving this off is currently the only workable setting.' },
+	  description: 'Refuse an update unless the release is signed by the Canectic release key this board already trusts (its setup/canectic-release.asc). Needs gpg. Development builds are never signed, so turning this on means stable releases only. A release whose signature is present but fails is refused whether this is on or not.' },
 	{ key: 'update_progress_page',   defaultValue: 'true', type: 'boolean', category: 'updates',
 	  description: 'While the BBS is stopped for an update, have the updater answer on the web port itself: the update progress for sysops who were logged in when it was started, the maintenance page for everybody else. It hands the port back before starting the BBS. Turn off only if something else must own the port during an update.' },
 	{ key: 'update_drain_timeout',   defaultValue: '900', type: 'number', category: 'updates',

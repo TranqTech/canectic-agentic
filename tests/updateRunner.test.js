@@ -577,3 +577,86 @@ describe('the progress page while the BBS is stopped', function () {
 		assert.ok(npm !== -1 && npm < migrate, 'each command finishes before the next starts: ' + order.join(' | '));
 	});
 });
+
+describe('the final check and npm rewriting the lockfile', function () {
+	function lockText(version, extraField) {
+		var l = { name: 'canectic-bbs', version: version, lockfileVersion: 3, packages: {
+			'': { name: 'canectic-bbs', version: version },
+			'node_modules/bindings': { version: '1.5.0', integrity: 'sha512-BBB' }
+		} };
+		if (extraField) l.packages['node_modules/bindings'].hasInstallScript = true;
+		return JSON.stringify(l, null, 2) + '\n';
+	}
+
+	it('completes when npm only normalises the lockfile, which is every real update', async function () {
+		var s = scenario({ stagedExtra: { 'package-lock.json': lockText('0.9.8a') } });
+		var state = await run({ instructions: s.instructions, exec: function (command) {
+			if (/npm install/.test(command)) fs.writeFileSync(path.join(s.target, 'package-lock.json'), lockText('0.9.8a', true));
+			return '';
+		} });
+		assert.strictEqual(state.status, 'complete', state.error || JSON.stringify(state.phases));
+	});
+
+	it('still fails, naming the file, when npm pins something different', async function () {
+		var s = scenario({ stagedExtra: { 'package-lock.json': lockText('0.9.8a') } });
+		var state = await run({ instructions: s.instructions, exec: function (command) {
+			if (/npm install/.test(command)) {
+				fs.writeFileSync(path.join(s.target, 'package-lock.json'), lockText('0.9.8a').replace('1.5.0', '9.9.9'));
+			}
+			return '';
+		} });
+		assert.strictEqual(state.status, 'failed');
+		assert.strictEqual(phase(state, 'verify').status, 'failed');
+		assert.ok(/package-lock\.json/.test(state.error), state.error);
+	});
+});
+
+describe('the release signature', function () {
+	var flags = null;
+	before(async function () { flags = await import('../src/maintenance/maintenanceFlag.js'); });
+
+	function sigAs(state, seen) {
+		return function (opts) {
+			if (seen) seen.opts = opts;
+			return { state: state, detail: 'stubbed ' + state };
+		};
+	}
+
+	it('checks the staged tree against the key the installed board trusts', async function () {
+		var s = scenario();
+		var seen = {};
+		await run({ instructions: s.instructions, exec: execStub([]), verifySignature: sigAs('verified', seen) });
+		assert.strictEqual(seen.opts.treeRoot, s.stagedRoot);
+		assert.strictEqual(seen.opts.pinFrom, path.join(s.target, 'setup', 'canectic-release.asc'),
+			'the pin must come from the INSTALLED board, never from the release being checked');
+		assert.strictEqual(seen.opts.keyMaterial, path.join(s.stagedRoot, 'setup', 'canectic-release.asc'));
+	});
+
+	it('refuses a bad signature before touching anything, and reopens the board', async function () {
+		var s = scenario();
+		var ran = [];
+		var state = await run({ instructions: s.instructions, exec: execStub(ran), verifySignature: sigAs('bad') });
+		assert.strictEqual(state.status, 'failed');
+		assert.strictEqual(phase(state, 'preflight').status, 'failed');
+		assert.ok(/signature does not check out/.test(state.error), state.error);
+		assert.strictEqual(ran.length, 0, 'nothing may run: ' + ran.join(' | '));
+		assert.strictEqual(read(s.target, 'src/a.js'), 'OLD');
+		assert.strictEqual(flags.isActive(s.target), false);
+	});
+
+	it('refuses an unsigned release when the sysop requires signatures', async function () {
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([]), verifySignature: sigAs('unsigned'),
+			requireSignature: true });
+		assert.strictEqual(state.status, 'failed');
+		assert.strictEqual(phase(state, 'preflight').status, 'failed');
+		assert.ok(/update_require_signature is on/.test(state.error), state.error);
+		assert.ok(/Development builds are never signed/.test(state.error), 'it must say why a dev build fails this');
+	});
+
+	it('lets an unsigned release through when signatures are not required', async function () {
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([]), verifySignature: sigAs('unsigned') });
+		assert.strictEqual(state.status, 'complete');
+	});
+});
