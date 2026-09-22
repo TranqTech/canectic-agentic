@@ -129,6 +129,11 @@ class MaintenanceWatch extends EventEmitter {
 	}
 
 	_apply(flag) {
+		// A process starting on an open board clears any status file its
+		// predecessor left. The updater stops processes mid-drain, after they
+		// have written one, and reopens the board before the new processes'
+		// first check, so otherwise nobody removes them.
+		if (!this._primed && !flag) flags.clearDrainStatus(this.root, this.processName);
 		this._primed = true;
 		var prev = this._flag;
 		var key = flag ? JSON.stringify(flag) : null;

@@ -132,6 +132,14 @@ describe('MaintenanceWatch', function () {
 		assert.strictEqual(c.deadline.getTime() - new Date(c.flag.since).getTime(), 60000);
 	});
 
+	it('clears a status file its predecessor left when it starts on an open board', async function () {
+		// Seen in the update rehearsal: the old processes wrote drain statuses,
+		// were stopped, and the board reopened before the new ones checked.
+		flags.writeDrainStatus(root, 'gateway', { since: '2026-09-22T04:20:17.629Z', drained: true, pending: {} });
+		await watch.tick();
+		assert.strictEqual(flags.readDrainStatuses(root).length, 0);
+	});
+
 	it('does not keep the process alive', function () {
 		var w = new MaintenanceWatch({ process: 'x', root: root, intervalMs: 50 });
 		w.start();
