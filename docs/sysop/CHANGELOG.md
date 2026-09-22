@@ -4,6 +4,7 @@
 
 ### Updates
 
+- **The Update page now says when the release you are running has been withdrawn**, with the reason and, once there is one, the release that replaces it. The update check has known since withdrawals began and nothing showed it, so a board on a pulled release looked exactly like one that was up to date.
 - **An update now tells you about a one-off repair it left for you.** A few database repairs are too slow to run without asking, so the update reports them and leaves them to you, and until now that report was only in the update's log: an update could say COMPLETE with one still waiting. It is now a warning on the run, shown on the Update page and by `node src/tools/update.js --status`, with the commands to run. The one boards set up before this spring are most likely to see is the MSGID split: `node src/tools/maintenance.js --fix-msgids --dry-run` to see what it would change, then without `--dry-run` to do it.
 - Fix: **an update on a board installed before releases carried a MANIFEST warned that "every changed data file was kept as yours" when none had been.** It now says so only when a data file really was kept, with how many; each one is also named, as before.
 

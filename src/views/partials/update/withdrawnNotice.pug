@@ -1,0 +1,18 @@
+//- The release this board is RUNNING has been withdrawn. The update check has
+//- worked this out since withdrawal existed and nothing showed it; a board on a
+//- pulled release read exactly like one that was current.
+//- Needs: result (a check result, judged against what is running), running.
+if result && result.channels
+  - var gone = null
+  each chan in result.channels
+    if chan && chan.withdrawn && !gone
+      - gone = chan.withdrawn
+  if gone
+    .alert.alert-danger(data-withdrawn=running)
+      strong #{running} has been withdrawn.
+      if gone.reason
+        |  #{gone.reason}.
+      if gone.by
+        |  #{gone.by} replaces it.
+      else
+        |  No replacement is published yet; stay on #{running} until one is.
