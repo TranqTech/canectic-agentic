@@ -141,28 +141,34 @@ curl -fsSL https://canectic.tranqsoft.com/releases/bootstrap.sh | bash -s -- --t
 
 ### Checking the signature
 
-Releases are signed. Import the key once and the bootstrap checks every release
-you ever fetch:
-
-```bash
-curl -fsSLO https://canectic.tranqsoft.com/releases/canectic-release.asc
-gpg --import canectic-release.asc
-```
-
-Compare the fingerprint against the one below before you trust it. This is the
-number that matters: it does not change if the release host ever moves, and it
-is what an installed board pins so that later releases can be checked without
-fetching anything.
+Releases are signed, and the bootstrap checks the signature for you whenever
+`gpg` is installed. It fetches the release key from the release directory and
+accepts a signature only if it was made by the key with this fingerprint, which
+is built into the bootstrap:
 
 ```
 F3F1 6D36 59AF 25FB F947  4C6D B5D8 AB14 3016 761F
 ```
 
-Without the key imported the bootstrap says the release was not signature
-checked and carries on, because a checksum is still a checksum. With it you get
-`signature verified` and the whole publish is accounted for: the signature
-covers the checksum list, the checksum list covers the release metadata, and the
-metadata covers the archive.
+This is the number that matters: it does not change if the release host ever
+moves, and it is what an installed board pins so that later releases can be
+checked without fetching anything. The bootstrap prints it when the check
+passes, so you can compare it with this page.
+
+You get `signature verified (Canectic release key ...)` and the whole publish is
+accounted for: the signature covers the checksum list, the checksum list covers
+the release metadata, and the metadata covers the archive. A signature that does
+not match, or that was made by any other key, stops the install before anything
+is unpacked. Without `gpg` the bootstrap says it could not check the signature
+and carries on, because a checksum is still a checksum.
+
+Importing the key into your own keyring is optional; the bootstrap does not use
+it unless the release directory has no copy of the key:
+
+```bash
+curl -fsSLO https://canectic.tranqsoft.com/releases/canectic-release.asc
+gpg --import canectic-release.asc
+```
 
 A release that arrives down a file echo has no checksum list beside it, only the
 archive, which is normal. The archive carries a signed `MANIFEST` inside it

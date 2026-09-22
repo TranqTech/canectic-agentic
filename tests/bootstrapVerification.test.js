@@ -30,7 +30,7 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,11 +77,12 @@ function swapArtifactAndMetadata(dir) {
 	fs.writeFileSync(path.join(dir, META), JSON.stringify(meta, null, 2) + '\n');
 }
 
-function run(from, out) {
+function run(from, out, env) {
 	fs.mkdirSync(out, { recursive: true });
 	try {
 		var stdout = execFileSync('bash', [BOOTSTRAP, '--from', from, '--version', VERSION,
-			'--download-only', '--target', out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+			'--download-only', '--target', out], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+			env: Object.assign({}, process.env, env || {}) });
 		return { ok: true, output: stdout };
 	} catch (e) {
 		return { ok: false, output: String(e.stdout || '') + String(e.stderr || '') };
@@ -155,5 +156,86 @@ describe('what the bootstrap will hand onward', function () {
 		var r = run(dir, path.join(work, 'out'));
 		assert.ok(!r.ok, 'accepted a tampered archive with no list present');
 		assert.match(r.output, /does not match its published checksum/);
+	});
+});
+
+describe('the bootstrap and the release signature', function () {
+	// It accepted a signature by ANY key in the sysop's keyring. It now fetches
+	// the release key from the release directory into a private gpg home and
+	// requires gpg to say the pinned key made the signature. Throwaway keys
+	// here, with the pin overridden through CANECTIC_RELEASE_KEY_FPR.
+	this.timeout(60000);
+	var work, home, release, other;
+
+	function gpg(args) {
+		var r = spawnSync('gpg', ['--homedir', home, '--batch', '--no-tty', '--pinentry-mode', 'loopback', '--passphrase', '']
+			.concat(args), { encoding: 'utf8', timeout: 30000 });
+		if (r.status !== 0) throw new Error('gpg ' + args.join(' ') + ': ' + r.stderr);
+		return r.stdout;
+	}
+	function newKey(name) {
+		gpg(['--quick-gen-key', name + ' <' + name.toLowerCase() + '@example.invalid>', 'ed25519', 'sign', 'never']);
+		var fpr = gpg(['--with-colons', '--list-keys', name]).split('\n')
+			.filter(function (l) { return l.indexOf('fpr:') === 0; })[0].split(':')[9];
+		return { fpr: fpr, armored: gpg(['--armor', '--export', fpr]) };
+	}
+	function signedPublish(name, signer, served) {
+		var dir = publish(path.join(work, name));
+		gpg(['--local-user', signer.fpr, '--armor', '--detach-sign', '--output', path.join(dir, 'SHA256SUMS.asc'),
+			path.join(dir, 'SHA256SUMS')]);
+		fs.writeFileSync(path.join(dir, 'canectic-release.asc'), (served || signer).armored);
+		return dir;
+	}
+	function pinned() { return { CANECTIC_RELEASE_KEY_FPR: release.fpr }; }
+
+	before(function () {
+		if (spawnSync('gpg', ['--version'], { stdio: 'ignore' }).status !== 0) return this.skip();
+		work = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-bootsig-'));
+		home = path.join(work, 'gnupg');
+		fs.mkdirSync(home, { mode: 0o700 });
+		release = newKey('BootRelease');
+		other = newKey('BootOther');
+	});
+	after(function () {
+		if (!work) return;
+		spawnSync('gpgconf', ['--homedir', home, '--kill', 'all'], { stdio: 'ignore' });
+		fs.rmSync(work, { recursive: true, force: true });
+	});
+
+	it('verifies a checksum list signed by the release key', function () {
+		var r = run(signedPublish('good', release), path.join(work, 'out-good'), pinned());
+		assert.ok(r.ok, r.output);
+		assert.match(r.output, /signature verified \(Canectic release key/);
+	});
+
+	it('refuses a checksum list signed by another key, even with the release key beside it', function () {
+		// gpg calls this a missing key, not a bad signature; treating it as
+		// "cannot check" is what let a re-signed list through.
+		var r = run(signedPublish('other-signer', other, release), path.join(work, 'out-os'), pinned());
+		assert.ok(!r.ok, 'accepted a list signed by the wrong key:\n' + r.output);
+		assert.match(r.output, /not signed by the Canectic release key/);
+	});
+
+	it('refuses a release directory that serves a different key', function () {
+		var r = run(signedPublish('swapped-key', other), path.join(work, 'out-sk'), pinned());
+		assert.ok(!r.ok, r.output);
+		assert.match(r.output, /signing key is not the Canectic release key/);
+	});
+
+	it('refuses a checksum list changed after it was signed', function () {
+		var dir = signedPublish('tampered', release);
+		fs.appendFileSync(path.join(dir, 'SHA256SUMS'), '0000  extra.zip\n');
+		var r = run(dir, path.join(work, 'out-t'), pinned());
+		assert.ok(!r.ok, r.output);
+		assert.match(r.output, /does not match its own signature/);
+	});
+
+	it('pins the fingerprint of the key this repository ships', function () {
+		var src = fs.readFileSync(BOOTSTRAP, 'utf8');
+		var pin = (src.match(/^RELEASE_KEY_FPR="([0-9A-F]{40})"/m) || [])[1];
+		var shipped = spawnSync('gpg', ['--homedir', home, '--with-colons', '--show-keys',
+			path.join(ROOT, 'setup', 'canectic-release.asc')], { encoding: 'utf8' }).stdout.split('\n')
+			.filter(function (l) { return l.indexOf('fpr:') === 0; })[0].split(':')[9];
+		assert.strictEqual(pin, shipped, 'bootstrap.sh would refuse every real release');
 	});
 });

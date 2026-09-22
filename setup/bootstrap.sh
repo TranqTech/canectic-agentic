@@ -204,17 +204,74 @@ check_against_sums() {
   Nothing has been unpacked."
 }
 
+# The Canectic release key's PRIMARY fingerprint, the number docs/sysop/INSTALL.md
+# tells you to compare. A signature counts only when gpg says this key made it.
+# Checking "some key in your keyring signed it" accepted a signature by ANY key
+# you happened to hold. The override exists to test this script itself.
+RELEASE_KEY_FPR="F3F16D3659AF25FBF9474C6DB5D8AB143016761F"
+if [[ -n "${CANECTIC_RELEASE_KEY_FPR:-}" ]]; then
+    RELEASE_KEY_FPR="$(printf '%s' "$CANECTIC_RELEASE_KEY_FPR" | tr -d ' ' | tr 'abcdef' 'ABCDEF')"
+    warn "using the release key fingerprint from CANECTIC_RELEASE_KEY_FPR, not the one built into this script"
+fi
+
+spaced_fpr() { printf '%s' "$1" | sed 's/.\{4\}/& /g; s/ $//'; }
+
+# Check SHA256SUMS.asc against the pinned key. Sets SIGNED, warns when it cannot
+# check at all, and refuses when a signature is there and is not the release
+# key's. The key comes from the release directory into a private gpg home, so
+# nothing depends on, or changes, your own keyring.
+verify_sums_signature() {
+    local asc="$WORK/SHA256SUMS.asc" home="$WORK/gnupg" status primary held=false
+    mkdir -m 700 "$home"
+    if fetch_optional "canectic-release.asc" "$WORK/canectic-release.asc" \
+        && gpg --homedir "$home" --batch --import "$WORK/canectic-release.asc" >/dev/null 2>&1; then
+        local served
+        served="$(gpg --homedir "$home" --batch --with-colons --list-keys 2>/dev/null \
+            | awk -F: '$1=="pub"{want=1; next} $1=="fpr" && want{print $10; exit}')"
+        if [[ "$served" != "$RELEASE_KEY_FPR" ]]; then
+            gpgconf --homedir "$home" --kill all >/dev/null 2>&1 || true
+            die "the release directory's signing key is not the Canectic release key.
+  expected $(spaced_fpr "$RELEASE_KEY_FPR")
+  got      $(spaced_fpr "${served:-nothing readable}")
+  Nothing has been unpacked."
+        fi
+        held=true
+        status="$(gpg --homedir "$home" --batch --status-fd 1 --verify "$asc" "$SUMS" 2>/dev/null || true)"
+    else
+        # No key in the release directory: fall back to your own keyring.
+        status="$(gpg --batch --status-fd 1 --verify "$asc" "$SUMS" 2>/dev/null || true)"
+    fi
+    gpgconf --homedir "$home" --kill all >/dev/null 2>&1 || true
+
+    if grep -q '^\[GNUPG:\] BADSIG ' <<<"$status"; then
+        die "the published checksum list does not match its own signature. Something is wrong with this publish; nothing has been unpacked."
+    fi
+    if grep -qE '^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG) ' <<<"$status"; then
+        die "the published checksum list is signed with a key that has expired or been revoked. Nothing has been unpacked."
+    fi
+    primary="$(awk '/^\[GNUPG:\] VALIDSIG /{print $NF; exit}' <<<"$status")"
+    if [[ -n "$primary" && "$primary" != "$RELEASE_KEY_FPR" ]]; then
+        die "the published checksum list is signed by a key that is not the Canectic release key ($(spaced_fpr "$primary")). Nothing has been unpacked."
+    fi
+    if [[ -z "$primary" ]]; then
+        if $held; then
+            # We hold the release key and the signature is still not its: gpg
+            # reports that as a missing key, not a bad signature, and treating
+            # it as "cannot check" let a re-signed checksum list through.
+            die "the published checksum list is not signed by the Canectic release key. Nothing has been unpacked."
+        fi
+        warn "the published checksums carry a signature this system could not check (no copy of the release key)"
+        warn "the checksums are still checked; import canectic-release.asc to check the signature too"
+        return 0
+    fi
+    SIGNED=true
+    ok "signature verified (Canectic release key $(spaced_fpr "$RELEASE_KEY_FPR"))"
+}
+
 if fetch_optional "SHA256SUMS" "$SUMS"; then
     HAVE_SUMS=true
     if command -v gpg >/dev/null 2>&1 && fetch_optional "SHA256SUMS.asc" "$WORK/SHA256SUMS.asc"; then
-        if gpg --verify "$WORK/SHA256SUMS.asc" "$SUMS" >/dev/null 2>&1; then
-            SIGNED=true
-            ok "signature verified"
-        else
-            warn "the published checksums carry a signature this system cannot verify"
-            warn "that means either the signing key is not in your keyring, or something is wrong"
-            warn "import it with: gpg --import canectic-release.asc"
-        fi
+        verify_sums_signature
     fi
 else
     # A file echo delivers an archive and nothing else, so this is the normal
