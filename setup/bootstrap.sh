@@ -167,8 +167,38 @@ else
                     (i.releases || []).filter(function (x) { return x && x.version === v && x.superseded_by; })[0];
                 if (!w) return;
                 var why = w.withdrawn_reason || w.superseded_reason;
+                // The named replacement may have been withdrawn since, so the
+                // chain is followed to something listed, and the newest listed
+                // release is named once it is: the same rule as replacementFor
+                // in src/release/releaseIndex.js, which this cannot import.
+                var num = function (x) {
+                    var m = /^(\d+)\.(\d+)\.(\d+)([a-z]?)(?:\.(\d{8}))?(?:\.(\d+))?$/.exec(x || "");
+                    return m ? [+m[1], +m[2], +m[3], m[4] ? m[4].charCodeAt(0) : 999, +(m[5] || 0), +(m[6] || 0)] : null;
+                };
+                var newer = function (a, b) {
+                    var x = num(a), y = num(b);
+                    if (!x || !y) return false;
+                    for (var k = 0; k < x.length; k++) if (x[k] !== y[k]) return x[k] > y[k];
+                    return false;
+                };
+                var listed = (i.releases || []).filter(function (x) { return x && !x.superseded_by; });
+                var newest = listed.reduce(function (a, x) { return !a || newer(x.version, a) ? x.version : a; }, null);
+                var gone = function (n) {
+                    return (i.withdrawn || []).filter(function (x) { return x && x.version === n; })[0] ||
+                        (i.releases || []).filter(function (x) { return x && x.version === n && x.superseded_by; })[0];
+                };
+                var by = w.superseded_by || null, seen = {};
+                seen[v] = true;
+                while (by) {
+                    if (listed.some(function (x) { return x.version === by; })) { by = newest; break; }
+                    var g = gone(by);
+                    if (!g) break;
+                    seen[by] = true;
+                    if (!g.superseded_by || seen[g.superseded_by]) { by = newer(newest, by) ? newest : null; break; }
+                    by = g.superseded_by;
+                }
                 process.stdout.write(v + " has been withdrawn" + (why ? " (" + why + ")" : "") +
-                    (w.superseded_by ? "; install " + w.superseded_by + " instead" : ""));
+                    (by ? "; install " + by + " instead" : ""));
             });
         ')"
         [[ -n "$WITHDRAWN" ]] && die "$WITHDRAWN"

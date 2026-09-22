@@ -23,10 +23,11 @@
 import assert from 'assert';
 import {
 	compareDotted, blockersFor, evaluateChannel, channelsToCheck, evaluate,
-	shouldNotify, notificationFor, reconcileWithRunning,
+	shouldNotify, notificationFor, reconcileWithRunning, runningWithdrawn,
 	VERDICT_CURRENT, VERDICT_AVAILABLE, VERDICT_BLOCKED, VERDICT_UNKNOWN,
 	BLOCKER_MIGRATION, BLOCKER_TOO_OLD, BLOCKER_NODE, BLOCKER_NOT_NEWER, BLOCKER_WITHDRAWN
 } from '../src/release/updateVerdict.js';
+import { withdrawRelease } from '../src/release/releaseIndex.js';
 
 function release(version, extra) {
 	return Object.assign({
@@ -310,6 +311,60 @@ describe('shouldNotify', function () {
 		var current = evaluate({ current: '0.9.7a', channel: 'stable', indexes: { stable: index('stable', [release('0.9.7a')]) } });
 		assert.strictEqual(shouldNotify(current, null), false);
 		assert.strictEqual(shouldNotify(null, null), false);
+	});
+});
+
+// A board running a withdrawn release. With nothing newer listed its verdict
+// is `current`, which on its own produced no notification at all.
+describe('notifying a board that runs a withdrawn release', function () {
+
+	function pulled(current, releases, reason, by) {
+		var idx = withdrawRelease(index('stable', releases.map(function (v) { return release(v); })),
+			current, { reason: reason, by: by });
+		return evaluate({ current: current, channel: 'stable', indexes: { stable: idx }, appliedMigrations: [] });
+	}
+
+	it('notifies even though nothing newer is listed', function () {
+		var r = pulled('0.9.9a', ['0.9.9a', '0.9.8a'], 'updater crashes');
+		assert.strictEqual(r.best, null);
+		assert.ok(runningWithdrawn(r));
+		assert.strictEqual(shouldNotify(r, null), true);
+		var n = notificationFor(r);
+		assert.strictEqual(n.severity, 'warning');
+		assert.strictEqual(n.title, 'Canectic 0.9.9a has been withdrawn');
+		assert.ok(/updater crashes/.test(n.body), n.body);
+		assert.ok(/No replacement is published yet; stay on 0\.9\.9a/.test(n.body), n.body);
+	});
+
+	it('says so once, not every morning', function () {
+		var r = pulled('0.9.9a', ['0.9.9a', '0.9.8a'], 'x');
+		assert.strictEqual(shouldNotify(r, { version: null, verdict: 'current', current: '0.9.9a', withdrawn: true }), false);
+	});
+
+	it('says so even when the last notification was about the same update', function () {
+		// Offered 0.9.9a while on 0.9.8a, then 0.9.8a is pulled: the offer has
+		// not changed, the board's standing has.
+		var r = pulled('0.9.8a', ['0.9.9a', '0.9.8a'], 'x', '0.9.9a');
+		assert.strictEqual(shouldNotify(r, { version: '0.9.9a', verdict: VERDICT_AVAILABLE, current: '0.9.8a', withdrawn: false }), true);
+		var n = notificationFor(r);
+		assert.strictEqual(n.title, 'Canectic 0.9.8a has been withdrawn');
+		assert.ok(/0\.9\.9a is available on the stable channel and this system can take it/.test(n.body), n.body);
+	});
+
+	it('says so again for a different running release', function () {
+		var r = pulled('0.9.9a', ['0.9.9a', '0.9.8a'], 'x');
+		assert.strictEqual(shouldNotify(r, { version: null, verdict: 'current', current: '0.9.8a', withdrawn: true }), true);
+	});
+
+	it('announces the replacement when it is published, by the ordinary rule', function () {
+		var r = pulled('0.9.9a', ['0.9.10a', '0.9.9a'], 'x', '0.9.10a');
+		assert.strictEqual(shouldNotify(r, { version: null, verdict: 'current', current: '0.9.9a', withdrawn: true }), true);
+		assert.strictEqual(shouldNotify(r, { version: '0.9.10a', verdict: VERDICT_AVAILABLE, current: '0.9.9a', withdrawn: true }), false);
+	});
+
+	it('says nothing about withdrawal on a release that was not withdrawn', function () {
+		var r = evaluate({ current: '0.9.7a', channel: 'stable', indexes: { stable: index('stable', [release('0.9.7a')]) } });
+		assert.strictEqual(runningWithdrawn(r), null);
 	});
 });
 

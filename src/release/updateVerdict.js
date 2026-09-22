@@ -28,6 +28,7 @@
 
 import { compareVersions, isNewer, parseVersion, channelOf } from '../utils/version.js';
 import { checkMoveSafety } from './pipelineCheck.js';
+import { findWithdrawn, replacementFor } from './releaseIndex.js';
 
 var VERDICT_CURRENT   = 'current';
 var VERDICT_AVAILABLE = 'available';
@@ -171,19 +172,13 @@ function evaluateChannel(opts) {
 	// the choice above, and worth surfacing even when nothing newer is
 	// available: it is the difference between "you are current" and "you are
 	// on a release that was pulled".
+	// findWithdrawn reads the first format too, which marked a withdrawal
+	// inside `releases`. `by` is where the chain of replacements ends, not the
+	// first link, which may itself have been withdrawn since.
 	var withdrawn = null;
-	for (var l of (index && index.withdrawn) || []) {
-		if (l && l.version === opts.current) {
-			withdrawn = { by: l.superseded_by || null, reason: l.withdrawn_reason || null };
-			break;
-		}
-	}
-	// The first format marked a withdrawal inside `releases`.
-	for (var w of releases) {
-		if (!withdrawn && w.version === opts.current && w.superseded_by) {
-			withdrawn = { by: w.superseded_by, reason: w.superseded_reason || null };
-			break;
-		}
+	var gone = (index && opts.current && parseVersion(opts.current)) ? findWithdrawn(index, opts.current) : null;
+	if (gone) {
+		withdrawn = { by: replacementFor(index, opts.current), reason: gone.withdrawn_reason || null };
 	}
 
 	if (!best || !isNewer(best.version, opts.current)) {
@@ -340,6 +335,20 @@ function reconcileWithRunning(result, opts) {
 }
 
 /**
+ * Whether the release this result was checked under has been withdrawn, as
+ * { by, reason }, or null. Every channel reports it, so the first one that
+ * does is the answer.
+ */
+function runningWithdrawn(result) {
+	if (!result || !result.channels) return null;
+	for (var name of Object.keys(result.channels)) {
+		var c = result.channels[name];
+		if (c && c.withdrawn) return c.withdrawn;
+	}
+	return null;
+}
+
+/**
  * Should this result produce a notification?
  *
  * A daily job that says the same thing every morning is a job a sysop turns
@@ -347,11 +356,26 @@ function reconcileWithRunning(result, opts) {
  * release that was blocked and is now reachable (they ran the migration, they
  * upgraded Node) is news even though the version has not moved.
  *
+ * Running a withdrawn release is news in its own right, and more urgent than
+ * any update: the verdict alone says `current` when nothing newer is listed
+ * yet, so without this a board on a pulled release heard nothing unless its
+ * sysop opened the Update page. Told once per running version, so the daily
+ * check does not repeat it; a replacement appearing later is still news by
+ * the ordinary rule, since it arrives as an available version.
+ *
  * @param {object} result   from evaluate()
- * @param {object} [last]   { version, verdict } from the last notification sent
+ * @param {object} [last]   { version, verdict, current, withdrawn } from the
+ *                          last notification sent; `withdrawn` true when that
+ *                          notification said the running release was pulled
  */
 function shouldNotify(result, last) {
-	if (!result || !result.best) return false;
+	if (!result) return false;
+	if (runningWithdrawn(result) &&
+		!(last && last.withdrawn && last.current && result.current &&
+			compareVersions(last.current, result.current) === 0)) {
+		return true;
+	}
+	if (!result.best) return false;
 	if (result.best.verdict !== VERDICT_AVAILABLE && result.best.verdict !== VERDICT_BLOCKED) return false;
 	if (!last || !last.version) return true;
 	return !(compareVersions(last.version, result.best.available) === 0 && last.verdict === result.best.verdict);
@@ -359,8 +383,31 @@ function shouldNotify(result, last) {
 
 /** The notification a result warrants. Null when there is nothing to say. */
 function notificationFor(result) {
-	if (!result || !result.best) return null;
+	if (!result) return null;
 	var b = result.best;
+
+	var gone = runningWithdrawn(result);
+	if (gone) {
+		var body = result.current + ', which this system is running, has been withdrawn' +
+			(gone.reason ? ': ' + gone.reason : '') + '. ';
+		if (b && b.verdict === VERDICT_AVAILABLE) {
+			body += b.available + ' is available on the ' + b.channel + ' channel and this system can take it.';
+		} else if (b && b.verdict === VERDICT_BLOCKED) {
+			body += b.available + ' is available but cannot be applied yet: ' +
+				b.blockers.map(function (x) { return x.detail; }).join('; ') + '.';
+		} else if (gone.by) {
+			body += gone.by + ' replaces it.';
+		} else {
+			body += 'No replacement is published yet; stay on ' + result.current + ' until one is.';
+		}
+		return {
+			severity: 'warning',
+			title: 'Canectic ' + result.current + ' has been withdrawn',
+			body: body
+		};
+	}
+
+	if (!b) return null;
 
 	if (b.verdict === VERDICT_AVAILABLE) {
 		return {
@@ -394,6 +441,7 @@ export {
 	BLOCKER_NOT_NEWER,
 	BLOCKER_WITHDRAWN,
 	reconcileWithRunning,
+	runningWithdrawn,
 	compareDotted,
 	blockersFor,
 	evaluateChannel,

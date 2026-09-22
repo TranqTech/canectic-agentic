@@ -146,6 +146,50 @@ function findWithdrawn(index, version) {
 }
 
 /**
+ * What a board on a withdrawn release should move to, or null when nothing
+ * has been named.
+ *
+ * `superseded_by` is written once, when the replacement is named, and is never
+ * revisited when that replacement is withdrawn in turn. 0.9.7a names 0.9.8a,
+ * which was pulled two days later, so reading the field as it stands tells a
+ * board to install a release it will be refused. The chain is followed through
+ * the withdrawn list until it reaches something listed, and the answer is then
+ * the newest listed release: one that names a replacement has had newer fixes
+ * since, and sending a board to an older one would only queue a second update.
+ *
+ * A chain that dead-ends on a withdrawn release with no replacement of its own
+ * falls to the newest listed release newer than it, since the maintainer did
+ * name a way out and that way out is what became of it. A release that names
+ * nothing gets null: no replacement has been declared, and the notice says so.
+ * A name this index does not hold (a development build replaced by a stable)
+ * is returned as named, because the other channel's index is not here to
+ * follow. Pure.
+ *
+ * @returns {string|null} a version
+ */
+function replacementFor(index, version) {
+	var idx = normaliseIndex(index);
+	var gone = findWithdrawn(idx, version);
+	if (!gone || !gone.superseded_by) return null;
+
+	var named = gone.superseded_by;
+	var seen = new Set([version]);
+	for (;;) {
+		if (findRelease(idx, named)) {
+			return newestRelease(idx).version;
+		}
+		var next = findWithdrawn(idx, named);
+		if (!next) return named;
+		seen.add(named);
+		if (!next.superseded_by || seen.has(next.superseded_by)) {
+			var after = newestNewerThan(idx, named);
+			return after ? after.version : null;
+		}
+		named = next.superseded_by;
+	}
+}
+
+/**
  * Add or replace a release, keeping the list newest first.
  *
  * Replacing rather than appending on a repeat version matters when a release is
@@ -235,6 +279,7 @@ export {
 	normaliseIndex,
 	withdrawRelease,
 	findWithdrawn,
+	replacementFor,
 	INDEX_VERSION,
 	indexName,
 	emptyIndex,

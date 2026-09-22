@@ -179,8 +179,10 @@ not install it, including boards running releases from before withdrawal
 existed. Its files stay published, and so do its release notes.
 
 If the release you are **running** has been withdrawn, `/admin/update` says so at
-the top, with the reason and, once there is one, the release that replaces it.
-Until a replacement is published the advice is to stay where you are: the
+the top, with the reason and, once there is one, the release that replaces it,
+and the update check sends a notification saying the same (see below). When
+the named replacement has itself been withdrawn since, you are pointed at the
+newest release still listed rather than at one you would be refused. Until a replacement is published the advice is to stay where you are: the
 withdrawn release is only as broken as the reason says, and moving back to an
 older one is not something the updater does.
 
@@ -196,6 +198,10 @@ happens when the available version changes, or when a release that was blocked
 becomes reachable because you ran the migration or upgraded Node. That second
 case is the one worth waiting for, which is why the version alone is not the
 whole test.
+
+Running a withdrawn release gets its own notification, sent even when nothing
+newer is listed yet, and once for each release you run. When the replacement
+is published later, that arrives as an ordinary "is available" notification.
 
 ---
 

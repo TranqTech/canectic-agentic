@@ -29,7 +29,7 @@ import {
 } from '../release/manifest.js';
 import { parseMetadata, serialiseMetadata, artifactName, metadataName } from '../release/metadata.js';
 import { isDevelopment } from '../utils/version.js';
-import { parseIndex, findRelease, findWithdrawn } from '../release/releaseIndex.js';
+import { parseIndex, findRelease, findWithdrawn, replacementFor } from '../release/releaseIndex.js';
 import { indexName } from '../release/releaseIndex.js';
 import { cachedBase, storeBase } from './baseCache.js';
 
@@ -169,9 +169,10 @@ async function resolveRelease(source, channel, version) {
 		if (!found) {
 			var gone = findWithdrawn(index, version);
 			if (gone) {
+				var by = replacementFor(index, version);
 				throw new Error(version + ' has been withdrawn' +
 					(gone.withdrawn_reason ? ' (' + gone.withdrawn_reason + ')' : '') +
-					(gone.superseded_by ? '; ' + gone.superseded_by + ' replaces it' : ''));
+					(by ? '; ' + by + ' replaces it' : ''));
 			}
 			throw new Error(version + ' is not published on the ' + channel + ' channel');
 		}

@@ -17,6 +17,7 @@
 
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
+import { runningWithdrawn } from '../release/updateVerdict.js';
 
 var SOURCE_SCHEDULE = 'schedule';   // the daily job
 var SOURCE_MANUAL   = 'manual';     // a sysop pressed Check now
@@ -99,18 +100,33 @@ async function getRecent(limit) {
  *
  * The dedupe key is version AND verdict, so this returns both. A release that
  * was blocked and is now reachable is news even though the version has not
- * moved, and keying on version alone would swallow that.
+ * moved, and keying on version alone would swallow that. It also returns the
+ * version the board was running and whether that notification said it had
+ * been withdrawn, read back out of the stored result rather than a column of
+ * its own, since the result already records it.
  */
 async function lastNotified() {
 	try {
 		var rows = await postgres.query(
-			'SELECT available_version, verdict FROM update_checks ' +
+			'SELECT available_version, verdict, current_version, result FROM update_checks ' +
 			'WHERE notified = true ORDER BY checked_at DESC, id DESC LIMIT 1', []);
 		if (!rows || !rows.length) return null;
-		return { version: rows[0].available_version, verdict: rows[0].verdict };
+		return {
+			version: rows[0].available_version,
+			verdict: rows[0].verdict,
+			current: rows[0].current_version,
+			withdrawn: runningWithdrawn(parseResult(rows[0].result)) !== null
+		};
 	} catch (_) {
 		return null;
 	}
+}
+
+/** The stored result, whether the driver handed back JSON text or an object. */
+function parseResult(v) {
+	if (!v) return null;
+	if (typeof v === 'object') return v;
+	try { return JSON.parse(v); } catch (_) { return null; }
 }
 
 async function purgeOld(days) {

@@ -17,7 +17,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { evaluateChannel, VERDICT_CURRENT, VERDICT_AVAILABLE } from '../src/release/updateVerdict.js';
 import { resolveRelease, dirSource } from '../src/maintenance/updateStaging.js';
-import { withdrawRelease } from '../src/release/releaseIndex.js';
+import { withdrawRelease, replacementFor } from '../src/release/releaseIndex.js';
 import { publishedVersions } from '../scripts/publish.mjs';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,6 +57,72 @@ describe('the update check and a withdrawn release', function () {
 	});
 });
 
+// The 0.9.7a case as published: withdrawn in favour of 0.9.8a, which was then
+// withdrawn in favour of 0.9.9a. Reading 0.9.7a's own field sends a board to a
+// release it will be refused.
+function chained() {
+	var idx = { channel: 'stable', releases: [
+		{ version: '0.9.9a', migrations: [] }, { version: '0.9.8a', migrations: [] },
+		{ version: '0.9.7a', migrations: [] }, { version: '0.9.6a', migrations: [] }
+	] };
+	idx = withdrawRelease(idx, '0.9.7a', { reason: 'updater freezes', by: '0.9.8a' });
+	return withdrawRelease(idx, '0.9.8a', { reason: 'updater crashes', by: '0.9.9a' });
+}
+
+describe('the replacement for a withdrawn release', function () {
+
+	it('follows a replacement that was itself withdrawn to the one that is listed', function () {
+		assert.strictEqual(replacementFor(chained(), '0.9.7a'), '0.9.9a');
+		assert.strictEqual(replacementFor(chained(), '0.9.8a'), '0.9.9a');
+	});
+
+	it('names the newest listed release, not an older one that was named first', function () {
+		var idx = chained();
+		idx.releases.unshift({ version: '0.9.10a', migrations: [] });
+		assert.strictEqual(replacementFor(idx, '0.9.7a'), '0.9.10a');
+	});
+
+	it('finds the way out when the chain ends on a withdrawal with no replacement', function () {
+		var idx = { channel: 'stable', releases: [
+			{ version: '0.9.10a' }, { version: '0.9.8a' }, { version: '0.9.7a' }, { version: '0.9.6a' }] };
+		idx = withdrawRelease(idx, '0.9.7a', { reason: 'x', by: '0.9.8a' });
+		idx = withdrawRelease(idx, '0.9.8a', { reason: 'y' });
+		assert.strictEqual(replacementFor(idx, '0.9.7a'), '0.9.10a');
+		idx.releases = idx.releases.filter(function (r) { return r.version !== '0.9.10a'; });
+		assert.strictEqual(replacementFor(idx, '0.9.7a'), null, 'nothing newer than the dead end is listed');
+	});
+
+	it('names nothing for a release withdrawn with no replacement', function () {
+		assert.strictEqual(replacementFor(withdrawRelease(index(), '0.9.8a', { reason: 'x' }), '0.9.8a'), null);
+		assert.strictEqual(replacementFor(index(), '0.9.8a'), null, 'not withdrawn at all');
+	});
+
+	it('does not loop on a cycle', function () {
+		var idx = { channel: 'stable', releases: [{ version: '0.9.9a' }, { version: '0.9.8a' }, { version: '0.9.7a' }] };
+		idx = withdrawRelease(idx, '0.9.8a', { reason: 'x', by: '0.9.9a' });
+		idx = withdrawRelease(idx, '0.9.9a', { reason: 'y', by: '0.9.8a' });
+		assert.strictEqual(replacementFor(idx, '0.9.8a'), null);
+	});
+
+	it('returns a name this index does not hold as it stands', function () {
+		var idx = withdrawRelease({ channel: 'development', releases: [{ version: '0.9.9a.20260922' }] },
+			'0.9.9a.20260922', { reason: 'x', by: '0.9.9b' });
+		assert.strictEqual(replacementFor(idx, '0.9.9a.20260922'), '0.9.9b');
+	});
+
+	it('is what the update check tells a board running one', function () {
+		var r = evaluateChannel({ index: chained(), channel: 'stable', current: '0.9.7a', appliedMigrations: [] });
+		assert.deepStrictEqual(r.withdrawn, { by: '0.9.9a', reason: 'updater freezes' });
+	});
+
+	it('reads the first format, marked in place', function () {
+		var idx = { channel: 'stable', releases: [
+			{ version: '0.9.9a' }, { version: '0.9.8a', superseded_by: '0.9.9a', superseded_reason: 'old style' }] };
+		var r = evaluateChannel({ index: idx, channel: 'stable', current: '0.9.8a', appliedMigrations: [] });
+		assert.deepStrictEqual(r.withdrawn, { by: '0.9.9a', reason: 'old style' });
+	});
+});
+
 describe('asking for a withdrawn release by name', function () {
 	var dir;
 	beforeEach(function () { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zz-withdrawn-')); });
@@ -67,6 +133,12 @@ describe('asking for a withdrawn release by name', function () {
 			JSON.stringify(withdrawRelease(index(), '0.9.8a', { reason: 'updater crashes', by: '0.9.9a' })));
 		await assert.rejects(resolveRelease(dirSource(dir), 'stable', '0.9.8a'),
 			/0\.9\.8a has been withdrawn \(updater crashes\); 0\.9\.9a replaces it/);
+	});
+
+	it('names the release at the end of the chain, not a withdrawn one', async function () {
+		fs.writeFileSync(path.join(dir, 'index-stable.json'), JSON.stringify(chained()));
+		await assert.rejects(resolveRelease(dirSource(dir), 'stable', '0.9.7a'),
+			/0\.9\.7a has been withdrawn \(updater freezes\); 0\.9\.9a replaces it/);
 	});
 
 	it('takes the newest listed release when none is named', async function () {
@@ -126,6 +198,25 @@ describe('the bootstrap and a withdrawn release', function () {
 		var r = run(['--version', '9.9.9a']);
 		assert.strictEqual(r.ok, false, r.output);
 		assert.ok(/9\.9\.9a has been withdrawn \(updater crashes\)/.test(r.output), r.output);
+	});
+
+	it('names the release at the end of the chain, not a withdrawn one', function () {
+		var idx = withdrawRelease({ channel: 'stable', releases: [
+			{ version: '9.9.10a' }, { version: '9.9.9a' }, { version: '9.9.8a' }] }, '9.9.8a', { reason: 'a', by: '9.9.9a' });
+		idx = withdrawRelease(idx, '9.9.9a', { reason: 'b', by: '9.9.10a' });
+		publish(['9.9.8a', '9.9.9a', '9.9.10a'], idx);
+		var r = run(['--version', '9.9.8a']);
+		assert.strictEqual(r.ok, false, r.output);
+		assert.ok(/9\.9\.8a has been withdrawn \(a\); install 9\.9\.10a instead/.test(r.output), r.output);
+	});
+
+	it('names the newest listed release when the chain ends on a withdrawal with nothing after it', function () {
+		var idx = withdrawRelease({ channel: 'stable', releases: [
+			{ version: '9.9.10a' }, { version: '9.9.9a' }, { version: '9.9.8a' }] }, '9.9.8a', { reason: 'a', by: '9.9.9a' });
+		idx = withdrawRelease(idx, '9.9.9a', { reason: 'b' });
+		publish(['9.9.8a', '9.9.9a', '9.9.10a'], idx);
+		var r = run(['--version', '9.9.8a']);
+		assert.ok(/install 9\.9\.10a instead/.test(r.output), r.output);
 	});
 
 	it('skips a release still marked withdrawn in place, the first format', function () {

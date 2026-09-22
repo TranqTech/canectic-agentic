@@ -33,6 +33,17 @@ describe('the Update page on a withdrawn release', function () {
 		assert.ok(/0\.9\.9a replaces it/.test(html), html);
 	});
 
+	it('names where the chain of replacements ends, not a replacement that was pulled too', function () {
+		var idx = withdrawRelease({ channel: 'stable', releases: [
+			{ version: '0.9.9a', migrations: [] }, { version: '0.9.8a', migrations: [] }, { version: '0.9.7a', migrations: [] }
+		] }, '0.9.7a', { reason: 'updater freezes', by: '0.9.8a' });
+		idx = withdrawRelease(idx, '0.9.8a', { reason: 'updater crashes', by: '0.9.9a' });
+		var result = evaluate({ current: '0.9.7a', channel: 'stable', indexes: { stable: idx }, appliedMigrations: [] });
+		var html = render({ result: result, running: '0.9.7a' });
+		assert.ok(/0\.9\.9a replaces it/.test(html), html);
+		assert.ok(!/0\.9\.8a/.test(html), html);
+	});
+
 	it('says to stay put when nothing replaces it yet', function () {
 		var html = render({ result: checked('0.9.8a', { reason: 'broken' }), running: '0.9.8a' });
 		assert.ok(/No replacement is published yet/.test(html), html);
