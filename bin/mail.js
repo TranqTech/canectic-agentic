@@ -15,6 +15,10 @@
  *   - Publishes PM_READ_CHANGED events (sync read status to gateway)
  *   - Subscribes to CONFIG_CHANGED events (reload appConfig)
  *
+ * With no mail_domain (or every mail port 0) it waits rather than exiting, so
+ * pm2 does not restart it in a loop, and starts its servers when a CONFIG_CHANGED
+ * reload makes mail possible.
+ *
  * Usage:
  *   node bin/mail.js
  *
@@ -34,6 +38,8 @@ import { SmtpServer } from "../src/servers/smtpServer.js";
 import appConfig from "../src/config/appConfig.js";
 import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
 import { isActive as isMaintenanceActive } from "../src/maintenance/maintenanceFlag.js";
+import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
+import { mailDisabledReason } from "../src/servers/mailStartup.js";
 
 dotenv.config();
 alogger.setProcessName('mail');
@@ -42,6 +48,9 @@ var systemvermsg = systeminfo.versionMsg();
 var imapServer;
 var smtpServer;
 var inboundSmtpServer;
+var configSubscriber;
+var serversStarted = false;
+var serversStarting = false;
 
 // ---------------------------------------------------------------------------
 // Safety catches
@@ -60,6 +69,7 @@ async function shutdown() {
 	if (imapServer) imapServer.stop();
 	if (smtpServer) smtpServer.stop();
 	if (inboundSmtpServer) inboundSmtpServer.stop();
+	if (configSubscriber) configSubscriber.shutdown();
 	alogger.shutdownLogBus();
 	pgpool.end();
 	redis.shutdown();
@@ -94,11 +104,51 @@ async function main() {
 	await appConfig.load();
 	alogger.writeAlog(1, systemvermsg + "\n  Mail Process Startup", "yellowbright", true);
 
-	var domain = appConfig.get('mail_domain', '');
-	if (!domain) {
-		alogger.writeAlog(1, "[Mail] Disabled — mail_domain not configured", "yellow");
-		process.exit(0);
+	// One subscriber for the life of the process. It reloads config in every
+	// mode (the IMAP server has its own, so an SMTP-only process used to get
+	// none), and it is what wakes a process that is waiting for mail to be
+	// configured.
+	configSubscriber = createEventSubscriber(function (event) {
+		if (event.type !== EVENTS.CONFIG_CHANGED) return;
+		appConfig.reload().then(function () {
+			if (!serversStarted) return startIfConfigured(false);
+		}).catch(function (err) {
+			alogger.writeAlog(1, '[Mail] Config reload failed: ' + err.message, 'redbright');
+		});
+	});
+
+	await startIfConfigured(true);
+}
+
+/**
+ * Start the servers if mail is configured; otherwise wait, quietly.
+ *
+ * It used to exit, and pm2 restarts anything that exits, so a board without a
+ * mail domain (every fresh install) restarted this process every few seconds
+ * until pm2 gave up. Waiting keeps it online and idle, and saving a mail domain
+ * in /admin/config starts the servers without a restart.
+ */
+async function startIfConfigured(atStartup) {
+	if (serversStarted || serversStarting) return;
+	var reason = mailDisabledReason(appConfig);
+	if (reason) {
+		if (atStartup) {
+			alogger.writeAlog(1, '[Mail] Waiting: ' + reason + '. Set it in /admin/config and the mail servers start ' +
+				'without a restart.', 'yellow');
+		}
+		return;
 	}
+	serversStarting = true;
+	try {
+		await startServers();
+		serversStarted = true;
+	} finally {
+		serversStarting = false;
+	}
+}
+
+async function startServers() {
+	var domain = appConfig.get('mail_domain', '');
 
 	// Ensure PM attachments schema
 	var pmAttachments = await import("../src/models/pmAttachments.js");
@@ -148,10 +198,7 @@ async function main() {
 		started++;
 	}
 
-	if (started === 0) {
-		alogger.writeAlog(1, "[Mail] No servers enabled — exiting", "yellow");
-		process.exit(0);
-	}
+	// mailDisabledReason() has already checked that at least one port is set.
 
 	// Maintenance mode: refuse new mail client connections while the board is
 	// closed and close the ones still open when the grace runs out. Set before
