@@ -2,6 +2,14 @@
 
 ## Pending (since v0.9.9a)
 
+### Networking
+
+- Fix: **echomail forwarded to your downlinks lost most of its SEEN-BY.** A message usually carries several SEEN-BY lines, and only the last one was kept, so downlinks were not told about most of the systems that already had the message. That is what SEEN-BY is for, and without it they can pass a message to a system that already has it. Every line is now kept, this system is added, and the list goes out as several short lines, as other software writes it. Messages already received keep what was stored; everything tossed from now on is complete.
+- Fix: **forwarded echomail told downlinks it had come only from you.** Its PATH was replaced with your address instead of having it added, and the original PATH was sent as well, at the top of the message where software keeping the last PATH line ignored it.
+- Fix: **every message you forwarded carried your timezone instead of its author's**, and posts made on the board carried a fixed `-0600` whatever your timezone and whatever the time of year. The author's timezone now passes through untouched, and posts made here carry this system's real offset for the date.
+- Fix: **forwarded echomail gained a second tear line after its Origin line**, which showed as a stray `---` at the end of the message on every system downstream.
+- Your tosser now names itself with its real version in the `TID` line, where it said `Canectic Tosser v0.1`.
+
 ### Updates
 
 - **The Update page now says when the release you are running has been withdrawn**, with the reason and, once there is one, the release that replaces it. The update check has known since withdrawals began and nothing showed it, so a board on a pulled release looked exactly like one that was up to date.

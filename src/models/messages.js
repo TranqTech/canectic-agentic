@@ -22,7 +22,6 @@ import appConfig from "../config/appConfig.js";
 import * as systeminfo from "../utils/systeminfo.js";
 
 
-const default_tzutc   = "-0600";
 
 // Thread update queue: tracks threads that need stats recalculation after batch toss.
 // Format: array of "threadId[shortcode" pseudo-IDs (deduped).
@@ -590,7 +589,7 @@ async function startNewThread(formObj, shortcode) {
 		thread_id: thread_id,
 		msg_id: serial,
 		msg_orig_addr: origAddr,
-		tz_utc: default_tzutc,
+		tz_utc: ftnUtils.tzutcFor(currtime),
 		created_at: currtime,
 		source: addrInfo.address,
 		from_user: formObj.from_user,
@@ -701,7 +700,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 		thread_id: thread_id,
 		msg_id: serial,
 		msg_orig_addr: origAddr,
-		tz_utc: default_tzutc,
+		tz_utc: ftnUtils.tzutcFor(currtime),
 		created_at: currtime,
 		source: addrInfo.address,
 		from_user: formObj.from_user,

@@ -311,7 +311,8 @@ describe('jamToDbObj', function () {
 
 	it('should fall back to the inline SEEN-BY when no subfield is present', function () {
 		var msg = message({ seenBy: '' }, 'Body\rSEEN-BY 9/9 8\r');
-		assert.strictEqual(jamToDbObj(msg, null).seen_by, '9/9 8');
+		// Stored sorted, net then node, as FTS-0004 writes SEEN-BY.
+		assert.strictEqual(jamToDbObj(msg, null).seen_by, '9/8 9');
 	});
 
 	it('should prefer the PID subfield for tosser_id', function () {

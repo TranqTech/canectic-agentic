@@ -13,6 +13,8 @@ const pexec = util.promisify(exec);
 import {Message, Packet} from '../../models/ftnClasses.js'
 import * as ftnNetmailAdapter from '../../models/ftnNetmailAdapter.js'
 import * as ftnVia from '../../utils/ftnVia.js'
+import * as ftnSeenPath from '../../utils/ftnSeenPath.js'
+import * as systeminfo from '../../utils/systeminfo.js'
 import * as privateMessages from '../../models/privateMessages.js'
 import * as systemAddresses from '../../models/systemAddresses.js'
 import * as echomail from '../../models/echomail.js'
@@ -26,8 +28,6 @@ import * as alogger from "../../utils/alogger.js"
 
 
 //setup and variables
-const TosserName = "Canectic Tosser v0.1"
-const SystemTZUTC = "-0600"
 const defaultZone = 1
 // Tossed packet handling: determined by ftn_keep_tossed_days config.
 // 0 = delete immediately, 999 = keep forever (move to tossed dir), 1+ = move and purge later.
@@ -245,6 +245,112 @@ function formatKludge(attribute, value) {
 		return '\x01' + attribute + ' ' + (value == null ? '' : value);
 	}
 	return '\x01' + attribute + ': ' + (value == null ? '' : value);
+}
+
+/** What this tosser calls itself in TID. It said "Canectic Tosser v0.1" to
+ *  every system it ever sent to. */
+function tosserName() {
+	return 'Canectic ' + systeminfo.canonicalVersion();
+}
+
+/**
+ * Whether a body already ends with its Origin line.
+ *
+ * Mail relayed through here keeps its tear line and Origin in the body, since
+ * the parser does not take them out; mail posted here keeps them in their own
+ * columns. The writer added a tear line to both, so every relayed message went
+ * on with a stray "---" after its Origin.
+ */
+function bodyHasOrigin(bodyText) {
+	var lines = String(bodyText || '').split(/\r\n|\r|\n/);
+	for (var i = lines.length - 1; i >= 0; i--) {
+		var l = lines[i].trim();
+		if (!l) continue;
+		return /^\* Origin:/.test(l);
+	}
+	return false;
+}
+
+/**
+ * Settle a message's kludges for the wire, in place. Returns whether CHRS is
+ * already declared.
+ *
+ * MSGID and REPLY follow the columns. TID is this tosser's, which is what TID
+ * means. TZUTC belongs to the author: it is kept when present, taken from the
+ * stored column when not, and only failing both given `fallbackTz`. It used to
+ * be overwritten with a constant "-0600" on every message, forwarded ones
+ * included. PATH and SEEN-BY are never kludges on the way out: rows tossed
+ * before the parser kept PATH out of the kludges still carry it there, and it
+ * was written at the top of the message, old and unextended.
+ */
+function stampKludges(msg, fallbackTz) {
+	var seen = { msgid: false, reply: false, tid: false, tz: false, chrs: false };
+	msg.OptionalAttributes = (msg.OptionalAttributes || []).filter(function (a) {
+		return a && a.attribute !== 'PATH' && a.attribute !== 'SEEN-BY';
+	});
+	for (const attrib of msg.OptionalAttributes) {
+		switch (attrib.attribute) {
+			case 'MSGID':
+				seen.msgid = true;
+				if (msg.MsgId && attrib.value != msg.MsgId) attrib.value = msg.MsgId;
+				break;
+			case 'REPLY':
+				seen.reply = true;
+				if (msg.ReplyTo && attrib.value != msg.ReplyTo) attrib.value = msg.ReplyTo;
+				break;
+			case 'TID':
+				seen.tid = true;
+				attrib.value = tosserName();
+				break;
+			case 'TZUTC':
+				seen.tz = true;
+				break;
+			case 'CHRS':
+				seen.chrs = true;
+				break;
+			default:
+		}
+	}
+	if (!seen.msgid) msg.OptionalAttributes.push({ attribute: 'MSGID', value: msg.MsgId });
+	if (!seen.reply && msg.ReplyTo) msg.OptionalAttributes.push({ attribute: 'REPLY', value: msg.ReplyTo });
+	if (!seen.tid) msg.OptionalAttributes.push({ attribute: 'TID', value: tosserName() });
+	if (!seen.tz) {
+		var tz = msg.TZUTC || fallbackTz;
+		if (tz) msg.OptionalAttributes.push({ attribute: 'TZUTC', value: tz });
+	}
+	return seen.chrs;
+}
+
+/**
+ * Everything after the body: tear line and Origin unless the body already
+ * ends with them, then SEEN-BY and PATH for echomail, as many lines of each as
+ * they need.
+ */
+function messageTail(msg, body) {
+	var t = '';
+	if (bodyHasOrigin(body)) {
+		if (!/\r$/.test(body)) t += '\r';
+	} else {
+		t += '\r';
+		if (msg.SignatureString) {
+			// Tagline present: bare tear line, then tagline on its own line
+			t += '\r---';
+			t += '\r' + msg.SignatureString;
+			if (msg.ProductLine) t += '\r--- ' + msg.ProductLine;
+		} else if (msg.ProductLine) {
+			// No tagline: tear line with product identifier
+			t += '\r--- ' + msg.ProductLine;
+		} else {
+			t += '\r---';
+		}
+		if (msg.Type === 'Echomail' && msg.OriginLine) t += '\r * Origin: ' + msg.OriginLine;
+		t += '\r';
+	}
+	if (msg.Type === 'Echomail') {
+		for (const l of ftnSeenPath.seenByLines(msg.SeenBy)) t += l + '\r';
+		for (const l of ftnSeenPath.pathLines(msg.Path)) t += l + '\r';
+	}
+	return t;
 }
 
 // Extract an FTN arcmail bundle (zip) into the destination directory.
@@ -665,9 +771,21 @@ function processMessageText(message) {
 						break;
 					case 'TOPT':
 					case 'FMPT':
-					case 'PATH':
-						message.Path = value
+						// Point numbers. They used to fall through into PATH,
+						// so a netmail to or from a point had its PATH
+						// replaced by the point number.
 						message.OptionalAttributes.push({ attribute, value });
+						break;
+					case 'PATH':
+						// Every PATH line is part of one list, and it is kept
+						// OUT of the kludges: it is written back at the end of
+						// the message with this system added, and a copy left
+						// here went out a second time at the top, unextended.
+						message.Path = message.Path ? message.Path + ' ' + value : value;
+						break;
+					case 'SEEN-BY':
+						// Not a kludge, but some software writes it as one.
+						message.SeenBy = message.SeenBy ? message.SeenBy + ' ' + value : value;
 						break;
 					// No 'INTL' case: the colon form ("\x01INTL: <dest> <orig>")
 					// falls through to the startsWith("INTL") handler in
@@ -705,11 +823,14 @@ function processMessageText(message) {
 				}
 			}
 		}else if (line.startsWith('SEEN-BY')){
-			// FTS-0004: SEEN-BY is space-separated (SEEN-BY 1/1 2/2 ...) with
-			// no colon. Prior code did line.split(':')[1].trim() which crashed
-			// on the common no-colon case and mis-sliced zone:net addresses
-			// when a colon happened to be present.
-			message.SeenBy = line.substring(7).trim()
+			// FTS-0004 writes "SEEN-BY: 1/1 2/2 ...", and some software leaves
+			// the colon out. A message carries as many SEEN-BY lines as its
+			// list needs, all of them one list: this kept only the last line,
+			// and kept the colon as an entry, so a typical FidoNet message lost
+			// six of its seven lines here and went on to downlinks without
+			// them. ftnSeenPath normalises the whole list below.
+			var sbValue = line.replace(/^SEEN-BY:?/, '').trim();
+			message.SeenBy = message.SeenBy ? message.SeenBy + ' ' + sbValue : sbValue;
 		}else {
 			// Regular message text
 			bodyLines.push(line);
@@ -717,6 +838,8 @@ function processMessageText(message) {
 	}
 	
 	message.BodyText = bodyLines.join('\r').replace(/\x8D/g, ''); //remove any reverse cr chars
+	if (message.SeenBy) message.SeenBy = ftnSeenPath.mergeSeenBy(message.SeenBy) || '';
+	if (message.Path) message.Path = ftnSeenPath.normalisePath(message.Path) || '';
 	if (!message.Source){
 		//console.log("Creating Source")
 		message.Source = defaultZone + ":" + message.SourceNet + "/" + message.SourceNode
@@ -1048,70 +1171,9 @@ function WritePktToNode(messageArray, conn, systemaddress){
 
 	// Write messages
 	for (const msg of messageArray) {
-		// Parse and populate required attributes if empty.
-		var setattribs = {
-			msgid: false,
-			reply: false,
-			tid: false,
-			tz: false,
-		}
-
-		for (const attrib of msg.OptionalAttributes){
-			switch (attrib.attribute){
-				case "MSGID":
-					setattribs.msgid = true
-					if ((msg.MsgId) && (attrib.value != msg.MsgId)){
-						attrib.value = msg.MsgId
-					}
-					break;
-				case "REPLY":
-					setattribs.reply = true
-					if ((msg.ReplyTo) && (attrib.value != msg.ReplyTo)){
-						attrib.value = msg.ReplyTo
-					}
-					break;
-				case "TID":
-					setattribs.tid = true
-					attrib.value = TosserName
-					break;
-				case "TZUTC":
-					setattribs.tz = true
-					attrib.value = SystemTZUTC
-					break;
-				case "CHRS":
-					setattribs.chrs = true
-					break;
-				default:
-					//
-			}
-		}
-		if (!setattribs.msgid){
-			const newattrib = {
-				attribute: "MSGID",
-				value: msg.MsgId
-			}
-			msg.OptionalAttributes.push(newattrib)
-		}
-		if (!setattribs.reply && msg.ReplyTo){
-			msg.OptionalAttributes.push({
-				attribute: "REPLY",
-				value: msg.ReplyTo
-			})
-		}
-		if (!setattribs.tid){
-			const newattrib = {
-				attribute: "TID",
-				value: TosserName
-			}
-			msg.OptionalAttributes.push(newattrib)
-		}
-		if (!setattribs.tz){
-			const newattrib = {
-				attribute: "TZUTC",
-				value: SystemTZUTC
-			}
-			msg.OptionalAttributes.push(newattrib)
-		}
+		// Echomail with no TZUTC anywhere gets none: it is the author's
+		// timezone, and a forwarded message's cannot be guessed.
+		var setattribs = { chrs: stampKludges(msg, null) }
 
 		// Declare the wire encoding. The area's policy decides it; `auto`
 		// means CP437 whenever the body fits, which is nearly always. Writing
@@ -1169,33 +1231,11 @@ function WritePktToNode(messageArray, conn, systemaddress){
 			rawText += formatKludge(attr.attribute, attr.value) + '\r';
 		}
 		// Body text (join with \r)
-		const bodyLines = (msg.BodyText || '').split('\r\n');
-		rawText += bodyLines.join('\r');
-		// Tear line, optional tagline, origin line (FTS-0004 format)
-		rawText += "\r"
-		if (msg.SignatureString) {
-			// Tagline present: bare tear line, then tagline on its own line
-			rawText += "\r---"
-			rawText += "\r" + msg.SignatureString
-			if (msg.ProductLine) rawText += "\r--- " + msg.ProductLine
-		} else if (msg.ProductLine) {
-			// No tagline: tear line with product identifier
-			rawText += "\r--- " + msg.ProductLine
-		} else {
-			rawText += "\r---"
-		}
-		if (msg.Type === "Echomail"){
-			if (msg.OriginLine){
-				rawText += "\r * Origin: " + msg.OriginLine
-			}
-			if (msg.SeenBy) {
-				rawText += `\rSEEN-BY: ${msg.SeenBy}`;
-			}
-			if (msg.Path) {
-				rawText += `\r\x01PATH: ${msg.Path}`;
-			}
-		}
-		rawText += "\r"
+		const body = (msg.BodyText || '').split('\r\n').join('\r');
+		rawText += body;
+		// Tear line, optional tagline, origin line (FTS-0004 format), then
+		// SEEN-BY and PATH.
+		rawText += messageTail(msg, body);
 
 
 		writeNullStr(rawText);
@@ -1427,67 +1467,9 @@ async function WritePkts(messageArray){
 
 			// Write messages
 			for (const msg of packet.Messages) {
-				// Parse and populate required attributes if empty.
-				var setattribs = {
-					msgid: false,
-					reply: false,
-					tid: false,
-					tz: false,
-				}
-
-				for (const attrib of msg.OptionalAttributes){
-					switch (attrib.attribute){
-						case "MSGID":
-							setattribs.msgid = true
-							if ((msg.MsgId) && (attrib.value != msg.MsgId)){
-								attrib.value = msg.MsgId
-							}
-							break;
-						case "REPLY":
-							setattribs.reply = true
-							if ((msg.ReplyTo) && (attrib.value != msg.ReplyTo)){
-								attrib.value = msg.ReplyTo
-							}
-							break;
-						case "TID":
-							setattribs.tid = true
-							attrib.value = TosserName
-							break;
-						case "TZUTC":
-							setattribs.tz = true
-							attrib.value = SystemTZUTC
-							break;
-						default:
-							//
-					}
-				}
-				if (!setattribs.msgid){
-					const newattrib = {
-						attribute: "MSGID",
-						value: msg.MsgId
-					}
-					msg.OptionalAttributes.push(newattrib)
-				}
-				if (!setattribs.reply && msg.ReplyTo){
-					msg.OptionalAttributes.push({
-						attribute: "REPLY",
-						value: msg.ReplyTo
-					})
-				}
-				if (!setattribs.tid){
-					const newattrib = {
-						attribute: "TID",
-						value: TosserName
-					}
-					msg.OptionalAttributes.push(newattrib)
-				}
-				if (!setattribs.tz){
-					const newattrib = {
-						attribute: "TZUTC",
-						value: SystemTZUTC
-					}
-					msg.OptionalAttributes.push(newattrib)
-				}
+				// Netmail posted here has no TZUTC stored, so it gets this
+				// system's offset for the time it is written.
+				var setattribs = { chrs: stampKludges(msg, ftnUtils.tzutcFor(new Date())) }
 
 				// Netmail decides its encoding per message, and declares it.
 				const nmWire = charsetPolicy.charsetForMessage(
@@ -1540,33 +1522,12 @@ async function WritePkts(messageArray){
 				for (const attr of msg.OptionalAttributes || []) {
 					rawText += formatKludge(attr.attribute, attr.value) + '\r';
 				}
-				if (msg.SeenBy) {
-					rawText += `\x01SEEN-BY: ${msg.SeenBy}\r`;
-				}
-				// Body text (join with \r)
-				const bodyLines = (msg.BodyText || '').split('\r\n');
-				rawText += bodyLines.join('\r');
-				var originsplit = "\r\r---"
-				if (msg.SignatureString){
-					originsplit += "\r" + msg.SignatureString + "\r"
-				}
-				if (msg.ProductLine){
-					originsplit += " " + msg.ProductLine
-				}
-				rawText += originsplit
-				//only apply origin line to echomail?
-				if (msg.Type === "Echomail"){
-					if (msg.OriginLine){
-						rawText += "\r * Origin: " + msg.OriginLine
-					}
-					if (msg.SeenBy) {
-						rawText += `\rSEEN-BY: ${msg.SeenBy}`;
-					}
-					if (msg.Path) {
-						rawText += `\r\x01PATH: ${msg.Path}`;
-					}
-				}
-				rawText += "\r"
+				// Body text (join with \r). The tail is the echomail writer's:
+				// this one wrote SEEN-BY as a kludge above the body as well as
+				// below it, and its own shape of tear line.
+				const body = (msg.BodyText || '').split('\r\n').join('\r');
+				rawText += body;
+				rawText += messageTail(msg, body);
 
 				writeNullStr(rawText);
 				console.log("Pushing processed", msg.Id)
@@ -1728,7 +1689,7 @@ async function TossOutboundNetmail(){
 	var pktresult = await WritePkts(sendArray)
 	if ((pktresult)&&(pktresult.processedmsgs)){
 		console.log("Wrote", pktresult.pktcount, "Packets")
-		await privateMessages.markSentArray(pktresult.processedmsgs, TosserName)
+		await privateMessages.markSentArray(pktresult.processedmsgs, tosserName())
 
 		// Write flow file entries for file-attach netmail attachments
 		try {
@@ -1822,6 +1783,10 @@ export {
 	packetPasswordBuffer,
 	getFileType,
 	formatKludge,
+	stampKludges,
+	messageTail,
+	bodyHasOrigin,
+	tosserName,
 	bareFtnAddress,
 	extractMailBundle
 }

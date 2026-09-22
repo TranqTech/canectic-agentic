@@ -551,3 +551,27 @@ describe('getSystemTime', function () {
 		});
 	});
 });
+
+// tzutcFor replaced a constant "-0600" that was stamped on every local post
+// and, by the packet writers, on every forwarded message. The offset belongs to
+// the date: the same board is -0600 in July and -0700 in January.
+describe('ftnUtils.tzutcFor', function () {
+	var saved;
+	before(function () { saved = process.env.TZ; });
+	after(function () { if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved; });
+
+	it('follows daylight saving rather than being fixed', async function () {
+		var { tzutcFor } = await import('../src/utils/ftnUtils.js');
+		process.env.TZ = 'America/Edmonton';
+		assert.strictEqual(tzutcFor(new Date('2026-07-01T12:00:00Z')), '-0600');
+		assert.strictEqual(tzutcFor(new Date('2026-01-15T12:00:00Z')), '-0700');
+	});
+
+	it('writes no sign ahead of UTC, and minutes where there are some', async function () {
+		var { tzutcFor } = await import('../src/utils/ftnUtils.js');
+		process.env.TZ = 'Asia/Kolkata';
+		assert.strictEqual(tzutcFor(new Date('2026-07-01T12:00:00Z')), '0530');
+		process.env.TZ = 'UTC';
+		assert.strictEqual(tzutcFor(new Date('2026-07-01T12:00:00Z')), '0000');
+	});
+});

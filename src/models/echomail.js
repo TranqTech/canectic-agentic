@@ -10,6 +10,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as ftnUtils from "../utils/ftnUtils.js";
+import * as ftnSeenPath from "../utils/ftnSeenPath.js";
 import * as ftnTosser from "../middleware/tossers/ftnTosser.js";
 import * as systemAddresses from "./systemAddresses.js";
 import * as alogger from "../utils/alogger.js";
@@ -197,61 +198,52 @@ function evaluateOutbound(msg, dest, self) {
 		return { tossable: false, reason: 'received from this node', seenBy: null };
 	}
 
-	var seenBy = null;
-
-	if (msg.seen_by) {
-		// SEEN-BY is compressed: "134/101 102 103 220/1" means 134/101,
-		// 134/102, 134/103, 220/1. Bare numbers belong to the preceding net.
-		var sbArray = String(msg.seen_by).trim().split(/\s+/);
-		var sbnets = [];
-		var netobj = null;
-
-		for (var sb of sbArray) {
-			if (!sb) continue;
-			if (sb.includes('/')) {
-				if (netobj) sbnets.push(netobj);
-				var parts = sb.split('/');
-				netobj = { net: parts[0], netstring: sb, nodes: [parts[1]] };
-			} else if (netobj) {
-				netobj.nodes.push(sb);
-				netobj.netstring += ' ' + sb;
-			}
-		}
-		if (netobj) sbnets.push(netobj);
-
-		var netpresent = false;
-		for (var net of sbnets) {
-			if (net.net !== dest.net) continue;
-			netpresent = true;
-			if (net.nodes.includes(dest.node)) {
-				return { tossable: false, reason: 'already in SEEN-BY', seenBy: null };
-			}
-			net.nodes.push(dest.node);
-			net.netstring += ' ' + dest.node;
-		}
-
-		if (netpresent) {
-			var joined = [];
-			for (var sn of sbnets) joined.push(sn.netstring);
-			seenBy = joined.join(' ');
-		} else {
-			seenBy = String(msg.seen_by) + ' ' + dest.net + '/' + dest.node;
-		}
-	} else {
-		seenBy = self.netnode;
-		seenBy += (dest.net === String(self.netnode).split('/')[0])
-			? ' ' + dest.node
-			: ' ' + dest.net + '/' + dest.node;
+	// Both lists are read through ftnSeenPath, which understands the
+	// compressed form ("134/101 102 220/1": bare numbers belong to the net
+	// before them) and every shape stored before it existed, including the
+	// colon older rows carry as an entry.
+	var target = { net: dest.net, node: dest.node };
+	if (ftnSeenPath.hasNetNode(msg.seen_by, target)) {
+		return { tossable: false, reason: 'already in SEEN-BY', seenBy: null };
+	}
+	if (ftnSeenPath.hasNetNode(msg.path, target)) {
+		return { tossable: false, reason: 'already in PATH', seenBy: null };
 	}
 
-	if (msg.path) {
-		var patharr = String(msg.path).trim().split(/\s+/);
-		if (patharr.includes(dest.net + '/' + dest.node)) {
-			return { tossable: false, reason: 'already in PATH', seenBy: null };
-		}
-	}
+	// FTS-0004: a system adds itself and every system it sends to. Adding
+	// ourselves only when SEEN-BY was empty meant a forwarded message never
+	// said it had been here.
+	var seenBy = ftnSeenPath.mergeSeenBy(msg.seen_by, [self.netnode, target]);
 
 	return { tossable: true, reason: null, seenBy: seenBy };
+}
+
+/**
+ * Restamp a message for the hop to one destination, in place. Done after the
+ * verdict because the "did this come from them" test needs the original source.
+ *
+ * PATH gains this system at the end. It used to be REPLACED with our own
+ * address, which told every downlink the message had come from here and
+ * nowhere else.
+ *
+ * @param {object} msg            message row
+ * @param {object} verdict        from evaluateOutbound, tossable
+ * @param {object} systemaddress  { address, zone, net, node, netnode }
+ * @param {string} nodeAddress    the destination, zone:net/node
+ * @param {string} netnode        its net/node with any point number stripped
+ */
+function stampForHop(msg, verdict, systemaddress, nodeAddress, netnode) {
+	msg.source           = systemaddress.address;
+	msg.source_zone      = systemaddress.zone;
+	msg.source_net       = systemaddress.net;
+	msg.source_node      = systemaddress.node;
+	msg.destination      = nodeAddress;
+	msg.destination_zone = nodeAddress.split(':')[0];
+	msg.destination_net  = netnode.split('/')[0];
+	msg.destination_node = netnode.split('/')[1];
+	if (verdict.seenBy) msg.seen_by = verdict.seenBy;
+	msg.path = ftnSeenPath.appendPath(msg.path, systemaddress.netnode);
+	return msg;
 }
 
 async function getOutboundForConnection(conn) {
@@ -394,27 +386,14 @@ async function getOutboundForConnection(conn) {
 						);
 
 						if (verdict.tossable) {
-							// Restamp for this hop. Done after the verdict because the
-							// "did this come from them" test needs the original source.
-							msg.source           = systemaddress.address;
-							msg.source_zone      = systemaddress.zone;
-							msg.source_net       = systemaddress.net;
-							msg.source_node      = systemaddress.node;
-							msg.destination      = nodeAddress;
-							msg.destination_zone = nodeAddress.split(":")[0];
-							msg.destination_net  = netnode.split("/")[0];
-							msg.destination_node = netnode.split("/")[1];
-
+							stampForHop(msg, verdict, systemaddress, nodeAddress, netnode);
 							if (verdict.seenBy) {
-								msg.seen_by = verdict.seenBy;
 								nodeSeenByUpdateArray.push({
 									id: msg.id,
 									msgtable: msgtable,
 									newsbstring: verdict.seenBy
 								});
 							}
-
-							msg.path = systemaddress.netnode;
 							var ftnObj = await dbToFtn(msg);
 							// The area decides the wire encoding; the tosser
 							// needs it to pick bytes and to declare CHRS.
@@ -486,6 +465,7 @@ async function updateMsgIndexes(idxUpdateArray) {
 // import from messages.js directly.
 export {
 	evaluateOutbound,
+	stampForHop,
 	ftnToDb,
 	dbToFtn,
 	getOutboundForConnection

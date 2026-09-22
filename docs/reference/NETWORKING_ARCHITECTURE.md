@@ -601,7 +601,13 @@ base36 MSGID encoding that would use the same epoch and day
 numbering while expanding the burst capacity and removing the
 Redis hot-path dependency. Not currently implemented.
 
-After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace) — both use colon-space.
+After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace), both colon-space, as many lines of each as the list needs. Every line is part of one list.
+
+**SEEN-BY and PATH, in and out** (`src/utils/ftnSeenPath.js`, the one definition used by the parser, `evaluateOutbound`, `stampForHop` and both packet writers):
+
+- Inbound, every SEEN-BY line and every PATH line is accumulated. `seen_by` is stored as one compressed line, deduplicated and sorted by net then node; `path` as one compressed line in order. PATH is not kept among the kludges. Until 2026-09-22 the parser kept only the LAST SEEN-BY line (six of seven on a typical FidoNet message) with the colon after `SEEN-BY` stored as an entry, and kept PATH as a kludge too, which the writers then emitted at the top of the message. Rows stored before then keep the truncated SEEN-BY; `parseNetNodes` skips the colon and the writers drop a PATH kludge.
+- Outbound, SEEN-BY gains this system and the destination (`evaluateOutbound`), PATH gains this system at the end unless it is already the last hop (`stampForHop`; it used to be replaced). Both are written after the Origin, wrapped under 80 characters with a full net/node at the start of each line.
+- TZUTC is the author's and is never overwritten; echomail with none gets none, netmail written here gets `ftnUtils.tzutcFor()` for the moment it is written. TID is `Canectic <version>`. A tear line and Origin are added only when the body does not already end with an Origin line (relayed mail keeps them in the body).
 
 The `ftnClasses.js` `Packet` and `Message` classes model these structures. `ftnTosser.js` `ReadPkt()` handles the binary parsing.
 
@@ -1158,9 +1164,10 @@ because it arrived from the peer's *network* conflates the network with the
 node, and describes a hub's whole job: mail arrives from an uplink on network N
 and must go out to downlinks, also on network N.
 
-SEEN-BY is read in its compressed form, where bare numbers belong to the
-preceding net: `134/1 100 101 220/1` means 134/1, 134/100, 134/101 and 220/1. A
-node number matching in a different net does not block.
+SEEN-BY and PATH are both read in their compressed form through
+`ftnSeenPath`, where bare numbers belong to the preceding net: `134/1 100 101
+220/1` means 134/1, 134/100, 134/101 and 220/1. A node number matching in a
+different net does not block.
 
 ## Rescan
 

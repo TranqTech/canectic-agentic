@@ -640,7 +640,27 @@ function chrsValueFor(charset) {
 	return 'CP437 2';
 }
 
+/**
+ * The TZUTC kludge value for a moment on this system's clock (FTS-4008):
+ * hours and minutes from UTC, a leading minus when behind it and no sign when
+ * ahead, so "-0600", "0000", "0530".
+ *
+ * Worked out for the date given rather than fixed, because the offset changes
+ * with daylight saving. It was a constant "-0600" in both the poster and the
+ * packet writers, which was right for the machine it was written on for half
+ * the year and for no other board at all, and the writers stamped it over the
+ * TZUTC of every message they forwarded, author's timezone or not.
+ */
+function tzutcFor(date) {
+	var d = date instanceof Date ? date : new Date(date === undefined ? Date.now() : date);
+	var minutes = -d.getTimezoneOffset();
+	var sign = minutes < 0 ? '-' : '';
+	var abs = Math.abs(minutes);
+	return sign + String(Math.floor(abs / 60)).padStart(2, '0') + String(abs % 60).padStart(2, '0');
+}
+
 export{
+	tzutcFor,
 	parseOptionalAttributes,
 	charsetFromKludge,
 	chrsValueFor,
