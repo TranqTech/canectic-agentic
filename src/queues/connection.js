@@ -61,7 +61,34 @@ const redisConfig = parseRedisConfig();
  * the returned instance as the `connection` option.
  */
 export function createQueueConnection() {
-	return new IORedis(redisConfig);
+	var conn = new IORedis(redisConfig);
+	_open.add(conn);
+	conn.once('end', function () { _open.delete(conn); });
+	return conn;
+}
+
+// Every connection made above that has not ended yet. Several modules open an
+// event publisher lazily and keep it in a private variable for the life of the
+// process, which is right for the application and leaves nothing that could
+// close it: the test suite, which must exit on its own so that a leaked timer
+// or socket fails the run (#46), had no way to let go of them.
+var _open = new Set();
+
+/**
+ * Disconnect every queue connection still open. For the end of a process that
+ * has nothing left to do, such as a test run; a running process shuts its
+ * queues and workers down properly first, and this closes whatever is left.
+ *
+ * @returns {number} how many were closed
+ */
+export function closeAllQueueConnections() {
+	var n = 0;
+	for (var conn of Array.from(_open)) {
+		try { conn.disconnect(); } catch (_) {}
+		_open.delete(conn);
+		n++;
+	}
+	return n;
 }
 
 /**

@@ -12,11 +12,10 @@
 // `exit: true`, so mocha force-exited before the timer could fire: the suite
 // reported 3,831 passing over a process that was about to die.
 //
-// That setting is still there, and has to be for now: the tests that touch
-// PostgreSQL and Redis leave process-lifetime connection pools open, so without
-// force-exit the run never drains. Until that is dealt with, a leak like this
-// one is caught by running `npx mocha --no-exit` deliberately rather than by
-// the suite failing on its own.
+// That setting is gone (#46): tests/helpers/rootHooks.js closes the database
+// connections after the run and fails it, naming the timer, if anything else
+// is still holding the process open, so a leak like this one now fails the
+// suite on its own.
 //
 // The protocol itself is not at fault. `sendERR` closes the transport, and on a
 // real socket that kills the caller too. These mocks are wired by overriding
