@@ -61,6 +61,7 @@ import {
 	serialiseIndex, parseIndex, indexName
 } from '../src/release/releaseIndex.js';
 import { checkStableCoverage, deltaShare } from '../src/release/pipelineCheck.js';
+import { stampLockfileVersion, LOCKFILE } from '../src/release/lockfile.js';
 import { markSuperseded } from '../src/release/releaseIndex.js';
 import { summariseAudit, formatAdvisory } from '../src/release/auditCheck.js';
 import {
@@ -332,6 +333,16 @@ function packageJsonIsVersionStampOnly(treeRoot, baseVersion, baseManifest) {
 	return hashBuffer(Buffer.from(JSON.stringify(pkg, null, 2) + '\n')) === entry.sha256;
 }
 
+// The same question for the lockfile, which is stamped alongside package.json
+// so that npm has no version to "correct" on a board (see lockfile.js).
+function lockfileIsVersionStampOnly(treeRoot, baseVersion, baseManifest) {
+	var entry = (baseManifest.files || []).find(function (f) { return f.path === LOCKFILE; });
+	var file = path.join(treeRoot, LOCKFILE);
+	if (!entry || !fs.existsSync(file)) return false;
+	var restored = stampLockfileVersion(fs.readFileSync(file, 'utf8'), baseVersion);
+	return hashBuffer(Buffer.from(restored)) === entry.sha256;
+}
+
 function stageTree(version, files) {
 	var staging = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-release-'));
 	var treeName = 'canectic-' + version;
@@ -353,6 +364,14 @@ function stageTree(version, files) {
 	var pkg = readJSON(pkgFile);
 	pkg.version = version;
 	fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
+
+	// And the lockfile, or npm "corrects" its root version to match on every
+	// board, and the final check of the install or update reads the rewrite as
+	// a file that did not land.
+	var lockFile = path.join(treeRoot, LOCKFILE);
+	if (fs.existsSync(lockFile)) {
+		fs.writeFileSync(lockFile, stampLockfileVersion(fs.readFileSync(lockFile, 'utf8'), version));
+	}
 
 	return { staging: staging, treeRoot: treeRoot, treeName: treeName };
 }
@@ -438,6 +457,16 @@ function writeSums(outputDir, sign) {
 	var lines = names.map(function (n) { return hashFile(path.join(outputDir, n)) + '  ' + n; });
 	var sums = path.join(outputDir, 'SHA256SUMS');
 	fs.writeFileSync(sums, lines.join('\n') + '\n');
+
+	// A signature over the PREVIOUS checksum list cannot vouch for this one.
+	// Leaving it beside the new list meant an unsigned build published a
+	// signature that fails to verify, which reads as tampering to anybody who
+	// checks. Unsigned is honest; stale is not.
+	if (!sign && fs.existsSync(sums + '.asc')) {
+		fs.unlinkSync(sums + '.asc');
+		warn('SHA256SUMS changed and this build is not signed, so the old SHA256SUMS.asc was removed. ' +
+			'Sign before publishing (--sign) if the directory should stay signed.');
+	}
 
 	if (sign) {
 		try {
@@ -563,10 +592,14 @@ function cutStable(opts) {
 	var pkg = readJSON(pkgFile);
 	pkg.version = version;
 	fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
-	ok('package.json bumped to ' + version);
+	var lockFile = path.join(ROOT, LOCKFILE);
+	if (fs.existsSync(lockFile)) {
+		fs.writeFileSync(lockFile, stampLockfileVersion(fs.readFileSync(lockFile, 'utf8'), version));
+	}
+	ok('package.json and ' + LOCKFILE + ' bumped to ' + version);
 
 	if (opts.tag) {
-		git(['add', 'package.json', 'docs/sysop/CHANGELOG.md', 'docs/releases']);
+		git(['add', 'package.json', LOCKFILE, 'docs/sysop/CHANGELOG.md', 'docs/releases']);
 		git(['commit', '-m', 'Release: v' + version]);
 		if (opts.sign) {
 			git(['tag', '-s', '-u', opts.signKey, 'v' + version, '-m', 'Canectic BBS v' + version]);
@@ -753,8 +786,9 @@ function buildArtifact(opts) {
 			warn('this delta is ' + Math.round(share * 100) + '% of the full tree, which says a stable release is overdue');
 		}
 		var stampOnly = packageJsonIsVersionStampOnly(staged.treeRoot, meta.base, opts.baseManifest);
+		var lockStampOnly = lockfileIsVersionStampOnly(staged.treeRoot, meta.base, opts.baseManifest);
 		var substantive = diff.added.length + diff.removed.length + diff.changed.filter(function (p) {
-			return !(p === 'package.json' && stampOnly);
+			return !(p === 'package.json' && stampOnly) && !(p === LOCKFILE && lockStampOnly);
 		}).length;
 		if (!substantive) {
 			fs.rmSync(staged.staging, { recursive: true, force: true });

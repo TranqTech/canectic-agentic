@@ -280,3 +280,41 @@ describe('runInstall', function () {
 		assert.ok(/match the release/.test(phase(state, 'verify').detail));
 	});
 });
+
+describe('runInstall and npm rewriting the lockfile', function () {
+	// Found by the install rehearsal on 2026-09-21: npm install synced the
+	// lockfile's root version to package.json and added its own metadata, and
+	// the final check reported the whole install failed, telling the sysop to
+	// delete a working board.
+	function lockText(version, extraField) {
+		var l = { name: 'canectic-bbs', version: version, lockfileVersion: 3, packages: {
+			'': { name: 'canectic-bbs', version: version },
+			'node_modules/bindings': { version: '1.5.0', integrity: 'sha512-BBB' }
+		} };
+		if (extraField) l.packages['node_modules/bindings'].hasInstallScript = true;
+		return JSON.stringify(l, null, 2) + '\n';
+	}
+
+	function npmStub(target, rewrite) {
+		return function (command) {
+			if (/npm install/.test(command)) fs.writeFileSync(path.join(target, 'package-lock.json'), rewrite());
+			return '';
+		};
+	}
+
+	it('completes when npm only normalises the lockfile', async function () {
+		var s = scenario({ stagedRoot: stage({ 'package-lock.json': lockText('0.9.6a') }), options: { dependencies: true } });
+		var state = await runInstall({ instructions: s.instructions,
+			exec: npmStub(s.target, function () { return lockText('0.9.9a', true); }) });
+		assert.strictEqual(state.status, 'complete', state.error || '');
+	});
+
+	it('still fails, naming the file, when npm pins something different', async function () {
+		var s = scenario({ stagedRoot: stage({ 'package-lock.json': lockText('0.9.9a') }), options: { dependencies: true } });
+		var state = await runInstall({ instructions: s.instructions, exec: npmStub(s.target, function () {
+			return lockText('0.9.9a').replace('1.5.0', '9.9.9');
+		}) });
+		assert.strictEqual(state.status, 'failed');
+		assert.ok(/package-lock\.json/.test(state.error), 'the failure must say which file: ' + state.error);
+	});
+});

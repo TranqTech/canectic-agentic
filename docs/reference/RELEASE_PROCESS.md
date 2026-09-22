@@ -126,7 +126,11 @@ what happens to be on the maintainer's disk.
 4. Writes `docs/releases/v<version>.md` from the declared steps, the notices and
    the closed changelog body
 5. Clears `pending.json`, keeping the standing floor
-6. Bumps `package.json`, commits, tags `v<version>`
+6. Bumps `package.json` and the root version in `package-lock.json`, commits,
+   tags `v<version>`. The lockfile matters: npm syncs its root version to
+   `package.json` on every install, and a lockfile left behind is rewritten on
+   every board (see `src/release/lockfile.js`). Every build also stamps its
+   version into the staged copy of both files
 7. Stages the shipped tree, builds `MANIFEST`, packs the archive
 8. Writes the metadata, the standalone manifest, the channel index, the
    bootstrap and its checksum, and `SHA256SUMS`

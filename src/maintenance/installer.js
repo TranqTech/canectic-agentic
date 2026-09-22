@@ -21,6 +21,7 @@ import { spawnSync } from 'child_process';
 
 import { buildApplyPlan } from '../release/applyPlan.js';
 import { parseManifest, verifyTree, MANIFEST_FILENAME } from '../release/manifest.js';
+import { forgiveNormalisedLockfile } from '../release/lockfile.js';
 import {
 	beginPhase, finishPhase, skipPhase, failPhase, completeRun, addWarning
 } from '../release/updatePhases.js';
@@ -262,10 +263,18 @@ async function runInstall(opts) {
 		}
 
 		persist(beginPhase(state, 'verify'));
-		var check = verifyTree(target, manifest);
+		// npm install rewrites package-lock.json (lockfile.js). Compared byte
+		// for byte, that failed every fresh install at this last step and told
+		// the sysop to delete a working board and start again.
+		var lockCheck = forgiveNormalisedLockfile(verifyTree(target, manifest),
+			{ targetRoot: target, sourceRoot: stagedRoot });
+		if (lockCheck.note) log('verify: ' + lockCheck.note);
+		var check = lockCheck.result;
 		if (!check.ok) {
+			var names = check.missing.concat(check.mismatched.map(function (m) { return m.path || m; }));
 			throw new Error(check.missing.length + ' file(s) did not land and ' +
-				check.mismatched.length + ' do not match the release');
+				check.mismatched.length + ' do not match the release: ' +
+				names.slice(0, 5).join(', ') + (names.length > 5 ? ' and ' + (names.length - 5) + ' more' : ''));
 		}
 		persist(finishPhase(state, 'verify', check.checked + ' files match the release'));
 
