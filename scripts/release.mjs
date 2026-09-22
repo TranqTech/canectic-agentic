@@ -62,7 +62,7 @@ import {
 } from '../src/release/releaseIndex.js';
 import { checkStableCoverage, deltaShare } from '../src/release/pipelineCheck.js';
 import { stampLockfileVersion, LOCKFILE } from '../src/release/lockfile.js';
-import { markSuperseded } from '../src/release/releaseIndex.js';
+import { withdrawRelease, findWithdrawn } from '../src/release/releaseIndex.js';
 import { summariseAudit, formatAdvisory } from '../src/release/auditCheck.js';
 import {
 	pendingIsEmpty, findPending, closePending, crossCheckPending, releaseNoteSkeleton,
@@ -110,6 +110,7 @@ function parseArgs(argv) {
 		else if (a === '--no-gitlab')           { opts.gitlab = false; }
 		else if (a === '--publish')             { opts.mode = 'publish'; opts.version = argv[++i]; }
 		else if (a === '--supersede')           { opts.mode = 'supersede'; opts.version = argv[++i]; }
+		else if (a === '--withdraw')            { opts.mode = 'withdraw'; opts.version = argv[++i]; }
 		else if (a === '--by')                  { opts.supersededBy = argv[++i]; }
 		else if (a === '--reason')              { opts.reason = argv[++i]; }
 		else if (a === '--sign')                { opts.sign = true; }
@@ -137,9 +138,11 @@ function usage() {
 		'  --no-tag                 skip the release commit and tag (stable only)',
 		'  --no-gitlab              do not mirror the release onto the GitLab releases page',
 		'  --publish <version>      only mirror an already cut release onto GitLab',
-		'  --supersede <version>    withdraw a published release',
-		'  --by <version>           the release that replaces it (with --supersede)',
-		'  --reason "..."           why it was withdrawn (with --supersede)',
+		'  --withdraw <version>     withdraw a published release now, replacement or not',
+		'  --supersede <version>    name the release that replaces a withdrawn one (withdrawing it',
+		'                           first if it is still listed); needs --by',
+		'  --by <version>           the replacement (optional with --withdraw)',
+		'  --reason "..."           why it was withdrawn (required with --withdraw)',
 		'  --sign                   gpg sign SHA256SUMS',
 		'  --base-manifest PATH     the stable manifest a development delta is against',
 		'  --date YYYY-MM-DD        override the release date',
@@ -844,28 +847,48 @@ function main() {
 	var opts = parseArgs(process.argv.slice(2));
 	if (!opts.mode) { usage(); die('choose --stable <version> or --dev'); }
 
-	if (opts.mode === 'supersede') {
+	if (opts.mode === 'supersede' || opts.mode === 'withdraw') {
 		// Withdrawing a published release. The artifact is not touched: its
 		// bytes are signed and a board verifies them, so the withdrawal goes
-		// in the index, which is the regenerated part.
-		if (!opts.version) die('--supersede needs the version being withdrawn');
-		if (!opts.supersededBy) die('--supersede needs --by <version>, so a board has somewhere to go');
+		// in the index, which is the regenerated part. It takes effect as soon
+		// as the index is published, on every board and bootstrap, including
+		// ones that predate withdrawal: the release is simply no longer listed.
+		var flag = '--' + opts.mode;
+		if (!opts.version) die(flag + ' needs the version being withdrawn');
+		if (opts.mode === 'supersede' && !opts.supersededBy) {
+			die('--supersede needs --by <version>. To withdraw a release before its replacement exists, use --withdraw');
+		}
+		if (opts.mode === 'withdraw' && !opts.reason) {
+			die('--withdraw needs --reason "...": a board running the release is told it, and nothing else says why');
+		}
 		if (opts.version === opts.supersededBy) die('a release cannot supersede itself');
 
 		var chan = channelOf(opts.version);
 		var idxPath = path.join(opts.output, indexName(chan));
 		if (!fs.existsSync(idxPath)) die('no ' + indexName(chan) + ' in ' + opts.output);
+		var idx = parseIndex(fs.readFileSync(idxPath, 'utf8'));
 
-		var idx = readJSON(idxPath);
-		var replacement = (idx.releases || []).find(function (r) { return r.version === opts.supersededBy; });
-		if (!replacement) {
-			die(opts.supersededBy + ' is not in the ' + chan + ' index. Cut it first: withdrawing a ' +
-				'release before its replacement exists leaves every board with nowhere to go.');
+		if (opts.supersededBy) {
+			// A typo here would point every board running the withdrawn
+			// release at a version that does not exist.
+			var byChan = channelOf(opts.supersededBy);
+			var byIdx = byChan === chan ? idx : (fs.existsSync(path.join(opts.output, indexName(byChan)))
+				? parseIndex(fs.readFileSync(path.join(opts.output, indexName(byChan)), 'utf8')) : null);
+			if (!byIdx || !findRelease(byIdx, opts.supersededBy)) {
+				die(opts.supersededBy + ' is not a listed release. Cut it first, or --withdraw without --by until it exists.');
+			}
 		}
 
-		var updated = markSuperseded(idx, opts.version, opts.supersededBy, opts.reason || null);
+		var updated;
+		try {
+			updated = withdrawRelease(idx, opts.version, { reason: opts.reason || null, by: opts.supersededBy || null });
+		} catch (e) {
+			die(e.message);
+		}
+		var entry = findWithdrawn(updated, opts.version);
+		var said = 'withdrew ' + opts.version + (entry.superseded_by ? ' in favour of ' + entry.superseded_by : ', no replacement yet');
 		if (opts.dryRun) {
-			info('dry run: would withdraw ' + opts.version + ' in favour of ' + opts.supersededBy);
+			info('dry run: would have ' + said);
 			return;
 		}
 
@@ -884,9 +907,9 @@ function main() {
 			ok('signing with ' + formatFingerprint(opts.signKey));
 		}
 
-		fs.writeFileSync(idxPath, JSON.stringify(updated, null, 2) + '\n');
-		ok('withdrew ' + opts.version + ' in favour of ' + opts.supersededBy);
-		if (opts.reason) info('reason: ' + opts.reason);
+		fs.writeFileSync(idxPath, serialiseIndex(updated));
+		ok(said);
+		if (entry.withdrawn_reason) info('reason: ' + entry.withdrawn_reason);
 
 		// The index is covered by SHA256SUMS, so the sums and their signature
 		// have to be rebuilt or every published file fails verification.

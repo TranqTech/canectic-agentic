@@ -60,7 +60,10 @@ function sha256(buf) {
 function publishedVersions(indexTexts) {
 	var seen = new Set();
 	for (var text of indexTexts) {
-		for (var r of parseIndex(text).releases) {
+		// Withdrawn releases stay published, notes and all: a board running
+		// one is told why, and the notes are where the why is written down.
+		var idx = parseIndex(text);
+		for (var r of idx.releases.concat(idx.withdrawn || [])) {
 			if (r && r.version) seen.add(r.version);
 		}
 	}

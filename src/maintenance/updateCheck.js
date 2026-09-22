@@ -92,7 +92,11 @@ function mergeIndexes(channel, fromHttp, fromFtn) {
 	for (var r of (fromHttp.releases || [])) { seen.add(r.version); releases.push(r); }
 	for (var f of (fromFtn.releases || [])) { if (!seen.has(f.version)) releases.push(f); }
 
-	return { index_version: 1, channel: channel, updated: new Date().toISOString(), releases: releases };
+	// Withdrawals are only ever published over HTTP; the file echo has no index.
+	return {
+		index_version: 1, channel: channel, updated: new Date().toISOString(),
+		releases: releases, withdrawn: (fromHttp && fromHttp.withdrawn) || []
+	};
 }
 
 /**

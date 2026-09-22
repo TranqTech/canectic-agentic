@@ -2,6 +2,21 @@
 
 ## Pending (since v0.9.8a)
 
+### Updates
+
+- Fix: **an update could stop partway through if anyone had the board open in a web browser.** While the BBS is stopped, the update answers on the board's web port itself, and a browser tab trying to reconnect to the board could make the update itself stop, in the middle, leaving the BBS stopped and the Update page still saying an update was running. Updates into 0.9.8a were affected. An update always runs the updater of the release it installs, so the update into this release is not.
+- **An update that fails unexpectedly now says so.** A visitor's browser dropping a connection is ignored and the update carries on; any other unexpected error is recorded against the step the update was on, with whether the BBS was left stopped, before the updater exits. The Update page and `node src/tools/update.js --status` then show it failed, where before a run that had died went on showing as running. Two quieter ways for an update to vanish without a record, both in how it starts itself, are closed as well.
+- Fix: **the Update page offered the version you had just updated to.** It showed the result of the last check, which ran before the update, until you pressed Check now. It now compares what that check found with what is running, and says when the check is older than the board. The update itself also refuses a release that is not newer than the one running, so a page left open cannot reinstall it, and `node src/tools/update.js` on a board that is up to date says so instead of reporting that it cannot move yet.
+
+### Installation
+
+- **The bootstrap will not install a withdrawn release.** Asked for one by name, it stops and says why the release was withdrawn and what replaces it. Left to choose, it takes the newest release that has not been withdrawn.
+
+### Release Engineering
+
+- **A release can be withdrawn the moment a fault is found, before its fix exists.** `node scripts/release.mjs --withdraw <version> --reason "..."` takes it out of the channel index's release list into a separate withdrawn list, so no board and no bootstrap is offered it again, including ones written before withdrawal existed: those take the first release listed, and marking an entry in place (the format used once, for 0.9.7a) did nothing for them. `--supersede <version> --by <replacement>` names the fix once it is cut. An index still in the old format is converted the next time it is written. See "Withdrawing a release" in `docs/reference/RELEASE_PROCESS.md`.
+- Fix: **`--supersede --sign` signed nothing and said it had.** It returned before the step that chooses the signing key, so it rewrote `SHA256SUMS`, removed the old signature and printed "rewritten and signed". A withdrawal now proves it can sign before it changes anything.
+
 ## v0.9.8a (2026-09-22)
 
 ### Upgrade Notes

@@ -140,14 +140,39 @@ if [[ -z "$VERSION" ]]; then
     INDEX="$(fetch_text "index-${CHANNEL}.json")"
     # The index is newest first, so the first version is the one we want. Parsed
     # with node rather than with sed: this is a JSON document and the release
-    # tooling that writes it is entitled to add fields.
+    # tooling that writes it is entitled to add fields. A withdrawn release is
+    # not listed at all; the skip is for the first withdrawal format, which
+    # left the entry in place and marked it.
     VERSION="$(printf '%s' "$INDEX" | node -e '
         var s = ""; process.stdin.on("data", d => s += d).on("end", () => {
             var i = JSON.parse(s);
-            if (!i.releases || !i.releases.length) { process.exit(3); }
-            process.stdout.write(i.releases[0].version);
+            var r = (i.releases || []).filter(function (x) { return x && !x.superseded_by; });
+            if (!r.length) { process.exit(3); }
+            process.stdout.write(r[0].version);
         });
     ')" || die "the $CHANNEL channel has no releases published"
+else
+    # A version asked for by name is still looked up, so a withdrawn release is
+    # refused rather than installed. No index (an artifact directory copied by
+    # hand) is not a reason to refuse anything.
+    NAMED_CHANNEL="$CHANNEL"
+    [[ "$VERSION" =~ \.[0-9]{8}(\.[0-9]+)?$ ]] && NAMED_CHANNEL="development"
+    INDEX="$(fetch_text "index-${NAMED_CHANNEL}.json" 2>/dev/null)" || INDEX=""
+    if [[ -n "$INDEX" ]]; then
+        WITHDRAWN="$(printf '%s' "$INDEX" | NAMED="$VERSION" node -e '
+            var s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+                var i; try { i = JSON.parse(s); } catch (e) { return; }
+                var v = process.env.NAMED;
+                var w = (i.withdrawn || []).filter(function (x) { return x && x.version === v; })[0] ||
+                    (i.releases || []).filter(function (x) { return x && x.version === v && x.superseded_by; })[0];
+                if (!w) return;
+                var why = w.withdrawn_reason || w.superseded_reason;
+                process.stdout.write(v + " has been withdrawn" + (why ? " (" + why + ")" : "") +
+                    (w.superseded_by ? "; install " + w.superseded_by + " instead" : ""));
+            });
+        ')"
+        [[ -n "$WITHDRAWN" ]] && die "$WITHDRAWN"
+    fi
 fi
 
 ok "release $VERSION"

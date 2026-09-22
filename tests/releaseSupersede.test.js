@@ -1,5 +1,8 @@
 // tests/releaseSupersede.test.js: withdrawing a release, and its signature.
 //
+// A withdrawn release moves out of the index's `releases` into `withdrawn`,
+// so boards and bootstraps that know nothing of withdrawal stop seeing it.
+//
 // `release.mjs --supersede ... --sign` returned before the step that chooses
 // the signing key, so it handed SHA256SUMS no key, which reads as an unsigned
 // build: the old SHA256SUMS.asc was removed, nothing was signed, and the script
@@ -84,9 +87,61 @@ describe('withdrawing a release', function () {
 		var said = r.stdout + r.stderr;
 		assert.strictEqual(r.status, 0, said);
 		var idx = JSON.parse(fs.readFileSync(path.join(out, 'index-stable.json'), 'utf8'));
-		assert.strictEqual(idx.releases[1].superseded_by, '0.9.8a');
+		assert.deepStrictEqual(idx.releases.map(function (x) { return x.version; }), ['0.9.8a'],
+			'a withdrawn release is no longer listed, so no board or bootstrap can take it');
+		assert.strictEqual(idx.withdrawn[0].version, '0.9.7a');
+		assert.strictEqual(idx.withdrawn[0].superseded_by, '0.9.8a');
+		assert.strictEqual(idx.withdrawn[0].withdrawn_reason, 'the updater fails');
 		assert.ok(/UNSIGNED/.test(said), said);
 		assert.ok(!fs.existsSync(path.join(out, 'SHA256SUMS.asc')), 'a signature over the old list cannot stay');
+	});
+
+	function run(args) {
+		return spawnSync(process.execPath, [SCRIPT].concat(args, ['--output', out]), {
+			encoding: 'utf8', timeout: 45000,
+			env: Object.assign({}, process.env, { GNUPGHOME: home, GPG_TTY: '' })
+		});
+	}
+
+	// The point of --withdraw: a fault found in a published release is acted
+	// on at once, not after its fix has been cut.
+	it('withdraws a release before any replacement exists', function () {
+		var r = run(['--withdraw', '0.9.8a', '--reason', 'updater crashes']);
+		assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+		var idx = JSON.parse(fs.readFileSync(path.join(out, 'index-stable.json'), 'utf8'));
+		assert.deepStrictEqual(idx.releases.map(function (x) { return x.version; }), ['0.9.7a']);
+		assert.strictEqual(idx.withdrawn[0].version, '0.9.8a');
+		assert.strictEqual(idx.withdrawn[0].superseded_by, null);
+		assert.ok(/no replacement yet/.test(r.stdout), r.stdout);
+	});
+
+	it('names the replacement for an already withdrawn release with --supersede', function () {
+		assert.strictEqual(run(['--withdraw', '0.9.7a', '--reason', 'the updater fails']).status, 0);
+		var r = run(['--supersede', '0.9.7a', '--by', '0.9.8a']);
+		assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+		var idx = JSON.parse(fs.readFileSync(path.join(out, 'index-stable.json'), 'utf8'));
+		assert.strictEqual(idx.withdrawn[0].superseded_by, '0.9.8a');
+		assert.strictEqual(idx.withdrawn[0].withdrawn_reason, 'the updater fails', 'the reason is kept');
+	});
+
+	it('refuses --withdraw without a reason', function () {
+		var r = run(['--withdraw', '0.9.8a']);
+		assert.notStrictEqual(r.status, 0);
+		assert.ok(/--reason/.test(r.stdout + r.stderr), r.stdout + r.stderr);
+	});
+
+	it('refuses --supersede without --by, and points at --withdraw', function () {
+		var r = run(['--supersede', '0.9.8a', '--reason', 'x']);
+		assert.notStrictEqual(r.status, 0);
+		assert.ok(/--withdraw/.test(r.stdout + r.stderr), r.stdout + r.stderr);
+	});
+
+	it('refuses a replacement that is not a listed release', function () {
+		var r = run(['--withdraw', '0.9.7a', '--reason', 'x', '--by', '0.9.9a']);
+		assert.notStrictEqual(r.status, 0);
+		assert.ok(/not a listed release/.test(r.stdout + r.stderr), r.stdout + r.stderr);
+		var idx = JSON.parse(fs.readFileSync(path.join(out, 'index-stable.json'), 'utf8'));
+		assert.strictEqual(idx.releases.length, 2, 'nothing was changed');
 	});
 });
 

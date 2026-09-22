@@ -196,7 +196,7 @@ describe('serialise and parse', function () {
 // board verifies; rewriting it would invalidate a signature over bytes that
 // should never change.
 
-describe('markSuperseded', function () {
+describe('withdrawing a release', function () {
 	var mod = null;
 
 	before(async function () {
@@ -207,44 +207,101 @@ describe('markSuperseded', function () {
 		return {
 			channel: 'stable',
 			releases: [
-				{ version: '0.9.8a', artifact: 'a.zip' },
-				{ version: '0.9.7a', artifact: 'b.zip' },
-				{ version: '0.9.6a', artifact: 'c.zip' },
+				{ version: '0.9.8a', artifact: 'a.zip', migrations: ['0006'] },
+				{ version: '0.9.7a', artifact: 'b.zip', migrations: ['0006'] },
+				{ version: '0.9.6a', artifact: 'c.zip', migrations: [] },
 			],
 		};
 	}
 
-	it('marks the named release and leaves the others alone', function () {
-		var out = mod.markSuperseded(index(), '0.9.7a', '0.9.8a', 'updater fails');
-		var byVersion = {};
-		for (var r of out.releases) byVersion[r.version] = r;
+	// The reason for the separate list. Every board on a release before 0.9.8a,
+	// and every bootstrap, takes the first entry in `releases` whatever it
+	// carries, so only an entry that is not there cannot be offered.
+	it('takes the release out of the list every board and bootstrap reads', function () {
+		var out = mod.withdrawRelease(index(), '0.9.8a', { reason: 'updater crashes' });
+		assert.deepStrictEqual(out.releases.map(function (r) { return r.version; }), ['0.9.7a', '0.9.6a']);
+		assert.strictEqual(out.releases[0].version, '0.9.7a', 'what a pre-0.9.8a board or a bootstrap now takes');
+	});
 
-		assert.strictEqual(byVersion['0.9.7a'].superseded_by, '0.9.8a');
-		assert.strictEqual(byVersion['0.9.7a'].superseded_reason, 'updater fails');
-		assert.strictEqual(byVersion['0.9.8a'].superseded_by, undefined);
-		assert.strictEqual(byVersion['0.9.6a'].superseded_by, undefined);
+	it('works before any replacement exists', function () {
+		var out = mod.withdrawRelease(index(), '0.9.8a', { reason: 'updater crashes' });
+		var w = mod.findWithdrawn(out, '0.9.8a');
+		assert.strictEqual(w.withdrawn_reason, 'updater crashes');
+		assert.strictEqual(w.superseded_by, null);
+		assert.ok(w.withdrawn_at);
+		assert.deepStrictEqual(w.migrations, ['0006'], 'boards that took it applied these');
+		assert.strictEqual(w.artifact, 'a.zip');
+	});
+
+	it('names the replacement later, keeping the reason and when it was withdrawn', function () {
+		var first = mod.withdrawRelease(index(), '0.9.8a', { reason: 'updater crashes', at: new Date('2026-09-22T09:00:00Z') });
+		var later = mod.withdrawRelease(first, '0.9.8a', { by: '0.9.9a' });
+		var w = mod.findWithdrawn(later, '0.9.8a');
+		assert.strictEqual(w.superseded_by, '0.9.9a');
+		assert.strictEqual(w.withdrawn_reason, 'updater crashes');
+		assert.strictEqual(w.withdrawn_at, '2026-09-22T09:00:00.000Z');
+		assert.strictEqual(later.withdrawn.length, 1, 'still one entry');
 	});
 
 	it('does not mutate the index it was given', function () {
 		var original = index();
-		mod.markSuperseded(original, '0.9.7a', '0.9.8a', 'x');
-		assert.strictEqual(original.releases[1].superseded_by, undefined);
+		mod.withdrawRelease(original, '0.9.7a', { reason: 'x' });
+		assert.strictEqual(original.releases.length, 3);
+		assert.strictEqual(original.withdrawn, undefined);
 	});
 
-	it('refuses a version that is not in the index', function () {
+	it('refuses a version that is in neither list', function () {
 		// Silently doing nothing would report a withdrawal that never happened.
-		assert.throws(function () { mod.markSuperseded(index(), '9.9.9a', '0.9.8a', 'x'); },
-			/no release 9\.9\.9a/);
+		assert.throws(function () { mod.withdrawRelease(index(), '9.9.9a', { reason: 'x' }); }, /no release 9\.9\.9a/);
 	});
 
-	it('keeps the reason optional', function () {
-		var out = mod.markSuperseded(index(), '0.9.7a', '0.9.8a', null);
-		assert.strictEqual(out.releases[1].superseded_by, '0.9.8a');
-		assert.strictEqual(out.releases[1].superseded_reason, null);
+	it('refuses a release superseding itself', function () {
+		assert.throws(function () { mod.withdrawRelease(index(), '0.9.8a', { by: '0.9.8a' }); }, /itself/);
 	});
 
 	it('stamps the index as updated', function () {
-		var out = mod.markSuperseded(index(), '0.9.7a', '0.9.8a', 'x');
-		assert.ok(out.updated, 'a withdrawal changes the index and should say when');
+		assert.ok(mod.withdrawRelease(index(), '0.9.7a', { reason: 'x' }).updated);
+	});
+
+	it('moves a release marked in place, the first format, into the list', function () {
+		var legacy = index();
+		legacy.updated = '2026-09-22T08:58:00.000Z';
+		legacy.releases[1].superseded_by = '0.9.8a';
+		legacy.releases[1].superseded_reason = 'the updater fails in the schema phase';
+		var out = mod.normaliseIndex(legacy);
+		assert.deepStrictEqual(out.releases.map(function (r) { return r.version; }), ['0.9.8a', '0.9.6a']);
+		var w = mod.findWithdrawn(out, '0.9.7a');
+		assert.strictEqual(w.superseded_by, '0.9.8a');
+		assert.strictEqual(w.withdrawn_reason, 'the updater fails in the schema phase');
+		assert.strictEqual(w.superseded_reason, undefined, 'one name for the reason');
+	});
+
+	it('is what parseIndex returns, so every reader sees one shape', function () {
+		var legacy = index();
+		legacy.releases[1].superseded_by = '0.9.8a';
+		var parsed = mod.parseIndex(JSON.stringify(legacy));
+		assert.ok(Array.isArray(parsed.withdrawn));
+		assert.strictEqual(mod.findWithdrawn(parsed, '0.9.7a').superseded_by, '0.9.8a');
+		assert.strictEqual(mod.findRelease(parsed, '0.9.7a'), null);
+	});
+
+	it('survives the next release being added, and will not re-use a withdrawn version', function () {
+		var out = mod.withdrawRelease(index(), '0.9.8a', { reason: 'x' });
+		var next = mod.addRelease(out, { version: '0.9.9a', released: '2026-09-22', artifact: 'd.zip', sha256: 'x', migrations: [] });
+		assert.strictEqual(next.releases[0].version, '0.9.9a');
+		assert.ok(mod.findWithdrawn(next, '0.9.8a'), 'the withdrawal must not be lost at the next cut');
+		assert.throws(function () {
+			mod.addRelease(out, { version: '0.9.8a', released: '2026-09-22', artifact: 'e.zip', sha256: 'y' });
+		}, /withdrawn/);
+	});
+
+	it('still counts a withdrawn build when asking what carried a stable\'s migrations', function () {
+		var dev = { channel: 'development', releases: [
+			{ version: '0.9.8a.20260922', base: '0.9.8a', migrations: ['0007'] },
+			{ version: '0.9.8a.20260921', base: '0.9.8a', migrations: [] }
+		] };
+		var out = mod.withdrawRelease(dev, '0.9.8a.20260922', { reason: 'x' });
+		var based = mod.releasesBasedOn(out, '0.9.8a').map(function (r) { return r.version; });
+		assert.deepStrictEqual(based, ['0.9.8a.20260921', '0.9.8a.20260922']);
 	});
 });

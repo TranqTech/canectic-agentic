@@ -165,32 +165,54 @@ tell a real change from the stamp.
 ### Withdrawing a release
 
 A release can only be found defective after it is published. By then it is
-signed, indexed, and reachable by every board that checks — so the problem is
-not naming the fix, it is that nothing could say the broken one should not be
-taken.
+signed, indexed, and reachable by every board that checks, so the thing to do
+is stop it spreading at once, not after the fix has been cut.
 
 ```bash
-node scripts/release.mjs --supersede 0.9.7a --by 0.9.8a --reason "the updater fails in the schema phase" --sign
+# The moment the fault is found. No replacement needed.
+node scripts/release.mjs --withdraw 0.9.8a --reason "the updater crashes if a browser is open on the board" --sign
+node scripts/publish.mjs
+
+# Once the fix is cut and in the index, point boards at it.
+node scripts/release.mjs --supersede 0.9.8a --by 0.9.9a --sign
 node scripts/publish.mjs
 ```
 
-Cut the replacement **first**. The command refuses otherwise, because
-withdrawing a release before its successor exists leaves every board with
-nowhere to go.
+`--withdraw` needs `--reason`: a board running the release is told it, and
+nothing else says why. `--by` is optional there and names the replacement if it
+already exists. `--supersede` needs `--by`, and works on a release that is
+still listed (withdrawing it as it goes) or already withdrawn (keeping the
+original reason and time). Either refuses a `--by` that is not a listed
+release, since a typo would point every affected board at nothing.
 
-The mark lands in the channel index, not in the release's own metadata sidecar.
-The sidecar describes the archive, is covered by `SHA256SUMS`, and is what a
-board verifies on download; rewriting it would invalidate a signature over
-bytes that must never change. The index is the regenerated part, which is why a
-withdrawal belongs there — and why `SHA256SUMS` has to be rebuilt and re-signed
-afterwards, which the command does.
+**A withdrawal takes the release out of the index's `releases` list** and puts
+it in a `withdrawn` list with `withdrawn_at`, `withdrawn_reason` and
+`superseded_by`. That is what makes it work on boards that have never heard of
+withdrawal: every update check before 0.9.8a, and every bootstrap ever
+published, takes the first entry in `releases` whatever it says, so the first
+format (a mark on the entry, used once for 0.9.7a) protected nobody on an older
+release. An index still in that format is converted by whatever new code reads
+it next, and a withdrawn version can never be re-used by a later cut.
 
-`updateVerdict` then honours it two ways, and both matter:
+The withdrawal lands in the channel index, not in the release's own metadata
+sidecar. The sidecar describes the archive, is covered by `SHA256SUMS`, and is
+what a board verifies on download; rewriting it would invalidate a signature
+over bytes that must never change. The index is the regenerated part, which is
+why a withdrawal belongs there, and why `SHA256SUMS` is rebuilt and re-signed
+afterwards. With `--sign`, the command proves it can sign before it touches
+anything, so a run that cannot sign leaves the directory as it was.
 
-- a withdrawn release is **not a candidate**, so a board is steered past it
-- a board **running** a withdrawn release is told so, with the reason, even when
-  no replacement is available yet — that is the difference between "you are
-  current" and "you are on a release that was pulled"
+What reads the `withdrawn` list:
+
+- the update check tells a board **running** a withdrawn release so, with the
+  reason, even before a replacement exists. That is the difference between
+  "you are current" and "you are on a release that was pulled"
+- asking for a withdrawn release by name (the Admin UI, `update.js --version`,
+  `bootstrap.sh --version`) is refused with the reason and the replacement,
+  rather than "not published"
+- the publish script keeps its notes on the site
+- the release-time migration coverage check still counts a withdrawn
+  development build, because boards that took it applied its migrations
 
 Nothing is deleted from the release host. The artifact stays downloadable,
 because a development build may be based on it and because removing a file

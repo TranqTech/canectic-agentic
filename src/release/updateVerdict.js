@@ -92,12 +92,12 @@ function blockersFor(opts) {
 		});
 	}
 
-	if (release.superseded_by) {
+	if (release.superseded_by || release.withdrawn_at) {
+		var why = release.withdrawn_reason || release.superseded_reason;
 		blockers.push({
 			kind: BLOCKER_WITHDRAWN,
-			detail: release.version + ' has been withdrawn' +
-				(release.superseded_reason ? ' (' + release.superseded_reason + ')' : '') +
-				'; ' + release.superseded_by + ' replaces it'
+			detail: release.version + ' has been withdrawn' + (why ? ' (' + why + ')' : '') +
+				(release.superseded_by ? '; ' + release.superseded_by + ' replaces it' : '')
 		});
 	}
 
@@ -172,8 +172,15 @@ function evaluateChannel(opts) {
 	// available: it is the difference between "you are current" and "you are
 	// on a release that was pulled".
 	var withdrawn = null;
+	for (var l of (index && index.withdrawn) || []) {
+		if (l && l.version === opts.current) {
+			withdrawn = { by: l.superseded_by || null, reason: l.withdrawn_reason || null };
+			break;
+		}
+	}
+	// The first format marked a withdrawal inside `releases`.
 	for (var w of releases) {
-		if (w.version === opts.current && w.superseded_by) {
+		if (!withdrawn && w.version === opts.current && w.superseded_by) {
 			withdrawn = { by: w.superseded_by, reason: w.superseded_reason || null };
 			break;
 		}
