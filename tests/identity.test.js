@@ -26,7 +26,7 @@
 import assert from 'assert';
 import {
 	IDENTITY_FILENAME, DIZ_FILENAME, DIZ_WIDTH, DIZ_LINES,
-	withoutSelfChecksum, serialiseIdentity, parseIdentity, buildFileIdDiz, firstSentence
+	withoutSelfChecksum, serialiseIdentity, parseIdentity, buildFileIdDiz
 } from '../src/release/identity.js';
 import { buildMetadata } from '../src/release/metadata.js';
 
@@ -189,41 +189,22 @@ describe('FILE_ID.DIZ', function () {
 		assert.ok(/not installable alone/.test(diz), diz);
 	});
 
-	it('surfaces the warnings, which is what somebody browsing an echo wants', function () {
-		// Knowing a release deprecates a setting is worth more before the
-		// download than after it.
+	it('describes the software and carries no upgrade notices', function () {
+		// A DIZ is what a BBS listing shows. Upgrade notices belong in the
+		// release notes and the metadata, whatever their level.
 		var diz = buildFileIdDiz(meta({
-			notices: [{ level: 'warning', text: 'allow_netmail_relay is deprecated. More detail here.' }]
+			notices: [
+				{ level: 'critical', text: 'Something critical. More detail here.' },
+				{ level: 'warning', text: 'allow_netmail_relay is deprecated. More detail here.' },
+				{ level: 'info', text: 'Something mildly interesting.' }
+			]
 		}));
-		assert.ok(/Upgrading needs attention/.test(diz), diz);
-		assert.ok(/allow_netmail_relay/.test(diz), diz);
-	});
-
-	it('leaves informational notices out, since the space is not there', function () {
-		var diz = buildFileIdDiz(meta({ notices: [{ level: 'info', text: 'Something mildly interesting.' }] }));
-		assert.ok(!/Upgrading needs attention/.test(diz), diz);
+		assert.strictEqual(diz, buildFileIdDiz(meta()), diz);
+		assert.ok(!/Upgrading|critical|allow_netmail_relay|interesting/.test(diz), diz);
 	});
 
 	it('does not end in blank lines, which read as a broken description', function () {
 		var diz = buildFileIdDiz(meta());
 		assert.ok(!/\n\n$/.test(diz), JSON.stringify(diz.slice(-5)));
-	});
-});
-
-describe('firstSentence', function () {
-
-	it('takes the claim and leaves the explanation', function () {
-		assert.strictEqual(firstSentence('A thing changed. Here is why it changed.'), 'A thing changed');
-	});
-
-	it('truncates visibly rather than silently', function () {
-		var out = firstSentence('x'.repeat(100));
-		assert.ok(out.length <= DIZ_WIDTH);
-		assert.ok(/\.\.\.$/.test(out), out);
-	});
-
-	it('copes with no sentence at all', function () {
-		assert.strictEqual(firstSentence(''), '');
-		assert.strictEqual(firstSentence(null), '');
 	});
 });

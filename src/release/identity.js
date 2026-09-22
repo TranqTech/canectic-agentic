@@ -122,9 +122,9 @@ function fit(line) {
  * the previous one, which is the single most common thing wrong with a BBS
  * archive's description.
  *
- * The upgrade notices are the part worth the space: somebody browsing a file
- * echo deciding whether to take this release wants to know it deprecates a
- * setting before they download it, not after.
+ * A description of the software and nothing else: it is what a BBS listing
+ * shows. Upgrade notices belong in the release notes and the metadata, and a
+ * file area listing is not where a sysop reads them.
  */
 function buildFileIdDiz(meta, opts) {
 	var o = opts || {};
@@ -144,32 +144,12 @@ function buildFileIdDiz(meta, opts) {
 			(meta.node_min ? '. Needs Node ' + meta.node_min : '')));
 	}
 
-	var notices = (meta.notices || []).filter(function (n) {
-		return n.level === 'warning' || n.level === 'critical';
-	});
-	if (notices.length) {
-		lines.push(fit(''));
-		lines.push(fit('Upgrading needs attention:'));
-		for (var n of notices) {
-			if (lines.length >= DIZ_LINES - 1) break;
-			lines.push(fit('- ' + firstSentence(n.text)));
-		}
-	}
-
 	while (lines.length < DIZ_LINES && o.pad) lines.push('');
 	if (lines.length > DIZ_LINES) lines = lines.slice(0, DIZ_LINES);
 
 	// Trailing blanks read as a broken description in a lister.
 	while (lines.length && lines[lines.length - 1] === '') lines.pop();
 	return lines.join('\n') + '\n';
-}
-
-/** The claim, without the explanation. A DIZ has no room for the second. */
-function firstSentence(text) {
-	var t = String(text || '').trim();
-	var stop = t.search(/\.\s/);
-	var s = stop === -1 ? t : t.substring(0, stop);
-	return s.length > DIZ_WIDTH - 2 ? s.substring(0, DIZ_WIDTH - 5) + '...' : s;
 }
 
 export {
@@ -180,6 +160,5 @@ export {
 	withoutSelfChecksum,
 	serialiseIdentity,
 	parseIdentity,
-	buildFileIdDiz,
-	firstSentence
+	buildFileIdDiz
 };
