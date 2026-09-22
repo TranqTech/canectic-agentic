@@ -167,6 +167,27 @@ function applyPlan(opts) {
 		manifestWritten = true;
 	}
 
+	// MANIFEST.asc, the release signature over MANIFEST, has to travel with it.
+	// Installs never got one, so a board kept whatever signature it was first
+	// installed with, or none, next to a MANIFEST it no longer described. An
+	// unsigned release (every development build) removes the old one rather
+	// than leaving a signature over the previous MANIFEST beside the new one.
+	// Both go through the backup, so a rollback puts things back as they were.
+	var SIG = MANIFEST_FILENAME + '.asc';
+	var stagedSig = path.join(stagedRoot, SIG);
+	var installedSig = path.join(targetRoot, SIG);
+	if (manifestWritten) {
+		if (fs.existsSync(stagedSig)) {
+			if (backUp(targetRoot, opts.backupDir, SIG)) backedUp.push(SIG);
+			placeFile(stagedSig, installedSig, '644');
+			written.push(SIG);
+		} else if (fs.existsSync(installedSig)) {
+			if (backUp(targetRoot, opts.backupDir, SIG)) backedUp.push(SIG);
+			fs.unlinkSync(installedSig);
+			removed.push(SIG);
+		}
+	}
+
 	if (!dryRun && opts.onProgress) {
 		// Deliberately no alogger here. This module runs on the INSTALL path,
 		// which happens before npm install has ever run, so anything it imports

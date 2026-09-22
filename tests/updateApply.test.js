@@ -438,3 +438,68 @@ describe('pruneEmptyDirs', function () {
 		assert.strictEqual(fs.existsSync(path.join(root, 'src')), true);
 	});
 });
+
+describe('the release signature beside MANIFEST', function () {
+	// Installs never received MANIFEST.asc, so a board kept whatever signature
+	// it was first installed with, or none, beside a MANIFEST it no longer
+	// described. Found while rehearsing updates on 2026-09-21.
+	var SIG = MANIFEST_FILENAME + '.asc';
+
+	function stagedTree(signed) {
+		var root = tmpDir('staged');
+		writeTree(root, { 'src/a.js': 'NEW' });
+		var m = buildManifest({ root: root, files: [{ path: 'src/a.js', category: 'code' }], version: '0.9.8a' });
+		fs.writeFileSync(path.join(root, MANIFEST_FILENAME), serialiseManifest(m));
+		if (signed) fs.writeFileSync(path.join(root, SIG), '-----BEGIN PGP SIGNATURE-----\nnew\n');
+		return { root: root, manifest: m };
+	}
+
+	function installWith(oldSig) {
+		var install = tmpDir('install');
+		writeTree(install, { 'src/a.js': 'OLD' });
+		var old = buildManifest({ root: install, files: [{ path: 'src/a.js', category: 'code' }], version: '0.9.7a' });
+		fs.writeFileSync(path.join(install, MANIFEST_FILENAME), serialiseManifest(old));
+		if (oldSig) fs.writeFileSync(path.join(install, SIG), '-----BEGIN PGP SIGNATURE-----\nold\n');
+		return { root: install, manifest: old };
+	}
+
+	function apply(staged, install) {
+		var plan = buildApplyPlan({ target: staged.manifest, local: install.manifest, installed: install.manifest });
+		var backupDir = tmpDir('backup');
+		var result = applyPlan({ plan: plan, stagedRoot: staged.root, targetRoot: install.root, backupDir: backupDir });
+		return { result: result, backupDir: backupDir };
+	}
+
+	function sig(root) {
+		var p = path.join(root, SIG);
+		return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+	}
+
+	it('lands the new release signature with the new MANIFEST', function () {
+		var install = installWith(true);
+		apply(stagedTree(true), install);
+		assert.ok(/new/.test(sig(install.root)), 'the board must carry the signature over the MANIFEST it now has');
+	});
+
+	it('removes a signature over the previous MANIFEST when the new release is unsigned', function () {
+		var install = installWith(true);
+		var a = apply(stagedTree(false), install);
+		assert.strictEqual(sig(install.root), null, 'a stale signature beside a new MANIFEST fails to verify');
+		assert.ok(a.result.removed.indexOf(SIG) !== -1);
+	});
+
+	it('puts the old signature back on rollback', function () {
+		var install = installWith(true);
+		var a = apply(stagedTree(false), install);
+		rollback({ backupDir: a.backupDir, targetRoot: install.root, result: a.result });
+		assert.ok(/old/.test(sig(install.root)));
+	});
+
+	it('takes a signature away on rollback when the board had none before', function () {
+		var install = installWith(false);
+		var a = apply(stagedTree(true), install);
+		assert.ok(sig(install.root));
+		rollback({ backupDir: a.backupDir, targetRoot: install.root, result: a.result });
+		assert.strictEqual(sig(install.root), null);
+	});
+});
