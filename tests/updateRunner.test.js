@@ -26,7 +26,7 @@ import { buildManifest, serialiseManifest, MANIFEST_FILENAME } from '../src/rele
 import { newRun } from '../src/release/updatePhases.js';
 import * as runStore from '../src/maintenance/updateRunStore.js';
 import { backupDir } from '../src/maintenance/updateLayout.js';
-import { runUpdate, ROLLBACK_SAFE } from '../src/maintenance/updateRunner.js';
+import { runUpdate, ROLLBACK_SAFE, manualActionsFrom } from '../src/maintenance/updateRunner.js';
 
 var roots = [];
 function tmp(tag) {
@@ -115,6 +115,37 @@ function phase(state, name) {
 function read(target, rel) {
 	return fs.readFileSync(path.join(target, rel), 'utf8');
 }
+
+// Undermine, updated from 0.9.6a with no MANIFEST, was told "every changed
+// data file was kept as yours" when not one had been.
+describe('an installation with no MANIFEST', function () {
+
+	it('says nothing about kept files when none were kept', async function () {
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([]) });
+		assert.strictEqual(state.status, 'complete', state.error || '');
+		assert.ok(!state.warnings.some(function (w) { return /had no MANIFEST/.test(w); }), state.warnings.join('\n'));
+	});
+
+	it('says how many data files it kept when some differed', async function () {
+		var s = scenario({
+			installExtra: { 'config/x.json': '{"mine":true}' },
+			stagedExtra: { 'config/x.json': '{"shipped":true}' }
+		});
+		// Re-describe the staged tree with config/x.json as a data file.
+		var files = ['package.json', 'src/a.js', 'src/added.js', 'config/x.json'].map(function (p) {
+			return { path: p, category: p === 'config/x.json' ? 'data' : 'code' };
+		});
+		fs.writeFileSync(path.join(s.stagedRoot, MANIFEST_FILENAME),
+			serialiseManifest(buildManifest({ root: s.stagedRoot, files: files, version: '0.9.8a' })));
+		var state = await run({ instructions: s.instructions, exec: execStub([]) });
+		assert.strictEqual(state.status, 'complete', state.error || '');
+		assert.strictEqual(read(s.target, 'config/x.json'), '{"mine":true}', 'kept, since it may be theirs');
+		var w = state.warnings.filter(function (x) { return /had no MANIFEST/.test(x); })[0];
+		assert.ok(w && /1 data file\(s\)/.test(w), state.warnings.join('\n'));
+		assert.ok(state.warnings.some(function (x) { return /kept your config\/x\.json/.test(x); }), 'and names it');
+	});
+});
 
 describe('the whole sequence', function () {
 
@@ -658,5 +689,56 @@ describe('the release signature', function () {
 		var s = scenario();
 		var state = await run({ instructions: s.instructions, exec: execStub([]), verifySignature: sigAs('unsigned') });
 		assert.strictEqual(state.status, 'complete');
+	});
+});
+
+// Undermine went from 0.9.6a to 0.9.9a and was told "COMPLETE", with the
+// MSGID split still pending: dbmigrations said ACTION NEEDED in the log and
+// nothing else did. The text below is what it printed there.
+var UNDERMINE_MIGRATIONS = [
+	'    --- Migrations (post-schema) ---',
+	'    normalised 0 row(s) across 0 of 108 table(s)',
+	'      applied: 0006-normalise-body-text',
+	'  ACTION NEEDED: 0002-msgid-tuple-split',
+	'  Split legacy "address serial" MSGIDs into the msg_id / msg_orig_addr tuple',
+	'',
+	'      node src/tools/maintenance.js --fix-msgids --dry-run   (report only)',
+	'      node src/tools/maintenance.js --fix-msgids             (repair)',
+	''
+].join('\n');
+
+describe('manual migrations an update does not run', function () {
+
+	it('reads what dbmigrations reported', function () {
+		var acts = manualActionsFrom(UNDERMINE_MIGRATIONS);
+		assert.strictEqual(acts.length, 1);
+		assert.strictEqual(acts[0].id, '0002-msgid-tuple-split');
+		assert.ok(/address serial/.test(acts[0].description), acts[0].description);
+		assert.deepStrictEqual(acts[0].commands, [
+			'node src/tools/maintenance.js --fix-msgids --dry-run (report only)',
+			'node src/tools/maintenance.js --fix-msgids (repair)'
+		]);
+	});
+
+	it('finds nothing when nothing is pending', function () {
+		assert.deepStrictEqual(manualActionsFrom('  Nothing pending.\n'), []);
+		assert.deepStrictEqual(manualActionsFrom(''), []);
+		assert.deepStrictEqual(manualActionsFrom(undefined), []);
+	});
+
+	it('reads several in a row', function () {
+		var two = UNDERMINE_MIGRATIONS + '\n  ACTION NEEDED: 0009-other\n  Something else\n\n      node x.js\n';
+		assert.deepStrictEqual(manualActionsFrom(two).map(function (a) { return a.id; }),
+			['0002-msgid-tuple-split', '0009-other']);
+	});
+
+	it('says so in the run, where the Update page and --status show it', async function () {
+		var s = scenario();
+		var exec = function (command) { return /dbmigrations/.test(command) ? UNDERMINE_MIGRATIONS : ''; };
+		var state = await run({ instructions: s.instructions, exec: exec });
+		assert.strictEqual(state.status, 'complete', state.error || '');
+		var w = state.warnings.filter(function (x) { return /action needed/.test(x); })[0];
+		assert.ok(w, state.warnings.join('\n'));
+		assert.ok(/0002-msgid-tuple-split/.test(w) && /--fix-msgids --dry-run/.test(w), w);
 	});
 });

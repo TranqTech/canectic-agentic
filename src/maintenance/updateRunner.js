@@ -280,9 +280,17 @@ async function runUpdate(opts) {
 			log('keeping your ' + w.path + ' (' + w.reason + ')');
 			persist(addWarning(state, 'kept your ' + w.path + ': ' + w.reason));
 		}
-		if (!install.installed) {
-			persist(addWarning(state, 'this installation had no ' + MANIFEST_FILENAME +
-				', so every changed data file was kept as yours'));
+		// Without a MANIFEST there is no telling a sysop's edit from a file an
+		// earlier release shipped, so any data file that differs is kept. Say
+		// so only when one was: printed unconditionally, this told the sysop
+		// of a board where every file matched that files had been kept.
+		var keptBlind = (plan.counts && plan.counts.conflict) || 0;
+		if (!install.installed && keptBlind) {
+			persist(addWarning(state, 'this installation had no ' + MANIFEST_FILENAME + ', so ' + keptBlind +
+				' data file(s) that differ from the release were kept as yours (named above); ' +
+				'compare them with the release and replace any you never edited'));
+		} else if (!install.installed) {
+			log('no ' + MANIFEST_FILENAME + ' here yet; every data file matched the release, and this update records one');
 		}
 
 		// ---- backup ----------------------------------------------------
@@ -353,8 +361,17 @@ async function runUpdate(opts) {
 				persist(addWarning(state, 'database dumped to ' + taken.file +
 					' (' + Math.round(taken.bytes / 1048576) + ' MB)'));
 			}
-			await exec(nodeCommand('src/tools/dbmigrations.js'), target, log);
+			var migrated = await exec(nodeCommand('src/tools/dbmigrations.js'), target, log);
 			persist(finishPhase(state, 'schema', 'declarative schema and migration ledger applied'));
+			// A migration too expensive to run unasked is reported by
+			// dbmigrations and left to the sysop. Said only in the log, a
+			// completed update read as nothing left to do; Undermine went
+			// from 0.9.6a to 0.9.9a with the MSGID split still pending.
+			for (var act of manualActionsFrom(migrated)) {
+				persist(addWarning(state, 'action needed, not run by the update: ' + act.id +
+					(act.description ? ' (' + act.description + ')' : '') +
+					(act.commands.length ? '. ' + act.commands.join('; then ') : '')));
+			}
 			// One dbmigrations run does both. Recording migrations as skipped
 			// with that reason is honest; marking it done would imply a second
 			// thing happened.
@@ -572,6 +589,44 @@ async function runUpdate(opts) {
 	}
 }
 
+/**
+ * The manual migrations dbmigrations reported as still needing a person, read
+ * from its output. dbmigrations runs as its own process, and this process
+ * cannot rely on its own database driver while node_modules is being replaced,
+ * so its report is the source. Pure.
+ *
+ *   ACTION NEEDED: 0002-msgid-tuple-split
+ *   Split legacy "address serial" MSGIDs into ...
+ *
+ *       node src/tools/maintenance.js --fix-msgids --dry-run   (report only)
+ *       node src/tools/maintenance.js --fix-msgids             (repair)
+ *
+ * @returns {Array<{id:string, description:string, commands:string[]}>}
+ */
+function manualActionsFrom(output) {
+	var lines = String(output || '').split(/\r?\n/);
+	var out = [];
+	for (var i = 0; i < lines.length; i++) {
+		var m = /ACTION NEEDED:\s*(\S+)/.exec(lines[i]);
+		if (!m) continue;
+		var act = { id: m[1], description: '', commands: [] };
+		var j = i + 1;
+		while (j < lines.length && !lines[j].trim()) j++;
+		if (j < lines.length && !/ACTION NEEDED:/.test(lines[j]) && /^\s{0,3}\S/.test(lines[j])) {
+			act.description = lines[j].trim();
+			j++;
+		}
+		while (j < lines.length && !lines[j].trim()) j++;
+		while (j < lines.length && /^\s{4,}\S/.test(lines[j])) {
+			act.commands.push(lines[j].trim().replace(/\s{2,}/g, ' '));
+			j++;
+		}
+		out.push(act);
+		i = j - 1;
+	}
+	return out;
+}
+
 /** A configured command, with a bare pm2 resolved next to the running Node. */
 function resolvedCommand(key, fallback) {
 	var configured = appConfig.get(key, fallback) || fallback;
@@ -579,6 +634,7 @@ function resolvedCommand(key, fallback) {
 }
 
 export {
+	manualActionsFrom,
 	LAST_ROLLBACKABLE_PHASE,
 	ROLLBACK_SAFE,
 	REOPEN_ON_FAILURE,
