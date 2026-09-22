@@ -31,7 +31,9 @@ function hasEscaped(env) {
 
 /**
  * Relaunch this script, detached, as a process nobody is the parent of.
- * Returns the child's pid; the caller should exit straight away after.
+ * Returns the child's pid, or null when it could not be started. The caller
+ * exits straight away after a pid, and carries on itself after a null: an
+ * updater that exits without a copy running is an update that vanished.
  *
  * stdout and stderr are inherited, which matters: the launcher pointed them at
  * the update's log file, and the copy must keep writing there.
@@ -50,8 +52,11 @@ function escapeProcessTree(opts) {
 		cwd: o.cwd || process.cwd(),
 		env: env
 	});
+	// A failed spawn reports itself as an 'error' event after this returns,
+	// and with no listener Node throws it. The pid tells the caller instead.
+	if (child && typeof child.on === 'function') child.on('error', function () {});
 	if (child && typeof child.unref === 'function') child.unref();
-	return child ? child.pid : null;
+	return child && child.pid ? child.pid : null;
 }
 
 export {

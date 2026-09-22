@@ -57,6 +57,18 @@ describe('escaping the launcher\'s process tree', function () {
 			'the copy must keep writing to the log the launcher opened: ' + JSON.stringify(logged));
 	});
 
+	// A failed spawn reports itself as an 'error' event after the call returns.
+	// Unheard, Node throws it; and the caller, told a pid, exited with no copy
+	// running, so the update vanished. Mocha fails this on the uncaught error.
+	it('returns null, and throws nothing, when the copy cannot be started', function (done) {
+		var pid = escapeProcessTree({
+			argv: ['node', '/x/applyUpdate.js', '--run', '/x/run.json'], execArgv: [],
+			execPath: '/nonexistent/canectic-node', cwd: os.tmpdir()
+		});
+		assert.strictEqual(pid, null, 'the caller must not be told a copy is running');
+		setTimeout(done, 300);
+	});
+
 	it('marks the copy so it does not escape again', function () {
 		var calls = [];
 		var pid = escapeProcessTree({

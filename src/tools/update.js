@@ -44,6 +44,7 @@ import { stagingDir, reclaimable } from '../maintenance/updateLayout.js';
 import { makeRunId, newRun } from '../release/updatePhases.js';
 import * as runStore from '../maintenance/updateRunStore.js';
 import { summarise } from '../release/updatePhases.js';
+import { installUpdaterGuard } from '../maintenance/updaterGuard.js';
 
 var RED = '\x1b[0;31m', GREEN = '\x1b[0;32m', YELLOW = '\x1b[1;33m', CYAN = '\x1b[0;36m', BOLD = '\x1b[1m', NC = '\x1b[0m';
 function info(m) { console.log(CYAN + '->' + NC + ' ' + m); }
@@ -389,10 +390,13 @@ async function main() {
 				processControl: o.processControl }
 		});
 
+		var say = function (m) { console.log('   ' + m); };
+		var unguard = installUpdaterGuard({ target: o.target, runId: runId, log: say });
 		var state = await runUpdate({
 			instructions: runStore.readRunFile(runFile),
-			log: function (m) { console.log('   ' + m); }
+			log: say
 		});
+		unguard();
 
 		console.log('');
 		reportStatus(o.target);

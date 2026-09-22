@@ -35,7 +35,7 @@ import { spawn } from 'child_process';
 import { categoryRoots } from '../release/shippedTree.js';
 import { UPDATE_DIRNAME, stagingRoot } from './updateLayout.js';
 import * as runStore from './updateRunStore.js';
-import { makeRunId, newRun } from '../release/updatePhases.js';
+import { makeRunId, newRun, failRun } from '../release/updatePhases.js';
 
 // The entry point a release must ship to be handed off to. Relative to the
 // staged tree root.
@@ -178,11 +178,20 @@ function launchUpdater(opts) {
 	var plan = handoffPlan({ stagedRoot: stagedRoot, target: target, runFile: runFile });
 
 	var out = fs.openSync(logFile, 'a');
-	var child = spawn(plan.command, plan.args, {
+	var child = (opts.spawnFn || spawn)(plan.command, plan.args, {
 		cwd: plan.cwd,
 		detached: true,
 		stdio: ['ignore', out, out],
 		env: Object.assign({}, process.env, { CANECTIC_UPDATE_RUN: runId })
+	});
+	// A spawn that fails reports it as an 'error' event after this returns.
+	// With no listener Node throws it, which would take the gateway down; and
+	// the run would sit at "running" with no updater behind it. Record it.
+	child.on('error', function (err) {
+		try {
+			var s = runStore.load(target, runId);
+			if (s) runStore.save(target, failRun(s, 'the updater could not be started: ' + err.message));
+		} catch (_) {}
 	});
 	child.unref();
 	try { fs.closeSync(out); } catch (_) {}

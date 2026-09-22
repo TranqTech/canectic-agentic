@@ -28,6 +28,7 @@ import * as runStore from '../maintenance/updateRunStore.js';
 import { runUpdate } from '../maintenance/updateRunner.js';
 import { summarise } from '../release/updatePhases.js';
 import { hasEscaped, escapeProcessTree } from '../maintenance/processEscape.js';
+import { installUpdaterGuard } from '../maintenance/updaterGuard.js';
 
 function log(msg) {
 	// Goes to the log file the launcher opened, which is the only place anybody
@@ -51,11 +52,22 @@ async function main() {
 	// processEscape.js.
 	if (!hasEscaped()) {
 		var copy = escapeProcessTree();
-		log('relaunched as pid ' + copy + ', outside the launcher\'s process tree, so stopping the BBS cannot stop the update');
-		process.exit(0);
+		if (copy) {
+			log('relaunched as pid ' + copy + ', outside the launcher\'s process tree, so stopping the BBS cannot stop the update');
+			process.exit(0);
+		}
+		// Carrying on here keeps the risk escaping exists for (launched from
+		// the Admin UI, pm2 may kill this process at the stop), but exiting
+		// with no copy running is certain to lose the update.
+		log('could not relaunch outside the launcher\'s process tree; carrying on in this process');
 	}
 
 	var instructions = runStore.readRunFile(runFile);
+
+	// From here on an error nothing caught either is ignored (a client going
+	// away) or is recorded against the run before this process exits, so the
+	// run can never be left saying "running" by an updater that is gone.
+	installUpdaterGuard({ target: instructions.target, runId: instructions.runId, log: log });
 	// The launcher recorded the pid of the process it started, which has
 	// exited. Record this one.
 	try {

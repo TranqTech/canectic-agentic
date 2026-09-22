@@ -128,15 +128,32 @@ function startUpdateStatusServer(opts) {
 
 	// The web terminal, presence and door sockets all come here too. There is
 	// nothing to connect them to.
+	//
+	// Node takes its own error handler off a socket it hands to an 'upgrade'
+	// listener. Without one here, a browser tab retrying its WebSocket and
+	// resetting the connection raised an 'error' nothing listened for, which
+	// Node throws: on 2026-09-22 that killed the updater on a live board in
+	// the middle of npm install, with the BBS stopped.
 	server.on('upgrade', function (req, socket) {
+		socket.on('error', function () { socket.destroy(); });
 		try {
 			socket.end('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 300\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
-		} catch (_) {}
+		} catch (_) {
+			socket.destroy();
+		}
 	});
 
+	// Every socket this server owns gets a listener of its own as well, so
+	// none of them can throw whatever Node does with it later. A client going
+	// away is never this process's problem.
 	server.on('connection', function (socket) {
 		sockets.add(socket);
+		socket.on('error', function () {});
 		socket.on('close', function () { sockets.delete(socket); });
+	});
+
+	server.on('clientError', function (err, socket) {
+		socket.destroy();
 	});
 
 	function listenOnce() {
@@ -178,6 +195,10 @@ function startUpdateStatusServer(opts) {
 		for (var i = 1; i <= attempts; i++) {
 			var err = await listenOnce();
 			if (!err) {
+				// listenOnce only watched the bind. An error on the server
+				// after that would otherwise be thrown, and the page is never
+				// worth the update.
+				server.on('error', function (e) { say('progress page: ' + (e && e.message ? e.message : e)); });
 				if (server.unref) server.unref();
 				var bound = server.address();
 				say('progress page: answering on port ' + (bound && bound.port ? bound.port : o.port) +

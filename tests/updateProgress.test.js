@@ -250,6 +250,54 @@ describe('the updater listener', function () {
 		assert.ok(/^HTTP\/1\.1 503/.test(reply), reply);
 	});
 
+	// What killed the hub's update on 2026-09-22. Node takes its own error
+	// handler off a socket it hands to an 'upgrade' listener, so a browser tab
+	// retrying its presence WebSocket, then resetting the connection, raised
+	// an 'error' nothing listened for, and the updater died mid npm install
+	// with the board stopped. Mocha fails the test on the uncaught error.
+	it('survives a WebSocket upgrade the client resets', async function () {
+		for (var i = 0; i < 5; i++) {
+			await new Promise(function (resolve) {
+				var s = net.connect(handle.port, '127.0.0.1', function () {
+					s.write('GET /ws/presence HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+						'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n');
+				});
+				s.once('data', function () { s.resetAndDestroy(); });
+				s.on('error', function () {});
+				s.on('close', resolve);
+			});
+		}
+		// Reset before the server has answered, too.
+		await new Promise(function (resolve) {
+			var s = net.connect(handle.port, '127.0.0.1', function () {
+				s.write('GET /ws/presence HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+					'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n');
+				s.resetAndDestroy();
+			});
+			s.on('error', function () {});
+			s.on('close', resolve);
+		});
+		await new Promise(function (resolve) { setTimeout(resolve, 200); });
+		var r = await get(handle.port, '/');
+		assert.strictEqual(r.status, 503, 'the listener is still answering');
+	});
+
+	it('survives a plain request the client resets halfway', async function () {
+		for (var i = 0; i < 5; i++) {
+			await new Promise(function (resolve) {
+				var s = net.connect(handle.port, '127.0.0.1', function () {
+					s.write('GET /admin/update/progress HTTP/1.1\r\nHost: x\r\n');
+					setTimeout(function () { s.resetAndDestroy(); }, 20);
+				});
+				s.on('error', function () {});
+				s.on('close', resolve);
+			});
+		}
+		await new Promise(function (resolve) { setTimeout(resolve, 200); });
+		var r = await get(handle.port, '/');
+		assert.strictEqual(r.status, 503, 'the listener is still answering');
+	});
+
 	it('gives the port back promptly even with a request only half received', async function () {
 		// A slow client, or a proxy that has sent part of a request. Node's
 		// server.close() drops idle connections by itself, but it waits for one

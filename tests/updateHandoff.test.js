@@ -20,7 +20,7 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
 import {
@@ -298,6 +298,27 @@ describe('launchUpdater', function () {
 		assert.strictEqual(state.from, '0.9.6a');
 		assert.strictEqual(state.to, '0.9.8a');
 		assert.strictEqual(summarise(state).status, 'running');
+	});
+
+	// A spawn that fails reports it as an 'error' event after launchUpdater has
+	// returned. With no listener Node throws it, which in the gateway takes the
+	// board's web interface down; and the run sat at "running" with nothing
+	// behind it. Mocha fails this test on the uncaught error.
+	it('records an updater that could not be started, rather than throwing', function (done) {
+		var target = write(tmp('install'), { 'package.json': '{"version":"0.9.6a"}' });
+		var staged = write(tmp('staged'), { [UPDATER_ENTRY]: 'process.exit(0);\n' });
+		var handle = launchUpdater({
+			stagedRoot: staged, target: target, from: '0.9.6a', to: '0.9.8a',
+			spawnFn: function (cmd, args, o) { return spawn('/nonexistent/canectic-node', args, o); }
+		});
+		setTimeout(function () {
+			var state = runStore.load(target, handle.runId);
+			try {
+				assert.strictEqual(state.status, 'failed');
+				assert.ok(/could not be started/.test(state.error), state.error);
+				done();
+			} catch (e) { done(e); }
+		}, 300);
 	});
 
 	it('refuses rather than spawning something that cannot work', function () {
