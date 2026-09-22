@@ -2,6 +2,11 @@
 
 ## Pending (since v0.9.8a)
 
+### Upgrade Notes
+
+- **From 0.9.8a, this is the first update that gives notice, so it takes longer.** Callers and logged-in web users are warned and given `maintenance_grace_seconds` (5 minutes unless you have changed it) before the BBS stops, and the update then waits for binkp sessions and jobs in progress to finish. Set a shorter grace on the Config page first if you would rather.
+- **If an update to 0.9.8a stopped partway, finish it before updating again.** The BBS is stopped, the board is closed for maintenance, and the update's log ends in `Unhandled 'error' event` and `ECONNRESET`, usually during the dependencies step. From the install directory, run the steps it had not reached, in order: `npm install --omit=dev`, `node src/tools/dbmigrations.js`, `pm2 start ecosystem.config.cjs`, and once the processes are up, `node src/tools/maintenanceMode.js --off`. Then update to this release as normal.
+
 ### Updates
 
 - Fix: **an update could stop partway through if anyone had the board open in a web browser.** While the BBS is stopped, the update answers on the board's web port itself, and a browser tab trying to reconnect to the board could make the update itself stop, in the middle, leaving the BBS stopped and the Update page still saying an update was running. Updates into 0.9.8a were affected. An update always runs the updater of the release it installs, so the update into this release is not.
