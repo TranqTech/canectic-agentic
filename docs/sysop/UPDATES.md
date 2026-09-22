@@ -91,8 +91,26 @@ published checksum is not there, the update tool says so rather than pretending
 it checked.
 
 Over FTN your trust rests on your link password and on whoever is feeding you
-the echo, the same as it does for every other file you receive that way. A
-signature will close that gap when a key is published.
+the echo, the same as it does for every other file you receive that way, unless
+you require signatures (below).
+
+### Signatures
+
+Stable releases are signed. Before an update applies anything, it checks the
+release's signed `MANIFEST` against the release key your board already has
+(`setup/canectic-release.asc`, installed with Canectic). The key your board
+trusts comes from your installation, never from the release being checked, so a
+release swapped for another cannot bring its own key with it.
+
+- **A signature that is present and fails is always refused,** whatever your
+  settings. That is somebody telling you something is wrong.
+- **An unsigned release is allowed by default.** Development builds are never
+  signed.
+- **Turn on `update_require_signature`** to refuse anything not signed by the
+  release key. That means stable releases only, and it needs `gpg` installed.
+
+The update log says which it was: `signature verified`, `unsigned`, or why it
+could not check.
 
 The end-state check still runs regardless: after unpacking, every file is
 verified against the manifest inside the archive, so a corrupted or truncated

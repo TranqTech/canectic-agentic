@@ -15,6 +15,8 @@
 
 ### Updates
 
+- Fix: **every install and update reported failure at its very last step, after everything had worked.** The last step checks that every file landed as released, and `npm install`, which runs just before it, rewrites `package-lock.json` as a matter of course. A fresh install was told it had not finished and that removing it and starting again was safe; an update was left closed for maintenance. The check now compares the lockfile by what it actually pins, which npm does not change, and names any file that genuinely did not land. If you installed 0.9.7a and saw "the install did not finish" at the verify step, your board was installed correctly.
+- **`update_require_signature` now does what it says.** It was read by nothing. An update now checks the release's signature against the release key your board already has before applying anything: a signature that fails is always refused, and with the setting on, so is an unsigned release (which includes every development build). See "Signatures" in `docs/sysop/UPDATES.md`.
 - Fix: **an update started from the Admin UI stopped partway, leaving half the BBS stopped.** The gateway and mail processes went down, the mailer and worker kept running, and the update itself disappeared at its "stop" step with nothing on the Update page to say why. The update was being stopped along with the BBS it was updating. It now takes itself out of the way first. Updates started from a shell were not affected. This fix travels with the new release's updater, so the update INTO this release already benefits from it, including from the Admin UI.
 
 ### Security
