@@ -468,16 +468,20 @@ function writeSums(outputDir, sign) {
 			'Sign before publishing (--sign) if the directory should stay signed.');
 	}
 
+	var signed = false;
 	if (sign) {
 		try {
 			if (fs.existsSync(sums + '.asc')) fs.unlinkSync(sums + '.asc');
 			execFileSync('gpg', ['--detach-sign', '--armor', sums], { stdio: 'inherit' });
-			ok('signed SHA256SUMS');
+			signed = fs.existsSync(sums + '.asc');
+			if (signed) ok('signed SHA256SUMS');
 		} catch (e) {
 			warn('could not sign SHA256SUMS: ' + e.message);
 		}
 	}
-	return sums;
+	// Whether a signature was actually written, so a caller reports what
+	// happened rather than what it asked for.
+	return { path: sums, signed: signed };
 }
 
 function humanBytes(n) {
@@ -865,15 +869,34 @@ function main() {
 			return;
 		}
 
+		// Before the index is touched. Rewriting SHA256SUMS removes the old
+		// signature, so a withdrawal that then fails to sign leaves the
+		// directory with no signature at all. This check lived only on the
+		// build path, which this mode returns before reaching, so --supersede
+		// --sign signed nothing and said it had.
+		if (opts.sign) {
+			opts.signKey = releaseKeyFingerprint();
+			try {
+				assertCanSign(opts.signKey);
+			} catch (e) {
+				die(e.message);
+			}
+			ok('signing with ' + formatFingerprint(opts.signKey));
+		}
+
 		fs.writeFileSync(idxPath, JSON.stringify(updated, null, 2) + '\n');
 		ok('withdrew ' + opts.version + ' in favour of ' + opts.supersededBy);
 		if (opts.reason) info('reason: ' + opts.reason);
 
 		// The index is covered by SHA256SUMS, so the sums and their signature
 		// have to be rebuilt or every published file fails verification.
-		writeSums(opts.output, opts.sign ? opts.signKey : null);
-		ok('SHA256SUMS rewritten' + (opts.sign ? ' and signed' : ' (UNSIGNED)'));
-		if (!opts.sign) warn('publish will refuse an unsigned SHA256SUMS over a signed one; re-run with --sign');
+		var sums = writeSums(opts.output, opts.sign);
+		if (opts.sign && !sums.signed) {
+			die('SHA256SUMS was rewritten but could not be signed, and publish will refuse it. ' +
+				'Sign it by hand, then publish:  gpg --detach-sign --armor ' + sums.path);
+		}
+		ok('SHA256SUMS rewritten' + (sums.signed ? ' and signed' : ' (UNSIGNED)'));
+		if (!sums.signed) warn('publish will refuse an unsigned SHA256SUMS over a signed one; re-run with --sign');
 		info('now run: node scripts/publish.mjs');
 		return;
 	}
