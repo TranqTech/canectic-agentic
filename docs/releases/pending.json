@@ -15,7 +15,7 @@
     },
     {
       "level": "info",
-      "text": "If you installed 0.9.7a and were told \"the install did not finish\", your board is installed correctly. The final check misread a routine change npm install makes to package-lock.json as a file that had not landed. Nothing needs removing or redoing."
+      "text": "If you installed 0.9.6a or 0.9.7a and were told \"the install did not finish\", your board is installed correctly. The final check misread a routine change npm install makes to package-lock.json as a file that had not landed. Nothing needs removing or redoing."
     },
     {
       "level": "warning",
