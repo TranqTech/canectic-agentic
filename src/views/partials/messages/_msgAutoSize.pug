@@ -25,6 +25,10 @@ script.
     // the trade was made in favour of text, which is what most messages are.
     // Changing this back to 80 makes every mobile reader squint so that art
     // areas hold their shape. See issue #49 before doing that.
+    //
+    // The intended answer is neither constant: a reader-facing 40/80 selector
+    // in the reading views, with ansi_area as the per-area default. Not built
+    // yet; the tradeoffs are written up in issue #54.
     var TARGET_COLS_MOBILE = 40;
     var MOBILE_BREAKPOINT = 992; // below Bootstrap lg
     var MIN_FONT_PX = 7;
