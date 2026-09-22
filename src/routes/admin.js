@@ -6568,6 +6568,23 @@ router.get('/update', requireAdmin, async (req, res) => {
 		result = (typeof last.result === 'string') ? JSON.parse(last.result) : last.result;
 	}
 
+	// The stored check may have been made on the version this board ran
+	// before its last update, and would then offer the version it runs now.
+	// Judge what it found against what is running, without waiting for the
+	// next check.
+	if (result) {
+		var verdictMod = await import('../release/updateVerdict.js');
+		var appliedNow = null;
+		try {
+			appliedNow = await (await import('../maintenance/migrationLedger.js')).appliedIds();
+		} catch (_) { /* unknown: the check's own migration blockers are kept */ }
+		result = verdictMod.reconcileWithRunning(result, {
+			current: systeminfo.canonicalVersion(),
+			appliedMigrations: appliedNow,
+			nodeVersion: process.versions.node
+		});
+	}
+
 	// Preflight runs HERE, with the board up, because that is the only moment
 	// several of these are answerable. Once an update has stopped the
 	// processes, "how many callers are online" is zero and "is a job in

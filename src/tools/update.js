@@ -33,6 +33,7 @@ import { buildApplyPlan, pathsFor, warningsFor,
 	ACTION_CREATE, ACTION_OVERWRITE, ACTION_UNCHANGED, ACTION_KEEP, ACTION_CONFLICT, ACTION_REMOVE
 } from '../release/applyPlan.js';
 import { blockersFor } from '../release/updateVerdict.js';
+import { isNewer } from '../utils/version.js';
 import { appliedIds } from '../maintenance/migrationLedger.js';
 import {
 	dirSource, httpSource, resolveRelease, stageRelease, discardStaging
@@ -268,6 +269,13 @@ async function main() {
 		entry = await resolveRelease(source, channel, o.version || null);
 	}
 	var version = entry.version;
+
+	// Nothing newer is not a refusal. Asked for by name, it is: blockersFor
+	// below says why.
+	if (!o.version && !isNewer(version, running)) {
+		ok(running + ' is the newest release on the ' + channel + ' channel, and this system runs it. Nothing to do.');
+		return;
+	}
 
 	// The move rule, before anything is downloaded. Refusing after a 20 MB
 	// fetch would be rude and refusing after extraction would be worse.

@@ -23,9 +23,9 @@
 import assert from 'assert';
 import {
 	compareDotted, blockersFor, evaluateChannel, channelsToCheck, evaluate,
-	shouldNotify, notificationFor,
+	shouldNotify, notificationFor, reconcileWithRunning,
 	VERDICT_CURRENT, VERDICT_AVAILABLE, VERDICT_BLOCKED, VERDICT_UNKNOWN,
-	BLOCKER_MIGRATION, BLOCKER_TOO_OLD, BLOCKER_NODE
+	BLOCKER_MIGRATION, BLOCKER_TOO_OLD, BLOCKER_NODE, BLOCKER_NOT_NEWER, BLOCKER_WITHDRAWN
 } from '../src/release/updateVerdict.js';
 
 function release(version, extra) {
@@ -412,5 +412,90 @@ describe('superseded releases', function () {
 	it('leaves the reason null when none was recorded', function () {
 		var r = evaluate(index({ superseded_by: '0.9.8a' }), '0.9.7a');
 		assert.deepStrictEqual(r.withdrawn, { by: '0.9.8a', reason: null });
+	});
+});
+
+// The hub, updated to 0.9.8a, went on showing "Update to 0.9.8a" until somebody
+// pressed Check now: the page showed the check made while it ran 0.9.7a.
+describe('a stored check, judged against what is running now', function () {
+
+	function checkedOn(current, releases) {
+		return evaluate({
+			current: current, channel: 'stable',
+			indexes: { stable: index('stable', releases) },
+			appliedMigrations: [], nodeVersion: '26.8.1'
+		});
+	}
+
+	it('offers nothing once the board runs the version the check found', function () {
+		var stored = checkedOn('0.9.7a', [release('0.9.8a'), release('0.9.7a')]);
+		assert.strictEqual(stored.best.verdict, VERDICT_AVAILABLE, 'the premise: it was offered');
+		var now = reconcileWithRunning(stored, { current: '0.9.8a', appliedMigrations: [], nodeVersion: '26.8.1' });
+		assert.strictEqual(now.best, null, 'nothing to offer');
+		assert.strictEqual(now.channels.stable.verdict, VERDICT_CURRENT);
+		assert.strictEqual(now.channels.stable.current, '0.9.8a');
+		assert.strictEqual(now.checkedFor, '0.9.7a', 'and the page can say the check is older than the board');
+	});
+
+	it('offers nothing to a board that has moved past what the check found', function () {
+		var stored = checkedOn('0.9.7a', [release('0.9.8a')]);
+		var now = reconcileWithRunning(stored, { current: '0.9.8a.20260923', appliedMigrations: [], nodeVersion: '26.8.1' });
+		assert.strictEqual(now.best, null);
+	});
+
+	it('still offers a release that is newer than what runs now, with fresh blockers', function () {
+		var stored = checkedOn('0.9.6a', [release('0.9.9a', { min_upgrade_from: '0.9.7a' })]);
+		assert.strictEqual(stored.best.verdict, VERDICT_BLOCKED, 'the premise: 0.9.6a was too old');
+		var now = reconcileWithRunning(stored, { current: '0.9.8a', appliedMigrations: [], nodeVersion: '26.8.1' });
+		assert.strictEqual(now.best.verdict, VERDICT_AVAILABLE, 'on 0.9.8a the floor no longer applies');
+		assert.deepStrictEqual(now.best.blockers, []);
+	});
+
+	it('keeps the migration blockers the check found when the ledger cannot be read', function () {
+		var stored = checkedOn('0.9.7a', [release('0.9.9a', { migrations: [] })]);
+		stored.channels.stable.blockers = [{ kind: BLOCKER_MIGRATION, detail: 'kept' }];
+		var now = reconcileWithRunning(stored, { current: '0.9.8a', appliedMigrations: null, nodeVersion: '26.8.1' });
+		assert.strictEqual(now.best.verdict, VERDICT_BLOCKED);
+		assert.strictEqual(now.best.blockers[0].detail, 'kept');
+	});
+
+	it('leaves a result checked on the running version exactly as it was', function () {
+		var stored = checkedOn('0.9.8a', [release('0.9.8a')]);
+		assert.strictEqual(reconcileWithRunning(stored, { current: '0.9.8a' }), stored);
+	});
+});
+
+describe('moves that are not updates', function () {
+
+	it('refuses the version already running', function () {
+		var b = blockersFor({ current: '0.9.8a', release: release('0.9.8a') });
+		assert.deepStrictEqual(b.map(function (x) { return x.kind; }), [BLOCKER_NOT_NEWER]);
+	});
+
+	it('refuses an older version', function () {
+		var b = blockersFor({ current: '0.9.8a', release: release('0.9.7a') });
+		assert.ok(b.some(function (x) { return x.kind === BLOCKER_NOT_NEWER; }));
+	});
+
+	it('refuses a withdrawn release, naming its replacement', function () {
+		var b = blockersFor({ current: '0.9.6a', release: release('0.9.7a', { superseded_by: '0.9.8a', superseded_reason: 'broken updater' }) });
+		var w = b.filter(function (x) { return x.kind === BLOCKER_WITHDRAWN; })[0];
+		assert.ok(w, JSON.stringify(b));
+		assert.ok(/broken updater/.test(w.detail) && /0\.9\.8a/.test(w.detail), w.detail);
+	});
+
+	it('blocks nothing on an ordinary move forward', function () {
+		assert.deepStrictEqual(blockersFor({ current: '0.9.7a', release: release('0.9.8a') }), []);
+	});
+});
+
+describe('the Update page', function () {
+	it('judges the stored check against the running version before offering anything', async function () {
+		var fs = await import('fs');
+		var text = fs.readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
+		var route = text.slice(text.indexOf("router.get('/update',"), text.indexOf("router.get('/update',") + 4000);
+		var judged = route.indexOf('reconcileWithRunning(');
+		assert.ok(judged !== -1, 'the page does not re-judge the stored result');
+		assert.ok(judged < route.indexOf('canApply:'), 'it must happen before the button is decided');
 	});
 });

@@ -37,6 +37,8 @@ var VERDICT_UNKNOWN   = 'unknown';
 var BLOCKER_MIGRATION = 'migration';
 var BLOCKER_TOO_OLD   = 'min_upgrade_from';
 var BLOCKER_NODE      = 'node_min';
+var BLOCKER_NOT_NEWER = 'not_newer';
+var BLOCKER_WITHDRAWN = 'withdrawn';
 
 /**
  * Compare two dotted numeric versions, for `node_min`.
@@ -76,6 +78,28 @@ function compareDotted(a, b) {
 function blockersFor(opts) {
 	var release = opts.release || {};
 	var blockers = [];
+
+	// Moving to the version already running, or back to an older one, is not
+	// an update. The Update page offered the running version as an update on
+	// a board that had just taken it, from a check made before it did, and the
+	// apply route would have staged and reinstalled it. Here rather than in
+	// the page so the Admin UI, the CLI and the page all refuse alike.
+	if (release.version && opts.current && parseVersion(release.version) && parseVersion(opts.current) &&
+		!isNewer(release.version, opts.current)) {
+		blockers.push({
+			kind: BLOCKER_NOT_NEWER,
+			detail: release.version + ' is not newer than ' + opts.current + ', which this system is running'
+		});
+	}
+
+	if (release.superseded_by) {
+		blockers.push({
+			kind: BLOCKER_WITHDRAWN,
+			detail: release.version + ' has been withdrawn' +
+				(release.superseded_reason ? ' (' + release.superseded_reason + ')' : '') +
+				'; ' + release.superseded_by + ' replaces it'
+		});
+	}
 
 	// The migration rule. Only migrations the ledger recorded as `applied` are
 	// considered: `skipped` means this system was told it did not need the
@@ -243,6 +267,72 @@ function evaluate(opts) {
 }
 
 /**
+ * A stored check result, judged against what is running NOW.
+ *
+ * A check is stored when it runs and read whenever the Update page is shown,
+ * and in between the board can change version, most often because it has just
+ * been updated. The hub, on 0.9.8a, went on being offered 0.9.8a until
+ * somebody pressed Check now. The releases a check found do not go stale;
+ * which of them is newer than this board does. So each channel's release is
+ * judged again against the running version, with its blockers worked out
+ * afresh.
+ *
+ * @param {object} result   from evaluate(), as stored
+ * @param {object} opts     { current, appliedMigrations, nodeVersion }.
+ *                          appliedMigrations null means the ledger could not be
+ *                          read, and the migration blockers the check found are
+ *                          kept rather than cleared
+ * @returns {object} the result as it applies now; `checkedFor` names the
+ *          version the check ran under when that differs
+ */
+function reconcileWithRunning(result, opts) {
+	var o = opts || {};
+	if (!result || !result.channels || !o.current || !parseVersion(o.current)) return result;
+	if (result.current && parseVersion(result.current) && compareVersions(result.current, o.current) === 0) {
+		return result;
+	}
+
+	var channels = {};
+	for (var name of Object.keys(result.channels)) {
+		var c = result.channels[name] || {};
+		// What they were running when this was checked says nothing about
+		// what they run now.
+		var base = Object.assign({}, c, { current: o.current, withdrawn: null });
+		if (!c.release || !c.available) { channels[name] = base; continue; }
+		if (!isNewer(c.available, o.current)) {
+			channels[name] = Object.assign(base, {
+				verdict: VERDICT_CURRENT, available: null, release: null, blockers: []
+			});
+			continue;
+		}
+		var unknownLedger = o.appliedMigrations === null || o.appliedMigrations === undefined;
+		var blockers = blockersFor({
+			current: o.current, release: c.release,
+			appliedMigrations: unknownLedger ? [] : o.appliedMigrations,
+			nodeVersion: o.nodeVersion
+		});
+		if (unknownLedger) {
+			blockers = (c.blockers || []).filter(function (b) { return b.kind === BLOCKER_MIGRATION; })
+				.concat(blockers.filter(function (b) { return b.kind !== BLOCKER_MIGRATION; }));
+		}
+		channels[name] = Object.assign(base, {
+			verdict: blockers.length ? VERDICT_BLOCKED : VERDICT_AVAILABLE,
+			blockers: blockers
+		});
+	}
+
+	var best = null;
+	for (var pref of channelsToCheck(result.channel)) {
+		var ch = channels[pref];
+		if (ch && (ch.verdict === VERDICT_AVAILABLE || ch.verdict === VERDICT_BLOCKED)) { best = ch; break; }
+	}
+
+	return Object.assign({}, result, {
+		current: o.current, channels: channels, best: best, checkedFor: result.current || null
+	});
+}
+
+/**
  * Should this result produce a notification?
  *
  * A daily job that says the same thing every morning is a job a sysop turns
@@ -294,6 +384,9 @@ export {
 	BLOCKER_MIGRATION,
 	BLOCKER_TOO_OLD,
 	BLOCKER_NODE,
+	BLOCKER_NOT_NEWER,
+	BLOCKER_WITHDRAWN,
+	reconcileWithRunning,
 	compareDotted,
 	blockersFor,
 	evaluateChannel,

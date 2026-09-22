@@ -21,7 +21,9 @@ block content
     var blockerLabel = {
       migration:        'Migration',
       min_upgrade_from: 'Too old to upgrade directly',
-      node_min:         'Node too old'
+      node_min:         'Node too old',
+      not_newer:        'Not newer',
+      withdrawn:        'Withdrawn'
     }
     var cls = function (v) { return verdictClass[v] || 'secondary' }
     var lbl = function (v) { return verdictLabel[v] || String(v || 'unknown') }
@@ -151,6 +153,10 @@ block content
                 | project has cut no releases.
 
           if result && result.channels
+            if result.checkedFor
+              p.text-muted.small
+                | The last check ran while this board was on #{result.checkedFor}. What it found is shown
+                | against #{running}, the version running now; Check now refreshes it.
             .row.g-3
               each chan, name in result.channels
                 .col-lg-6
