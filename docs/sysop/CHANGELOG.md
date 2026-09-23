@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.10a)
 
+### Upgrade Notes
+
+- **Check how your BBS starts at boot, once, after updating.** Run `node src/tools/bootUnit.js` as the user the BBS runs as, and `node src/tools/bootUnit.js --install` if it reports anything. A board set up with `pm2 startup` stops starting at boot once the Node version it names is removed, which under nvm happens on an ordinary Node upgrade. `--install` asks for sudo and restarts nothing; the restart it prints restarts the BBS, so close the board first with `node src/tools/maintenanceMode.js --on` if callers are online.
+
 ### Installation
 
 - **New: `node src/tools/bootUnit.js --install` sets the BBS to start at boot in a way that survives Node upgrades.** The unit `pm2 startup` writes names one Node version, so under nvm the BBS stops booting once that version is uninstalled. The fix used to be a hand edit described in the install guide; this does it: it installs the `canectic-pm2` wrapper, writes the unit that uses it (with sudo, keeping your existing `PATH` minus its Node version and saving the old unit beside it), and enables it, restarting nothing. Run it once on any board that was set up with `pm2 startup`. `node src/tools/bootUnit.js` on its own checks a board and says what is wrong; the Update page shows the same warnings. See "Surviving Node Upgrades" in `docs/sysop/INSTALL.md`.

@@ -1,6 +1,13 @@
 {
   "steps": [],
-  "notices": [],
+  "notices": [
+    {
+      "id": "boot-unit-survives-node-upgrades",
+      "level": "warning",
+      "from_max": "0.9.10a",
+      "text": "After updating, run node src/tools/bootUnit.js as the user the BBS runs as. If it reports a problem, run node src/tools/bootUnit.js --install. A board set up with pm2 startup has a boot unit that names one Node version, and under nvm it stops starting the BBS at boot once that version is removed. The tool writes a unit that finds Node when it starts instead, asks for sudo to do so, and restarts nothing: it prints the command to restart when you are ready, which restarts the BBS, so close the board first with node src/tools/maintenanceMode.js --on if callers are online."
+    }
+  ],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }
