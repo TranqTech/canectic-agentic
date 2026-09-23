@@ -68,10 +68,9 @@ block content
                           td= user.username
                           td= user.fullname || '—'
                           td= user.logoncount || 0
-                          td
+                          td(data-order=timestampMs(user.lastlogon) || 0)
                             if user.lastlogon
-                              - var ldate = DateTime.fromMillis(Date.parse(user.lastlogon))
-                              = ldate.toFormat('yyyy-MM-dd')
+                              +ts(user.lastlogon, 'date')
                             else
                               | —
                           td —
@@ -382,7 +381,7 @@ block content
 
         function fmtDate(val) {
           if (!val) return '—';
-          return new Date(val).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+          return window.CanecticLocalTime ? window.CanecticLocalTime.format(Date.parse(val), 'date') : String(val);
         }
 
         // Format a date value as YYYY-MM-DD for date input fields

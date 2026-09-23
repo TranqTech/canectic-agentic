@@ -52,16 +52,20 @@ block content
                         td= t.label
                         td
                           span.badge.bg-info= scopeLabels[t.scope] || t.scope
-                        td
+                        td(data-order=timestampMs(t.last_used_at) || 0)
                           if t.last_used_at
-                            small= new Date(t.last_used_at).toLocaleString()
+                            small
+                              +ts(t.last_used_at)
                           else
                             small.text-muted never
-                        td
-                          small= new Date(t.created_at).toLocaleDateString()
-                        td
+                        td(data-order=timestampMs(t.created_at) || 0)
+                          small
+                            +ts(t.created_at, 'date')
+                        //- A token that never expires sorts after every one that does.
+                        td(data-order=timestampMs(t.expires_at) || Number.MAX_SAFE_INTEGER)
                           if t.expires_at
-                            small= new Date(t.expires_at).toLocaleDateString()
+                            small
+                              +ts(t.expires_at, 'date')
                           else
                             small.text-muted no expiry
                         td

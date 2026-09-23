@@ -32,7 +32,8 @@ block content
                       td.small= entry.peer_name || '-'
                       td.small.text-end= fmt.formatBytes(entry.file_size)
                       td.monospace.small.text-muted= entry.session_uuid ? entry.session_uuid.substring(0, 8) : '-'
-                      td.small= new Date(entry.sent_at).toLocaleString()
+                      td.small(data-order=timestampMs(entry.sent_at) || 0)
+                        +ts(entry.sent_at)
             else
               .text-center.text-muted.p-4
                 | Nothing sent yet, or entries have aged out of the retention window.

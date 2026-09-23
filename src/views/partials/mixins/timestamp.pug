@@ -1,0 +1,20 @@
+//- timestamp.pug: the one way a DataTables view shows a date.
+//-
+//-   +ts(entry.received_at)            2026-09-22 17:57:03
+//-   +ts(area.first_seen, 'date')      2026-09-22
+//-
+//- Renders a <time> carrying the instant, which public/js/localTime.js rewrites
+//- in the viewer's timezone. The cell it sits in needs the sort key as well:
+//-
+//-   td(data-order=timestampMs(entry.received_at) || 0)
+//-     +ts(entry.received_at)
+//-
+//- Needs formatTimestamp and timestampMs in the view's locals (set app-wide in
+//- src/servers/webserver.js). Included by the admin and user layouts, so views
+//- that extend them can use it without including it themselves.
+mixin ts(value, mode)
+  - var tsMs = timestampMs(value)
+  if tsMs === null
+    span.text-muted -
+  else
+    time.ts-local(datetime=new Date(tsMs).toISOString() data-ts=tsMs data-ts-mode=(mode === 'date' ? 'date' : 'datetime'))= formatTimestamp(tsMs, { dateOnly: mode === 'date' })

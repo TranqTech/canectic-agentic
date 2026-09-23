@@ -21,6 +21,7 @@ import { activityMiddleware } from '../middleware/webActivity.js';
 import { createErrorHandler } from '../middleware/errorHandler.js';
 import { maintenanceMiddleware } from '../middleware/maintenanceWeb.js';
 import appConfig from '../config/appConfig.js';
+import { formatTimestamp, timestampMs } from '../utils/dateFormat.js';
 
 const node_env = process.env.NODE_ENV || "development"
 var webserver = express();
@@ -95,6 +96,16 @@ webserver.use(function(req, res, next) {
 	// No Origin or Referer — reject (safe default)
 	alogger.writeAlog(4, 'CSRF: no Origin or Referer header on ' + req.method + ' ' + req.path, 'yellow');
 	return res.status(403).json({ error: 'Forbidden — missing origin verification' });
+});
+
+// --- View helpers every page can use ---
+// The table timestamp formatter, for the `ts` mixin the layouts include. Set
+// here rather than per router so an admin page and a user page cannot end up
+// formatting dates two ways.
+webserver.use(function(req, res, next) {
+	res.locals.formatTimestamp = formatTimestamp;
+	res.locals.timestampMs = timestampMs;
+	next();
 });
 
 // --- Maintenance mode ---

@@ -65,7 +65,8 @@ block content
                     .col-md-3
                       strong Last Import:
                       if importInfo && importInfo.last_import
-                        |  #{new Date(importInfo.last_import).toLocaleString()}
+                        |  
+                        +ts(importInfo.last_import)
                       else
                         |  Never
                     .col-md-3
@@ -608,9 +609,15 @@ block content
               ctHtml = '<span class="text-muted">None detected</span>';
             }
             document.getElementById('detailConnectionTypes').innerHTML = ctHtml;
-            document.getElementById('detailFirstSeen').textContent = row.data('first-seen') ? new Date(row.data('first-seen')).toLocaleString() : 'N/A';
-            document.getElementById('detailLastSeen').textContent = row.data('last-seen') ? new Date(row.data('last-seen')).toLocaleString() : 'N/A';
-            document.getElementById('detailRemovedAt').textContent = row.data('removed-at') ? new Date(row.data('removed-at')).toLocaleString() : 'N/A';
+            // Same format as every table timestamp, in the viewer's timezone.
+            var whenText = function (v) {
+              var ms = v ? Date.parse(v) : NaN;
+              if (isNaN(ms)) return 'N/A';
+              return window.CanecticLocalTime ? window.CanecticLocalTime.format(ms) : v;
+            };
+            document.getElementById('detailFirstSeen').textContent = whenText(row.data('first-seen'));
+            document.getElementById('detailLastSeen').textContent = whenText(row.data('last-seen'));
+            document.getElementById('detailRemovedAt').textContent = whenText(row.data('removed-at'));
 
             // Boolean badges
             document.getElementById('detailCM').innerHTML = row.data('is-cm') === true || row.data('is-cm') === 'true' ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';

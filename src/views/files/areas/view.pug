@@ -109,11 +109,9 @@ block content
                             if isNew
                               span.badge.bg-info.ms-2 NEW
                           td.text-center.text-nowrap= formatBytes(file.file_size || 0)
-                          td.text-nowrap
+                          td.text-nowrap(data-order=timestampMs(file.upload_date) || 0)
                             if file.upload_date
-                              - var fdate = Date.parse(file.upload_date)
-                              - var fd = DateTime.fromMillis(fdate)
-                              = fd.toFormat('MMM dd, yyyy')
+                              +ts(file.upload_date, 'date')
                             else
                               span.text-muted —
                           td= file.short_desc || ''

@@ -143,11 +143,9 @@ block content
                           td.text-center
                             if msg.has_attachments
                               i.bi.bi-paperclip.text-info(title='Has attachments')
-                          td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;')
+                          td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;' data-order=timestampMs(msg.system_time) || 0)
                             if msg.system_time
-                              - var mdate = Date.parse(msg.system_time)
-                              - var md = DateTime.fromMillis(mdate)
-                              = md.toFormat('MMM dd HH:mm')
+                              +ts(msg.system_time)
 
               //- Sent table (hidden)
               #folder-sent.pm-hidden
@@ -181,11 +179,9 @@ block content
                           td.text-center
                             if msg.has_attachments
                               i.bi.bi-paperclip.text-info(title='Has attachments')
-                          td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;')
+                          td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;' data-order=timestampMs(msg.system_time) || 0)
                             if msg.system_time
-                              - var mdate = Date.parse(msg.system_time)
-                              - var md = DateTime.fromMillis(mdate)
-                              = md.toFormat('MMM dd HH:mm')
+                              +ts(msg.system_time)
 
               //- Trash table (hidden)
               #folder-trash.pm-hidden
@@ -221,11 +217,9 @@ block content
                           td.text-center
                             if msg.has_attachments
                               i.bi.bi-paperclip.text-info(title='Has attachments')
-                          td.small.text-muted(style='white-space:nowrap;')
+                          td.small.text-muted(style='white-space:nowrap;' data-order=timestampMs(msg.deleted_at) || 0)
                             if msg.deleted_at
-                              - var ddate = Date.parse(msg.deleted_at)
-                              - var dd = DateTime.fromMillis(ddate)
-                              = dd.toFormat('MMM dd')
+                              +ts(msg.deleted_at, 'date')
 
             //- Reader pane
             .pm-reader

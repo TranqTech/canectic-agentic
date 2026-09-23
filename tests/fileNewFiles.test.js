@@ -18,6 +18,7 @@
 
 import assert from 'assert';
 import { DateTime } from 'luxon';
+import { formatTimestamp, timestampMs } from '../src/utils/dateFormat.js';
 
 var pug = null;
 try { pug = (await import('pug')).default; } catch (_) { pug = null; }
@@ -42,6 +43,8 @@ function renderArea(locals) {
 		fileGroup: { shortcode: 'GEN', name: 'General' },
 		filelist: [], totalFiles: 0, scanPointer: 0, newCount: 0, newOnly: false,
 		formatBytes: formatBytes, uploaded: null, error: null,
+		// Set app-wide by webserver.js; a view rendered on its own needs them passed.
+		formatTimestamp: formatTimestamp, timestampMs: timestampMs,
 		DateTime: DateTime, ismobile: false, boardname: 'Test', activelink: 'files',
 		currentPath: '/files/area/UPLOADS', pmUnreadCount: 0, faviconlink: '/x.ico',
 	}, locals));

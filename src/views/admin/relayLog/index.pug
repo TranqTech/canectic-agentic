@@ -78,7 +78,8 @@ block content
                 tbody
                   each row in stuck
                     tr
-                      td.small= new Date(row.received_at).toLocaleString()
+                      td.small(data-order=timestampMs(row.received_at) || 0)
+                        +ts(row.received_at)
                       td.monospace.small #{shortAddr(row.from_address)}
                       td.monospace.small #{shortAddr(row.to_address)}
                       td.monospace.small= row.next_hop || '-'
@@ -142,7 +143,8 @@ block content
                   tbody
                     each entry, idx in entries
                       tr
-                        td.small(data-order=new Date(entry.received_at).getTime())= new Date(entry.received_at).toLocaleString()
+                        td.small(data-order=timestampMs(entry.received_at) || 0)
+                          +ts(entry.received_at)
                         td
                           span.badge(class='bg-' + (decisionClass[entry.decision] || 'secondary'))= decisionLabel(entry.decision)
                         td.monospace.small
@@ -239,7 +241,9 @@ block content
         if (!r || !modal) return;
 
         var html = '<dl class="row mb-0">';
-        html += line('Received', new Date(r.received_at).toLocaleString());
+        html += line('Received', window.CanecticLocalTime
+          ? window.CanecticLocalTime.format(Date.parse(r.received_at))
+          : r.received_at);
         html += line('Decision', r.decision);
         if (r.reason) html += line('Reason', r.reason);
         html += line('Relay mode', r.relay_mode);

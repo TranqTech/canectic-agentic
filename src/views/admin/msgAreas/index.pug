@@ -90,12 +90,10 @@ block content
                           td.text-end
                             - var mcount = (area.msg_count || 0).toLocaleString()
                             = mcount
-                          td
+                          td(data-order=timestampMs(area.last_message) || 0)
                             if area.last_message
                               .text-end
-                                - var e1date = Date.parse(area.last_message)
-                                - var edate = DateTime.fromMillis(e1date)
-                                = edate.toFormat('MMMM dd, yyyy')
+                                +ts(area.last_message, 'date')
                             else
                               center
                                 | N/A
@@ -429,7 +427,7 @@ block content
           document.getElementById('areaInfoDescription').textContent = d.bsDescription;
           document.getElementById('areaInfoLastFrom').textContent    = d.bsLastfrom || '—';
           document.getElementById('areaInfoLastMessage').textContent = d.bsLastmessage
-            ? new Date(d.bsLastmessage).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+            ? (window.CanecticLocalTime ? window.CanecticLocalTime.format(Date.parse(d.bsLastmessage), 'date') : String(d.bsLastmessage))
             : '—';
 
           areaInfoModal.show();

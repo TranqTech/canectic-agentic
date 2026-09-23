@@ -88,4 +88,37 @@ function toDateTime(value) {
 	return dt.isValid ? dt : null;
 }
 
-export { formatListDate, formatListDateFull, DEFAULT_RECENT_MONTHS };
+/**
+ * A timestamp for a table cell: "2026-09-22 17:57:03", or "2026-09-22" with
+ * `dateOnly`. Zero padded and 24-hour, so it reads the same everywhere and
+ * sorts correctly even as text.
+ *
+ * Every DataTables view renders dates through this (via the `ts` mixin in
+ * views/partials/mixins/timestamp.pug). They used `toLocaleString()`, which in
+ * Node's default locale is "9/22/2026, 5:57:03 PM": no padding, a 12-hour clock
+ * and month first, so every date column sorted as text, with 10/1 before 9/30
+ * and 5 PM before 9 AM.
+ *
+ * Rendered in the server's timezone. public/js/localTime.js rewrites it in the
+ * viewer's own timezone in the browser, in the same format; for a sysop that is
+ * almost always the same thing, and without JavaScript the server's is shown.
+ *
+ * @returns {string|null} null when the value is missing or unparseable
+ */
+function formatTimestamp(value, opts) {
+	var dt = toDateTime(value);
+	if (!dt) return null;
+	return dt.toFormat(opts && opts.dateOnly ? 'yyyy-MM-dd' : 'yyyy-MM-dd HH:mm:ss');
+}
+
+/**
+ * Epoch milliseconds for a DataTables `data-order`, so a date column sorts on
+ * the instant and never on its text. Null when there is no date, which a cell
+ * should render as 0 so undated rows sort together at one end.
+ */
+function timestampMs(value) {
+	var dt = toDateTime(value);
+	return dt ? dt.toMillis() : null;
+}
+
+export { formatListDate, formatListDateFull, formatTimestamp, timestampMs, DEFAULT_RECENT_MONTHS };

@@ -101,7 +101,8 @@ block content
                   if echolist.last_imported_at
                     p.text-muted
                       i.bi.bi-clock.me-1
-                      | Last imported: #{new Date(echolist.last_imported_at).toLocaleString()}
+                      | Last imported: 
+                      +ts(echolist.last_imported_at)
 
                   if echolist.scan_area
                     p.text-muted
@@ -249,12 +250,14 @@ block content
                                     span.badge.bg-info Yes
                                   else
                                     span.text-muted No
-                                td
+                                td(data-order=timestampMs(area.first_seen) || 0)
                                   if area.first_seen
-                                    small= new Date(area.first_seen).toLocaleDateString()
-                                td
+                                    small
+                                      +ts(area.first_seen, 'date')
+                                td(data-order=timestampMs(area.last_seen) || 0)
                                   if area.last_seen
-                                    small= new Date(area.last_seen).toLocaleDateString()
+                                    small
+                                      +ts(area.last_seen, 'date')
                       else
                         .text-center.py-3
                           p.text-muted No areas found. Import an echolist file to populate this list.

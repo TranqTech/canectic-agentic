@@ -92,12 +92,10 @@ block content
                               = (tbytes / 1024).toFixed(1) + ' KB'
                             else
                               = tbytes + ' B'
-                          td
+                          td(data-order=timestampMs(area.last_upload) || 0)
                             if area.last_upload
                               .text-end
-                                - var e1date = Date.parse(area.last_upload)
-                                - var edate = DateTime.fromMillis(e1date)
-                                = edate.toFormat('MMMM dd, yyyy')
+                                +ts(area.last_upload, 'date')
                             else
                               center
                                 | N/A
@@ -441,7 +439,7 @@ block content
           document.getElementById('areaInfoLastUploader').textContent = d.bsLastuploader || '—';
           document.getElementById('areaInfoLastFilename').textContent = d.bsLastfilename || '—';
           document.getElementById('areaInfoLastUpload').textContent  = d.bsLastupload
-            ? new Date(d.bsLastupload).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+            ? (window.CanecticLocalTime ? window.CanecticLocalTime.format(Date.parse(d.bsLastupload), 'date') : String(d.bsLastupload))
             : '—';
 
           areaInfoModal.show();

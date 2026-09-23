@@ -140,10 +140,9 @@ block content
                                     = (fsize / 1024).toFixed(1) + ' KB'
                                   else
                                     = fsize + ' B'
-                                td
+                                td(data-order=timestampMs(entry.file_date) || 0)
                                   if entry.file_date
-                                    - var fdate = DateTime.fromJSDate(new Date(entry.file_date))
-                                    = fdate.toFormat('yyyy-MM-dd')
+                                    +ts(entry.file_date, 'date')
                                   else
                                     | —
                                 td= entry.short_desc || '—'
@@ -416,7 +415,7 @@ block content
         function formatDate(dateStr) {
           if (!dateStr) return '—';
           try {
-            return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+            return window.CanecticLocalTime ? window.CanecticLocalTime.format(Date.parse(dateStr), 'date') : String(dateStr);
           } catch(e) { return dateStr; }
         }
 

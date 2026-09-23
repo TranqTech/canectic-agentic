@@ -38,8 +38,9 @@ block content
                       td
                         if entry.session_uuid
                           small.text-muted= entry.session_uuid.substring(0, 8)
-                      td
-                        small= new Date(entry.received_at).toLocaleString()
+                      td(data-order=timestampMs(entry.received_at) || 0)
+                        small
+                          +ts(entry.received_at)
             else
               p.text-muted No inbound files logged yet.
 
