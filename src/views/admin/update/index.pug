@@ -93,6 +93,18 @@ block content
                     if c.detail
                       span.text-muted  (#{c.detail})
 
+        //- The systemd unit that starts pm2 at boot (#21). Not an update
+        //- blocker, but this is the page a sysop visits around a Node or OS
+        //- change, which is when a pinned unit bites.
+        if bootProblems && bootProblems.length
+          .alert.alert-warning.small
+            strong Starting at boot:
+            ul.mb-1.mt-1
+              each p in bootProblems
+                li= p
+            | Fix it from a shell, as the user the BBS runs as:
+            code.ms-1 node src/tools/bootUnit.js --install
+
         //- Last update run, read from the state file rather than from a
         //- process: by the time anybody looks, whatever launched it has usually
         //- been replaced by it.

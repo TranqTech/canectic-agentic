@@ -176,6 +176,10 @@ async function main() {
 	console.log('  Next:');
 	if (!o.database) console.log('    setup/create_pg_db_user.sh && node src/tools/dbmigrations.js');
 	if (!o.start)    console.log('    pm2 start ecosystem.config.cjs && pm2 save');
+	if (o.start)     console.log('    pm2 save');
+	// Starting at boot, in a way that survives Node upgrades (#21), instead of
+	// `pm2 startup` and a hand edit.
+	console.log('    node src/tools/bootUnit.js --install    (start the BBS at boot, and keep it starting after a Node upgrade)');
 	console.log('    Open the web interface and register; the first account is the sysop.');
 	console.log('    docs/sysop/INSTALL.md covers the rest.');
 	console.log('');

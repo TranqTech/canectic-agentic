@@ -380,13 +380,13 @@ This creates all tables and columns. Safe to run multiple times — it only adds
 **With PM2 (recommended for production):**
 ```bash
 pm2 start ecosystem.config.cjs
-pm2 save      # persist across reboots
-pm2 startup   # generate system startup script
+pm2 save                                # what the boot unit will start
+node src/tools/bootUnit.js --install    # start it at boot (asks for sudo)
 ```
 
-If you installed Node with nvm, patch the unit `pm2 startup` generates before
-you rely on it. As generated it hardcodes the Node version and will stop
-booting after an upgrade. See [Surviving Node Upgrades](#surviving-node-upgrades).
+Use `bootUnit.js` rather than `pm2 startup`. The unit `pm2 startup` writes
+hardcodes the Node version and stops booting once that version is removed; see
+[Surviving Node Upgrades](#surviving-node-upgrades).
 
 **Single process (development/testing):**
 ```bash
@@ -464,68 +464,80 @@ A native Node install has a milder version of the same problem: the unit points
 at `/usr/bin/pm2`, which keeps working, but an OS upgrade can move the Node
 underneath it without warning.
 
-Canectic ships a wrapper that resolves Node at start time instead of freezing it
-into the unit. It follows nvm's `default` alias when nvm is present, and falls
-back to whatever `pm2` is on `PATH` when it is not, so the same unit works on
-both kinds of install. Install it once, to a path outside the repo (`setup/` is
-wiped and recopied by `update.sh`, so a boot during an update would find no
-wrapper):
+Canectic ships a wrapper, `setup/canectic-pm2.sh`, that resolves Node at start
+time instead of freezing it into the unit. It follows nvm's `default` alias when
+nvm is present and falls back to whatever `pm2` is on `PATH` when it is not, so
+the same unit works on both kinds of install. On `resurrect` it also notices
+processes that `dump.pm2` recorded on a Node that has since been replaced, and
+restarts them on the current one and saves, which used to need a `pm2 save` by
+hand after every Node upgrade.
+
+One command installs the wrapper and writes the unit that uses it, in place of
+`pm2 startup` and the hand edit this section used to describe. Run it as the
+user the BBS runs as, from the install directory:
 
 ```bash
-install -m 755 setup/canectic-pm2.sh ~/.local/bin/canectic-pm2
+node src/tools/bootUnit.js --install
 ```
 
-Then edit `/etc/systemd/system/pm2-<user>.service` to drop the nvm directory
-from `PATH`, add `NVM_DIR`, and route the `Exec*` lines through the wrapper:
-
-```ini
-Environment=PATH=/home/you/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=PM2_HOME=/home/you/.pm2
-Environment=NVM_DIR=/home/you/.nvm
-
-ExecStart=/home/you/.local/bin/canectic-pm2 resurrect
-ExecReload=/home/you/.local/bin/canectic-pm2 reload all
-ExecStop=/home/you/.local/bin/canectic-pm2 kill
-```
-
-On a native install, leave `NVM_DIR` out. The wrapper then finds no `nvm.sh` and
-goes straight to `pm2` on `PATH`.
-
-Reload systemd and restart once to confirm the new path boots:
+It copies the wrapper to `~/.local/bin/canectic-pm2` (outside the install,
+because an update replaces `setup/` and a boot in the middle of one would find
+no wrapper), writes `/etc/systemd/system/pm2-<user>.service` with sudo, keeping
+the `PATH` of any unit already there minus its Node version directories and
+saving the old one beside it as `.before-canectic`, and enables it. It restarts
+nothing: the new unit takes effect at the next boot, or now, at a quiet moment.
+If the unit was already running pm2:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl restart pm2-<user>
+pm2 save && sudo systemctl restart pm2-<user>
 ```
 
-Upgrading Node then needs no unit edit, but it does still need a `pm2 save`,
-because `dump.pm2` stores an absolute interpreter path for each of the four
-children. Under nvm:
+If you started pm2 yourself (with `pm2 start`, as on a fresh install), stop that
+daemon first, or the unit fails to start: its `resurrect` only talks to the
+daemon you started, and systemd refuses to adopt a process it did not start.
+The tool prints whichever applies.
+
+```bash
+pm2 save && pm2 kill && sudo systemctl start pm2-<user>
+```
+
+To see what it would write, or check a board without changing anything:
+
+```bash
+node src/tools/bootUnit.js --print      # the unit, to stdout
+node src/tools/bootUnit.js              # what is wrong, if anything; exits 1 when something is
+```
+
+The check reports a unit pinned to a Node version, one that does not use the
+wrapper, a wrapper that is missing or older than the release's copy (run
+`--install` again after an update that changed it), processes in `dump.pm2` on a
+Node that is no longer the default, and a `dump.pm2` with nothing saved. The
+Update page shows the same warnings.
+
+Upgrading Node then needs no unit edit and no `pm2 save`. Under nvm:
 
 ```bash
 nvm install 27 && nvm alias default 27
 npm install -g pm2                  # globals are per-version under nvm
 sudo systemctl restart pm2-<user>
-pm2 save                            # re-pin the children in dump.pm2
 ```
 
-Natively, the package upgrade replaces Node in place, so only the last two steps
-apply:
+Natively, the package upgrade replaces Node in place:
 
 ```bash
 sudo apt install --only-upgrade nodejs
 sudo systemctl restart pm2-<user>
-pm2 save
 ```
 
 Upgrading the operating system underneath a running BBS is a separate job with
 its own risks, chiefly the PostgreSQL cluster. See [OS_UPGRADE.md](OS_UPGRADE.md).
 
-Skip the `pm2 save` and the daemon comes up on the new Node while `resurrect`
-still spawns the four children under the old interpreter recorded in the dump.
+Without the wrapper (a unit from `pm2 startup`), a Node upgrade also needs a
+`pm2 save`, or the daemon comes up on the new Node while `resurrect` still spawns
+the four processes under the old interpreter recorded in the dump.
 `ecosystem.config.cjs` pins `interpreter` to `process.execPath`, so a plain
-`pm2 start ecosystem.config.cjs` followed by `pm2 save` always re-pins the
-children to the daemon's own Node. Verify with:
+`pm2 start ecosystem.config.cjs` followed by `pm2 save` re-pins them to the
+daemon's own Node, which is what the wrapper does for you. Verify with:
 
 ```bash
 pm2 jlist | python3 -c "import json,sys; [print(p['name'], p['pm2_env']['node_version']) for p in json.load(sys.stdin)]"

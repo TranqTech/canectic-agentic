@@ -24,6 +24,16 @@
 #
 # Arguments pass straight through to pm2, so one wrapper serves every Exec*
 # line. See docs/sysop/INSTALL.md, "Surviving Node Upgrades".
+#
+# One addition on `resurrect` (#21): dump.pm2 records an absolute interpreter
+# for every process, so after a Node upgrade the daemon comes up on the new
+# Node and resurrect starts the BBS on the old one, until somebody remembers
+# `pm2 save`. Once the old version is uninstalled they do not start at all.
+# After resurrecting, any process whose recorded interpreter is not the Node
+# now current, and whose directory holds ecosystem.config.cjs, is started
+# again from that file (which pins process.execPath) and the result saved.
+#
+# Installed and kept current by `node src/tools/bootUnit.js --install`.
 
 # Set by the unit so this does not depend on systemd exporting HOME. The
 # fallback covers interactive use and native-Node boxes where it is unset.
@@ -50,6 +60,44 @@ if ! command -v pm2 >/dev/null 2>&1; then
 	echo "canectic-pm2: pm2 not found for $(node -v 2>/dev/null || echo 'no node on PATH')." >&2
 	echo "canectic-pm2: pm2 installs per Node version, so a new Node needs its own: npm install -g pm2" >&2
 	exit 1
+fi
+
+# Re-pin the BBS processes dump.pm2 still records on an older Node. Prints one
+# line per install directory needing it: "<dir><TAB><name> <name>...".
+stale_apps() {
+	node -e '
+		var fs = require("fs"), path = require("path");
+		var home = process.env.PM2_HOME || path.join(require("os").homedir(), ".pm2");
+		var apps; try { apps = JSON.parse(fs.readFileSync(path.join(home, "dump.pm2"), "utf8")); } catch (e) { process.exit(0); }
+		var now = fs.realpathSync(process.execPath), byDir = {};
+		for (var a of Array.isArray(apps) ? apps : []) {
+			if (!a || !a.pm_cwd || !a.exec_interpreter || a.exec_interpreter === "none") continue;
+			if (!fs.existsSync(path.join(a.pm_cwd, "ecosystem.config.cjs"))) continue;
+			var was; try { was = fs.realpathSync(a.exec_interpreter); } catch (e) { was = a.exec_interpreter; }
+			if (was === now) continue;
+			(byDir[a.pm_cwd] = byDir[a.pm_cwd] || []).push(a.name);
+		}
+		for (var d in byDir) console.log(d + "\t" + byDir[d].join(" "));
+	' 2>/dev/null
+}
+
+if [ "${1:-}" = "resurrect" ]; then
+	pm2 "$@"
+	rc=$?
+	repinned=0
+	while IFS=$'\t' read -r dir names; do
+		[ -n "$dir" ] || continue
+		echo "canectic-pm2: $names in $dir were saved on another Node; restarting them on $(node -v)" >&2
+		# shellcheck disable=SC2086
+		pm2 delete $names >/dev/null 2>&1
+		# --only: just the ones re-pinned, so a process the sysop stopped on
+		# purpose (and so not in the dump) is not started behind their back.
+		(cd "$dir" && pm2 start ecosystem.config.cjs --only "${names// /,}" >/dev/null) ||
+			echo "canectic-pm2: could not start $dir/ecosystem.config.cjs" >&2
+		repinned=1
+	done < <(stale_apps)
+	[ "$repinned" = 1 ] && pm2 save >/dev/null 2>&1
+	exit $rc
 fi
 
 exec pm2 "$@"

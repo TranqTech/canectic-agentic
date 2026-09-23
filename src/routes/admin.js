@@ -6654,9 +6654,18 @@ router.get('/update', requireAdmin, async (req, res) => {
 		notices:   await upgradeNoticeView(result, systeminfo.canonicalVersion()),
 		noticeRefused: req.query.notice === 'ack',
 		lastRunNotices: lastRunNotices(updateRunStore.latest(target)),
+		bootProblems: await bootUnitProblems(target),
 		history:   await updateChecks.getRecent(20)
 	});
 });
+
+/** What is wrong with the pm2 boot unit (#21); empty when fine or unknowable. */
+async function bootUnitProblems(target) {
+	try {
+		var bu = await import('../maintenance/bootUnit.js');
+		return bu.assessBoot({ installRoot: target }).problems;
+	} catch (_) { return []; }
+}
 
 /** The upgrade notes the last run carried, for "After updating", once it is over. */
 function lastRunNotices(state) {
