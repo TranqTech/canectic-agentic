@@ -2,6 +2,11 @@
 
 ## Pending (since v0.9.10a)
 
+### Administration
+
+- Fix: **date columns in the admin logs and other tables did not sort by date.** Dates showed as `9/22/2026, 5:57:03 PM`, or as `September 22, 2026` and `Sep 22` on some pages, and sorting a column put `10/1` before `9/30` and April before March. Every table now shows dates as `2026-09-22 17:57:03` (or just the date where that is all there is) and sorts on the actual time. Affected: the inbound and outbound file logs, the netmail relay log, API tokens, echolists, filebones, nodelists, message and file areas, users, and on the user side the private mail inbox and file lists.
+- **Times in tables show in your own timezone.** They follow your browser's clock, which for a sysop is almost always the board's own; the zone is named when you hover over a time.
+
 ## v0.9.10a (2026-09-22)
 
 ### Upgrade Notes
