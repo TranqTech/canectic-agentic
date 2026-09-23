@@ -21,7 +21,7 @@
 //-                               group. `msgGroups/view.pug` uses this.
 //-     defaults (object)         New-mode only. Seeds initial values for
 //-                               read_security, post_security, min_age,
-//-                               max_age, post_as, and newscan_default.
+//-                               max_age, post_as, newscan_default and ansi_area.
 //-                               Omit a key to fall back to the hardcoded
 //-                               safe default. The index view passes no
 //-                               defaults; the group view passes the
@@ -32,7 +32,7 @@
 //- an id here without updating both callers' JS will silently break
 //- form hydration. Suffixes currently required: name, description,
 //- shortcode (new only), group (new only), active (edit only),
-//- thread_mode, post_as, newscan, qwk_conf_number (edit only),
+//- thread_mode, post_as, newscan, ansi_area, qwk_conf_number (edit only),
 //- qwk_conf_status (edit only), readsecurity, postsecurity, minage,
 //- maxage, network (new only), areatag (new only), and the four flag
 //- widget suffix groups: {read_perm, read_rest, post_perm, post_rest}
@@ -52,6 +52,7 @@ mixin areaFormFields(prefix, mode, opts)
   - var initMaxAge   = (defaults.max_age        !== undefined) ? defaults.max_age        : 255
   - var initPostAs   = defaults.post_as || 'username'
   - var initNewscan  = (defaults.newscan_default === true) ? 'true' : 'false'
+  - var initAnsi     = (defaults.ansi_area === true) ? 'true' : 'false'
   - var initMaxAgeDays  = (defaults.max_age_days  !== undefined && defaults.max_age_days  !== null) ? defaults.max_age_days  : ''
   - var initMaxMessages = (defaults.max_messages !== undefined && defaults.max_messages !== null) ? defaults.max_messages : ''
 
@@ -143,6 +144,19 @@ mixin areaFormFields(prefix, mode, opts)
             else
               option(value='false') No
               option(value='true') Yes
+      //- #49 / #54: the web reader's starting width on phones.
+      .mb-3
+        label.form-label(for=prefix + 'ansi_area') Mostly ANSI art
+        select.form-select(id=prefix + 'ansi_area' name='ansi_area')
+          if mode === 'new'
+            option(value='false' selected=(initAnsi === 'false')) No
+            option(value='true' selected=(initAnsi === 'true')) Yes (80 columns on phones)
+          else
+            option(value='false') No
+            option(value='true') Yes (80 columns on phones)
+        small.form-text.text-muted
+          | On phones the web reader shows 40 columns so text is readable, which breaks 80-column art.
+          | Yes opens this area at 80 instead. Readers can switch either way, and messages detected as art show at 80 regardless.
       if mode === 'edit'
         .mb-3
           label.form-label(for=prefix + 'qwk_conf_number') QWK Conference #

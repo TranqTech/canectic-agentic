@@ -66,6 +66,7 @@ block content
                           data-bs-threadmode=area.thread_mode || 'standard'
                           data-bs-postas=area.post_as || 'username'
                           data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
+                          data-bs-ansiarea=(area.ansi_area ? 'true' : 'false')
                           data-bs-qwkconfnumber=area.qwk_conf_number || ''
                           data-bs-msgcount=area.msg_count || 0
                           data-bs-lastfrom=area.last_from || ''
@@ -459,6 +460,7 @@ block content
         document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
         document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
         document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
+        document.getElementById('ea_ansi_area').value      = d.bsAnsiarea === 'true' ? 'true' : 'false';
         document.getElementById('ea_qwk_conf_number').value = d.bsQwkconfnumber || '';
         // Reset collision-check status when loading a row into the form
         var qwkStatus = document.getElementById('ea_qwk_conf_status');
@@ -568,6 +570,7 @@ block content
             document.getElementById('na_postsecurity').value = data.post_security || 60;
             document.getElementById('na_post_as').value = data.post_as || 'username';
             document.getElementById('na_newscan').value = data.newscan_default ? 'true' : 'false';
+            document.getElementById('na_ansi_area').value = data.ansi_area ? 'true' : 'false';
             renderAreaFlags('na_read_perm', 'read_perm_flags', parseFlags(JSON.stringify(data.read_perm_flags)), allPerms, 'bg-success');
             renderAreaFlags('na_read_rest', 'read_rest_flags', parseFlags(JSON.stringify(data.read_rest_flags)), allRestrs, 'bg-danger');
             renderAreaFlags('na_post_perm', 'post_perm_flags', parseFlags(JSON.stringify(data.post_perm_flags)), allPerms, 'bg-success');

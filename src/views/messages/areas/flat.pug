@@ -78,6 +78,7 @@ block content
                     = messagesBefore + messages.length
                     |  of 
                     = totalMessages
+                include ../../partials/messages/_readerWidth
 
             //- Message container
             #messageContainer.card-body.bg-black(
@@ -148,7 +149,7 @@ block content
                           )
                             i.bi.bi-trash
                     .px-2.py-2
-                      .messagebody.monospace.fg-brightgrey
+                      .messagebody.monospace.fg-brightgrey(data-art=message.isArt ? 'true' : undefined)
                         if message.isAnsi
                           .ansi
                             if message.body_html
@@ -473,7 +474,7 @@ block content
           +   '</div>'
           + '</div>'
           + '<div class="px-2 py-2">'
-          +   '<div class="messagebody monospace fg-brightgrey">'
+          +   '<div class="messagebody monospace fg-brightgrey"' + (msg.isArt ? ' data-art="true"' : '') + '>'
           +     bodyContent
           +   '</div>'
           + '</div>'

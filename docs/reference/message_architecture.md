@@ -47,7 +47,7 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | `messages/areas/view.pug` | Threaded area view. Thread listing table with keyset-paginated lazy scroll. Unread badges per thread. New Thread modal. Mark Read button. Flat View toggle. |
 | `messages/areas/flat.pug` | Flat area view. Guard chain: `!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found. Column layout: `col-xl-6.offset-xl-3.col-lg-10.col-12`. Sidebar hidden below xl, replaced with offcanvas (hamburger ☰). Desktop nav buttons hidden on mobile. Stacked message headers. `data-force80` and `data-can-post` on container. Post/Reply buttons, modals, quote system, and JS `buildMsgHtml` all gated behind `canPost`. Auto-fill for short content (loads older messages when initial batch doesn't overflow container). |
 | `messages/areas/thread.pug` | Thread reader. Same guard chain, column layout, offcanvas, and `canPost` gating as flat.pug. `← Threads` button hidden on mobile. Stacked message headers. Bidirectional lazy scroll from first unread with auto-fill for short content. Reply modal with quote panel. |
-| `partials/messages/_msgAutoSize.pug` | Auto-sizes `.messagebody` font to fit target column count. Probe uses `font-family:"Consolas",monospace` inline. Reads `data-force80`: `ansi_area=true` → always 80 cols. Desktop (≥992px) → 80 cols. Mobile → 40 cols. Min 7px, max 32px. `setProperty('font-size', px, 'important')`. Exposed as `window.fitMessageBodies`. |
+| `partials/messages/_msgAutoSize.pug` | Loads `public/js/readerWidth.js`, which sizes each `.messagebody` to a column count (#54): 80 on desktop (≥992px); below that the view's 40 or 80 (the reader's choice per area in localStorage, else `data-force80` from `ansi_area`, else 40), and 80 for any body with `data-art` whatever the view. Min 7px, max 32px, `setProperty('font-size', px, 'important')`. Exposed as `window.fitMessageBodies`. `partials/messages/_readerWidth.pug` is the 40 \| 80 switch (`d-lg-none`). |
 
 ### Maintenance
 
@@ -110,7 +110,7 @@ Each row represents a message area (forum/conference) belonging to a message gro
   - `username` — posts display the user's login name
   - `realname` — posts display the user's full name (falling back to username)
 - `newscan_default` — BOOLEAN, DEFAULT true. Whether this area is included in newscan by default for users who haven't set an explicit override. Resolved by `userAreaSubs.getSubscriptionMap()`: user override → this column → true.
-- `ansi_area` — BOOLEAN, DEFAULT false. Marks the area as primarily ANSI art content. When true, the web auto-sizer always targets 80 columns regardless of screen size. **Never wired up:** the column was added in 3e28c3f (March 2026) together with the two templates that read it, and nothing has ever written it. There is no admin form field and no model write, so it cannot be set to true. Note also that its only effect is web font sizing; it does not control whether escape sequences survive or whether text is reflowed, so it is not by itself the fix for munged art.
+- `ansi_area` — BOOLEAN, DEFAULT false. "Mostly ANSI art": the web reader starts this area at 80 columns on phones instead of 40 (#54). Set on the area form; `message_groups.ansi_area` is the default a new area inherits when the form does not say, and Push Group Defaults can apply it (unticked by default), the same shape as `thread_mode`. It only chooses the starting width; readers can switch, and messages detected as art show at 80 regardless. It does not control whether escape sequences survive or whether text is reflowed. Unsettable from March to September 2026 (#49).
 
 ### Message tables (per area)
 
@@ -596,15 +596,19 @@ Below xl, the sidebar is replaced by a Bootstrap offcanvas panel (`offcanvas-end
 
 ### Auto-Sizing (`_msgAutoSize.pug`)
 
-Included by both view templates. Creates a hidden monospace probe element at 16px reference, measures its pixel width, computes the font-size that makes N characters fill the container. Applied with `setProperty('font-size', px, 'important')`.
+Included by both view templates; the logic is `public/js/readerWidth.js` (#54), whose rules (`viewCols`, `bodyCols`, `fontPx`) are pure and tested in `tests/readerWidth.test.js`. A hidden monospace probe at 16px gives the width of one character; each body gets the font size that makes its column count fill the container, applied with `setProperty('font-size', px, 'important')`.
 
 | Condition | Target columns | Effect |
 |---|---|---|
-| `data-force80='true'` (ansi_area) | 80 | Fixed width, ANSI art stays correct |
-| Desktop (≥992px) | 80 | Standard BBS column width |
-| Mobile (<992px) | 40 | Larger, readable text |
+| Desktop (≥992px) | 80 | Standard BBS column width; no switch shown |
+| Mobile, the reader chose 40 or 80 for this area | as chosen | Remembered in localStorage (`canectic.readerCols.<AREA>`) |
+| Mobile, area `ansi_area` true | 80 | Art areas open as written |
+| Mobile otherwise | 40 | Larger, readable text |
+| Body marked `data-art` (any mobile view) | 80 | Detected art is never shown broken at 40 |
 
-Runs on page load, debounced on resize, and exposed as `window.fitMessageBodies` for the infinite scroll loader to call after inserting new messages.
+`data-art` comes from `detectAnsiArt(body_text)` in the message loaders (`msg.isArt`, carried by `messageForClient`), computed when the page is rendered, so it needs no `body_html` regeneration. On the dev board it flagged 22 of 165 OTHERNETS messages, all labelled [ANSI] by their authors, and none of 6000 in the three busiest text areas.
+
+Runs on page load, debounced on resize, again on every click of the switch, and as `window.fitMessageBodies` for the infinite scroll loader after inserting messages.
 
 ### Access Control
 

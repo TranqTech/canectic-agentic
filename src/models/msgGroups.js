@@ -185,6 +185,9 @@ async function newGroup(formObj) {
 		// Default outbound wire encoding for areas created in this group.
 		charset: normaliseCharsetMode(formObj.charset),
 		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true,
+		// Default for areas created in this group: mostly ANSI art, so the web
+		// reader opens them at 80 columns on phones (#49, #54).
+		ansi_area: formObj.ansi_area === 'true' || formObj.ansi_area === true,
 		// Retention defaults for areas created in this group. NULL means no
 		// pruning, which is what every group and area starts as.
 		max_age_days: (formObj.max_age_days && parseInt(formObj.max_age_days) > 0)
@@ -296,6 +299,9 @@ async function updateGroup(shortcode, formObj) {
 	}
 	if (formObj.newscan_default !== undefined) {
 		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
+	}
+	if (formObj.ansi_area !== undefined) {
+		updateObj.ansi_area = formObj.ansi_area === 'true' || formObj.ansi_area === true;
 	}
 	if (formObj.max_age_days !== undefined) updateObj.max_age_days =
 		(formObj.max_age_days !== '' && parseInt(formObj.max_age_days) > 0) ? parseInt(formObj.max_age_days) : null;
@@ -601,6 +607,9 @@ async function pushDefaultsToAreas(shortcode, fields) {
 	}
 	if (pushAll || fields.includes('newscan_default')) {
 		updateObj.newscan_default = group.newscan_default || false;
+	}
+	if (pushAll || fields.includes('ansi_area')) {
+		updateObj.ansi_area = group.ansi_area === true;
 	}
 	if (pushAll || fields.includes('retention')) {
 		// Note both can be null, and null means no pruning. Pushing retention

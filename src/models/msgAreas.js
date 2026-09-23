@@ -232,6 +232,12 @@ async function newArea(formObj) {
 			? formObj.post_as.trim().toLowerCase()
 			: 'username',
 		newscan_default: formObj.newscan_default === 'true' || formObj.newscan_default === true,
+		// Mostly ANSI art: the web reader opens this area at 80 columns on
+		// phones instead of 40 (#49, #54). The group's default when the form
+		// does not say, like thread_mode, so an art network is set once.
+		ansi_area: formObj.ansi_area !== undefined
+			? (formObj.ansi_area === 'true' || formObj.ansi_area === true)
+			: dbgroup.ansi_area === true,
 		read_perm_flags: normalizeFlags(formObj.read_perm_flags),
 		read_rest_flags: normalizeFlags(formObj.read_rest_flags),
 		post_perm_flags: normalizeFlags(formObj.post_perm_flags),
@@ -487,6 +493,9 @@ async function updateArea(shortcode, formObj) {
 	if (formObj.newscan_default !== undefined) {
 		updateObj.newscan_default = formObj.newscan_default === 'true' || formObj.newscan_default === true;
 	}
+	if (formObj.ansi_area !== undefined) {
+		updateObj.ansi_area = formObj.ansi_area === 'true' || formObj.ansi_area === true;
+	}
 
 	// QWK conference number sysop override. Areas are normally assigned
 	// from their group's block, but a sysop can override an individual
@@ -657,6 +666,9 @@ async function moveArea(shortcode, targetGroupShortcode, opts) {
 		}
 		if (targetGroup.newscan_default !== undefined && targetGroup.newscan_default !== null) {
 			updateObj.newscan_default = targetGroup.newscan_default === true;
+		}
+		if (targetGroup.ansi_area !== undefined && targetGroup.ansi_area !== null) {
+			updateObj.ansi_area = targetGroup.ansi_area === true;
 		}
 		if (targetGroup.min_age !== undefined && targetGroup.min_age !== null) {
 			updateObj.min_age = targetGroup.min_age;

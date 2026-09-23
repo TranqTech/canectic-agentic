@@ -70,6 +70,9 @@ block content
                       h5
                         | Newscan Default:
                         = msgGroup.newscan_default ? 'Yes' : 'No'
+                      h5
+                        | Mostly ANSI Art:
+                        = msgGroup.ansi_area ? 'Yes (80 columns on phones)' : 'No'
               .card
                 .card-header.bg-darkblue.text-white
                   h4 Areas
@@ -106,6 +109,7 @@ block content
                                 data-bs-threadmode=area.thread_mode || 'standard'
                                 data-bs-postas=area.post_as || 'username'
                                 data-bs-newscandefault=(area.newscan_default ? 'true' : 'false')
+                                data-bs-ansiarea=(area.ansi_area ? 'true' : 'false')
                                 data-bs-qwkconfnumber=area.qwk_conf_number || ''
                                 data-bs-msgcount=area.msg_count || 0
                                 data-bs-lastfrom=area.last_from || ''
@@ -350,6 +354,7 @@ block content
                         post_security: msgGroup.post_security,
                         post_as: msgGroup.post_as,
                         newscan_default: msgGroup.newscan_default,
+                        ansi_area: msgGroup.ansi_area === true,
                         max_age_days: msgGroup.max_age_days,
                         max_messages: msgGroup.max_messages
                       }
@@ -410,6 +415,11 @@ block content
                             select#edit_newscan.form-select(name='newscan_default')
                               option(value='false' selected=(!msgGroup.newscan_default)) No
                               option(value='true' selected=(!!msgGroup.newscan_default)) Yes
+                          .col-4
+                            label.form-label(for='edit_ansi_area') Mostly ANSI Art:
+                            select#edit_ansi_area.form-select(name='ansi_area')
+                              option(value='false' selected=(!msgGroup.ansi_area)) No
+                              option(value='true' selected=(!!msgGroup.ansi_area)) Yes (80 columns on phones)
                           .col-4
                             label.form-label(for='edit_max_age_days') Max Age (days):
                             input#edit_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit' value=(msgGroup.max_age_days === null || msgGroup.max_age_days === undefined) ? '' : msgGroup.max_age_days)
@@ -540,6 +550,10 @@ block content
                     .form-check.mb-2
                       input.form-check-input#push_newscan(type='checkbox' name='fields' value='newscan_default' checked)
                       label.form-check-label(for='push_newscan') Newscan Default (#{msgGroup.newscan_default ? 'Yes' : 'No'})
+                    .form-check.mb-2
+                      input.form-check-input#push_ansi_area(type='checkbox' name='fields' value='ansi_area')
+                      label.form-check-label(for='push_ansi_area') Mostly ANSI Art (#{msgGroup.ansi_area ? 'Yes' : 'No'})
+                      .form-text.text-muted Unticked by default, since this replaces any per-area choice.
                     .form-check.mb-2
                       input.form-check-input#push_retention(type='checkbox' name='fields' value='retention')
                       label.form-check-label(for='push_retention')
@@ -809,6 +823,7 @@ block content
           document.getElementById('ea_thread_mode').value    = d.bsThreadmode || 'standard';
           document.getElementById('ea_post_as').value        = d.bsPostas || 'username';
           document.getElementById('ea_newscan').value        = d.bsNewscandefault === 'true' ? 'true' : 'false';
+          document.getElementById('ea_ansi_area').value      = d.bsAnsiarea === 'true' ? 'true' : 'false';
           document.getElementById('ea_qwk_conf_number').value = d.bsQwkconfnumber || '';
 
           renderAreaFlags('ea_read_perm', 'read_perm_flags', parseFlags(d.bsReadpermflags), allPerms, 'bg-success');

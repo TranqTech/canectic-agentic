@@ -1,0 +1,6 @@
+//- The reader's 40 | 80 switch (#54), phones and tablets only: desktop is
+//- always 80. public/js/readerWidth.js handles the clicks, remembers the
+//- choice per area in this browser, and marks the active button.
+.btn-group.btn-group-sm.ms-2.d-lg-none(role='group' aria-label='Columns' data-reader-width)
+  button.btn.btn-outline-secondary(type='button' data-cols='40' title='40 columns: larger text') 40
+  button.btn.btn-outline-secondary(type='button' data-cols='80' title='80 columns: as written, for art and tables') 80

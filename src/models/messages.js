@@ -17,6 +17,7 @@ import * as ftnUtils from '../utils/ftnUtils.js';
 import * as codepageConversions from '../utils/codepageConversions.js';
 import * as terminalText from '../utils/terminalText.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
+import { detectAnsiArt } from '../utils/termMsgFormat.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from "../config/appConfig.js";
 import * as systeminfo from "../utils/systeminfo.js";
@@ -271,10 +272,12 @@ async function getMessagesForThread(shortcode, threadid) {
 			var displayText = msg.body_text || '';
 			msg.body_html = await formatBodyHtml(displayText);
 			msg.isAnsi = detectIsAnsi(displayText);
+			msg.isArt = detectAnsiArt(displayText);
 		} else {
 			// Pre-rendered — still need to detect if terminal rendering is needed
 			var checkText = msg.body_text || '';
 			msg.isAnsi = detectIsAnsi(checkText);
+			msg.isArt = detectAnsiArt(checkText);
 		}
 	}
 
@@ -306,9 +309,11 @@ async function getMessagesForArea(shortcode, options) {
 			var displayText = msg.body_text || '';
 			msg.body_html = await formatBodyHtml(displayText);
 			msg.isAnsi = detectIsAnsi(displayText);
+			msg.isArt = detectAnsiArt(displayText);
 		} else {
 			var checkText = msg.body_text || '';
 			msg.isAnsi = detectIsAnsi(checkText);
+			msg.isArt = detectAnsiArt(checkText);
 		}
 	}
 
@@ -328,9 +333,11 @@ async function getMessage(id, shortcode) {
 		var displayText = msg.body_text || '';
 		msg.body_html = await formatBodyHtml(displayText);
 		msg.isAnsi = detectIsAnsi(displayText);
+		msg.isArt = detectAnsiArt(displayText);
 	} else {
 		var checkText = msg.body_text || '';
 		msg.isAnsi = detectIsAnsi(checkText);
+		msg.isArt = detectAnsiArt(checkText);
 	}
 
 	return msg;
@@ -434,9 +441,11 @@ async function getMessages(shortcode, options) {
 			var displayText = msg.body_text || '';
 			msg.body_html = await formatBodyHtml(displayText);
 			msg.isAnsi = detectIsAnsi(displayText);
+			msg.isArt = detectAnsiArt(displayText);
 		} else {
 			var checkText = msg.body_text || '';
 			msg.isAnsi = detectIsAnsi(checkText);
+			msg.isArt = detectAnsiArt(checkText);
 		}
 	}
 
@@ -2316,6 +2325,9 @@ function messageForClient(m, threadUUID) {
 		body_text: m.body_text,
 		body_html: m.body_html,
 		isAnsi: m.isAnsi || false,
+		// Art the web reader shows at 80 columns on phones whatever the view
+		// is set to (#54).
+		isArt: m.isArt || false,
 		thread_uuid: threadUUID || m.thread_uuid || '',
 		moderation: {
 			canDelete: !!mod.canDelete,

@@ -448,7 +448,8 @@ router.get('/msgGroup/:shortcode/defaults', requireAdmin, async (req, res) => {
 		post_perm_flags: group.post_perm_flags || [],
 		post_rest_flags: group.post_rest_flags || [],
 		post_as: group.post_as || 'username',
-		newscan_default: group.newscan_default === true
+		newscan_default: group.newscan_default === true,
+		ansi_area: group.ansi_area === true
 	});
 });
 

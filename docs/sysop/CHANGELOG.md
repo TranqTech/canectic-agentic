@@ -2,6 +2,11 @@
 
 ## Pending (since v0.9.10a)
 
+### Messages
+
+- **New: read at 40 or 80 columns on a phone.** On a phone the web reader sizes text to 40 columns so it is readable, which breaks anything laid out for 80, ANSI art above all. The reader now has a **40 | 80** switch, remembered per area, and a message recognised as art is shown at 80 on its own, whatever the switch says. Desktop is unchanged at 80.
+- **Message areas and groups have a "Mostly ANSI art" setting**, so an area full of art opens at 80 columns on phones. Set it on the area, or on a group for every area created in it, with Push Group Defaults for areas that already exist. The setting existed in the database without any way to set it.
+
 ### Upgrade Notes
 
 - **Check how your BBS starts at boot, once, after updating.** Run `node src/tools/bootUnit.js` as the user the BBS runs as, and `node src/tools/bootUnit.js --install` if it reports anything. A board set up with `pm2 startup` stops starting at boot once the Node version it names is removed, which under nvm happens on an ordinary Node upgrade. `--install` asks for sudo and restarts nothing; the restart it prints restarts the BBS, so close the board first with `node src/tools/maintenanceMode.js --on` if callers are online.

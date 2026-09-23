@@ -128,6 +128,14 @@ block content
                           option(value='true') Yes
                     .row.mt-3
                       .col-6
+                        label.form-label(for="ng_ansi_area") Mostly ANSI Art:
+                        select#ng_ansi_area.form-select(name='ansi_area')
+                          option(value='false' selected) No
+                          option(value='true') Yes (80 columns on phones)
+                        .form-text.text-muted
+                          | Areas in this group open at 80 columns on phones. New areas inherit this.
+                    .row.mt-3
+                      .col-6
                         label.form-label(for='ng_max_age_days') Max Age (days):
                         input#ng_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit')
                         .form-text.text-muted
