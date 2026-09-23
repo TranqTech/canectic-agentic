@@ -528,6 +528,36 @@ function processMessageBody(msg, options) {
 // lines while catching the common 80/90/100-col editor outputs.
 var REFLOW_MIN_RATIO = 0.80; // line must be at least 80% of wrapWidth
 
+// A line that is laid out rather than written: never join it, or anything onto
+// it. Any of these is enough:
+//   - two or more gaps of 3+ spaces, which is columns;
+//   - one gap of 4+ spaces, which is alignment (`Recipe By     : ...`);
+//   - mostly punctuation rather than letters and digits, which is drawing:
+//     `| \ / |`, `--==[ ]==--`, `+-----+`.
+// A single gap of exactly three spaces is left to prose: across eight busy
+// areas on the dev board it was an accidental extra space in real sentences
+// seven times out of eight. Erring that way costs less anyway: an unjoined
+// prose line only breaks its paragraph early, a joined layout line is destroyed.
+// ASCII art is neither cursor movement nor block glyphs, so detectAnsiArt
+// does not see it and the message is reflowed. Every row of 64 characters or
+// more was joined to the next, so a 72-column drawing came out as 148-column
+// lines that then wrapped: broken rows with extra lines between them. Found on
+// ALTBBSADS, reading at 80 columns on a phone (#54).
+var LAYOUT_MIN_INK = 20;
+var LAYOUT_MAX_WORD_SHARE = 0.5;
+
+function isLaidOut(line) {
+	var bare = _bareLine(String(line || '')).trim();
+	if (!bare) return false;
+	var gaps = bare.match(/ {3,}/g) || [];
+	if (gaps.length >= 2) return true;
+	if (gaps.length === 1 && gaps[0].length >= 4) return true;
+	var ink = bare.replace(/\s+/g, '');
+	if (ink.length < LAYOUT_MIN_INK) return false;
+	var word = (ink.match(/[\p{L}\p{N}]/gu) || []).length;
+	return word / ink.length < LAYOUT_MAX_WORD_SHARE;
+}
+
 function reflowParagraphs(lines, wrapWidth) {
 	var threshold = Math.floor(wrapWidth * REFLOW_MIN_RATIO);
 	if (threshold < 40) threshold = 40;
@@ -549,8 +579,8 @@ function reflowParagraphs(lines, wrapWidth) {
 		// Normal non-blank line — check if we should join with subsequent lines
 		var visWidth = measureVisualWidth(line);
 
-		// If this line is short, it's intentionally formatted — don't join
-		if (visWidth < threshold) {
+		// If this line is short, or laid out, it's intentionally formatted — don't join
+		if (visWidth < threshold || isLaidOut(line)) {
 			result.push(line);
 			i++;
 			continue;
@@ -573,7 +603,8 @@ function reflowParagraphs(lines, wrapWidth) {
 			if (nextTrimmed.length === 0 ||
 				nextType !== LINE_NORMAL ||
 				nextLine.charAt(0) === " " ||
-				nextLine.charAt(0) === "\t") {
+				nextLine.charAt(0) === "\t" ||
+				isLaidOut(nextLine)) {
 				break;
 			}
 
@@ -750,6 +781,7 @@ function reflowText(text, wrapWidth) {
 }
 
 export {
+	isLaidOut,
 	artLineWidths,
 	processMessageBody,
 	convertCP437toUTF8,

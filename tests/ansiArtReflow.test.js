@@ -21,7 +21,7 @@
 // Run: npx mocha --no-config --no-package tests/ansiArtReflow.test.js
 
 import assert from 'assert';
-import { detectAnsiArt, reflowText, artLineWidths } from '../src/utils/termMsgFormat.js';
+import { detectAnsiArt, reflowText, artLineWidths, isLaidOut } from '../src/utils/termMsgFormat.js';
 import { formatBodyHtml } from '../src/utils/terminalText.js';
 
 var BLOCK = '█';   // CP437 0xDB
@@ -113,17 +113,24 @@ describe('detectAnsiArt — what must NOT become art', function () {
 // The damage itself
 // ---------------------------------------------------------------------------
 
-describe('reflow is unguarded, which is why the caller must ask first', function () {
+describe('reflow and art: the caller still asks first', function () {
 
-	it('joins art rows when called directly', function () {
-		// reflowText does NOT know about art, by design — it is a text
-		// operation. Three full-width rows collapse to one. This is the
-		// damage, reproduced at its source, and the reason both callers have
-		// to run detectAnsiArt BEFORE reaching here rather than after.
+	it('no longer joins drawn rows on its own', function () {
+		// It used to: three full-width rows collapsed to one, which is why both
+		// callers run detectAnsiArt before reflowing. Reflow now also refuses
+		// to join a line that is laid out (isLaidOut: gaps of spaces, or mostly
+		// not letters), because ASCII art is neither cursor movement nor block
+		// glyphs and detectAnsiArt cannot see it (#54).
 		var art = blockArt(3, 78);
 		assert.strictEqual(lines(art).length, 3);
-		assert.strictEqual(lines(reflowText(art, 80)).length, 1,
-			'if this ever stops joining, the guard in the callers is no longer what protects art');
+		assert.strictEqual(lines(reflowText(art, 80)).length, 3);
+	});
+
+	it('would still join text written between drawn rows, which is why the caller check stays', function () {
+		var textRow = 'A line of ordinary words that runs long enough to be a join candidate here,';
+		var next = 'and the words carry on onto a second line just as prose would do in a post.';
+		assert.strictEqual(lines(reflowText(textRow + '\r' + next, 80)).length, 1,
+			'a text row inside art reads as prose; only detectAnsiArt on the whole message protects it');
 	});
 
 	it('still reflows ordinary prose', function () {
@@ -167,5 +174,46 @@ describe('formatBodyHtml preserves art line structure', function () {
 	it('returns null for empty input, as before', async function () {
 		assert.strictEqual(await formatBodyHtml(''), null);
 		assert.strictEqual(await formatBodyHtml(null), null);
+	});
+});
+
+describe('reflow leaves laid-out lines alone (#54)', function () {
+
+	// Rows of an ASCII drawing, as posted to ALTBBSADS (message 1557 on the dev
+	// board). Every row is 64+ wide, so the old reflow joined each to the next
+	// and a 72-column drawing rendered as 148-column lines that wrapped.
+	var ASCII_ART = [
+		'| \\ / | \\    / |         |   ||      |  |  |       |  |  |     | \\ / ||',
+		'|     |   \\ /   -----    |   ||      |---- |---   ------ |     |     | ',
+		'|     |    |    -----|   |   ||      |  \\  |      ------ |     |     | '
+	];
+
+	it('keeps every row of ASCII art on its own line', function () {
+		assert.ok(ASCII_ART.every(function (l) { return l.length >= 64; }), 'rows clear the reflow threshold');
+		assert.strictEqual(lines(reflowText(ASCII_ART.join('\r'), 80)).length, 3);
+	});
+
+	it('keeps aligned columns and field headers apart', function () {
+		for (var l of [
+			'Mem:             429          62         146          34         220',
+			'Recipe By     : King Cotton Cafe, Morgan Keegan Tower, Memphis TN',
+			'MMMMM----------------------TOFU SOUR CREAM---------------------------',
+			'-------------------------------------------------------------------------'
+		]) assert.strictEqual(isLaidOut(l), true, l);
+	});
+
+	it('leaves prose to reflow, including the stray extra space people type', function () {
+		for (var l of [
+			'JR-Comm 1.02a works really well for me.   Reminds me of the late 80s and',
+			'MY APPOLOGIES EVERYONE!  I must not have been fully awake this morning, I',
+			'The quick brown fox jumps over the lazy dog and keeps on going and on'
+		]) assert.strictEqual(isLaidOut(l), false, l);
+	});
+
+	it('does not join prose onto a laid-out line, or a laid-out line onto prose', function () {
+		var prose = 'The quick brown fox jumps over the lazy dog and keeps on going and on';
+		var rule = 'MMMMM----------------------TOFU SOUR CREAM---------------------------';
+		assert.strictEqual(lines(reflowText(prose + '\r' + rule, 80)).length, 2);
+		assert.strictEqual(lines(reflowText(rule + '\r' + prose, 80)).length, 2);
 	});
 });

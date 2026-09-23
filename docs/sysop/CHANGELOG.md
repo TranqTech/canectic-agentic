@@ -4,11 +4,13 @@
 
 ### Messages
 
+- Fix: **ASCII art and column-aligned posts had their rows run together.** Lines were joined into paragraphs whenever they were long enough, which is right for prose and wrong for a drawing made of `| / \ -` characters, a MealMaster recipe's section dividers, or a table of figures: two rows became one long line that then wrapped, so the picture broke and extra lines appeared. Lines laid out with columns or wide gaps, or drawn mostly from punctuation, are now left as written. Messages received before updating keep their old layout until regenerated; see the upgrade note.
 - **New: read at 40 or 80 columns on a phone.** On a phone the web reader sizes text to 40 columns so it is readable, which breaks anything laid out for 80, ANSI art above all. The reader now has a **40 | 80** switch, remembered per area, and a message recognised as art is shown at 80 on its own, whatever the switch says. Desktop is unchanged at 80.
 - **Message areas and groups have a "Mostly ANSI art" setting**, so an area full of art opens at 80 columns on phones. Set it on the area, or on a group for every area created in it, with Push Group Defaults for areas that already exist. The setting existed in the database without any way to set it.
 
 ### Upgrade Notes
 
+- **Repair the layout of messages already received** with `node src/tools/maintenance.js --regen-html` (worker running; `--area SHORTCODE` to try one area first). ASCII art and column-aligned posts that arrived before this release still show rows run together until then.
 - **Check how your BBS starts at boot, once, after updating.** Run `node src/tools/bootUnit.js` as the user the BBS runs as, and `node src/tools/bootUnit.js --install` if it reports anything. A board set up with `pm2 startup` stops starting at boot once the Node version it names is removed, which under nvm happens on an ordinary Node upgrade. `--install` asks for sudo and restarts nothing; the restart it prints restarts the BBS, so close the board first with `node src/tools/maintenanceMode.js --on` if callers are online.
 
 ### Installation
