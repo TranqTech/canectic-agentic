@@ -49,16 +49,34 @@ export function bodyCols(view, isArt) {
 	return isArt ? DESKTOP_COLS : view;
 }
 
+// Pixels left spare so a line of exactly `cols` characters never wraps its
+// last one. Rounding the size to the nearest tenth used to round UP about half
+// the time, and every full-width line then broke into two.
+var SPARE_PX = 2;
+
 /**
  * Font size that makes `cols` monospace characters fill `availableWidth`,
- * given the width of one character at the reference size. Clamped and
- * rounded to a tenth of a pixel.
+ * given the width of one character at the reference size. Clamped, and
+ * rounded DOWN to a tenth of a pixel with a little to spare.
  */
 export function fontPx(availableWidth, charWidthAtRef, cols) {
 	if (!(availableWidth > 0) || !(charWidthAtRef > 0) || !(cols > 0)) return null;
-	var px = REFERENCE_PX * (availableWidth / (charWidthAtRef * cols));
+	var px = REFERENCE_PX * (Math.max(availableWidth - SPARE_PX, 1) / (charWidthAtRef * cols));
 	px = Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, px));
-	return Math.round(px * 10) / 10;
+	return Math.floor(px * 10) / 10;
+}
+
+// Characters measured to size by. A phone has no Consolas, and the monospace
+// font it falls back to often has no block or box glyphs, so those come from
+// another font and can be wider than a digit. Sizing by '0' alone let an
+// 80-column row of blocks overflow and wrap.
+export var PROBE_CHARS = ['0', '\u2588', '\u2584', '\u2500', '\u2502', '\u2591'];
+
+/** The width to size by: the widest of the measured characters. */
+export function widestChar(widths) {
+	var w = 0;
+	for (var i = 0; i < (widths || []).length; i++) if (widths[i] > w) w = widths[i];
+	return w;
 }
 
 function readStored(shortcode) {
@@ -69,18 +87,20 @@ function writeStored(shortcode, cols) {
 	try { window.localStorage.setItem(storageKey(shortcode), String(cols)); } catch (_) { /* private window */ }
 }
 
-/** Width of one monospace character at the reference size, measured. */
+/** Width of the widest probe character at the reference size, measured. */
 function measureChar(container) {
 	// font-family inline to match .monospace exactly; inherit would measure the
 	// container's proportional font.
 	var probe = document.createElement('span');
 	probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;' +
 		'font-family:"Consolas",monospace;font-size:' + REFERENCE_PX + 'px;';
-	probe.textContent = '0'.repeat(DESKTOP_COLS);
 	container.appendChild(probe);
-	var w = probe.getBoundingClientRect().width / DESKTOP_COLS;
+	var widths = PROBE_CHARS.map(function (ch) {
+		probe.textContent = ch.repeat(DESKTOP_COLS);
+		return probe.getBoundingClientRect().width / DESKTOP_COLS;
+	});
 	container.removeChild(probe);
-	return w;
+	return widestChar(widths);
 }
 
 /** Size every message body in the reader. */

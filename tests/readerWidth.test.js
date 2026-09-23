@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
-	viewCols, bodyCols, fontPx, storageKey, MOBILE_BREAKPOINT, DESKTOP_COLS, MOBILE_COLS
+	viewCols, bodyCols, fontPx, storageKey, widestChar, PROBE_CHARS, MOBILE_BREAKPOINT, DESKTOP_COLS, MOBILE_COLS
 } from '../public/js/readerWidth.js';
 import { dbAvailable } from './helpers/dbAvailable.js';
 
@@ -54,12 +54,32 @@ describe('reader width: which columns a view starts at', function () {
 	});
 
 	it('scales the font so the columns fill the width, within readable bounds', function () {
-		// 8px per character at 16px: 40 columns fill 320px at exactly 16px.
-		assert.strictEqual(fontPx(320, 8, 40), 16);
-		assert.strictEqual(fontPx(320, 8, 80), 8);
+		// 8px per character at 16px: 40 columns fill 322px (2 spare) at exactly 16px.
+		assert.strictEqual(fontPx(322, 8, 40), 16);
+		assert.strictEqual(fontPx(322, 8, 80), 8);
 		assert.strictEqual(fontPx(40, 8, 80), 7, 'never below the minimum');
 		assert.strictEqual(fontPx(5000, 8, 40), 32, 'never above the maximum');
 		assert.strictEqual(fontPx(0, 8, 40), null);
+	});
+
+	it('never sizes a full line wider than the space it has', function () {
+		// The phone widths that matter, with character widths a real font gives.
+		for (var avail = 300; avail <= 1000; avail += 7) {
+			for (var cw of [8.8, 9.6, 9.62, 10, 12.04]) {
+				for (var cols of [40, 80]) {
+					var px = fontPx(avail, cw, cols);
+					if (px === 7) continue;   // clamped at the minimum: nothing smaller to try
+					assert.ok(cols * cw * px / 16 <= avail - 1,
+						'overflows at ' + avail + 'px, ' + cw + ' per char, ' + cols + ' cols: ' + px + 'px');
+				}
+			}
+		}
+	});
+
+	it('sizes by the widest glyph, so block and box characters from a fallback font still fit', function () {
+		assert.ok(PROBE_CHARS.indexOf('0') !== -1 && PROBE_CHARS.indexOf('\u2588') !== -1);
+		assert.strictEqual(widestChar([9.6, 11.2, 9.6]), 11.2);
+		assert.strictEqual(widestChar([]), 0);
 	});
 
 	it('remembers per area, whatever case the shortcode arrives in', function () {

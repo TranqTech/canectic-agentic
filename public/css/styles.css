@@ -399,6 +399,14 @@ span[style*="color: rgb(1, 1, 1)"] {
 	line-height: 1.0;
 }
 
+/* Art is laid out in rows and a row that wraps is a broken picture. It is sized
+   to 80 columns (public/js/readerWidth.js); if a font still makes a row a hair
+   too wide, scroll sideways rather than break it onto a second line. */
+.messagebody[data-art="true"] {
+	white-space: nowrap;
+	overflow-x: auto;
+}
+
 /* --- Error wiggle animation --- */
 @keyframes error-wiggle {
 	0%   { transform: translateX(0); }
