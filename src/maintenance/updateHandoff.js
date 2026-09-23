@@ -159,6 +159,7 @@ function launchUpdater(opts) {
 		base: opts.base || null,
 		nodeMin: opts.nodeMin || null,
 		steps: opts.steps || [],
+		notices: Array.isArray(opts.notices) ? opts.notices : null,
 		logFile: logFile,
 		launchedBy: opts.launchedBy || 'unknown',
 		launchedAt: new Date().toISOString(),
@@ -172,6 +173,7 @@ function launchUpdater(opts) {
 	runStore.save(target, newRun({
 		runId: runId, from: opts.from, to: opts.to, target: target,
 		stagedRoot: stagedRoot, logFile: logFile,
+		notices: opts.notices,
 		phases: opts.phases
 	}));
 

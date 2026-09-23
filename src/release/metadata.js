@@ -15,7 +15,7 @@
 // pass and a maintainer wants every complaint at once, not the first one.
 
 import {
-	parseVersion, channelOf, baseStable, formatVersion, isDevelopment
+	parseVersion, channelOf, baseStable, formatVersion, isDevelopment, compareVersions
 } from '../utils/version.js';
 
 var METADATA_VERSION = 1;
@@ -188,9 +188,17 @@ function normaliseSteps(steps) {
 	});
 }
 
+// `id` lets a notice carried forward into a later release be shown once, and
+// `from_min` / `from_max` (inclusive) say which running versions it concerns.
+// All three are optional and written only when set, so a notice that uses
+// none of them reads exactly as it always did. See src/release/upgradeNotices.js.
 function normaliseNotices(notices) {
 	return (notices || []).map(function (n) {
-		return { level: n.level || 'info', text: n.text };
+		var out = { level: n.level || 'info', text: n.text };
+		if (n.id) out.id = String(n.id);
+		if (n.from_min) out.from_min = String(n.from_min);
+		if (n.from_max) out.from_max = String(n.from_max);
+		return out;
 	});
 }
 
@@ -273,10 +281,25 @@ function validateMetadata(meta, opts) {
 	if (!Array.isArray(meta.notices)) {
 		problems.push('notices is not an array');
 	} else {
+		var ids = new Set();
 		for (var n of meta.notices) {
 			if (!n || !n.text) { problems.push('a notice has no text'); continue; }
 			if (NOTICE_LEVELS.indexOf(n.level) === -1) {
 				problems.push('notice level "' + n.level + '" is not one of ' + NOTICE_LEVELS.join(', '));
+			}
+			if (n.id !== undefined) {
+				if (!/^[a-z0-9][a-z0-9-]*$/.test(String(n.id))) problems.push('notice id "' + n.id + '" is not a lower-case slug');
+				else if (ids.has(n.id)) problems.push('notice id "' + n.id + '" is used twice');
+				ids.add(n.id);
+			}
+			for (var bound of ['from_min', 'from_max']) {
+				if (n[bound] !== undefined && !parseVersion(n[bound])) {
+					problems.push('notice ' + bound + ' "' + n[bound] + '" is not a Canectic version');
+				}
+			}
+			if (n.from_min && n.from_max && parseVersion(n.from_min) && parseVersion(n.from_max) &&
+				compareVersions(n.from_min, n.from_max) > 0) {
+				problems.push('notice "' + (n.id || String(n.text).slice(0, 30)) + '" has from_min above from_max');
 			}
 		}
 	}

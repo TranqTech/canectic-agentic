@@ -229,15 +229,39 @@ function primaryFingerprints(home, keyFile) {
 function verifyTreeSignature(opts) {
 	var o = opts || {};
 	var manifest = path.join(o.treeRoot, 'MANIFEST');
-	var sig = signatureName(manifest);
-	if (!fs.existsSync(sig)) return { state: 'unsigned', detail: 'the release carries no MANIFEST.asc' };
-	if (!fs.existsSync(manifest)) return { state: 'bad', detail: 'MANIFEST.asc is there but MANIFEST is not' };
+	return verifyDetachedSignature({
+		file: manifest, sig: signatureName(manifest), keyMaterial: o.keyMaterial, pinFrom: o.pinFrom,
+		fileLabel: 'MANIFEST', keyLabel: 'this release'
+	});
+}
+
+/**
+ * Is a file signed by the key the installed board trusts? The general form of
+ * verifyTreeSignature, which checks MANIFEST; the update check uses it on a
+ * published SHA256SUMS before showing upgrade notices from the sidecars it
+ * lists (#55), since a notice can tell a sysop to run a command.
+ *
+ * @param {object} opts
+ * @param {string} opts.file         the signed file
+ * @param {string} opts.sig          its detached signature
+ * @param {string} opts.keyMaterial  a public key file carrying the release key
+ * @param {string} opts.pinFrom      the INSTALLED board's setup/canectic-release.asc
+ * @param {string} [opts.fileLabel]  how to name the file in a detail
+ * @param {string} [opts.keyLabel]   who supplied keyMaterial, for a detail
+ * @returns {{state: string, detail: string}} as verifyTreeSignature
+ */
+function verifyDetachedSignature(opts) {
+	var o = opts || {};
+	var label = o.fileLabel || path.basename(o.file || '');
+	var sigLabel = label + SIGNATURE_SUFFIX;
+	if (!o.sig || !fs.existsSync(o.sig)) return { state: 'unsigned', detail: 'there is no ' + sigLabel };
+	if (!o.file || !fs.existsSync(o.file)) return { state: 'bad', detail: sigLabel + ' is there but ' + label + ' is not' };
 	if (!gpgAvailable()) return { state: 'unverifiable', detail: 'gpg is not installed' };
 	if (!o.pinFrom || !fs.existsSync(o.pinFrom)) {
 		return { state: 'unverifiable', detail: 'this installation has no ' + PUBLIC_KEY_FILENAME + ' saying which key to trust' };
 	}
 	if (!o.keyMaterial || !fs.existsSync(o.keyMaterial)) {
-		return { state: 'unverifiable', detail: 'the release carries no ' + PUBLIC_KEY_FILENAME + ' to check the signature with' };
+		return { state: 'unverifiable', detail: (o.keyLabel || 'the release') + ' carries no ' + PUBLIC_KEY_FILENAME + ' to check the signature with' };
 	}
 
 	var home = fs.mkdtempSync(path.join(os.tmpdir(), 'canectic-gpg-'));
@@ -249,16 +273,16 @@ function verifyTreeSignature(opts) {
 
 		var shipped = primaryFingerprints(home, o.keyMaterial);
 		if (shipped.indexOf(pin) === -1) {
-			return { state: 'bad', detail: 'the key shipped with this release is not the release key this board trusts (' +
+			return { state: 'bad', detail: 'the key shipped with ' + (o.keyLabel || 'this release') + ' is not the release key this board trusts (' +
 				formatFingerprint(pin) + ')' };
 		}
 
 		var imp = gpgIn(home, ['--import', o.keyMaterial]);
 		if (imp.status !== 0) return { state: 'unverifiable', detail: 'gpg could not import the release key' };
 
-		var v = gpgIn(home, ['--status-fd', '1', '--verify', sig, manifest]);
+		var v = gpgIn(home, ['--status-fd', '1', '--verify', o.sig, o.file]);
 		var status = String(v.stdout || '');
-		if (/^\[GNUPG:\] BADSIG /m.test(status)) return { state: 'bad', detail: 'MANIFEST.asc does not match MANIFEST' };
+		if (/^\[GNUPG:\] BADSIG /m.test(status)) return { state: 'bad', detail: sigLabel + ' does not match ' + label };
 		if (/^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG) /m.test(status)) {
 			return { state: 'bad', detail: 'signed with a key that has expired or been revoked' };
 		}
@@ -266,7 +290,7 @@ function verifyTreeSignature(opts) {
 		if (!valid) {
 			return { state: 'bad', detail: /NO_PUBKEY/.test(status)
 				? 'signed by a key that is not the release key'
-				: 'gpg could not verify MANIFEST.asc' };
+				: 'gpg could not verify ' + sigLabel };
 		}
 		// VALIDSIG <signing fpr> ... <primary fpr>: the last field is the primary.
 		var fields = valid[1].trim().split(/\s+/);
@@ -292,5 +316,6 @@ export {
 	detachSign,
 	assertCanSign,
 	gpgAvailable,
-	verifyTreeSignature
+	verifyTreeSignature,
+	verifyDetachedSignature
 };

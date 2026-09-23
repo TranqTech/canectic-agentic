@@ -6558,6 +6558,35 @@ router.get('/relay-log', requireAdmin, async (req, res) => {
 // cannot see why they are stuck cannot do anything about it.
 // -------------------------------------------------------
 
+/**
+ * The upgrade notes the Update page shows for the release on offer, and the
+ * acknowledgement the Update button needs (#55). The same function answers the
+ * page and the apply route, so what the button checks is what was shown.
+ *
+ * Notes a check could not verify are never shown: the sysop is sent to the
+ * release notes instead, and has to acknowledge having read those.
+ */
+async function upgradeNoticeView(result, running) {
+	var best = result && result.best;
+	if (!best || !best.available) return null;
+	var un = await import('../release/upgradeNotices.js');
+	var checkUrl = appConfig.get('update_check_url', '');
+	var notesUrl = null;
+	try { if (checkUrl) notesUrl = new URL(best.available + '/notes', checkUrl.replace(/\/?$/, '/')).href; } catch (_) {}
+	var n = result.notices;
+	if (!n || n.target !== best.available) {
+		return { target: best.available, verified: false, list: [], notesUrl: notesUrl, ackToken: 'release-notes',
+			reason: 'the last check did not collect upgrade notes for ' + best.available + '; Check now will' };
+	}
+	if (!n.verified) {
+		return { target: best.available, verified: false, list: [], notesUrl: notesUrl, ackToken: 'release-notes',
+			reason: n.reason || 'they could not be verified' };
+	}
+	var list = un.applicableNotices(n.items, running);
+	return { target: best.available, verified: true, list: list, notesUrl: notesUrl,
+		ackToken: un.acknowledgementToken(list), reason: null };
+}
+
 router.get('/update', requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
@@ -6622,9 +6651,18 @@ router.get('/update', requireAdmin, async (req, res) => {
 		runLive:   isRunLive(updateRunStore.latest(target)),
 		graceSeconds: appConfig.getNumber('maintenance_grace_seconds', 300),
 		canApply:  pre.ok && best && best.verdict === 'available' && !isRunLive(updateRunStore.latest(target)),
+		notices:   await upgradeNoticeView(result, systeminfo.canonicalVersion()),
+		noticeRefused: req.query.notice === 'ack',
+		lastRunNotices: lastRunNotices(updateRunStore.latest(target)),
 		history:   await updateChecks.getRecent(20)
 	});
 });
+
+/** The upgrade notes the last run carried, for "After updating", once it is over. */
+function lastRunNotices(state) {
+	if (!state || state.status === 'running' || !Array.isArray(state.notices)) return [];
+	return state.notices;
+}
 
 /** Is a program on PATH? `command -v` rather than `which`, which is not
  *  installed everywhere and reports differently when it is. */
@@ -6695,6 +6733,24 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 	var running = systeminfo.canonicalVersion();
 	var channel = appConfig.get('update_channel', 'stable');
 
+	// The upgrade notes the page showed must have been acknowledged, and must
+	// be the ones this move brings. Checked here as well as by the page's
+	// disabled button, so the rule holds for anything that can post a form.
+	var shown = null;
+	try {
+		var lastCheck = await updateChecks.latest();
+		var checked = lastCheck && lastCheck.result
+			? (typeof lastCheck.result === 'string' ? JSON.parse(lastCheck.result) : lastCheck.result) : null;
+		shown = await upgradeNoticeView(checked, running);
+	} catch (_) { shown = null; }
+	// A version other than the one the notes were shown for is refused too:
+	// its notes were never on the page.
+	if (shown && shown.ackToken && (shown.target !== (req.body.version || null) ||
+		String(req.body.ack || '') !== shown.ackToken)) {
+		alogger.writeAlog(2, '[Admin] update to ' + req.body.version + ' refused: upgrade notes not acknowledged', 'yellow');
+		return res.redirect('/admin/update?notice=ack');
+	}
+
 	var runId = updatePhases.makeRunId();
 	updateRunStore.save(target, updatePhases.newRun({
 		runId: runId, from: running, to: req.body.version || null, target: target
@@ -6744,6 +6800,9 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 			stagedRoot: staged.treeRoot, target: target, runId: runId,
 			from: running, to: entry.version, base: staged.meta.base || null,
 			nodeMin: staged.meta.node_min, steps: staged.meta.steps || [],
+			// Kept on the run for "After updating". Left out when they were not
+			// verified, and the updater falls back to the release's own copy.
+			notices: shown && shown.verified && shown.target === entry.version ? shown.list : undefined,
 			// req.session never exists here (sessions are not express-session),
 			// so this recorded every web launch as 'admin web'.
 			launchedBy: 'admin ' + (currentuser && currentuser.name ? currentuser.name : 'web'),

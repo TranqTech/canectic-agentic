@@ -42,6 +42,23 @@ needs it. A **notice** has nothing to run: it is a behaviour that changed
 underneath the sysop, which is the kind that hurts most when missed because
 nothing fails.
 
+Boards show notices on the Update page before the button and require warnings
+to be acknowledged (#55, `src/release/upgradeNotices.js`). A notice may carry:
+
+| Field | Meaning |
+|-------|---------|
+| `level` | `info`, `warning` or `critical`. Anything above `info` must be ticked before updating |
+| `text` | what the sysop reads |
+| `id` | optional lower-case slug. A notice carried forward into a later release with the same id is shown once; without one, the id is derived from level and text |
+| `from_min`, `from_max` | optional, inclusive: the running versions it concerns. "Coming from 0.9.7a or earlier" is `from_max: "0.9.7a"`. Without either it is shown to everyone |
+
+Give every "coming from" notice its range: without one, a board already past
+the problem is shown it and has to tick it anyway, which is how a warning
+system teaches people to tick without reading. A board collects the notices of
+every release between the one it runs and the target, so a notice need not be
+carried forward for boards already on a release that collects them (anything
+after 0.9.10a); the release notes still carry it for readers.
+
 `min_upgrade_from` and `node_min` are standing facts and survive a cut. `steps`
 and `notices` belong to one cycle and are cleared by it.
 

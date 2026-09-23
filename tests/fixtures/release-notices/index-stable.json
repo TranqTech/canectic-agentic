@@ -1,0 +1,125 @@
+{
+  "index_version": 1,
+  "channel": "stable",
+  "updated": "2026-09-22T23:57:43.582Z",
+  "releases": [
+    {
+      "version": "0.9.10a",
+      "released": "2026-09-22",
+      "codename": "Handshake",
+      "artifact": "canectic-0.9.10a.zip",
+      "sha256": "887f27ecfba8e94b02b0ce01e1548f79b994ec62be23c20589643d2488ceb8f2",
+      "delta": false,
+      "base": null,
+      "base_artifact": null,
+      "metadata": "canectic-0.9.10a.json",
+      "node_min": "22.0.0",
+      "min_upgrade_from": "0.9.0a",
+      "migrations": [
+        "0001-menu-layout",
+        "0002-msgid-tuple-split",
+        "0003-qwk-conference-blocks",
+        "0004-settings-provenance",
+        "0005-refresh-stale-version",
+        "0006-normalise-body-text",
+        "0007-netmail-seenby-text"
+      ],
+      "bytes": 25290173
+    },
+    {
+      "version": "0.9.9a",
+      "released": "2026-09-22",
+      "codename": "Handshake",
+      "artifact": "canectic-0.9.9a.zip",
+      "sha256": "41600e1de08809fc6d088bf0139de8f5d927627d4dc8700611c6b2b45e127f1d",
+      "delta": false,
+      "base": null,
+      "base_artifact": null,
+      "metadata": "canectic-0.9.9a.json",
+      "node_min": "22.0.0",
+      "min_upgrade_from": "0.9.0a",
+      "migrations": [
+        "0001-menu-layout",
+        "0002-msgid-tuple-split",
+        "0003-qwk-conference-blocks",
+        "0004-settings-provenance",
+        "0005-refresh-stale-version",
+        "0006-normalise-body-text"
+      ],
+      "bytes": 25199963
+    },
+    {
+      "version": "0.9.6a",
+      "released": "2026-09-16",
+      "codename": "Handshake",
+      "artifact": "canectic-0.9.6a.zip",
+      "sha256": "11b9bb4c6f8687aa411b06a508d8b8074668072ed16319b3d2b722db070cac2e",
+      "delta": false,
+      "base": null,
+      "base_artifact": null,
+      "metadata": "canectic-0.9.6a.json",
+      "node_min": "22.0.0",
+      "min_upgrade_from": "0.9.0a",
+      "migrations": [
+        "0001-menu-layout",
+        "0002-msgid-tuple-split",
+        "0003-qwk-conference-blocks",
+        "0004-settings-provenance",
+        "0005-refresh-stale-version"
+      ],
+      "bytes": 24504372
+    }
+  ],
+  "withdrawn": [
+    {
+      "version": "0.9.8a",
+      "released": "2026-09-22",
+      "codename": "Handshake",
+      "artifact": "canectic-0.9.8a.zip",
+      "sha256": "828bda6ac3164743619d86ec7871dfec5f9918a76cd0565b5e2b932d0663df6b",
+      "delta": false,
+      "base": null,
+      "base_artifact": null,
+      "metadata": "canectic-0.9.8a.json",
+      "node_min": "22.0.0",
+      "min_upgrade_from": "0.9.0a",
+      "migrations": [
+        "0001-menu-layout",
+        "0002-msgid-tuple-split",
+        "0003-qwk-conference-blocks",
+        "0004-settings-provenance",
+        "0005-refresh-stale-version",
+        "0006-normalise-body-text"
+      ],
+      "bytes": 25115852,
+      "superseded_by": "0.9.9a",
+      "withdrawn_at": "2026-09-22T10:08:41.456Z",
+      "withdrawn_reason": "an update into 0.9.8a stops partway if a browser is open on the board"
+    },
+    {
+      "version": "0.9.7a",
+      "released": "2026-09-20",
+      "codename": "Handshake",
+      "artifact": "canectic-0.9.7a.zip",
+      "sha256": "deff1abed63385894a035c74a65fc29cfe00f83405818cdd087ee9b720d44905",
+      "delta": false,
+      "base": null,
+      "base_artifact": null,
+      "metadata": "canectic-0.9.7a.json",
+      "node_min": "22.0.0",
+      "min_upgrade_from": "0.9.0a",
+      "migrations": [
+        "0001-menu-layout",
+        "0002-msgid-tuple-split",
+        "0003-qwk-conference-blocks",
+        "0004-settings-provenance",
+        "0005-refresh-stale-version",
+        "0006-normalise-body-text"
+      ],
+      "bytes": 24766346,
+      "superseded_by": "0.9.8a",
+      "withdrawn_at": "2026-09-22T08:57:59.758Z",
+      "withdrawn_reason": "the updater fails in the schema phase"
+    }
+  ]
+}

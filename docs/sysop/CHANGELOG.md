@@ -2,6 +2,12 @@
 
 ## Pending (since v0.9.10a)
 
+### Updates
+
+- **The Update page now shows a release's upgrade notes before you update.** Releases have declared them since 0.9.9a, but only the release notes carried them, so a sysop who updated from the Update page never saw "clear your gateway log" or "retention will be enforced on the first run". A **Before you update** panel now lists the notes that concern your board, from every release you would skip, most serious first, and the Update button waits for you to tick that you have read them when any is a warning. They are verified against the release's signed checksum list before being shown; when that is not possible you are pointed at the release notes instead. The notes stay on the Update page and the progress page after the update, since several are instructions for afterwards. `node src/tools/update.js` prints them too, and needs `--acknowledge-notices` to apply when one is a warning. See "Upgrade notes" in `docs/sysop/UPDATES.md`.
+- The "is available" notification now says how many upgrade notes apply to your board.
+- Upgrading into this release is the first to keep its notes for afterwards; the panel before the button appears from the update after it, because the page you update from belongs to the release you are running.
+
 ### Administration
 
 - Fix: **date columns in the admin logs and other tables did not sort by date.** Dates showed as `9/22/2026, 5:57:03 PM`, or as `September 22, 2026` and `Sep 22` on some pages, and sorting a column put `10/1` before `9/30` and April before March. Every table now shows dates as `2026-09-22 17:57:03` (or just the date where that is all there is) and sorts on the actual time. Affected: the inbound and outbound file logs, the netmail relay log, API tokens, echolists, filebones, nodelists, message and file areas, users, and on the user side the private mail inbox and file lists.

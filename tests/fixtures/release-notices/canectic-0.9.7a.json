@@ -1,0 +1,42 @@
+{
+  "metadata_version": 1,
+  "version": "0.9.7a",
+  "channel": "stable",
+  "codename": "Handshake",
+  "released": "2026-09-20",
+  "artifact": "canectic-0.9.7a.zip",
+  "sha256": "deff1abed63385894a035c74a65fc29cfe00f83405818cdd087ee9b720d44905",
+  "delta": false,
+  "base": null,
+  "base_artifact": null,
+  "min_upgrade_from": "0.9.0a",
+  "node_min": "22.0.0",
+  "migrations": [
+    "0001-menu-layout",
+    "0002-msgid-tuple-split",
+    "0003-qwk-conference-blocks",
+    "0004-settings-provenance",
+    "0005-refresh-stale-version",
+    "0006-normalise-body-text"
+  ],
+  "steps": [],
+  "notices": [
+    {
+      "level": "warning",
+      "text": "Embedded mode only (PROCESS_MODE=embedded): this release starts running maintenance that has never run on your board. An embedded worker recognised 7 of 33 maintenance jobs and silently completed the rest without doing them, so log purges, message and file retention, nodelist and echolist scanning, timed events and the update check have all been idle. They begin working on the first daily run after you update, and they clear the whole backlog at once. The part to check before updating is retention: if you ever set max_age_days or max_messages on a message or file area, it has been ignored until now and will be enforced on that first run. The Retention Preview on an area's admin page reports what a limit would remove without removing anything. Boards running the normal four-process setup are unaffected, because their worker has always run these."
+    },
+    {
+      "level": "warning",
+      "text": "If you carry file echoes, expect a burst of outbound files the first time the tosser runs after updating. A file arriving from an uplink was correctly queued for your downlinks and then never sent, because nothing ran the outbound pass for file echoes. That queue has been growing for as long as you have been receiving files. The first outbound pass after this update sends all of it, so a downlink that has had nothing from you for months may receive a great deal at once. Nothing was lost and nothing needs doing; it is the volume that may surprise you and your links. If you would rather meter it, update at a quiet hour and watch the first pass on the peer page, which now shows pending, sent and failed counts per connection."
+    },
+    {
+      "level": "info",
+      "text": "This update rewrites stored message bodies. Three parts of the system had been storing text three different ways in the same database columns, which is what allowed messages relayed between networks to be corrupted, and the update normalises them. It runs automatically during the update and asks nothing of you. On the development board it rewrote 4,707 messages across 9 areas, all of them received over QWK; your own figures will differ. The older column is deliberately left in place and unread for this release, so it holds the previous copy of every rewritten message and the change can be reversed if it ever needs to be. Messages that were already displaying incorrectly before this update are not repaired by it."
+    }
+  ],
+  "files": 980,
+  "bytes": 24766346,
+  "full_files": 980,
+  "full_bytes": 24766346,
+  "notes": null
+}

@@ -29,6 +29,7 @@
 import { compareVersions, isNewer, parseVersion, channelOf } from '../utils/version.js';
 import { checkMoveSafety } from './pipelineCheck.js';
 import { findWithdrawn, replacementFor } from './releaseIndex.js';
+import { applicableNotices, describeCounts } from './upgradeNotices.js';
 
 var VERDICT_CURRENT   = 'current';
 var VERDICT_AVAILABLE = 'available';
@@ -381,10 +382,32 @@ function shouldNotify(result, last) {
 	return !(compareVersions(last.version, result.best.available) === 0 && last.verdict === result.best.verdict);
 }
 
+/**
+ * What the notification says about upgrade notes for the release on offer, or
+ * an empty string. Counts rather than the notes themselves: they are for
+ * reading on the Update page, where they can be acknowledged.
+ */
+function noticesSentence(result) {
+	var b = result && result.best;
+	var n = result && result.notices;
+	if (!b || !b.available || !n || n.target !== b.available) return '';
+	if (!n.verified) return ' Its upgrade notes could not be verified, so read the release notes before you update.';
+	var counts = describeCounts(applicableNotices(n.items, result.current));
+	return counts ? ' ' + counts + '; read them on the Update page before you update.' : '';
+}
+
 /** The notification a result warrants. Null when there is nothing to say. */
 function notificationFor(result) {
 	if (!result) return null;
 	var b = result.best;
+	var withNotes = function (note) {
+		if (note) note.body += noticesSentence(result);
+		return note;
+	};
+	return withNotes(baseNotification(result, b));
+}
+
+function baseNotification(result, b) {
 
 	var gone = runningWithdrawn(result);
 	if (gone) {

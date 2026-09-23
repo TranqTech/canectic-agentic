@@ -171,6 +171,42 @@ seeing.
 
 ---
 
+## Upgrade notes
+
+Some releases change something you need to know about before or after you
+update: a log to clear, a limit that starts being enforced, a burst of files
+your downlinks will receive. Each release declares these as upgrade notes, and
+the Update page shows the ones that concern you in a **Before you update**
+panel above the Update button.
+
+- **Every release you would skip counts.** Moving from 0.9.6a straight to a
+  later release shows the notes of every release in between as well, including
+  withdrawn ones, since your board passes through what they changed. A note
+  repeated by a later release is shown once.
+- **Only the ones for your version.** A note can say which versions it
+  concerns ("coming from 0.9.7a or earlier"), and a board outside that range is
+  not shown it.
+- **Warnings must be acknowledged.** When any note is a warning, the Update
+  button stays disabled until you tick that you have read them. The tick is tied
+  to the notes you were shown: if a check finds a newer release in the
+  meantime, you are asked again.
+- **Only notes proven to be the project's are shown.** They can tell you to run
+  a command, so the check verifies them against the release's signed checksum
+  list, with the release key your board already holds, before showing any. If
+  that cannot be done (gpg missing, a signature that fails, a file echo with no
+  signed list), the page says so and links the release notes instead, and the
+  tick is for having read those.
+- **After updating**, the notes the update brought stay on the Update page under
+  the last update, and on the progress page, since several are instructions for
+  afterwards.
+
+Boards on 0.9.10a or earlier show none of this before updating, because the
+Update page you see is the one from the release you are running. The update
+into the first release after 0.9.10a keeps its notes for afterwards, and the
+panel appears from the update after that.
+
+---
+
 ## Withdrawn releases
 
 A release found to be broken after it was published is withdrawn. It comes off
@@ -198,6 +234,9 @@ happens when the available version changes, or when a release that was blocked
 becomes reachable because you ran the migration or upgraded Node. That second
 case is the one worth waiting for, which is why the version alone is not the
 whole test.
+
+When upgrade notes apply to the move, the notification says how many, and how
+many need attention before you update; they are read on the Update page.
 
 Running a withdrawn release gets its own notification, sent even when nothing
 newer is listed yet, and once for each release you run. When the replacement

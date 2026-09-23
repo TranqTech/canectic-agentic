@@ -1,0 +1,58 @@
+{
+  "metadata_version": 1,
+  "version": "0.9.8a",
+  "channel": "stable",
+  "codename": "Handshake",
+  "released": "2026-09-22",
+  "artifact": "canectic-0.9.8a.zip",
+  "sha256": "828bda6ac3164743619d86ec7871dfec5f9918a76cd0565b5e2b932d0663df6b",
+  "delta": false,
+  "base": null,
+  "base_artifact": null,
+  "min_upgrade_from": "0.9.0a",
+  "node_min": "22.0.0",
+  "migrations": [
+    "0001-menu-layout",
+    "0002-msgid-tuple-split",
+    "0003-qwk-conference-blocks",
+    "0004-settings-provenance",
+    "0005-refresh-stale-version",
+    "0006-normalise-body-text"
+  ],
+  "steps": [],
+  "notices": [
+    {
+      "level": "warning",
+      "text": "Clear the gateway's pm2 output log (logs/production/gateway-out.log on a standard install) after updating. Every web login before this release wrote the user's password to it in plain text; the logging is gone but the old lines are not."
+    },
+    {
+      "level": "info",
+      "text": "This update cannot warn your callers before it stops the BBS: the processes it replaces predate maintenance mode. Updates after this one close the board, warn callers and web users, and wait for network work in progress to finish first."
+    },
+    {
+      "level": "warning",
+      "text": "If an update to 0.9.7a failed at its schema step, finish it before updating again. That update stopped with \"spawnSync is not defined\" after it had replaced the files and installed the dependencies, then started the BBS again on 0.9.7a's code over a database that had not been brought up to date. Run node src/tools/dbmigrations.js in the install directory and restart the BBS, which completes what the update was doing, then update to this release as normal."
+    },
+    {
+      "level": "info",
+      "text": "If you installed 0.9.6a or 0.9.7a and were told \"the install did not finish\", your board is installed correctly. The final check misread a routine change npm install makes to package-lock.json as a file that had not landed. Nothing needs removing or redoing."
+    },
+    {
+      "level": "warning",
+      "text": "Coming from 0.9.6a or earlier, embedded mode only (PROCESS_MODE=embedded): maintenance that has never run on your board starts running. An embedded worker recognised 7 of 33 maintenance jobs and silently completed the rest without doing them, so log purges, message and file retention, nodelist and echolist scanning, timed events and the update check have all been idle. They begin on the first daily run after you update, and clear the whole backlog at once. The part to check before updating is retention: if you ever set max_age_days or max_messages on a message or file area, it has been ignored until now and will be enforced on that first run. The Retention Preview on an area's admin page reports what a limit would remove without removing anything. Boards running the normal four-process setup are unaffected, because their worker has always run these."
+    },
+    {
+      "level": "warning",
+      "text": "Coming from 0.9.6a or earlier, if you carry file echoes: expect a burst of outbound files on the first toss after updating. A file arriving from an uplink was correctly queued for your downlinks and then never sent, because nothing ran the outbound pass for file echoes. That queue has been growing for as long as you have been receiving files, so a downlink that has had nothing from you for months may receive a great deal at once. Nothing was lost and nothing needs doing; it is the volume that may surprise you and your links. To meter it, update at a quiet hour and watch the first pass on the peer page, which now shows pending, sent and failed counts per connection."
+    },
+    {
+      "level": "info",
+      "text": "Coming from 0.9.6a or earlier: this update rewrites stored message bodies. Three parts of the system had been storing text three different ways in the same database columns, which is what allowed relayed messages to be corrupted. The update normalises them automatically and asks nothing of you. On the development board that was 4,707 messages across 9 areas, all received over QWK; your figures will differ. The previous copy of every rewritten message is retained in the old column, unread, so the change is reversible. Messages already displaying incorrectly before this update are not repaired by it."
+    }
+  ],
+  "files": 1017,
+  "bytes": 25115852,
+  "full_files": 1017,
+  "full_bytes": 25115852,
+  "notes": null
+}

@@ -36,13 +36,18 @@ sleep 2
 curl -s -o /dev/null -w "check -> %{http_code}\n" -H "Origin: $B" -b cookies.txt -X POST $B/admin/update/check
 curl -s -b cookies.txt $B/admin/update > update.html
 grep -oE 'name="version" value="[^"]*"|Nothing blocking|Blocked[^<]*' update.html | sort -u
+# The Update button needs the upgrade notes acknowledged after 0.9.10a (#55);
+# send the token the page shows, as ticking the box does. Empty for older pages.
+ACK=$(grep -oE 'name="ack" value="[^"]*"' update.html | head -1 | sed -e 's/.*value="//' -e 's/"$//')
+[ -n "$ACK" ] && echo "upgrade notes acknowledged ($ACK)"
+grep -oE 'Before you update to [^<]*|could not be verified[^<]*' update.html | head -2
 rm -f caller.log webtab.log
 pkill -f "[w]ebtab.mjs" || true
 nohup node caller.mjs > /dev/null 2>&1 < /dev/null &
 nohup node webtab.mjs > /dev/null 2>&1 < /dev/null &
 sleep 3
 before=$(ls ~/canectic/logs/update/*.json 2>/dev/null | grep -v latest | wc -l)
-curl -s -o apply.html -w "apply -> %{http_code}\n" -H "Origin: $B" -b cookies.txt --data-urlencode "version=$TO_VERSION" $B/admin/update/apply
+curl -s -o apply.html -w "apply -> %{http_code} %{redirect_url}\n" -H "Origin: $B" -b cookies.txt --data-urlencode "version=$TO_VERSION" --data-urlencode "ack=$ACK" $B/admin/update/apply
 for i in $(seq 1 40); do n=$(ls ~/canectic/logs/update/*.json 2>/dev/null | grep -v latest | wc -l); [ "$n" -gt "$before" ] && break; sleep 0.5; done
 RUNID=$(ls -t ~/canectic/logs/update/*.json | grep -v latest | head -1 | xargs basename | sed 's/\.json$//')
 echo "RUNID=$RUNID"; echo "$RUNID" > current-run

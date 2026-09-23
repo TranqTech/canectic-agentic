@@ -29,6 +29,10 @@ import {
 	evaluate, shouldNotify, notificationFor, channelsToCheck, VERDICT_UNKNOWN
 } from '../release/updateVerdict.js';
 import { buildChannelIndex } from './ftnReleaseSource.js';
+import * as path from 'path';
+import { httpSource } from './updateStaging.js';
+import { fetchUpgradeNotices } from './upgradeNoticeFetch.js';
+import { PUBLIC_KEY_FILENAME } from '../release/signing.js';
 
 var FETCH_TIMEOUT_MS = 20000;
 var MAX_INDEX_BYTES = 4 * 1024 * 1024;
@@ -172,6 +176,31 @@ async function runCheck(opts) {
 		appliedMigrations: applied,
 		nodeVersion: process.versions.node
 	});
+
+	// The upgrade notices of every release the move would skip, verified, for
+	// the Update page to show before its button (#55). HTTP only: a file echo
+	// has no signed SHA256SUMS to prove them with, and the Update page points
+	// at the release notes instead. A failure here is recorded on the result
+	// and never fails the check.
+	if (result.best && result.best.available && useHttp && base && indexes[result.best.channel]) {
+		try {
+			result.notices = await fetchUpgradeNotices({
+				source: httpSource(base),
+				index: indexes[result.best.channel],
+				running: current,
+				target: result.best.available,
+				// The board's own copy of the release key is the pin, as for the
+				// updater's signature check. The worker runs in the install root.
+				pinFrom: path.join(process.cwd(), 'setup', PUBLIC_KEY_FILENAME)
+			});
+		} catch (e) {
+			result.notices = { target: result.best.available, verified: false, reason: e.message, items: [], releases: [] };
+		}
+		if (!result.notices.verified) {
+			alogger.writeAlog(2, '[UpdateCheck] upgrade notes for ' + result.best.available +
+				' not shown: ' + result.notices.reason, 'yellowbright');
+		}
+	}
 
 	var notified = false;
 	if (!error || result.best) {

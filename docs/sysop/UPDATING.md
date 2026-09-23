@@ -112,6 +112,16 @@ tell.
 
 Stop the BBS first. This tool does not.
 
+Both ways below print the move's upgrade notes first (see "Upgrade notes" in
+`docs/sysop/UPDATES.md`), verified against the release's signed checksum list.
+When any of them is a warning, or they could not be verified, the tool refuses
+to apply until you pass `--acknowledge-notices`, having read them or the release
+notes. It refuses before downloading anything.
+
+```bash
+node src/tools/update.js --target /opt/canectic --apply --acknowledge-notices
+```
+
 There are two ways to apply, and the difference is which copy of the code does
 the work.
 
@@ -411,6 +421,10 @@ a file the update writes as it goes.
 With `update_check_transport` set to `ftn`, the tool takes releases from your
 configured file area instead of over HTTP. Everything else is identical: the
 same plan, the same categories, the same phases.
+
+Upgrade notes are not shown for a release from a file echo, since there is no
+signed checksum list to prove them with; the tool points you at the release
+notes and needs `--acknowledge-notices` to apply.
 
 One difference it will tell you about. A release that arrived down a file echo
 may have no published checksum with it, because the sibling metadata file

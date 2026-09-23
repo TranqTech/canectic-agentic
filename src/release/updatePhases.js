@@ -116,6 +116,10 @@ function newRun(opts) {
 		finishedAt: null,
 		error: null,
 		warnings: [],
+		// The upgrade notes this move brings, for "After updating" (#55). Null
+		// until known; the updater settles it to the launcher's verified list,
+		// or none when the launcher (older code) passed nothing.
+		notices: Array.isArray(opts.notices) ? opts.notices : null,
 		phases: PHASES.map(function (name) {
 			return {
 				name: name,

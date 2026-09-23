@@ -110,6 +110,13 @@ block content
                 .text-warning.mt-1
                   i.bi.bi-exclamation-triangle.me-1
                   = w
+              if lastRunNotices && lastRunNotices.length
+                .mt-2
+                  strong After updating
+                  span.text-muted.ms-1 (the upgrade notes this update brought)
+                  ul.mb-0.mt-1
+                    each n in lastRunNotices
+                      li(class=n.level === 'info' ? '' : 'text-warning')= n.text
 
         //- Disk held by the updater, so "I need that space back" has an answer.
         if disk && disk.total > 0
@@ -153,6 +160,10 @@ block content
                 | project has cut no releases.
 
           include ../../partials/update/withdrawnNotice
+          if noticeRefused
+            .alert.alert-warning
+              | The update did not start: tick that you have read the upgrade notes shown for it, then press Update again.
+              | If the page offers a different release now, check its notes first.
           if result && result.channels
             if result.checkedFor
               p.text-muted.small
@@ -197,6 +208,9 @@ block content
                               dt.col-5.text-muted Delta against
                               dd.col-7= chan.release.base
 
+                        if name === channel && notices && notices.target === chan.available
+                          include ../../partials/update/upgradeNotes
+
                         if chan.blockers && chan.blockers.length
                           .alert.alert-warning.small.mb-0
                             strong This system cannot take it yet:
@@ -211,7 +225,19 @@ block content
                           form(method='post' action='/admin/update/apply'
                                onsubmit=`return confirm('Update to ${chan.available}?\n\nThis closes the board for maintenance. Connected callers and web users get ${Math.round((graceSeconds || 0) / 60)} minute(s) warning, and the update waits for binkp sessions and jobs to finish before it stops the BBS, replaces the files, migrates the database and starts it again. The board reopens once the update is verified; if it fails, it stays closed until you reopen it from the Maintenance page.\n\nThis page will be unavailable while the gateway restarts; come back to it to see what happened.')`)
                             input(type='hidden' name='version' value=chan.available)
-                            button.btn.btn-warning.w-100(type='submit')
+                            //- The tick the apply route checks. Bound to the
+                            //- exact notes shown, so it cannot carry over.
+                            - var needAck = notices && notices.target === chan.available && notices.ackToken
+                            if needAck
+                              .form-check.small.mb-2
+                                input.form-check-input#ackNotes(type='checkbox' name='ack' value=notices.ackToken required
+                                  onchange="document.getElementById('updateButton').disabled = !this.checked")
+                                label.form-check-label(for='ackNotes')
+                                  if notices.verified
+                                    | I have read the upgrade notes above
+                                  else
+                                    | I have read the release notes for #{chan.available}
+                            button.btn.btn-warning.w-100#updateButton(type='submit' disabled=!!needAck)
                               i.bi.bi-arrow-up-circle.me-1
                               | Update to #{chan.available}
                           p.text-muted.small.mt-2.mb-0

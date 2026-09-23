@@ -36,7 +36,7 @@ import { blockersFor } from '../release/updateVerdict.js';
 import { isNewer } from '../utils/version.js';
 import { appliedIds } from '../maintenance/migrationLedger.js';
 import {
-	dirSource, httpSource, resolveRelease, stageRelease, discardStaging
+	dirSource, httpSource, resolveRelease, stageRelease, discardStaging, fetchText
 } from '../maintenance/updateStaging.js';
 import { launchUpdater, validateHandoff } from '../maintenance/updateHandoff.js';
 import { buildChannelIndex, sourceForRelease, isFtnRelease } from '../maintenance/ftnReleaseSource.js';
@@ -46,6 +46,10 @@ import { makeRunId, newRun } from '../release/updatePhases.js';
 import * as runStore from '../maintenance/updateRunStore.js';
 import { summarise } from '../release/updatePhases.js';
 import { installUpdaterGuard } from '../maintenance/updaterGuard.js';
+import { fetchUpgradeNotices } from '../maintenance/upgradeNoticeFetch.js';
+import { applicableNotices, needsAcknowledgement } from '../release/upgradeNotices.js';
+import { parseIndex, indexName } from '../release/releaseIndex.js';
+import { PUBLIC_KEY_FILENAME } from '../release/signing.js';
 
 var RED = '\x1b[0;31m', GREEN = '\x1b[0;32m', YELLOW = '\x1b[1;33m', CYAN = '\x1b[0;36m', BOLD = '\x1b[1m', NC = '\x1b[0m';
 function info(m) { console.log(CYAN + '->' + NC + ' ' + m); }
@@ -75,6 +79,8 @@ function usage() {
 		'  --no-schema        do not run dbmigrations',
 		'  --no-restart       do not stop or start the BBS',
 		'  --keep-staging     do not delete the staging directory afterwards',
+		'  --acknowledge-notices  you have read the upgrade notes, and any warning',
+		'                     among them; --apply and --handoff need it when there is one',
 		'  --verbose          list every file, not just a summary',
 		'',
 		'  Without --apply this only reports. Nothing is written to the target.',
@@ -105,6 +111,7 @@ function parseArgs(argv) {
 		else if (a === '--no-schema')    o.schema = false;
 		else if (a === '--no-restart')   o.processControl = false;
 		else if (a === '--keep-staging') o.keepStaging = true;
+		else if (a === '--acknowledge-notices') o.acknowledgeNotices = true;
 		else if (a === '--verbose')      o.verbose = true;
 		else if (a === '--plan-only')    o.apply = false;
 		else if (a === '--help' || a === '-h') { usage(); process.exit(0); }
@@ -188,6 +195,28 @@ async function readLedger() {
  * This is the whole reason progress is durable: by the time anybody asks, the
  * thing that launched the updater has usually been replaced by it.
  */
+/** The upgrade notes a move brings, or why they cannot be shown. */
+function reportNotes(version, notes, list) {
+	console.log('');
+	if (!notes.verified) {
+		warn('the upgrade notes for ' + version + ' could not be verified (' + notes.reason + '), so they are not shown.');
+		warn('read the release notes for ' + version + ' before you apply it.');
+		console.log('');
+		return;
+	}
+	if (!list.length) {
+		info('no upgrade notes apply to this move');
+		console.log('');
+		return;
+	}
+	console.log('  ' + BOLD + 'Upgrade notes for this move' + NC);
+	for (var n of list) {
+		var tag = n.level === 'info' ? CYAN + 'note' + NC : YELLOW + n.level + NC;
+		console.log('    ' + tag + '  ' + n.text + (n.release !== version ? ' (from ' + n.release + ')' : ''));
+	}
+	console.log('');
+}
+
 function reportStatus(target) {
 	var state = runStore.latest(target);
 	if (!state) {
@@ -212,6 +241,11 @@ function reportStatus(target) {
 	}
 	console.log('');
 	for (var w of (state.warnings || [])) warn(w);
+	if (Array.isArray(state.notices) && state.notices.length) {
+		console.log('  ' + BOLD + (state.status === 'complete' ? 'After updating' : 'Upgrade notes') + NC);
+		for (var n of state.notices) console.log('    ' + (n.level === 'info' ? '- ' : YELLOW + n.level.toUpperCase() + NC + ' ') + n.text);
+		console.log('');
+	}
 	if (state.logFile) console.log('  log      ' + state.logFile);
 	console.log('');
 }
@@ -309,6 +343,31 @@ async function main() {
 		die('this system cannot move to ' + version + ' yet. Nothing was downloaded.');
 	}
 
+	// The upgrade notes every release in the move declares, verified against
+	// the signed SHA256SUMS, before anything is downloaded (#55). A file echo
+	// has no signed SHA256SUMS, so there it is the release notes instead.
+	var notes = { verified: false, reason: 'releases from a file echo carry no signed SHA256SUMS to verify them against', items: [] };
+	if (!useFtn) {
+		try {
+			notes = await fetchUpgradeNotices({
+				source: source,
+				index: parseIndex(await fetchText(source, indexName(channel))),
+				running: running, target: version,
+				pinFrom: path.join(o.target, 'setup', PUBLIC_KEY_FILENAME)
+			});
+		} catch (e) {
+			notes = { verified: false, reason: e.message, items: [] };
+		}
+	}
+	var noteList = notes.verified ? applicableNotices(notes.items, running) : [];
+	reportNotes(version, notes, noteList);
+	var ackNeeded = !notes.verified || needsAcknowledgement(noteList);
+	if (o.apply && ackNeeded && !o.acknowledgeNotices) {
+		die((notes.verified ? 'the upgrade notes above include a warning' : 'the upgrade notes could not be verified') +
+			'. Read ' + (notes.verified ? 'them' : 'the release notes for ' + version) +
+			', then run again with --acknowledge-notices. Nothing was downloaded.');
+	}
+
 	// Staging goes inside the installation by default. node_modules resolves by
 	// walking up from a module's own directory and a release ships none, so an
 	// updater staged in /tmp cannot import anything with a dependency. Under
@@ -364,6 +423,7 @@ async function main() {
 				from: running, to: version, launchedBy: 'src/tools/update.js --handoff',
 				nodeMin: staged.meta.node_min, steps: staged.meta.steps || [],
 				base: staged.meta.base || null,
+				notices: noteList,
 				options: { dump: o.dump, dependencies: o.dependencies, schema: o.schema,
 					processControl: o.processControl }
 			});
@@ -387,7 +447,7 @@ async function main() {
 		var runId = makeRunId();
 		runStore.save(o.target, newRun({
 			runId: runId, from: running, to: version, target: o.target,
-			stagedRoot: staged.treeRoot, logFile: null
+			stagedRoot: staged.treeRoot, logFile: null, notices: noteList
 		}));
 		var runFile = runStore.writeRunFile(o.target, runId, {
 			handoff_version: 1, runId: runId, target: o.target, stagedRoot: staged.treeRoot,

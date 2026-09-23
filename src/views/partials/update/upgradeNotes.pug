@@ -1,0 +1,27 @@
+//- The upgrade notes a move brings (#55), from every release it skips, filtered
+//- to the ones that apply to this board. Only shown once verified against the
+//- signed SHA256SUMS; otherwise the sysop is sent to the release notes.
+//- Needs: notices (from upgradeNoticeView in routes/admin.js).
+- var levelClass = { critical: 'danger', warning: 'warning', info: 'info' }
+- var levelLabel = { critical: 'Critical', warning: 'Warning', info: 'Note' }
+if notices
+  .upgrade-notes.mb-2(data-upgrade-notes=notices.target)
+    if notices.verified && notices.list.length
+      h6.mt-1.mb-2 Before you update to #{notices.target}
+      each n in notices.list
+        .alert.small.py-2.mb-2(class='alert-' + (levelClass[n.level] || 'info'))
+          span.badge.me-2(class='bg-' + (levelClass[n.level] || 'info'))= levelLabel[n.level] || n.level
+          = n.text
+          if n.release !== notices.target
+            span.text-muted.ms-1 (from #{n.release})
+    else if notices.verified
+      p.small.text-muted.mb-2 No upgrade notes apply to this board for this move.
+    else
+      .alert.alert-warning.small.py-2.mb-2
+        | This release's upgrade notes could not be verified (#{notices.reason}), so they are not shown here.
+        | Read the release notes before you update
+        if notices.notesUrl
+          | :
+          a.alert-link.ms-1(href=notices.notesUrl target='_blank' rel='noopener')= notices.notesUrl
+        else
+          | .

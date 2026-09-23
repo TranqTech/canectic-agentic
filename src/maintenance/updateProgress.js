@@ -84,7 +84,7 @@ function tailFile(file, n) {
 function progressSnapshot(state, extra) {
 	var x = extra || {};
 	if (!state) {
-		return { runId: null, status: 'none', phases: [], warnings: [], log: [], drain: null,
+		return { runId: null, status: 'none', phases: [], warnings: [], notices: [], log: [], drain: null,
 			servedBy: x.servedBy || 'gateway', boardName: x.boardName || null };
 	}
 	var phases = (state.phases || [])
@@ -110,6 +110,7 @@ function progressSnapshot(state, extra) {
 		finishedAt: state.finishedAt || null,
 		error:      state.error || null,
 		warnings:   (state.warnings || []).slice(),
+		notices:    Array.isArray(state.notices) ? state.notices.slice() : [],
 		phases:     phases,
 		current:    running ? running.name : null,
 		log:        (x.log || []).slice(-LOG_LINES),
@@ -163,6 +164,14 @@ function renderProgressBody(s) {
 	} else if (s.status === 'complete') {
 		out += '<div class="box ok"><strong>The update is complete.</strong> The board is open again. ' +
 			'<a href="/admin/update">Back to the Update page</a></div>';
+	}
+	if (s.notices && s.notices.length) {
+		// Upgrade notes the release declared (#55). Several are instructions
+		// for afterwards, so they matter most once the update is complete.
+		out += '<h2>' + (s.status === 'complete' ? 'After updating' : 'Upgrade notes') + '</h2><ul class="notes">' +
+			s.notices.map(function (n) {
+				return '<li class="lvl-' + esc(n.level) + '">' + (n.level === 'info' ? '' : '<strong>' + esc(n.level) + ':</strong> ') + esc(n.text) + '</li>';
+			}).join('') + '</ul>';
 	}
 	if (s.warnings.length) {
 		out += '<h2>Warnings</h2><ul class="warn">' + s.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul>';

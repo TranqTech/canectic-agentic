@@ -184,6 +184,15 @@ async function runUpdate(opts) {
 	if (!state) throw new Error('no run state for ' + runId);
 	function persist(next) { state = next; runStore.save(target, state); return state; }
 
+	// The upgrade notes, kept on the run for "After updating" (#55). Only ever
+	// the verified list the launcher showed: a launcher from before notes were
+	// shown passes none, and the copy inside the archive is not a stand-in,
+	// because it sits outside the signed MANIFEST.
+	if (!Array.isArray(state.notices)) {
+		state.notices = Array.isArray(ins.notices) ? ins.notices : [];
+		persist(state);
+	}
+
 	var backup = backupDir(target, runId);
 	var plan = null;
 	var applied = null;
