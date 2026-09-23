@@ -211,6 +211,8 @@ format (a mark on the entry, used once for 0.9.7a) protected nobody on an older
 release. An index still in that format is converted by whatever new code reads
 it next, and a withdrawn version can never be re-used by a later cut.
 
+**A replacement can itself be withdrawn.** `superseded_by` is written once and not revisited, so 0.9.7a names 0.9.8a, which was withdrawn two days later. Everything that tells a board what to move to (the update check's `withdrawn.by`, the refusal when a withdrawn release is asked for by name, the Update page notice, and the bootstrap, which carries its own copy of the rule because it runs before any release is unpacked) goes through `replacementFor(index, version)` in `src/release/releaseIndex.js`: it follows the chain through the withdrawn list and names the newest release still listed. Nothing needs re-running when a replacement is withdrawn in turn.
+
 The withdrawal lands in the channel index, not in the release's own metadata
 sidecar. The sidecar describes the archive, is covered by `SHA256SUMS`, and is
 what a board verifies on download; rewriting it would invalidate a signature

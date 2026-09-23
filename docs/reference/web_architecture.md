@@ -59,6 +59,10 @@ Standard Express 4 setup with Pug view engine.
 | `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion |
 | `/notifications` | `notificationsRouter` (`src/routes/notifications.js`) | Notification history with pagination, mark-read, bell dropdown data |
 
+### Dates in tables
+
+Every DataTables view renders a date through one mixin, `+ts(value[, 'date'])` in `views/partials/mixins/timestamp.pug`, included by the admin and user layouts, inside a cell that carries `data-order=timestampMs(value) || 0` (#56). The text is `yyyy-MM-dd HH:mm:ss` (or `yyyy-MM-dd`), zero padded and 24-hour, from `dateFormat.formatTimestamp`, in the server's timezone; `public/js/localTime.js` rewrites each `<time data-ts>` in the viewer's timezone in the same format and again on every table draw, and names the zone in the tooltip. Sorting uses the epoch in `data-order` and never the text. They used `toLocaleString()` ("9/22/2026, 5:57:03 PM") or month-name formats, and every date column sorted as text. `formatTimestamp` and `timestampMs` are set in `res.locals` app-wide by a middleware in `webserver.js`. `tests/tableTimestamps.test.js` fails a DataTables view that formats a date itself or has a date cell without `data-order`. About 26 display-only views still use `toLocaleString` and sort nothing (#59).
+
 ### Error Handling
 
 404s are caught by a fallback middleware and forwarded to the error handler (`src/middleware/errorHandler.js`). The error handler renders `views/error.pug` and only exposes stack traces on the page in development mode (`NODE_ENV=development`). It logs every 5xx at level 1 with the method, the path (query string removed) and the stack, in every mode, and deliberately does not log 4xx, since scanner 404s would bury real errors. It used to log nothing, so an exception in an admin route showed an error page and left the logs clean.
