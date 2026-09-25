@@ -333,9 +333,9 @@ export async function enqueueRegenPmHtml(opts = {}) {
  * Called by: scheduler (daily), admin, CLI.
  */
 export async function enqueuePurgePmTrash(days) {
-	return maintenanceQueue.add('purge-pm-trash', {
-		days: days || appConfig.getNumber('pm_trash_retention_days', 30),
-	}, {
+	// Days only when the caller chose them; otherwise the job reads the
+	// setting when it runs (src/maintenance/retention.js).
+	return maintenanceQueue.add('purge-pm-trash', days ? { days: days, manual: true } : {}, {
 		jobId: 'purge-pm-trash',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -540,9 +540,7 @@ export async function enqueueScanEcholists() {
 }
 
 export async function enqueuePurgeTossed(days) {
-	return maintenanceQueue.add('purge-tossed', {
-		days: days || appConfig.getNumber('ftn_keep_tossed_days', 7),
-	}, {
+	return maintenanceQueue.add('purge-tossed', days ? { days: days, manual: true } : {}, {
 		jobId: 'purge-tossed-manual',
 		removeOnComplete: true, removeOnFail: true,
 	});

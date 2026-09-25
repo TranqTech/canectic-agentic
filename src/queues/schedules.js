@@ -30,6 +30,7 @@ import * as coordinatorSegments from '../models/coordinatorSegments.js';
 import * as scheduleFormat from '../utils/scheduleFormat.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from '../config/appConfig.js';
+import { RETENTION_JOBS, scheduleWanted } from '../maintenance/retention.js';
 
 /**
  * Every scheduler key currently registered on a queue.
@@ -100,6 +101,27 @@ export async function pruneOrphanSchedules(expectedKeys, queueMap) {
 	return removed;
 }
 
+// Register a fixed schedule when it is wanted, and REMOVE it when it is not.
+// Fixed schedules are outside what pruneOrphanSchedules may touch, so a
+// schedule that is merely not re-registered stays in Redis and keeps firing.
+// Returns true when the schedule is registered.
+async function ensureSchedule(queue, key, wanted, pattern, jobName) {
+	if (wanted) {
+		await queue.upsertJobScheduler(key, { pattern: pattern }, { name: jobName, data: {} });
+		return true;
+	}
+	try {
+		if (await queue.removeJobScheduler(key)) {
+			alogger.writeAlog(2, '  Removed schedule ' + key + ' (switched off in settings)', 'cyan');
+		}
+	} catch (err) {
+		alogger.writeAlog(2, '  Could not remove schedule ' + key + ': ' + err.message, 'yellow');
+	}
+	return false;
+}
+
+export { ensureSchedule };
+
 export async function registerSchedules() {
 	var scheduleCount = 0;
 
@@ -111,15 +133,19 @@ export async function registerSchedules() {
 
 	try {
 		// -----------------------------------------------------------------
-		// Maintenance: daily PM trash retention sweep (tag-only)
+		// Maintenance: daily retention purges (src/maintenance/retention.js).
+		// Registered with no days: the job reads the setting when it runs, so
+		// a change applies that night. A purge switched off (0, or 999 for
+		// tossed packets) has its schedule REMOVED: it used to be skipped
+		// here and left registered, and went on purging with the old days.
 		// -----------------------------------------------------------------
-		await maintenanceQueue.upsertJobScheduler('purge-pm-trash-daily', {
-			pattern: '0 3 * * *',   // 3:00 AM daily
-		}, {
-			name: 'purge-pm-trash',
-			data: { days: appConfig.getNumber('pm_trash_retention_days', 30) },
-		});
-		scheduleCount++;
+		for (var retName of Object.keys(RETENTION_JOBS)) {
+			var ret = RETENTION_JOBS[retName];
+			if (await ensureSchedule(maintenanceQueue, ret.schedule,
+				scheduleWanted(retName, appConfig.getNumber.bind(appConfig)), ret.pattern, retName)) {
+				scheduleCount++;
+			}
+		}
 
 		// -----------------------------------------------------------------
 		// Maintenance: hourly PM purged-row cleanup (the actual hard-delete
@@ -138,34 +164,6 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
-		// Maintenance: daily notification purge
-		// -----------------------------------------------------------------
-		var notifRetention = appConfig.getNumber('notifications_retention_days', 30);
-		if (notifRetention > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-notifications-daily', {
-				pattern: '0 30 2 * * *',   // 2:30 AM daily
-			}, {
-				name: 'purge-notifications',
-				data: { days: notifRetention },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
-		// Maintenance: daily tossed packet purge
-		// -----------------------------------------------------------------
-		var keepDays = appConfig.getNumber('ftn_keep_tossed_days', 7);
-		if (keepDays > 0 && keepDays < 999) {
-			await maintenanceQueue.upsertJobScheduler('purge-tossed-daily', {
-				pattern: '0 2 * * *',   // 2:00 AM daily
-			}, {
-				name: 'purge-tossed',
-				data: { days: keepDays },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
 		// Maintenance: daily nodelist auto-import scan
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('scan-nodelists-daily', {
@@ -177,87 +175,12 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
-		// Maintenance: daily bad echomail purge
-		// -----------------------------------------------------------------
-		var badEchoDays = appConfig.getNumber('bad_echo_retention_days', 30);
-		if (badEchoDays > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-bad-echomail-daily', {
-				pattern: '0 45 3 * * *',   // 3:45 AM daily
-			}, {
-				name: 'purge-bad-echomail',
-				data: { days: badEchoDays },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
-		// Maintenance: daily inbound file log purge
-		// -----------------------------------------------------------------
-		var inboundLogDays = appConfig.getNumber('inbound_log_retention_days', 90);
-		if (inboundLogDays > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-inbound-log-daily', {
-				pattern: '0 50 3 * * *',   // 3:50 AM daily
-			}, {
-				name: 'purge-inbound-log',
-				data: { days: inboundLogDays },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
-		// Maintenance: daily outbound file log purge
-		// -----------------------------------------------------------------
-		var outboundLogDays = appConfig.getNumber('outbound_log_retention_days', 90);
-		if (outboundLogDays > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-outbound-log-daily', {
-				pattern: '0 52 3 * * *',   // 3:52 AM daily
-			}, {
-				name: 'purge-outbound-log',
-				data: { days: outboundLogDays },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
-		// Maintenance: daily netmail relay log purge
-		// -----------------------------------------------------------------
-		var relayLogDays = appConfig.getNumber('netmail_relay_log_retention_days', 180);
-		if (relayLogDays > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-relay-log-daily', {
-				pattern: '0 56 3 * * *',   // 3:56 AM daily
-			}, {
-				name: 'purge-relay-log',
-				data: { days: relayLogDays },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
-		// Maintenance: daily mailer session history purge
-		// -----------------------------------------------------------------
-		var mailerSessionDays = appConfig.getNumber('mailer_session_retention_days', 30);
-		if (mailerSessionDays > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-mailer-sessions-daily', {
-				pattern: '0 54 3 * * *',   // 3:54 AM daily
-			}, {
-				name: 'purge-mailer-sessions',
-				data: { days: mailerSessionDays },
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
 		// Maintenance: daily log rotation. 23:59 rather than midnight so the
 		// archive directory, named for the day the job runs, is the day its
 		// contents cover. Settings are read when it runs (maintenanceJobs.js).
 		// -----------------------------------------------------------------
-		if (appConfig.getBoolean('log_rotation_enabled', true)) {
-			await maintenanceQueue.upsertJobScheduler('rotate-logs-daily', {
-				pattern: '0 59 23 * * *',   // 11:59 PM daily
-			}, {
-				name: 'rotate-logs',
-				data: {},
-			});
+		if (await ensureSchedule(maintenanceQueue, 'rotate-logs-daily',
+			appConfig.getBoolean('log_rotation_enabled', true), '0 59 23 * * *', 'rotate-logs')) {
 			scheduleCount++;
 		}
 
@@ -304,27 +227,8 @@ export async function registerSchedules() {
 		// somebody to notice it, and registering it disabled would mean the
 		// queue diagnostics list a schedule that deliberately does nothing.
 		// -----------------------------------------------------------------
-		if (appConfig.getBoolean('update_check_enabled', false)) {
-			await maintenanceQueue.upsertJobScheduler('update-check-daily', {
-				pattern: '0 40 4 * * *',   // 4:40 AM daily
-			}, {
-				name: 'update-check',
-				data: {},
-			});
-			scheduleCount++;
-		}
-
-		// -----------------------------------------------------------------
-		// Maintenance: daily update check history purge
-		// -----------------------------------------------------------------
-		var updateCheckDays = appConfig.getNumber('update_check_retention_days', 90);
-		if (updateCheckDays > 0) {
-			await maintenanceQueue.upsertJobScheduler('purge-update-checks-daily', {
-				pattern: '0 58 3 * * *',   // 3:58 AM daily
-			}, {
-				name: 'purge-update-checks',
-				data: { days: updateCheckDays },
-			});
+		if (await ensureSchedule(maintenanceQueue, 'update-check-daily',
+			appConfig.getBoolean('update_check_enabled', false), '0 40 4 * * *', 'update-check')) {
 			scheduleCount++;
 		}
 

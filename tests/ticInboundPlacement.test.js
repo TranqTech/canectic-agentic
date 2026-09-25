@@ -12,14 +12,20 @@
 // as raw strings, so a downlink written with a 5D domain or a .0 point suffix
 // did not match its own connection and was sent the file again.
 //
-// placeInboundFile touches only a temp directory; forwardExclusions is pure.
+// replacesPattern: Replaces may use DOS wildcards (`Replaces NODELIST.*`), and
+// only an exact name used to match, so a wildcard replaced nothing.
+//
+// placeInboundFile touches only a temp directory; forwardExclusions and
+// replacesPattern are pure, and the wildcard patterns are also run through
+// Postgres's own ILIKE when a database is available.
 // Run: npx mocha --no-config --exit tests/ticInboundPlacement.test.js
 
 import assert from 'assert';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { placeInboundFile, forwardExclusions } from '../src/middleware/tossers/ticTosser.js';
+import { placeInboundFile, forwardExclusions, replacesPattern } from '../src/middleware/tossers/ticTosser.js';
+import { dbAvailable } from './helpers/dbAvailable.js';
 
 describe('placeInboundFile', function () {
 	var root, inDir, areaDir;
@@ -141,5 +147,64 @@ describe('forwardExclusions', function () {
 	it('survives a TIC with nothing in it', function () {
 		assert.strictEqual(forwardExclusions({}).size, 0);
 		assert.strictEqual(forwardExclusions(null).size, 0);
+	});
+});
+
+describe('replacesPattern', function () {
+
+	it('matches a plain name exactly', function () {
+		assert.deepStrictEqual(replacesPattern('NODELIST.Z68'), { kind: 'exact', name: 'NODELIST.Z68' });
+	});
+
+	it('turns DOS wildcards into an ILIKE pattern', function () {
+		assert.deepStrictEqual(replacesPattern('NODELIST.*'), { kind: 'wildcard', like: 'NODELIST.%' });
+		assert.deepStrictEqual(replacesPattern('Z1DAILY.Z??'), { kind: 'wildcard', like: 'Z1DAILY.Z__' });
+	});
+
+	it('escapes the characters ILIKE would treat as wildcards', function () {
+		// FSX_INFO.* must not match FSXAINFO.ZIP through an unescaped _.
+		assert.deepStrictEqual(replacesPattern('FSX_INF%.*'), { kind: 'wildcard', like: 'FSX\\_INF\\%.%' });
+	});
+
+	it('refuses a wildcard that could match a whole area', function () {
+		// Replaces deletes what it matches.
+		for (var p of ['*', '*.*', '*.ZIP', '?ODELIST.*', '.*']) {
+			assert.strictEqual(replacesPattern(p).kind, 'refused', p);
+		}
+	});
+
+	it('refuses a path', function () {
+		assert.strictEqual(replacesPattern('../etc/passwd').kind, 'refused');
+		assert.strictEqual(replacesPattern('DIR\\FILE.ZIP').kind, 'refused');
+	});
+
+	it('refuses an empty Replaces', function () {
+		assert.strictEqual(replacesPattern('   ').kind, 'refused');
+	});
+
+	describe('against Postgres ILIKE', function () {
+		var pg = null;
+		before(async function () {
+			if (!(await dbAvailable())) return this.skip();
+			pg = await import('../src/middleware/db/postgres.js');
+		});
+
+		async function matches(name, pattern) {
+			var row = await pg.queryOne("SELECT $1::text ILIKE $2 ESCAPE '\\' AS m", [name, replacesPattern(pattern).like]);
+			return row.m;
+		}
+
+		it('matches what the wildcard names and nothing else', async function () {
+			assert.strictEqual(await matches('NODELIST.Z61', 'NODELIST.*'), true);
+			assert.strictEqual(await matches('nodelist.z61', 'NODELIST.*'), true, 'case insensitive');
+			assert.strictEqual(await matches('NODEDIFF.A61', 'NODELIST.*'), false);
+			assert.strictEqual(await matches('Z1DAILY.Z68', 'Z1DAILY.Z??'), true);
+			assert.strictEqual(await matches('Z1DAILY.Z6', 'Z1DAILY.Z??'), false, '? is exactly one character');
+		});
+
+		it('treats _ and % in the name literally', async function () {
+			assert.strictEqual(await matches('FSX_INFO.ZIP', 'FSX_INFO.*'), true);
+			assert.strictEqual(await matches('FSXAINFO.ZIP', 'FSX_INFO.*'), false);
+		});
 	});
 });

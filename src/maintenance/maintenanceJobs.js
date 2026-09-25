@@ -27,6 +27,13 @@
 
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
+import { retentionDaysFor } from "./retention.js";
+
+// Days a retention purge keeps on this run, or null to purge nothing. Read
+// when the job runs, never from a schedule's data: see retention.js.
+function keepDays(name, data) {
+	return retentionDaysFor(name, data, appConfig.getNumber.bind(appConfig));
+}
 
 /**
  * Every job name this module handles.
@@ -108,7 +115,7 @@ export async function runMaintenanceJob(name, data, opts) {
 
 		case 'purge-pm-trash': {
 			var pmTrash = await import("../models/privateMessages.js");
-			await pmTrash.purgeDeleted(data.days);
+			await pmTrash.purgeDeleted(keepDays(name, data));
 			return true;
 		}
 
@@ -128,18 +135,21 @@ export async function runMaintenanceJob(name, data, opts) {
 		}
 
 		case 'purge-notifications': {
+			var notifDays = keepDays(name, data);
+			if (notifDays === null) return true;
 			var notifMod = await import("../models/notifications.js");
-			await notifMod.purgeOld(data.days);
+			await notifMod.purgeOld(notifDays);
 			return true;
 		}
 
 		case 'purge-tossed': {
+			var tossedKeep = keepDays(name, data);
+			if (tossedKeep === null) return true;
 			var tossedDir = appConfig.get('ftntossed', 'ftn/tossed');
-			var keepDays = data.days || 7;
 			try {
 				var fsPurge = await import('fs');
 				var pathPurge = await import('path');
-				var cutoff = Date.now() - (keepDays * 86400000);
+				var cutoff = Date.now() - (tossedKeep * 86400000);
 				var files = fsPurge.readdirSync(tossedDir);
 				var purged = 0;
 				for (var f of files) {
@@ -151,7 +161,7 @@ export async function runMaintenanceJob(name, data, opts) {
 					}
 				}
 				if (purged > 0) {
-					alogger.writeAlog(2, 'Purged ' + purged + ' tossed packet(s) older than ' + keepDays + ' days', 'cyan');
+					alogger.writeAlog(2, 'Purged ' + purged + ' tossed packet(s) older than ' + tossedKeep + ' days', 'cyan');
 				}
 			} catch (tossErr) {
 				alogger.writeAlog(3, 'Tossed packet purge error: ' + tossErr.message, 'yellow');
@@ -180,15 +190,15 @@ export async function runMaintenanceJob(name, data, opts) {
 
 		case 'purge-bad-echomail': {
 			var badEchomail = await import("../models/badEchomail.js");
-			var days = data.days || appConfig.getNumber('bad_echo_retention_days', 30);
-			if (days > 0) await badEchomail.purgeOld(days);
+			var days = keepDays(name, data);
+			if (days !== null) await badEchomail.purgeOld(days);
 			return true;
 		}
 
 		case 'purge-inbound-log': {
 			var inboundLog = await import("../models/inboundFileLog.js");
-			var logDays = data.days || appConfig.getNumber('inbound_log_retention_days', 90);
-			if (logDays > 0) {
+			var logDays = keepDays(name, data);
+			if (logDays !== null) {
 				var logPurged = await inboundLog.purgeOld(logDays);
 				if (logPurged > 0) alogger.writeAlog(3, 'Purged ' + logPurged + ' inbound file log entries older than ' + logDays + ' days', 'cyan');
 			}
@@ -211,8 +221,8 @@ export async function runMaintenanceJob(name, data, opts) {
 
 		case 'purge-update-checks': {
 			var updateChecksModel = await import("../models/updateChecks.js");
-			var ucDays = data.days || appConfig.getNumber('update_check_retention_days', 90);
-			if (ucDays > 0) {
+			var ucDays = keepDays(name, data);
+			if (ucDays !== null) {
 				var ucPurged = await updateChecksModel.purgeOld(ucDays);
 				if (ucPurged > 0) alogger.writeAlog(3, 'Purged ' + ucPurged + ' update check records older than ' + ucDays + ' days', 'cyan');
 			}
@@ -221,8 +231,8 @@ export async function runMaintenanceJob(name, data, opts) {
 
 		case 'purge-relay-log': {
 			var relayLog = await import("../models/netmailRelayLog.js");
-			var relayDays = data.days || appConfig.getNumber('netmail_relay_log_retention_days', 180);
-			if (relayDays > 0) {
+			var relayDays = keepDays(name, data);
+			if (relayDays !== null) {
 				var relayPurged = await relayLog.purgeOld(relayDays);
 				if (relayPurged > 0) alogger.writeAlog(3, 'Purged ' + relayPurged + ' netmail relay log entries older than ' + relayDays + ' days', 'cyan');
 			}
@@ -231,8 +241,8 @@ export async function runMaintenanceJob(name, data, opts) {
 
 		case 'purge-outbound-log': {
 			var outboundLog = await import("../models/outboundFileLog.js");
-			var outDays = data.days || appConfig.getNumber('outbound_log_retention_days', 90);
-			if (outDays > 0) {
+			var outDays = keepDays(name, data);
+			if (outDays !== null) {
 				var outPurged = await outboundLog.purgeOld(outDays);
 				if (outPurged > 0) alogger.writeAlog(3, 'Purged ' + outPurged + ' outbound file log entries older than ' + outDays + ' days', 'cyan');
 			}
@@ -241,8 +251,8 @@ export async function runMaintenanceJob(name, data, opts) {
 
 		case 'purge-mailer-sessions': {
 			var mailerSess = await import("../models/mailerSessions.js");
-			var sessDays = data.days || appConfig.getNumber('mailer_session_retention_days', 30);
-			if (sessDays > 0) {
+			var sessDays = keepDays(name, data);
+			if (sessDays !== null) {
 				var sessPurged = await mailerSess.purgeOld(sessDays);
 				if (sessPurged > 0) alogger.writeAlog(3, 'Purged ' + sessPurged + ' mailer session history rows older than ' + sessDays + ' days', 'cyan');
 			}

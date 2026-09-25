@@ -691,7 +691,16 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	// 10. Replaces: find the entry this file supersedes. It is deactivated
 	// only once the new file is recorded (step 12), so a failed import leaves
 	// the old one in place.
-	var oldEntry = tic.replaces ? await findEntryByFilename(fileAreaId, tic.replaces) : null;
+	var oldEntries = [];
+	if (tic.replaces) {
+		var rp = replacesPattern(tic.replaces);
+		if (rp.kind === 'refused') {
+			ticLog(2, '[TIC] ' + ticFilename + ': ignoring Replaces ' + tic.replaces + ' (' + rp.reason + ')',
+				'yellowbright', SYSTEM_TOO);
+		} else {
+			oldEntries = await findEntriesReplacedBy(fileAreaId, rp);
+		}
+	}
 
 	// 11. Resolve area path and move file, displacing the replaced file so a
 	// same-name replacement keeps its name (see placeInboundFile).
@@ -704,7 +713,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		sourcePath: attachedFilePath,
 		areaPath: areaPath,
 		filename: tic.file,
-		replaced: oldEntry ? [oldEntry] : []
+		replaced: oldEntries
 	});
 	var destFilePath = placed.destFilePath;
 	if (placed.renamed) {
@@ -781,7 +790,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		return 'error';
 	}
 
-	if (oldEntry) {
+	for (var oldEntry of oldEntries) {
 		await fileEntries.deactivateEntry(oldEntry.id);
 		ticLog(3, '[TIC] Replaced ' + oldEntry.filename + ' in ' + areaShortcode, 'cyan');
 	}
@@ -1180,13 +1189,55 @@ async function moveToBad(filePath, filename, badDir, attachedFilePath, attachedF
 /**
  * Find a file entry by filename in an area (for Replaces handling).
  */
-async function findEntryByFilename(areaId, filename) {
+/**
+ * What a TIC's Replaces line matches.
+ *
+ * The TIC convention allows DOS wildcards, `*` and `?`, so a hatch can
+ * replace every earlier version (`Replaces NODELIST.*`, `Replaces Z1DAILY.Z*`).
+ * Only an exact filename used to match, so a wildcard Replaces replaced
+ * nothing and every version accumulated.
+ *
+ * A pattern must begin with a literal character. Replaces deactivates AND
+ * deletes what it matches, so `*`, `*.*` or `*.ZIP` from a misconfigured or
+ * hostile system would empty the area; a leading literal confines it to one
+ * family of names. Refused patterns are logged and the file imported without
+ * replacing anything.
+ *
+ * Pure. Returns { kind: 'exact', name } | { kind: 'wildcard', like } |
+ * { kind: 'refused', reason }, where `like` is a pattern for ILIKE with the
+ * SQL wildcards in the name escaped.
+ */
+function replacesPattern(replaces) {
+	var name = String(replaces || '').trim();
+	if (!name) return { kind: 'refused', reason: 'empty' };
+	if (/[\\/]/.test(name)) return { kind: 'refused', reason: 'contains a path' };
+	if (!/[*?]/.test(name)) return { kind: 'exact', name: name };
+	if (/^[*?.]/.test(name)) return { kind: 'refused', reason: 'a wildcard Replaces must start with part of a filename' };
+	var like = name
+		.replace(/[\\%_]/g, function (c) { return '\\' + c; })
+		.replace(/\*/g, '%')
+		.replace(/\?/g, '_');
+	return { kind: 'wildcard', like: like };
+}
+
+/**
+ * The active entries in an area that a Replaces pattern names.
+ */
+async function findEntriesReplacedBy(areaId, pattern) {
 	var postgres = await import('../../middleware/db/postgres.js');
-	var row = await postgres.queryOne(
-		'SELECT * FROM file_entries WHERE area_id = $1 AND LOWER(filename) = LOWER($2) AND active = true',
-		[areaId, filename]
-	);
-	return row || null;
+	var rows;
+	if (pattern.kind === 'exact') {
+		rows = await postgres.query(
+			'SELECT * FROM file_entries WHERE area_id = $1 AND LOWER(filename) = LOWER($2) AND active = true',
+			[areaId, pattern.name]
+		);
+	} else if (pattern.kind === 'wildcard') {
+		rows = await postgres.query(
+			"SELECT * FROM file_entries WHERE area_id = $1 AND filename ILIKE $2 ESCAPE '\\' AND active = true",
+			[areaId, pattern.like]
+		);
+	}
+	return rows || [];
 }
 
 export {
@@ -1197,5 +1248,6 @@ export {
 	ticHasPassedThrough,
 	normaliseAddress,
 	forwardExclusions,
-	placeInboundFile
+	placeInboundFile,
+	replacesPattern
 };
