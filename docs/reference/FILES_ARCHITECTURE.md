@@ -436,8 +436,9 @@ Worker: tic:inbound job
   7. Validate To address against system addresses
   8. Check peer subscription (logged but not rejected)
   9. Verify CRC-32 hash
-   9b. LOOP CHECK: our own address in Seenby or Path means the file has been
-       through here before — tossed, not imported, not forwarded
+   9b. LOOP CHECK: our own address in Path means the file has been
+       through here before — tossed, not imported, not forwarded.
+       Path only: Seenby always lists us (see Loop prevention)
   10. Dupe check (area + filename case-insensitively + CRC-32, or CRC-32 + size
       under any name)
   11. Handle Replaces (deactivate old entry)
@@ -469,17 +470,26 @@ again. Two independent brakes, answering different questions:
 
 | Guard | Question | Survives retention? |
 |---|---|---|
-| Seenby / Path (`ticHasPassedThrough`) | Has this file been through **this system** before? | Yes — it travels with the file |
+| Path (`ticHasPassedThrough`) | Has this file been through **this system** before? | Yes — it travels with the file |
 | Dupe check (`fileEntries.checkDupe`) | Does this area hold this file **now**? | No — `file-maintenance` hard-deletes rows |
 
 Neither substitutes for the other, which is why both are needed. The dupe check
 consults a table that retention prunes, so a file held, pruned, and then offered
-again by a peer who still has it reads as brand new to it. Only the Seenby stamp
-survives that, because it lives in the file rather than here.
+again by a peer who still has it reads as brand new to it. Only the Path stamp
+survives that, because it lives in the file rather than here. We add our
+address to Path on every TIC we send.
 
-Both had holes. The Seenby check did not exist at all — Seenby was read on
-inbound only to decide who *not* to forward to, never to ask whether we were
-already in it. And the dupe check compared filenames case-sensitively and
+**Seenby is not a loop signal.** It lists the systems a file has been *sent*
+to, and a sender adds each recipient before sending (our outbound builder adds
+the destination peer, and every uplink does the same). So every TIC a downlink
+receives names that downlink in Seenby. The guard shipped in 0.9.7a checking
+Seenby as well as Path, and from then until 0.9.11a it refused every file an
+uplink sent, logging it at level 2 as a loop and counting it as a dupe: the
+hub's daily nodelists from 1:153/757 never reached their areas and nothing
+read as an error. Seenby is read on inbound for one thing, choosing who *not*
+to forward to (step 15).
+
+Both brakes had holes before this. The loop check did not exist at all. And the dupe check compared filenames case-sensitively and
 required an exact name match even when the CRC matched, so a file coming back
 from a chain that had uppercased it (which chains do — see the same note on
 `ftnReleaseSource.js`) read as new with an identical checksum.

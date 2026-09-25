@@ -12,6 +12,13 @@
       "level": "info",
       "from_max": "0.9.10a",
       "text": "Messages already received keep the layout they were given when they arrived, so ASCII art, MealMaster recipes and other column-aligned posts will still show rows run together until they are rendered again. To repair them, run node src/tools/maintenance.js --regen-html with the worker running (add --area SHORTCODE to do one area first). It can take a while on a large message base; it changes nothing but how stored messages are displayed."
+    },
+    {
+      "id": "recover-refused-tic-files",
+      "level": "warning",
+      "from_min": "0.9.7a",
+      "from_max": "0.9.10a",
+      "text": "Since 0.9.7a, files arriving by file echo were refused as loops whenever the TIC listed this system under Seenby, which every uplink does, so most inbound files never reached their areas. This release fixes that for new files. Files already refused are, unless you have cleared it, still in ftn/tossed/ next to their .tic, and the system log names each one with \"loop\" and \"already lists\". To import one, move the .tic and its file back into ftn/in/ and the next toss takes it. For nodelists and other files that replace an earlier one, only the newest needs moving."
     }
   ],
   "min_upgrade_from": "0.9.0a",

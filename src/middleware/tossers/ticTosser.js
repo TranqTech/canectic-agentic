@@ -253,10 +253,18 @@ function normaliseAddress(addr) {
 /**
  * Have we already handled this file?
  *
- * A TIC carries Seenby (systems that have it) and Path (systems it travelled
- * through), and we stamp ourselves into both on the way out. So our own
- * address arriving back in either list means this file has been round to us
- * before, and passing it on again is how a mesh becomes a carousel.
+ * A TIC carries Path (systems it travelled through) and Seenby (systems it
+ * has been SENT to). Only Path answers this question. A sender adds each
+ * recipient to Seenby before sending, so a downlink always finds itself
+ * there: we do it ourselves in the outbound builder, and so does every
+ * uplink. Checking Seenby refused every file an uplink sent, as a "loop",
+ * from 0.9.7a until this was found on the hub (daily nodelists from
+ * 1:153/757 all listed 1:134/100 in Seenby and never reached the area).
+ * Seenby is for choosing who not to forward to, and is read for that below.
+ *
+ * We stamp Path on every file we send, so our address arriving back in it
+ * means the file has been round to us before, and passing it on again is how
+ * a mesh becomes a carousel.
  *
  * This is the guard FTN relies on, and it was absent: the only thing standing
  * between this system and a loop was the dupe check, which is a different
@@ -265,7 +273,7 @@ function normaliseAddress(addr) {
  * Pure, and exported, because the addresses come from the database and the
  * rule should be testable without one.
  *
- * @param {object} tic - parsed TIC with `seenby` and `path` arrays
+ * @param {object} tic - parsed TIC with a `path` array
  * @param {string[]} ourAddresses - our system addresses on this network
  * @returns {string|null} the address that matched, or null
  */
@@ -279,10 +287,6 @@ function ticHasPassedThrough(tic, ourAddresses) {
 	}
 	if (mine.size === 0) return null;
 
-	for (var sb of (tic.seenby || [])) {
-		var s = normaliseAddress(sb);
-		if (s && mine.has(s)) return s;
-	}
 	for (var p of (tic.path || [])) {
 		// Path entries are "address timestamp"; the address is the first token.
 		var pAddr = normaliseAddress(String(p).split(/\s+/)[0]);
@@ -531,8 +535,8 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		}
 	}
 
-	// 8b. Loop check. Our own address in Seenby or Path means this file has
-	// already been through here, whatever the dupe table currently says. This
+	// 8b. Loop check. Our own address in Path means this file has
+	// already been through here (Seenby does not: see ticHasPassedThrough), whatever the dupe table currently says. This
 	// catches the case the dupe check cannot: a file we held, pruned by
 	// retention, and were then sent again by a peer who still had it.
 	if (networkId) {
@@ -542,7 +546,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		var loopedVia = ticHasPassedThrough(tic, ourAddrs);
 		if (loopedVia) {
 			alogger.writeAlog(2, '[TIC] ' + ticFilename + ': loop — ' + tic.file +
-				' already lists ' + loopedVia + ' in Seenby/Path, not importing or forwarding', 'yellowbright');
+				' already lists ' + loopedVia + ' in its Path, not importing or forwarding', 'yellowbright');
 			await moveToTossed(ticFilePath, ticFilename, tossedDir);
 			try {
 				await fs.promises.rename(attachedFilePath, path.join(tossedDir, tic.file));
