@@ -441,12 +441,16 @@ Worker: tic:inbound job
        Path only: Seenby always lists us (see Loop prevention)
   10. Dupe check (area + filename case-insensitively + CRC-32, or CRC-32 + size
       under any name)
-  11. Handle Replaces (deactivate old entry)
-  12. Move file to area directory
+  11. Find the entry Replaces names (not yet deactivated)
+  12. Move file to area directory (placeInboundFile): the replaced entry's
+      file is set aside first, so a same-name replacement keeps its name;
+      a same-name file that is NOT being replaced still gets NAME_N
   13. Extract descriptions (TIC LDesc or FILE_ID.DIZ)
-  14. Create file_entries row
+  14. Create file_entries row. On failure: roll the files back, TIC + file
+      to bad. On success: deactivate the replaced entry, delete its file
   15. Create file_distribution rows for subscribed peers
-      (excluding source connection, seenby addresses, and any peer whose
+      (excluding source connection, everything in Seenby/Path/From compared
+       by normaliseAddress — see forwardExclusions — and any peer whose
        network carries no areatag for this area — see partitionByAreatag)
   16. Move .tic to ftn/tossed/
   17. Update area stats

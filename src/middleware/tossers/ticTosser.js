@@ -236,10 +236,14 @@ function _parseAddress(addr) {
 async function resolveSourceConnection(fromAddress) {
 	if (!fromAddress) return null;
 
+	// Normalised, like the loop check and forwarding exclusions: a From of
+	// 1:153/757@fidonet or 1:153/757.0 is the same peer, and missing it skips
+	// the TIC password check and forwards the file back to its sender.
+	var from = normaliseAddress(fromAddress);
 	var ftnConnections = await peerConnections.getActiveConnectionsByNetworkType('FTN');
 	for (var conn of ftnConnections) {
 		var cd = conn.connection_data || {};
-		if (cd.address && cd.address.toLowerCase() === fromAddress.toLowerCase()) {
+		if (cd.address && normaliseAddress(cd.address) === from) {
 			return conn;
 		}
 	}
@@ -306,6 +310,107 @@ function ticHasPassedThrough(tic, ourAddresses) {
 		if (pAddr && mine.has(pAddr)) return pAddr;
 	}
 	return null;
+}
+
+/**
+ * The systems an inbound file must not be forwarded to: everything in its
+ * Seenby and Path, and whoever handed it to us.
+ *
+ * Normalised with normaliseAddress, as the loop check is. The raw strings
+ * used to be compared, so a downlink written `1:229/426@fidonet` in a Path,
+ * or `1:153/757.0`, did not match its own connection address and was sent a
+ * file it had already had.
+ *
+ * @param {object} tic - parsed TIC
+ * @returns {Set<string>} normalised addresses
+ */
+function forwardExclusions(tic) {
+	var excluded = new Set();
+	function add(a) {
+		var n = normaliseAddress(a);
+		if (n) excluded.add(n);
+	}
+	for (var sb of (tic && tic.seenby) || []) add(sb);
+	// Path entries are "address timestamp ..."; the address is the first token.
+	for (var p of (tic && tic.path) || []) add(String(p).trim().split(/\s+/)[0]);
+	if (tic && tic.from) add(tic.from);
+	return excluded;
+}
+
+/**
+ * Put an inbound file into its area directory, displacing the files of the
+ * entries it replaces, in a way that can be undone.
+ *
+ * A file that replaces one of the same name (an infopack re-released under
+ * its own name, or NODELIST.Z68 a year after the last) used to collide with
+ * the replaced file, which Replaces deactivated in the database but left on
+ * disk. The new file was saved as NAME_1.EXT and recorded under that name,
+ * so the next release's Replaces could not find it, and the area filled with
+ * active _1, _2, _3 copies. A replaced file is now moved aside first, so the
+ * new one takes its name; a file of the same name that is NOT being replaced
+ * still gets a _N name rather than being overwritten.
+ *
+ * Nothing is deleted until the caller has recorded the new file: commit()
+ * removes the displaced files, rollback() puts the new file back where it
+ * came from and restores them.
+ *
+ * @param {object} opts
+ * @param {string} opts.sourcePath - the received file
+ * @param {string} opts.areaPath - the area's directory
+ * @param {string} opts.filename - the name to file it under
+ * @param {object[]} [opts.replaced] - entries being replaced ({disk_path})
+ * @returns {Promise<{destFilePath: string, renamed: boolean, commit: Function, rollback: Function}>}
+ */
+async function placeInboundFile(opts) {
+	var areaPath = opts.areaPath;
+	var displaced = [];
+
+	for (var entry of opts.replaced || []) {
+		if (!entry || !entry.disk_path) continue;
+		var oldPath = path.join(areaPath, path.basename(entry.disk_path));
+		if (!fs.existsSync(oldPath)) continue;
+		var aside = path.join(areaPath, '.' + path.basename(oldPath) + '.replaced-' + process.pid + '-' + Date.now());
+		await fs.promises.rename(oldPath, aside);
+		displaced.push({ from: oldPath, aside: aside });
+	}
+
+	async function restoreDisplaced() {
+		for (var d of displaced) {
+			try { await fs.promises.rename(d.aside, d.from); } catch (_) {}
+		}
+	}
+
+	var destFilePath = path.join(areaPath, opts.filename);
+	var renamed = false;
+	if (fs.existsSync(destFilePath)) {
+		var ext = path.extname(opts.filename);
+		var base = path.basename(opts.filename, ext);
+		for (var counter = 1; fs.existsSync(destFilePath); counter++) {
+			destFilePath = path.join(areaPath, base + '_' + counter + ext);
+		}
+		renamed = true;
+	}
+
+	try {
+		await fs.promises.rename(opts.sourcePath, destFilePath);
+	} catch (err) {
+		await restoreDisplaced();
+		throw err;
+	}
+
+	return {
+		destFilePath: destFilePath,
+		renamed: renamed,
+		commit: async function () {
+			for (var d of displaced) {
+				try { await fs.promises.rm(d.aside, { force: true }); } catch (_) {}
+			}
+		},
+		rollback: async function () {
+			try { await fs.promises.rename(destFilePath, opts.sourcePath); } catch (_) {}
+			await restoreDisplaced();
+		}
+	};
 }
 
 /**
@@ -583,36 +688,29 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		return 'dupe';
 	}
 
-	// 10. Handle Replaces — deactivate old file if specified
-	if (tic.replaces) {
-		var oldEntry = await findEntryByFilename(fileAreaId, tic.replaces);
-		if (oldEntry) {
-			await fileEntries.deactivateEntry(oldEntry.id);
-			ticLog(3, '[TIC] Deactivated replaced file: ' + tic.replaces + ' in ' + areaShortcode, 'cyan');
-		}
-	}
+	// 10. Replaces: find the entry this file supersedes. It is deactivated
+	// only once the new file is recorded (step 12), so a failed import leaves
+	// the old one in place.
+	var oldEntry = tic.replaces ? await findEntryByFilename(fileAreaId, tic.replaces) : null;
 
-	// 11. Resolve area path and move file
+	// 11. Resolve area path and move file, displacing the replaced file so a
+	// same-name replacement keeps its name (see placeInboundFile).
 	var dbarea = await fileAreas.getAreaByShortcode(areaShortcode);
 	var dbgroup = await fileGroups.getGroupByShortcode(dbarea.group_shortcode);
 	var areaPath = fileAreas.resolveAreaPath(dbgroup, dbarea);
 	ensureDirSync(areaPath);
 
-	var destFilePath = path.join(areaPath, tic.file);
-
-	// Handle filename collision on disk (shouldn't happen after dupe check, but be safe)
-	if (fs.existsSync(destFilePath)) {
-		var ext = path.extname(tic.file);
-		var base = path.basename(tic.file, ext);
-		var counter = 1;
-		while (fs.existsSync(destFilePath)) {
-			destFilePath = path.join(areaPath, base + '_' + counter + ext);
-			counter++;
-		}
-		ticLog(3, '[TIC] Filename collision — saving as ' + path.basename(destFilePath), 'yellow');
+	var placed = await placeInboundFile({
+		sourcePath: attachedFilePath,
+		areaPath: areaPath,
+		filename: tic.file,
+		replaced: oldEntry ? [oldEntry] : []
+	});
+	var destFilePath = placed.destFilePath;
+	if (placed.renamed) {
+		ticLog(3, '[TIC] ' + tic.file + ' already exists in ' + areaShortcode +
+			' and is not being replaced — saving as ' + path.basename(destFilePath), 'yellow');
 	}
-
-	await fs.promises.rename(attachedFilePath, destFilePath);
 
 	// 12. Build file entry
 	var fileDate = tic.date ? new Date(tic.date * 1000) : new Date();
@@ -675,8 +773,19 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 
 	if (!addResult.status) {
 		ticLog(2, '[TIC] Failed to insert file entry for ' + tic.file + ': ' + addResult.errormessages.join(', '), 'redbright', SYSTEM_TOO);
+		// Put everything back, then shelve the TIC with its file. Left in the
+		// inbound directory it was retried on every toss, and after the file
+		// had been moved it failed there as "attached file not found".
+		await placed.rollback();
+		await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 		return 'error';
 	}
+
+	if (oldEntry) {
+		await fileEntries.deactivateEntry(oldEntry.id);
+		ticLog(3, '[TIC] Replaced ' + oldEntry.filename + ' in ' + areaShortcode, 'cyan');
+	}
+	await placed.commit();
 
 	// 13. Create distribution rows for all subscribed peers EXCEPT source
 	var allSubscribers = await filePeerSubscriptions.getSubscribedConnections(fileAreaId);
@@ -695,22 +804,13 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 			unreachable.network_id + ' — map the area or unsubscribe the peer', 'yellowbright', SYSTEM_TOO);
 	}
 
-	// Build seenby set for exclusion (includes source connection + TIC seenby)
-	var seenbySet = new Set();
-	for (var sb of tic.seenby) {
-		seenbySet.add(sb.toLowerCase().trim());
-	}
-	for (var pp of tic.path) {
-		// Path entries may include timestamps — extract just the address
-		var pathAddr = pp.split(' ')[0];
-		seenbySet.add(pathAddr.toLowerCase().trim());
-	}
-	if (tic.from) seenbySet.add(tic.from.toLowerCase().trim());
+	// Everyone the file has been to or through, normalised (forwardExclusions)
+	var seenbySet = forwardExclusions(tic);
 
 	var distConnIds = [];
 	for (var sub of subscribers) {
 		var subCd = sub.connection_data || {};
-		var subAddr = (subCd.address || '').toLowerCase().trim();
+		var subAddr = normaliseAddress(subCd.address || '');
 
 		// Skip source connection
 		if (sourceConn && sub.peer_connection_id === sourceConn.id) continue;
@@ -1095,5 +1195,7 @@ export {
 	tossInbound,
 	tossOutbound,
 	ticHasPassedThrough,
-	normaliseAddress
+	normaliseAddress,
+	forwardExclusions,
+	placeInboundFile
 };
