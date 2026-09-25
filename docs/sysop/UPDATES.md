@@ -130,6 +130,25 @@ A system on development is told about stable as well, because converging back
 onto stable is a move worth being offered. A system on stable is never told
 about development builds: that is a channel you did not choose.
 
+### Switching channel
+
+Pick the channel in the **Channel** box at the top of `/admin/update` and press
+**Switch**. It is the same `update_channel` setting as on the Configuration
+page, and the page checks the new channel straight away. Switching changes only
+what you are offered; nothing is downloaded until you press Update. If `.env`
+sets `update_channel`, the page shows it read-only and the change has to be
+made there.
+
+- **Stable to development.** The newest development build is offered at once,
+  if it is newer than what you run.
+- **Development to stable.** A development build is newer than the stable it
+  was built on (0.9.11a.20261001 comes after 0.9.11a), so there is nothing to
+  move to yet: the board stays on its build and moves onto stable with the first
+  stable release after it. The Update page says so for as long as that is the
+  case. If a development build applied a database change that next stable does
+  not ship, the stable release shows as blocked with the reason, rather than
+  being offered.
+
 ---
 
 ## Reading `/admin/update`

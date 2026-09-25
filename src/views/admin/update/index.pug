@@ -1,10 +1,8 @@
 extends ../../layouts/admin
 
 block content
-  //- Read-only. Nothing on this page downloads or applies anything; that is the
-  //- updater, which does not exist yet. What it can do is answer the two
-  //- questions a sysop has: is there something newer, and may this system take
-  //- it.
+  //- Is there something newer, may this system take it, and (from the Update
+  //- button) take it. Also where the channel is switched.
   -
     var verdictClass = {
       current:   'secondary',
@@ -37,9 +35,13 @@ block content
           i.bi.bi-arrow-up-circle.me-2
           | Software Update
         p.text-muted.small.mb-3
-          | Whether a newer Canectic exists, and whether this system can move to it.
-          | The check is read-only: it resolves a release index and nothing else.
-          | Downloading and applying an update is not implemented yet.
+          | Whether a newer Canectic exists, whether this system can move to it, and
+          | the update itself. Checking downloads nothing; only the Update button does.
+
+        include ../../partials/flash
+
+        if waitingForStable
+          .alert.alert-info.small= waitingForStable
 
         //- What is running
         .card.bg-dark.border-secondary.mb-3
@@ -50,7 +52,16 @@ block content
                 .fs-5.fw-bold= running
               .col-md-3.col-6.mb-2
                 .text-muted.small Channel
-                .fs-5= channel
+                if channelFromEnv
+                  .fs-5= channel
+                  .text-muted.small set in .env
+                else
+                  form.d-flex.gap-2.align-items-center(method='post' action='/admin/update/channel')
+                    select.form-select.form-select-sm.w-auto(name='channel' aria-label='Update channel'
+                      title='Stable is full releases. Development builds are cut between them and meant for live boards.')
+                      each opt in channelOptions
+                        option(value=opt.value selected=(opt.value === channel))= opt.label
+                    button.btn.btn-sm.btn-outline-info(type='submit') Switch
               .col-md-3.col-6.mb-2
                 .text-muted.small Node
                 .fs-5= nodeVersion

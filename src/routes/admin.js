@@ -6641,8 +6641,14 @@ router.get('/update', requireAdmin, async (req, res) => {
 			.map(function (t) { return t.command; })
 	});
 
+	var channelSwitch = await import('../release/channelSwitch.js');
+	res.locals.flash = await flash.get(req);
 	res.render('admin/update/index', {
 		sufficientAccess, title: 'Software Update', activelink: 'update',
+		channelOptions: (getDefinition('update_channel') || {}).options || [],
+		channelFromEnv: appConfig.getSource('update_channel') === 'env',
+		waitingForStable: appConfig.get('update_channel', 'stable') === 'stable'
+			? channelSwitch.waitingForStable(systeminfo.canonicalVersion()) : null,
 		activenav: 'update', currentuser,
 		running:   systeminfo.canonicalVersion(),
 		nodeVersion: process.versions.node,
@@ -6864,6 +6870,45 @@ router.get('/update/progress.json', requireAdmin, async (req, res) => {
 // A check the sysop asked for runs even when the daily check is off. The
 // opt-out is about this system reaching out on its own; a person pressing the
 // button is not that.
+// Switch update channel from the Update page. Same setting as the config page
+// (update_channel), saved as the sysop's choice, then checked at once so the
+// page shows the new channel's releases rather than the old channel's results.
+router.post('/update/channel', urlencodedParser, requireAdmin, async (req, res) => {
+	var to = String(req.body.channel || '');
+	var from = appConfig.get('update_channel', 'stable');
+	if (!isAllowedValue('update_channel', to)) {
+		await flash.setOne(req, 'danger', 'Not a channel: ' + to);
+		return res.redirect('/admin/update');
+	}
+	if (appConfig.getSource('update_channel') === 'env') {
+		await flash.setOne(req, 'warning', 'The channel is set in .env, which wins over this page. Change it there and reload the configuration.');
+		return res.redirect('/admin/update');
+	}
+	if (to === from) return res.redirect('/admin/update');
+
+	if (!(await configStore.setValue('update_channel', to))) {
+		await flash.setOne(req, 'danger', 'Could not save the channel.');
+		return res.redirect('/admin/update');
+	}
+	// The other processes reload on the event setValue publishes; this one
+	// reloads now, so the check below runs on the new channel.
+	await appConfig.reload();
+	alogger.writeAlog(2, '[Admin] update channel switched from ' + from + ' to ' + to +
+		' by ' + ((await getCurrentUser(req)) || {}).username, 'cyan');
+
+	var cs = await import('../release/channelSwitch.js');
+	var note = cs.describeSwitch(systeminfo.canonicalVersion(), from, to);
+	try {
+		var updateCheck = await import('../maintenance/updateCheck.js');
+		await updateCheck.runCheck({ source: 'manual', force: true });
+	} catch (e) {
+		alogger.writeAlog(2, '[Admin] update check after a channel switch failed: ' + e.message, 'yellowbright');
+		note += ' The check that followed failed: ' + e.message + '. Press Check now to try again.';
+	}
+	await flash.setOne(req, 'success', 'Now following ' + to + '. ' + note);
+	res.redirect('/admin/update');
+});
+
 router.post('/update/check', urlencodedParser, requireAdmin, async (req, res) => {
 	var updateCheck = await import('../maintenance/updateCheck.js');
 	try {
