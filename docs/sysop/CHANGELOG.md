@@ -1,6 +1,8 @@
 # Canectic BBS - Changelog
 
-## Pending (since v0.9.10a)
+## Pending (since v0.9.11a)
+
+## v0.9.11a (2026-09-25)
 
 ### File Echoes
 

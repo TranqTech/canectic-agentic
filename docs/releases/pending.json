@@ -1,32 +1,6 @@
 {
   "steps": [],
-  "notices": [
-    {
-      "id": "boot-unit-survives-node-upgrades",
-      "level": "warning",
-      "from_max": "0.9.10a",
-      "text": "After updating, run node src/tools/bootUnit.js as the user the BBS runs as. If it reports a problem, run node src/tools/bootUnit.js --install. A board set up with pm2 startup has a boot unit that names one Node version, and under nvm it stops starting the BBS at boot once that version is removed. The tool writes a unit that finds Node when it starts instead, asks for sudo to do so, and restarts nothing: it prints the command to restart when you are ready, which restarts the BBS, so close the board first with node src/tools/maintenanceMode.js --on if callers are online."
-    },
-    {
-      "id": "regen-html-for-laid-out-text",
-      "level": "info",
-      "from_max": "0.9.10a",
-      "text": "Messages already received keep the layout they were given when they arrived, so ASCII art, MealMaster recipes and other column-aligned posts will still show rows run together until they are rendered again. To repair them, run node src/tools/maintenance.js --regen-html with the worker running (add --area SHORTCODE to do one area first). It can take a while on a large message base; it changes nothing but how stored messages are displayed."
-    },
-    {
-      "id": "recover-refused-tic-files",
-      "level": "warning",
-      "from_min": "0.9.7a",
-      "from_max": "0.9.10a",
-      "text": "Since 0.9.7a, files arriving by file echo were refused as loops whenever the TIC listed this system under Seenby, which every uplink does, so most inbound files never reached their areas. This release fixes that for new files. Files refused within the last ftn_keep_tossed_days (7 by default; ftn/tossed/ is purged after that) are still in ftn/tossed/ next to their .tic, and the system log names each one with \"loop\" and \"already lists\". To import one, move the .tic and its file back into ftn/in/ and the next toss takes it. For nodelists and other files that replace an earlier one, only the newest needs moving."
-    },
-    {
-      "id": "first-log-rotation-archives-history",
-      "level": "info",
-      "from_max": "0.9.10a",
-      "text": "Log files are now rotated every night at 23:59 into logs/production/archive/YYYY-MM-DD/, and archives older than log_retention_days (30 by default) are deleted. The first rotation archives everything your logs hold so far under that night's date, so that history is deleted 30 days later. To keep it, copy logs/production/ somewhere else first, or raise log_retention_days (0 keeps every archive). node src/tools/rotateLogs.js --dry-run shows what a rotation would take."
-    }
-  ],
+  "notices": [],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }
