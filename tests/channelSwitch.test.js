@@ -11,7 +11,7 @@
 
 import assert from 'assert';
 import pug from 'pug';
-import { describeSwitch, waitingForStable } from '../src/release/channelSwitch.js';
+import { describeSwitch, waitingForStable, needsConfirmation, DEVELOPMENT_WARNING } from '../src/release/channelSwitch.js';
 import { formatTimestamp, timestampMs } from '../src/utils/dateFormat.js';
 
 describe('describeSwitch', function () {
@@ -37,6 +37,20 @@ describe('describeSwitch', function () {
 		assert.match(t, /0\.9\.11a\.20261001/);
 		assert.match(t, /newer than stable 0\.9\.11a/);
 		assert.match(t, /first stable release after 0\.9\.11a/);
+	});
+});
+
+describe('the development warning', function () {
+	it('is asked for only when moving onto development', function () {
+		assert.strictEqual(needsConfirmation('stable', 'development'), true);
+		assert.strictEqual(needsConfirmation('development', 'development'), false);
+		assert.strictEqual(needsConfirmation('development', 'stable'), false);
+	});
+
+	it('says there is no way back to the stable running now', function () {
+		assert.match(DEVELOPMENT_WARNING, /less testing/);
+		assert.match(DEVELOPMENT_WARNING, /no going back to the stable you run now/);
+		assert.match(DEVELOPMENT_WARNING, /database change/);
 	});
 });
 
@@ -70,6 +84,14 @@ describe('the Update page channel control', function () {
 		assert.match(html, /action="\/admin\/update\/channel"/);
 		assert.match(html, /<option value="development" selected/);
 		assert.match(html, /<option value="stable">/);
+	});
+
+	it('carries the warning and an unset confirmation for the dialog to fill', function () {
+		var html = render({ developmentWarning: DEVELOPMENT_WARNING });
+		assert.match(html, /data-warning="Development builds are cut/);
+		assert.match(html, /data-current="stable"/);
+		assert.match(html, /name="confirmed" value=""/);
+		assert.match(html, /window\.confirm\('Switch to development builds\?/);
 	});
 
 	it('shows the channel read-only when .env sets it', function () {

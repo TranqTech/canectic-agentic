@@ -6646,6 +6646,7 @@ router.get('/update', requireAdmin, async (req, res) => {
 	res.render('admin/update/index', {
 		sufficientAccess, title: 'Software Update', activelink: 'update',
 		channelOptions: (getDefinition('update_channel') || {}).options || [],
+		developmentWarning: channelSwitch.DEVELOPMENT_WARNING,
 		channelFromEnv: appConfig.getSource('update_channel') === 'env',
 		waitingForStable: appConfig.get('update_channel', 'stable') === 'stable'
 			? channelSwitch.waitingForStable(systeminfo.canonicalVersion()) : null,
@@ -6886,6 +6887,16 @@ router.post('/update/channel', urlencodedParser, requireAdmin, async (req, res) 
 	}
 	if (to === from) return res.redirect('/admin/update');
 
+	var cs = await import('../release/channelSwitch.js');
+	// Development has a warning to read first. The form sets `confirmed` once
+	// the dialog is accepted; anything else posting here is refused, with the
+	// warning, rather than switched silently.
+	if (cs.needsConfirmation(from, to) && req.body.confirmed !== 'yes') {
+		await flash.setOne(req, 'warning', 'Not switched. ' + cs.DEVELOPMENT_WARNING +
+			' Choose Development and press Switch again to confirm.');
+		return res.redirect('/admin/update');
+	}
+
 	if (!(await configStore.setValue('update_channel', to))) {
 		await flash.setOne(req, 'danger', 'Could not save the channel.');
 		return res.redirect('/admin/update');
@@ -6896,7 +6907,6 @@ router.post('/update/channel', urlencodedParser, requireAdmin, async (req, res) 
 	alogger.writeAlog(2, '[Admin] update channel switched from ' + from + ' to ' + to +
 		' by ' + ((await getCurrentUser(req)) || {}).username, 'cyan');
 
-	var cs = await import('../release/channelSwitch.js');
 	var note = cs.describeSwitch(systeminfo.canonicalVersion(), from, to);
 	try {
 		var updateCheck = await import('../maintenance/updateCheck.js');

@@ -56,7 +56,12 @@ block content
                   .fs-5= channel
                   .text-muted.small set in .env
                 else
-                  form.d-flex.gap-2.align-items-center(method='post' action='/admin/update/channel')
+                  //- Switching to development asks first (channelSwitch.js); the
+                  //- route refuses it without `confirmed`, which only the
+                  //- accepted dialog sets.
+                  form#channelForm.d-flex.gap-2.align-items-center(method='post' action='/admin/update/channel'
+                    data-current=channel data-warning=developmentWarning)
+                    input(type='hidden' name='confirmed' value='')
                     select.form-select.form-select-sm.w-auto(name='channel' aria-label='Update channel'
                       title='Stable is full releases. Development builds are cut between them and meant for live boards.')
                       each opt in channelOptions
@@ -310,3 +315,16 @@ block content
                       if h.notified
                         i.bi.bi-bell-fill.text-info
     br
+
+  script.
+    (function () {
+      var f = document.getElementById('channelForm');
+      if (!f) return;
+      f.addEventListener('submit', function (e) {
+        var to = f.elements.channel.value;
+        f.elements.confirmed.value = '';
+        if (to !== 'development' || f.dataset.current === 'development') return;
+        if (!window.confirm('Switch to development builds?\n\n' + f.dataset.warning)) { e.preventDefault(); return; }
+        f.elements.confirmed.value = 'yes';
+      });
+    })();

@@ -139,7 +139,9 @@ what you are offered; nothing is downloaded until you press Update. If `.env`
 sets `update_channel`, the page shows it read-only and the change has to be
 made there.
 
-- **Stable to development.** The newest development build is offered at once,
+- **Stable to development.** You are warned first and asked to confirm:
+  development builds get less testing, and there is no going back to the stable
+  you run now. Once confirmed, the newest development build is offered at once,
   if it is newer than what you run.
 - **Development to stable.** A development build is newer than the stable it
   was built on (0.9.11a.20261001 comes after 0.9.11a), so there is nothing to

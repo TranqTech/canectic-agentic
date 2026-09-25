@@ -13,6 +13,22 @@ import { isDevelopment, baseStable } from '../utils/version.js';
 
 export var CHANNELS = ['stable', 'development'];
 
+// Shown before a switch to development, and required to be confirmed. The
+// part people miss is the way back: releases never go backwards, so there is
+// no returning to the stable this board runs now, only moving on to the next
+// one, and a build's database change can hold that back until a stable that
+// includes it.
+export var DEVELOPMENT_WARNING =
+	'Development builds are cut between stable releases and get less testing than stable. ' +
+	'There is no going back to the stable you run now: switching back to stable waits for the next stable release, ' +
+	'and if a build has made a database change that release does not include, for one that does. ' +
+	'Stable is the better choice for a board other people rely on.';
+
+/** Does a switch from `from` to `to` need the development warning confirmed? */
+export function needsConfirmation(from, to) {
+	return to === 'development' && from !== 'development';
+}
+
 /**
  * What switching from `from` to `to` means for a board running `running`.
  * @returns {string|null} null when nothing is changing
