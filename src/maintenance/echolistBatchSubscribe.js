@@ -22,6 +22,7 @@ import * as networkEcholist from '../models/networkEcholist.js';
 import * as peerAreaSubscriptions from '../models/peerAreaSubscriptions.js';
 import * as notifications from '../models/notifications.js';
 import * as alogger from '../utils/alogger.js';
+import { shortcodeFromAreatag, AREA_SHORTCODE_MAX } from '../utils/areaShortcode.js';
 
 // ---------------------------------------------------------------------------
 // Shortcode derivation
@@ -32,16 +33,16 @@ import * as alogger from '../utils/alogger.js';
  * in the admin route so batch and single runs produce identical names.
  */
 function baseShortcode(areatag) {
-	return String(areatag || '').toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64);
+	return shortcodeFromAreatag(areatag);
 }
 
 /**
  * Resolve a unique shortcode for an areatag.
  *
  * Sanitising is lossy: `FSX.GEN` and `FSX-GEN` both become `FSX_GEN`, and
- * anything past 64 characters is truncated, so distinct areatags can collide
- * with each other or with an existing area. On collision we append `_2`, `_3`
- * and so on, trimming the base so the result still fits in 64 characters.
+ * anything past AREA_SHORTCODE_MAX characters is truncated, so distinct areatags
+ * can collide with each other or with an existing area. On collision we append
+ * `_2`, `_3` and so on, trimming the base so the result still fits.
  *
  * `taken` carries shortcodes claimed earlier in this same run, which are not in
  * the database yet at the time we check.
@@ -60,7 +61,7 @@ async function resolveShortcode(areatag, taken) {
 
 	for (var n = 2; n <= 99; n++) {
 		var suffix = '_' + n;
-		var candidate = base.substring(0, 64 - suffix.length) + suffix;
+		var candidate = base.substring(0, AREA_SHORTCODE_MAX - suffix.length) + suffix;
 		if (taken.has(candidate)) continue;
 		var isFree = await postgres.checkValueUnique('shortcode', candidate, 'message_areas');
 		if (isFree) return candidate;

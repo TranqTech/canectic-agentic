@@ -87,7 +87,11 @@ mixin areaFormFields(prefix, mode, opts)
             input.form-control(type='text' id=prefix + 'name' name='name' required)
           .col-4
             label.form-label(for=prefix + 'shortcode') Short Code
-            input.form-control(type='text' id=prefix + 'shortcode' name='shortcode' required)
+            //- Names the area's tables (mb_<shortcode>_msgs), so it must be a
+            //- bare SQL identifier. The server checks too: see areaShortcode.js.
+            input.form-control(type='text' id=prefix + 'shortcode' name='shortcode' required
+              pattern='[A-Za-z0-9_]+' maxlength='52'
+              title='Letters, digits and underscores only, up to 52 characters')
         else
           .col-12
             label.form-label(for=prefix + 'name') Name

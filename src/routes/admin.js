@@ -82,6 +82,7 @@ import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
 import * as fileEcholist from '../models/fileEcholist.js';
 import * as flash from '../middleware/db/flash.js';
+import { shortcodeFromAreatag } from '../utils/areaShortcode.js';
 import * as maintFlags from '../maintenance/maintenanceFlag.js';
 import { maintenanceWatch } from '../maintenance/maintenanceWatch.js';
 import { recordSysopSessions } from '../middleware/maintenanceWeb.js';
@@ -263,12 +264,17 @@ router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) =>
 	if (result.status === true) {
 		res.redirect(`/admin/msgGroup/${result.shortcode}`);
 	} else {
+		// The view reads `errormessages` and needs the group list; this used
+		// to pass `errors` and no list, so a refused group rendered an empty
+		// page with no reason given.
 		res.render('admin/msgGroups', {
 			sufficientAccess: sufficientAccess,
 			title: 'Message Groups',
 			activelink: 'msgGroups',
 			currentuser: currentuser,
-			errors: result.errormessages,
+			errormessages: result.errormessages,
+			grouplist: await msgGroups.getAllGroups(),
+			nextConfStart: await msgGroups.nextGroupConfStart(),
 			availablePermissions: getAvailablePermissions(),
 			availableRestrictions: getAvailableRestrictions()
 		});
@@ -283,7 +289,6 @@ router.post('/msgGroups/recalculateAreaCounts', urlencodedParser, requireAdmin, 
 
 router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
-	var sufficientAccess = checkAdminAccess(currentuser);
 	var shortcode   = req.params.shortcode.toUpperCase().trim();
 	var formObj     = req.body;
 	formObj.groupshortcode = shortcode;
@@ -292,19 +297,14 @@ router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asyn
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await msgAreas.newArea(formObj);
-	if (result.status === true) {
-		res.redirect(`/admin/msgGroup/${shortcode}`);
-	} else {
-		res.render('admin/msgGroups', {
-			sufficientAccess: sufficientAccess,
-			title: 'Message Groups',
-			activelink: 'msgGroups',
-			currentuser: currentuser,
-			errors: result.errormessages,
-			availablePermissions: getAvailablePermissions(),
-			availableRestrictions: getAvailableRestrictions()
-		});
+	if (result.status !== true) {
+		// Back to the group page the sysop submitted from, with the reason.
+		// This used to render the group LIST under a variable that view never
+		// reads, so a refused area (a '-' in the shortcode, say) looked like a
+		// form that did nothing.
+		await flash.setOne(req, 'danger', 'Area not created: ' + (result.errormessages || []).join(' '));
 	}
+	res.redirect(`/admin/msgGroup/${shortcode}`);
 });
 
 router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
@@ -473,6 +473,10 @@ router.get('/msgGroup/:shortcode', async (req, res, next) => {
 	}
 	var networklist = await msgNetworks.getActiveNetworks();
 	var grouplist   = await msgGroups.getAllGroups();
+	// The view includes partials/flash, but nothing handed it the messages,
+	// so every flash redirected here (push defaults, new area) was dropped
+	// and surfaced later on whichever page read flash next.
+	res.locals.flash = await flash.get(req);
 	res.render('admin/msgGroups/view', {
 		sufficientAccess: sufficientAccess,
 		title: title,
@@ -3660,7 +3664,7 @@ router.post('/echolist/:networkId/combined/subscribe', urlencodedParser, require
 			groupshortcode:  req.body.group_shortcode,
 			name:            req.body.name || areatag,
 			description:     req.body.description || areatag,
-			shortcode:       req.body.shortcode || areatag.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 64),
+			shortcode:       req.body.shortcode || shortcodeFromAreatag(areatag),
 			readsecurity:    req.body.read_security,
 			postsecurity:    req.body.post_security,
 			post_as:         req.body.post_as || 'realname',

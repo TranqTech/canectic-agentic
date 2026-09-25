@@ -7,6 +7,7 @@ import * as tableTools from '../middleware/db/tableTools.js';
 import * as msgGroups from "./msgGroups.js";
 import { normaliseThreadMode, isThreadMode } from "../utils/threadMode.js";
 import { normaliseCharsetMode, isCharsetMode } from "../utils/charsetPolicy.js";
+import { areaShortcodeProblem } from "../utils/areaShortcode.js";
 import * as networkAreas from "./networkAreas.js";
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
@@ -165,8 +166,11 @@ async function newArea(formObj) {
 	if (!formObj.description) {
 		returnObj.errormessages.push("Description cannot be empty!");
 	}
-	if (!formObj.shortcode) {
-		returnObj.errormessages.push("Must have a shortcode!");
+	// Checked here rather than left to CREATE TABLE, which fails on a '-'
+	// after the area row is written and rolled back.
+	var shortcodeProblem = areaShortcodeProblem(formObj.shortcode);
+	if (shortcodeProblem) {
+		returnObj.errormessages.push(shortcodeProblem);
 	}
 	if (returnObj.errormessages.length > 0) {
 		return returnObj;
