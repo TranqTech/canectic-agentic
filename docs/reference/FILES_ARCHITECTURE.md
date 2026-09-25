@@ -442,9 +442,10 @@ Worker: tic:inbound job
   10. Dupe check (area + filename case-insensitively + CRC-32, or CRC-32 + size
       under any name)
   11. Find the entries Replaces names (not yet deactivated). DOS wildcards
-      (`*`, `?`) are honoured via ILIKE (replacesPattern); a wildcard must
-      start with a literal character, since `*.*` would empty the area, and
-      a refused pattern is logged and the file imported replacing nothing
+      (`*`, `?`) are honoured via ILIKE (replacesPattern); a wildcard needs
+      3+ literal characters before the first dot (`*FOO.ZIP` yes, `*.ZIP`,
+      `*.*`, `A*.ZIP` no), since Replaces deletes what it matches, and a
+      refused pattern is logged and the file imported replacing nothing
   12. Move file to area directory (placeInboundFile): the replaced entry's
       file is set aside first, so a same-name replacement keeps its name;
       a same-name file that is NOT being replaced still gets NAME_N

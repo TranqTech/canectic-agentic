@@ -168,9 +168,16 @@ describe('replacesPattern', function () {
 
 	it('refuses a wildcard that could match a whole area', function () {
 		// Replaces deletes what it matches.
-		for (var p of ['*', '*.*', '*.ZIP', '?ODELIST.*', '.*']) {
+		for (var p of ['*', '*.*', '*.ZIP', '.*', '*.TAR.GZ', 'A*.ZIP', '*AB*.*', '??.ZIP']) {
 			assert.strictEqual(replacesPattern(p).kind, 'refused', p);
 		}
+	});
+
+	it('accepts a leading wildcard when enough of the name is given', function () {
+		assert.deepStrictEqual(replacesPattern('*FOO.ZIP'), { kind: 'wildcard', like: '%FOO.ZIP' });
+		assert.deepStrictEqual(replacesPattern('?ODELIST.*'), { kind: 'wildcard', like: '_ODELIST.%' });
+		assert.strictEqual(replacesPattern('*FOO*').kind, 'wildcard');
+		assert.strictEqual(replacesPattern('FSX*.ZIP').kind, 'wildcard');
 	});
 
 	it('refuses a path', function () {
@@ -200,6 +207,9 @@ describe('replacesPattern', function () {
 			assert.strictEqual(await matches('NODEDIFF.A61', 'NODELIST.*'), false);
 			assert.strictEqual(await matches('Z1DAILY.Z68', 'Z1DAILY.Z??'), true);
 			assert.strictEqual(await matches('Z1DAILY.Z6', 'Z1DAILY.Z??'), false, '? is exactly one character');
+			assert.strictEqual(await matches('XYZFOO.ZIP', '*FOO.ZIP'), true);
+			assert.strictEqual(await matches('XYZFOO.ARJ', '*FOO.ZIP'), false);
+			assert.strictEqual(await matches('FOOBAR.ZIP', '*FOO.ZIP'), false);
 		});
 
 		it('treats _ and % in the name literally', async function () {

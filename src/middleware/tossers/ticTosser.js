@@ -1197,22 +1197,31 @@ async function moveToBad(filePath, filename, badDir, attachedFilePath, attachedF
  * Only an exact filename used to match, so a wildcard Replaces replaced
  * nothing and every version accumulated.
  *
- * A pattern must begin with a literal character. Replaces deactivates AND
- * deletes what it matches, so `*`, `*.*` or `*.ZIP` from a misconfigured or
- * hostile system would empty the area; a leading literal confines it to one
- * family of names. Refused patterns are logged and the file imported without
- * replacing anything.
+ * Replaces deactivates AND deletes what it matches, so `*`, `*.*` or `*.ZIP`
+ * from a misconfigured or hostile system would empty the area. A wildcard
+ * pattern must therefore name enough of the file: at least
+ * REPLACES_MIN_LITERALS literal characters in the part before the first dot,
+ * wherever they sit, so `*FOO.ZIP` and `?ODELIST.*` are accepted while
+ * `*.ZIP`, `*.TAR.GZ` and `A*.ZIP` are not. The extension does not count,
+ * since it names a kind of file, not a family. Refused patterns are logged
+ * and the file imported without replacing anything.
  *
  * Pure. Returns { kind: 'exact', name } | { kind: 'wildcard', like } |
  * { kind: 'refused', reason }, where `like` is a pattern for ILIKE with the
  * SQL wildcards in the name escaped.
  */
+var REPLACES_MIN_LITERALS = 3;
+
 function replacesPattern(replaces) {
 	var name = String(replaces || '').trim();
 	if (!name) return { kind: 'refused', reason: 'empty' };
 	if (/[\\/]/.test(name)) return { kind: 'refused', reason: 'contains a path' };
 	if (!/[*?]/.test(name)) return { kind: 'exact', name: name };
-	if (/^[*?.]/.test(name)) return { kind: 'refused', reason: 'a wildcard Replaces must start with part of a filename' };
+	var stem = name.split('.')[0];
+	if (stem.replace(/[*?]/g, '').length < REPLACES_MIN_LITERALS) {
+		return { kind: 'refused', reason: 'a wildcard Replaces must name at least ' + REPLACES_MIN_LITERALS +
+			' characters of the filename before its extension' };
+	}
 	var like = name
 		.replace(/[\\%_]/g, function (c) { return '\\' + c; })
 		.replace(/\*/g, '%')
