@@ -42,6 +42,7 @@ import { launchUpdater, validateHandoff } from '../maintenance/updateHandoff.js'
 import { buildChannelIndex, sourceForRelease, isFtnRelease } from '../maintenance/ftnReleaseSource.js';
 import { runUpdate } from '../maintenance/updateRunner.js';
 import { stagingDir, reclaimable } from '../maintenance/updateLayout.js';
+import { pruneUpdateLeftovers, DEFAULT_BACKUP_KEEP } from '../maintenance/updateHousekeeping.js';
 import { makeRunId, newRun } from '../release/updatePhases.js';
 import * as runStore from '../maintenance/updateRunStore.js';
 import { summarise } from '../release/updatePhases.js';
@@ -74,6 +75,8 @@ function usage() {
 		'  --handoff          hand off to the NEW release\'s updater, detached,',
 		'                     and return. Survives the BBS being stopped',
 		'  --status           report the last update run on --target and stop',
+		'  --prune            delete old update backups and leftover staging now,',
+		'                     keeping update_backup_keep backups (add --dry-run to see what)',
 		'  --no-dump          do not dump the database before migrating',
 		'  --no-deps          do not run npm install',
 		'  --no-schema        do not run dbmigrations',
@@ -92,7 +95,7 @@ function parseArgs(argv) {
 	var o = {
 		fromDir: null, url: null, channel: null, version: null,
 		target: process.cwd(), staging: null,
-		apply: false, handoff: false, keepStaging: false, verbose: false, status: false,
+		apply: false, handoff: false, keepStaging: false, verbose: false, status: false, prune: false, dryRun: false,
 		dump: true, dependencies: true, schema: true, processControl: true
 	};
 	for (var i = 0; i < argv.length; i++) {
@@ -106,6 +109,8 @@ function parseArgs(argv) {
 		else if (a === '--apply')        o.apply = true;
 		else if (a === '--handoff')      { o.handoff = true; o.apply = true; }
 		else if (a === '--status')       o.status = true;
+		else if (a === '--prune')        o.prune = true;
+		else if (a === '--dry-run')      o.dryRun = true;
 		else if (a === '--no-dump')      o.dump = false;
 		else if (a === '--no-deps')      o.dependencies = false;
 		else if (a === '--no-schema')    o.schema = false;
@@ -250,11 +255,27 @@ function reportStatus(target) {
 	console.log('');
 }
 
+// Reclaim old update backups and leftover staging by hand (#62). The same
+// rule an update applies when it completes.
+function reportPrune(o) {
+	var keep = appConfig.getNumber('update_backup_keep', DEFAULT_BACKUP_KEEP);
+	var r = pruneUpdateLeftovers({ target: o.target, currentRunId: null, stagedRoot: null, keep: keep, dryRun: o.dryRun });
+	var verb = o.dryRun ? 'would remove' : 'removed';
+	for (var b of r.backups) console.log('  ' + verb + ' backup  ' + b.runId + '  ' + humanBytes(b.bytes));
+	for (var s of r.staging) console.log('  ' + verb + ' staging ' + s.name + '  ' + humanBytes(s.bytes));
+	for (var e of r.errors) console.log('  ' + YELLOW + 'not removed' + NC + ' ' + e);
+	console.log((o.dryRun ? '[dry run] ' : '') + (r.backups.length || r.staging.length
+		? verb + ' ' + humanBytes(r.freed) + ', keeping the last ' + (keep || 'all') + ' update backup(s)'
+		: 'nothing to remove'));
+	if (r.errors.length) process.exitCode = 1;
+}
+
 async function main() {
 	var o = parseArgs(process.argv.slice(2));
 	await appConfig.load();
 
 	if (o.status) { reportStatus(o.target); return; }
+	if (o.prune) { reportPrune(o); return; }
 
 	// An explicit --from-dir or --url overrides the configured transport, since
 	// somebody naming a source means it.

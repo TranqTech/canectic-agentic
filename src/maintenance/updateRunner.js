@@ -45,6 +45,7 @@ import { describeInstall } from './installTarget.js';
 import { applyPlan, verifyApplied, rollback } from './updateApply.js';
 import { backupDir, freeBytes } from './updateLayout.js';
 import { pruneBaseCache } from './baseCache.js';
+import { pruneUpdateLeftovers, DEFAULT_BACKUP_KEEP } from './updateHousekeeping.js';
 import { runCommandAsync, spawnAsync, nodeCommand, createRuntimeDirs, COMMAND_TIMEOUT_MS } from './updateCommands.js';
 import * as maintFlags from './maintenanceFlag.js';
 import { startUpdateStatusServer } from './updateStatusServer.js';
@@ -446,6 +447,18 @@ async function runUpdate(opts) {
 			if (discarded.length) log('base cache: discarded ' + discarded.join(', '));
 		} catch (e) {
 			log('base cache prune failed, which changes nothing: ' + e.message);
+		}
+		// Old backups and leftover staging (#62). This run's backup and the
+		// staging it runs from are never touched.
+		try {
+			var pruned = pruneUpdateLeftovers({
+				target: target, currentRunId: runId, stagedRoot: stagedRoot,
+				keep: appConfig.getNumber('update_backup_keep', DEFAULT_BACKUP_KEEP), log: log
+			});
+			if (pruned.freed) log('housekeeping: freed ' + Math.round(pruned.freed / 1048576) + ' MB');
+			for (var pe of pruned.errors) log('housekeeping: could not remove ' + pe);
+		} catch (e) {
+			log('backup and staging prune failed, which changes nothing: ' + e.message);
 		}
 
 		// Last, once verify has passed: the processes came back up closed, and

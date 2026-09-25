@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.11a)
 
+### Updates
+
+- Fix: **every update kept its backup for ever, database dump included.** Each one is about the size of your database, so a board that had updated a handful of times could be holding gigabytes in `.canectic-update/backup/`, plus a staged copy of every release it had updated to. When an update completes it now deletes older backups, keeping the last `update_backup_keep` (1 by default, the update just finished; 0 keeps them all), and any staged releases left from earlier updates. It never deletes its own backup, nothing is deleted after a failed update, and a failed update's backup is kept until a later update completes. `node src/tools/update.js --prune` reclaims the space now; add `--dry-run` to see what it would remove.
+
 ## v0.9.11a (2026-09-25)
 
 ### File Echoes

@@ -286,6 +286,8 @@ var CONFIG_DEFINITIONS = [
 	  description: 'How an update stops the BBS. A bare pm2 is resolved next to the running Node binary first, since under nvm the supervisor PATH may not hold the version the BBS runs on.' },
 	{ key: 'update_start_command',   defaultValue: 'pm2 start ecosystem.config.cjs', type: 'string', category: 'updates',
 	  description: 'How an update starts the BBS again. Note that starting from the ecosystem file starts every process in it, including one you had deliberately stopped.' },
+	{ key: 'update_backup_keep', defaultValue: '1', type: 'number', category: 'updates',
+	  description: 'How many updates to keep the backup of (the files it replaced and a full database dump), newest first. The backup of the update that has just finished is always kept. 0 keeps every backup. Older backups are deleted when an update completes, or now with node src/tools/update.js --prune.' },
 	{ key: 'update_base_cache_keep', defaultValue: '2', type: 'number', category: 'updates',
 	  description: 'How many stable release artifacts to keep cached for rebuilding development deltas. The base of the installed version is never discarded regardless.' },
 	{ key: 'update_require_signature', defaultValue: 'false', type: 'boolean', category: 'updates',

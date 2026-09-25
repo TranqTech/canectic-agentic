@@ -12,8 +12,11 @@
 //                        development deltas are reconstructed against. This is
 //                        the whole reason the dot directory is not simply
 //                        deleted when an update finishes.
-//   backup/<runId>/      UNTIL RECLAIMED. What an update displaced, kept so a
-//                        rollback is a copy back rather than a reconstruction.
+//   backup/<runId>/      THE LAST update_backup_keep UPDATES. What an update
+//                        displaced plus its database dump, kept so a rollback
+//                        is a copy back rather than a reconstruction. Older
+//                        ones, and staging the handoff had to leave behind, are
+//                        removed when an update completes (updateHousekeeping.js).
 //
 // The split from logs/update/ is on purpose. logs/update/ holds the RECORD of
 // what happened: small, readable, worth keeping for ever. This directory holds

@@ -367,10 +367,30 @@ Everything lives in `.canectic-update/` with three different lifetimes:
 |-----------|----------|-------------------|
 | `staging/` | One update | Nothing, once the update finished |
 | `base/` | Across updates | A development update re-downloads its base stable |
-| `backup/` | Until you reclaim it | Past updates can no longer be rolled back |
+| `backup/` | The last `update_backup_keep` updates | Those updates can no longer be rolled back |
 
 `/admin/update` shows the size of each. Deleting the whole directory is safe and
 loses nothing but those three things.
+
+Each update's backup holds the files it replaced and, unless you passed
+`--no-dump`, a full dump of the database taken just before it migrated, so a
+backup is roughly the size of your database. When an update completes, it
+deletes the backups of older updates, keeping the last `update_backup_keep`
+(1 by default, counting the update that just finished; 0 keeps them all), and
+any staged releases left over from earlier updates. It never deletes its own
+backup. A backup from a failed update is kept until a later update completes,
+since it may be what you are recovering from; after that the board has moved
+past it. Nothing is deleted after a failed update.
+
+To reclaim the space now rather than at the next update:
+
+```bash
+node src/tools/update.js --prune --dry-run   # what it would remove
+node src/tools/update.js --prune
+```
+
+`--prune` keeps the newest completed update's backup and refuses to run while an
+update is in progress.
 
 The base cache is why a development update is fast the second time: a delta is
 rebuilt against the stable it names, and that stable is kept rather than fetched

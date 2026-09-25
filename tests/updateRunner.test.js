@@ -366,6 +366,32 @@ describe('the backup', function () {
 		assert.ok(dir.indexOf('.canectic-update') !== -1, dir);
 		assert.ok(dir.indexOf('logs') === -1, 'logs hold the record, not the bytes: ' + dir);
 	});
+
+	it('removes older backups and leftover staging once the update completes (#62)', async function () {
+		var s = scenario();
+		var old = '20260920-040034-aaaa';
+		fs.mkdirSync(backupDir(s.target, old), { recursive: true });
+		fs.writeFileSync(path.join(backupDir(s.target, old), 'database.dump'), 'old dump');
+		runStore.save(s.target, { runId: old, status: 'complete', phases: [] });
+		runStore.save(s.target, JSON.parse(fs.readFileSync(runStore.statePath(s.target, s.runId), 'utf8')));
+		write(s.target, { '.canectic-update/staging/0.9.7a/tree/x': 'stale' });
+
+		var state = await run({ instructions: s.instructions, exec: execStub([]) });
+		assert.strictEqual(state.status, 'complete');
+		assert.ok(!fs.existsSync(backupDir(s.target, old)), 'the older backup is gone');
+		assert.ok(fs.existsSync(backupDir(s.target, s.runId)), 'this run keeps its own');
+		assert.ok(!fs.existsSync(path.join(s.target, '.canectic-update/staging/0.9.7a')), 'stale staging is gone');
+	});
+
+	it('keeps older backups when the update fails', async function () {
+		var s = scenario();
+		var old = '20260920-040034-aaaa';
+		fs.mkdirSync(backupDir(s.target, old), { recursive: true });
+		runStore.save(s.target, { runId: old, status: 'complete', phases: [] });
+		var state = await run({ instructions: s.instructions, exec: execStub([], /npm/) });
+		assert.strictEqual(state.status, 'failed');
+		assert.ok(fs.existsSync(backupDir(s.target, old)), 'nothing is pruned after a failure');
+	});
 });
 
 describe('maintenance mode around an update', function () {
