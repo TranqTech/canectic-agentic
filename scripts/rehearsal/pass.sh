@@ -35,12 +35,13 @@ curl -s -o /dev/null -w "reload -> %{http_code}\n" -H "Origin: $B" -b cookies.tx
 sleep 2
 curl -s -o /dev/null -w "check -> %{http_code}\n" -H "Origin: $B" -b cookies.txt -X POST $B/admin/update/check
 curl -s -b cookies.txt $B/admin/update > update.html
-grep -oE 'name="version" value="[^"]*"|Nothing blocking|Blocked[^<]*' update.html | sort -u
+grep -oE 'name="version" value="[^"]*"|Nothing blocking|Blocked[^<]*' update.html | sort -u || true
 # The Update button needs the upgrade notes acknowledged after 0.9.10a (#55);
 # send the token the page shows, as ticking the box does. Empty for older pages.
-ACK=$(grep -oE 'name="ack" value="[^"]*"' update.html | head -1 | sed -e 's/.*value="//' -e 's/"$//')
+ACK=$(grep -oE 'name="ack" value="[^"]*"' update.html | head -1 | sed -e 's/.*value="//' -e 's/"$//' || true)
 [ -n "$ACK" ] && echo "upgrade notes acknowledged ($ACK)"
-grep -oE 'Before you update to [^<]*|could not be verified[^<]*' update.html | head -2
+# No panel on a page from before 0.9.11a; under pipefail an empty grep would end the pass here.
+grep -oE 'Before you update to [^<]*|could not be verified[^<]*' update.html | head -2 || true
 rm -f caller.log webtab.log
 pkill -f "[w]ebtab.mjs" || true
 nohup node caller.mjs > /dev/null 2>&1 < /dev/null &
