@@ -64,6 +64,7 @@ describe('managed scheduler keys', function () {
 			'purge-relay-log-daily',
 			'reconcile-echolists-daily',
 			'scan-echolists-daily',
+			'rotate-logs-daily',
 			'message-maintenance-daily',
 			'user-maintenance-daily',
 			'scan-inbound',

@@ -289,12 +289,34 @@ async function boldchalked(chalkcolour, message){
 // Core logging functions
 // -----------------------------------------------------------------------
 
+// Where a `filename` argument writes: null/'' is the system log, anything else
+// logs/<env>/<name>.log. An array writes the same line to each, so a subsystem
+// with its own log can still put what a sysop must see in the system log,
+// while the console and the log bus get it once.
+function _logFilesFor(filename){
+	var names = Array.isArray(filename) ? filename : [filename];
+	var files = [];
+	for (var name of names){
+		var f = name ? logpath + '/' + name + ".log" : logfile;
+		if (files.indexOf(f) === -1) files.push(f);
+	}
+	return files;
+}
+
+function _appendToLogs(files, text){
+	for (var f of files){
+		appendFileSync(f, text);
+	}
+}
+
+// The directory this process writes its log files into, for log rotation.
+function logDirectory(){
+	return logpath;
+}
+
 //all purpose logging function
 async function writeAlog(level, message, chalkcolour, bold, filename){
-	var alogfile = logfile
-	if (filename){
-		alogfile = logpath + '/' + filename + ".log";
-	}
+	var alogfiles = _logFilesFor(filename);
 	// attach timestamp to log message (Luxon DateTime honours process.env.TZ)
 	var currenttime = DateTime.now();
 	//Luxon sometimes puts a slim nbsp into time string. Replace with standard space for logging
@@ -318,9 +340,9 @@ async function writeAlog(level, message, chalkcolour, bold, filename){
 			if(logfileindev){
 				try{
 					if (!existsSync(logpath)){
-						mkdirSync(logpath);
+						mkdirSync(logpath, { recursive: true });
 					}
-					appendFileSync(alogfile, messagewtime);	
+					_appendToLogs(alogfiles, messagewtime);	
 				}catch(error){
 					console.log(chalk.bold.red("Could not write to log file."));
 					console.log(chalk.red(error));
@@ -347,9 +369,9 @@ async function writeAlog(level, message, chalkcolour, bold, filename){
 			//write to logfile. catch errors writing logfile and display to local console.
 			try{
 				if (!existsSync(logpath)){
-					mkdirSync(logpath);
+					mkdirSync(logpath, { recursive: true });
 				}
-				appendFileSync(alogfile, messagewtime);	
+				_appendToLogs(alogfiles, messagewtime);	
 			}catch(error){
 				console.log(chalk.bold.red("Could not write to log file."));
 				console.log(chalk.red(error));
@@ -359,7 +381,8 @@ async function writeAlog(level, message, chalkcolour, bold, filename){
 	}
 
 	// Publish to log bus (fire-and-forget, ALL levels — admin view filters client-side)
-	_publishEntry(_buildEntry(level, message, chalkcolour, bold, filename));
+	_publishEntry(_buildEntry(level, message, chalkcolour, bold,
+		Array.isArray(filename) ? (filename.filter(Boolean)[0] || null) : filename));
 }
 
 //for writing to specific log file
@@ -393,7 +416,7 @@ async function writeClog(level, message, filename, chalkcolour, bold, noconsole)
 			if(logfileindev){
 				try{
 					if (!existsSync(logpath)){
-						mkdirSync(logpath);
+						mkdirSync(logpath, { recursive: true });
 					}
 					appendFileSync(clogfile, messagewtime);	
 				}catch(error){
@@ -458,6 +481,7 @@ function isConsoleLogging() {
 
 export{
 	writeAlog,
+	logDirectory,
 	isConsoleLogging,
 	writeClog,
 	setTerminalTitle,

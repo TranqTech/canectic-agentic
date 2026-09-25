@@ -17,6 +17,7 @@
 
 - **Repair the layout of messages already received** with `node src/tools/maintenance.js --regen-html` (worker running; `--area SHORTCODE` to try one area first). ASCII art and column-aligned posts that arrived before this release still show rows run together until then.
 - **Check how your BBS starts at boot, once, after updating.** Run `node src/tools/bootUnit.js` as the user the BBS runs as, and `node src/tools/bootUnit.js --install` if it reports anything. A board set up with `pm2 startup` stops starting at boot once the Node version it names is removed, which under nvm happens on an ordinary Node upgrade. `--install` asks for sudo and restarts nothing; the restart it prints restarts the BBS, so close the board first with `node src/tools/maintenanceMode.js --on` if callers are online.
+- **Your existing logs are archived on the first night and deleted 30 days later.** The first rotation puts everything your logs hold so far into one archive dated that day, and like any archive it is removed once it is older than `log_retention_days`. To keep the history longer, copy `logs/production/` somewhere else before then, or raise `log_retention_days`.
 - **Recover file echo files refused since 0.9.7a.** Those received within `ftn_keep_tossed_days` (7 by default, after which `ftn/tossed/` is purged) are still there, each TIC next to its file, and its log line reads `loop — <file> already lists <your address> in Seenby/Path`. To import one, move the `.tic` and its file back into `ftn/in/`; the next toss imports it. Nodelists and other files that replace their predecessor only need the newest one moving.
 
 ### Installation
@@ -32,6 +33,8 @@
 
 ### Administration
 
+- **New: log files are rotated daily.** Every log in `logs/production/` used to grow for ever. Each night at 23:59 each one is compressed into `logs/production/archive/YYYY-MM-DD/` and started afresh, and archives older than `log_retention_days` (30 by default, 0 keeps them all) are deleted. Settings are under Logging on the configuration page. `node src/tools/rotateLogs.js --dry-run` shows what a rotation would do, and without `--dry-run` rotates now.
+- **New: file echo processing has its own log, `tic.log`.** Every file received or sent by file echo is logged there, with the reason for any it refused. Failures, refusals and each run's totals still appear in `system.log` too.
 - Fix: **date columns in the admin logs and other tables did not sort by date.** Dates showed as `9/22/2026, 5:57:03 PM`, or as `September 22, 2026` and `Sep 22` on some pages, and sorting a column put `10/1` before `9/30` and April before March. Every table now shows dates as `2026-09-22 17:57:03` (or just the date where that is all there is) and sorts on the actual time. Affected: the inbound and outbound file logs, the netmail relay log, API tokens, echolists, filebones, nodelists, message and file areas, users, and on the user side the private mail inbox and file lists.
 - **Times in tables show in your own timezone.** They follow your browser's clock, which for a sysop is almost always the board's own; the zone is named when you hover over a time.
 

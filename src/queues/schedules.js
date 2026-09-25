@@ -247,6 +247,21 @@ export async function registerSchedules() {
 		}
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily log rotation. 23:59 rather than midnight so the
+		// archive directory, named for the day the job runs, is the day its
+		// contents cover. Settings are read when it runs (maintenanceJobs.js).
+		// -----------------------------------------------------------------
+		if (appConfig.getBoolean('log_rotation_enabled', true)) {
+			await maintenanceQueue.upsertJobScheduler('rotate-logs-daily', {
+				pattern: '0 59 23 * * *',   // 11:59 PM daily
+			}, {
+				name: 'rotate-logs',
+				data: {},
+			});
+			scheduleCount++;
+		}
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily echolist/filebone auto-scan
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('scan-echolists-daily', {

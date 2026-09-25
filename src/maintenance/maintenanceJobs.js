@@ -68,6 +68,7 @@ export const MAINTENANCE_JOBS = [
 	'file-maintenance',
 	'user-maintenance',
 	'scan-inbound',
+	'rotate-logs',
 ];
 
 /**
@@ -155,6 +156,25 @@ export async function runMaintenanceJob(name, data, opts) {
 			} catch (tossErr) {
 				alogger.writeAlog(3, 'Tossed packet purge error: ' + tossErr.message, 'yellow');
 			}
+			return true;
+		}
+
+		case 'rotate-logs': {
+			// Settings are read when the job runs, not when it was scheduled,
+			// so a retention change applies tonight without a restart, and a
+			// schedule left behind after rotation was turned off does nothing.
+			if (!data.force && !appConfig.getBoolean('log_rotation_enabled', true)) return true;
+			var logRotation = await import('./logRotation.js');
+			var rot = await logRotation.rotateLogs({
+				logDir: alogger.logDirectory(),
+				retentionDays: data.days !== undefined ? data.days : appConfig.getNumber('log_retention_days', 30),
+			});
+			// Written after the rotation, so it opens the new system log.
+			alogger.writeAlog(2, 'Log rotation: ' + rot.rotated.length + ' file(s) archived to ' + rot.archiveDir +
+				(rot.removed.length ? ', ' + rot.removed.length + ' expired day(s) removed' : '') +
+				(rot.errors.length ? ', ' + rot.errors.length + ' error(s): ' +
+					rot.errors.map(function (e) { return e.file + ': ' + e.error; }).join('; ') : ''),
+				rot.errors.length ? 'yellowbright' : 'cyan');
 			return true;
 		}
 

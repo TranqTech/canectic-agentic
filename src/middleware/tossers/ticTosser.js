@@ -23,6 +23,19 @@ import { applyDescriptions } from '../../utils/fileDescExtractor.js';
 import appConfig from '../../config/appConfig.js';
 import * as alogger from '../../utils/alogger.js';
 
+// File echo processing logs to its own file, logs/<env>/tic.log, so what
+// happened to each file can be read without the rest of the system log.
+// Failures, refusals and each run's summary ALSO go to the system log, marked
+// SYSTEM_TOO: when every file an uplink sent was being refused as a loop, the
+// only sign was a routine-looking line in the system log, and moving TIC
+// lines out of it entirely would have left not even that.
+var TIC_LOG    = 'tic';
+var SYSTEM_TOO = true;
+
+function ticLog(level, message, colour, alsoSystem) {
+	alogger.writeAlog(level, message, colour, false, alsoSystem ? [TIC_LOG, null] : TIC_LOG);
+}
+
 // ---------------------------------------------------------------------------
 // TIC file parser
 // ---------------------------------------------------------------------------
@@ -339,7 +352,7 @@ async function tossInbound() {
 	try {
 		filelist = fs.readdirSync(inDir);
 	} catch (err) {
-		alogger.writeAlog(2, '[TIC] Cannot read inbound directory ' + inDir + ': ' + err.message, 'redbright');
+		ticLog(2, '[TIC] Cannot read inbound directory ' + inDir + ': ' + err.message, 'redbright', SYSTEM_TOO);
 		return summary;
 	}
 
@@ -348,11 +361,11 @@ async function tossInbound() {
 	});
 
 	if (ticFiles.length === 0) {
-		alogger.writeAlog(3, '[TIC] No .tic files in ' + inDir, 'cyan');
+		ticLog(3, '[TIC] No .tic files in ' + inDir, 'cyan');
 		return summary;
 	}
 
-	alogger.writeAlog(2, '[TIC] Found ' + ticFiles.length + ' .tic file(s) in ' + inDir, 'cyan');
+	ticLog(2, '[TIC] Found ' + ticFiles.length + ' .tic file(s) in ' + inDir, 'cyan');
 
 	for (var ticFilename of ticFiles) {
 		var ticFilePath = path.join(inDir, ticFilename);
@@ -370,7 +383,7 @@ async function tossInbound() {
 				summary.errors++;
 			}
 		} catch (err) {
-			alogger.writeAlog(2, '[TIC] Unhandled error processing ' + ticFilename + ': ' + err.message, 'redbright');
+			ticLog(2, '[TIC] Unhandled error processing ' + ticFilename + ': ' + err.message, 'redbright', SYSTEM_TOO);
 			summary.errors++;
 			// Move to bad dir
 			try {
@@ -379,11 +392,11 @@ async function tossInbound() {
 		}
 	}
 
-	alogger.writeAlog(2,
+	ticLog(2,
 		'[TIC] Inbound complete: ' + summary.processed + ' processed, ' +
 		summary.dupes + ' dupes, ' + summary.skipped + ' skipped, ' +
 		summary.errors + ' errors',
-		summary.errors > 0 ? 'yellowbright' : 'greenbright'
+		summary.errors > 0 ? 'yellowbright' : 'greenbright', SYSTEM_TOO
 	);
 
 	// Forward what just arrived to our own downlinks.  processOneTicFile has
@@ -397,7 +410,7 @@ async function tossInbound() {
 		} catch (fwdErr) {
 			// The outbound sweep will pick the rows up regardless; this only
 			// costs latency, so it must not fail the inbound toss.
-			alogger.writeAlog(3, '[TIC] Forward signal error: ' + fwdErr.message, 'yellow');
+			ticLog(3, '[TIC] Forward signal error: ' + fwdErr.message, 'yellow', SYSTEM_TOO);
 		}
 	}
 
@@ -414,27 +427,27 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	try {
 		ticContent = fs.readFileSync(ticFilePath, 'utf8');
 	} catch (err) {
-		alogger.writeAlog(2, '[TIC] Cannot read ' + ticFilename + ': ' + err.message, 'redbright');
+		ticLog(2, '[TIC] Cannot read ' + ticFilename + ': ' + err.message, 'redbright', SYSTEM_TOO);
 		return 'error';
 	}
 
 	var tic = parseTicFile(ticContent);
 
 	if (!tic.file) {
-		alogger.writeAlog(2, '[TIC] ' + ticFilename + ': missing File field', 'redbright');
+		ticLog(2, '[TIC] ' + ticFilename + ': missing File field', 'redbright', SYSTEM_TOO);
 		await moveToBad(ticFilePath, ticFilename, badDir);
 		return 'error';
 	}
 
 	if (!tic.area) {
-		alogger.writeAlog(2, '[TIC] ' + ticFilename + ': missing Area field', 'redbright');
+		ticLog(2, '[TIC] ' + ticFilename + ': missing Area field', 'redbright', SYSTEM_TOO);
 		// Try to move the attached file too if the TIC named one.
 		var orphanPath = tic.file ? path.join(inDir, tic.file) : null;
 		await moveToBad(ticFilePath, ticFilename, badDir, orphanPath, tic.file);
 		return 'error';
 	}
 
-	alogger.writeAlog(3, '[TIC] Processing: ' + tic.file + ' in area ' + tic.area + ' from ' + tic.from, 'cyan');
+	ticLog(3, '[TIC] Processing: ' + tic.file + ' in area ' + tic.area + ' from ' + tic.from, 'cyan');
 
 	// 2. Find the attached file
 	var attachedFilePath = path.join(inDir, tic.file);
@@ -449,7 +462,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 			attachedFilePath = path.join(inDir, match);
 			tic.file = match; // Use actual filename on disk
 		} else {
-			alogger.writeAlog(2, '[TIC] ' + ticFilename + ': attached file ' + tic.file + ' not found in ' + inDir, 'redbright');
+			ticLog(2, '[TIC] ' + ticFilename + ': attached file ' + tic.file + ' not found in ' + inDir, 'redbright', SYSTEM_TOO);
 			await moveToBad(ticFilePath, ticFilename, badDir);
 			return 'error';
 		}
@@ -464,7 +477,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		var expectedPw = cd.tic_password || '';
 		if (expectedPw && tic.pw) {
 			if (expectedPw.toUpperCase() !== tic.pw.toUpperCase()) {
-				alogger.writeAlog(2, '[TIC] ' + ticFilename + ': TIC password mismatch from ' + tic.from, 'redbright');
+				ticLog(2, '[TIC] ' + ticFilename + ': TIC password mismatch from ' + tic.from, 'redbright', SYSTEM_TOO);
 				await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 				return 'error';
 			}
@@ -496,7 +509,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	}
 
 	if (!areaMapping) {
-		alogger.writeAlog(2, '[TIC] ' + ticFilename + ': area tag ' + tic.area + ' not mapped to any file area', 'yellowbright');
+		ticLog(2, '[TIC] ' + ticFilename + ': area tag ' + tic.area + ' not mapped to any file area', 'yellowbright', SYSTEM_TOO);
 		await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 		return 'skipped';
 	}
@@ -508,7 +521,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	if (tic.to && networkId) {
 		var toValid = await validateToAddress(tic.to, networkId);
 		if (!toValid) {
-			alogger.writeAlog(2, '[TIC] ' + ticFilename + ': To address ' + tic.to + ' does not match any system address', 'yellowbright');
+			ticLog(2, '[TIC] ' + ticFilename + ': To address ' + tic.to + ' does not match any system address', 'yellowbright', SYSTEM_TOO);
 			// Not fatal — some TIC implementations omit or mis-set To
 		}
 	}
@@ -517,7 +530,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	if (sourceConn) {
 		var subscribed = await filePeerSubscriptions.isSubscribed(sourceConn.id, fileAreaId);
 		if (!subscribed) {
-			alogger.writeAlog(3, '[TIC] ' + ticFilename + ': area ' + tic.area + ' not subscribed for connection ' + sourceConn.id + ' — allowing anyway (inbound)', 'yellow');
+			ticLog(3, '[TIC] ' + ticFilename + ': area ' + tic.area + ' not subscribed for connection ' + sourceConn.id + ' — allowing anyway (inbound)', 'yellow');
 			// Log but don't reject — many sysops want to receive first, subscribe later
 		}
 	}
@@ -526,9 +539,9 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	var hashes = computeHashes(attachedFilePath);
 	if (tic.crc) {
 		if (hashes.crc32 !== tic.crc.toUpperCase().padStart(8, '0')) {
-			alogger.writeAlog(2,
+			ticLog(2,
 				'[TIC] ' + ticFilename + ': CRC mismatch — TIC says ' + tic.crc +
-				', file is ' + hashes.crc32, 'redbright'
+				', file is ' + hashes.crc32, 'redbright', SYSTEM_TOO
 			);
 			await moveToBad(ticFilePath, ticFilename, badDir, attachedFilePath, tic.file);
 			return 'error';
@@ -545,8 +558,8 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 			.filter(Boolean);
 		var loopedVia = ticHasPassedThrough(tic, ourAddrs);
 		if (loopedVia) {
-			alogger.writeAlog(2, '[TIC] ' + ticFilename + ': loop — ' + tic.file +
-				' already lists ' + loopedVia + ' in its Path, not importing or forwarding', 'yellowbright');
+			ticLog(2, '[TIC] ' + ticFilename + ': loop — ' + tic.file +
+				' already lists ' + loopedVia + ' in its Path, not importing or forwarding', 'yellowbright', SYSTEM_TOO);
 			await moveToTossed(ticFilePath, ticFilename, tossedDir);
 			try {
 				await fs.promises.rename(attachedFilePath, path.join(tossedDir, tic.file));
@@ -561,7 +574,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	try { inboundSize = fs.statSync(attachedFilePath).size; } catch (_) { inboundSize = 0; }
 	var isDupe = await fileEntries.checkDupe(fileAreaId, tic.file, hashes.crc32, inboundSize);
 	if (isDupe) {
-		alogger.writeAlog(3, '[TIC] ' + ticFilename + ': dupe — ' + tic.file + ' already exists in area ' + areaShortcode, 'yellow');
+		ticLog(3, '[TIC] ' + ticFilename + ': dupe — ' + tic.file + ' already exists in area ' + areaShortcode, 'yellow');
 		// Move TIC and attached file to tossed (not bad — it's a valid dupe)
 		await moveToTossed(ticFilePath, ticFilename, tossedDir);
 		try {
@@ -575,7 +588,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 		var oldEntry = await findEntryByFilename(fileAreaId, tic.replaces);
 		if (oldEntry) {
 			await fileEntries.deactivateEntry(oldEntry.id);
-			alogger.writeAlog(3, '[TIC] Deactivated replaced file: ' + tic.replaces + ' in ' + areaShortcode, 'cyan');
+			ticLog(3, '[TIC] Deactivated replaced file: ' + tic.replaces + ' in ' + areaShortcode, 'cyan');
 		}
 	}
 
@@ -596,7 +609,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 			destFilePath = path.join(areaPath, base + '_' + counter + ext);
 			counter++;
 		}
-		alogger.writeAlog(3, '[TIC] Filename collision — saving as ' + path.basename(destFilePath), 'yellow');
+		ticLog(3, '[TIC] Filename collision — saving as ' + path.basename(destFilePath), 'yellow');
 	}
 
 	await fs.promises.rename(attachedFilePath, destFilePath);
@@ -661,7 +674,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	});
 
 	if (!addResult.status) {
-		alogger.writeAlog(2, '[TIC] Failed to insert file entry for ' + tic.file + ': ' + addResult.errormessages.join(', '), 'redbright');
+		ticLog(2, '[TIC] Failed to insert file entry for ' + tic.file + ': ' + addResult.errormessages.join(', '), 'redbright', SYSTEM_TOO);
 		return 'error';
 	}
 
@@ -677,9 +690,9 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	var subscribers = reachable.deliverable;
 
 	for (var unreachable of reachable.undeliverable) {
-		alogger.writeAlog(2, '[TIC] ' + (unreachable.peer_name || 'connection ' + unreachable.peer_connection_id) +
+		ticLog(2, '[TIC] ' + (unreachable.peer_name || 'connection ' + unreachable.peer_connection_id) +
 			' is subscribed to ' + areaShortcode + ' but that area carries no areatag on network ' +
-			unreachable.network_id + ' — map the area or unsubscribe the peer', 'yellowbright');
+			unreachable.network_id + ' — map the area or unsubscribe the peer', 'yellowbright', SYSTEM_TOO);
 	}
 
 	// Build seenby set for exclusion (includes source connection + TIC seenby)
@@ -710,7 +723,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 
 	if (distConnIds.length > 0) {
 		await fileDistribution.createDistributionRows(addResult.entryId, distConnIds, 'tic');
-		alogger.writeAlog(3, '[TIC] Created ' + distConnIds.length + ' distribution row(s) for ' + tic.file, 'cyan');
+		ticLog(3, '[TIC] Created ' + distConnIds.length + ' distribution row(s) for ' + tic.file, 'cyan');
 	}
 
 	// 14. Move .tic to tossed
@@ -719,7 +732,7 @@ async function processOneTicFile(ticFilePath, ticFilename, inDir, tossedDir, bad
 	// 15. Update area stats
 	await fileAreas.updateStatsForArea(areaShortcode);
 
-	alogger.writeAlog(2, '[TIC] Imported: ' + tic.file + ' -> ' + areaShortcode + ' (' + hashes.crc32 + ')', 'greenbright');
+	ticLog(2, '[TIC] Imported: ' + tic.file + ' -> ' + areaShortcode + ' (' + hashes.crc32 + ')', 'greenbright');
 
 	return 'processed';
 }
@@ -741,7 +754,7 @@ async function tossOutbound() {
 	var pendingRows = await fileDistribution.getAllPending();
 
 	if (!pendingRows || pendingRows.length === 0) {
-		alogger.writeAlog(3, '[TIC] No pending outbound distributions', 'cyan');
+		ticLog(3, '[TIC] No pending outbound distributions', 'cyan');
 		return summary;
 	}
 
@@ -756,7 +769,7 @@ async function tossOutbound() {
 	}
 
 	var connIds = Object.keys(grouped);
-	alogger.writeAlog(2, '[TIC] Outbound: ' + pendingRows.length + ' file(s) for ' + connIds.length + ' connection(s)', 'cyan');
+	ticLog(2, '[TIC] Outbound: ' + pendingRows.length + ' file(s) for ' + connIds.length + ' connection(s)', 'cyan');
 
 	for (var cid of connIds) {
 		var files = grouped[cid];
@@ -766,7 +779,7 @@ async function tossOutbound() {
 			// Resolve connection
 			conn = await peerConnections.getConnectionById(parseInt(cid));
 			if (!conn || !conn.active) {
-				alogger.writeAlog(3, '[TIC] Skipping inactive connection ' + cid, 'yellow');
+				ticLog(3, '[TIC] Skipping inactive connection ' + cid, 'yellow');
 				for (var f of files) {
 					await fileDistribution.markSkipped(f.id, 'Connection inactive');
 					summary.skipped++;
@@ -777,7 +790,7 @@ async function tossOutbound() {
 			var cd = conn.connection_data || {};
 			var peerAddress = cd.address || '';
 			if (!peerAddress) {
-				alogger.writeAlog(2, '[TIC] Connection ' + cid + ' has no FTN address — skipping', 'yellowbright');
+				ticLog(2, '[TIC] Connection ' + cid + ' has no FTN address — skipping', 'yellowbright', SYSTEM_TOO);
 				for (var f of files) {
 					await fileDistribution.markSkipped(f.id, 'No FTN address');
 					summary.skipped++;
@@ -790,7 +803,7 @@ async function tossOutbound() {
 			var ourAddress = sysAddr ? sysAddr.address : '';
 
 			if (!ourAddress) {
-				alogger.writeAlog(2, '[TIC] No system address for network ' + conn.network_id + ' — skipping', 'yellowbright');
+				ticLog(2, '[TIC] No system address for network ' + conn.network_id + ' — skipping', 'yellowbright', SYSTEM_TOO);
 				for (var f of files) {
 					await fileDistribution.markSkipped(f.id, 'No system address');
 					summary.skipped++;
@@ -812,9 +825,9 @@ async function tossOutbound() {
 						summary.errors++;
 					}
 				} catch (err) {
-					alogger.writeAlog(2,
+					ticLog(2,
 						'[TIC] Error staging ' + distRow.filename + ' for connection ' + cid + ': ' + err.message,
-						'redbright'
+						'redbright', SYSTEM_TOO
 					);
 					await fileDistribution.markFailed(distRow.id, err.message);
 					summary.errors++;
@@ -822,7 +835,7 @@ async function tossOutbound() {
 			}
 
 		} catch (connErr) {
-			alogger.writeAlog(2, '[TIC] Error processing connection ' + cid + ': ' + connErr.message, 'redbright');
+			ticLog(2, '[TIC] Error processing connection ' + cid + ': ' + connErr.message, 'redbright', SYSTEM_TOO);
 			for (var f of files) {
 				await fileDistribution.markFailed(f.id, connErr.message);
 				summary.errors++;
@@ -830,10 +843,10 @@ async function tossOutbound() {
 		}
 	}
 
-	alogger.writeAlog(2,
+	ticLog(2,
 		'[TIC] Outbound complete: ' + summary.sent + ' sent, ' +
 		summary.skipped + ' skipped, ' + summary.errors + ' errors',
-		summary.errors > 0 ? 'yellowbright' : 'greenbright'
+		summary.errors > 0 ? 'yellowbright' : 'greenbright', SYSTEM_TOO
 	);
 
 	// Signal the mailer to scan the BSO outbound directory for staged files.
@@ -843,7 +856,7 @@ async function tossOutbound() {
 			var jobsMod = await import('../../queues/jobs.js');
 			await jobsMod.enqueueMailerBsoScan();
 		} catch (scanErr) {
-			alogger.writeAlog(3, '[TIC] BSO scan signal error: ' + scanErr.message, 'yellow');
+			ticLog(3, '[TIC] BSO scan signal error: ' + scanErr.message, 'yellow', SYSTEM_TOO);
 		}
 	}
 
@@ -865,7 +878,7 @@ async function stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, 
 	}
 
 	if (!areatag) {
-		alogger.writeAlog(3, '[TIC] No areatag mapping for area ' + distRow.area_shortcode + ' on network ' + conn.network_id, 'yellow');
+		ticLog(3, '[TIC] No areatag mapping for area ' + distRow.area_shortcode + ' on network ' + conn.network_id, 'yellow');
 		await fileDistribution.markFailed(distRow.id, 'No areatag mapping');
 		return false;
 	}
@@ -881,7 +894,7 @@ async function stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, 
 	var srcFilePath = path.join(areaPath, distRow.disk_path || distRow.filename);
 
 	if (!fs.existsSync(srcFilePath)) {
-		alogger.writeAlog(2, '[TIC] Source file not found: ' + srcFilePath, 'redbright');
+		ticLog(2, '[TIC] Source file not found: ' + srcFilePath, 'redbright', SYSTEM_TOO);
 		await fileDistribution.markFailed(distRow.id, 'Source file not found on disk');
 		return false;
 	}
@@ -972,14 +985,14 @@ async function stageOneOutboundFile(distRow, conn, cd, ourAddress, peerAddress, 
 			var floLines = '^' + ticOutPath + '\r\n' + '^' + attachedOutPath + '\r\n';
 			fs.appendFileSync(floPath, floLines);
 		} catch (floErr) {
-			alogger.writeAlog(3, '[TIC] Failed to create .flo entry for ' + peerAddress + ': ' + floErr.message, 'redbright');
+			ticLog(3, '[TIC] Failed to create .flo entry for ' + peerAddress + ': ' + floErr.message, 'redbright', SYSTEM_TOO);
 		}
 	}
 
 	// Mark as sent
 	await fileDistribution.markSent(distRow.id);
 
-	alogger.writeAlog(3, '[TIC] Staged: ' + distRow.filename + ' + ' + ticOutFilename + ' -> ' + peerAddress, 'cyan');
+	ticLog(3, '[TIC] Staged: ' + distRow.filename + ' + ' + ticOutFilename + ' -> ' + peerAddress, 'cyan');
 
 	return true;
 }
@@ -1021,7 +1034,7 @@ async function moveToTossed(filePath, filename, tossedDir) {
 	try {
 		await fs.promises.rename(filePath, path.join(tossedDir, filename));
 	} catch (err) {
-		alogger.writeAlog(3, '[TIC] Could not move ' + filename + ' to tossed: ' + err.message, 'yellow');
+		ticLog(3, '[TIC] Could not move ' + filename + ' to tossed: ' + err.message, 'yellow', SYSTEM_TOO);
 	}
 }
 
@@ -1029,7 +1042,7 @@ async function moveToBad(filePath, filename, badDir, attachedFilePath, attachedF
 	try {
 		await fs.promises.rename(filePath, path.join(badDir, filename));
 	} catch (err) {
-		alogger.writeAlog(3, '[TIC] Could not move ' + filename + ' to bad: ' + err.message, 'yellow');
+		ticLog(3, '[TIC] Could not move ' + filename + ' to bad: ' + err.message, 'yellow', SYSTEM_TOO);
 	}
 
 	// Move the attached file alongside its TIC when we know where it is —
@@ -1050,7 +1063,7 @@ async function moveToBad(filePath, filename, badDir, attachedFilePath, attachedF
 			await fs.promises.rename(attachedFilePath, destPath);
 			movedAttachment = path.basename(destPath);
 		} catch (err) {
-			alogger.writeAlog(3, '[TIC] Could not move attached file ' + attachedFilename + ' to bad: ' + err.message, 'yellow');
+			ticLog(3, '[TIC] Could not move attached file ' + attachedFilename + ' to bad: ' + err.message, 'yellow', SYSTEM_TOO);
 		}
 	}
 

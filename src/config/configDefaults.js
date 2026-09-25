@@ -128,6 +128,8 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'logfileindev',          defaultValue: '',            type: 'boolean', category: 'logging',     description: 'Write log files in development mode' },
 	{ key: 'defaultlogfile',        defaultValue: 'system.log',  type: 'string',  category: 'logging',     description: 'Default log filename' },
 	{ key: 'LOG_BUS_RETENTION_HOURS', defaultValue: '8',         type: 'number',  category: 'logging',     description: 'Hours to retain log bus history in Redis' },
+	{ key: 'log_rotation_enabled',  defaultValue: 'true',        type: 'boolean', category: 'logging',     description: 'Rotate the log files daily at 23:59: each one is gzipped into logs/<env>/archive/YYYY-MM-DD/ and started afresh. Turning it on or off takes effect at the next gateway restart or node src/tools/schedules.js --sync' },
+	{ key: 'log_retention_days',    defaultValue: '30',          type: 'number',  category: 'logging',     description: 'Days of rotated logs to keep under logs/<env>/archive/ (0 = keep forever)' },
 
 	// -----------------------------------------------------------------------
 	// Terminal

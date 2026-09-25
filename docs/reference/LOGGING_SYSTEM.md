@@ -251,6 +251,32 @@ await registerLogWebSocket(wsManager);
 
 ---
 
+## Log Files and Rotation
+
+Files live in `logs/<NODE_ENV>/`. `writeAlog(level, msg, colour, bold, filename)` and `writeClog(level, msg, filename, ...)` write `system.log` when `filename` is empty and `<filename>.log` otherwise. `writeAlog` also accepts an ARRAY of names (`null` meaning the system log) and writes the one line to each, while the console and the log bus get it once.
+
+| File | Written by |
+|------|------------|
+| `system.log` | everything without a filename |
+| `mailer.log` | binkp mailer, BSO scanner, wazoo transfers |
+| `tosser.log` | FTN tosser (packet identification, bundles) |
+| `tic.log` | TIC file echo processing, inbound and outbound (`ticLog()` in `ticTosser.js`). Failures, refusals and each run's summary go to `system.log` as well (`SYSTEM_TOO`), because the 0.9.7a-0.9.10a Seenby loop bug refused every inbound file and its only trace was a routine-looking system log line; moving TIC out of the system log entirely would have left not even that |
+| `security.log` | honeypot logins, for fail2ban |
+| `<process>-out.log`, `<process>-error.log` | pm2, as named in `ecosystem.config.cjs` |
+
+### Rotation
+
+`src/maintenance/logRotation.js`, run daily at 23:59 by the `rotate-logs` maintenance job (`rotate-logs-daily`) and by hand with `node src/tools/rotateLogs.js [--dry-run] [--days N]`, which needs no worker. Each non-empty top-level `*.log` becomes `logs/<env>/archive/YYYY-MM-DD/<name>.log.gz`, dated by the local day the rotation ran (23:59 so the day is the day the contents cover); a second rotation that day writes `<name>.2.log.gz` rather than overwriting. Archive days older than `log_retention_days` (30, 0 keeps all) are deleted; a directory under `archive/` not named like a day is never touched.
+
+Two ways to take a file, chosen by name (`rotationMethod`):
+
+- **rename** for alogger's files. alogger opens by path on every write, so the next line recreates the file. Atomic; nothing lost. Moved first and compressed after, so writers never wait on gzip.
+- **copytruncate** for pm2's `-out.log` / `-error.log`. pm2 holds them open for the daemon's life; renamed, it would keep writing into the archive. Copied up to the size seen, then truncated; a line written between the two is lost. pm2 opens in append mode, so later writes land at offset 0 rather than leaving a sparse hole. `tests/logRotation.test.js` fails if `ecosystem.config.cjs` names a pm2 file that does not match.
+
+The job reads `log_rotation_enabled` and `log_retention_days` when it runs, so a retention change applies that night; enabling or disabling registers or skips the schedule, so that half needs a gateway restart or `schedules.js --sync`. A board running with `NODE_ENV=development` rotates `logs/development/` only, while `ecosystem.config.cjs` points pm2 at `logs/production/`; on a production board they are the same directory. fail2ban follows `security.log` across a rename.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
