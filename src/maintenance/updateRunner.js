@@ -45,6 +45,7 @@ import { describeInstall } from './installTarget.js';
 import { applyPlan, verifyApplied, rollback } from './updateApply.js';
 import { backupDir, freeBytes } from './updateLayout.js';
 import { pruneBaseCache } from './baseCache.js';
+import { noticesForRun } from './upgradeNoticeFetch.js';
 import { pruneUpdateLeftovers, DEFAULT_BACKUP_KEEP } from './updateHousekeeping.js';
 import { runCommandAsync, spawnAsync, nodeCommand, createRuntimeDirs, COMMAND_TIMEOUT_MS } from './updateCommands.js';
 import * as maintFlags from './maintenanceFlag.js';
@@ -185,12 +186,32 @@ async function runUpdate(opts) {
 	if (!state) throw new Error('no run state for ' + runId);
 	function persist(next) { state = next; runStore.save(target, state); return state; }
 
-	// The upgrade notes, kept on the run for "After updating" (#55). Only ever
-	// the verified list the launcher showed: a launcher from before notes were
-	// shown passes none, and the copy inside the archive is not a stand-in,
-	// because it sits outside the signed MANIFEST.
+	// The upgrade notes, kept on the run for the progress page and "After
+	// updating" (#55). The launcher's verified list when it passed one. When it
+	// did not (a launcher from before notes were shown, or one that could not
+	// verify them), fetch and verify them here, BEFORE the files phase so the
+	// key pinned is still the old installation's (#61): taking none, as this
+	// used to, meant a sysop updating from 0.9.10a never saw them anywhere.
+	// The copy inside the archive is still not a stand-in: it sits outside the
+	// signed MANIFEST.
 	if (!Array.isArray(state.notices)) {
-		state.notices = Array.isArray(ins.notices) ? ins.notices : [];
+		if (Array.isArray(ins.notices)) {
+			state.notices = ins.notices;
+		} else {
+			var fetched = await (opts.noticesForRun || noticesForRun)({
+				target: target, from: ins.from, to: ins.to,
+				checkUrl: appConfig.get('update_check_url', ''),
+				channel: appConfig.get('update_channel', 'stable'),
+				transport: appConfig.get('update_check_transport', 'http')
+			});
+			state.notices = fetched.list;
+			if (fetched.verified) {
+				log('upgrade notes: ' + fetched.list.length + ' for this move, fetched and verified by the updater');
+			} else {
+				state = addWarning(state, 'the upgrade notes for ' + (ins.to || 'this release') + ' could not be shown (' +
+					fetched.reason + '). Read them in the release notes');
+			}
+		}
 		persist(state);
 	}
 

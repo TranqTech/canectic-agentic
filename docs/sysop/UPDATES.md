@@ -198,12 +198,17 @@ panel above the Update button.
   tick is for having read those.
 - **After updating**, the notes the update brought stay on the Update page under
   the last update, and on the progress page, since several are instructions for
-  afterwards.
+  afterwards. When the page you updated from did not collect them, the new
+  release's updater fetches and verifies them itself, the same way, before it
+  replaces any file; if it cannot, the update carries on and its warnings say to
+  read the release notes.
 
-Boards on 0.9.10a or earlier show none of this before updating, because the
-Update page you see is the one from the release you are running. The update
-into the first release after 0.9.10a keeps its notes for afterwards, and the
-panel appears from the update after that.
+Boards on 0.9.10a or earlier show nothing before updating, because the Update
+page you see is the one from the release you are running. An update from 0.9.11a
+or earlier into 0.9.11a showed nothing afterwards either; from the release after
+0.9.11a on, the notes appear on the progress page and after updating whatever
+you update from, and the panel before the button appears once you are running
+0.9.11a or later.
 
 ---
 

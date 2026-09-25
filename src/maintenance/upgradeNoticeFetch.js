@@ -17,10 +17,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import { fetchText } from './updateStaging.js';
+import { fetchText, httpSource } from './updateStaging.js';
 import { parseMetadata, metadataName } from '../release/metadata.js';
 import { verifyDetachedSignature, PUBLIC_KEY_FILENAME } from '../release/signing.js';
-import { releasesBetween, gatherNotices } from '../release/upgradeNotices.js';
+import { releasesBetween, gatherNotices, applicableNotices } from '../release/upgradeNotices.js';
+import { parseIndex, indexName } from '../release/releaseIndex.js';
 
 var SUMS = 'SHA256SUMS';
 
@@ -105,4 +106,59 @@ async function fetchUpgradeNotices(opts) {
 	}
 }
 
-export { fetchUpgradeNotices, parseSums };
+/**
+ * The notes for a run whose launcher passed none, fetched by the updater (#61).
+ *
+ * The launcher is the OLD release. One from before notes were shown (0.9.10a
+ * and earlier) passes nothing, and so does one that could not verify them, so
+ * the run used to record no notes and neither the progress page nor "After
+ * updating" had anything to show: the sysop never saw them at all. The new
+ * release's updater now asks the release host itself, through the same
+ * verified chain. It must run before the files phase, so `pinFrom` is still
+ * the OLD installation's key: trusting the key the new release brings with it
+ * would let a release vouch for itself.
+ *
+ * Never throws; `verified: false` carries the reason.
+ *
+ * @param {object} opts
+ * @param {string} opts.target   the installation
+ * @param {string} opts.from     the version being replaced
+ * @param {string} opts.to       the version being applied
+ * @param {string} opts.checkUrl update_check_url
+ * @param {string} opts.channel  update_channel
+ * @param {string} [opts.transport] update_check_transport; 'ftn' has nothing to verify against
+ * @param {number} [opts.timeoutMs]
+ * @param {function} [opts.fetchNotices] seam for tests, as fetchUpgradeNotices
+ * @returns {Promise<{verified: boolean, list: object[], reason: (string|null)}>}
+ */
+async function noticesForRun(opts) {
+	var o = opts || {};
+	if (o.transport === 'ftn') {
+		return { verified: false, list: [], reason: 'releases from a file echo carry no signed SHA256SUMS to verify them against' };
+	}
+	if (!o.checkUrl) return { verified: false, list: [], reason: 'update_check_url is not set' };
+	var timer = null;
+	try {
+		var work = (async function () {
+			var source = httpSource(o.checkUrl);
+			var index = parseIndex(await fetchText(source, indexName(o.channel || 'stable')));
+			return (o.fetchNotices || fetchUpgradeNotices)({
+				source: source, index: index, running: o.from, target: o.to,
+				pinFrom: path.join(o.target, 'setup', PUBLIC_KEY_FILENAME)
+			});
+		})();
+		var timeout = new Promise(function (_, reject) {
+			timer = setTimeout(function () { reject(new Error('timed out after ' + Math.round((o.timeoutMs || 30000) / 1000) + 's')); },
+				o.timeoutMs || 30000);
+		});
+		var got = await Promise.race([work, timeout]);
+		if (!got.verified) return { verified: false, list: [], reason: got.reason || 'they could not be verified' };
+		return { verified: true, list: applicableNotices(got.items, o.from), reason: null };
+	} catch (e) {
+		return { verified: false, list: [], reason: e.message };
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+export { fetchUpgradeNotices, parseSums, noticesForRun };

@@ -6815,7 +6815,8 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 			from: running, to: entry.version, base: staged.meta.base || null,
 			nodeMin: staged.meta.node_min, steps: staged.meta.steps || [],
 			// Kept on the run for "After updating". Left out when they were not
-			// verified, and the updater falls back to the release's own copy.
+			// verified, and the new release's updater fetches and verifies them
+			// itself (noticesForRun, #61).
 			notices: shown && shown.verified && shown.target === entry.version ? shown.list : undefined,
 			// req.session never exists here (sessions are not express-session),
 			// so this recorded every web launch as 'admin web'.

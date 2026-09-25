@@ -105,8 +105,17 @@ function listenerStub(record) {
 		return { port: opts.port, close: async function () { if (record) record.push({ event: 'close' }); } };
 	};
 }
+// The notes lookup is stubbed too: a run whose launcher passed no notes asks
+// the release host (#61), and a test must never reach the network.
+function noticesStub(result, record) {
+	return async function (opts) {
+		if (record) record.push(opts);
+		return result || { verified: true, list: [], reason: null };
+	};
+}
 function run(o) {
-	return runUpdate(Object.assign({ waitForDrain: drainStub('drained'), startStatusServer: listenerStub() }, o));
+	return runUpdate(Object.assign({ waitForDrain: drainStub('drained'), startStatusServer: listenerStub(),
+		noticesForRun: noticesStub() }, o));
 }
 
 function phase(state, name) {
@@ -766,5 +775,51 @@ describe('manual migrations an update does not run', function () {
 		var w = state.warnings.filter(function (x) { return /action needed/.test(x); })[0];
 		assert.ok(w, state.warnings.join('\n'));
 		assert.ok(/0002-msgid-tuple-split/.test(w) && /--fix-msgids --dry-run/.test(w), w);
+	});
+});
+
+// #61: an update from 0.9.10a to 0.9.11a showed no upgrade notes anywhere. The
+// launcher is the OLD release and 0.9.10a passed none, so the run recorded an
+// empty list and the progress page and "After updating" had nothing to show.
+describe('upgrade notes the launcher did not pass', function () {
+	var NOTE = { id: 'recover-refused-tic-files', level: 'warning', text: 'Recover files.' };
+
+	it('are fetched and kept on the run by the updater itself', async function () {
+		var s = scenario();
+		var asked = [];
+		var state = await run({ instructions: s.instructions, exec: execStub([]),
+			noticesForRun: noticesStub({ verified: true, list: [NOTE], reason: null }, asked) });
+		assert.strictEqual(asked.length, 1);
+		assert.strictEqual(asked[0].from, '0.9.6a');
+		assert.strictEqual(asked[0].to, '0.9.8a');
+		assert.strictEqual(asked[0].target, s.target, 'pinned from the installation being updated');
+		assert.deepStrictEqual(state.notices, [NOTE]);
+		assert.deepStrictEqual(runStore.load(s.target, s.runId).notices, [NOTE], 'persisted for the page');
+	});
+
+	it('are fetched before any file is replaced, so the old key is the pin', async function () {
+		var s = scenario();
+		var seenA = null;
+		await run({ instructions: s.instructions, exec: execStub([]),
+			noticesForRun: async function () { seenA = read(s.target, 'src/a.js'); return { verified: true, list: [], reason: null }; } });
+		assert.strictEqual(seenA, 'OLD');
+	});
+
+	it('are not fetched when the launcher passed a list, even an empty one', async function () {
+		var s = scenario();
+		s.instructions.notices = [];
+		var asked = [];
+		var state = await run({ instructions: s.instructions, exec: execStub([]), noticesForRun: noticesStub(null, asked) });
+		assert.strictEqual(asked.length, 0);
+		assert.deepStrictEqual(state.notices, []);
+	});
+
+	it('that cannot be verified leave a warning pointing at the release notes, and the update carries on', async function () {
+		var s = scenario();
+		var state = await run({ instructions: s.instructions, exec: execStub([]),
+			noticesForRun: noticesStub({ verified: false, list: [], reason: 'SHA256SUMS is not verified: bad signature' }) });
+		assert.strictEqual(state.status, 'complete');
+		assert.deepStrictEqual(state.notices, []);
+		assert.ok(state.warnings.some(function (w) { return /could not be shown.*bad signature.*release notes/.test(w); }), JSON.stringify(state.warnings));
 	});
 });
