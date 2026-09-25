@@ -8,6 +8,10 @@
 - Fix: **an update started from 0.9.10a or earlier showed no upgrade notes, before or after.** The Update page you update from belongs to the release you are running, and one from before upgrade notes existed passed none on, so the notes never reached the progress page or the Update page afterwards; they were only in the release notes. The new release's updater now fetches and verifies them itself when the page you updated from did not, so they appear on the progress page and under the last update whichever release you came from. If they cannot be verified, the update's warnings say to read the release notes.
 - Fix: **every update kept its backup for ever, database dump included.** Each one is about the size of your database, so a board that had updated a handful of times could be holding gigabytes in `.canectic-update/backup/`, plus a staged copy of every release it had updated to. When an update completes it now deletes older backups, keeping the last `update_backup_keep` (1 by default, the update just finished; 0 keeps them all), and any staged releases left from earlier updates. It never deletes its own backup, nothing is deleted after a failed update, and a failed update's backup is kept until a later update completes. `node src/tools/update.js --prune` reclaims the space now; add `--dry-run` to see what it would remove.
 
+### Administration
+
+- Fix: **changes made on the admin pages recorded nobody as having made them.** Creating or editing a message or file group, area, network or peer left "created by" and "updated by" empty; an update started from the Update page recorded no one; and closing or reopening the board for maintenance logged the sysop as `undefined`. Each now records the sysop's username. Records written before this release stay empty. A message posted from the admin message pages with its From field left blank is now posted under your username rather than no name at all.
+
 ## v0.9.11a (2026-09-25)
 
 ### File Echoes

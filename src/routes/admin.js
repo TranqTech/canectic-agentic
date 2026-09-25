@@ -257,7 +257,7 @@ router.post('/msgGroup/new', urlencodedParser, requireAdmin, async (req, res) =>
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await msgGroups.newGroup(formObj);
@@ -293,7 +293,7 @@ router.post('/msgGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asyn
 	var formObj     = req.body;
 	formObj.groupshortcode = shortcode;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await msgAreas.newArea(formObj);
@@ -313,7 +313,7 @@ router.post('/msgGroup/:shortcode/update', urlencodedParser, requireAdmin, async
 	var shortcode        = req.params.shortcode.toUpperCase().trim();
 	var formObj          = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var result = await msgGroups.updateGroup(shortcode, formObj);
@@ -582,7 +582,7 @@ router.post('/networks/new', urlencodedParser, requireAdmin, async (req, res) =>
 	var currentuser = await getCurrentUser(req);
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await msgNetworks.newNetwork(formObj);
@@ -692,7 +692,7 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 	var uuid        = req.params.uuid.toLowerCase().trim();
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	// Merge config fields into the network's config JSONB
@@ -727,7 +727,7 @@ router.post('/network/:uuid/newzone', urlencodedParser, requireAdmin, async (req
 	var formObj = req.body;
 	formObj.network_id = network.id;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await msgZones.newZone(formObj);
@@ -748,7 +748,7 @@ router.post('/network/:uuid/newaddress', urlencodedParser, requireAdmin, async (
 	var formObj = req.body;
 	formObj.network_id = network.id;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await systemAddresses.newAddress(formObj);
@@ -763,7 +763,7 @@ router.post('/address/:uuid/update', urlencodedParser, requireAdmin, async (req,
 	var addressuuid  = req.params.uuid.toLowerCase().trim();
 	var formObj      = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var dbaddress = await systemAddresses.getAddressByUUID(addressuuid);
@@ -814,7 +814,7 @@ router.post('/network/zone/:zoneuuid/update', urlencodedParser, requireAdmin, as
 	var zoneuuid    = req.params.zoneuuid.toLowerCase().trim();
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var dbzone  = await msgZones.getZoneByUUID(zoneuuid);
@@ -851,7 +851,7 @@ router.post('/peers/new', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await peers.newPeer(formObj);
@@ -932,7 +932,7 @@ router.post('/peer/:uuid/update', urlencodedParser, requireAdmin, async (req, re
 	var uuid        = req.params.uuid.toLowerCase().trim();
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var result = await peers.updatePeer(uuid, formObj);
@@ -967,7 +967,7 @@ router.post('/peer/:uuid/newconnection', urlencodedParser, requireAdmin, async (
 	var formObj = req.body;
 	formObj.peer_id = peer.id;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await peerConnections.newConnection(formObj);
@@ -1012,7 +1012,7 @@ router.post('/connection/:uuid/update', urlencodedParser, requireAdmin, async (r
 	var uuid        = req.params.uuid.toLowerCase().trim();
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var result = await peerConnections.updateConnection(uuid, formObj);
@@ -1070,7 +1070,7 @@ router.post('/connection/:uuid/setallowed', urlencodedParser, requireAdmin, asyn
 	// allowedareas comes in as array of area id strings (or single string)
 	var rawIds   = req.body.allowedareas || [];
 	var areaIds  = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => parseInt(id)).filter(Boolean);
-	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.name } : {};
+	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.username } : {};
 	var result   = await peerAreaSubscriptions.setSubscriptions(conn.id, areaIds, 'allowed', formObj);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "setallowed failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
@@ -1089,7 +1089,7 @@ router.post('/connection/:uuid/setenabled', urlencodedParser, requireAdmin, asyn
 	}
 	var rawIds   = req.body.enabledareas || [];
 	var areaIds  = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => parseInt(id)).filter(Boolean);
-	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.name } : {};
+	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.username } : {};
 	var result   = await peerAreaSubscriptions.setSubscriptions(conn.id, areaIds, 'enabled', formObj);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "setenabled failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
@@ -1262,7 +1262,7 @@ router.post('/network/:uuid/addarea', urlencodedParser, requireAdmin, async (req
 	}
 	var formObj = req.body;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	// QWK networks require numeric areatags (conference numbers)
@@ -1300,7 +1300,7 @@ router.post('/network/area/:id/update', urlencodedParser, requireAdmin, async (r
 	var id          = parseInt(req.params.id);
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	// Pre-validate: QWK networks require numeric areatags
@@ -1356,7 +1356,7 @@ router.post('/network/:uuid/addfilearea', urlencodedParser, requireAdmin, async 
 	}
 	var formObj = req.body;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await fileNetworkAreas.addMapping(
@@ -1387,7 +1387,7 @@ router.post('/network/filearea/:id/update', urlencodedParser, requireAdmin, asyn
 	var id          = parseInt(req.params.id);
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var fnaRow = await fileNetworkAreas.getMappingById(id);
@@ -1441,7 +1441,7 @@ router.post('/connection/:uuid/setfileallowed', urlencodedParser, requireAdmin, 
 	}
 	var rawIds   = req.body.allowedfileareas || [];
 	var areaIds  = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => parseInt(id)).filter(Boolean);
-	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.name } : {};
+	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.username } : {};
 	var result   = await filePeerSubscriptions.setSubscriptions(conn.id, areaIds, 'allowed', formObj);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "setfileallowed failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
@@ -1460,7 +1460,7 @@ router.post('/connection/:uuid/setfileenabled', urlencodedParser, requireAdmin, 
 	}
 	var rawIds   = req.body.enabledfileareas || [];
 	var areaIds  = (Array.isArray(rawIds) ? rawIds : [rawIds]).map(id => parseInt(id)).filter(Boolean);
-	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.name } : {};
+	var formObj  = currentuser ? { updatedByUUID: currentuser.uuid, updatedByName: currentuser.username } : {};
 	var result   = await filePeerSubscriptions.setSubscriptions(conn.id, areaIds, 'enabled', formObj);
 	if (result.status !== true) {
 		alogger.writeAlog(3, "setfileenabled failed for conn " + uuid + ": " + result.errormessages.join(", "), "redbright");
@@ -1675,7 +1675,7 @@ router.post('/msgArea/:shortcode/newthread', urlencodedParser, requireAdmin, asy
 	var shortcode   = req.params.shortcode.toLowerCase().trim();
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.from_user = formObj.from_user || currentuser.name;
+		formObj.from_user = formObj.from_user || currentuser.username;
 	}
 	var resultObj = await messages.startNewThread(formObj, shortcode);
 	if (resultObj.status === true) {
@@ -1691,7 +1691,7 @@ router.post('/msgArea/:shortcode/thread/:uuid/newreply', urlencodedParser, requi
 	var uuid        = req.params.uuid.toLowerCase().trim();
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.from_user = formObj.from_user || currentuser.name;
+		formObj.from_user = formObj.from_user || currentuser.username;
 	}
 	var resultObj = await messages.replyToThread(formObj, shortcode, uuid);
 	if (resultObj.status !== true) {
@@ -1820,7 +1820,7 @@ router.post('/fileGroup/new', urlencodedParser, requireAdmin, async (req, res) =
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var formObj     = req.body;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await fileGroups.newGroup(formObj);
@@ -1852,7 +1852,7 @@ router.post('/fileGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asy
 	var formObj     = req.body;
 	formObj.groupshortcode = shortcode;
 	if (currentuser) {
-		formObj.createdByName = currentuser.name;
+		formObj.createdByName = currentuser.username;
 		formObj.createdByUUID = currentuser.uuid;
 	}
 	var result = await fileAreas.newArea(formObj);
@@ -1877,7 +1877,7 @@ router.post('/fileGroup/:shortcode/update', urlencodedParser, requireAdmin, asyn
 	var shortcode        = req.params.shortcode.toUpperCase().trim();
 	var formObj          = req.body;
 	if (currentuser) {
-		formObj.updatedByName = currentuser.name;
+		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var result = await fileGroups.updateGroup(shortcode, formObj);
@@ -6827,7 +6827,7 @@ router.post('/update/apply', urlencodedParser, requireAdmin, async (req, res) =>
 			notices: shown && shown.verified && shown.target === entry.version ? shown.list : undefined,
 			// req.session never exists here (sessions are not express-session),
 			// so this recorded every web launch as 'admin web'.
-			launchedBy: 'admin ' + (currentuser && currentuser.name ? currentuser.name : 'web'),
+			launchedBy: 'admin ' + (currentuser && currentuser.username ? currentuser.username : 'web'),
 			options: {}
 		});
 		alogger.writeAlog(1, '[Admin] update to ' + entry.version + ' handed off, run ' + runId, 'green');
@@ -6985,12 +6985,12 @@ router.post('/maintenance/enter', urlencodedParser, requireAdmin, async (req, re
 			reason:           (req.body.reason || '').trim() || null,
 			expected_minutes: req.body.expected_minutes,
 			grace_seconds:    req.body.grace_seconds,
-			set_by:           currentuser ? currentuser.name : 'admin',
+			set_by:           currentuser ? currentuser.username : 'admin',
 			source:           'manual'
 		});
 		refreshMaintenanceWatch();
 		alogger.writeAlog(1, '[Admin] Maintenance mode ' + (wasActive ? 'details updated' : 'ON') + ' by ' +
-			(currentuser ? currentuser.name : '?'), 'yellowbright', true);
+			(currentuser ? currentuser.username : '?'), 'yellowbright', true);
 		await flash.setOne(req, 'success', wasActive
 			? 'Maintenance details updated. The grace still runs from when the board was first closed.'
 			: 'The board is closed for maintenance.');
@@ -7005,7 +7005,7 @@ router.post('/maintenance/leave', urlencodedParser, requireAdmin, async (req, re
 	try {
 		var removed = maintFlags.leaveMaintenance(process.cwd());
 		refreshMaintenanceWatch();
-		alogger.writeAlog(1, '[Admin] Maintenance mode OFF by ' + (currentuser ? currentuser.name : '?'), 'yellowbright', true);
+		alogger.writeAlog(1, '[Admin] Maintenance mode OFF by ' + (currentuser ? currentuser.username : '?'), 'yellowbright', true);
 		await flash.setOne(req, removed ? 'success' : 'info', removed ? 'The board is open.' : 'The board was already open.');
 	} catch (err) {
 		await flash.setOne(req, 'danger', 'Could not remove the maintenance flag: ' + err.message);
