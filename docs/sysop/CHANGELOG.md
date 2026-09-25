@@ -4,7 +4,7 @@
 
 ### File Echoes
 
-- Fix: **Files sent by an uplink never reached their file areas, and nothing reported an error.** Since 0.9.7a, a file whose TIC listed this system under `Seenby` was refused as a loop. But every uplink lists a file's recipients there before sending it, so nearly every inbound file was refused, logged at a low level and counted as a duplicate. Only `Path`, which records the systems a file has actually passed through, is now checked. Files already refused can be recovered; see the upgrade note.
+- Fix: **Files sent by an uplink never reached their file areas, and nothing reported an error.** Since 0.9.7a, a file whose TIC listed this system under `Seenby` was refused as a loop. But every uplink lists a file's recipients there before sending it, so nearly every inbound file was refused, logged at a low level and counted as a duplicate. Only `Path`, which records the systems a file has actually passed through, is now checked. Files refused in the last week or so can be recovered; see the upgrade note.
 
 ### Messages
 
@@ -17,7 +17,7 @@
 
 - **Repair the layout of messages already received** with `node src/tools/maintenance.js --regen-html` (worker running; `--area SHORTCODE` to try one area first). ASCII art and column-aligned posts that arrived before this release still show rows run together until then.
 - **Check how your BBS starts at boot, once, after updating.** Run `node src/tools/bootUnit.js` as the user the BBS runs as, and `node src/tools/bootUnit.js --install` if it reports anything. A board set up with `pm2 startup` stops starting at boot once the Node version it names is removed, which under nvm happens on an ordinary Node upgrade. `--install` asks for sudo and restarts nothing; the restart it prints restarts the BBS, so close the board first with `node src/tools/maintenanceMode.js --on` if callers are online.
-- **Recover file echo files refused since 0.9.7a.** Unless you have cleared it, each TIC is still in `ftn/tossed/`, next to its file, and its log line reads `loop — <file> already lists <your address> in Seenby/Path`. To import one, move the `.tic` and its file back into `ftn/in/`; the next toss imports it. Nodelists and other files that replace their predecessor only need the newest one moving.
+- **Recover file echo files refused since 0.9.7a.** Those received within `ftn_keep_tossed_days` (7 by default, after which `ftn/tossed/` is purged) are still there, each TIC next to its file, and its log line reads `loop — <file> already lists <your address> in Seenby/Path`. To import one, move the `.tic` and its file back into `ftn/in/`; the next toss imports it. Nodelists and other files that replace their predecessor only need the newest one moving.
 
 ### Installation
 
