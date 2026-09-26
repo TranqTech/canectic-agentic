@@ -6,6 +6,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as msgNetworks from './msgNetworks.js';
 import * as msgZones from './msgZones.js';
 import * as alogger from "../utils/alogger.js";
+import { checkQwkId, longIdsAllowed } from '../utils/qwkId.js';
 
 
 async function newAddress(formObj) {
@@ -91,8 +92,17 @@ async function newAddress(formObj) {
 				return returnObj;
 			}
 		}
+	} else if (networkType === 'QWK') {
+		// Our QWK ID on this network: the rules in src/utils/qwkId.js (#67).
+		var qwkCheck = checkQwkId(formObj.address, { allowLong: longIdsAllowed(dbnetwork) });
+		returnObj.warnings = qwkCheck.warnings;
+		if (qwkCheck.errors.length > 0) {
+			returnObj.errormessages = returnObj.errormessages.concat(qwkCheck.errors);
+			return returnObj;
+		}
+		formObj.address = qwkCheck.id;
 	} else {
-		// QWK, NNTP, LOCAL — store address as-is, no numeric parsing
+		// NNTP, LOCAL — store address as-is, no numeric parsing
 		if (!formObj.address.trim()) {
 			returnObj.errormessages.push("Address cannot be empty");
 			return returnObj;
@@ -311,8 +321,16 @@ async function updateAddress(uuid, formObj) {
 			updateObj.address_net   = net;
 			updateObj.address_node  = node;
 			updateObj.address_point = point;
+		} else if (networkType === 'QWK') {
+			var qwkCheck = checkQwkId(raw, { allowLong: longIdsAllowed(dbnetwork) });
+			returnObj.warnings = qwkCheck.warnings;
+			if (qwkCheck.errors.length > 0) {
+				returnObj.errormessages = returnObj.errormessages.concat(qwkCheck.errors);
+				return returnObj;
+			}
+			updateObj.address = qwkCheck.id;
 		} else {
-			// QWK, NNTP, LOCAL — store as-is
+			// NNTP, LOCAL — store as-is
 			updateObj.address = raw;
 		}
 	}

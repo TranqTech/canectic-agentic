@@ -8,6 +8,7 @@ import * as msgNetworks from './msgNetworks.js';
 import * as networkAreas from './networkAreas.js';
 import * as peerAreaSubscriptions from './peerAreaSubscriptions.js';
 import * as systemAddresses from './systemAddresses.js';
+import { checkQwkId, longIdsAllowed, remoteRole, findIdClash } from '../utils/qwkId.js';
 
 // peers is imported lazily to avoid any future circular risk as the
 // peer/connection graph grows
@@ -225,6 +226,38 @@ function validateConnectionData(networkType, data) {
 
 // --- Write operations ---
 
+// Every QWK connection, inactive included, for the per-role uniqueness check.
+async function getQwkConnectionsForIdCheck() {
+	return (await postgres.query(
+		`SELECT pc.id, pc.uuid, pc.network_id, pc.active, pc.connection_data,
+		        p.name AS peer_name, mn.name AS network_name
+		 FROM peer_connections pc
+		 JOIN message_networks mn ON mn.id = pc.network_id
+		 JOIN peers p ON p.id = pc.peer_id
+		 WHERE mn.network_type = 'QWK'
+		 ORDER BY pc.id ASC`, [])) || [];
+}
+
+// The QWK ID rules (src/utils/qwkId.js) for a connection about to be saved:
+// its Remote QWK ID must be valid for the network, and no other connection may
+// use the same ID in the same role. Normalises connectionData.remote_qwk_id.
+async function checkQwkConnection(dbnetwork, connectionData, selfUuid) {
+	var check = checkQwkId(connectionData.remote_qwk_id, { allowLong: longIdsAllowed(dbnetwork) });
+	connectionData.remote_qwk_id = check.id;
+	var out = { errors: check.errors.slice(), warnings: check.warnings.slice() };
+	if (out.errors.length > 0) return out;
+
+	var role = remoteRole(connectionData);
+	var clash = findIdClash({ uuid: selfUuid, id: check.id, role: role }, await getQwkConnectionsForIdCheck());
+	if (clash) {
+		out.errors.push('QWK ID ' + check.id + ' is already used by the connection to ' + clash.peer_name +
+			' on ' + clash.network_name + (clash.active ? '' : ' (inactive)') + ', where it is ' +
+			(role === 'hub' ? 'our hub' : 'our node') + '. A QWK ID can be used once as a hub and once as a node.');
+	}
+	return out;
+}
+
+
 async function newConnection(formObj) {
 	var returnObj = {
 		status: false,
@@ -271,6 +304,14 @@ async function newConnection(formObj) {
 	if (dataErrors.length > 0) {
 		returnObj.errormessages = returnObj.errormessages.concat(dataErrors);
 		return returnObj;
+	}
+	if (dbnetwork.network_type === 'QWK') {
+		var qwkCheck = await checkQwkConnection(dbnetwork, connectionData, null);
+		returnObj.warnings = qwkCheck.warnings;
+		if (qwkCheck.errors.length > 0) {
+			returnObj.errormessages = returnObj.errormessages.concat(qwkCheck.errors);
+			return returnObj;
+		}
 	}
 
 	// Resolve system_address_id — optional, must belong to the same network
@@ -423,6 +464,14 @@ async function updateConnection(uuid, formObj) {
 		if (dataErrors.length > 0) {
 			returnObj.errormessages = returnObj.errormessages.concat(dataErrors);
 			return returnObj;
+		}
+		if (dbnetwork.network_type === 'QWK') {
+			var qwkCheck = await checkQwkConnection(dbnetwork, connectionData, dbconn.uuid);
+			returnObj.warnings = qwkCheck.warnings;
+			if (qwkCheck.errors.length > 0) {
+				returnObj.errormessages = returnObj.errormessages.concat(qwkCheck.errors);
+				return returnObj;
+			}
 		}
 		updateObj.connection_data = JSON.stringify(connectionData);
 	}
@@ -834,6 +883,7 @@ export {
 	buildConnectionData,
 	mergeConnectionData,
 	isDirectoryHubNode,
+	getQwkConnectionsForIdCheck,
 	validateConnectionData,
 	clearNntpHwmForArea,
 	clearQwkHwmForArea,

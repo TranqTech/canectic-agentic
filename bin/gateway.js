@@ -36,6 +36,7 @@ import { closeQueues, tossQueue, mailerQueue, maintenanceQueue } from "../src/qu
 import * as jobs from "../src/queues/jobs.js";
 import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
+import { auditQwkIdsAndNotify } from '../src/maintenance/qwkIdAudit.js'
 import { startWorkerWatchdog } from "../src/queues/workerWatchdog.js";
 import { registerLogWebSocket } from "../src/routes/adminLogs.js";
 import { registerNodeSpyWebSocket } from "../src/servers/nodespySocket.js";
@@ -610,6 +611,9 @@ async function main(){
 
 	// Register job schedules (polls, toss cycles, maintenance)
 	await registerSchedules()
+
+	// QWK IDs that break the rules saves are held to (#67): reported, not refused
+	await auditQwkIdsAndNotify()
 
 	// Watch the worker. The gateway does this because a dead gateway is
 	// obvious within minutes and a dead worker is silent for days: nothing

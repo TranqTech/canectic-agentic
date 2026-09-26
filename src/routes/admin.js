@@ -605,6 +605,20 @@ router.post('/networks/new', urlencodedParser, requireAdmin, async (req, res) =>
 	}
 });
 
+// Tell the sysop what became of a save on the network and peer pages. These
+// routes used to log a refusal and redirect as though nothing happened, so a
+// save refused by validation (a duplicate QWK ID, say) looked like a save that
+// took (#67). Warnings are shown whether or not the save went through.
+async function flashSaveResult(req, result, what) {
+	var msgs = [];
+	if (!result || result.status !== true) {
+		msgs.push({ type: 'danger', text: what + ' was not saved: ' +
+			((result && result.errormessages) || ['unknown error']).join(' ') });
+	}
+	for (var w of (result && result.warnings) || []) msgs.push({ type: 'warning', text: w });
+	if (msgs.length > 0) await flash.set(req, msgs);
+}
+
 router.get('/network/:uuid', async (req, res, next) => {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
@@ -672,6 +686,7 @@ router.get('/network/:uuid', async (req, res, next) => {
 			a.groupName.localeCompare(b.groupName)
 		);
 	}
+	res.locals.flash = await flash.get(req);
 	res.render('admin/msgNets/view', {
 		sufficientAccess: sufficientAccess,
 		title: 'Network',
@@ -699,14 +714,17 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	// Merge config fields into the network's config JSONB
-	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area', 'stub_intake_area'];
+	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area', 'stub_intake_area', 'qwk_long_ids'];
 	var hasConfigField = configKeys.some(function(k) { return formObj[k] !== undefined; });
 	if (hasConfigField) {
 		var dbnet = await msgNetworks.getNetworkByUUID(uuid);
 		var existingConfig = (dbnet && dbnet.config) ? (typeof dbnet.config === 'string' ? JSON.parse(dbnet.config) : dbnet.config) : {};
 		for (var ck of configKeys) {
 			if (formObj[ck] !== undefined) {
-				existingConfig[ck] = formObj[ck] || null;
+				// A checkbox: the form sends a hidden 'false' first, so ticked is ['false', 'true'].
+				existingConfig[ck] = ck === 'qwk_long_ids'
+					? [].concat(formObj[ck]).indexOf('true') !== -1
+					: (formObj[ck] || null);
 				delete formObj[ck];
 			}
 		}
@@ -716,6 +734,7 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 	if (result.status !== true) {
 		alogger.writeAlog(3, "updateNetwork failed for " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
+	await flashSaveResult(req, result, 'The network');
 	res.redirect('/admin/network/' + uuid);
 });
 
@@ -758,6 +777,7 @@ router.post('/network/:uuid/newaddress', urlencodedParser, requireAdmin, async (
 	if (result.status !== true) {
 		alogger.writeAlog(3, "newAddress failed for network " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
+	await flashSaveResult(req, result, 'The address');
 	res.redirect('/admin/network/' + uuid);
 });
 
@@ -779,6 +799,7 @@ router.post('/address/:uuid/update', urlencodedParser, requireAdmin, async (req,
 	if (result.status !== true) {
 		alogger.writeAlog(3, "updateAddress failed for " + addressuuid + ": " + result.errormessages.join(", "), "redbright");
 	}
+	await flashSaveResult(req, result, 'The address');
 	res.redirect('/admin/network/' + (network ? network.uuid : ''));
 });
 
@@ -915,6 +936,7 @@ router.get('/peer/:uuid', async (req, res, next) => {
 			}
 		}
 	}
+	res.locals.flash = await flash.get(req);
 	res.render('admin/peers/view', {
 		sufficientAccess: sufficientAccess,
 		title: 'Peer',
@@ -980,6 +1002,7 @@ router.post('/peer/:uuid/newconnection', urlencodedParser, requireAdmin, async (
 	if (result.status !== true) {
 		alogger.writeAlog(3, "newConnection failed for peer " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
+	await flashSaveResult(req, result, 'The connection');
 	if (result && result.status === true && result.insertUUID) {
 		await applyConnectionSchedule(
 			await peerConnections.getConnectionByUUIDWithNetwork(result.insertUUID), 'create');
@@ -1025,6 +1048,7 @@ router.post('/connection/:uuid/update', urlencodedParser, requireAdmin, async (r
 	if (result.status !== true) {
 		alogger.writeAlog(3, "updateConnection failed for " + uuid + ": " + result.errormessages.join(", "), "redbright");
 	}
+	await flashSaveResult(req, result, 'The connection');
 	// Redirect back to the owning peer's page
 	var conn = await peerConnections.getConnectionByUUIDWithNetwork(uuid);
 	await applyConnectionSchedule(conn, 'update');

@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 //internal modules
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from "../utils/alogger.js";
+import { longIdsAllowed, QWK_ID_MAX } from '../utils/qwkId.js';
 
 
 async function newNetwork(formObj) {
@@ -160,6 +161,19 @@ async function updateNetwork(uuid, formObj) {
 		}
 	}
 
+	// Turning off "allow QWK IDs longer than 8 characters" is refused while any
+	// long ID remains on the network (#67): the board would otherwise hold IDs
+	// its own rules call invalid, and they would fail the next save.
+	if (formObj.config !== undefined && dbnetwork.network_type === 'QWK' &&
+	    longIdsAllowed(dbnetwork) && !longIdsAllowed({ config: formObj.config })) {
+		var longIds = await longQwkIdsOnNetwork(dbnetwork.id);
+		if (longIds.length > 0) {
+			returnObj.errormessages.push('QWK IDs longer than 8 characters are still in use on this network, so they ' +
+				'must stay allowed: ' + longIds.join(', ') + '. Change them first.');
+			return returnObj;
+		}
+	}
+
 	// zones is a managed cache owned by msgZones — never updated directly here
 
 	if (Object.keys(updateObj).length === 0) {
@@ -199,6 +213,22 @@ async function updateNetwork(uuid, formObj) {
 	return returnObj;
 }
 
+// Every QWK ID longer than 8 characters on a network, as "ID (where)".
+async function longQwkIdsOnNetwork(networkId) {
+	var out = [];
+	var conns = await postgres.query(
+		`SELECT p.name AS peer_name, UPPER(TRIM(pc.connection_data->>'remote_qwk_id')) AS qwk_id
+		 FROM peer_connections pc JOIN peers p ON p.id = pc.peer_id
+		 WHERE pc.network_id = $1 AND LENGTH(TRIM(pc.connection_data->>'remote_qwk_id')) > $2
+		 ORDER BY pc.id`, [networkId, QWK_ID_MAX]);
+	for (var c of conns || []) out.push(c.qwk_id + ' (connection to ' + c.peer_name + ')');
+	var addrs = await postgres.query(
+		`SELECT UPPER(TRIM(address)) AS qwk_id FROM system_addresses
+		 WHERE network_id = $1 AND LENGTH(TRIM(address)) > $2 ORDER BY id`, [networkId, QWK_ID_MAX]);
+	for (var a of addrs || []) out.push(a.qwk_id + ' (our address)');
+	return out;
+}
+
 async function getNetworksByType(networkType) {
 	var dblist = await postgres.query(
 		"SELECT * FROM message_networks WHERE network_type = $1 ORDER BY name ASC",
@@ -216,5 +246,6 @@ export {
 	getNetworkByUUID,
 	getNetworkByDomain,
 	getNetworksByType,
+	longQwkIdsOnNetwork,
 	updateNetwork
 };

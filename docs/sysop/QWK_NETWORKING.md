@@ -7,6 +7,36 @@ from the hub (a `.qwk`) and sends back its own users' replies (a `.rep`).
 
 Canectic can be either side, and both at once on different networks.
 
+## QWK IDs
+
+Every system on a QWK network has a QWK ID: yours is the address you give the
+network under Networking > Networks, and each connection names the other
+system's as its **Remote QWK ID**. Canectic holds them to the same rules as
+Synchronet:
+
+- Up to 8 characters, stored in upper case.
+- None of these characters: a space, and `\ / | < > * ? + [ ] : = " ; ,`.
+- An ID that starts with a digit, or contains `.` or `@`, is accepted with a
+  warning: netmail cannot be addressed to it, because Synchronet reads
+  `user@1...` as a FidoNet address and a dot as an internet one.
+- **Each ID can be used once as your hub and once as your node.** A hub builds
+  one packet per node, so two connections to the same hub would fight over
+  it. One system can be both your hub and your node, as two connections.
+
+A save that breaks a rule is refused, with the reason shown at the top of the
+page. IDs saved before these rules existed keep working; if any break them, the
+board sends a notification listing them when it starts, and each will need
+fixing the next time its connection or address is saved.
+
+### IDs longer than 8 characters
+
+Tick **Allow QWK IDs longer than 8 characters** on a QWK network (edit the
+network) to allow up to 32, for your own ID and every connection on that
+network. Only do this on a network where every system accepts long IDs.
+Synchronet and most QWK software stop at 8, and netmail to a longer ID cannot
+pass through them. The setting cannot be turned off while a long ID is still
+in use on the network; the refusal lists them.
+
 ## Being a node of another system
 
 Add a QWK connection to the hub's peer (Networking > Peers, the peer, Add

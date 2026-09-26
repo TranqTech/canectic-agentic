@@ -32,6 +32,7 @@ block content
                   h3 Data Not Found!
                   br
             else
+              include ../../partials/flash
               .card
                 .card-header.bg-darkblue.text-white
                   .row
@@ -644,6 +645,19 @@ block content
                                   each fa in allFileAreasList
                                     option(value=fa.shortcode selected=(networkConfig && networkConfig.stub_intake_area === fa.shortcode))
                                       = (fa.area_name || fa.name || fa.shortcode) + ' [' + (fa.areatag || fa.shortcode) + ']'
+                        if network.network_type === 'QWK'
+                          .row
+                            .col-1
+                            .col-10
+                              br
+                              .form-check
+                                //- An unticked box sends nothing; the hidden false lets it be unticked.
+                                input(type='hidden' name='qwk_long_ids' value='false')
+                                input.form-check-input#en_qwk_long_ids(type='checkbox' name='qwk_long_ids' value='true' checked=(networkConfig && networkConfig.qwk_long_ids === true))
+                                label.form-check-label(for='en_qwk_long_ids') Allow QWK IDs longer than 8 characters (up to 32)
+                              small.form-text.text-muted
+                                | Only for a network where every system accepts long QWK IDs. Synchronet and most QWK
+                                | software stop at 8, and netmail to a longer ID cannot pass through them.
                         .row
                           .col-1
                           .col-10
