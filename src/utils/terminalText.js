@@ -621,9 +621,17 @@ async function formatBodyHtml(displayText, forceWidth) {
 			});
 		}
 
-		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces)
+		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces).
+		// Trailing spaces go first (#60). formatTextForHtml turns them into
+		// &nbsp;, which a browser can neither drop nor let hang past the edge,
+		// and many systems pad every line out to the full width: OTHERNETS
+		// posts carried lines of 81-85 characters, text plus padding. Sized to
+		// 80 columns on a phone, the padding overflowed and the card's
+		// break-word put it on a line of its own, so the message read as
+		// double spaced. They are invisible anyway, and the ANSI path above
+		// already drops them.
 		if (reflowed.includes("   ")) {
-			return formatTextForHtml(reflowed);
+			return formatTextForHtml(reflowed.replace(/[ \t]+(?=\r|$)/g, ''));
 		}
 
 		return reflowed.replace(/\r/g, '<br>');

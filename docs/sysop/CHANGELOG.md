@@ -12,6 +12,14 @@
 
 - Fix: **changes made on the admin pages recorded nobody as having made them.** Creating or editing a message or file group, area, network or peer left "created by" and "updated by" empty; an update started from the Update page recorded no one; and closing or reopening the board for maintenance logged the sysop as `undefined`. Each now records the sysop's username. Records written before this release stay empty. A message posted from the admin message pages with its From field left blank is now posted under your username rather than no name at all.
 
+### Messages
+
+- Fix: **messages read as double spaced at 80 columns on a phone.** Many systems pad every line with spaces out to the full width, and those spaces were kept, so a padded line came out a character or more wider than 80 columns and the overflow landed on a line of its own, empty. Most noticeable in OTHERNETS, where nearly every message is padded. Trailing spaces are now dropped, which changes nothing else about how a message looks. Messages received before updating keep the padding until regenerated; see the upgrade note.
+
+### Upgrade Notes
+
+- **Regenerate stored messages again**, even if you did so for 0.9.11a: `node src/tools/maintenance.js --regen-html` with the worker running (`--area SHORTCODE` for one area). Messages received before this release keep the trailing padding that makes them double spaced at 80 columns on a phone until then.
+
 ## v0.9.11a (2026-09-25)
 
 ### File Echoes
