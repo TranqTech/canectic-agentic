@@ -447,7 +447,7 @@ User-facing file browsing system. Follows the same architecture as `src/routes/i
 |---|---|---|
 | GET | `/files` | List file groups (access-filtered, new file counts per group) |
 | GET | `/files/group/:shortcode` | List areas in a file group (access-filtered, new counts, upload indicators) |
-| GET | `/files/area/:shortcode` | Browse files in an area (paginated table, advances scan pointer) |
+| GET | `/files/area/:shortcode` | Browse files in an area (paginated table; NEW marks files since the previous visit) |
 | GET | `/files/view/:uuid` | File detail — metadata, descriptions, download button |
 | GET | `/files/download/:uuid` | Download — access-checked, increments download count, sends file via `res.download()` |
 | GET | `/files/area/:shortcode/files.json` | JSON pagination — `?offset=N&limit=N&sort=column&order=asc|desc` |
@@ -465,9 +465,9 @@ User-facing file browsing system. Follows the same architecture as `src/routes/i
 
 Uses the same pattern as message areas: `checkFileAreaReadAccess(sessionUser, areaOrGroup)` checks security level + permission flags + restriction flags. `checkFileAreaUploadAccess()` does the same for upload (post) access. Groups with zero accessible areas are hidden from the listing.
 
-### Scan Pointers
+### New Files
 
-When a user views a file listing, the scan pointer is advanced to the highest file ID in the results (via `userFilePointers.advancePointer()`). New file counts are computed from the gap between the pointer and current max file ID per area.
+A file is **new** if it arrived (`upload_date`) after the start of the user's PREVIOUS visit: the classic BBS "new since last call" (`src/utils/newSince.js`). A visit starts at terminal login, web login, and on the web after `web_idle_threshold` minutes idle (default 120); each runs `updateUserCalls`, which overwrites `users.lastlogon`, so the baseline is captured BEFORE that write: `session.prev_logon` on the web (`buildSessionData` at login/registration, `webActivity` on idle resume) and `call.prev_logon` on a terminal (login handler). No previous login falls back to the account's `created_at`. Nothing clears the marker during a visit. Read through `src/models/newFilesBaseline.js` (`forWeb`, `forCall`); counted and listed with `fileEntries.countNewSince` / `getNewSince`.
 
 ### Download Flow
 

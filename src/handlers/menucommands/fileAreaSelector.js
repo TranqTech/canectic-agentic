@@ -2,7 +2,8 @@ import { BaseSubModule } from "../basesubmodule.js";
 import { updateUserFileGroup, updateUserFileArea } from "../../models/useraccounts.js";
 import { getActiveGroups } from "../../models/fileGroups.js";
 import { getAreasInGroup } from "../../models/fileAreas.js";
-import * as userFilePointers from "../../models/userFilePointers.js";
+import * as newFilesBaseline from "../../models/newFilesBaseline.js";
+import { countNewSince } from "../../models/fileEntries.js";
 import * as userFileSubs from "../../models/userFileSubs.js";
 import * as alogger from "../../utils/alogger.js";
 
@@ -151,6 +152,7 @@ class fileAreaSelector extends BaseSubModule {
 		this.allRows = [];
 		this.areaCount = 0;
 
+		var newSince = newFilesBaseline.forCall(this.call);
 		for (var g = 0; g < groups.length; g++) {
 			var group = groups[g];
 			var areas = await getAreasInGroup(group.shortcode);
@@ -175,10 +177,11 @@ class fileAreaSelector extends BaseSubModule {
 				var area = areas[a];
 
 				// Get new file count for this area
+				// New since the start of the caller's previous visit.
 				var newCount = 0;
 				if (this._userId) {
 					try {
-						newCount = await userFilePointers.getNewCount(this._userId, area.shortcode, area.id);
+						newCount = await countNewSince(area.id, newSince);
 					} catch (_) {}
 				}
 

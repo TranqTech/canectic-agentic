@@ -18,7 +18,8 @@ import { getOnlineUsers } from '../middleware/webActivity.js';
 import { getRecentMessages as getWallMessages, addMessage as addWallMessage, canPost as canPostWall, purgeOldMessages as purgeWall } from '../models/wall.js';
 import * as userMsgPointers from '../models/userMsgPointers.js';
 import * as userAreaSubs from '../models/userAreaSubs.js';
-import * as userFilePointers from '../models/userFilePointers.js';
+import * as newFilesBaseline from '../models/newFilesBaseline.js';
+import * as fileEntries from '../models/fileEntries.js';
 import * as userFileSubs from '../models/userFileSubs.js';
 import * as msgAreas from '../models/msgAreas.js';
 import * as fileAreas from '../models/fileAreas.js';
@@ -186,12 +187,14 @@ router.get('/stages.json', async (req, res) => {
 		return { shortcode: a.shortcode, newscan_default: a.newscan_default };
 	});
 	var subscribedFileShortcodes = await userFileSubs.getSubscribedAreas(userId, fileAreasWithDefaults);
+	// New since the start of the previous visit (src/utils/newSince.js).
+	var newSince = await newFilesBaseline.forWeb(req, currentuser);
 	var newFileCount = 0;
 	var newFileAreas = 0;
 	for (var fsc of subscribedFileShortcodes) {
 		var fa = activeFileAreas.find(function(a) { return a.shortcode === fsc; });
 		if (!fa) continue;
-		var fc = await userFilePointers.getNewCount(userId, fsc, fa.id);
+		var fc = await fileEntries.countNewSince(fa.id, newSince);
 		if (fc > 0) {
 			newFileCount += fc;
 			newFileAreas++;
@@ -399,12 +402,13 @@ router.get('/stage/newfiles', async (req, res) => {
 		return { shortcode: a.shortcode, newscan_default: a.newscan_default };
 	});
 	var subscribedFileShortcodes = await userFileSubs.getSubscribedAreas(userId, fileAreasWithDefaults);
+	var newSince = await newFilesBaseline.forWeb(req, currentuser);
 
 	var items = [];
 	for (var fsc of subscribedFileShortcodes) {
 		var fa = activeFileAreas.find(function(a) { return a.shortcode === fsc; });
 		if (!fa) continue;
-		var count = await userFilePointers.getNewCount(userId, fsc, fa.id);
+		var count = await fileEntries.countNewSince(fa.id, newSince);
 		if (count > 0) {
 			items.push({ shortcode: fsc, name: fa.name || fsc, count: count });
 		}

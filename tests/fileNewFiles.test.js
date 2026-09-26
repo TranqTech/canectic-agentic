@@ -1,20 +1,15 @@
 // tests/fileNewFiles.test.js — the web's new-file views.
 //
-// Two things are worth holding down here, and neither throws when it breaks.
+// "New" means arrived (upload_date) since the start of the user's previous
+// visit, the classic BBS newscan (src/utils/newSince.js). It used to be a
+// per-area read pointer moved forward by viewing pages; nothing moves anything
+// now, so a file stays marked for the whole visit.
 //
-// 1. The NEW marker is a comparison between a file id and a scan pointer, and
-//    postgres hands both back as strings. Compared as strings, '9' > '37' is
-//    true and '10' > '9' is false, so the markers land on the wrong rows while
-//    the page renders perfectly. The template must compare them as integers.
+// The marker compares a file's upload_date, which postgres returns as a Date
+// or a string depending on the driver path, with the baseline in epoch ms.
 //
-// 2. The new-only listing advances the scan pointer over exactly the rows it
-//    shows. If it were ordered newest-first like the main listing, a backlog
-//    larger than one page would have its oldest files marked read without ever
-//    being displayed — they would simply never appear again.
-//
-// Pure: renders the templates directly and exercises the model's SQL shape,
-// no database.
-// Run: npx mocha --no-config --no-package tests/fileNewFiles.test.js
+// Pure: renders the templates directly, no database.
+// Run: npx mocha --no-config --exit tests/fileNewFiles.test.js
 
 import assert from 'assert';
 import { DateTime } from 'luxon';
@@ -26,13 +21,16 @@ try { pug = (await import('pug')).default; } catch (_) { pug = null; }
 function formatBytes(n) { return String(n) + ' B'; }
 
 // Rows as postgres returns them: ids are strings.
-function entry(id, filename) {
+function entry(id, filename, uploaded) {
 	return {
 		id: String(id), uuid: 'uuid-' + id, filename: filename || ('FILE' + id + '.ZIP'),
-		file_size: 1024, upload_date: '2026-09-18T00:00:00.000Z',
+		file_size: 1024, upload_date: uploaded || '2026-09-18T00:00:00.000Z',
 		short_desc: 'desc ' + id, download_count: 0,
 	};
 }
+
+// The previous visit began here.
+var SINCE = Date.parse('2026-09-20T12:00:00Z');
 
 function renderArea(locals) {
 	var fn = pug.compileFile('src/views/files/areas/view.pug');
@@ -41,7 +39,7 @@ function renderArea(locals) {
 		canDownload: true, canUpload: false,
 		fileArea: { shortcode: 'UPLOADS', name: 'Uploads', description: '' },
 		fileGroup: { shortcode: 'GEN', name: 'General' },
-		filelist: [], totalFiles: 0, scanPointer: 0, newCount: 0, newOnly: false,
+		filelist: [], totalFiles: 0, newSinceMs: SINCE, newCount: 0, newOnly: false,
 		formatBytes: formatBytes, uploaded: null, error: null,
 		// Set app-wide by webserver.js; a view rendered on its own needs them passed.
 		formatTimestamp: formatTimestamp, timestampMs: timestampMs,
@@ -57,62 +55,35 @@ function renderArea(locals) {
 describe('file area view — NEW markers', function () {
 	before(function () { if (!pug) this.skip(); });
 
-	it('marks only the files above the scan pointer', function () {
-		// Pointer 36: file 37 is new, 36 and 9 are not. Compared as strings
-		// this inverts, because '9' > '36'.
+	function rowFor(html, name) {
+		var m = html.match(new RegExp('<tr[^>]*>(?:(?!</tr>)[\\s\\S])*?' + name + '[\\s\\S]*?</tr>'));
+		return m ? m[0] : '';
+	}
+
+	it('marks only the files that arrived since the previous visit', function () {
 		var html = renderArea({
-			filelist: [entry(37, 'NEWEST.ZIP'), entry(36, 'SEEN.ZIP'), entry(9, 'OLD.ZIP')],
-			totalFiles: 3, scanPointer: 36, newCount: 1,
+			filelist: [entry(37, 'NEWEST.ZIP', '2026-09-24T08:00:00Z'), entry(36, 'SEEN.ZIP', '2026-09-19T08:00:00Z'), entry(9, 'OLD.ZIP', '2025-01-01T00:00:00Z')],
+			totalFiles: 3, newCount: 1,
 		});
-
-		var newRows = html.match(/data-is-new="true"/g) || [];
-		assert.strictEqual(newRows.length, 1, 'exactly one row should be NEW');
-
-		// And it must be the right one.
-		assert.ok(/NEWEST\.ZIP/.test(html));
-		var rowFor = function (name) {
-			var m = html.match(new RegExp('<tr[^>]*>(?:(?!</tr>)[\\s\\S])*?' + name + '[\\s\\S]*?</tr>'));
-			return m ? m[0] : '';
-		};
-		assert.ok(/data-is-new="true"/.test(rowFor('NEWEST\\.ZIP')), 'file 37 must be NEW');
-		assert.ok(!/data-is-new="true"/.test(rowFor('SEEN\\.ZIP')), 'file 36 must not be NEW');
-		assert.ok(!/data-is-new="true"/.test(rowFor('OLD\\.ZIP')), 'file 9 must not be NEW');
+		assert.strictEqual((html.match(/data-is-new="true"/g) || []).length, 1, 'exactly one row should be NEW');
+		assert.ok(/data-is-new="true"/.test(rowFor(html, 'NEWEST\\.ZIP')), 'the file from Sep 24 is NEW');
+		assert.ok(!/data-is-new="true"/.test(rowFor(html, 'SEEN\\.ZIP')), 'the file from before the visit is not');
 	});
 
-	it('does not mark a single-digit id as newer than a double-digit pointer', function () {
-		// The string comparison in its purest form: '9' > '10'.
-		var html = renderArea({
-			filelist: [entry(9, 'OLD.ZIP')], totalFiles: 1, scanPointer: 10, newCount: 0,
-		});
-		assert.ok(!/data-is-new="true"/.test(html), 'file 9 is older than pointer 10');
+	it('goes by arrival, not by id', function () {
+		// A low id that arrived late (an import, a re-hatch) is still new.
+		var html = renderArea({ filelist: [entry(3, 'LATE.ZIP', '2026-09-25T00:00:00Z')], totalFiles: 1, newCount: 1 });
+		assert.ok(/data-is-new="true"/.test(html));
 	});
 
-	it('marks a double-digit id as newer than a single-digit pointer', function () {
-		var html = renderArea({
-			filelist: [entry(10, 'NEW.ZIP')], totalFiles: 1, scanPointer: 9, newCount: 1,
-		});
-		assert.ok(/data-is-new="true"/.test(html), 'file 10 is newer than pointer 9');
+	it('takes upload_date as a Date as well as a string', function () {
+		var html = renderArea({ filelist: [entry(5, 'D.ZIP', new Date('2026-09-25T00:00:00Z'))], totalFiles: 1, newCount: 1 });
+		assert.ok(/data-is-new="true"/.test(html));
 	});
 
-	it('marks everything when the pointer is zero', function () {
-		var html = renderArea({
-			filelist: [entry(3), entry(2), entry(1)], totalFiles: 3, scanPointer: 0, newCount: 3,
-		});
-		assert.strictEqual((html.match(/data-is-new="true"/g) || []).length, 3);
-	});
-
-	it('is still right when the pointer arrives as a string', function () {
-		// getPointer parses to a number today, which is the only reason a
-		// naive `file.id > scanPointer` works here: string-against-number
-		// coerces. Hand the template a raw scan_pointer straight off a row and
-		// the comparison turns lexicographic, where '9' > '37' is true. Since
-		// the template cannot see which it was given, it must not depend on it.
-		var html = renderArea({
-			filelist: [entry(37, 'NEWEST.ZIP'), entry(9, 'OLD.ZIP')],
-			totalFiles: 2, scanPointer: '36', newCount: 1,
-		});
-		assert.strictEqual((html.match(/data-is-new="true"/g) || []).length, 1,
-			'only file 37 is above pointer 36, whatever type the pointer has');
+	it('marks nothing at the boundary itself', function () {
+		var html = renderArea({ filelist: [entry(5, 'EDGE.ZIP', new Date(SINCE).toISOString())], totalFiles: 1, newCount: 0 });
+		assert.ok(!/data-is-new="true"/.test(html));
 	});
 });
 
@@ -124,28 +95,25 @@ describe('file area view — new-only toggle', function () {
 	before(function () { if (!pug) this.skip(); });
 
 	it('offers a New link with the count when there are new files', function () {
-		var html = renderArea({ filelist: [entry(5)], totalFiles: 1, scanPointer: 0, newCount: 1 });
+		var html = renderArea({ filelist: [entry(5)], totalFiles: 1, newCount: 1 });
 		assert.ok(html.includes('/files/area/UPLOADS?new=1'), 'New link must be present');
 	});
 
 	it('offers no New link when nothing is new', function () {
-		var html = renderArea({ filelist: [entry(5)], totalFiles: 1, scanPointer: 5, newCount: 0 });
+		var html = renderArea({ filelist: [entry(5)], totalFiles: 1, newCount: 0 });
 		assert.ok(!html.includes('?new=1'), 'no New link when there is nothing new');
 	});
 
-	it('says how far through the backlog a capped new-only page is', function () {
-		// The user has to know that reloading shows more, or a backlog bigger
-		// than a page looks like the whole of it.
+	it('says how many of the new files a capped new-only page shows', function () {
 		var html = renderArea({
-			filelist: [entry(1), entry(2)], totalFiles: 90, scanPointer: 0,
-			newCount: 90, newOnly: true,
+			filelist: [entry(1), entry(2)], totalFiles: 90, newCount: 90, newOnly: true,
 		});
-		assert.ok(/Showing 2 of 90 new files/.test(html));
-		assert.ok(/reload to continue/.test(html), 'must say the listing continues');
+		assert.ok(/Showing 2 of 90 new since your last visit, newest first/.test(html));
+		assert.ok(!/reload to continue/.test(html), 'reloading no longer moves anything along');
 	});
 
 	it('offers a way back to the full listing when new-only is empty', function () {
-		var html = renderArea({ filelist: [], totalFiles: 12, scanPointer: 99, newCount: 0, newOnly: true });
+		var html = renderArea({ filelist: [], totalFiles: 12, newCount: 0, newOnly: true });
 		assert.ok(/No new files in this area/.test(html));
 		assert.ok(/Show all files/.test(html));
 	});

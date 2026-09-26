@@ -1,8 +1,9 @@
 import { BaseSubModule } from "../basesubmodule.js";
 import { getAreaByShortcode, resolveAreaPath } from "../../models/fileAreas.js";
 import { getGroupByShortcode } from "../../models/fileGroups.js";
-import { getEntriesForArea, getEntryCount, searchEntries, getMaxIdForArea, incrementDownloadCount } from "../../models/fileEntries.js";
-import * as userFilePointers from "../../models/userFilePointers.js";
+import { getEntriesForArea, getEntryCount, searchEntries, incrementDownloadCount } from "../../models/fileEntries.js";
+import * as newFilesBaseline from "../../models/newFilesBaseline.js";
+import { isNewSince } from "../../utils/newSince.js";
 import * as alogger from "../../utils/alogger.js";
 import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
 import { NativeXmodemProtocol } from "../../protocols/xmodem_native.js";
@@ -114,7 +115,7 @@ class fileBrowser extends BaseSubModule {
 		this._fileCursor = 0;
 		this._fileScroll = 0;
 		this._fileTotal = 0;
-		this._scanPointer = 0;  // user's scan pointer for this area
+		this._newSinceMs = 0;   // "new" baseline: the previous visit's start
 
 		// Search
 		this._searchMode = false;
@@ -232,12 +233,11 @@ class fileBrowser extends BaseSubModule {
 		return yr + "-" + mo + "-" + dy + " " + hr + ":" + mn;
 	}
 
+	// New = arrived since the start of the caller's previous visit
+	// (src/utils/newSince.js). Nothing clears it during the call: there is no
+	// pointer any more, so viewing a file or an area changes nothing.
 	_isNewFile(file) {
-		// parseInt both sides: postgres returns id as a string, and once
-		// _scanPointer has been assigned one of those strings the comparison
-		// turns lexicographic, where '10' > '9' is false and a genuinely new
-		// file stops being marked.
-		return parseInt(file.id, 10) > parseInt(this._scanPointer, 10);
+		return isNewSince(file.upload_date, this._newSinceMs);
 	}
 
 	_wordWrap(text, maxWidth) {
@@ -284,14 +284,7 @@ class fileBrowser extends BaseSubModule {
 
 		this._areaName = this._areaConfig.name || this._areaShortcode;
 
-		// Load user's scan pointer
-		if (this._userId) {
-			try {
-				this._scanPointer = await userFilePointers.getPointer(this._userId, this._areaShortcode);
-			} catch (_) {
-				this._scanPointer = 0;
-			}
-		}
+		this._newSinceMs = newFilesBaseline.forCall(this.call).getTime();
 
 		return true;
 	}
@@ -351,38 +344,7 @@ class fileBrowser extends BaseSubModule {
 		});
 	}
 
-	// ===========================================================================
-	// POINTER MANAGEMENT
-	// ===========================================================================
 
-	async _advancePointerToFile(file) {
-		if (!this._userId || !file) return;
-		try {
-			var fileId = parseInt(file.id, 10);
-			await userFilePointers.advancePointer(this._userId, this._areaShortcode, fileId);
-			// Update local pointer if we moved forward.  Keep it a number:
-			// storing the string id here is what used to break _isNewFile for
-			// the rest of the session.
-			if (fileId > parseInt(this._scanPointer, 10)) {
-				this._scanPointer = fileId;
-			}
-		} catch (err) {
-			alogger.writeAlog(3, this.loggingId + " pointer advance error: " + (err?.stack || err), "redbright");
-		}
-	}
-
-	async _markAreaRead() {
-		if (!this._userId) return;
-		try {
-			await userFilePointers.markAreaRead(this._userId, this._areaShortcode);
-			// Update local pointer to max
-			if (this._areaConfig) {
-				this._scanPointer = await getMaxIdForArea(this._areaConfig.id);
-			}
-		} catch (err) {
-			alogger.writeAlog(3, this.loggingId + " markAreaRead error: " + (err?.stack || err), "redbright");
-		}
-	}
 
 	// ===========================================================================
 	// STATE MANAGEMENT
@@ -407,7 +369,6 @@ class fileBrowser extends BaseSubModule {
 		var file = this._filteredFiles[this._fileCursor];
 		this._prepareDetailLines(file);
 		this._drawFileDetailScreen(file);
-		this._advancePointerToFile(file);
 	}
 
 	// ===========================================================================
@@ -604,8 +565,6 @@ class fileBrowser extends BaseSubModule {
 		}
 		this.call.cmds.senddata("  ");
 		this._navKey("S", "Search");
-		this.call.cmds.senddata("  ");
-		this._navKey("M", "Mark Read");
 		this.call.cmds.senddata("  ");
 		this._navKey("Q", "Back");
 		this.call.cmds.resetcolors();
@@ -1226,7 +1185,7 @@ class fileBrowser extends BaseSubModule {
 			}
 		}
 
-		this.call.cmds.senddata("\r\n  [# for detail, D# for download, S to search, M mark read, Q to quit]: ");
+		this.call.cmds.senddata("\r\n  [# for detail, D# for download, S to search, Q to quit]: ");
 		this._dumbInputMode = true;
 		this._dumbInputBuffer = "";
 		this._dumbPageStart = -1; // No more pages
@@ -1474,13 +1433,6 @@ class fileBrowser extends BaseSubModule {
 			case "s":
 				this._enterSearch();
 				return;
-			case "m":
-				this._markAreaRead().then(() => {
-					if (!this.active) return;
-					this._drawFileRows();
-					this._drawFileStatusBar();
-				});
-				return;
 		}
 	}
 
@@ -1643,14 +1595,6 @@ class fileBrowser extends BaseSubModule {
 			this.signalReturn();
 			return;
 		}
-		if (lower === "m") {
-			this._markAreaRead().then(() => {
-				if (!this.active) return;
-				this.call.cmds.senddata("\r\n  All files marked as read.\r\n");
-				this._setState(STATE.FILE_LIST);
-			});
-			return;
-		}
 		if (lower === "s") {
 			this.call.cmds.senddata("\r\n  Search: ");
 			this._dumbSearchMode = true;
@@ -1700,8 +1644,6 @@ class fileBrowser extends BaseSubModule {
 		var num = parseInt(input);
 		if (!isNaN(num) && num >= 1 && num <= this._filteredFiles.length) {
 			this._fileCursor = num - 1;
-			var file = this._filteredFiles[this._fileCursor];
-			this._advancePointerToFile(file);
 			this._setState(STATE.FILE_DETAIL);
 			return;
 		}
@@ -1734,7 +1676,7 @@ class fileBrowser extends BaseSubModule {
 			}
 		}
 
-		this.call.cmds.senddata("\r\n  [# for detail, D# for download, S to search, M mark read, Q to quit]: ");
+		this.call.cmds.senddata("\r\n  [# for detail, D# for download, S to search, Q to quit]: ");
 		this._dumbPageStart = -1;
 	}
 

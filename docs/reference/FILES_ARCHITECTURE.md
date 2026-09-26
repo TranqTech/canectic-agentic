@@ -33,7 +33,7 @@ Cross-references:
 | `fileDistribution.js` | Outbound file distribution tracking. Each row = one file to one peer. `createDistributionRows` (bulk, idempotent via existence check), `getPendingForConnection`, `getAllPending` (joined with file_entries + peer_connections), `getDistributionForEntry`, `markSent`, `markFailed`, `markSkipped`, `retryFailed` (returns the count reset, and THROWS on a database error, unlike the other writes here, because it is a sysop waiting on a button), `summaryForConnection` (status counts plus recent failures, for the peer page), `partitionByAreatag` (pure). Status lifecycle: `pending` -> `sent` / `failed` / `skipped`. **`failed` is terminal**: the outbound pass reads pending rows only, so nothing retries a failed row on its own. That is why `partitionByAreatag` exists: the outbound pass needs an areatag to build a descriptor and fails a row without one, so a peer subscribed to an area not carried on its network used to collect one permanent dead row per file. All three creation paths (TIC inbound, web upload, terminal upload) now filter through it and log the mismatch. |
 | `fileNetworkAreas.js` | Maps file areas to FTN networks with areatags. `getAreaByTag(networkId, areatag)` — resolves inbound TIC area tags. `getNetworksByFileArea`, `getMappingsForNetwork`, `getMapping`, `getMappingById`, `addMapping` (dupe checks on both network+area and network+areatag), `removeMapping`, `updateMapping`. |
 | `filePeerSubscriptions.js` | Per-connection subscription state for file areas. Two-flag model: `allowed` (sysop permits) + `enabled` (sysop activates). `getSubscriptionsByConnection`, `getSubscribedConnections` (requires both allowed AND enabled AND connection active), `isSubscribed`, `setSubscriptions` (bulk toggle by field), `syncConnectionToFileAreas` (bootstrap missing rows), `allowAllFileAreas`, `enableAllAllowed`, `syncFileAreaToConnections` (propagate new area to all connections on a network), `removeSubscriptionsForFileArea`. |
-| `userFilePointers.js` | Per-user per-area scan pointers (mirrors `userMsgPointers.js`). Floor-based: any file with `id <= scan_pointer` is considered "seen". `ensureConstraintsAndIndexes` (table bootstrap), `advancePointer` (GREATEST — only moves forward; coerces its argument, since postgres returns ids as strings), `highestId(rows)` (the numeric max id of a result set — the obvious loop comparing `row.id > max` turns lexicographic after the first assignment, where `'9' > '37'`, which pinned pointers below the true maximum and left new-file counts that nothing could clear), `markAreaRead` (jump to current max), `getPointer`, `getNewCount`, `initPointersForArea` (pre-populate all users when area created, pointer=0), `initPointersForUser` (pre-populate all areas when user created, pointer=max to hide history). |
+| `userFilePointers.js` | LEGACY: per-user per-area scan pointers. No longer used for "new" (see Read Tracking); rows are still created for new areas. Floor-based: any file with `id <= scan_pointer` is considered "seen". `ensureConstraintsAndIndexes` (table bootstrap), `advancePointer` (GREATEST — only moves forward; coerces its argument, since postgres returns ids as strings), `highestId(rows)` (the numeric max id of a result set — the obvious loop comparing `row.id > max` turns lexicographic after the first assignment, where `'9' > '37'`, which pinned pointers below the true maximum and left new-file counts that nothing could clear), `markAreaRead` (jump to current max), `getPointer`, `getNewCount`, `initPointersForArea` (pre-populate all users when area created, pointer=0), `initPointersForUser` (pre-populate all areas when user created, pointer=max to hide history). |
 
 ### Utilities
 
@@ -361,22 +361,14 @@ Mutates the entry object in place. Only fills fields that are currently null/emp
 
 ## Read Tracking
 
-### Scan Pointer Pattern
+### New Since Last Visit
 
-File read tracking uses a single-tier pointer system (simpler than messages' two-tier system, since files have no threading):
+A file is **new** if it arrived (`upload_date`) after the start of the user's PREVIOUS visit: the classic BBS "new since last call" (`src/utils/newSince.js`). A visit starts at terminal login, web login, and on the web after `web_idle_threshold` minutes idle (default 120); each runs `updateUserCalls`, which overwrites `users.lastlogon`, so the baseline is captured BEFORE that write: `session.prev_logon` on the web (`buildSessionData` at login/registration, `webActivity` on idle resume) and `call.prev_logon` on a terminal (login handler). No previous login falls back to the account's `created_at`. Nothing clears the marker during a visit. Read through `src/models/newFilesBaseline.js` (`forWeb`, `forCall`); counted and listed with `fileEntries.countNewSince` / `getNewSince`.
 
-- Each `user_file_pointers` row stores the highest `file_entries.id` the user has "seen" in that area
-- Any file with `id > scan_pointer` is "new"
-- Pointer only advances forward (GREATEST in upsert)
+This replaced a per-area read pointer (`user_file_pointers`) on 2026-09-25. Many things moved that pointer (the web area page, the JSON listing, the terminal browser's cursor, a Mark Read key), which is how badges came to disagree with the lists under them. The table is kept but nothing reads it for "new" any more; the terminal browser's M (Mark Read) key is gone, since there is nothing to clear.
 
-### Pointer Advancement
+### Pointer Rows (legacy)
 
-- **Web area view**: advances pointer to max ID in the loaded file list
-- **Web JSON pagination**: advances pointer on each page load
-- **Terminal fileBrowser**: advances pointer when viewing a file's detail
-- **Mark area read**: jumps pointer to current `MAX(id)` for the area
-
-### Pre-Population
 
 - **New area created**: `initPointersForArea()` creates rows for all active users with `scan_pointer = 0` (all existing files appear as new)
 - **New user created**: `initPointersForUser()` creates rows for all active areas with `scan_pointer = MAX(id)` (history hidden, only future files appear new)
@@ -645,7 +637,7 @@ Two-state file browser with state machine (`STATE.LOADING`, `STATE.FILE_LIST`, `
 **File List State**:
 - Column layout: filename (35%), description, size (8 chars), date (6 chars, "Mon DD")
 - Highlighted row with blue bar, new files in green, tagged files in magenta
-- Navigation: Up/Down, PgUp/PgDn, Home/End, Enter (detail), D (download), T (tag), B (batch download), S (search), M (mark read), Q (back)
+- Navigation: Up/Down, PgUp/PgDn, Home/End, Enter (detail), D (download), T (tag), B (batch download), S (search), Q (back)
 - Lazy pagination: loads 50 files at a time, triggers load-ahead when near bottom
 
 **File Detail State**:
@@ -657,7 +649,7 @@ Two-state file browser with state machine (`STATE.LOADING`, `STATE.FILE_LIST`, `
 
 **Hangup-After-Transfer Prompt**: All download paths (D key single file, B key batch) prompt for protocol selection (XMODEM/ZMODEM) and display a "Hang up after transfer?" `[Y/n]` prompt. Enter defaults to Yes. After a successful transfer, if the user chose hangup the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. Managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
 
-**Dumb Terminal**: Numbered list with 20-line paging, text-mode detail, `D#` download command, `S` search, `M` mark read.
+**Dumb Terminal**: Numbered list with 20-line paging, text-mode detail, `D#` download command, `S` search.
 
 ### fileBatchCheck
 
@@ -680,12 +672,12 @@ Standalone upload sub-module. Validates area selection and upload access, prompt
 | Method | Route | View | Description |
 |--------|-------|------|-------------|
 | GET | `/files` | `files/index` | File group listing (filtered by read access, new counts, total-new button) |
-| GET | `/files/new` | `files/new` | New files across subscribed areas, with a per-area preview. Read-only: advances no pointer |
+| GET | `/files/new` | `files/new` | New files (since the previous visit) across subscribed areas, with a per-area preview |
 | GET | `/files/group/:shortcode` | `files/groups/view` | Areas in a group (filtered, new counts, upload indicators) |
-| GET | `/files/area/:shortcode` | `files/areas/view` | File listing in area (paginated, advances scan pointer). `?new=1` lists only files above the pointer, oldest first |
+| GET | `/files/area/:shortcode` | `files/areas/view` | File listing in area (paginated); NEW marks files since the previous visit. `?new=1` lists only files above the pointer, oldest first |
 | GET | `/files/view/:uuid` | `files/view` | Single file detail (breadcrumb to area/group) |
 | GET | `/files/download/:uuid` | — | File download (increments count, `res.download()`) |
-| GET | `/files/area/:shortcode/files.json` | — | JSON pagination (sortable, advances pointer) |
+| GET | `/files/area/:shortcode/files.json` | — | JSON pagination (sortable) |
 | GET | `/files/area/:shortcode/upload` | `files/upload` | Upload form (gated by upload access) |
 | POST | `/files/area/:shortcode/upload` | — | Handle upload (multer → staging → area dir) |
 

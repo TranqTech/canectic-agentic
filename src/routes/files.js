@@ -16,7 +16,7 @@ import * as privateMessages from '../models/privateMessages.js';
 import * as fileGroups from '../models/fileGroups.js';
 import * as fileAreas from '../models/fileAreas.js';
 import * as fileEntries from '../models/fileEntries.js';
-import * as userFilePointers from '../models/userFilePointers.js';
+import * as newFilesBaseline from '../models/newFilesBaseline.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
@@ -259,6 +259,9 @@ router.get('/', async (req, res) => {
 	}
 
 	var userId = await resolveUserId(currentuser);
+	// New since the start of the previous visit (src/utils/newSince.js).
+	var newSince = await newFilesBaseline.forWeb(req, currentuser);
+
 	var grouplist = await fileGroups.getActiveGroups();
 	grouplist = grouplist.filter(function(g) { return checkFileAreaBrowseAccess(currentuser, g); });
 
@@ -271,7 +274,7 @@ router.get('/', async (req, res) => {
 		var subMap = userId ? await userFileSubs.getSubscriptionMap(userId, areas) : {};
 		for (var area of areas) {
 			area.subscribed = subMap[area.shortcode] !== undefined ? subMap[area.shortcode] : (area.newscan_default !== false);
-			area.new_count = userId ? await userFilePointers.getNewCount(userId, area.shortcode, area.id) : 0;
+			area.new_count = userId ? await fileEntries.countNewSince(area.id, newSince) : 0;
 		}
 
 		groupedAreas.push({
@@ -312,6 +315,7 @@ router.get('/new', async (req, res) => {
 
 	var userId = await resolveUserId(currentuser);
 	var showAll = req.query.all === '1';
+	var newSince = await newFilesBaseline.forWeb(req, currentuser);
 
 	var grouplist = await fileGroups.getActiveGroups();
 	grouplist = grouplist.filter(function(g) { return checkFileAreaBrowseAccess(currentuser, g); });
@@ -333,14 +337,13 @@ router.get('/new', async (req, res) => {
 				: (area.newscan_default !== false);
 			if (!showAll && !subscribed) continue;
 
-			var pointer = userId ? await userFilePointers.getPointer(userId, area.shortcode) : 0;
-			var count = userId ? await fileEntries.getNewFileCount(area.id, pointer) : 0;
+			var count = userId ? await fileEntries.countNewSince(area.id, newSince) : 0;
 			if (count === 0) continue;
 
 			// A preview only. The area page is where the full list lives, and
 			// pulling every new file of every area into one page is how this
 			// turns into the slowest page on the board.
-			var preview = await fileEntries.getNewEntriesForArea(area.id, pointer, { limit: 5 });
+			var preview = await fileEntries.getNewSince(area.id, newSince, { limit: 5 });
 
 			area.subscribed = subscribed;
 			area.new_count = count;
@@ -414,11 +417,12 @@ router.get('/group/:shortcode', async (req, res) => {
 
 	// Attach new counts and upload access per area
 	var userId = await resolveUserId(currentuser);
+	var newSince = await newFilesBaseline.forWeb(req, currentuser);
 	for (var area of arealist) {
 		area.canUpload = checkFileAreaUploadAccess(currentuser, area);
 		area.new_count = 0;
 		if (userId) {
-			area.new_count = await userFilePointers.getNewCount(userId, area.shortcode, area.id);
+			area.new_count = await fileEntries.countNewSince(area.id, newSince);
 		}
 	}
 
@@ -461,26 +465,15 @@ router.get('/area/:shortcode', async (req, res) => {
 	var userId = await resolveUserId(currentuser);
 	var newOnly = req.query.new === '1';
 
-	// Snapshot the pointer BEFORE advancing it. Rendering this page moves the
-	// pointer to the newest file listed, so without the snapshot the NEW
-	// markers would all be gone by the time the page was drawn and the count
-	// in the header would disagree with the rows underneath it.
-	var scanPointer = userId ? await userFilePointers.getPointer(userId, fileArea.shortcode) : 0;
-	var newCount = userId ? await fileEntries.getNewFileCount(fileArea.id, scanPointer) : 0;
+	// New = arrived since the start of the previous visit. Nothing on this
+	// page clears it: the markers stay for the whole visit (newSince.js).
+	var newSince = userId ? await newFilesBaseline.forWeb(req, currentuser) : new Date();
+	var newCount = userId ? await fileEntries.countNewSince(fileArea.id, newSince) : 0;
 
 	var totalFiles = await fileEntries.getEntryCount(fileArea.id);
-	// Oldest new file first, so that advancing the pointer below covers exactly
-	// the rows on this page and a backlog larger than the page is walked
-	// through over successive visits rather than skipped.
 	var filelist = newOnly
-		? await fileEntries.getNewEntriesForArea(fileArea.id, scanPointer, { limit: 50, offset: 0, oldestFirst: true })
+		? await fileEntries.getNewSince(fileArea.id, newSince, { limit: 50, offset: 0 })
 		: await fileEntries.getEntriesForArea(fileArea.id, { limit: 50, offset: 0 });
-
-	// Advance scan pointer to highest file ID in results
-	if (userId && filelist.length > 0) {
-		await userFilePointers.advancePointer(userId, fileArea.shortcode,
-			userFilePointers.highestId(filelist));
-	}
 
 	res.render('files/areas/view', {
 		title: fileArea.name,
@@ -492,7 +485,7 @@ router.get('/area/:shortcode', async (req, res) => {
 		fileGroup: fileGroup,
 		filelist: filelist,
 		totalFiles: totalFiles,
-		scanPointer: scanPointer,
+		newSinceMs: newSince.getTime(),
 		newCount: newCount,
 		newOnly: newOnly,
 		formatBytes: formatBytes,
@@ -663,13 +656,6 @@ router.get('/area/:shortcode/files.json', async (req, res) => {
 	});
 
 	var total = await fileEntries.getEntryCount(fileArea.id);
-
-	// Advance scan pointer
-	var userId = await resolveUserId(currentuser);
-	if (userId && filelist.length > 0) {
-		await userFilePointers.advancePointer(userId, fileArea.shortcode,
-			userFilePointers.highestId(filelist));
-	}
 
 	res.json({
 		files: filelist.map(function(f) {

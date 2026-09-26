@@ -102,9 +102,9 @@ block content
                         th.text-center.d-none.d-md-table-cell(scope='col') Downloads
                     tbody
                       for file of filelist
-                        //- Compared as integers: postgres returns id as a
-                        //- string, and '9' > '37' is true.
-                        - var isNew = scanPointer !== undefined && parseInt(file.id, 10) > parseInt(scanPointer, 10)
+                        //- New = arrived since the start of the previous visit
+                        //- (src/utils/newSince.js); nothing clears it mid-visit.
+                        - var isNew = newSinceMs !== undefined && file.upload_date && new Date(file.upload_date).getTime() > newSinceMs
                         tr(data-file-uuid=file.uuid data-is-new=(isNew ? 'true' : 'false') style='cursor:pointer')
                           td
                             i.bi.bi-file-earmark.me-1
@@ -129,9 +129,7 @@ block content
                           td.text-center.d-none.d-md-table-cell= file.download_count || 0
                 .text-muted.small.mt-2
                   if newOnly
-                    | Showing #{filelist.length} of #{newCount} new files, oldest first
-                    if newCount > filelist.length
-                      |  — reload to continue
+                    | Showing #{filelist.length} of #{newCount} new since your last visit, newest first
                   else
                     | Showing #{filelist.length} of #{totalFiles} files
               else

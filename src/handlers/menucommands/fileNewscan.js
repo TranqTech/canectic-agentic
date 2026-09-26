@@ -6,7 +6,8 @@
 import { BaseSubModule } from "../basesubmodule.js";
 import { getActiveGroups } from "../../models/fileGroups.js";
 import { getAreasInGroup } from "../../models/fileAreas.js";
-import * as userFilePointers from "../../models/userFilePointers.js";
+import * as newFilesBaseline from "../../models/newFilesBaseline.js";
+import { countNewSince } from "../../models/fileEntries.js";
 import * as userFileSubs from "../../models/userFileSubs.js";
 import * as postgres from "../../middleware/db/postgres.js";
 
@@ -87,6 +88,8 @@ class FileNewscan extends BaseSubModule {
 		// Scan all accessible subscribed areas
 		var groups = await getActiveGroups();
 		var userRec = this.call.user_record || {};
+		// New since the start of the caller's previous visit (newSince.js).
+		var newSince = newFilesBaseline.forCall(this.call);
 		this._results = [];
 		this._totalNew = 0;
 
@@ -102,7 +105,7 @@ class FileNewscan extends BaseSubModule {
 				var subscribed = await userFileSubs.isSubscribed(userId, area.shortcode);
 				if (!subscribed) continue;
 
-				var newCount = await userFilePointers.getNewCount(userId, area.shortcode, area.id);
+				var newCount = await countNewSince(area.id, newSince);
 				if (newCount > 0) {
 					this._results.push({
 						groupName: groups[g].name,

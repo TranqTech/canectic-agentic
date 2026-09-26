@@ -256,6 +256,29 @@ async function getNewEntriesForArea(areaId, sinceId, opts) {
 	return rows || [];
 }
 
+/**
+ * Files that arrived in an area after `since` (a Date): what "new" means now,
+ * since the start of the user's previous visit (src/utils/newSince.js).
+ */
+async function countNewSince(areaId, since) {
+	var result = await postgres.queryOne(
+		"SELECT COUNT(*) AS cnt FROM file_entries WHERE area_id = $1 AND upload_date > $2 AND active = true",
+		[areaId, since || new Date(0)]
+	);
+	return result ? parseInt(result.cnt) : 0;
+}
+
+async function getNewSince(areaId, since, opts) {
+	var limit = (opts && opts.limit) || 50;
+	var offset = (opts && opts.offset) || 0;
+	var rows = await postgres.query(
+		"SELECT * FROM file_entries WHERE area_id = $1 AND upload_date > $2 AND active = true " +
+		"ORDER BY upload_date DESC, id DESC LIMIT $3 OFFSET $4",
+		[areaId, since || new Date(0), limit, offset]
+	);
+	return rows || [];
+}
+
 async function getMaxIdForArea(areaId) {
 	var result = await postgres.queryOne(
 		"SELECT COALESCE(MAX(id), 0) AS max_id FROM file_entries WHERE area_id = $1",
@@ -582,6 +605,8 @@ export {
 	deleteEntry,
 	getNewFileCount,
 	getNewEntriesForArea,
+	countNewSince,
+	getNewSince,
 	newEntriesOrderBy,
 	getMaxIdForArea,
 	regenerateDescHtml,

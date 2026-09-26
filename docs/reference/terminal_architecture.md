@@ -227,7 +227,7 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `wall` | Sub-module: display recent oneliners, prompt to post. Also a call flow stage after announcements |
 | `sysInfo` | Sub-module: system information display (board info + aggregate stats). Also available as call flow stage `sysinfo` |
 | `bulletins` | Sub-module: numbered bulletin selection menu, displays art file or body_text. Also available as call flow stage |
-| `fileNewscan` | Sub-module: scans subscribed file areas for new files since last pointer, displays summary |
+| `fileNewscan` | Sub-module: scans subscribed file areas for files new since the previous visit, displays summary |
 | `notifications` | Sub-module: lightbar notification list with detail view, mark all read |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
@@ -1345,10 +1345,9 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 - Header with area name, file count, new file count
 - Lightbar list with columns: Filename, Description, Size, Date
 - Files sorted by `upload_date DESC` (newest first)
-- New files (id > scan pointer) highlighted in bright green
+- New files (arrived since the caller's previous visit, `newSince.js`) highlighted in bright green
 - Lazy loading: initial batch of 50, more loaded on scroll
 - Search mode (S key) — uses DB-backed `searchEntries()` for 2+ char queries
-- Mark Read (M key) — advances scan pointer to max
 
 **FILE_DETAIL state:**
 - Full-screen detail view: filename, size, date, uploader, download count, description, area
@@ -1362,7 +1361,7 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 
 **Geometry:** Same pattern as `msgReader` — `_calcGeometry()` computes `bodyWidth`, `bodyLeft`, `bodyRight` centered on wide terminals, capped at `MAX_BODY_WIDTH` (100).
 
-**Scan pointer management:** Viewing a file detail advances the pointer via `userFilePointers.advancePointer()`. "Mark Read" jumps to max file ID.
+**New files:** measured from `call.prev_logon`, the previous visit's start, captured by the login handler before `updateUserCalls`. Nothing during the call changes it; the old scan pointer and M (Mark Read) key are gone.
 
 ---
 

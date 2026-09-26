@@ -8,6 +8,7 @@ import * as alogger from "../utils/alogger.js";
 import * as postgres from '../middleware/db/postgres.js';
 import appConfig from "../config/appConfig.js";
 import { sessionUpdateUser } from '../middleware/db/sessionstore.js';
+import { newSinceMs } from '../utils/newSince.js';
 
 //setup
 dotenv.config();
@@ -930,6 +931,10 @@ function buildSessionData(userobj) {
 		restrictionflags: JSON.stringify(Array.isArray(userobj.restrictionflags) ? userobj.restrictionflags : []),
 		mailaddress:      userobj.mailaddress      || '',
 		mailtype:         userobj.mailtype         || '',
+		// The start of the PREVIOUS visit, for "new since last login"
+		// (src/utils/newSince.js). Built from the record as loaded, before
+		// updateUserCalls overwrites lastlogon with this visit's start.
+		prev_logon:       String(newSinceMs(userobj.lastlogon, userobj.created_at)),
 	};
 }
 

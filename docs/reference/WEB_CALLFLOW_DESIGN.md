@@ -68,7 +68,7 @@ All data is already available from existing models:
 | Who's Online | `getOnlineUsers()` + nodeManager | Same as `/whosonline` route |
 | Wall | `wall.getRecentMessages()` | Same as `/wall` route |
 | New Messages | `userMsgPointers.getNewscanSummary()` | With `userAreaSubs` filtering, same as newscan |
-| New Files | `userFilePointers` scan | Same as file newscan |
+| New Files | `fileEntries.countNewSince` from `session.prev_logon` | Files arrived since the previous visit, as everywhere else (`src/utils/newSince.js`) |
 
 ## Implementation Approach
 

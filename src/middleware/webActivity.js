@@ -12,6 +12,7 @@ import * as callers from '../models/callers.js';
 import * as userAccounts from '../models/useraccounts.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
+import { newSinceMs } from '../utils/newSince.js';
 
 var PRESENCE_PREFIX = 'presence:web:';
 var PRESENCE_SET = 'presence:web:online';
@@ -57,6 +58,9 @@ async function _trackActivity(req) {
 		try {
 			var user = await userAccounts.getUserRecord(session.username);
 			if (user) {
+				// A new visit: files are new relative to the one before it.
+				// Read lastlogon BEFORE updateUserCalls overwrites it.
+				await sessionStore.sessionUpdate(sessionid, { prev_logon: String(newSinceMs(user.lastlogon, user.created_at)) });
 				var clientIp = req.ip || (req.connection && req.connection.remoteAddress) || '';
 				await callers.logCall(user, 'Web', clientIp, user.location || '');
 				userAccounts.updateUserCalls(user);

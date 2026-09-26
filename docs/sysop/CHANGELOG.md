@@ -34,6 +34,11 @@
 - The standalone Sent and Trash pages are gone: `/pm/sent` and `/pm/trash` now open those tabs of the inbox, so a bookmark still works. They were unusable on a phone, and the inbox's own tabs had replaced them.
 - Fix: **the bottom of the inbox was cut off on a phone**, for the same reason as the message list: it was sized for a desktop's navigation bar and ignored the phone's address bar. It now fits the space left on screen.
 
+### Files
+
+- **"New" files now means new since your last visit, everywhere.** A file is marked new if it arrived after your previous visit began, on the web and in the terminal alike, and it stays marked for the whole visit; looking at an area or a file no longer clears it. On the web a new visit begins when you log in, or when you come back after `web_idle_threshold` minutes without activity (120 by default). The file lists, the New Files page, the call flow's new-files summary and the terminal's file newscan and area list all agree. Before, each area kept its own marker that viewing moved along, so the counts in one place could disagree with the list in another.
+- The terminal file browser's **M** (Mark Read) key is gone: with new meaning since your last visit, there is nothing to mark.
+
 ## v0.9.11a (2026-09-25)
 
 ### File Echoes

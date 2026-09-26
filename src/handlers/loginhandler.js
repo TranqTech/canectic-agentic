@@ -1,5 +1,6 @@
 import { BaseHandler } from "./basehandler.js";
 import { checkUserPass, updateUserCalls } from "../models/useraccounts.js";
+import { newSinceMs } from "../utils/newSince.js";
 import * as alogger from "../utils/alogger.js";
 
 const validunamechars = new RegExp("[A-Za-z0-9 ]");
@@ -386,6 +387,9 @@ class LoginHandler extends BaseHandler {
         if (useraccount.file_group) this.call.file_group = useraccount.file_group;
         if (useraccount.file_area) this.call.file_area = useraccount.file_area;
         this.username = useraccount.username;
+        // Files are "new" since the previous visit; read it before
+        // updateUserCalls overwrites lastlogon (src/utils/newSince.js).
+        this.call.prev_logon = newSinceMs(useraccount.lastlogon, useraccount.created_at);
         updateUserCalls(useraccount);
         this._sendLoginOK();
     }
