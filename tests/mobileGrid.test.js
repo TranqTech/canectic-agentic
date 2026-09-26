@@ -12,8 +12,9 @@
 //
 // This scans for the old pattern rather than listing pages, so a new page
 // written the old way fails here too. Admin pages are out of scope. The login
-// partial's desktop branch is exempt: phones get its separate `ismobile`
-// layout, which was checked at 412px.
+// partial and the login-required catch page are exempt: their spacer columns
+// are only in the desktop branch, and phones get a separate `ismobile` layout
+// (the login form's was checked at 412px).
 //
 // Run: npx mocha --no-config --exit tests/mobileGrid.test.js
 
@@ -24,7 +25,10 @@ import { fileURLToPath } from 'url';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 var VIEWS = path.join(ROOT, 'src/views');
-var EXEMPT = ['partials/users/login.pug'];
+// Both keep their spacer columns only inside `if !ismobile`: phones get a
+// separate layout. status/loginrequired.pug is a catch page kept for future
+// use even though nothing renders it today.
+var EXEMPT = ['partials/users/login.pug', 'status/loginrequired.pug'];
 
 function pugFiles(dir) {
 	var out = [];
@@ -65,7 +69,4 @@ describe('user pages on a phone', function () {
 		}
 	});
 
-	it('the unused login-required page is gone', function () {
-		assert.ok(!fs.existsSync(path.join(VIEWS, 'status/loginrequired.pug')));
-	});
 });
