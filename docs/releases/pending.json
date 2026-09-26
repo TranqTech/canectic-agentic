@@ -1,12 +1,6 @@
 {
   "steps": [],
-  "notices": [
-    {
-      "id": "regen-html-trailing-padding",
-      "level": "info",
-      "text": "Messages already received keep trailing spaces that make them look double spaced at 80 columns on a phone, most of all in OTHERNETS, until they are rendered again. Run node src/tools/maintenance.js --regen-html with the worker running (add --area SHORTCODE to do one area first), even if you ran it after updating to 0.9.11a. It changes nothing but how stored messages are displayed."
-    }
-  ],
+  "notices": [],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }
