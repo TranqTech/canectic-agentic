@@ -423,8 +423,10 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 	if (!hasExisting) {
 		if (isHubMode) {
 			// Hub mode: scan in/ for .rep files from the node
+			// Oldest first: the HTTP hub names each upload <NODE>-<ms>-<rand>.rep
+			// so a second REP cannot overwrite one not yet imported.
 			var inFiles = fs.readdirSync(inDir);
-			var repFile = inFiles.find(f => f.toLowerCase().endsWith('.rep'));
+			var repFile = inFiles.filter(f => f.toLowerCase().endsWith('.rep')).sort()[0];
 
 			if (!repFile) {
 				alogger.writeClog(5,
@@ -793,6 +795,20 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 	}
 
 	return returnObj;
+}
+
+// Import every REP a hub node has left, one pull per packet. The inbound job
+// is deduplicated while it waits, so two uploads close together share one
+// job; without this loop the second REP sat until a third arrived.
+async function pullHubReps(peerConnectionUUID, maxPackets) {
+	var results = [];
+	var limit = maxPackets || 50;
+	for (var i = 0; i < limit; i++) {
+		var r = await pullFromQwkPeer(peerConnectionUUID);
+		results.push(r);
+		if (!r.status || r.notRecorded) break;
+	}
+	return results;
 }
 
 // Pull from all active QWK connections.
@@ -1357,6 +1373,7 @@ async function resetQwkOutboundIdx(peerConnectionUUID, areaId) {
 
 export {
 	pullFromQwkPeer,
+	pullHubReps,
 	pullAllQWK,
 	pushToQwkPeer,
 	pushAllQWK,

@@ -42,6 +42,10 @@ router.get('/me', apiAuth, function(req, res) {
 import { registerQwkRoutes } from './api/qwk.js';
 registerQwkRoutes(router);
 
+// --- QWK networking hub (node authenticates as a peer, not a user) ---
+import { registerQnetRoutes } from './api/qnet.js';
+registerQnetRoutes(router);
+
 // Fallback 404 for unknown /api/v1 paths so clients get JSON, not HTML
 router.use(function(req, res) {
 	res.status(404).json({ error: 'not_found', path: req.path });

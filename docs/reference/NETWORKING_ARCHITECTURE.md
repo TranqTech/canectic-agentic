@@ -324,8 +324,8 @@ DB messages (above HWM) → workItems with echo suppression + tear/origin
 
 **Pull (inbound — node's REP arrives):**
 ```
-Node drops .rep in cwd/qnet/<NODE_ID>/in/ (via qnet-directory.js or directory transport)
-  → pullFromQwkPeer() detects .rep in in/ dir
+Node POSTs /api/v1/qnet/rep (or drops .rep in cwd/qnet/<NODE_ID>/in/ via qnet-directory.js)
+  → qwk:hub:inbound job → pullHubReps() → pullFromQwkPeer() per .rep, oldest first
   → unzip → extracted/<NODE_ID>.MSG + HEADERS.DAT
   → parseMessagesDAT() → applyHeadersDat()
   → importQwkMessage() per message
@@ -334,13 +334,13 @@ Node drops .rep in cwd/qnet/<NODE_ID>/in/ (via qnet-directory.js or directory tr
 
 **Push (outbound — node requests QWK):**
 ```
-Connection handler calls buildQwkForNode(connectionUUID)
+Node GETs /api/v1/qnet/packet → buildQwkForNode(connectionUUID)
   → gathers messages from subscribed areas above HWM
   → applies echo suppression + tear/origin
   → buildControlDat() + buildMessagesDat() + buildHeadersDatText()
-  → assembleQwkPacket() → cwd/qnet/<NODE_ID>/out/<OUR_ID>.qwk
-  → advances HWM
-  → node picks up via qnet-directory.js or directory transport
+  → assembleQwkPacket() → cwd/qnet/<NODE_ID>/out/<OUR_ID>.qwk (+ .qwk.json sidecar)
+  → served; re-served unchanged until the node POSTs /packet/:id/ack
+  → commitNodePacket() advances HWM, marks PMs sent, removes the packet
 ```
 
 ### Transfer history (QWK and NNTP)
@@ -767,18 +767,66 @@ var result = await buildQwkForNode('9f894ef9-5333-42c2-826b-caaf84cb457e');
 12. Zips everything into `cwd/qnet/<NODE_ID>/out/<OUR_ID>.qwk`
 13. Advances `msg_idx` for all subscriptions
 
-### Where to call it
+### Committing: only on acknowledgement
 
-Call `buildQwkForNode()` from any connection handler that serves a node requesting its packet:
+`buildQwkForNode()` commits nothing. It writes the packet with a sidecar,
+`<packet>.qwk.json`, holding `packetId` and what delivery commits: each
+subscription's new `msg_idx` (`hwm`, from `hwmFor()`) and the `pm_outbox` ids
+it carries. While that packet is on disk every call returns it again
+(`reused: true`), unchanged. `commitNodePacket(uuid, packetId)` applies the
+sidecar and removes both files; an id that does not match the packet waiting
+commits nothing, so a stale or replayed acknowledgement cannot advance past a
+packet the node has not seen. A packet with no sidecar (built by an earlier
+release, which advanced on build) is removed with nothing to commit.
 
-- **qnet-directory.js integration**: Before the Synchronet call-out runs, have the tosser or a pre-hook call `buildQwkForNode()`. The generated `.qwk` will be in `out/` for `qnet-directory.js` to pick up.
-- **FTP server**: When a QWK-restricted user logs in and requests their packet, call `buildQwkForNode()` with the connection UUID matched to that user.
-- **HTTP/API endpoint**: Expose a route that triggers packet generation and returns the file.
-- **Telnet/terminal QWK menu**: When a user selects "Download QWK packet", call the low-level functions directly with user-specific conference lists.
+Before this the HWM advanced when the packet was built, so a download that
+failed lost every message in it. Also fixed here: the maximum was taken by
+comparing ids as STRINGS (postgres returns them that way), so a packet of
+messages 1 to 10 committed 9 and message 10 went again. `hwmFor` compares
+numerically and `advanceHwmForItems` uses it.
 
-### HWM timing note
+### QWK hub over HTTP
 
-Currently, `buildQwkForNode()` advances the HWM immediately after building the packet. This means if the packet is built but never delivered (crash, network failure), those messages will not be included in the next build. For critical deployments, consider splitting: have `buildQwkForNode()` return the HWM data without advancing, and let the caller advance after confirmed delivery.
+`src/routes/api/qnet.js`, mounted under `/api/v1/qnet` (so it inherits the
+`/api/` CSRF exemption and the maintenance-mode JSON 503). Until it existed
+a Canectic hub had no network transport, and nothing called
+`buildQwkForNode()` at all, so a hub never produced a packet for a node.
+
+- **Auth:** HTTP Basic, user = the node's QWK ID (the hub connection's
+  `remote_qwk_id`, any case), password = the hub connection's `password`
+  (`src/utils/qnetAuth.js`, constant-time compare). An active `hub`
+  connection with an EMPTY password never matches: the QWK ID is in every
+  packet. A failure logs `[AUTHFAIL] Failed login for "QWK node <ID>" from
+  <ip>` to `security.log`, which the shipped fail2ban filter already matches.
+- `GET /hello` -> `{hub, node, protocol: 1}`: the client's connect step.
+- `GET /packet` -> the packet with `X-Qnet-Packet-Id` and `X-Qnet-Messages`,
+  or 204 when there is nothing (not logged). Built in the gateway, like the
+  user QWK download.
+- `POST /packet/:id/ack` -> `commitNodePacket`; 409 on a mismatched id.
+- `POST /rep` (octet-stream, `qnet_max_rep_bytes`, 20 MB) -> must look like
+  a ZIP, stored as `<NODE>-<ms>-<rand>.rep` via a temp name so a second upload
+  cannot overwrite the first, then `enqueueQwkHubInbound`; 202. The worker
+  runs `pullHubReps()`, which imports every waiting REP oldest first (the
+  inbound job is deduplicated while it waits, so two uploads can share one).
+- Transfer log: packets served and refused uploads are recorded by the route
+  with transport `http-hub` and the node's IP; the REP import records its own
+  row from the worker.
+
+The client is `HttpTransport` in `qwkTransport.js`. `downloadFile` writes the
+packet (temp, fsync, rename) and then acknowledges it, the same point an FTP
+hub deletes after download; the tosser imports from that local copy and
+processes a leftover one before pulling again. A failed acknowledgement is
+logged and the hub re-offers the same packet, which dupe checking absorbs.
+Network errors carry fetch's `cause` code and 401 says "authentication
+failed", so the transfer log classifies them.
+
+Still NOT built from the original list: an FTP server, and a pre-hook that
+builds packets for `qnet-directory.js` nodes. A directory node still gets no
+packet from a Canectic hub.
+
+Known limit: QWK private mail is not routed per connection.
+`getPendingByTransport('QWK')` returns every pending QWK PM, and whichever QWK
+connection packs first (a client push or a hub packet) takes them all.
 
 ---
 
@@ -848,7 +896,8 @@ Writes component files, zips them with system `zip -j`, cleans up intermediates.
 | `ftp` | Client | Connects to remote FTP server. Downloads .qwk, uploads .rep. CDs into target directory before upload (Synchronet compatibility). |
 | `sftp` | Client | Same as FTP but over SSH. Uses `ssh2-sftp-client`. Supports password and private key auth. |
 | `directory` | Client | Copies files to/from local filesystem paths. No network connection. For same-machine setups or shared mounts. |
-| `hub` | Hub | No outbound transport. Scans `cwd/qnet/<NODE_ID>/in/` for .rep files on pull. QWK generation is on-demand via `buildQwkForNode()`. |
+| `http` | Client | This board as a QWK node of a Canectic hub, over the hub's `/api/v1/qnet` (see "QWK hub over HTTP"). `host` is the hub's web address, `username` our QWK ID there, `password` the one the hub set. Remote paths are ignored. |
+| `hub` | Hub | The node reaches us. Over HTTP at `/api/v1/qnet`, or through a shared directory (`qnet-directory.js`). REPs land in `cwd/qnet/<NODE_ID>/in/`; the node's QWK is built on request by `buildQwkForNode()`. |
 
 ---
 

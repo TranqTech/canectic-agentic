@@ -364,10 +364,14 @@ function createTossProcessor() {
 
 				// Hub mode inbound (node drops .rep)
 				case 'qwk:hub:inbound': {
+					// Every REP the node has left, not just the first.
 					var hubPulled = null;
 					if (job.data.connectionUUID) {
-						hubPulled = await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
-						reportTransfer('QWK', 'pull', job.data.connectionUUID, hubPulled);
+						var hubResults = await qwkTosser.pullHubReps(job.data.connectionUUID);
+						for (var hr of hubResults) {
+							if (!hr.notRecorded) reportTransfer('QWK', 'pull', job.data.connectionUUID, hr);
+						}
+						hubPulled = { totalImported: hubResults.reduce(function (n, hr) { return n + (hr.totalImported || 0); }, 0) };
 					}
 					await postTossMaint();
 					if (transferFormat.importedAnything(hubPulled)) {

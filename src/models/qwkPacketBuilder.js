@@ -15,6 +15,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 
 import * as postgres from '../middleware/db/postgres.js';
@@ -297,16 +298,25 @@ function assembleQwkPacket(options) {
 // Gathers new messages from all subscribed conferences since last HWM,
 // applies echo suppression and tear/origin, then assembles the packet.
 //
-// Returns { status, qwkPath, totalMessages, totalSkipped, errormessages }
+// Returns { status, qwkPath, packetId, totalMessages, totalSkipped, reused,
+// errormessages }.
 //
-// The caller is responsible for delivering the packet (copying to out/,
-// uploading via FTP, etc.) and advancing the HWM after successful delivery.
+// Nothing is committed here. The packet is written with a sidecar
+// (<packet>.json) holding what delivering it will commit: each
+// subscription's new high-water mark and the PM outbox rows it carries. The
+// caller delivers the packet and then calls commitNodePacket() with its
+// packetId once the node confirms receipt. Until then every request gets the
+// SAME packet back, so a download that fails part way loses nothing; before,
+// the HWM advanced when the packet was built and a failed download lost every
+// message in it.
 async function buildQwkForNode(peerConnectionUUID) {
 	var returnObj = {
 		status: false,
 		qwkPath: null,
+		packetId: null,
 		totalMessages: 0,
 		totalSkipped: 0,
+		reused: false,
 		errormessages: []
 	};
 
@@ -362,12 +372,17 @@ async function buildQwkForNode(peerConnectionUUID) {
 	// for removing the packet after confirmed delivery.
 	var existingQwk = path.join(outDir, localQwkId.toUpperCase() + '.qwk');
 	if (fs.existsSync(existingQwk)) {
+		var pending = readPending(existingQwk);
 		alogger.writeClog(5,
 			'buildQwkForNode: existing QWK packet in ' + outDir +
-			' — skipping build until node picks it up', 'tosser',
+			' not yet acknowledged, offering it again', 'tosser',
 			'cyan'
 		, false, false);
 		returnObj.status = true;
+		returnObj.reused = true;
+		returnObj.qwkPath = existingQwk;
+		returnObj.packetId = pending ? pending.packetId : null;
+		returnObj.totalMessages = pending ? pending.totalMessages : 0;
 		return returnObj;
 	}
 
@@ -559,30 +574,101 @@ async function buildQwkForNode(peerConnectionUUID) {
 		'greenbright'
 	, false, false);
 
-	// Advance HWM for all processed items (posted + skipped)
-	await advanceHwmForItems(workTracker, enabledSubs);
-
-	// Mark QWK PMs as sent
-	for (var pmItem of pmWorkItems) {
-		await privateMessages.markSent(pmItem.pmOutboxId);
-	}
+	// What delivering this packet commits, written beside it. Committed by
+	// commitNodePacket() when the node acknowledges, not here.
+	var packetId = crypto.randomUUID();
+	writePending(qwkPath, {
+		packetId:      packetId,
+		connection:    peerConnectionUUID,
+		builtAt:       new Date().toISOString(),
+		totalMessages: messageItems.length,
+		hwm:           hwmFor(workTracker),
+		pmIds:         pmWorkItems.map(function (p) { return p.pmOutboxId; })
+	});
 
 	returnObj.status = true;
 	returnObj.qwkPath = qwkPath;
+	returnObj.packetId = packetId;
 	returnObj.totalMessages = messageItems.length;
 	return returnObj;
+}
+
+function pendingPath(qwkPath) { return qwkPath + '.json'; }
+
+function readPending(qwkPath) {
+	try { return JSON.parse(fs.readFileSync(pendingPath(qwkPath), 'utf8')); } catch (_) { return null; }
+}
+
+function writePending(qwkPath, data) {
+	var tmp = pendingPath(qwkPath) + '.tmp';
+	fs.writeFileSync(tmp, JSON.stringify(data, null, 1));
+	fs.renameSync(tmp, pendingPath(qwkPath));
+}
+
+// The highest message id per subscription among the items in a packet
+// (posted or echo-suppressed). Pure.
+//
+// Numeric on purpose: postgres returns ids as STRINGS, and compared as text
+// "10" < "9", so a packet of messages 1 to 10 committed 9 and delivered 10
+// again in the next packet. advanceHwmForItems had the same comparison.
+function hwmFor(workTracker) {
+	var byPas = {};
+	for (var item of workTracker || []) {
+		var id = Number(item.msgId);
+		if (!Number.isFinite(id)) continue;
+		if (byPas[item.pas_id] === undefined || id > byPas[item.pas_id]) byPas[item.pas_id] = id;
+	}
+	return byPas;
+}
+
+/**
+ * The node has the packet: advance its HWMs, mark its PMs sent, remove it.
+ *
+ * `packetId` must match the packet on disk. A stale or repeated
+ * acknowledgement matches nothing and commits nothing, so it can never
+ * advance past a packet the node has not seen. A packet with no sidecar
+ * (built by a release before acknowledgements) is removed with nothing to
+ * commit, since that release had already advanced its HWMs.
+ *
+ * @returns {{status: boolean, committed: boolean, errormessages: string[]}}
+ */
+async function commitNodePacket(peerConnectionUUID, packetId) {
+	var out = { status: false, committed: false, errormessages: [] };
+	var dbconn = await peerConnections.getConnectionByUUIDWithNetwork(peerConnectionUUID);
+	if (!dbconn) { out.errormessages.push('Connection not found'); return out; }
+	var cd = dbconn.connection_data || {};
+	var remoteQwkId = (cd.remote_qwk_id || '').trim().toUpperCase();
+	var outDir = path.join(process.cwd(), 'qnet', remoteQwkId, 'out');
+	var packets = [];
+	try { packets = fs.readdirSync(outDir).filter(function (f) { return /\.qwk$/i.test(f); }); } catch (_) {}
+	if (packets.length === 0) { out.errormessages.push('No packet waiting'); return out; }
+
+	var qwkPath = path.join(outDir, packets[0]);
+	var pending = readPending(qwkPath);
+	if (pending && pending.packetId !== packetId) {
+		out.errormessages.push('Packet id does not match the packet waiting');
+		return out;
+	}
+	if (pending) {
+		await advanceHwmForItems(Object.keys(pending.hwm || {}).map(function (k) {
+			return { pas_id: k, msgId: pending.hwm[k] };
+		}));
+		for (var pmId of pending.pmIds || []) await privateMessages.markSent(pmId);
+	}
+	try { fs.unlinkSync(qwkPath); } catch (_) {}
+	try { fs.unlinkSync(pendingPath(qwkPath)); } catch (_) {}
+	alogger.writeClog(5, 'commitNodePacket: ' + remoteQwkId + ' acknowledged ' + packets[0] +
+		(pending ? ' (' + pending.totalMessages + ' message(s))' : ''), 'tosser', 'greenbright', false, false);
+	out.status = true;
+	out.committed = true;
+	return out;
 }
 
 // Advance msg_idx for each subscription up to the highest consecutive
 // message ID that was either posted or skipped.
 async function advanceHwmForItems(workTracker, enabledSubs) {
-	// Group by pas_id, find max msgId
-	var byPas = {};
-	for (var item of workTracker) {
-		if (!byPas[item.pas_id] || item.msgId > byPas[item.pas_id]) {
-			byPas[item.pas_id] = item.msgId;
-		}
-	}
+	// Max msgId per subscription, compared as numbers (see hwmFor).
+	var byPas = hwmFor(workTracker);
 
 	for (var pasId in byPas) {
 		var maxId = byPas[pasId];
@@ -612,5 +698,7 @@ export {
 	assembleQwkPacket,
 
 	// High-level — node connection specific
-	buildQwkForNode
+	buildQwkForNode,
+	commitNodePacket,
+	hwmFor
 };

@@ -950,9 +950,17 @@ block content
                               )
                                 option(value='ftp' selected) FTP
                                 option(value='sftp') SFTP
+                                option(value='http') HTTP (Canectic hub)
                                 option(value='directory') Directory
                                 option(value='hub') Hub (Inbound)
                               br
+                              #nc_qwk_hub_fields(style='display:none')
+                                label(for='nc_qwk_hub_password') Node password:
+                                input(type='password' id='nc_qwk_hub_password' name='qwk_password' class='form-control' autocomplete='new-password')
+                                small.form-text.text-muted
+                                  | The node connects over HTTP to this board's address with its QWK ID and this password.
+                                  | Without a password it cannot connect.
+                                br
                               #nc_qwk_client_fields
                                 label(for='nc_qwk_host') Host:
                                 input(
@@ -962,6 +970,8 @@ block content
                                   class='form-control'
                                   tabindex='7'
                                 )
+                                small.form-text.text-muted.qwk-http-help(style='display:none')
+                                  | The hub's web address, e.g. https://bbs.example.com. Username is your QWK ID on the hub.
                                 br
                                 label(for='nc_qwk_port') Port:
                                 input(
@@ -1180,12 +1190,22 @@ block content
                               select(id='ec_qwk_transport' name='qwk_transport' class='form-control' tabindex='4')
                                 option(value='ftp') FTP
                                 option(value='sftp') SFTP
+                                option(value='http') HTTP (Canectic hub)
                                 option(value='directory') Directory
                                 option(value='hub') Hub (Inbound)
                               br
+                              #ec_qwk_hub_fields(style='display:none')
+                                label(for='ec_qwk_hub_password') Node password:
+                                input(type='password' id='ec_qwk_hub_password' name='qwk_password' class='form-control' autocomplete='new-password')
+                                small.form-text.text-muted
+                                  | The node connects over HTTP to this board's address with its QWK ID and this password.
+                                  | Without a password it cannot connect.
+                                br
                               #ec_qwk_client_fields
                                 label(for='ec_qwk_host') Host:
                                 input(type='text' id='ec_qwk_host' name='qwk_host' class='form-control' tabindex='2')
+                                small.form-text.text-muted.qwk-http-help(style='display:none')
+                                  | The hub's web address, e.g. https://bbs.example.com. Username is your QWK ID on the hub.
                                 br
                                 label(for='ec_qwk_port') Port:
                                 input(type='number' id='ec_qwk_port' name='qwk_port' class='form-control' value='21' tabindex='3')
@@ -1465,7 +1485,17 @@ block content
         if (!sel) return;
         var isHub = (sel.value === 'hub');
         var clientDiv = document.getElementById(prefix + '_qwk_client_fields');
+        var hubDiv = document.getElementById(prefix + '_qwk_hub_fields');
         if (clientDiv) clientDiv.style.display = isHub ? 'none' : '';
+        if (hubDiv) hubDiv.style.display = isHub ? '' : 'none';
+        // Both blocks carry a qwk_password field; only the visible one is sent.
+        [clientDiv, hubDiv].forEach(function (div) {
+          if (!div) return;
+          div.querySelectorAll('input, select').forEach(function (el) { el.disabled = (div.style.display === 'none'); });
+        });
+        if (clientDiv) clientDiv.querySelectorAll('.qwk-http-help').forEach(function (h) {
+          h.style.display = sel.value === 'http' ? '' : 'none';
+        });
         // Hub transport disables polling by default
         var pollSel = document.getElementById(prefix + '_poll_enabled');
         if (pollSel && isHub) pollSel.value = 'false';
@@ -1607,6 +1637,7 @@ block content
             document.getElementById('ec_qwk_transport').value      = cd.transport || 'ftp';
             document.getElementById('ec_qwk_username').value       = cd.username || '';
             document.getElementById('ec_qwk_password').value       = cd.password || '';
+            document.getElementById('ec_qwk_hub_password').value   = cd.password || '';
             document.getElementById('ec_qwk_remote_inbox').value   = cd.remote_inbox ?? '/';
             document.getElementById('ec_qwk_remote_outbox').value  = cd.remote_outbox ?? '/';
             toggleQwkClientFields('ec');

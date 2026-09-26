@@ -213,6 +213,7 @@ var TOPIC_TAGS = {
     'MAIL.md':                      ['mail', 'smtp', 'imap'],
     'TEMPLATES.md':                 ['templates', 'notifications'],
     'NETMAIL_ROUTES.md':            ['netmail', 'ftn', 'routing', 'configuration'],
+    'QWK_NETWORKING.md':            ['networking', 'qwk', 'hub', 'configuration'],
     'NETMAIL_RELAY.md':             ['netmail', 'ftn', 'relay', 'routing', 'configuration'],
     'OS_UPGRADE.md':                ['installation', 'maintenance', 'postgresql', 'upgrade'],
     'UPDATES.md':                   ['updates', 'releases', 'maintenance', 'configuration'],

@@ -517,12 +517,117 @@ class DirectoryTransport extends QWKTransport {
 // Factory
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// HTTP transport — this board as a QWK node of a Canectic hub
+// ---------------------------------------------------------------------------
+//
+// Talks to the hub's /api/v1/qnet (src/routes/api/qnet.js). `host` is the
+// hub's web address (https://bbs.example.com, a port in the URL if needed;
+// https is assumed when no scheme is given). `username` is OUR QWK ID as the
+// hub knows us, `password` the password the hub's sysop set for us. The
+// remote paths the tosser passes are ignored: the hub decides what a node
+// gets.
+//
+// downloadFile acknowledges the packet once it is safely on disk here, which
+// is when the hub advances our high-water marks. The tosser imports from that
+// local copy, and processes a leftover one before pulling again, so an
+// import that fails later loses nothing. If the acknowledgement itself fails
+// the hub offers the same packet again and dupe checking absorbs it.
+
+function hubBaseUrl(host) {
+	var h = String(host || '').trim().replace(/\/+$/, '');
+	if (!h) return '';
+	return /^https?:\/\//i.test(h) ? h : 'https://' + h;
+}
+
+class HttpTransport extends QWKTransport {
+	constructor(opts) {
+		super();
+		this._fetch = (opts && opts.fetch) || globalThis.fetch;
+		this._base = '';
+		this._auth = '';
+		this._timeout = 60000;
+	}
+
+	_url(p) { return this._base + '/api/v1/qnet' + p; }
+
+	async _request(method, p, body) {
+		var init = { method: method, headers: { Authorization: this._auth },
+			signal: AbortSignal.timeout(this._timeout) };
+		if (body) {
+			init.headers['Content-Type'] = 'application/octet-stream';
+			init.body = body;
+		}
+		var res;
+		try {
+			res = await this._fetch(this._url(p), init);
+		} catch (err) {
+			// fetch wraps the socket error; surface the cause so the transfer
+			// log can tell a timeout from a refused connection.
+			var cause = err && err.cause ? (err.cause.code || err.cause.message) : '';
+			var msg = err && err.name === 'TimeoutError' ? 'Timeout (HTTP request)' : (err.message || String(err));
+			throw new Error(msg + (cause ? ' (' + cause + ')' : '') + ' reaching ' + this._base);
+		}
+		if (res.status === 401) throw new Error('Hub refused our login (authentication failed) at ' + this._base);
+		return res;
+	}
+
+	async connect(cd) {
+		this._base = hubBaseUrl(cd.host);
+		if (!this._base) throw new Error('No hub address configured');
+		this._auth = 'Basic ' + Buffer.from((cd.username || '') + ':' + (cd.password || '')).toString('base64');
+		if (cd.timeout_seconds) this._timeout = parseInt(cd.timeout_seconds) * 1000;
+		var res = await this._request('GET', '/hello');
+		if (res.status === 404) throw new Error('No QWK hub at ' + this._base + ' (HTTP 404; is it a Canectic board of this release or later?)');
+		if (!res.ok) throw new Error('Hub answered HTTP ' + res.status + ' at ' + this._base);
+		var hello = await res.json().catch(function () { return {}; });
+		alogger.writeClog(5, 'HttpTransport: connected to ' + (hello.hub || this._base) + ' as ' + (hello.node || cd.username),
+			'tosser', 'greenbright', false, false);
+	}
+
+	async downloadFile(remotePath, localPath) {
+		var res = await this._request('GET', '/packet');
+		if (res.status === 204) {
+			// Same shape the tosser already treats as "nothing waiting".
+			var none = new Error('No packet waiting');
+			none.code = 'ENOENT';
+			throw none;
+		}
+		if (!res.ok) throw new Error('Hub answered HTTP ' + res.status + ' for our packet');
+		var id = res.headers.get('x-qnet-packet-id');
+		var buf = Buffer.from(await res.arrayBuffer());
+		var tmp = localPath + '.part';
+		var fd = fs.openSync(tmp, 'w');
+		try { fs.writeSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+		fs.renameSync(tmp, localPath);
+		if (id) {
+			var ack = await this._request('POST', '/packet/' + encodeURIComponent(id) + '/ack');
+			if (!ack.ok) {
+				alogger.writeClog(3, 'HttpTransport: hub did not accept our acknowledgement (HTTP ' + ack.status +
+					'); it will offer the same packet again', 'tosser', 'yellow', false, false);
+			}
+		}
+	}
+
+	async uploadFile(localPath, remotePath) {
+		var res = await this._request('POST', '/rep', fs.readFileSync(localPath));
+		if (res.status !== 202 && !res.ok) {
+			var detail = await res.text().catch(function () { return ''; });
+			throw new Error('Hub refused our REP: HTTP ' + res.status + (detail ? ' ' + detail.slice(0, 200) : ''));
+		}
+	}
+
+	async listDir() { return []; }
+	async disconnect() {}
+}
+
 function makeTransport(cd) {
 	var t = (cd.transport || 'ftp').toLowerCase();
 	alogger.writeClog(5, 'makeTransport: creating ' + t + ' transport', 'tosser', 'cyan', false, false);
 	if (t === 'ftp')       return new FTPTransport();
 	if (t === 'sftp')      return new SFTPTransport();
 	if (t === 'directory') return new DirectoryTransport();
+	if (t === 'http')      return new HttpTransport();
 	throw new Error('Unknown QWK transport: ' + t);
 }
 
@@ -531,5 +636,7 @@ export {
 	FTPTransport,
 	SFTPTransport,
 	DirectoryTransport,
+	HttpTransport,
+	hubBaseUrl,
 	makeTransport
 };

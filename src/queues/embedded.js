@@ -130,8 +130,11 @@ export async function startEmbeddedWorkers(opts = {}) {
 			case 'qwk:hub:inbound': {
 				var hubPulled = null;
 				if (job.data.connectionUUID) {
-					hubPulled = await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
-					reportTransfer('QWK', 'pull', job.data.connectionUUID, hubPulled);
+					var hubResults = await qwkTosser.pullHubReps(job.data.connectionUUID);
+					for (var hr of hubResults) {
+						if (!hr.notRecorded) reportTransfer('QWK', 'pull', job.data.connectionUUID, hr);
+					}
+					hubPulled = { totalImported: hubResults.reduce(function (n, hr) { return n + (hr.totalImported || 0); }, 0) };
 				}
 				await postTossMaint();
 				if (transferFormat.importedAnything(hubPulled)) {
