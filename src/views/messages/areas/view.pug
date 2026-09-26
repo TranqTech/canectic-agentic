@@ -10,8 +10,9 @@ block content
       include ../../partials/users/login.pug
     else
       .row.mt-2
-        .col-1
-        .col-10
+        //- Side margins from lg up only, as on the area listings.
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           if !msgArea
             .card
               .card-header.bg-darkblue.text-white
@@ -21,23 +22,23 @@ block content
           else
             .card
               .card-header.bg-darkblue.text-white
-                .row.align-items-center
-                  .col-6
-                    h2
+                .row.align-items-center.gy-2
+                  .col-12.col-md-6
+                    h2.mb-0
                       i.bi.bi-chat-left-text
                       |  
                       = msgArea.name
-                  .col-6
-                    .text-end
-                      button.btn.btn-sm.btn-success.me-2(data-bs-toggle='modal' data-bs-target='#newThreadModal')
+                  .col-12.col-md-6
+                    .d-flex.flex-wrap.gap-2.justify-content-md-end
+                      button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newThreadModal')
                         i.bi.bi-plus-lg
                         |  New Thread
                       form.d-inline(action=`/messages/area/${msgArea.shortcode}/markread` method='POST')
-                        button.btn.btn-sm.btn-outline-warning.me-2(type='submit' title='Mark all messages in this area as read')
+                        button.btn.btn-sm.btn-outline-warning(type='submit' title='Mark all messages in this area as read')
                           i.bi.bi-check2-all
                           |  Mark Read
                       if threadMode && threadMode !== 'no_threads'
-                        a.btn.btn-sm.btn-outline-info.me-2(href=`/messages/area/${msgArea.shortcode}?view=flat` title='View as flat message list')
+                        a.btn.btn-sm.btn-outline-info(href=`/messages/area/${msgArea.shortcode}?view=flat` title='View as flat message list')
                           i.bi.bi-list-task
                           |  Flat View
                         a.btn.btn-sm.btn-outline-light(href=`/messages`)
@@ -81,7 +82,11 @@ block content
               )
                 if threadlist && threadlist.length > 0
                   table.table.table-hover.mb-0(style='table-layout: fixed;')
-                    thead.sticky-top.bg-dark
+                    //- On a phone each thread is one cell: the subject in full and
+                    //- a details line under it (.thread-meta); the other columns
+                    //- and this header are md and up. The script's buildRowHtml
+                    //- builds the same shape for threads loaded on scroll.
+                    thead.thread-head.sticky-top.bg-dark
                       tr
                         th(scope='col' style='width: 40%') Subject
                         th.text-center(scope='col' style='width: 8%') Replies
@@ -95,17 +100,29 @@ block content
                           data-last-message=thread.last_message ? new Date(thread.last_message).toISOString() : ''
                           data-thread-id=thread.id
                         )
-                          td.text-truncate
+                          td.thread-subject
                             strong= thread.subject
-                          td.text-center= (thread.message_count || 1) - 1
-                          td.text-center
+                            .thread-meta.small.d-md-none
+                              span.fg-green= thread.started_by || '—'
+                              |  · #{(thread.message_count || 1) - 1} #{((thread.message_count || 1) - 1) === 1 ? 'reply' : 'replies'}
+                              if thread.unread_count && thread.unread_count > 0
+                                |  
+                                span.badge.bg-info= thread.unread_count
+                              if thread.last_message
+                                div
+                                  span.fg-yellow= DateTime.fromMillis(Date.parse(thread.last_message)).toFormat('MMM dd, yyyy HH:mm')
+                                  if thread.last_message_from
+                                    |  by 
+                                    span.fg-green= thread.last_message_from
+                          td.text-center.d-none.d-md-table-cell= (thread.message_count || 1) - 1
+                          td.text-center.d-none.d-md-table-cell
                             if thread.unread_count && thread.unread_count > 0
                               span.badge.bg-info= thread.unread_count
                             else
                               span.text-muted —
-                          td
+                          td.d-none.d-md-table-cell
                             span.fg-green= thread.started_by || '—'
-                          td
+                          td.d-none.d-md-table-cell
                             if thread.last_message
                               .small
                                 - var ldate = Date.parse(thread.last_message)
@@ -262,11 +279,18 @@ block content
           + ' data-href="/messages/area/' + shortcode + '/thread/' + t.uuid + '"'
           + ' data-last-message="' + (t.last_message ? new Date(t.last_message).toISOString() : '') + '"'
           + ' data-thread-id="' + t.id + '">'
-          + '<td class="text-truncate"><strong>' + escapeHtml(t.subject || '') + '</strong></td>'
-          + '<td class="text-center">' + replies + '</td>'
-          + '<td class="text-center">' + unreadBadge + '</td>'
-          + '<td><span class="fg-green">' + escapeHtml(t.started_by || '—') + '</span></td>'
-          + '<td><div class="small">' + lastReply + '</div></td>'
+          + '<td class="thread-subject"><strong>' + escapeHtml(t.subject || '') + '</strong>'
+          +   '<div class="thread-meta small d-md-none">'
+          +     '<span class="fg-green">' + escapeHtml(t.started_by || '—') + '</span>'
+          +     ' · ' + replies + (replies === 1 ? ' reply' : ' replies')
+          +     ((t.unread_count && t.unread_count > 0) ? ' <span class="badge bg-info">' + t.unread_count + '</span>' : '')
+          +     (t.last_message ? '<div>' + lastReply + '</div>' : '')
+          +   '</div>'
+          + '</td>'
+          + '<td class="text-center d-none d-md-table-cell">' + replies + '</td>'
+          + '<td class="text-center d-none d-md-table-cell">' + unreadBadge + '</td>'
+          + '<td class="d-none d-md-table-cell"><span class="fg-green">' + escapeHtml(t.started_by || '—') + '</span></td>'
+          + '<td class="d-none d-md-table-cell"><div class="small">' + lastReply + '</div></td>'
           + '</tr>';
       }
 

@@ -53,4 +53,31 @@ describe('area listings on a phone', function () {
 		assert.match(lg, /flex-wrap: wrap/);
 		assert.match(CSS, /\.area-list-header \.area-tools \{\s*flex: 1 1 100%;/);
 	});
+
+	// The threads list (threaded areas): on a phone each thread is one cell with
+	// the subject in full and a details line; checked with rows built by the
+	// template AND by the script for threads loaded on scroll (70 of 70 at 390px).
+	describe('threads list', function () {
+		var src = fs.readFileSync(path.join(ROOT, 'src/views/messages/areas/view.pug'), 'utf8');
+		var script = src.slice(src.indexOf('function buildRowHtml'));
+
+		it('uses the full width below lg', function () {
+			assert.match(src, /\.col-1\.d-none\.d-lg-block/);
+			assert.match(src, /\.col-12\.col-lg-10/);
+		});
+
+		it('puts the details under the subject on a phone, in both copies of the row', function () {
+			assert.match(src, /td\.thread-subject/);
+			assert.match(src, /\.thread-meta\.small\.d-md-none/);
+			assert.match(script, /class="thread-subject"/);
+			assert.match(script, /class="thread-meta small d-md-none"/);
+			assert.strictEqual((script.match(/d-none d-md-table-cell/g) || []).length, 4);
+		});
+
+		it('hides the header row with our own rule, not a Bootstrap class that does not exist', function () {
+			assert.match(src, /thead\.thread-head/);
+			assert.doesNotMatch(src, /table-header-group/);
+			assert.match(CSS, /\.thread-head \{\s*display: none;/);
+		});
+	});
 });

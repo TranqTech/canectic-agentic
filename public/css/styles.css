@@ -446,6 +446,31 @@ span[style*="color: rgb(1, 1, 1)"] {
 	}
 }
 
+/* Threads list (/messages/area/X for threaded areas). From md up the subject
+   is cut to its column; below md each thread is one cell, the subject wraps in
+   full and .thread-meta under it carries who started it, replies, unread and
+   the last reply. */
+.thread-subject {
+	overflow-wrap: anywhere;
+}
+@media (min-width: 768px) {
+	.thread-subject {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+}
+.thread-meta {
+	white-space: normal;
+}
+/* Hidden below md by our own rule: Bootstrap has no d-*-table-header-group,
+   so d-none there would hide the header on desktop too. */
+@media (max-width: 767.98px) {
+	.thread-head {
+		display: none;
+	}
+}
+
 /* Message headers. The left side (who, subject, date) is a flex item beside
    the buttons; without min-width: 0 it cannot shrink below its content, so
    text-truncate never truncated and a long subject pushed the header, buttons
