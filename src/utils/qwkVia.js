@@ -122,7 +122,58 @@ function stripFirstLine(bodyText) {
 	return m ? body.slice(m.index + m[0].length) : '';
 }
 
+/**
+ * What a sender path teaches about reaching the systems in it (Synchronet
+ * update_qwkroute): for each system after the one that handed it to us, the
+ * path up to and including it. The first system is a direct connection, so
+ * it needs no route. Pure.
+ * @returns {{id: string, path: string}[]}
+ */
+function routesFromSenderPath(path) {
+	var parts = parseViaPath(path);
+	var out = [];
+	for (var i = 1; i < parts.length; i++) out.push({ id: parts[i], path: parts.slice(0, i + 1).join('/') });
+	return out;
+}
+
+/**
+ * Leading '@' kludge lines of a body, and the body without them. Netmail in the
+ * NETMAIL form carries its @VIA on the line AFTER the address line, where the
+ * packet parser, which reads kludges only at the very start, cannot see it.
+ * @returns {{kludges: object, body: string}}
+ */
+function takeLeadingKludges(bodyText) {
+	var body = String(bodyText || '');
+	var kludges = {};
+	for (;;) {
+		var m = body.match(/^@([A-Za-z0-9_-]+):?\s+([^\r\n]*)(\r\n|\r|\n)/);
+		if (!m) break;
+		var key = m[1].toUpperCase();
+		if (key === 'VIA') (kludges.VIA = kludges.VIA || []).push(m[2].trim());
+		else kludges[key] = m[2].trim();
+		body = body.slice(m[0].length);
+	}
+	return { kludges: kludges, body: body };
+}
+
+/**
+ * The To field and body a private message goes out with, written as Synchronet
+ * writes netmail (msgtoqwk QM_TO_QNET): on its last hop To is the user; with
+ * hops still to go To is "NETMAIL" and the first body line is user@REST, where
+ * REST is the path after the next hop. `via` (a relayed message's sender path)
+ * goes as @VIA after that. Pure.
+ */
+function netmailWire(user, rest, bodyText, via) {
+	var body = String(bodyText || '');
+	var viaLine = via ? '@VIA: ' + via + '\r' : '';
+	if (rest) return { to: 'NETMAIL', body: String(user || '') + '@' + rest + '\r' + viaLine + body };
+	return { to: String(user || ''), body: viaLine + body };
+}
+
 export {
+	routesFromSenderPath,
+	takeLeadingKludges,
+	netmailWire,
 	parseViaPath,
 	senderPath,
 	originOf,

@@ -756,6 +756,7 @@ class pmEditor extends BaseSubModule {
 					}
 					if (origTd && origTd.peer_connection_uuid) {
 						messageObj.transport_data.peer_connection_uuid = origTd.peer_connection_uuid;
+						if (origTd.source_path) messageObj.transport_data.route_path = origTd.source_path;
 					}
 				}
 

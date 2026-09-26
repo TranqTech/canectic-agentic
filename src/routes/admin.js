@@ -715,7 +715,8 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	// Merge config fields into the network's config JSONB
-	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area', 'stub_intake_area', 'qwk_long_ids'];
+	var configKeys = ['nodelist_area_shortcode', 'infopack_area', 'echolist_area', 'filebone_area', 'stub_intake_area', 'qwk_long_ids', 'qwk_relay'];
+	var checkboxKeys = ['qwk_long_ids', 'qwk_relay'];
 	var hasConfigField = configKeys.some(function(k) { return formObj[k] !== undefined; });
 	if (hasConfigField) {
 		var dbnet = await msgNetworks.getNetworkByUUID(uuid);
@@ -723,7 +724,7 @@ router.post('/network/:uuid/update', urlencodedParser, requireAdmin, async (req,
 		for (var ck of configKeys) {
 			if (formObj[ck] !== undefined) {
 				// A checkbox: the form sends a hidden 'false' first, so ticked is ['false', 'true'].
-				existingConfig[ck] = ck === 'qwk_long_ids'
+				existingConfig[ck] = checkboxKeys.indexOf(ck) !== -1
 					? [].concat(formObj[ck]).indexOf('true') !== -1
 					: (formObj[ck] || null);
 				delete formObj[ck];

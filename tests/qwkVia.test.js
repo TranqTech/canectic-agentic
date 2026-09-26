@@ -132,6 +132,10 @@ describe('QWK hub passes mail on, and delivers netmail-form mail (#70)', functio
 		}
 		await pg.write("DELETE FROM pm_undeliverable WHERE subject LIKE 'zz via %'");
 		await pg.write("DELETE FROM notifications WHERE body LIKE '%zz via %'");
+		// notifySysops writes a real message to every sysop's inbox.
+		await pg.write("DELETE FROM pm_inbox WHERE subject LIKE 'Undeliverable QWK PM from ZZ%' AND from_user = 'SYSTEM'");
+		await pg.write("DELETE FROM pm_outbox WHERE subject LIKE 'zz via %' OR subject LIKE 'BADADDR: ZZ%'");
+		await pg.write("DELETE FROM netmail_relay_log WHERE packet_source = 'ZZNODEA'");
 		for (var d of ['ZZNODEA.node', 'ZZNODEB.node']) fs.rmSync(path.join(process.cwd(), 'qnet', d), { recursive: true, force: true });
 	}
 
@@ -236,13 +240,16 @@ describe('QWK hub passes mail on, and delivers netmail-form mail (#70)', functio
 		assert.ok(r.delivered, r.errormessages.join('; '));
 	});
 
-	it('marks mail for a system beyond us undeliverable, with the reason recorded', async function () {
-		var r = await qwkTosser.importQwkPrivateMessage({ from: 'Alice', to: 'Carol@ZZELSEWHERE', subject: 'zz via transit',
+	it('records an undeliverable PM with its reason, and its transport data once', async function () {
+		// Mail for a system beyond us is relayed or bounced since #73 (see
+		// qwkRelay.test.js); a local recipient who does not exist is what
+		// reaches the undeliverable record now.
+		var r = await qwkTosser.importQwkPrivateMessage({ from: 'Alice', to: 'ZZNoSuchUser@ZZHUBX', subject: 'zz via transit',
 			bodyText: 'Hi\r', date: '09-26-26', time: '10:04', msgNumber: 5, kludges: {} }, 'ZZNODEA', nodeA, 'ZZHUBX');
 		assert.strictEqual(r.delivered, false);
 		var ud = await pg.queryOne("SELECT reason, to_user, transport_data FROM pm_undeliverable WHERE subject = 'zz via transit'");
-		assert.match(ud.reason, /beyond this system \(ZZHUBX\); QWK netmail is not relayed yet/);
-		assert.strictEqual(ud.to_user, 'Carol');
+		assert.match(ud.reason, /Recipient "ZZNoSuchUser" not found \(QWK PM from ZZNODEA\)/);
+		assert.strictEqual(ud.to_user, 'ZZNoSuchUser');
 		var td = typeof ud.transport_data === 'string' ? JSON.parse(ud.transport_data) : ud.transport_data;
 		assert.strictEqual(typeof td, 'object', 'stored once as JSON, not a JSON string of JSON');
 	});

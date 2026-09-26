@@ -18,6 +18,7 @@ import * as flash from '../middleware/db/flash.js';
 import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 import * as postgres from '../middleware/db/postgres.js';
+import * as msgNetworks from '../models/msgNetworks.js';
 
 var pmUpload = multer({
 	dest: path.join(os.tmpdir(), 'canectic-pm-uploads'),
@@ -137,6 +138,10 @@ router.get(['/', '/inbox'], async (req, res) => {
 	var trashMessages = await privateMessages.getTrash(userId, { limit: limit });
 	var unreadCount = await privateMessages.getUnreadCount(userId);
 	var allowedTransports = privateMessages.getAllowedTransports(currentuser);
+	// A QWK destination known on more than one network needs one chosen (#73).
+	var qwkNetworks = allowedTransports.includes('QWK')
+		? ((await msgNetworks.getNetworksByType('QWK')) || []).filter(function (n) { return n.active; })
+		: [];
 
 	res.render('pm/inbox', {
 		title: 'Mail',
@@ -145,7 +150,8 @@ router.get(['/', '/inbox'], async (req, res) => {
 		sentMessages: sentMessages,
 		trashMessages: trashMessages,
 		unreadCount: unreadCount,
-		allowedTransports: allowedTransports
+		allowedTransports: allowedTransports,
+		qwkNetworks: qwkNetworks
 	});
 });
 
@@ -409,6 +415,11 @@ router.post('/compose/network', pmUpload.array('attachments', 5), async (req, re
 		}
 	};
 
+	// A QWK network the sender chose; otherwise the router decides (#73).
+	if (transportType === 'QWK' && /^[0-9]+$/.test(String(req.body.qwk_network_id || ''))) {
+		messageObj.transport_data.network_id = parseInt(req.body.qwk_network_id, 10);
+	}
+
 	// Build transport_data based on type
 	if (transportType === 'FTN') {
 		var destAddr = toAddress;
@@ -542,6 +553,8 @@ router.post('/reply/:uuid', pmUpload.array('attachments', 5), async (req, res) =
 		// not merely to a connection with the same QWK ID (qwkPmRouting.js).
 		if (transportType === 'QWK' && origTd.peer_connection_uuid) {
 			messageObj.transport_data.peer_connection_uuid = origTd.peer_connection_uuid;
+			// Back the way it came, when it came through other systems (#73).
+			if (origTd.source_path) messageObj.transport_data.route_path = origTd.source_path;
 		}
 	}
 

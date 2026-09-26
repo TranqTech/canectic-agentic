@@ -427,6 +427,24 @@ block content
                     placeholder='e.g. 1:123/456'
                   )
                   br
+                  if qwkNetworks && qwkNetworks.length > 1
+                    #net_qwk_network_wrap(style='display:none')
+                      label.text-white(for='net_qwk_network') QWK network:
+                      select#net_qwk_network.form-control.bg-black.fg-cyan(name='qwk_network_id')
+                        option(value='' selected) Choose automatically
+                        each n in qwkNetworks
+                          option(value=n.id)= n.name
+                      .form-text.text-muted Only needed when the system you are writing to is on more than one of your QWK networks.
+                      br
+                    script.
+                      (function () {
+                        var t = document.getElementById('net_transport');
+                        var w = document.getElementById('net_qwk_network_wrap');
+                        if (!t || !w) return;
+                        function sync() { w.style.display = t.value === 'QWK' ? '' : 'none'; }
+                        t.addEventListener('change', sync);
+                        sync();
+                      })();
                   label.text-white(for='net_subject') Subject:
                   input#net_subject.form-control.bg-black.fg-yellow(
                     type='text' name='subject' tabindex='5' required

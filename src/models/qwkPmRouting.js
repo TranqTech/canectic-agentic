@@ -24,6 +24,8 @@ import * as peerConnections from './peerConnections.js';
 import * as privateMessages from './privateMessages.js';
 import * as alogger from '../utils/alogger.js';
 import { remoteRole } from '../utils/qwkId.js';
+import { parseViaPath, netmailWire } from '../utils/qwkVia.js';
+import * as qwkRoutes from './qwkRoutes.js';
 
 function tdOf(pm) {
 	var td = pm && pm.transport_data;
@@ -37,52 +39,109 @@ function qwkIdOf(conn) {
 	return String(((conn && conn.connection_data) || {}).remote_qwk_id || '').trim().toUpperCase();
 }
 
-/**
- * The destination QWK ID a PM is addressed to, upper case, or ''.
- */
-function destinationOf(pm) {
+/** The hops a PM is addressed to (`DEST` or `HUB/NODE/DEST`), upper case. */
+function addressPathOf(pm) {
 	var td = tdOf(pm);
-	return String(td.destination || (pm && pm.to_address) || '').trim().toUpperCase();
+	return parseViaPath(td.destination || (pm && pm.to_address) || '');
+}
+
+/** The destination QWK ID a PM is addressed to (the last hop), or ''. */
+function destinationOf(pm) {
+	var p = addressPathOf(pm);
+	return p.length ? p[p.length - 1] : '';
+}
+
+// Our hub before our node, as Synchronet's qwk_route checks its hubs before
+// its nodes (#69). With IDs unique per role (#67) there is at most one of each.
+function pickConnection(conns, id) {
+	var matches = conns.filter(function (c) { return qwkIdOf(c) === id; });
+	return matches.find(function (c) { return remoteRole(c.connection_data) === 'hub'; }) || matches[0] || null;
 }
 
 /**
- * Pure. `connections` are the ACTIVE QWK connections.
- * @returns {{uuid: string|null, reason: string|null}}
+ * Pure. `connections` are the ACTIVE QWK connections; `routes` the learned
+ * routes (qwkRoutes.fresh()). In Synchronet's order (qwk.cpp qwk_route):
+ *   1. a reply, back over the connection its original came in on, along the
+ *      path it came by (transport_data.route_path, else straight to it);
+ *   2. the destination itself, when it is a direct connection;
+ *   3. an explicit path whose first hop is a direct connection;
+ *   4. a learned route whose first hop is a direct connection on the route's
+ *      own network;
+ *   5. nowhere, with the reason.
+ * A PM whose transport_data.network_id is set (relayed mail, or a network the
+ * sender chose) is held to that network. A destination learned on more than one
+ * network is ambiguous until one is chosen.
+ * @returns {{uuid: string|null, rest: string, method: string|null, reason: string|null}}
  */
-function routeQwkPm(pm, connections) {
-	var dest = destinationOf(pm);
-	var conns = (connections || []).slice().sort(function (a, b) { return Number(a.id) - Number(b.id); });
+function routeQwkPm(pm, connections, routes) {
+	var td = tdOf(pm);
+	var path = addressPathOf(pm);
+	var dest = path.length ? path[path.length - 1] : '';
+	var netId = td.network_id !== undefined && td.network_id !== null && td.network_id !== '' ? Number(td.network_id) : null;
+	var conns = (connections || []).slice()
+		.filter(function (c) { return netId === null || Number(c.network_id) === netId; })
+		.sort(function (a, b) { return Number(a.id) - Number(b.id); });
+	var none = function (reason) { return { uuid: null, rest: '', method: null, reason: reason }; };
 
-	var pinned = tdOf(pm).peer_connection_uuid;
+	var pinned = td.peer_connection_uuid;
 	if (pinned) {
 		var hit = conns.find(function (c) { return c.uuid === pinned; });
-		if (hit && (!dest || qwkIdOf(hit) === dest)) return { uuid: hit.uuid, reason: null };
+		if (hit) {
+			if (qwkIdOf(hit) === dest) return { uuid: hit.uuid, rest: '', method: 'reply', reason: null };
+			var back = parseViaPath(td.route_path);
+			if (back.length > 1 && back[0] === qwkIdOf(hit) && back[back.length - 1] === dest) {
+				return { uuid: hit.uuid, rest: back.slice(1).join('/'), method: 'reply', reason: null };
+			}
+		}
 	}
 
-	if (!dest) return { uuid: null, reason: 'no destination QWK ID' };
-	// Our hub before our node, as Synchronet's qwk_route checks its hubs
-	// before its nodes (#69). With IDs unique per role (#67) there is at most
-	// one of each.
-	var matches = conns.filter(function (c) { return qwkIdOf(c) === dest; });
-	var match = matches.find(function (c) { return remoteRole(c.connection_data) === 'hub'; }) || matches[0];
-	if (match) return { uuid: match.uuid, reason: null };
-	return { uuid: null, reason: 'no QWK connection to ' + dest };
+	if (!dest) return none('no destination QWK ID');
+
+	var direct = pickConnection(conns, dest);
+	if (direct) return { uuid: direct.uuid, rest: '', method: 'direct', reason: null };
+
+	if (path.length > 1) {
+		var first = pickConnection(conns, path[0]);
+		if (first) return { uuid: first.uuid, rest: path.slice(1).join('/'), method: 'explicit', reason: null };
+	}
+
+	var found = [];
+	for (var r of routes || []) {
+		if (String(r.qwk_id || '').toUpperCase() !== dest) continue;
+		if (netId !== null && Number(r.network_id) !== netId) continue;
+		var hops = parseViaPath(r.path);
+		var via = pickConnection(conns.filter(function (c) { return Number(c.network_id) === Number(r.network_id); }), hops[0]);
+		if (via) found.push({ uuid: via.uuid, rest: hops.slice(1).join('/'), network_id: Number(r.network_id) });
+	}
+	var nets = Array.from(new Set(found.map(function (f) { return f.network_id; })));
+	if (nets.length > 1) {
+		var names = nets.map(function (n) {
+			var c = (connections || []).find(function (x) { return Number(x.network_id) === n; });
+			return (c && c.network_name) || ('network ' + n);
+		});
+		return none(dest + ' is known on more than one network (' + names.join(', ') + '), so one has to be chosen');
+	}
+	if (found.length) return { uuid: found[0].uuid, rest: found[0].rest, method: 'learned', reason: null };
+
+	return none('no QWK connection or known route to ' + dest);
 }
 
 /**
- * The pending QWK PMs this connection should carry. PMs no connection can
- * carry are marked undeliverable here, and their senders told, so they stop
- * waiting for ever.
+ * The pending QWK PMs this connection should carry, each with `_qwkRest` (the
+ * hops after this one, '' on the last hop). PMs no connection can carry are
+ * marked undeliverable here, and their senders told, so they stop waiting.
  */
 async function pendingQwkPmsFor(connectionUUID) {
 	var pending = await privateMessages.getPendingByTransport('QWK');
 	if (!pending || pending.length === 0) return [];
 	var conns = await peerConnections.getActiveConnectionsByNetworkType('QWK');
+	var routes = await qwkRoutes.fresh();
 
 	var mine = [];
 	for (var pm of pending) {
-		var route = routeQwkPm(pm, conns);
+		var route = routeQwkPm(pm, conns, routes);
 		if (route.uuid === connectionUUID) {
+			pm._qwkRest = route.rest;
 			mine.push(pm);
 		} else if (!route.uuid) {
 			alogger.writeClog(3, 'QWK PM ' + pm.id + ' to ' + (pm.to_user || '?') + ' is undeliverable: ' +
@@ -99,4 +158,13 @@ async function pendingQwkPmsFor(connectionUUID) {
 	return mine;
 }
 
-export { routeQwkPm, destinationOf, pendingQwkPmsFor };
+/**
+ * The To field and body a PM goes out with on this hop (qwkVia.netmailWire),
+ * with a relayed PM's sender path as @VIA.
+ */
+function wireFor(pm) {
+	var td = tdOf(pm);
+	return netmailWire(pm.to_user || '', pm._qwkRest || '', pm.body_text || '', td.relay ? td.source_path : null);
+}
+
+export { routeQwkPm, destinationOf, addressPathOf, pendingQwkPmsFor, wireFor };

@@ -658,6 +658,14 @@ block content
                               small.form-text.text-muted
                                 | Only for a network where every system accepts long QWK IDs. Synchronet and most QWK
                                 | software stop at 8, and netmail to a longer ID cannot pass through them.
+                              .form-check.mt-2
+                                input(type='hidden' name='qwk_relay' value='false')
+                                input.form-check-input#en_qwk_relay(type='checkbox' name='qwk_relay' value='true' checked=(!networkConfig || networkConfig.qwk_relay !== false))
+                                label.form-check-label(for='en_qwk_relay') Relay QWK netmail between systems on this network
+                              small.form-text.text-muted
+                                | Passes on netmail addressed to other systems on this network, as a QWK hub does, by a
+                                | direct link or a route learned from the mail itself. What cannot be passed on goes back
+                                | to its sender. Mail is never relayed from one network to another.
                         .row
                           .col-1
                           .col-10

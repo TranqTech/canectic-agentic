@@ -23,7 +23,7 @@ import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
 import * as privateMessages from './privateMessages.js';
-import { pendingQwkPmsFor } from './qwkPmRouting.js';
+import { pendingQwkPmsFor, wireFor } from './qwkPmRouting.js';
 import { qnetOutDir } from '../utils/qnetPaths.js';
 import { exportDecision, withVia } from '../utils/qwkVia.js';
 import { listOutgoing, outFilesDir, removeSent } from './qwkFiles.js';
@@ -543,9 +543,11 @@ async function buildQwkForNode(peerConnectionUUID) {
 				msg: {
 					id: pm.id,
 					from_user: pm.from_user || '',
-					to_user: pm.to_user || '',
+					// On the wire as Synchronet writes netmail: NETMAIL plus an
+					// address line while hops remain, @VIA on relayed mail (#73).
+					to_user: wireFor(pm).to,
 					subject: pm.subject || '',
-					body_text: pm.body_text || '',
+					body_text: wireFor(pm).body,
 					utf8: null, // null so buildMessagesDat runs utf8ToCp437 conversion
 					system_time: pm.system_time || new Date(),
 					reply_ref: 0

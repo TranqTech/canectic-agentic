@@ -151,8 +151,25 @@ replies back along the same way.
 
 Private mail sent to one of your users as QWK netmail (`user@YOURID`, or
 `NETMAIL` with the address on the first line, as Synchronet sends it) is
-delivered. Netmail for a system beyond yours is not passed on yet; it is
-recorded as undeliverable with the reason.
+delivered.
+
+## Netmail to other systems
+
+Your users can send QWK private mail to any system your board can reach, not
+only the ones you link with directly: write `user` as the name and the system's
+QWK ID as the address. It goes over a direct link when there is one, otherwise
+by a route the board has learned: every QWK message that arrives says which
+systems it came through, and the board remembers how to reach each of them for
+90 days. An address can also spell the way out, `HUBID/THEIRID`. If the same
+QWK ID is known on two of your networks, the send form asks which to use.
+
+Netmail other systems send through yours is passed on the same way, within the
+network it arrived on and never from one network to another. Untick **Relay
+QWK netmail between systems on this network** on a QWK network (edit the
+network) to stop that. Mail that cannot be passed on, because there is no
+route, relaying is off, or it has come round in a loop, goes back to its sender
+with the subject `BADADDR:` and the reason, as Synchronet does. Every decision
+is listed under Networking > Netmail Relay Log.
 
 ## Sending and receiving files
 
@@ -197,11 +214,9 @@ address. Each connection on a peer's page shows its own recent transfers.
 - **A node gets the same messages twice:** it collected a packet but its
   confirmation did not arrive, so the hub offered the packet again. Duplicate
   checking drops the repeats.
-- **A QWK private message came back as undeliverable:** no active QWK
-  connection has the QWK ID it was addressed to. Private mail goes only to
-  the system named in its address, over the connection whose Remote QWK ID
-  matches (a reply goes back over the connection the original came in on).
-  When a system is both your hub and your node, new mail to it goes to it as
-  your hub.
-  Mail for a system you do not link with directly is not passed on through
-  a hub.
+- **A QWK private message came back as undeliverable:** the board has no link
+  to the system it was addressed to and no route to it, or knows it on more
+  than one network and none was chosen. Routes are learned from mail that
+  arrives, so a system nobody on your networks has heard from in 90 days
+  cannot be reached. When a system is both your hub and your node, mail to it
+  goes to it as your hub.

@@ -28,10 +28,14 @@ import { splitFullMsgid } from '../../utils/ftnUtils.js';
 import { makeTransport } from '../../models/qwkTransport.js';
 import * as networkTransfers from '../../models/networkTransfers.js';
 import * as privateMessages from '../../models/privateMessages.js';
-import { pendingQwkPmsFor } from '../../models/qwkPmRouting.js';
+import { pendingQwkPmsFor, wireFor } from '../../models/qwkPmRouting.js';
 import * as qwkPacketBuilder from '../../models/qwkPacketBuilder.js';
 import { qnetDir, qnetInDir, qnetOutDir } from '../../utils/qnetPaths.js';
-import { senderPath, pathContains, exportDecision, withVia, parseNetmailAddress, stripFirstLine, originOf } from '../../utils/qwkVia.js';
+import { senderPath, pathContains, exportDecision, withVia, parseNetmailAddress, stripFirstLine, originOf, takeLeadingKludges } from '../../utils/qwkVia.js';
+import * as qwkRoutes from '../../models/qwkRoutes.js';
+import * as netmailRelayLog from '../../models/netmailRelayLog.js';
+import * as msgNetworks from '../../models/msgNetworks.js';
+import { routeQwkPm } from '../../models/qwkPmRouting.js';
 import { listOutgoing, outFilesDir, removeSent, receiveExtraFiles } from '../../models/qwkFiles.js';
 import {
 	parseControlDat,
@@ -152,6 +156,7 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId, link) {
 	// Sender path, stored as Synchronet stores it: the system that handed us
 	// the message, then its @VIA. The origin is the last element (#70).
 	var viaPath  = peerId ? senderPath(peerId, viaIn) : viaIn;
+	returnObj.senderPath = peerId ? viaPath : null;
 	// Origin line extracted from body
 	var originLine = qwkMsg.originLine || null;
 
@@ -233,10 +238,82 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId, link) {
 // Import a QWK conference 0 message as a private message
 // ---------------------------------------------------------------------------
 
-async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID, localQwkId) {
+// Netmail for a system beyond us (#73). Relayed only within the network it
+// arrived on, by the same router our own users' mail takes (a direct link, an
+// explicit path, or a route learned from @VIA), and only while the network's
+// relay setting is on. What cannot be relayed goes back to its sender as
+// BADADDR, as Synchronet does. Every decision goes in the netmail relay log.
+async function relayQwkNetmail(c) {
+	var net = c.net, retObj = c.retObj;
+	var address = net.user + '@' + net.address;
+	var subject = c.qwkMsg.subject || '';
+	var msgId = (c.kludges && c.kludges.MSGID) || (c.remoteQwkId + ':0:' + (c.qwkMsg.msgNumber || Date.now()));
+	var logRow = {
+		msgId: msgId, fromUser: c.fromUser, fromAddress: c.origin, toUser: net.user, toAddress: net.address,
+		subject: subject, packetSource: c.remoteQwkId, relayMode: 'qwk', viaIn: c.sourcePath
+	};
+
+	var bounce = async function (decision, reason) {
+		await netmailRelayLog.logDecision(Object.assign({}, logRow, { decision: decision, reason: reason }));
+		retObj.errormessages.push(reason);
+		// Never bounce a bounce: two systems without a route to each other
+		// would pass it back and forth for ever.
+		if (/^BADADDR:/i.test(subject)) return retObj;
+		var body = 'Your message to ' + address + ' could not be delivered: ' + reason + '\r\r' +
+			'Subject: ' + subject + '\r\r' + c.bodyText;
+		await privateMessages.queueOutbound({
+			user_id: 0, from_user: c.localQwkId || 'SYSTEM', to_user: c.fromUser,
+			from_address: c.localQwkId || '', to_address: c.sourcePath,
+			subject: 'BADADDR: ' + net.address, body_text: body, utf8: body, transport_type: 'QWK',
+			transport_data: { destination: c.sourcePath, network_id: c.networkId, bounce: true }
+		});
+		return retObj;
+	};
+
+	if (c.localQwkId && pathContains(c.viaIn, c.localQwkId)) {
+		return await bounce('loop', 'It has already passed through this system (' + c.localQwkId + ')');
+	}
+	var network = c.networkId ? await msgNetworks.getNetworkById(c.networkId) : null;
+	var cfg = network && network.config;
+	if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch (_) { cfg = {}; } }
+	if (cfg && cfg.qwk_relay === false) {
+		return await bounce('refused', 'This system does not relay QWK netmail on ' + (network ? network.name : 'this network'));
+	}
+
+	var conns = await peerConnections.getActiveConnectionsByNetworkType('QWK');
+	var route = routeQwkPm({ to_address: net.address, transport_data: { network_id: c.networkId } },
+		conns, await qwkRoutes.fresh());
+	var nextHop = route.uuid ? conns.find(function (x) { return x.uuid === route.uuid; }) : null;
+	var nextId = nextHop ? String((nextHop.connection_data || {}).remote_qwk_id || '').toUpperCase() : '';
+	if (!route.uuid) return await bounce('no_route', 'There is ' + route.reason);
+	if (nextId === String(c.remoteQwkId || '').toUpperCase()) {
+		return await bounce('loop', 'The only way to ' + net.address + ' is back through ' + nextId + ', which sent it');
+	}
+
+	var uuid = uuidv4();
+	var queued = await privateMessages.queueOutbound({
+		uuid: uuid, user_id: 0, msg_id: msgId, from_user: c.fromUser, to_user: net.user,
+		from_address: c.origin, to_address: net.address, subject: subject,
+		body_text: c.bodyText, utf8: c.bodyText, transport_type: 'QWK',
+		transport_data: { destination: net.address, network_id: c.networkId, relay: true,
+			source_path: c.sourcePath, msg_id: msgId }
+	});
+	if (!queued || !queued.status) {
+		return await bounce('error', 'It could not be queued: ' + ((queued && queued.errormessages) || []).join('; '));
+	}
+	await netmailRelayLog.logDecision(Object.assign({}, logRow, {
+		decision: 'relayed', nextHop: nextId, routeMethod: route.method, outboundUuid: uuid
+	}));
+	retObj.relayed = true;
+	return retObj;
+}
+
+async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID, localQwkId, networkId) {
 	var retObj = {
 		delivered: false,
+		relayed: false,
 		duplicate: false,
+		senderPath: null,
 		errormessages: []
 	};
 
@@ -287,6 +364,17 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID, 
 	// so mail for one of our users arrived addressed to a user called
 	// "NETMAIL" or "Name@OURID" and went undeliverable.
 	var net = parseNetmailAddress(toUser, bodyText);
+	if (net && net.firstLineUsed) {
+		// Lose the address line; the @VIA (and any other kludge) that
+		// Synchronet writes AFTER it was not seen by the packet parser (#73).
+		var lead = takeLeadingKludges(stripFirstLine(bodyText));
+		bodyText = lead.body;
+		if (lead.kludges.VIA) viaIn = lead.kludges.VIA.join(' ');
+		kludges = Object.assign({}, lead.kludges, kludges);
+		sourcePath = senderPath(remoteQwkId, viaIn);
+		origin = originOf(sourcePath) || remoteQwkId;
+	}
+	retObj.senderPath = sourcePath;
 	if (net) {
 		if (net.kind === 'invalid') {
 			return undeliverable('Netmail address "' + net.user + '" is not user@address', net.user);
@@ -296,11 +384,13 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID, 
 				'; this system does not pass QWK netmail on to ' + (net.kind === 'fido' ? 'FidoNet' : 'internet mail'), net.user);
 		}
 		if (!localQwkId || net.destination !== localQwkId) {
-			return undeliverable('Addressed to ' + net.user + '@' + net.address + ', beyond this system (' +
-				(localQwkId || 'no QWK ID set') + '); QWK netmail is not relayed yet', net.user);
+			return await relayQwkNetmail({
+				qwkMsg: qwkMsg, net: net, fromUser: fromUser, bodyText: bodyText, kludges: kludges,
+				viaIn: viaIn, sourcePath: sourcePath, origin: origin, remoteQwkId: remoteQwkId,
+				localQwkId: localQwkId, networkId: networkId, retObj: retObj
+			});
 		}
 		toUser = net.user;
-		if (net.firstLineUsed) bodyText = stripFirstLine(bodyText);
 	}
 
 	// Resolve recipient to a local user
@@ -734,6 +824,7 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 
 		var highWaterMarks = cd.high_water_marks || {};
 		var localQwkId = await localQwkIdFor(dbconn);
+		var learnedPaths = [];   // sender paths seen, to learn routes from (#73)
 		var skippedConfs = {};
 
 		// Import messages
@@ -742,8 +833,9 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 			if (msg.conferenceNum === 0) {
 				if (!msg.isLive) continue;
 				try {
-					var pmResult = await importQwkPrivateMessage(msg, remoteQwkId, peerConnectionUUID, localQwkId);
-					if (pmResult.delivered) {
+					var pmResult = await importQwkPrivateMessage(msg, remoteQwkId, peerConnectionUUID, localQwkId, dbconn.network_id);
+					if (pmResult.senderPath) learnedPaths.push(pmResult.senderPath);
+					if (pmResult.delivered || pmResult.relayed) {
 						returnObj.totalImported++;
 						alogger.writeClog(5,
 							'pullFromQwkPeer: delivered PM from ' + msg.from + ' to ' + msg.to, 'tosser',
@@ -789,6 +881,7 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 				{ remoteQwkId: remoteQwkId, localQwkId: localQwkId }
 			);
 
+			if (result.senderPath) learnedPaths.push(result.senderPath);
 			if (result.imported) {
 				returnObj.totalImported++;
 			} else if (result.duplicate) {
@@ -835,6 +928,9 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 			' duplicate=' + returnObj.totalDuplicate, 'tosser',
 			'greenbright'
 		, false, false);
+
+		// Routes to every system these messages passed through (#73).
+		await qwkRoutes.learn(dbconn.network_id, learnedPaths);
 
 		// Files that came with the packet (#72): kept, not deleted with the
 		// extracted directory as they used to be.
@@ -1154,9 +1250,11 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 				msg: {
 					id: pm.id,
 					from_user: pm.from_user || '',
-					to_user: pm.to_user || '',
+					// On the wire as Synchronet writes netmail: NETMAIL plus an
+					// address line while hops remain, @VIA on relayed mail (#73).
+					to_user: wireFor(pm).to,
 					subject: pm.subject || '',
-					body_text: pm.body_text || '',
+					body_text: wireFor(pm).body,
 					utf8: null, // null so buildRepPacket runs utf8ToCp437 conversion
 					system_time: pm.system_time || new Date(),
 					reply_ref: 0
