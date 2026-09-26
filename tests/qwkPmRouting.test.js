@@ -97,7 +97,7 @@ describe('QWK hub with a shared-directory node, and per-connection PMs', functio
 	var pg, peers, peerConnections, qwkPacketBuilder, qwkTosser, qwkPmRouting, qwkClasses;
 	var peerId = null, hubUuid = null, upUuid = null, localId = null;
 	var pmIds = {};
-	var nodeDir = path.join(ROOT, 'qnet', NODE_ID);
+	var nodeDir = path.join(ROOT, 'qnet', NODE_ID + '.node');
 
 	async function addPm(key, toAddress) {
 		var r = await pg.insertObject({
@@ -124,7 +124,7 @@ describe('QWK hub with a shared-directory node, and per-connection PMs', functio
 			await pg.write('DELETE FROM peers WHERE id = $1', [old.id]);
 		}
 		await pg.write("DELETE FROM pm_outbox WHERE subject LIKE 'zz routing %' AND user_id = 0");
-		for (var id of [NODE_ID, UP_ID]) fs.rmSync(path.join(ROOT, 'qnet', id), { recursive: true, force: true });
+		for (var d of [NODE_ID, NODE_ID + '.node', UP_ID, UP_ID + '.hub']) fs.rmSync(path.join(ROOT, 'qnet', d), { recursive: true, force: true });
 	}
 
 	before(async function () {

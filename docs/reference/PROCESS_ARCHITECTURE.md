@@ -144,7 +144,7 @@ Stateless batch processor. Runs toss cycles, maintenance tasks, TIC processing, 
 
 - `ftn/in/` — mailer writes received files, worker reads and processes them
 - `ftn/out/` — worker writes outbound packets, mailer reads and sends them
-- `cwd/qnet/` — worker reads/writes QWK exchange directories
+- `cwd/qnet/` — worker reads/writes QWK exchange directories, one per link and role: `qnet/<ID>.hub/` and `qnet/<ID>.node/` (`src/utils/qnetPaths.js`)
 - `logs/` — each process writes to its own log files (or tagged entries)
 
 No process writes to another process's output directory. The mailer writes to inbound; the worker reads from inbound. The worker writes to outbound; the mailer reads from outbound. Filesystem is the boundary — same convention as the existing "mailer does not toss" design principle.

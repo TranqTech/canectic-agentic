@@ -290,6 +290,15 @@ block content
                                 td
                                   small Outbox:
                                 td= cd.remote_outbox !== undefined && cd.remote_outbox !== '' ? cd.remote_outbox : '(server default)'
+                              if conn.qnetDir
+                                tr
+                                  td
+                                    small Packet directory:
+                                  td
+                                    code= conn.qnetDir
+                                    if cd.transport === 'hub' && cd.hub_directory
+                                      br
+                                      small.text-muted The node's qnet-directory.js call-out uses this path.
                             else
                               tr
                                 td
@@ -968,7 +977,7 @@ block content
                                   label.form-check-label(for='nc_qwk_hub_directory') Node collects from a shared directory
                                 small.form-text.text-muted
                                   | For a node on this machine using qnet-directory.js. Its packet is built into
-                                  | qnet/&lt;ID&gt;/out/ ahead of time and its REPs are picked up from qnet/&lt;ID&gt;/in/.
+                                  | qnet/&lt;ID&gt;.node/out/ ahead of time and its REPs are picked up from qnet/&lt;ID&gt;.node/in/.
                                   | The password is not needed.
                                 br
                               #nc_qwk_client_fields
@@ -1219,7 +1228,7 @@ block content
                                   label.form-check-label(for='ec_qwk_hub_directory') Node collects from a shared directory
                                 small.form-text.text-muted
                                   | For a node on this machine using qnet-directory.js. Its packet is built into
-                                  | qnet/&lt;ID&gt;/out/ ahead of time and its REPs are picked up from qnet/&lt;ID&gt;/in/.
+                                  | qnet/&lt;ID&gt;.node/out/ ahead of time and its REPs are picked up from qnet/&lt;ID&gt;.node/in/.
                                   | The password is not needed.
                                 br
                               #ec_qwk_client_fields

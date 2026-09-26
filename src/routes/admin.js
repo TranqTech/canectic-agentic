@@ -56,6 +56,7 @@ import appConfig from "../config/appConfig.js";
 import { CONFIG_DEFINITIONS, getDefinition, getCategories, isAllowedValue } from "../config/configDefaults.js";
 import { updateConnectionSchedule, removeConnectionSchedule } from "../queues/schedules.js";
 import { connectionIntervalMinutes } from "../utils/scheduleFormat.js";
+import { qnetDir } from "../utils/qnetPaths.js";
 import * as configStore from "../models/configStore.js";
 import * as fileGroups from '../models/fileGroups.js';
 import * as fileAreas from '../models/fileAreas.js';
@@ -922,6 +923,11 @@ router.get('/peer/:uuid', async (req, res, next) => {
 					conn.fileDist     = await fileDistribution.summaryForConnection(conn.id);
 				} else if (conn.network_type === 'QWK' || conn.network_type === 'NNTP') {
 					conn.transfers = await networkTransfers.recent(15, { connectionId: conn.id });
+				}
+				// Where this QWK link's packets live (#68): the path a
+				// shared-directory node's sysop needs for qnet-directory.js.
+				if (conn.network_type === 'QWK') {
+					try { conn.qnetDir = qnetDir(conn.connection_data || {}); } catch (_) { conn.qnetDir = null; }
 				}
 			}
 		}

@@ -99,18 +99,18 @@ internet, since the node's password is sent with every request.
 ### Nodes that use a shared directory
 
 A Synchronet node on the same machine, or one that can see a directory of
-yours, can exchange packets through `qnet/<NODE_ID>/` instead of calling over
+yours, can exchange packets through `qnet/<NODE_ID>.node/` instead of calling over
 HTTP. Copy `src/external/synchronet/qnet-directory.js` to the node's `exec/`
 directory and set its call-out command for your hub to:
 
-    ?qnet-directory <YOUR_QWK_ID> /path/to/canectic/qnet/<NODE_ID>
+    ?qnet-directory <YOUR_QWK_ID> /path/to/canectic/qnet/<NODE_ID>.node
 
 On your side, tick **Node collects from a shared directory** on the node's
 Hub (Inbound) connection. It needs no password. Every
 **qwk_hub_sweep_minutes** (QWK settings, 5 by default) the board then:
 
-1. imports any REP the node has left in `qnet/<NODE_ID>/in/`;
-2. builds the node's packet into `qnet/<NODE_ID>/out/`, named after your QWK
+1. imports any REP the node has left in `qnet/<NODE_ID>.node/in/`;
+2. builds the node's packet into `qnet/<NODE_ID>.node/out/`, named after your QWK
    ID, if there are new messages or private mail for it.
 
 The node copies the packet away when it calls and deletes it from `out/`.
@@ -123,6 +123,19 @@ small `.qwk.json` file beside it records what the packet holds.
 
 The sweep runs only while at least one node is set to collect from a shared
 directory.
+
+The exact path is shown as **Packet directory** on the node's connection on
+the peer page. Boards that set this up before per-role directories used
+`qnet/<NODE_ID>` without `.node`; updating leaves that name as a link to the
+new directory, so the node keeps working, but point its call-out at the
+`.node` path when you next change it.
+
+## Where packets are kept
+
+Each QWK link works in its own directory under `qnet/`: `qnet/<ID>.hub/` for
+a system that is your hub and `qnet/<ID>.node/` for one that is your node, each
+with `in/` and `out/`. One system can be both, and then has both. The peer page
+shows each connection's **Packet directory**.
 
 ## Seeing what happened
 

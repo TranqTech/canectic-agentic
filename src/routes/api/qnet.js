@@ -33,6 +33,7 @@ import * as qwkPacketBuilder from '../../models/qwkPacketBuilder.js';
 import * as networkTransfers from '../../models/networkTransfers.js';
 import * as jobs from '../../queues/jobs.js';
 import { parseBasic, matchNode, looksLikeZip } from '../../utils/qnetAuth.js';
+import { qnetInDir } from '../../utils/qnetPaths.js';
 
 function clientIp(req) {
 	return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
@@ -106,7 +107,7 @@ async function handleAck(req, res) {
 function handleRep(req, res) {
 	var startedAt = new Date();
 	var max = appConfig.getNumber('qnet_max_rep_bytes', 20 * 1024 * 1024);
-	var inDir = path.join(process.cwd(), 'qnet', req.qnetNode, 'in');
+	var inDir = qnetInDir(req.qnetConn.connection_data);
 	try { fs.mkdirSync(inDir, { recursive: true }); } catch (_) {}
 	// A unique name, so a second REP arriving before the first is imported
 	// does not overwrite it. The hub pull takes them oldest first.

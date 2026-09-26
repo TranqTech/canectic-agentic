@@ -30,6 +30,7 @@ import * as networkTransfers from '../../models/networkTransfers.js';
 import * as privateMessages from '../../models/privateMessages.js';
 import { pendingQwkPmsFor } from '../../models/qwkPmRouting.js';
 import * as qwkPacketBuilder from '../../models/qwkPacketBuilder.js';
+import { qnetDir, qnetInDir, qnetOutDir } from '../../utils/qnetPaths.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
@@ -345,7 +346,7 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 
 	// Working directory: cwd()/qwk/<REMOTE_QWK_ID>/in/
 	// Persistent so we can inspect downloads and support future filebox features
-	var qwkBaseDir = path.join(process.cwd(), 'qnet', remoteQwkId);
+	var qwkBaseDir = qnetDir(cd);
 	var inDir      = path.join(qwkBaseDir, 'in');
 	var extractDir = path.join(inDir, 'extracted');
 	fs.mkdirSync(inDir, { recursive: true });
@@ -1106,7 +1107,7 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 	}
 
 	// Build REP packet
-	var outDir = path.join(process.cwd(), 'qnet', remoteQwkId, 'out');
+	var outDir = qnetOutDir(cd);
 	fs.mkdirSync(outDir, { recursive: true });
 
 	var repFileName = packetName + '.rep';
@@ -1321,7 +1322,7 @@ async function serviceHubNodes() {
 		if (!nodeId) continue;
 		summary.nodes++;
 
-		var inDir = path.join(process.cwd(), 'qnet', nodeId, 'in');
+		var inDir = qnetInDir(cd);
 		var reps = [];
 		try { reps = fs.readdirSync(inDir).filter(function (f) { return /\.rep$/i.test(f) && f[0] !== '.'; }); } catch (_) {}
 		if (reps.length > 0) {

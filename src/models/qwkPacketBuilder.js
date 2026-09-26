@@ -24,6 +24,7 @@ import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
 import * as privateMessages from './privateMessages.js';
 import { pendingQwkPmsFor } from './qwkPmRouting.js';
+import { qnetOutDir } from '../utils/qnetPaths.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
 import {
 	QWK_RECORD_SIZE,
@@ -364,7 +365,7 @@ async function buildQwkForNode(peerConnectionUUID) {
 	var tearOrigin = '\r--- \r || Canectic || ' + originText + '\r';
 
 	// Output directory for this node
-	var outDir = path.join(process.cwd(), 'qnet', remoteQwkId, 'out');
+	var outDir = qnetOutDir(cd);
 	fs.mkdirSync(outDir, { recursive: true });
 
 	// If a packet already exists, skip building — the node hasn't picked up
@@ -658,7 +659,7 @@ async function commitNodePacket(peerConnectionUUID, packetId) {
 	if (!dbconn) { out.errormessages.push('Connection not found'); return out; }
 	var cd = dbconn.connection_data || {};
 	var remoteQwkId = (cd.remote_qwk_id || '').trim().toUpperCase();
-	var outDir = path.join(process.cwd(), 'qnet', remoteQwkId, 'out');
+	var outDir = qnetOutDir(cd);
 	var packets = [];
 	try { packets = fs.readdirSync(outDir).filter(function (f) { return /\.qwk$/i.test(f); }); } catch (_) {}
 	if (packets.length === 0) { out.errormessages.push('No packet waiting'); return out; }

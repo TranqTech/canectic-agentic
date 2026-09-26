@@ -190,9 +190,11 @@ New areas inherit: `read_security`, `post_security`, `min_age`, `max_age`, `read
 }
 ```
 
-For hub transport, only `transport`, `remote_qwk_id`, `password` (the node's HTTP login), `hub_directory` and `high_water_marks` are used.
+For hub transport, only `transport`, `remote_qwk_id`, `password` (the node's HTTP login), `hub_directory` and `high_water_marks` are used. `hub_directory: true` marks a node that collects from `qnet/<NODE_ID>.node/out/` via qnet-directory.js instead of calling over HTTP (`peerConnections.isDirectoryHubNode`); it is a form checkbox, and the forms send a hidden `false` before every checkbox because `updateConnection` merges the form over the stored row, so an unticked box (which sends nothing) could otherwise never turn a setting off (`checkboxValue`).
 
-**QWK ID rules (#67), `src/utils/qwkId.js`:** Synchronet's `code_ok` character rule (not empty; none of `` \/|<>*?+[]:=";, `` or a space; printable ASCII), stored upper case, 8 characters unless the network's `config.qwk_long_ids` is true (then 32). A digit first, or `.`/`@`, is a warning, not a refusal (netmail cannot address it). **Unique per role:** `remoteRole(cd)` is `node` for the hub transport and `hub` for any other, and `findIdClash` refuses a second connection with the same ID in the same role, across networks and including inactive connections (one namespace per board, as in Synchronet, since the packet and the directory are named by the ID). Checked in `peerConnections.newConnection`/`updateConnection` (`checkQwkConnection`) and in `systemAddresses.newAddress`/`updateAddress` for QWK networks; `msgNetworks.updateNetwork` refuses turning `qwk_long_ids` off while `longQwkIdsOnNetwork` finds any. Results reach the sysop through `flashSaveResult` on the network and peer pages, which previously only logged a refused save. Existing violations are reported, never refused, by `src/maintenance/qwkIdAudit.js` at gateway startup: one `qwk_id_problem` notification per distinct problem list (deduped on type and body). `hub_directory: true` marks a node that collects from `qnet/<NODE_ID>/out/` via qnet-directory.js instead of calling over HTTP (`peerConnections.isDirectoryHubNode`); it is a form checkbox, and the forms send a hidden `false` before every checkbox because `updateConnection` merges the form over the stored row, so an unticked box (which sends nothing) could otherwise never turn a setting off (`checkboxValue`).
+**QWK ID rules (#67), `src/utils/qwkId.js`:** Synchronet's `code_ok` character rule (not empty; none of `` \/|<>*?+[]:=";, `` or a space; printable ASCII), stored upper case, 8 characters unless the network's `config.qwk_long_ids` is true (then 32). A digit first, or `.`/`@`, is a warning, not a refusal (netmail cannot address it). **Unique per role:** `remoteRole(cd)` is `node` for the hub transport and `hub` for any other, and `findIdClash` refuses a second connection with the same ID in the same role, across networks and including inactive connections (one namespace per board, as in Synchronet, since the packet and the directory are named by the ID). Checked in `peerConnections.newConnection`/`updateConnection` (`checkQwkConnection`) and in `systemAddresses.newAddress`/`updateAddress` for QWK networks; `msgNetworks.updateNetwork` refuses turning `qwk_long_ids` off while `longQwkIdsOnNetwork` finds any. Results reach the sysop through `flashSaveResult` on the network and peer pages, which previously only logged a refused save. Existing violations are reported, never refused, by `src/maintenance/qwkIdAudit.js` at gateway startup: one `qwk_id_problem` notification per distinct problem list (deduped on type and body).
+
+**Packet directories (#68), `src/utils/qnetPaths.js`:** `qnet/<ID>.hub/{in,out}` for a connection where ID is our hub, `qnet/<ID>.node/{in,out}` where ID is our node (role = the part after the LAST dot, lower case; IDs are upper case and may contain dots). `qnetDir`/`qnetInDir`/`qnetOutDir` are the only builders of these paths (a test fails on a literal `'qnet'` in the tosser, packet builder or qnet routes). Before, both roles of one system shared `qnet/<ID>/` and one `in/extracted/`, so a leftover from one role could be imported as the other's mail. Migration `0008-qnet-role-dirs` (`src/maintenance/qnetLayout.js`, builtins only, never throws, never overwrites) moves an upgraded board's directories: an ID with one role moves whole; an ID with both is split by file (`in/*.rep`, `out/*.qwk(.json)`, `qnet.log`, `in/extracted` holding a `.MSG` go to the node role; `in/*.qwk`, `in/bak`, `out/*.rep`, `in/extracted` holding `MESSAGES.DAT` to the hub role; anything else to the node role, reported); IDs with no connection are left. `qnet/<ID>` then becomes a symlink to `<ID>.node` wherever the ID has a node role, since only the node role is used from outside (qnet-directory.js), so an existing shared-directory node keeps working. The peer page shows each QWK link's packet directory.
 
 ### connection_data JSONB structure (NNTP)
 
@@ -307,7 +309,7 @@ Netmail: netmail.getPendingNetmail()
 
 **Pull (inbound):**
 ```
-Remote Hub → [FTP/SFTP download] → cwd/qnet/<HUB_ID>/in/<HUB_ID>.qwk
+Remote Hub → [FTP/SFTP download] → cwd/qnet/<HUB_ID>.hub/in/<HUB_ID>.qwk
   → unzip → extracted/MESSAGES.DAT + HEADERS.DAT (optional)
   → parseMessagesDAT() → applyHeadersDat() (if present)
   → importQwkMessage() per message (dupe check, threading, DB insert)
@@ -326,7 +328,7 @@ DB messages (above HWM) → workItems with echo suppression + tear/origin
 
 **Pull (inbound — node's REP arrives):**
 ```
-Node POSTs /api/v1/qnet/rep (or drops .rep in cwd/qnet/<NODE_ID>/in/ via qnet-directory.js)
+Node POSTs /api/v1/qnet/rep (or drops .rep in cwd/qnet/<NODE_ID>.node/in/ via qnet-directory.js)
   → qwk:hub:inbound job → pullHubReps() → pullFromQwkPeer() per .rep, oldest first
   → unzip → extracted/<NODE_ID>.MSG + HEADERS.DAT
   → parseMessagesDAT() → applyHeadersDat()
@@ -340,7 +342,7 @@ Node GETs /api/v1/qnet/packet → buildQwkForNode(connectionUUID)
   → gathers messages from subscribed areas above HWM
   → applies echo suppression + tear/origin
   → buildControlDat() + buildMessagesDat() + buildHeadersDatText()
-  → assembleQwkPacket() → cwd/qnet/<NODE_ID>/out/<OUR_ID>.qwk (+ .qwk.json sidecar)
+  → assembleQwkPacket() → cwd/qnet/<NODE_ID>.node/out/<OUR_ID>.qwk (+ .qwk.json sidecar)
   → served; re-served unchanged until the node POSTs /packet/:id/ack
   → commitNodePacket() advances HWM, marks PMs sent, removes the packet
 ```
@@ -770,7 +772,7 @@ var result = await buildQwkForNode('9f894ef9-5333-42c2-826b-caaf84cb457e');
 9. Builds MESSAGES.DAT with Record 0 header block
 10. Builds HEADERS.DAT with full-length fields and Message-IDs
 11. Builds NETFLAGS.DAT (all 0x01)
-12. Zips everything into `cwd/qnet/<NODE_ID>/out/<OUR_ID>.qwk`
+12. Zips everything into `cwd/qnet/<NODE_ID>.node/out/<OUR_ID>.qwk`
 13. Advances `msg_idx` for all subscriptions
 
 ### Committing: only on acknowledgement

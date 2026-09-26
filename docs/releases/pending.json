@@ -5,6 +5,11 @@
       "id": "regen-html-trailing-padding",
       "level": "info",
       "text": "Messages already received keep trailing spaces that make the last word of a line wrap onto a line of its own at 80 columns, most of all in OTHERNETS, until they are rendered again. Run node src/tools/maintenance.js --regen-html with the worker running (add --area SHORTCODE to do one area first), even if you ran it after updating to 0.9.11a. It changes nothing but how stored messages are displayed."
+    },
+    {
+      "id": "qnet-role-dirs",
+      "level": "info",
+      "text": "QWK packets now live in one directory per link and role: qnet/<ID>.hub/ for a system that is your hub, qnet/<ID>.node/ for one that is your node. The update moves what is already in qnet/ and leaves qnet/<ID> as a link to the node directory, so a Synchronet node calling through qnet-directory.js keeps working. When you next change that node's call-out, point it at the qnet/<ID>.node path shown on its connection in the peer page."
     }
   ],
   "min_upgrade_from": "0.9.0a",
