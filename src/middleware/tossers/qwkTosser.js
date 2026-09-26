@@ -32,6 +32,7 @@ import { pendingQwkPmsFor } from '../../models/qwkPmRouting.js';
 import * as qwkPacketBuilder from '../../models/qwkPacketBuilder.js';
 import { qnetDir, qnetInDir, qnetOutDir } from '../../utils/qnetPaths.js';
 import { senderPath, pathContains, exportDecision, withVia, parseNetmailAddress, stripFirstLine, originOf } from '../../utils/qwkVia.js';
+import { listOutgoing, outFilesDir, removeSent, receiveExtraFiles } from '../../models/qwkFiles.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
@@ -835,6 +836,11 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 			'greenbright'
 		, false, false);
 
+		// Files that came with the packet (#72): kept, not deleted with the
+		// extracted directory as they used to be.
+		var filesIn = await receiveExtraFiles(extractDir, cd, remoteQwkId);
+		returnObj.filesReceived = filesIn.received.length;
+
 		// Processing complete — remove the extracted directory so it isn't
 		// reprocessed next cycle. Also remove the source .qwk packet since
 		// Phase 1.5 would otherwise re-extract it on every run.
@@ -1159,7 +1165,13 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		}
 	}
 
-	if (workItems.filter(i => !i.skip).length === 0) {
+	// Files waiting for the hub (#72), and a REP left by a failed upload:
+	// either is something to send even with no new messages. The stale REP
+	// used to wait here until a new message happened to come along.
+	var outgoingFiles = listOutgoing(cd);
+	var staleRep = path.join(qnetOutDir(cd), packetName + '.rep');
+
+	if (workItems.filter(i => !i.skip).length === 0 && outgoingFiles.length === 0 && !fs.existsSync(staleRep)) {
 		// Only skips — advance past them and return
 		alogger.writeClog(5,
 			'pushToQwkPeer: nothing to post for ' + peerConnectionUUID, 'tosser',
@@ -1209,8 +1221,9 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 			await transport.disconnect();
 			transport = null;
 
-			// Existing REP delivered — remove it
+			// Existing REP delivered — remove it, and the files it carried
 			fs.unlinkSync(repPath);
+			sentRepFiles(repPath);
 			alogger.writeClog(5,
 				'pushToQwkPeer: existing REP delivered and removed — ' +
 				'skipping new build this cycle to let hub process', 'tosser',
@@ -1251,7 +1264,14 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		, false, false);
 
 		returnObj.stage = 'build';
-		buildRepPacket(postItems, packetName, outDir, localQwkId, { utf8: cd.utf8 !== false });
+		buildRepPacket(postItems, packetName, outDir, localQwkId, {
+			utf8: cd.utf8 !== false,
+			extraFiles: outgoingFiles.map(function (f) { return f.path; })
+		});
+		// Which files are in it, so they go only once it is delivered, even
+		// when that is a later cycle's retry of this same REP.
+		fs.writeFileSync(repPath + '.files.json', JSON.stringify({
+			dir: outFilesDir(cd), files: outgoingFiles.map(function (f) { return f.name; }) }));
 		try { returnObj.bytes = fs.statSync(repPath).size; } catch (_) {}
 
 		// Upload
@@ -1270,8 +1290,9 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		await transport.disconnect();
 		transport = null;
 
-		// Upload succeeded — remove the local REP
+		// Upload succeeded — remove the local REP and the files it carried
 		fs.unlinkSync(repPath);
+		sentRepFiles(repPath);
 
 		// Mark all posted items as successful
 		for (var item of workItems) {
@@ -1320,6 +1341,16 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		'greenbright'
 	, false, false);
 	return returnObj;
+}
+
+// A REP has been delivered: remove the files recorded as travelling in it.
+function sentRepFiles(repPath) {
+	var side = repPath + '.files.json';
+	try {
+		var rec = JSON.parse(fs.readFileSync(side, 'utf8'));
+		removeSent(rec.dir, rec.files);
+	} catch (_) {}
+	try { fs.unlinkSync(side); } catch (_) {}
 }
 
 // Advance msg_idx for a list of work items that are all skips (no posts attempted).

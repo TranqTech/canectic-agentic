@@ -699,9 +699,13 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId, opts) {
 	fs.writeFileSync(msgPath, msgData);
 	fs.writeFileSync(headersPath, headersDatLines.join('\n') + '\n', 'latin1');
 
+	// Files travelling with the REP (#72), zipped from where they are; the
+	// caller removes them once the REP is delivered.
+	var extra = ((opts && opts.extraFiles) || []).map(function (f) { return ' ' + JSON.stringify(f); }).join('');
+
 	try {
 		execSync('zip -j ' + JSON.stringify(repPath) + ' ' +
-			JSON.stringify(msgPath) + ' ' + JSON.stringify(headersPath));
+			JSON.stringify(msgPath) + ' ' + JSON.stringify(headersPath) + extra);
 	} catch (err) {
 		throw new Error('Failed to create REP zip (is zip installed?): ' + err.message);
 	}

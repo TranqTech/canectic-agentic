@@ -154,6 +154,21 @@ Private mail sent to one of your users as QWK netmail (`user@YOURID`, or
 delivered. Netmail for a system beyond yours is not passed on yet; it is
 recorded as undeliverable with the reason.
 
+## Sending and receiving files
+
+QWK packets can carry files, the way Synchronet has always allowed. To send
+files to a system, put them in `out/files/` under that link's packet
+directory (shown on the peer page); they go with the next packet, and are
+removed once it has been delivered. A packet is sent even when the files are
+all it carries.
+
+Files that arrive in a packet are kept: in the directory an inbound wildcard
+rule names (Networking > Inbound Wildcards), otherwise in `in/files/` under
+the link's packet directory. A file with the same name as one already there
+replaces it. You get a notification for each file received. Only plain file
+names are accepted (letters, digits, dot, dash and underscore); anything else
+is refused and logged.
+
 ## Where packets are kept
 
 Each QWK link works in its own directory under `qnet/`: `qnet/<ID>.hub/` for

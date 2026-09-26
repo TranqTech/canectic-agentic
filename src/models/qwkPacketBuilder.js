@@ -26,6 +26,7 @@ import * as privateMessages from './privateMessages.js';
 import { pendingQwkPmsFor } from './qwkPmRouting.js';
 import { qnetOutDir } from '../utils/qnetPaths.js';
 import { exportDecision, withVia } from '../utils/qwkVia.js';
+import { listOutgoing, outFilesDir, removeSent } from './qwkFiles.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
 import {
 	QWK_RECORD_SIZE,
@@ -280,8 +281,12 @@ function assembleQwkPacket(options) {
 		filesToZip.push(netflagsPath);
 	}
 
+	// Files travelling with the packet (#72). Zipped from where they are and
+	// never removed here: they go when the packet is committed.
+	var extraFiles = options.extraFiles || [];
+
 	// Create zip using system zip
-	var fileArgs = filesToZip.map(f => JSON.stringify(f)).join(' ');
+	var fileArgs = filesToZip.concat(extraFiles).map(f => JSON.stringify(f)).join(' ');
 	try {
 		execSync('zip -j ' + JSON.stringify(qwkPath) + ' ' + fileArgs);
 	} catch (err) {
@@ -557,7 +562,11 @@ async function buildQwkForNode(peerConnectionUUID) {
 		, false, false);
 	}
 
-	if (messageItems.length === 0) {
+	// Files waiting for this node (#72): a packet carrying only files is
+	// still built, as Synchronet does.
+	var outgoingFiles = listOutgoing(cd);
+
+	if (messageItems.length === 0 && outgoingFiles.length === 0) {
 		alogger.writeClog(5,
 			'buildQwkForNode: no new messages for ' + remoteQwkId, 'tosser',
 			'cyan'
@@ -596,7 +605,8 @@ async function buildQwkForNode(peerConnectionUUID) {
 		controlDat:  controlDat,
 		messagesDat: msgResult.buffer,
 		headersDat:  headersDat,
-		netflagsDat: netflagsBuf
+		netflagsDat: netflagsBuf,
+		extraFiles:  outgoingFiles.map(function (f) { return f.path; })
 	});
 
 	alogger.writeClog(5,
@@ -614,7 +624,10 @@ async function buildQwkForNode(peerConnectionUUID) {
 		builtAt:       new Date().toISOString(),
 		totalMessages: messageItems.length,
 		hwm:           hwmFor(workTracker),
-		pmIds:         pmWorkItems.map(function (p) { return p.pmOutboxId; })
+		pmIds:         pmWorkItems.map(function (p) { return p.pmOutboxId; }),
+		// Files in the packet, removed from out/files when it is committed.
+		filesDir:      outFilesDir(cd),
+		files:         outgoingFiles.map(function (f) { return f.name; })
 	});
 
 	returnObj.status = true;
@@ -696,6 +709,7 @@ async function commitPending(pending) {
 		return { pas_id: k, msgId: pending.hwm[k] };
 	}));
 	for (var pmId of pending.pmIds || []) await privateMessages.markSent(pmId);
+	if (pending.filesDir && pending.files) removeSent(pending.filesDir, pending.files);
 }
 
 // Advance msg_idx for each subscription up to the highest consecutive
