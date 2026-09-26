@@ -2,7 +2,7 @@ extends ../../layouts/user
 
 block content
   style.
-    body { overflow: hidden; height: 100vh; }
+    body { overflow: hidden; height: 100vh; height: 100dvh; }
   .container-fluid.main-wrapper
     if !currentuser
       - loginMode = 'guard'
@@ -72,6 +72,7 @@ block content
               //- Thread container
               #threadContainer.card-body.p-0(
                 style='overflow-y: auto; max-height: calc(100vh - 220px);'
+                data-fit-height
                 data-shortcode=msgArea.shortcode
                 data-group-shortcode=msgArea.group_shortcode
                 data-total=totalThreads
@@ -326,3 +327,6 @@ block content
         }
       });
     });
+
+  //- Sizes the scrolling list ([data-fit-height]) to the space left on screen.
+  script(type='module' src='/js/fitHeight.js')

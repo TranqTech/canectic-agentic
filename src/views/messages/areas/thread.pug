@@ -3,7 +3,7 @@ include ../../partials/messages/moderateControls.pug
 
 block content
   style.
-    body { overflow: hidden; height: 100vh; }
+    body { overflow: hidden; height: 100vh; height: 100dvh; }
   .container-fluid.main-wrapper
     if !currentuser
       - loginMode = 'guard'
@@ -87,6 +87,7 @@ block content
             //- Message container
             #messageContainer.card-body.bg-black(
               style='overflow-y: auto; max-height: calc(100vh - 190px);'
+              data-fit-height
               data-shortcode=msgArea.shortcode
               data-threaduuid=thread.uuid
               data-force80=msgArea.ansi_area ? 'true' : 'false'
