@@ -407,6 +407,45 @@ span[style*="color: rgb(1, 1, 1)"] {
 	min-width: 0;
 }
 
+/* Area listings (/messages, /files). On a phone they were 627-664px wide on
+   a 390px screen: the header's title, toggle, sort, search and buttons all on
+   one line, and five or six table columns. Below lg the header wraps and the
+   search takes the width; below md the description moves under the area name
+   (a .d-md-none line in the name cell) instead of taking a column; below sm
+   the count column and the last poster go. Desktop is unchanged. */
+.area-search {
+	width: 220px;
+}
+.area-table td.area-num,
+.area-table td.area-badge {
+	width: 80px;
+}
+.area-table td.area-last {
+	width: 200px;
+}
+@media (max-width: 991.98px) {
+	.area-list-header {
+		flex-wrap: wrap;
+		row-gap: 0.5rem;
+	}
+	.area-list-header .area-tools {
+		flex: 1 1 100%;
+	}
+	.area-list-header .area-search {
+		flex: 1 1 auto;
+		width: auto;
+	}
+}
+@media (max-width: 575.98px) {
+	.area-table td.area-badge {
+		width: auto;
+	}
+	.area-table td.area-last {
+		width: auto;
+		white-space: nowrap;
+	}
+}
+
 /* Message headers. The left side (who, subject, date) is a flex item beside
    the buttons; without min-width: 0 it cannot shrink below its content, so
    text-truncate never truncated and a long subject pushed the header, buttons

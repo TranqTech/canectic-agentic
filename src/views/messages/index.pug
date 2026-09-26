@@ -12,26 +12,28 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        //- Side margins from lg up only; on a phone they took a third of the width.
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           .card
             .card-header.bg-darkblue.text-white
-              .d-flex.justify-content-between.align-items-center
-                .d-flex.align-items-center
+              //- Wraps below lg (styles.css, "Area listings").
+              .area-list-header.d-flex.justify-content-between.align-items-center.gap-2
+                .d-flex.flex-wrap.align-items-center.gap-2
                   h2.mb-0.me-3
                     i.bi.bi-chat-dots.me-2
                     | Message Areas
                   .btn-group.btn-group-md
                     button.btn.btn-outline-light.view-toggle.active(data-view='subscribed') Subscribed
                     button.btn.btn-outline-light.view-toggle(data-view='all') All
-                .d-flex.align-items-center
-                  button#areaSort.btn.btn-sm.btn-outline-light.me-2(
+                .area-tools.d-flex.align-items-center
+                  button#areaSort.btn.btn-sm.btn-outline-light.text-nowrap.me-2(
                     type='button'
                     title='Toggle between the sysop ordering and most recently active first'
                   )
                     i.bi.bi-sort-down.me-1
                     span#areaSortLabel Default order
-                  .input-group.input-group-sm.me-2(style='width:220px')
+                  .area-search.input-group.input-group-sm.me-2
                     span.input-group-text
                       i.bi.bi-search
                     input#areaSearch.form-control(type='text' placeholder='Search areas...')
@@ -67,12 +69,14 @@ block content
                             td
                               a.text-decoration-none(href='/messages/area/' + area.shortcode)
                                 strong= area.name
-                            td= area.description || ''
-                            td.text-center(style='width:80px')= area.msg_count || 0
-                            td.text-center(style='width:80px')
+                              if area.description
+                                .small.text-muted.d-md-none= area.description
+                            td.d-none.d-md-table-cell= area.description || ''
+                            td.area-num.text-center.d-none.d-sm-table-cell= area.msg_count || 0
+                            td.area-badge.text-center
                               if area.unread_count && area.unread_count > 0
                                 span.badge.bg-info= area.unread_count
-                            td(style='width:200px')
+                            td.area-last
                               if area.last_message
                                 .small
                                   //- "Mar 15" while recent, "Mar 2021" once old.
@@ -80,7 +84,7 @@ block content
                                   //- last week's. Exact value is in the tooltip.
                                   div(title=formatListDateFull(area.last_message) || '')
                                     span.fg-yellow= formatListDate(area.last_message)
-                                  div
+                                  div.d-none.d-sm-block
                                     span.fg-green= area.last_from || ''
               else
                 .text-center.py-4
