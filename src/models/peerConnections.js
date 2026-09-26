@@ -129,6 +129,38 @@ function buildConnectionData(networkType, formObj) {
 	}
 }
 
+// The FTN fields that decide what the mailer dials. Nodelist lookups key on
+// `address` when there is no remote_host, so it counts too.
+const FTN_DIAL_KEYS = ['address', 'remote_host', 'remote_port', 'mailer_transport', 'mailer_protocol', 'mailer_ws_url'];
+
+// connection_data for a form save over a stored row (#66). buildConnectionData
+// returns only the keys a form edits, so rebuilding from it alone threw away
+// everything the system writes for itself: NNTP/QWK high_water_marks (the next
+// NNTP pull restarted every group from its first article) and the FTN connect
+// backoff. Keys the builder does not produce are carried through unchanged.
+// The one exception is backoff when the dial target changes: those failures
+// were against the old target, and a sysop correcting a wrong host expects the
+// next poll to try it. last_success_at and last_failure_at stay as history.
+function mergeConnectionData(networkType, existing, formObj) {
+	var stored = existing || {};
+	var built  = buildConnectionData(networkType, Object.assign({}, stored, formObj));
+	var merged = Object.assign({}, stored, built);
+
+	if (networkType === 'FTN') {
+		// Compare against the stored row rebuilt the same way, so a key an old
+		// row never had (mailer_transport before it existed) reads as its
+		// default rather than as a change.
+		var before = buildConnectionData(networkType, stored);
+		var redialled = FTN_DIAL_KEYS.some(k => before[k] !== built[k]);
+		if (redialled && (parseInt(stored.consecutive_failures) || 0) > 0) {
+			merged.consecutive_failures = 0;
+			merged.next_allowed_poll_at = null;
+			merged.last_failure_reason  = null;
+		}
+	}
+	return merged;
+}
+
 // Safety-check connection_data against the network type.
 // Returns an array of error strings (empty = valid).
 function validateConnectionData(networkType, data) {
@@ -363,10 +395,7 @@ async function updateConnection(uuid, formObj) {
 	var hasDataField = dataKeys.some(k => formObj[k] !== undefined);
 
 	if (hasDataField) {
-		// Merge: spread existing stored data, overlay with incoming form fields
-		var existingData = dbconn.connection_data || {};
-		var mergedForm   = Object.assign({}, existingData, formObj);
-		var connectionData = buildConnectionData(dbnetwork.network_type, mergedForm);
+		var connectionData = mergeConnectionData(dbnetwork.network_type, dbconn.connection_data, formObj);
 		var dataErrors     = validateConnectionData(dbnetwork.network_type, connectionData);
 		if (dataErrors.length > 0) {
 			returnObj.errormessages = returnObj.errormessages.concat(dataErrors);
@@ -780,6 +809,7 @@ export {
 	getConnectionById,
 	getActiveConnectionsByNetworkType,
 	buildConnectionData,
+	mergeConnectionData,
 	validateConnectionData,
 	clearNntpHwmForArea,
 	clearQwkHwmForArea,

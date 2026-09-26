@@ -540,6 +540,8 @@ It used to be checked in `pollConnection()` only. The BSO scanner calls `_connec
 
 **Nodelist-routed addresses** have no `peer_connections` row and therefore no `connection_data` to hold backoff state, so they had no backoff of any kind. `MailerManager` keeps an in-memory map for them (`_nodelistBackoff`, address to failures and next allowed time) with the same doubling and cap, fed by both the connect error and the session end, and cleared when a session finally completes. In memory rather than persisted: these are transient routes rather than configured links, `mailer_sessions` is the durable record, and starting clean after a restart is right for a route that may exist for one batch of mail. Admin peer detail view shows current failure count, next allowed time, last reason, and a Reset button.
 
+Saving the connection's edit form keeps the backoff state (#66: it used to drop it, along with NNTP/QWK `high_water_marks`, because `buildConnectionData` returns only the keys a form edits). `mergeConnectionData` carries every other key through, and clears the failure count, next allowed time and reason only when the dial target changes (`address`, `remote_host`, `remote_port`, `mailer_transport`, `mailer_protocol`, `mailer_ws_url`), since those failures were against the old target. `last_success_at` and `last_failure_at` are kept either way.
+
 Config: `mailer_backoff_enabled` (default `true`) to toggle globally, `mailer_backoff_max_hours` for the cap.
 
 Model helpers: `peerConnections.recordConnectFailure`, `recordConnectSuccess`, `resetBackoff`, `isInBackoff`, `computeBackoffDelayMs`. JSONB writes use `jsonb_set` so concurrent updates don't clobber sysop config edits on the same row.
