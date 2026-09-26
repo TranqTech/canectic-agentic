@@ -12,21 +12,21 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           .card
             .card-header.bg-darkblue.text-white
-              .row
-                .col-8
-                  h2
+              .row.align-items-center.gy-2
+                .col-12.col-md-8
+                  h2.mb-0
                     i.bi.bi-folder2-open
                     |
                     if fileGroup
                       = fileGroup.name
                     else
                       | File Group
-                .col-4
-                  .text-end
+                .col-12.col-md-4
+                  .text-md-end
                     a.btn.btn-sm.btn-outline-light(href='/files')
                       i.bi.bi-arrow-left
                       |  Groups
@@ -38,8 +38,11 @@ block content
                 if fileGroup.description
                   p.text-muted= fileGroup.description
                 if arealist && arealist.length > 0
+                  //- On a phone each area is one cell plus a counts column
+                  //- (.list-counts), as on the message group page; the other
+                  //- columns and the header row are md and up.
                   table#areaTable.table.table-hover
-                    thead
+                    thead.list-head
                       tr
                         th(scope='col') Area
                         th(scope='col') Description
@@ -55,10 +58,25 @@ block content
                             if area.canUpload
                               |
                               i.bi.bi-upload.text-success(title='Upload available')
-                          td= area.description
-                          td.text-center= area.file_count || 0
-                          td.text-center= formatBytes(area.total_bytes || 0)
-                          td
+                            .small.d-md-none
+                              if area.description
+                                .text-muted= area.description
+                              if area.last_upload
+                                div
+                                  span.fg-yellow= DateTime.fromMillis(Date.parse(area.last_upload)).toFormat('MMM dd, yyyy')
+                                  if area.last_filename
+                                    |  
+                                    span.fg-green= area.last_filename
+                          td.list-counts.d-md-none
+                            .text-nowrap(title='Files')
+                              i.bi.bi-files.me-1
+                              = area.file_count || 0
+                            if area.new_count && area.new_count > 0
+                              span.badge.bg-info.mt-1(title='New')= area.new_count
+                          td.d-none.d-md-table-cell= area.description
+                          td.text-center.d-none.d-md-table-cell= area.file_count || 0
+                          td.text-center.d-none.d-md-table-cell= formatBytes(area.total_bytes || 0)
+                          td.d-none.d-md-table-cell
                             if area.last_upload
                               .small
                                 - var ldate = Date.parse(area.last_upload)
@@ -69,7 +87,7 @@ block content
                                   span.fg-green= area.last_filename
                             else
                               span.text-muted —
-                          td.text-center
+                          td.text-center.d-none.d-md-table-cell
                             if area.new_count && area.new_count > 0
                               span.badge.bg-info= area.new_count
                             else

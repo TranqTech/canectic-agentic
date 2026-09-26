@@ -6,8 +6,9 @@ block content
       .col-12
         br
     .row
-      .col-2
-      .col-8
+      //- Side columns from lg up only; on a phone they took a third of the width.
+      .col-2.d-none.d-lg-block
+      .col-12.col-lg-8
         h1.mb-4= title
 
         ul.nav.nav-tabs.mb-3(role='tablist')

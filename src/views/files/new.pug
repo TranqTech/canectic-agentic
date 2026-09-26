@@ -12,8 +12,8 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           nav(aria-label='breadcrumb')
             ol.breadcrumb
               li.breadcrumb-item
@@ -58,15 +58,23 @@ block content
                                     td
                                       i.bi.bi-file-earmark.me-1
                                       strong= file.filename
-                                    td.text-center.text-nowrap(style='width:90px')= formatBytes(file.file_size || 0)
-                                    td.text-nowrap(style='width:130px')
+                                      //- Phone: the details under the name, the columns md and up.
+                                      .small.d-md-none
+                                        if file.short_desc
+                                          .text-muted= file.short_desc
+                                        div
+                                          = formatBytes(file.file_size || 0)
+                                          if file.upload_date
+                                            |  · #{DateTime.fromMillis(Date.parse(file.upload_date)).toFormat('MMM dd, yyyy')}
+                                    td.text-center.text-nowrap.d-none.d-md-table-cell(style='width:90px')= formatBytes(file.file_size || 0)
+                                    td.text-nowrap.d-none.d-md-table-cell(style='width:130px')
                                       if file.upload_date
                                         - var fdate = Date.parse(file.upload_date)
                                         - var fd = DateTime.fromMillis(fdate)
                                         = fd.toFormat('MMM dd, yyyy')
                                       else
                                         span.text-muted —
-                                    td.text-muted.small= file.short_desc || ''
+                                    td.text-muted.small.d-none.d-md-table-cell= file.short_desc || ''
                           if area.new_count > area.preview.length
                             .text-muted.small.mt-1
                               | and #{area.new_count - area.preview.length} more

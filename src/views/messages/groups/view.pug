@@ -12,18 +12,18 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           .card
             .card-header.bg-darkblue.text-white
-              .row
-                .col-8
-                  h2
+              .row.align-items-center.gy-2
+                .col-12.col-md-8
+                  h2.mb-0
                     i.bi.bi-folder2-open
                     |  
                     = msgGroup.name
-                .col-4
-                  .text-end
+                .col-12.col-md-4
+                  .text-md-end
                     a.btn.btn-sm.btn-outline-light(href='/messages')
                       i.bi.bi-arrow-left
                       |  Groups
@@ -31,8 +31,11 @@ block content
               if msgGroup.description
                 p.text-muted= msgGroup.description
               if arealist && arealist.length > 0
+                //- On a phone each area is one cell plus a counts column
+                //- (.list-counts); the other columns and the header row are md
+                //- and up. Same shape as the threads list.
                 table#areaTable.table.table-hover
-                  thead
+                  thead.list-head
                     tr
                       th(scope='col') Area
                       th(scope='col') Description
@@ -44,14 +47,28 @@ block content
                       tr.clickable-row(data-href=`/messages/area/${area.shortcode}`)
                         td
                           strong= area.name
-                        td= area.description
-                        td.text-center= area.msg_count || 0
-                        td.text-center
+                          .small.d-md-none
+                            if area.description
+                              .text-muted= area.description
+                            if area.last_message
+                              div
+                                span.fg-yellow= DateTime.fromMillis(Date.parse(area.last_message)).toFormat('MMM dd, yyyy')
+                                |  by 
+                                span.fg-green= area.last_from || '—'
+                        td.list-counts.d-md-none
+                          .text-nowrap(title='Messages')
+                            i.bi.bi-chat-left.me-1
+                            = area.msg_count || 0
+                          if area.unread_count && area.unread_count > 0
+                            span.badge.bg-info.mt-1(title='Unread')= area.unread_count
+                        td.d-none.d-md-table-cell= area.description
+                        td.text-center.d-none.d-md-table-cell= area.msg_count || 0
+                        td.text-center.d-none.d-md-table-cell
                           if area.unread_count && area.unread_count > 0
                             span.badge.bg-info= area.unread_count
                           else
                             span.text-muted —
-                        td
+                        td.d-none.d-md-table-cell
                           if area.last_message
                             .small
                               - var ldate = Date.parse(area.last_message)

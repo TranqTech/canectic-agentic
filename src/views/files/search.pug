@@ -12,8 +12,8 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           //- Breadcrumb
           nav(aria-label='breadcrumb')
             ol.breadcrumb
@@ -53,24 +53,34 @@ block content
                       thead
                         tr
                           th Filename
-                          th Area
-                          th Size
-                          th Description
-                          th Downloads
+                          th.d-none.d-md-table-cell Area
+                          th.d-none.d-md-table-cell Size
+                          th.d-none.d-md-table-cell Description
+                          th.d-none.d-md-table-cell Downloads
                       tbody
                         each file in results
                           tr(data-file-uuid=file.uuid style='cursor:pointer')
                             td
                               i.bi.bi-file-earmark.me-1
                               strong= file.filename
-                            td
+                              //- Phone: the details under the name, the columns md and up.
+                              .small.d-md-none
+                                if file._areaShortcode
+                                  div
+                                    if file._groupName
+                                      span.text-muted= file._groupName + ' / '
+                                    a(href='/files/area/' + file._areaShortcode)= file._areaName || file._areaShortcode
+                                if file.short_desc
+                                  .text-muted= file.short_desc
+                                div= formatBytes(file.file_size || 0)
+                            td.d-none.d-md-table-cell
                               if file._groupName
                                 span.text-muted= file._groupName + ' / '
                               if file._areaShortcode
                                 a(href='/files/area/' + file._areaShortcode)= file._areaName || file._areaShortcode
-                            td.text-nowrap= formatBytes(file.file_size || 0)
-                            td= file.short_desc || ''
-                            td.text-center= file.download_count || 0
+                            td.text-nowrap.d-none.d-md-table-cell= formatBytes(file.file_size || 0)
+                            td.d-none.d-md-table-cell= file.short_desc || ''
+                            td.text-center.d-none.d-md-table-cell= file.download_count || 0
                 else
                   .text-center.py-4
                     h5.text-muted No results found for "#{query}"

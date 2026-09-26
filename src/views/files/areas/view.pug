@@ -12,8 +12,8 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           .card
             .card-header.bg-darkblue.text-white
               h2
@@ -29,8 +29,8 @@ block content
           br
           br
       .row
-        .col-1
-        .col-10
+        .col-1.d-none.d-lg-block
+        .col-12.col-lg-10
           //- Breadcrumb
           nav(aria-label='breadcrumb')
             ol.breadcrumb
@@ -47,27 +47,27 @@ block content
 
           .card
             .card-header.bg-darkblue.text-white
-              .row
-                .col-8
-                  h2
+              .row.align-items-center.gy-2
+                .col-12.col-md-8
+                  h2.mb-0
                     i.bi.bi-files
                     |
                     if fileArea
                       = fileArea.name
                     else
                       | File Area
-                .col-4
-                  .text-end
+                .col-12.col-md-4
+                  .d-flex.flex-wrap.gap-2.justify-content-md-end
                     if newCount && newCount > 0
-                      .btn-group.btn-group-sm.me-2
+                      .btn-group.btn-group-sm
                         a.btn.btn-outline-light(href='/files/area/' + fileArea.shortcode class=(newOnly ? '' : 'active')) All
                         a.btn.btn-outline-light(href='/files/area/' + fileArea.shortcode + '?new=1' class=(newOnly ? 'active' : ''))
                           | New
                           span.badge.bg-info.ms-1= newCount
                     else if newOnly
-                      a.btn.btn-sm.btn-outline-light.me-2(href='/files/area/' + fileArea.shortcode) All
+                      a.btn.btn-sm.btn-outline-light(href='/files/area/' + fileArea.shortcode) All
                     if fileGroup
-                      a.btn.btn-sm.btn-outline-light.me-2(href=`/files/group/${fileGroup.shortcode}`)
+                      a.btn.btn-sm.btn-outline-light(href=`/files/group/${fileGroup.shortcode}`)
                         i.bi.bi-arrow-left
                         |  Group
                     if canUpload
@@ -90,13 +90,16 @@ block content
               if filelist && filelist.length > 0
                 .table-responsive
                   table#fileTable.table.table-hover
+                    //- On a phone only the Filename column shows (so sorting and
+                    //- the filter still work); description, size and date sit
+                    //- under the name. The rest are md and up.
                     thead
                       tr
                         th(scope='col') Filename
-                        th.text-center(scope='col') Size
-                        th(scope='col') Date
-                        th(scope='col') Description
-                        th.text-center(scope='col') Downloads
+                        th.text-center.d-none.d-md-table-cell(scope='col') Size
+                        th.d-none.d-md-table-cell(scope='col') Date
+                        th.d-none.d-md-table-cell(scope='col') Description
+                        th.text-center.d-none.d-md-table-cell(scope='col') Downloads
                     tbody
                       for file of filelist
                         //- Compared as integers: postgres returns id as a
@@ -108,14 +111,22 @@ block content
                             strong= file.filename
                             if isNew
                               span.badge.bg-info.ms-2 NEW
-                          td.text-center.text-nowrap= formatBytes(file.file_size || 0)
-                          td.text-nowrap(data-order=timestampMs(file.upload_date) || 0)
+                            .small.d-md-none
+                              if file.short_desc
+                                .text-muted= file.short_desc
+                              div
+                                span= formatBytes(file.file_size || 0)
+                                if file.upload_date
+                                  |  · 
+                                  +ts(file.upload_date, 'date')
+                          td.text-center.text-nowrap.d-none.d-md-table-cell= formatBytes(file.file_size || 0)
+                          td.text-nowrap.d-none.d-md-table-cell(data-order=timestampMs(file.upload_date) || 0)
                             if file.upload_date
                               +ts(file.upload_date, 'date')
                             else
                               span.text-muted —
-                          td= file.short_desc || ''
-                          td.text-center= file.download_count || 0
+                          td.d-none.d-md-table-cell= file.short_desc || ''
+                          td.text-center.d-none.d-md-table-cell= file.download_count || 0
                 .text-muted.small.mt-2
                   if newOnly
                     | Showing #{filelist.length} of #{newCount} new files, oldest first

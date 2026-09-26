@@ -465,7 +465,8 @@ span[style*="color: rgb(1, 1, 1)"] {
 }
 /* Phone only (d-md-none in the markup): the counts column to the right of the
    subject, narrow and right-aligned, so they are not run into the text. */
-.thread-counts {
+.thread-counts,
+.list-counts {
 	width: 3.5rem;
 	text-align: right;
 	vertical-align: top;
@@ -474,7 +475,8 @@ span[style*="color: rgb(1, 1, 1)"] {
 /* Hidden below md by our own rule: Bootstrap has no d-*-table-header-group,
    so d-none there would hide the header on desktop too. */
 @media (max-width: 767.98px) {
-	.thread-head {
+	.thread-head,
+	.list-head {
 		display: none;
 	}
 }
