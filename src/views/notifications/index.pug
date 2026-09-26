@@ -29,7 +29,7 @@ block content
                   if !n.read
                     span.badge.bg-primary.ms-2 New
                   if n.body
-                    p.mb-0.mt-1.text-muted(style='font-size:0.9rem')= n.body
+                    p.mb-0.mt-1.text-muted(style='font-size:0.9rem; white-space:pre-line')= n.body
                 .text-end
                   small.text-muted= n.created_at ? new Date(n.created_at).toLocaleString() : ''
                   if n.link

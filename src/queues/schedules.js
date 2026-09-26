@@ -75,11 +75,12 @@ async function listSchedulerKeys(queue) {
  *                              real ones; a test passing its own queue can prove
  *                              the sweep against real BullMQ without touching a
  *                              live schedule.
- * @returns {number} schedulers removed
+ * @returns {Array<{key: string, queue: string}>} what was removed, so the
+ *          caller can tell the sysop (see notifyPruned)
  */
 export async function pruneOrphanSchedules(expectedKeys, queueMap) {
 	var queues  = queueMap || { mailer: mailerQueue, toss: tossQueue, maintenance: maintenanceQueue };
-	var removed = 0;
+	var removed = [];
 
 	for (var qname of Object.keys(queues)) {
 		var keys    = await listSchedulerKeys(queues[qname]);
@@ -87,7 +88,7 @@ export async function pruneOrphanSchedules(expectedKeys, queueMap) {
 		for (var key of orphans) {
 			try {
 				await queues[qname].removeJobScheduler(key);
-				removed++;
+				removed.push({ key: key, queue: qname });
 				alogger.writeAlog(3,
 					`  Removed orphan schedule ${key} from ${qname}: nothing in the database asks for it`,
 					"yellow");
@@ -99,6 +100,51 @@ export async function pruneOrphanSchedules(expectedKeys, queueMap) {
 		}
 	}
 	return removed;
+}
+
+/**
+ * Tell the sysops what an automatic prune removed, with who each schedule was
+ * for and why it no longer applies.
+ *
+ * Removing the schedule is right when polling was turned off on purpose, so
+ * the prune keeps doing it; the notification is what stops it being silent
+ * when it was not on purpose. The first prune (2026-09-13) stopped DOVE-Net
+ * and Usenet collection on the development board, connections made before
+ * poll_enabled existed, and the only record was a level 3 log line.
+ *
+ * Only the startup prune calls this. The admin routes remove a schedule
+ * because the sysop just switched polling off, and `schedules.js --prune` is
+ * run by hand and prints what it removes. Never throws: a notification that
+ * cannot be written must not fail registration.
+ */
+export async function notifyPruned(removed) {
+	if (!removed || removed.length === 0) return false;
+	try {
+		var byUuid = new Map();
+		var conns = await peerConnections.getAllConnectionsWithPeer();
+		for (var c of (conns || [])) byUuid.set(String(c.uuid), c);
+
+		var items = [];
+		for (var r of removed) {
+			var parts = scheduleFormat.schedulerKeyParts(r.key);
+			var row = null;
+			if (parts && parts.connection) row = byUuid.get(parts.id) || null;
+			else if (parts && parts.prefix === 'timed-event:') row = await timedEvents.getById(parts.id).catch(function () { return null; });
+			else if (parts && parts.prefix === 'generate-stub:') row = await coordinatorSegments.getById(parts.id).catch(function () { return null; });
+			items.push({ key: r.key, queue: r.queue, row: row || null });
+		}
+
+		var note = scheduleFormat.pruneNotification(items);
+		if (!note) return false;
+		var notif = await import('../models/notifications.js');
+		await notif.createSysop('schedule_removed', note.title, note.body, {
+			severity: 'warning', icon: 'calendar-x', link: '/admin/peers'
+		});
+		return true;
+	} catch (err) {
+		alogger.writeAlog(2, `  Could not notify about removed schedules: ${err.message}`, "yellow");
+		return false;
+	}
 }
 
 // Register a fixed schedule when it is wanted, and REMOVE it when it is not.
@@ -415,8 +461,9 @@ export async function registerSchedules() {
 		// throws on error, so a failed read leaves through the catch below and
 		// never gets here with a half-built managedKeys to prune against.
 		var pruned = await pruneOrphanSchedules(managedKeys);
-		if (pruned > 0) {
-			alogger.writeAlog(2, `  Pruned ${pruned} orphan job schedule(s)`, "yellow");
+		if (pruned.length > 0) {
+			alogger.writeAlog(2, `  Pruned ${pruned.length} orphan job schedule(s)`, "yellow");
+			await notifyPruned(pruned);
 		}
 
 	} catch (err) {

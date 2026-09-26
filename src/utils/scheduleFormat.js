@@ -173,6 +173,87 @@ function orphanSchedulerKeys(registered, expected) {
 		.filter(function (k) { return isManagedSchedulerKey(k) && !want.has(k); });
 }
 
+var FAMILY_LABELS = {
+	'poll:': 'FTN poll',
+	'qwk-pull:': 'QWK pull',
+	'qwk-push:': 'QWK push',
+	'nntp-pull:': 'NNTP pull',
+	'nntp-push:': 'NNTP push',
+	'timed-event:': 'Timed event',
+	'generate-stub:': 'Stub generation'
+};
+
+// Split a managed key into its family and the id of the row it belongs to.
+function schedulerKeyParts(key) {
+	var k = String(key || '');
+	for (var prefix of MANAGED_KEY_PREFIXES) {
+		if (k.startsWith(prefix)) {
+			return { prefix: prefix, family: FAMILY_LABELS[prefix], id: k.slice(prefix.length),
+				connection: /^(poll|qwk-|nntp-)/.test(prefix) };
+		}
+	}
+	return null;
+}
+
+// Why a removed schedule was no longer wanted, from the row it belonged to
+// (null when the row is gone). Mirrors the rules registerSchedules applies.
+function orphanReason(key, row) {
+	var parts = schedulerKeyParts(key);
+	if (!parts) return 'not a managed schedule';
+	if (!row) return parts.connection ? 'the connection no longer exists' : 'it no longer exists';
+	if (parts.connection) {
+		var cd = row.connection_data || {};
+		if (!row.active) return 'the connection is inactive';
+		if (!row.poll_enabled) return 'polling is turned off for this connection';
+		if (parts.prefix === 'poll:' && cd.status === 'HOLD') return 'the connection is on hold';
+		if (parts.prefix.startsWith('qwk-') && cd.transport === 'hub') return 'it is a hub connection, which the other side polls';
+		return 'nothing in the database asks for it';
+	}
+	if (row.active === false) return 'it is inactive';
+	if (parts.prefix === 'generate-stub:' && (!row.schedule || row.schedule === 'manual')) return 'it is set to manual';
+	return 'nothing in the database asks for it';
+}
+
+// Who a removed schedule was for, in words a sysop recognises.
+function orphanSubject(key, row) {
+	var parts = schedulerKeyParts(key);
+	if (!parts) return String(key);
+	if (!row) return parts.family + ' ' + parts.id;
+	if (parts.connection) {
+		var cd = row.connection_data || {};
+		var who = row.peer_name || cd.address || cd.host || parts.id;
+		var where = row.network_name ? ' on ' + row.network_name : '';
+		var host = cd.host || cd.mailer_host || cd.remote_host;
+		return parts.family + ' for ' + who + where + (host ? ' (' + host + ')' : '');
+	}
+	return parts.family + ' "' + (row.name || parts.id) + '"';
+}
+
+/**
+ * The sysop notification for one automatic pruning pass, or null when nothing
+ * was removed. `removed` is [{key, queue, row}], row null when it is gone.
+ *
+ * Removing a schedule is the correct response to polling being turned off, so
+ * the prune must go on doing it. But until 2026-09 connections created before
+ * poll_enabled existed ran on schedules nothing in the database asked for, and
+ * the first prune stopped DOVE-Net and Usenet collection with one level 3 log
+ * line each. A sysop who meant it reads this and moves on; one who did not now
+ * finds out the day it happens, not two weeks later from an empty area.
+ */
+function pruneNotification(removed) {
+	var list = (removed || []).filter(Boolean);
+	if (list.length === 0) return null;
+	var lines = list.map(function (r) {
+		return orphanSubject(r.key, r.row) + ': removed because ' + orphanReason(r.key, r.row) + '.';
+	});
+	var title = list.length === 1
+		? 'Schedule removed: ' + orphanSubject(list[0].key, list[0].row)
+		: list.length + ' schedules removed';
+	var body = lines.join('\n') + '\n\nIf this was not intended, turn polling back on for the connection (Peers). ' +
+		'The schedule is registered again when you save.';
+	return { title: title, body: body, lines: lines };
+}
+
 export {
 	DEFAULT_LATE_GRACE_MS,
 	DEFAULT_STALL_MS,
@@ -184,5 +265,9 @@ export {
 	stalledJobs,
 	summariseCounts,
 	isManagedSchedulerKey,
-	orphanSchedulerKeys
+	orphanSchedulerKeys,
+	schedulerKeyParts,
+	orphanReason,
+	orphanSubject,
+	pruneNotification
 };

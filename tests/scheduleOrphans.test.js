@@ -21,8 +21,10 @@
 
 import assert from 'assert';
 import { redisAvailable } from './helpers/redisAvailable.js';
+import fs from 'fs';
 import {
-	MANAGED_KEY_PREFIXES, isManagedSchedulerKey, orphanSchedulerKeys
+	MANAGED_KEY_PREFIXES, isManagedSchedulerKey, orphanSchedulerKeys,
+	schedulerKeyParts, orphanReason, orphanSubject, pruneNotification
 } from '../src/utils/scheduleFormat.js';
 
 describe('managed scheduler keys', function () {
@@ -186,7 +188,8 @@ describe('pruneOrphanSchedules against a real queue', function () {
 
 		var removed = await schedules.pruneOrphanSchedules([KEEP], { test: queue });
 
-		assert.strictEqual(removed, 1, 'exactly the orphan should have gone');
+		assert.deepStrictEqual(removed, [{ key: ORPHAN, queue: 'test' }],
+			'exactly the orphan should have gone, and be reported');
 		assert.deepStrictEqual(await keys(), [KEEP, UNMANAGED].sort(),
 			'the expected key and the unmanaged one must both survive');
 	});
@@ -197,7 +200,73 @@ describe('pruneOrphanSchedules against a real queue', function () {
 
 		var removed = await schedules.pruneOrphanSchedules([KEEP], { test: queue });
 
-		assert.strictEqual(removed, 0);
+		assert.deepStrictEqual(removed, []);
 		assert.deepStrictEqual(await keys(), [KEEP]);
+	});
+});
+
+// The prune is right to remove a schedule when polling was turned off on
+// purpose, and silent when it was not: on 2026-09-13 the first one stopped
+// DOVE-Net and Usenet collection on the development board (connections made
+// before poll_enabled existed) with one level 3 log line each. It now tells
+// the sysops what went, who it was for and why.
+describe('telling the sysop what a prune removed', function () {
+	var DOVE = {
+		uuid: '9dc0a216', active: true, poll_enabled: false,
+		peer_name: 'Vertrauen', network_name: 'DOVE-Net',
+		connection_data: { host: 'dove.synchro.net' }
+	};
+
+	it('splits a key into its family and row id', function () {
+		assert.deepStrictEqual(schedulerKeyParts('qwk-pull:9dc0a216'),
+			{ prefix: 'qwk-pull:', family: 'QWK pull', id: '9dc0a216', connection: true });
+		assert.strictEqual(schedulerKeyParts('timed-event:7').connection, false);
+		assert.strictEqual(schedulerKeyParts('scan-nodelists-daily'), null);
+	});
+
+	it('names the peer, network and host', function () {
+		assert.strictEqual(orphanSubject('qwk-pull:9dc0a216', DOVE),
+			'QWK pull for Vertrauen on DOVE-Net (dove.synchro.net)');
+		assert.strictEqual(orphanSubject('timed-event:7', { name: 'Nightly' }), 'Timed event "Nightly"');
+		assert.strictEqual(orphanSubject('poll:gone', null), 'FTN poll gone');
+	});
+
+	it('says why, in the order registration decides', function () {
+		assert.strictEqual(orphanReason('qwk-pull:x', DOVE), 'polling is turned off for this connection');
+		assert.strictEqual(orphanReason('qwk-pull:x', null), 'the connection no longer exists');
+		assert.strictEqual(orphanReason('poll:x', Object.assign({}, DOVE, { active: false })), 'the connection is inactive');
+		assert.strictEqual(orphanReason('poll:x', { active: true, poll_enabled: true, connection_data: { status: 'HOLD' } }),
+			'the connection is on hold');
+		assert.strictEqual(orphanReason('qwk-push:x', { active: true, poll_enabled: true, connection_data: { transport: 'hub' } }),
+			'it is a hub connection, which the other side polls');
+		assert.strictEqual(orphanReason('generate-stub:2', { active: true, schedule: 'manual' }), 'it is set to manual');
+		assert.strictEqual(orphanReason('timed-event:3', null), 'it no longer exists');
+	});
+
+	it('is one notification per pass, and none when nothing went', function () {
+		assert.strictEqual(pruneNotification([]), null);
+		assert.strictEqual(pruneNotification(null), null);
+
+		var one = pruneNotification([{ key: 'qwk-pull:9dc0a216', queue: 'toss', row: DOVE }]);
+		assert.strictEqual(one.title, 'Schedule removed: QWK pull for Vertrauen on DOVE-Net (dove.synchro.net)');
+		assert.match(one.body, /removed because polling is turned off for this connection\./);
+		assert.match(one.body, /turn polling back on/);
+
+		var two = pruneNotification([
+			{ key: 'qwk-pull:9dc0a216', queue: 'toss', row: DOVE },
+			{ key: 'nntp-pull:a74c', queue: 'toss', row: null }
+		]);
+		assert.strictEqual(two.title, '2 schedules removed');
+		assert.strictEqual(two.lines.length, 2);
+	});
+
+	it('is raised by the startup prune, and only there', function () {
+		var src = fs.readFileSync(new URL('../src/queues/schedules.js', import.meta.url), 'utf8');
+		var reg = src.slice(src.indexOf('export async function registerSchedules'));
+		assert.match(reg, /^\s*await notifyPruned\(pruned\);/m);
+		assert.match(src, /createSysop\('schedule_removed'/);
+		// ensureSchedule and removeConnectionSchedule are the sysop's own
+		// changes; the notification belongs to the automatic sweep.
+		assert.strictEqual((src.match(/notifyPruned\(/g) || []).length, 2, 'defined once, called once');
 	});
 });

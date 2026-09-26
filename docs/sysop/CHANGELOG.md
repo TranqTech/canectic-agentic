@@ -12,6 +12,10 @@
 
 - Fix: **changes made on the admin pages recorded nobody as having made them.** Creating or editing a message or file group, area, network or peer left "created by" and "updated by" empty; an update started from the Update page recorded no one; and closing or reopening the board for maintenance logged the sysop as `undefined`. Each now records the sysop's username. Records written before this release stay empty. A message posted from the admin message pages with its From field left blank is now posted under your username rather than no name at all.
 
+### Networking
+
+- **You are now told when a connection's polling schedule is removed.** When the BBS starts it removes any poll, QWK or NNTP schedule that nothing in the database asks for any more, such as one for a deleted connection or one whose polling is turned off. That was only a line in the log. Connections created before the Polling setting existed have it off, but kept polling until 0.9.6a, when those schedules were removed on the first restart and the connection stopped collecting mail without a word. You now get a notification naming each connection, its network and host, and why its schedule went. If you meant it, nothing to do; if not, turn polling back on for the connection under Peers. Switching polling off yourself does not notify.
+
 ### Messages
 
 - Fix: **messages looked double spaced in the web reader, worst at 80 columns on a phone.** A message body was laid out as though it were a line of text inside the page, so its lines were spaced for the page's normal text size rather than its own: roughly two and a half lines' worth each at 80 columns on a phone, and about twice what it should be everywhere else. Lines now sit at the message's own spacing, on phones and on desktop, so messages are noticeably more compact than before. Art that is too wide for the screen now scrolls sideways as intended rather than spilling out.
