@@ -463,6 +463,14 @@ span[style*="color: rgb(1, 1, 1)"] {
 .thread-meta {
 	white-space: normal;
 }
+/* Phone only (d-md-none in the markup): the counts column to the right of the
+   subject, narrow and right-aligned, so they are not run into the text. */
+.thread-counts {
+	width: 3.5rem;
+	text-align: right;
+	vertical-align: top;
+	white-space: nowrap;
+}
 /* Hidden below md by our own rule: Bootstrap has no d-*-table-header-group,
    so d-none there would hide the header on desktop too. */
 @media (max-width: 767.98px) {

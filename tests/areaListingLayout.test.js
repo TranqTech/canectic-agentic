@@ -74,6 +74,14 @@ describe('area listings on a phone', function () {
 			assert.strictEqual((script.match(/d-none d-md-table-cell/g) || []).length, 4);
 		});
 
+		it('gives replies and unread a column of their own on a phone, not the details text', function () {
+			assert.match(src, /td\.thread-counts\.d-md-none/);
+			assert.match(script, /class="thread-counts d-md-none"/);
+			var meta = script.slice(script.indexOf('thread-meta'), script.indexOf('thread-counts'));
+			assert.doesNotMatch(meta, /repl(y|ies)|badge/, 'counts are back in the details line');
+			assert.match(CSS, /\.thread-counts \{[^}]*text-align: right/);
+		});
+
 		it('hides the header row with our own rule, not a Bootstrap class that does not exist', function () {
 			assert.match(src, /thead\.thread-head/);
 			assert.doesNotMatch(src, /table-header-group/);

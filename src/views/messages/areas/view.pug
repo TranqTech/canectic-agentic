@@ -104,16 +104,20 @@ block content
                             strong= thread.subject
                             .thread-meta.small.d-md-none
                               span.fg-green= thread.started_by || '—'
-                              |  · #{(thread.message_count || 1) - 1} #{((thread.message_count || 1) - 1) === 1 ? 'reply' : 'replies'}
-                              if thread.unread_count && thread.unread_count > 0
-                                |  
-                                span.badge.bg-info= thread.unread_count
                               if thread.last_message
                                 div
                                   span.fg-yellow= DateTime.fromMillis(Date.parse(thread.last_message)).toFormat('MMM dd, yyyy HH:mm')
                                   if thread.last_message_from
                                     |  by 
                                     span.fg-green= thread.last_message_from
+                          //- Phone only: replies and unread in a column of their own
+                          //- on the right, rather than run into the details text.
+                          td.thread-counts.d-md-none
+                            .text-nowrap(title='Replies')
+                              i.bi.bi-chat-left.me-1
+                              = (thread.message_count || 1) - 1
+                            if thread.unread_count && thread.unread_count > 0
+                              span.badge.bg-info.mt-1(title='Unread')= thread.unread_count
                           td.text-center.d-none.d-md-table-cell= (thread.message_count || 1) - 1
                           td.text-center.d-none.d-md-table-cell
                             if thread.unread_count && thread.unread_count > 0
@@ -282,10 +286,12 @@ block content
           + '<td class="thread-subject"><strong>' + escapeHtml(t.subject || '') + '</strong>'
           +   '<div class="thread-meta small d-md-none">'
           +     '<span class="fg-green">' + escapeHtml(t.started_by || '—') + '</span>'
-          +     ' · ' + replies + (replies === 1 ? ' reply' : ' replies')
-          +     ((t.unread_count && t.unread_count > 0) ? ' <span class="badge bg-info">' + t.unread_count + '</span>' : '')
           +     (t.last_message ? '<div>' + lastReply + '</div>' : '')
           +   '</div>'
+          + '</td>'
+          + '<td class="thread-counts d-md-none">'
+          +   '<div class="text-nowrap" title="Replies"><i class="bi bi-chat-left me-1"></i>' + replies + '</div>'
+          +   ((t.unread_count && t.unread_count > 0) ? '<span class="badge bg-info mt-1" title="Unread">' + t.unread_count + '</span>' : '')
           + '</td>'
           + '<td class="text-center d-none d-md-table-cell">' + replies + '</td>'
           + '<td class="text-center d-none d-md-table-cell">' + unreadBadge + '</td>'
