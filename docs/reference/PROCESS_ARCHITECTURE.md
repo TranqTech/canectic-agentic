@@ -5,7 +5,7 @@
 The system runs as four independent OS processes sharing PostgreSQL and Redis. Each process can crash and restart without affecting the others. A BullMQ job queue (backed by the existing Redis instance) handles all inter-process communication.
 
 For the shared message platform (schemas, read tracking, body_html pipeline, posting), see `message_architecture.md`.
-For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`.
+For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`, and `QWK_ARCHITECTURE.md` for QWK in detail.
 For the FTN mailer (binkp, transports, file exchange), see `MAILER_ARCHITECTURE.md`.
 For private messaging (unified PM, transport adapters), see `PM_ARCHITECTURE.md`.
 
@@ -538,7 +538,7 @@ The mailer process exists for protocols that need persistent listeners and concu
 - `buildQwkForNode()` is called on demand (node requests a packet), not during toss cycle
 - HWM advances after packet build
 - Gateway triggers this via a toss job (`qwk:hub:build`) when a node connection requests its packet
-- Currently HWM advances inside `buildQwkForNode()`. Future improvement: return the HWM data without advancing, let the caller confirm delivery (node actually picked up the file), then advance. This is noted in `NETWORKING_ARCHITECTURE.md` as a future item
+- Done (a800d87): `buildQwkForNode()` no longer advances HWMs; it records them in the packet's `.qwk.json` sidecar and `commitNodePacket()`/`commitPending()` advance them once the node has the packet (acknowledgement over HTTP, or the packet collected from `out/` by a shared-directory node). See `QWK_ARCHITECTURE.md`
 
 **NNTP pull (inbound):**
 - Worker connects to NNTP server, pulls articles above per-group HWM, imports, advances HWM

@@ -5,7 +5,7 @@
 The private messaging system provides unified user-to-user messaging across multiple transports (LOCAL, FTN, QWK, EMAIL, MESHTASTIC). A single pair of tables (`pm_inbox` / `pm_outbox`) replaces the previous FTN-specific `netmail_in` / `netmail_out` tables. Transport-specific metadata lives in a JSONB `transport_data` column, keeping the schema generic while preserving full protocol fidelity.
 
 For the shared message platform (echomail areas, read tracking, body_html pipeline), see `message_architecture.md`.
-For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`.
+For the networking/tosser stack (FTN, QWK, NNTP), see `NETWORKING_ARCHITECTURE.md`; QWK private mail routing is in `QWK_ARCHITECTURE.md`.
 For the internet email transport (outbound relay, inbound gateway), see `EMAIL_ARCHITECTURE.md`.
 For the web application stack (Express, sessions, admin panel), see `web_architecture.md`.
 For the process model, job queues, and inter-process signaling, see `PROCESS_ARCHITECTURE.md`.

@@ -169,6 +169,7 @@ function extractTitle(content, fallback) {
 var TOPIC_TAGS = {
     // reference
     'NETWORKING_ARCHITECTURE.md':   ['networking', 'ftn', 'qwk', 'nntp', 'tossers', 'architecture'],
+    'QWK_ARCHITECTURE.md':          ['networking', 'qwk', 'tossers', 'hub', 'architecture'],
     'MAILER_ARCHITECTURE.md':       ['networking', 'ftn', 'mailer', 'binkp', 'architecture'],
     'PEER_INTEROP.md':              ['networking', 'ftn', 'interop', 'bbbs', 'reference'],
     'PM_ARCHITECTURE.md':           ['pm', 'messaging', 'attachments', 'architecture'],
