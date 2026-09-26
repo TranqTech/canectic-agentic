@@ -25,6 +25,7 @@ import * as systemAddresses from './systemAddresses.js';
 import * as privateMessages from './privateMessages.js';
 import { pendingQwkPmsFor } from './qwkPmRouting.js';
 import { qnetOutDir } from '../utils/qnetPaths.js';
+import { exportDecision, withVia } from '../utils/qwkVia.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
 import {
 	QWK_RECORD_SIZE,
@@ -464,8 +465,11 @@ async function buildQwkForNode(peerConnectionUUID) {
 
 			if (msglist && msglist.length > 0) {
 				for (var msg of msglist) {
-					// Echo suppression — don't send back messages that came from this network
-					if (msg.source_network_id && msg.source_network_id === dbconn.network_id) {
+					// Not back to a system already in its path (#70). This was
+					// every message from this network, so a Canectic hub never
+					// passed one node's messages on to its other nodes.
+					var decision = exportDecision(msg, dbconn.network_id, remoteQwkId);
+					if (!decision.send) {
 						workTracker.push({
 							pas_id: sub.id, msgId: msg.id, skip: true
 						});
@@ -498,6 +502,9 @@ async function buildQwkForNode(peerConnectionUUID) {
 							msg.utf8 = (msg.utf8 || '') + restoredOrigin;
 						}
 					}
+
+					// Where it came from, so the node can route replies.
+					msg.body_text = withVia(msg.body_text, decision.via);
 
 					messageItems.push({
 						msg: msg,

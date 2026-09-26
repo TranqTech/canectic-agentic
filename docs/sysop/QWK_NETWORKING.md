@@ -130,6 +130,20 @@ the peer page. Boards that set this up before per-role directories used
 new directory, so the node keeps working, but point its call-out at the
 `.node` path when you next change it.
 
+## Passing messages on
+
+A board with more than one QWK connection on a network passes messages
+between them: what one node sends goes to your other nodes and to your hub,
+and what your hub sends goes to your nodes. A message never goes back to a
+system it has already been through. Each message carries an `@VIA` line
+saying where it came from, which is what lets other boards send netmail
+replies back along the same way.
+
+Private mail sent to one of your users as QWK netmail (`user@YOURID`, or
+`NETMAIL` with the address on the first line, as Synchronet sends it) is
+delivered. Netmail for a system beyond yours is not passed on yet; it is
+recorded as undeliverable with the reason.
+
 ## Where packets are kept
 
 Each QWK link works in its own directory under `qnet/`: `qnet/<ID>.hub/` for

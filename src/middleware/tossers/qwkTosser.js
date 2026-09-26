@@ -31,6 +31,7 @@ import * as privateMessages from '../../models/privateMessages.js';
 import { pendingQwkPmsFor } from '../../models/qwkPmRouting.js';
 import * as qwkPacketBuilder from '../../models/qwkPacketBuilder.js';
 import { qnetDir, qnetInDir, qnetOutDir } from '../../utils/qnetPaths.js';
+import { senderPath, pathContains, exportDecision, withVia, parseNetmailAddress, stripFirstLine, originOf } from '../../utils/qwkVia.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
@@ -68,19 +69,44 @@ function parseQwkDateTime(dateStr, timeStr) {
 	return isNaN(d.getTime()) ? new Date() : d;
 }
 
+// Our QWK ID on a connection: its own system address, else the network's
+// default. '' when neither is set.
+async function localQwkIdFor(dbconn) {
+	var sa = null;
+	if (dbconn.system_address_id) sa = await systemAddresses.getAddressById(dbconn.system_address_id);
+	if (!sa && dbconn.network_id) sa = await systemAddresses.getDefaultAddress(dbconn.network_id);
+	return sa && sa.address ? sa.address.trim().toUpperCase() : '';
+}
+
 // ---------------------------------------------------------------------------
 // Message import (pull)
 // ---------------------------------------------------------------------------
 
 // Imports a single QWK message into the message tables for the given area.
-// Returns { status, imported, duplicate, errormessages[] }
-async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
+// `link` is { remoteQwkId, localQwkId }: who handed us the packet, and our ID
+// on that network, for the sender path and the loop check (#70).
+// Returns { status, imported, duplicate, circular, errormessages[] }
+async function importQwkMessage(qwkMsg, area, dupeId, networkId, link) {
 	var returnObj = {
 		status: false,
 		imported: false,
 		duplicate: false,
+		circular: false,
 		errormessages: []
 	};
+	var peerId  = (link && link.remoteQwkId) || '';
+	var ourId   = (link && link.localQwkId) || '';
+	var viaIn   = (qwkMsg.kludges && qwkMsg.kludges.VIA) ? qwkMsg.kludges.VIA.join(' ') : null;
+
+	// A message whose @VIA already names us has been round a loop (Synchronet
+	// route_circ): importing it would send it round again.
+	if (ourId && pathContains(viaIn, ourId)) {
+		alogger.writeClog(3, 'importQwkMessage: circular path from ' + peerId + ': ' + viaIn +
+			' (contains ' + ourId + '), not imported', 'tosser', 'yellow', false, false);
+		returnObj.status = true;
+		returnObj.circular = true;
+		return returnObj;
+	}
 
 	var shorty      = area.shortcode.toLowerCase().trim();
 	var msgtable    = 'mb_' + shorty + '_msgs';
@@ -122,8 +148,9 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 	var tzUtc    = kludges.TZUTC || kludges.TZ || null;
 	// @PID → tosser_id / product_string
 	var tosserId = kludges.PID || null;
-	// @VIA → path (routing trace, multiple entries joined)
-	var viaPath  = kludges.VIA ? kludges.VIA.join(' ') : null;
+	// Sender path, stored as Synchronet stores it: the system that handed us
+	// the message, then its @VIA. The origin is the last element (#70).
+	var viaPath  = peerId ? senderPath(peerId, viaIn) : viaIn;
 	// Origin line extracted from body
 	var originLine = qwkMsg.originLine || null;
 
@@ -205,7 +232,7 @@ async function importQwkMessage(qwkMsg, area, dupeId, networkId) {
 // Import a QWK conference 0 message as a private message
 // ---------------------------------------------------------------------------
 
-async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) {
+async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID, localQwkId) {
 	var retObj = {
 		delivered: false,
 		duplicate: false,
@@ -214,46 +241,77 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) 
 
 	var toUser = (qwkMsg.to || '').trim();
 	var fromUser = (qwkMsg.from || '').trim();
+	var bodyText = qwkMsg.bodyText || '';
+	var kludges = qwkMsg.kludges || {};
+	var viaIn = kludges.VIA ? kludges.VIA.join(' ') : null;
+
+	// Where it came from, kept as Synchronet keeps it: the system that handed
+	// it to us, then its @VIA; the writer is the last element (#70).
+	var sourcePath = senderPath(remoteQwkId, viaIn);
+	var origin = originOf(sourcePath) || remoteQwkId;
 
 	if (!toUser) {
 		retObj.errormessages.push('QWK PM has no recipient');
 		return retObj;
 	}
 
-	// Resolve recipient to a local user
-	var resolution = await privateMessages.resolveRecipient(toUser);
-	if (!resolution.resolved) {
-		// Unresolvable — send to undeliverable queue and notify sysops
-		var undeliverableMsg = {
+	var undeliverable = async function (reason, toName) {
+		await privateMessages.insertUndeliverable({
 			from_user: fromUser,
-			to_user: toUser,
-			from_address: remoteQwkId,
+			to_user: toName || toUser,
+			from_address: origin,
 			to_address: '',
 			subject: qwkMsg.subject || '',
-			body_text: qwkMsg.bodyText || '',
+			body_text: bodyText,
 			transport_type: 'QWK',
-			transport_data: JSON.stringify({
-				source: remoteQwkId,
+			transport_data: {
+				source: origin,
+				source_path: sourcePath,
 				peer_connection_uuid: peerConnectionUUID,
 				conference: 0,
 				msg_number: qwkMsg.msgNumber || 0
-			}),
-			reason: 'Recipient "' + toUser + '" not found (QWK PM from ' + remoteQwkId + ')'
-		};
-		await privateMessages.insertUndeliverable(undeliverableMsg);
+			}
+		}, reason);
 		await privateMessages.notifySysops(
-			'Undeliverable QWK PM from ' + remoteQwkId,
-			'A private message from ' + fromUser + ' to ' + toUser + ' could not be delivered.\nSubject: ' + (qwkMsg.subject || '(none)') + '\nReason: Recipient not found.'
+			'Undeliverable QWK PM from ' + origin,
+			'A private message from ' + fromUser + ' to ' + (toName || toUser) + ' could not be delivered.\nSubject: ' +
+			(qwkMsg.subject || '(none)') + '\nReason: ' + reason
 		);
-		retObj.errormessages.push('Recipient "' + toUser + '" not found');
+		retObj.errormessages.push(reason);
 		return retObj;
+	};
+
+	// Netmail forms (Synchronet netmail.cpp qwktonetmail): To = "NETMAIL" with
+	// user@address as the first body line, or To = user@address. Read before,
+	// so mail for one of our users arrived addressed to a user called
+	// "NETMAIL" or "Name@OURID" and went undeliverable.
+	var net = parseNetmailAddress(toUser, bodyText);
+	if (net) {
+		if (net.kind === 'invalid') {
+			return undeliverable('Netmail address "' + net.user + '" is not user@address', net.user);
+		}
+		if (net.kind !== 'qwk') {
+			return undeliverable('Addressed to ' + net.kind + ' address ' + net.address +
+				'; this system does not pass QWK netmail on to ' + (net.kind === 'fido' ? 'FidoNet' : 'internet mail'), net.user);
+		}
+		if (!localQwkId || net.destination !== localQwkId) {
+			return undeliverable('Addressed to ' + net.user + '@' + net.address + ', beyond this system (' +
+				(localQwkId || 'no QWK ID set') + '); QWK netmail is not relayed yet', net.user);
+		}
+		toUser = net.user;
+		if (net.firstLineUsed) bodyText = stripFirstLine(bodyText);
+	}
+
+	// Resolve recipient to a local user
+	var resolution = await privateMessages.resolveRecipient(toUser);
+	if (!resolution.resolved) {
+		return undeliverable('Recipient "' + toUser + '" not found (QWK PM from ' + origin + ')');
 	}
 
 	// Build the message object for delivery
-	var bodyText = qwkMsg.bodyText || '';
 	var msgId = '';
-	if (qwkMsg.kludges && qwkMsg.kludges.MSGID) {
-		msgId = qwkMsg.kludges.MSGID;
+	if (kludges.MSGID) {
+		msgId = kludges.MSGID;
 	} else {
 		msgId = remoteQwkId + ':0:' + (qwkMsg.msgNumber || Date.now());
 	}
@@ -263,7 +321,7 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) 
 		msg_id: msgId,
 		from_user: fromUser,
 		to_user: resolution.username,
-		from_address: remoteQwkId,
+		from_address: origin,
 		to_address: resolution.username,
 		subject: qwkMsg.subject || '',
 		body_text: bodyText,
@@ -271,12 +329,13 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) 
 		raw_text: qwkMsg.rawUtf8 || qwkMsg.rawBody || '',
 		transport_type: 'QWK',
 		transport_data: {
-			source: remoteQwkId,
+			source: origin,
+			source_path: sourcePath,
 			peer_connection_uuid: peerConnectionUUID,
 			conference: 0,
 			msg_number: qwkMsg.msgNumber || 0,
 			msg_id: msgId,
-			reply_to: (qwkMsg.kludges && qwkMsg.kludges.REPLY) || ''
+			reply_to: kludges.REPLY || ''
 		},
 		system_time: parseQwkDateTime(qwkMsg.date, qwkMsg.time) || new Date()
 	};
@@ -673,6 +732,7 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 		, false, false);
 
 		var highWaterMarks = cd.high_water_marks || {};
+		var localQwkId = await localQwkIdFor(dbconn);
 		var skippedConfs = {};
 
 		// Import messages
@@ -681,7 +741,7 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 			if (msg.conferenceNum === 0) {
 				if (!msg.isLive) continue;
 				try {
-					var pmResult = await importQwkPrivateMessage(msg, remoteQwkId, peerConnectionUUID);
+					var pmResult = await importQwkPrivateMessage(msg, remoteQwkId, peerConnectionUUID, localQwkId);
 					if (pmResult.delivered) {
 						returnObj.totalImported++;
 						alogger.writeClog(5,
@@ -724,7 +784,8 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 				msg,
 				{ shortcode: areaInfo.shortcode, id: areaInfo.area_id },
 				dupeId,
-				dbconn.network_id
+				dbconn.network_id,
+				{ remoteQwkId: remoteQwkId, localQwkId: localQwkId }
 			);
 
 			if (result.imported) {
@@ -1008,8 +1069,11 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 				var conferenceNum = parseInt(sub.areatag, 10);
 
 				for (var msg of msglist) {
-					// Echo suppression — mark as skip
-					if (msg.source_network_id && msg.source_network_id === dbconn.network_id) {
+					// Not back to a system already in its path (#70). This was
+					// every message from this network, so a board that is a node
+					// here and a hub for others never passed its nodes' mail up.
+					var decision = exportDecision(msg, dbconn.network_id, remoteQwkId);
+					if (!decision.send) {
 						workItems.push({
 							pas_id: sub.id, area_id: sub.area_id, msgtable,
 							msgId: msg.id, skip: true
@@ -1055,6 +1119,9 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 						}
 					}
 					// Case 3: foreign with tear/origin in body — leave as-is
+
+					// Where it came from, so the next system can route replies.
+					msg.body_text = withVia(msg.body_text, decision.via);
 				}
 			}
 		}
@@ -1429,5 +1496,8 @@ export {
 	pushToQwkPeer,
 	serviceHubNodes,
 	pushAllQWK,
-	resetQwkOutboundIdx
+	resetQwkOutboundIdx,
+	// For tests: one message in, without a packet around it.
+	importQwkMessage,
+	importQwkPrivateMessage
 };
