@@ -14,6 +14,8 @@
  * below its top, less whatever its card puts under it, recomputed on resize,
  * rotation and when the phone's address bar comes or goes (visualViewport).
  * The inline calc() stays as the value before this runs, and without script.
+ * `data-fit-height="height"` sets height instead, for a layout box whose
+ * children stretch to fill it (the PM inbox).
  *
  * `fitHeight` is pure and tested; the rest is wiring.
  */
@@ -50,7 +52,11 @@ export function fitAll() {
 		var el = els[i];
 		var below = spaceBelow(el);
 		var top = el.getBoundingClientRect().top;
-		el.style.maxHeight = fitHeight(visibleHeight(), top, below) + 'px';
+		var px = fitHeight(visibleHeight(), top, below) + 'px';
+		// data-fit-height="height" for a layout box whose children stretch to
+		// fill it (the PM inbox); otherwise a scrolling list's max-height.
+		if (el.getAttribute('data-fit-height') === 'height') el.style.height = px;
+		else el.style.maxHeight = px;
 	}
 }
 

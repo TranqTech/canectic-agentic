@@ -23,6 +23,11 @@
 
 - **Regenerate stored messages again**, even if you did so for 0.9.11a: `node src/tools/maintenance.js --regen-html` with the worker running (`--area SHORTCODE` for one area). Messages received before this release keep the trailing padding that wraps their last word at 80 columns until then.
 
+### Private Mail
+
+- Fix: **on a phone, opening a private message pushed Reply and Delete off the screen.** A long subject could not shrink, so the reader's header ran past the edge. On a phone the header now runs in rows (date and buttons, then the subject in full, then From and To); on a desktop a long subject is cut short to fit.
+- Fix: **the bottom of the inbox was cut off on a phone**, for the same reason as the message list: it was sized for a desktop's navigation bar and ignored the phone's address bar. It now fits the space left on screen.
+
 ## v0.9.11a (2026-09-25)
 
 ### File Echoes

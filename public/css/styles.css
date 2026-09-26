@@ -400,6 +400,13 @@ span[style*="color: rgb(1, 1, 1)"] {
 	line-height: 1.1;
 }
 
+/* Lets a flex item shrink below its content, so text-truncate and wrapping
+   can work inside it. Bootstrap has no such utility; views used this class
+   before anything defined it. */
+.min-width-0 {
+	min-width: 0;
+}
+
 /* Message headers. The left side (who, subject, date) is a flex item beside
    the buttons; without min-width: 0 it cannot shrink below its content, so
    text-truncate never truncated and a long subject pushed the header, buttons

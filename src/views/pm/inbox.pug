@@ -2,7 +2,7 @@ extends ../layouts/user
 
 block content
   style.
-    html, body { overflow: hidden; height: 100vh; margin: 0; }
+    html, body { overflow: hidden; height: 100vh; height: 100dvh; margin: 0; }
     .pm-outer { display: flex; flex-direction: column; height: calc(100vh - 56px); }
     .pm-flash-area { flex-shrink: 0; }
     .pm-layout { display: flex; flex-grow: 1; min-height: 0; }
@@ -18,6 +18,31 @@ block content
     .pm-reader-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
     .pm-reader-content { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
     .pm-reader-header { flex-shrink: 0; }
+    /* The subject side of the reader header has to be able to shrink, or a
+       long subject pushes Reply and Delete off a phone screen (min-width-0 is
+       in styles.css; it was used here before anything defined it). On a phone
+       the subject wraps in full; from lg up it is cut to one line. */
+    .pm-reader-header .pm-reader-who { flex: 1 1 auto; }
+    /* display: block because fg-cyan sets inline, and an inline box can be
+       neither truncated nor contained. */
+    #readerSubject { display: block; overflow-wrap: anywhere; }
+    @media (min-width: 992px) {
+      #readerSubject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
+    /* On a phone the header runs in full-width rows instead of two columns:
+       date and buttons first, then the subject across the whole width, then
+       From/To. Side by side, the buttons column took half the width and a
+       long subject wrapped into a strip that filled the reader. */
+    @media (max-width: 991.98px) {
+      .pm-reader-header > .d-flex { flex-wrap: wrap; row-gap: 0.25rem; }
+      .pm-reader-header .pm-reader-actions {
+        order: 1; flex-basis: 100%; margin-left: 0 !important;
+        display: flex; align-items: center; justify-content: space-between;
+      }
+      .pm-reader-header .pm-reader-when { order: 1; margin-top: 0 !important; }
+      .pm-reader-header .pm-reader-buttons { order: 2; }
+      .pm-reader-header .pm-reader-who { order: 2; flex-basis: 100%; }
+    }
     .pm-reader-body { flex-grow: 1; overflow-y: auto; min-height: 0; }
     /* 4rem trailing breathing room at the bottom of the scroll container.
        Lives on .pm-reader-body (not .messagebody) so it sits below the
@@ -66,7 +91,9 @@ block content
         - loginRedirect = currentPath
         include ../partials/users/login.pug
     else
-      .pm-outer
+      //- Height from public/js/fitHeight.js: the space actually left under the
+      //- navbar, which is taller on a phone than the 56px the calc() assumes.
+      .pm-outer(data-fit-height='height')
         .pm-flash-area.px-3.pt-2
           include ../partials/flash
 
@@ -231,15 +258,15 @@ block content
               #readerContent.pm-reader-content.pm-hidden
                 .pm-reader-header.px-3.py-2.bg-dark.border-bottom.border-secondary
                   .d-flex.justify-content-between.align-items-start
-                    div.min-width-0
-                      .fw-bold.fg-cyan.text-truncate#readerSubject
+                    div.min-width-0.pm-reader-who
+                      .fw-bold.fg-cyan#readerSubject
                       .small
                         span.text-muted From: 
                         span#readerFrom.fg-yellow
                         span.text-muted.ms-3 To: 
                         span#readerTo.fg-green
-                    .flex-shrink-0.ms-3.text-end
-                      .d-flex.gap-1.justify-content-end
+                    .pm-reader-actions.flex-shrink-0.ms-3.text-end
+                      .pm-reader-buttons.d-flex.gap-1.justify-content-end
                         button.btn.btn-sm.btn-primary#readerReplyBtn(type='button' style='display:none;')
                           i.bi.bi-reply
                           |  Reply
@@ -248,7 +275,7 @@ block content
                           |  Restore
                         button.btn.btn-sm.btn-outline-danger#readerDeleteBtn(type='button' style='display:none;')
                           i.bi.bi-trash
-                      .small.mt-1
+                      .pm-reader-when.small.mt-1
                         span#readerDate.fg-yellow
                         span.ms-2#readerTransport
 
@@ -842,3 +869,5 @@ block content
         }
       });
     });
+
+  script(type='module' src='/js/fitHeight.js')
