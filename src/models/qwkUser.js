@@ -8,6 +8,15 @@
 // Conference 0 = private messages (PMs).
 // Conference N = message area with message_areas.qwk_conf_number = N.
 
+import { PacketFileSet } from './qwkPacketFiles.js';
+import * as pmAttachments from './pmAttachments.js';
+import * as userFileBatch from './userFileBatch.js';
+import * as fileAreas from './fileAreas.js';
+import * as fileGroups from './fileGroups.js';
+import { incrementDownloadCount } from './fileEntries.js';
+import { canDownloadFileArea } from '../utils/fileAreaAccess.js';
+import { buildNewFilesDat } from './qwkNewFiles.js';
+import { isControlMessage, applyControl } from './qwkControl.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -75,7 +84,8 @@ async function buildQwkForUser(userId) {
 	// content (announcements/wall/bulletins) so each download only carries
 	// new material since the previous successful fetch.
 	var user = await postgres.queryOne(
-		"SELECT id, username, security, permissionflags, restrictionflags, last_qwk_download_at FROM users WHERE id = $1",
+		"SELECT id, username, security, permissionflags, restrictionflags, last_qwk_download_at, created_at, " +
+		"qwk_files, qwk_attach, qwk_files_since FROM users WHERE id = $1",
 		[userId]
 	);
 	if (!user) {
@@ -85,6 +95,11 @@ async function buildQwkForUser(userId) {
 
 	var bbsId = getQwkBbsId();
 	var maxPerArea = appConfig.getNumber('qwk_max_msgs_per_area', 500);
+
+	// Files that travel beside the messages (#75): attachments, the new-files
+	// list and the batch download queue, as Synchronet's pack_qwk.cpp adds them.
+	var tmpDir = path.join(os.tmpdir(), 'canectic-qwk-' + userId + '-' + Date.now());
+	var packetFiles = new PacketFileSet(tmpDir);
 
 	// Get all active areas with their groups (for access checking)
 	var allAreas = await postgres.query(
@@ -158,13 +173,26 @@ async function buildQwkForUser(userId) {
 
 	if (unreadPMs && unreadPMs.length > 0) {
 		for (var pm of unreadPMs) {
+			// Attachments go in the packet as files when the user has ATTACH on
+			// (Synchronet QWK_ATTACH, on by default), named in the message so
+			// the reader knows to look for them.
+			var pmBody = pm.body_text || '';
+			if (pm.has_attachments && user.qwk_attach !== false) {
+				var attNames = [];
+				for (var att of await pmAttachments.getAttachments(pm.uuid)) {
+					if (att.message_table && att.message_table !== 'inbox') continue;
+					var used = packetFiles.addFile(att.filename, att.storage_path);
+					if (used) attNames.push(used);
+				}
+				if (attNames.length) pmBody = pmBody.replace(/\s*$/, '') + '\r\r[Attached, in this packet: ' + attNames.join(', ') + ']\r';
+			}
 			messageItems.push({
 				msg: {
 					id: pm.id,
 					from_user: pm.from_user || '',
 					to_user: pm.to_user || user.username,
 					subject: pm.subject || '',
-					body_text: pm.body_text || '',
+					body_text: pmBody,
 					utf8: pm.utf8 ? pm.utf8 : null,
 					system_time: pm.system_time || pm.created_at || new Date(),
 					msg_id: pm.msg_id || '',
@@ -297,7 +325,35 @@ async function buildQwkForUser(userId) {
 		}
 	}
 
-	if (messageItems.length === 0) {
+	// The new-files list, when the user has it on (Synchronet QWK_FILES).
+	var newFilesCount = 0;
+	if (user.qwk_files !== false) {
+		// Since the last packet, or a date the user asked for with FILES
+		// MM/DD/YY; a first packet counts from when the account was made.
+		var since = user.qwk_files_since || user.last_qwk_download_at || user.created_at || new Date(0);
+		try {
+			var nf = await buildNewFilesDat(user, new Date(since));
+			if (nf) {
+				packetFiles.addBytes('NEWFILES.DAT', nf.bytes);
+				newFilesCount = nf.count;
+			}
+		} catch (err) {
+			alogger.writeAlog(3, 'buildQwkForUser: new-files list failed for ' + user.username + ': ' + err.message, 'yellow');
+		}
+	}
+
+	// The batch download queue (FREQ adds to it, as do the file pages), still
+	// checked against the user's access now; a file that cannot go stays queued.
+	var batchSent = [];
+	try {
+		batchSent = await addBatchFiles(user, packetFiles);
+	} catch (err) {
+		alogger.writeAlog(3, 'buildQwkForUser: download queue failed for ' + user.username + ': ' + err.message, 'yellow');
+	}
+
+	// A packet is still made when files are all it carries, as Synchronet does.
+	if (messageItems.length === 0 && packetFiles.count === 0) {
+		try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
 		returnObj.status = true;
 		return returnObj;
 	}
@@ -325,8 +381,7 @@ async function buildQwkForUser(userId) {
 		messageItems, msgResult.itemOffsets, bbsId
 	);
 
-	// Assemble packet in temp directory
-	var tmpDir = path.join(os.tmpdir(), 'canectic-qwk-' + userId + '-' + Date.now());
+	// Assemble packet in temp directory (tmpDir, made above)
 
 	var qwkPath;
 	try {
@@ -335,13 +390,20 @@ async function buildQwkForUser(userId) {
 			tmpDir:      tmpDir,
 			controlDat:  controlDat,
 			messagesDat: msgResult.buffer,
-			headersDat:  headersDat
+			headersDat:  headersDat,
+			extraFiles:  packetFiles.paths
 		});
 	} catch (err) {
 		returnObj.errormessages.push('Failed to assemble QWK packet: ' + err.message);
 		// Clean up temp dir
 		try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
 		return returnObj;
+	}
+
+	// Queued downloads went: counted, and off the queue.
+	for (var b of batchSent) {
+		await incrementDownloadCount(b.id);
+		await userFileBatch.removeFromBatch(userId, b.uuid);
 	}
 
 	// Advance area pointers
@@ -361,8 +423,9 @@ async function buildQwkForUser(userId) {
 	// only includes system-conference content (announcements, wall,
 	// bulletins) that has appeared since now.
 	try {
+		// The FILES MM/DD/YY date applies to this one packet.
 		await postgres.write(
-			"UPDATE users SET last_qwk_download_at = NOW() WHERE id = $1",
+			"UPDATE users SET last_qwk_download_at = NOW(), qwk_files_since = NULL WHERE id = $1",
 			[userId]
 		);
 	} catch (err) {
@@ -376,6 +439,9 @@ async function buildQwkForUser(userId) {
 	returnObj.qwkPath = qwkPath;
 	returnObj.totalMessages = messageItems.length;
 	returnObj.areaCount = allConferences.length;
+	returnObj.newFiles = newFilesCount;
+	returnObj.files = packetFiles.count;
+	returnObj.batchFiles = batchSent.length;
 
 	alogger.writeAlog(5,
 		'buildQwkForUser: built ' + path.basename(qwkPath) + ' for ' + user.username +
@@ -479,11 +545,21 @@ async function importRepForUser(userId, repFilePath) {
 	// assembled into a LOCAL PM delivered to the user's inbox after the
 	// import loop so they see the failures on their next QWK download.
 	var rejectionsForPm = [];
+	var controlResults = [];
 	var wallAccepted = false;
 
 	// Process each message
 	for (var msg of messages) {
 		if (!msg.isLive) continue;
+
+		// A control message to "SBBS" changes the user's QWK settings or asks
+		// for a file (#75, Synchronet qwkcfgline), in whatever conference.
+		if (isControlMessage(msg)) {
+			var ctl = await applyControl(user, msg.subject);
+			controlResults.push(ctl);
+			returnObj.details.push(ctl);
+			continue;
+		}
 
 		// Conference 0 = PM
 		if (msg.conferenceNum === 0) {
@@ -584,6 +660,14 @@ async function importRepForUser(userId, repFilePath) {
 	// see them on their next QWK download. Most mail clients don't
 	// surface per-message rejection details from the upload response,
 	// so this is the only realistic feedback loop for offline users.
+	if (controlResults.length > 0) {
+		try {
+			await deliverControlReplyPm(user, controlResults);
+		} catch (err) {
+			alogger.writeAlog(3, 'importRepForUser: settings reply failed for ' + user.username + ': ' + err.message, 'yellow');
+		}
+	}
+
 	if (rejectionsForPm.length > 0) {
 		try {
 			await deliverRepErrorPm(user, rejectionsForPm);
@@ -634,6 +718,41 @@ async function importRepWall(user, msg) {
 // Compose a LOCAL/SYSTEM PM explaining the rejected messages from a REP
 // import so the user sees them on their next QWK download. Uses the same
 // privateMessages.deliverMessage path as every other system notification.
+// Put the user's batch download queue in the packet: every queued file they
+// may still download that is still on disk. Returns the entries packed.
+async function addBatchFiles(user, packetFiles) {
+	var sent = [];
+	for (var item of await userFileBatch.loadBatch(user.id)) {
+		var area = await fileAreas.getAreaByShortcode(item.area_shortcode);
+		if (!area || area.active === false) continue;
+		var group = area.group_shortcode ? await fileGroups.getGroupByShortcode(area.group_shortcode) : null;
+		if (!canDownloadFileArea(user, area) || (group && !canDownloadFileArea(user, group))) continue;
+		var source = path.join(fileAreas.resolveAreaPath(group, area), item.disk_path || item.filename);
+		if (packetFiles.addFile(item.filename, source)) sent.push(item);
+	}
+	return sent;
+}
+
+// What the control messages in a REP did, as a private message: an offline
+// reader has no other way to learn that FILES, ATTACH or FREQ took effect.
+async function deliverControlReplyPm(user, results) {
+	var bodyText = ['Your last REP upload contained QWK control messages:', '']
+		.concat(results.map(function (r) { return '  * ' + r; })).join('\r');
+	return await privateMessages.deliverMessage({
+		user_id: user.id,
+		from_user: 'SYSTEM',
+		to_user: user.username,
+		from_address: 'SYSTEM',
+		to_address: user.username,
+		subject: 'QWK settings',
+		body_text: bodyText,
+		utf8: bodyText,
+		transport_type: 'LOCAL',
+		transport_data: { system_notification: true, source: 'qwk_rep_control' },
+		system_time: new Date()
+	});
+}
+
 async function deliverRepErrorPm(user, rejections) {
 	var bodyLines = [
 		'The following messages from your last REP upload were not processed:',

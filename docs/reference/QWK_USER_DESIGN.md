@@ -175,7 +175,23 @@ If any messages in a REP were rejected (for any reason — wall overflow, wall a
 
 Mail clients allow users to "reply" to any message they see, including announcements and bulletins. Such replies target the announcements/bulletins conference in the REP file and are rejected by our read-only policy. The user's reply shows up in their mail client's sent folder as "sent" (the client doesn't know) but never reaches Canectic's database. The rejection PM (above) tells the user their reply was dropped, but the sent-folder state in their reader is beyond our control. Worth documenting for sysops so they can pre-answer user confusion.
 
+## 1.6. Files in the packet (#75)
+
+Synchronet's personal packets carry files beside the messages (pack_qwk.cpp), and so do ours, through one `PacketFileSet` (`src/models/qwkPacketFiles.js`: plain names, never a packet's own member names, a number added on a collision, each file linked into the build directory under the name the user sees because `zip -j` stores the name on disk and a file area keeps a second `NAME.EXT` as `NAME_1.EXT`). A packet is made when files are all there is to send.
+
+- **`NEWFILES.DAT`** (`src/models/qwkNewFiles.js`) when `users.qwk_files` is on (default true, as in Synchronet's `QWK_DEFAULT`): Synchronet's layout (`New files since:`, `(n) Group (n) Area` headers with a rule as long as the header, `NAME  SIZE description` lines, `N Files Listed.`), CRLF, CP437. Files uploaded after `users.qwk_files_since` (a one-off date from `FILES MM/DD/YY`, cleared by the next packet), else `last_qwk_download_at`, else the account's `created_at`, in the file areas the user can see (`fileAreaAccess.canBrowseFileArea`, area and group) and scans for new files (`userFileSubs`), as Synchronet lists every directory not excluded from new-scan. At most 2000 files.
+- **The batch download queue** (`user_file_batch`, which the file pages and FREQ fill): every queued file the user may still download (`canDownloadFileArea` on area and group) that is on disk goes in under its listed name; each is counted (`incrementDownloadCount`) and removed from the queue once the packet is built. One that cannot go stays queued.
+- **Private mail attachments** when `users.qwk_attach` is on (default true): each unread PM's `pm_attachments` (inbox rows) go in as files, and the PM body gains a line `[Attached, in this packet: NAME, ...]` so the reader knows to look.
+
+Settings: `users.qwk_files`, `users.qwk_attach`, `users.qwk_files_since`; set by REP control messages (below) and on the web `/qwk` page (Packet Settings, `POST /qwk/settings`).
+
 ## 2. REP Import Pipeline
+
+### Control messages to SBBS (#75), `src/models/qwkControl.js`
+
+A REP message addressed to `SBBS`, in any conference, is a control message (Synchronet `qwkcfgline`, reached from un_rep.cpp). The subject is upper-cased and padded to 25 characters, as Synchronet does, so `ON ` matches with its trailing space and anything else means off: `FILES ON` / `FILES MM/DD/YY` (on, listing from that date once) / `FILES <other>`; `ATTACH ON` / `ATTACH <other>`; `FREQ <filename>`, which finds the newest active file of that name (any case) in an area the user may browse and download and adds it to their batch download queue, so it comes in the next packet. Anything else is answered as not supported. What each did is sent back as one private message, subject `QWK settings`, since an offline reader has no other way to see it.
+
+
 
 ### Entry point: `importRepForUser(userId, repFilePath)`
 

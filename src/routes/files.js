@@ -1,4 +1,5 @@
 //imports
+import { canBrowseFileArea, canDownloadFileArea } from '../utils/fileAreaAccess.js';
 import express from 'express';
 var router = express.Router();
 import { DateTime } from "luxon";
@@ -80,43 +81,13 @@ function parseFlags(val) {
 	return [];
 }
 
-// Helper: check if user has sufficient access to read a file area or group.
+// Browse and download access: the shared rules in src/utils/fileAreaAccess.js.
 function checkFileAreaBrowseAccess(sessionUser, areaOrGroup) {
-	if (!areaOrGroup) return false;
-	var userSecurity = parseInt(sessionUser.security) || 0;
-	// browse_security is the visibility gate; falls back to read_security if not set
-	var browseSec = areaOrGroup.browse_security !== null && areaOrGroup.browse_security !== undefined
-		? parseInt(areaOrGroup.browse_security)
-		: (areaOrGroup.read_security ? parseInt(areaOrGroup.read_security) : 0);
-	if (userSecurity < browseSec) return false;
-
-	var userPerms  = parseFlags(sessionUser.permissionflags);
-	var userRestrs = parseFlags(sessionUser.restrictionflags);
-	// browse flags fall back to read flags if not set
-	var reqFlags   = parseFlags(areaOrGroup.browse_perm_flags || areaOrGroup.read_perm_flags);
-	var restFlags  = parseFlags(areaOrGroup.browse_rest_flags || areaOrGroup.read_rest_flags);
-
-	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
-	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
-
-	return true;
+	return canBrowseFileArea(sessionUser, areaOrGroup);
 }
 
-// Helper: check if user has sufficient access to download from a file area or group.
 function checkFileAreaReadAccess(sessionUser, areaOrGroup) {
-	if (!areaOrGroup) return false;
-	var userSecurity = parseInt(sessionUser.security) || 0;
-	if (areaOrGroup.read_security && userSecurity < areaOrGroup.read_security) return false;
-
-	var userPerms  = parseFlags(sessionUser.permissionflags);
-	var userRestrs = parseFlags(sessionUser.restrictionflags);
-	var reqFlags   = parseFlags(areaOrGroup.read_perm_flags);
-	var restFlags  = parseFlags(areaOrGroup.read_rest_flags);
-
-	if (reqFlags.length > 0 && !reqFlags.every(function(f) { return userPerms.includes(f); })) return false;
-	if (restFlags.length > 0 && restFlags.some(function(f) { return userRestrs.includes(f); })) return false;
-
-	return true;
+	return canDownloadFileArea(sessionUser, areaOrGroup);
 }
 
 // Helper: check if user has sufficient access to upload to a file area or group.

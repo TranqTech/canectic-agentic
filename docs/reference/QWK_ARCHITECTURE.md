@@ -279,6 +279,10 @@ Separate from the network-level QWK tosser, the user QWK system (`src/models/qwk
 - **Web**: `/qwk` (transfer page), `/qwk/download` (packet download), `/qwk/upload` (REP upload)
 - **Terminal**: `qwkTransfer` menu command — D/U/Q hotkey menu, ZMODEM/XMODEM protocol selection
 
+### Files and control messages (#75)
+
+Personal packets carry the new-files list (`NEWFILES.DAT`), the user's batch download queue and private mail attachments, and REP messages to `SBBS` (`FILES`, `ATTACH`, `FREQ`) change those settings or queue a file, as Synchronet's offline-reader packets do. See `QWK_USER_DESIGN.md` sections 1.6 and 2.
+
 ### Config keys
 
 - `qwk_enabled` (boolean, default true) — enable/disable user QWK transfers

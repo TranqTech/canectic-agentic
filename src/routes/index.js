@@ -1,4 +1,6 @@
 //imports
+import * as postgres from '../middleware/db/postgres.js';
+import * as userFileBatch from '../models/userFileBatch.js';
 import express from 'express';
 const router = express.Router();
 // ..stuff below
@@ -1441,6 +1443,9 @@ router.get('/qwk', async (req, res) => {
 	for (var ns of newSummary) totalNew += ns.unread_count;
 
 	var unreadPMs = await privateMessages.getUnreadCount(currentuser.id);
+	// Offline-reader file settings and the download queue the packet carries (#75)
+	var qwkPrefs = await postgres.queryOne('SELECT qwk_files, qwk_attach FROM users WHERE id = $1', [currentuser.id]) || {};
+	var queuedFiles = await userFileBatch.getBatchCount(currentuser.id);
 
 	res.render('qwk/index', {
 		title: 'QWK Mail Transfer',
@@ -1450,8 +1455,23 @@ router.get('/qwk', async (req, res) => {
 		subscribedCount: subscribedShortcodes.length,
 		newMessageCount: totalNew,
 		unreadPMCount: unreadPMs,
+		queuedFiles: queuedFiles,
+		qwkFiles: qwkPrefs.qwk_files !== false,
+		qwkAttach: qwkPrefs.qwk_attach !== false,
 		flash: await flash.get(req)
 	});
+});
+
+// Offline-reader settings (#75): the same two FILES and ATTACH switch in a REP.
+router.post('/qwk/settings', urlencodedParser, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	if (!currentuser) return res.redirect('/');
+	// Each checkbox sends a hidden 'false' first, so ticked is ['false', 'true'].
+	var ticked = function (v) { return [].concat(v || []).indexOf('true') !== -1; };
+	var err = await postgres.write('UPDATE users SET qwk_files = $1, qwk_attach = $2 WHERE id = $3',
+		[ticked(req.body.qwk_files), ticked(req.body.qwk_attach), currentuser.id]);
+	await flash.setOne(req, err ? 'danger' : 'success', err ? 'Your QWK settings were not saved.' : 'QWK settings saved.');
+	res.redirect('/qwk');
 });
 
 // Download QWK packet

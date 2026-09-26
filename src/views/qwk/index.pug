@@ -37,10 +37,19 @@ block content
                         span.badge.bg-info= unreadPMCount
                       else
                         span.text-muted 0
-              if newMessageCount > 0 || unreadPMCount > 0
+                  tr
+                    td Queued downloads
+                    td
+                      if queuedFiles > 0
+                        span.badge.bg-warning.text-dark= queuedFiles
+                      else
+                        span.text-muted 0
+              //- A packet can carry files (queued downloads, the new-files list)
+              //- as well as messages, so the button stays usable.
+              if newMessageCount > 0 || unreadPMCount > 0 || queuedFiles > 0
                 a.btn.btn-primary(href='/qwk/download') Download QWK Packet
               else
-                a.btn.btn-secondary.disabled(href='#') No New Messages
+                a.btn.btn-outline-secondary(href='/qwk/download') Download QWK Packet
 
         .col-md-6
           .card.mb-3
@@ -53,3 +62,22 @@ block content
                   label.form-label(for='repfile') Select .rep file:
                   input.form-control(type='file' id='repfile' name='repfile' accept='.rep' required)
                 button.btn.btn-success(type='submit') Upload REP Packet
+
+          .card.mb-3
+            .card-header
+              h5.mb-0 Packet Settings
+            .card-body
+              form(method='POST' action='/qwk/settings')
+                .form-check
+                  input(type='hidden' name='qwk_files' value='false')
+                  input.form-check-input#qwk_files(type='checkbox' name='qwk_files' value='true' checked=qwkFiles)
+                  label.form-check-label(for='qwk_files') Include a list of new files (NEWFILES.DAT)
+                .form-check.mb-2
+                  input(type='hidden' name='qwk_attach' value='false')
+                  input.form-check-input#qwk_attach(type='checkbox' name='qwk_attach' value='true' checked=qwkAttach)
+                  label.form-check-label(for='qwk_attach') Include private mail attachments
+                p.small.text-muted
+                  | Files you queue for download also come in your next packet. From your QWK reader, send a
+                  | message to SBBS with the subject FILES ON, FILES OFF, ATTACH ON, ATTACH OFF, or
+                  | FREQ followed by a file name to ask for a file.
+                button.btn.btn-outline-primary(type='submit') Save Settings
