@@ -20,6 +20,31 @@
 import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
 import appConfig from '../config/appConfig.js';
 
+/**
+ * queue.add() with the dedupe the jobId convention above intends: a second
+ * job with the same id is refused while the first is waiting, delayed or
+ * running, and runs once the first has finished.
+ *
+ * Plain queue.add() refuses an id that exists in ANY state, completed and
+ * failed included, and the queues keep the last 50 to 500 of those. So a
+ * fixed id ran once and then every later request returned the old completed
+ * job and did nothing, silently, until enough other jobs had pushed it out:
+ * a second `--regen-html`, a second manual QWK pull, a second fix-msgids.
+ * A finished job with the id is removed first, so the new one is added.
+ */
+export async function addDeduped(queue, name, data, opts) {
+	var id = opts && opts.jobId;
+	if (id) {
+		var existing = await queue.getJob(id);
+		if (existing) {
+			var state = await existing.getState();
+			if (state !== 'completed' && state !== 'failed') return existing;
+			try { await existing.remove(); } catch (_) {}
+		}
+	}
+	return queue.add(name, data, opts);
+}
+
 // =========================================================================
 // Toss jobs
 // =========================================================================
@@ -29,7 +54,7 @@ import appConfig from '../config/appConfig.js';
  * Called by: mailer (after file receive), admin (manual toss), CLI.
  */
 export async function enqueueFtnInbound(opts = {}) {
-	return tossQueue.add('ftn:inbound', {
+	return addDeduped(tossQueue, 'ftn:inbound', {
 		connectionUUID: opts.connectionUUID || null,
 		sourceDir: opts.sourceDir || null,
 	}, {
@@ -44,7 +69,7 @@ export async function enqueueFtnInbound(opts = {}) {
  * Called by: gateway (after user post), admin, CLI, scheduler.
  */
 export async function enqueueFtnOutbound(connectionUUID) {
-	return tossQueue.add('ftn:outbound', { connectionUUID }, {
+	return addDeduped(tossQueue, 'ftn:outbound', { connectionUUID }, {
 		jobId: connectionUUID
 			? `ftn-outbound--${connectionUUID}`
 			: `ftn-outbound--${Date.now()}`,
@@ -56,7 +81,7 @@ export async function enqueueFtnOutbound(connectionUUID) {
  * Called by: scheduler (repeatable), admin, CLI.
  */
 export async function enqueueQwkPull(connectionUUID) {
-	return tossQueue.add('qwk:pull', { connectionUUID }, {
+	return addDeduped(tossQueue, 'qwk:pull', { connectionUUID }, {
 		jobId: `qwk-pull--${connectionUUID}`,
 	});
 }
@@ -68,7 +93,7 @@ export async function enqueueQwkPull(connectionUUID) {
  * enqueueQwkPull() for finer control.
  */
 export async function enqueueQwkPullAll() {
-	return tossQueue.add('qwk:pull-all', {}, {
+	return addDeduped(tossQueue, 'qwk:pull-all', {}, {
 		jobId: `qwk-pull-all--${Date.now()}`,
 	});
 }
@@ -78,7 +103,7 @@ export async function enqueueQwkPullAll() {
  * Called by: scheduler (repeatable), admin, CLI.
  */
 export async function enqueueQwkPush(connectionUUID) {
-	return tossQueue.add('qwk:push', { connectionUUID }, {
+	return addDeduped(tossQueue, 'qwk:push', { connectionUUID }, {
 		jobId: `qwk-push--${connectionUUID}`,
 	});
 }
@@ -88,7 +113,7 @@ export async function enqueueQwkPush(connectionUUID) {
  * Convenience for CLI — same rationale as enqueueQwkPullAll().
  */
 export async function enqueueQwkPushAll() {
-	return tossQueue.add('qwk:push-all', {}, {
+	return addDeduped(tossQueue, 'qwk:push-all', {}, {
 		jobId: `qwk-push-all--${Date.now()}`,
 	});
 }
@@ -98,7 +123,7 @@ export async function enqueueQwkPushAll() {
  * Called by: gateway (node drops .rep), filesystem watcher, admin.
  */
 export async function enqueueQwkHubInbound(connectionUUID) {
-	return tossQueue.add('qwk:hub:inbound', { connectionUUID }, {
+	return addDeduped(tossQueue, 'qwk:hub:inbound', { connectionUUID }, {
 		jobId: `qwk-hub-inbound--${connectionUUID}`,
 	});
 }
@@ -108,7 +133,7 @@ export async function enqueueQwkHubInbound(connectionUUID) {
  * Called by: scheduler (repeatable), admin, CLI.
  */
 export async function enqueueNntpPull(connectionUUID) {
-	return tossQueue.add('nntp:pull', { connectionUUID }, {
+	return addDeduped(tossQueue, 'nntp:pull', { connectionUUID }, {
 		jobId: `nntp-pull--${connectionUUID}`,
 	});
 }
@@ -118,7 +143,7 @@ export async function enqueueNntpPull(connectionUUID) {
  * Convenience for CLI — calls pullAllNNTP() internally.
  */
 export async function enqueueNntpPullAll() {
-	return tossQueue.add('nntp:pull-all', {}, {
+	return addDeduped(tossQueue, 'nntp:pull-all', {}, {
 		jobId: `nntp-pull-all--${Date.now()}`,
 	});
 }
@@ -128,7 +153,7 @@ export async function enqueueNntpPullAll() {
  * Called by: scheduler (repeatable), admin, CLI.
  */
 export async function enqueueNntpPush(connectionUUID) {
-	return tossQueue.add('nntp:push', { connectionUUID }, {
+	return addDeduped(tossQueue, 'nntp:push', { connectionUUID }, {
 		jobId: `nntp-push--${connectionUUID}`,
 	});
 }
@@ -138,7 +163,7 @@ export async function enqueueNntpPush(connectionUUID) {
  * Convenience for CLI — calls pushAllNNTP() internally.
  */
 export async function enqueueNntpPushAll() {
-	return tossQueue.add('nntp:push-all', {}, {
+	return addDeduped(tossQueue, 'nntp:push-all', {}, {
 		jobId: `nntp-push-all--${Date.now()}`,
 	});
 }
@@ -148,7 +173,7 @@ export async function enqueueNntpPushAll() {
  * Called by: mailer (after file receive, alongside ftn:inbound), admin, CLI.
  */
 export async function enqueueTicInbound(opts = {}) {
-	return tossQueue.add('tic:inbound', {
+	return addDeduped(tossQueue, 'tic:inbound', {
 		connectionUUID: opts.connectionUUID || null,
 		sourceDir: opts.sourceDir || null,
 	}, {
@@ -163,7 +188,7 @@ export async function enqueueTicInbound(opts = {}) {
  * Called by: upload handler (networked area), tic:inbound (forwarding), admin, CLI.
  */
 export async function enqueueTicOutbound(opts = {}) {
-	return tossQueue.add('tic:outbound', {
+	return addDeduped(tossQueue, 'tic:outbound', {
 		connectionUUID: opts.connectionUUID || null,
 	}, {
 		jobId: opts.connectionUUID
@@ -177,7 +202,7 @@ export async function enqueueTicOutbound(opts = {}) {
  * Called by: privateMessages (after EMAIL PM queued), outbound-sweep.
  */
 export async function enqueueEmailOutbound() {
-	return tossQueue.add('email:outbound', {}, {
+	return addDeduped(tossQueue, 'email:outbound', {}, {
 		jobId: `email-outbound--${Date.now()}`,
 	});
 }
@@ -230,7 +255,7 @@ export async function enqueueTossCycle(opts = {}) {
  * Called by: worker (after FTN outbound toss).
  */
 export async function enqueueMailerSignalOutbound(connectionUUID) {
-	return mailerQueue.add('signal-outbound', { connectionUUID }, {
+	return addDeduped(mailerQueue, 'signal-outbound', { connectionUUID }, {
 		jobId: `signal-outbound--${connectionUUID}`,
 	});
 }
@@ -241,7 +266,7 @@ export async function enqueueMailerSignalOutbound(connectionUUID) {
  * Called by: admin panel, CLI.
  */
 export async function enqueueMailerTriggerPoll(connectionUUID) {
-	return mailerQueue.add('trigger-poll', { connectionUUID }, {
+	return addDeduped(mailerQueue, 'trigger-poll', { connectionUUID }, {
 		jobId: `trigger-poll--${connectionUUID}--${Date.now()}`,
 	});
 }
@@ -253,7 +278,7 @@ export async function enqueueMailerTriggerPoll(connectionUUID) {
  * outbound delivery triggering.
  */
 export async function enqueueMailerBsoScan() {
-	return mailerQueue.add('bso-scan', {}, {
+	return addDeduped(mailerQueue, 'bso-scan', {}, {
 		jobId: `bso-scan--${Date.now()}`,
 	});
 }
@@ -263,7 +288,7 @@ export async function enqueueMailerBsoScan() {
  * Called by: outbound tosser when routing via nodelist.
  */
 export async function enqueueMailerNodelistConnect(nodelistData, destinationAddress) {
-	return mailerQueue.add('nodelist-connect', {
+	return addDeduped(mailerQueue, 'nodelist-connect', {
 		nodelistData: nodelistData,
 		destinationAddress: destinationAddress,
 	}, {
@@ -280,7 +305,7 @@ export async function enqueueMailerNodelistConnect(nodelistData, destinationAddr
  * Called by: scheduler (daily), admin.
  */
 export async function enqueueUserMaintenance() {
-	return maintenanceQueue.add('user-maintenance', {}, {
+	return addDeduped(maintenanceQueue, 'user-maintenance', {}, {
 		jobId: 'user-maintenance',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -291,7 +316,7 @@ export async function enqueueUserMaintenance() {
  * Called by: scheduler (daily), admin.
  */
 export async function enqueueFileMaintenance() {
-	return maintenanceQueue.add('file-maintenance', {}, {
+	return addDeduped(maintenanceQueue, 'file-maintenance', {}, {
 		jobId: 'file-maintenance',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -302,7 +327,7 @@ export async function enqueueFileMaintenance() {
  * Called by: admin panel, CLI, scheduler.
  */
 export async function enqueueRegenHtml(opts = {}) {
-	return maintenanceQueue.add('regen-html', {
+	return addDeduped(maintenanceQueue, 'regen-html', {
 		areas: opts.areas || null,
 		batchSize: opts.batchSize || 100,
 		forceWidth: opts.forceWidth || null,
@@ -317,7 +342,7 @@ export async function enqueueRegenHtml(opts = {}) {
  * Called by: admin panel, CLI, scheduler.
  */
 export async function enqueueRegenPmHtml(opts = {}) {
-	return maintenanceQueue.add('regen-pm-html', {
+	return addDeduped(maintenanceQueue, 'regen-pm-html', {
 		batchSize: opts.batchSize || 100,
 		forceWidth: opts.forceWidth || null,
 	}, {
@@ -335,7 +360,7 @@ export async function enqueueRegenPmHtml(opts = {}) {
 export async function enqueuePurgePmTrash(days) {
 	// Days only when the caller chose them; otherwise the job reads the
 	// setting when it runs (src/maintenance/retention.js).
-	return maintenanceQueue.add('purge-pm-trash', days ? { days: days, manual: true } : {}, {
+	return addDeduped(maintenanceQueue, 'purge-pm-trash', days ? { days: days, manual: true } : {}, {
 		jobId: 'purge-pm-trash',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -351,7 +376,7 @@ export async function enqueuePurgePmTrash(days) {
  * disk reclaim.
  */
 export async function enqueuePmPurgedCleanup() {
-	return maintenanceQueue.add('pm-purged-cleanup', {}, {
+	return addDeduped(maintenanceQueue, 'pm-purged-cleanup', {}, {
 		jobId: 'pm-purged-cleanup',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -362,7 +387,7 @@ export async function enqueuePmPurgedCleanup() {
  * Called by: admin panel.
  */
 export async function enqueueRecalcAreaCounts() {
-	return maintenanceQueue.add('recalc-area-counts', {}, {
+	return addDeduped(maintenanceQueue, 'recalc-area-counts', {}, {
 		jobId: 'recalc-area-counts',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -373,7 +398,7 @@ export async function enqueueRecalcAreaCounts() {
  * Called by: admin panel, CLI.
  */
 export async function enqueueRethread(opts = {}) {
-	return maintenanceQueue.add('rethread', {
+	return addDeduped(maintenanceQueue, 'rethread', {
 		areas: opts.areas || null,
 		dryRun: opts.dryRun || false,
 	}, {
@@ -390,7 +415,7 @@ export async function enqueueRethread(opts = {}) {
  * Called by: admin panel (bulk message base import).
  */
 export async function enqueueBulkMsgBaseImport(opts = {}) {
-	return maintenanceQueue.add('bulk-msgbase-import', {
+	return addDeduped(maintenanceQueue, 'bulk-msgbase-import', {
 		mappings: opts.mappings || [],
 		seal: opts.seal !== false,
 	}, {
@@ -409,7 +434,7 @@ export async function enqueueBulkMsgBaseImport(opts = {}) {
  * Called by: maintenance CLI (--fix-msgids).
  */
 export async function enqueueFixMsgIds(opts = {}) {
-	return maintenanceQueue.add('fix-msgids', {
+	return addDeduped(maintenanceQueue, 'fix-msgids', {
 		areas: opts.areas || null,
 		dryRun: opts.dryRun || false,
 		batchSize: opts.batchSize || 500,
@@ -425,7 +450,7 @@ export async function enqueueFixMsgIds(opts = {}) {
  * Called by: scheduler (daily), admin panel.
  */
 export async function enqueueReconcileEcholists() {
-	return maintenanceQueue.add('reconcile-echolists', {}, {
+	return addDeduped(maintenanceQueue, 'reconcile-echolists', {}, {
 		jobId: 'reconcile-echolists',
 		removeOnComplete: true,
 		removeOnFail: true,
@@ -437,7 +462,7 @@ export async function enqueueReconcileEcholists() {
  * Called by: admin panel, CLI.
  */
 export async function enqueueRegenFileDescHtml(opts = {}) {
-	return maintenanceQueue.add('regen-file-desc-html', {
+	return addDeduped(maintenanceQueue, 'regen-file-desc-html', {
 		batchSize: opts.batchSize || 100,
 	}, {
 		jobId: 'regen-file-desc-html',
@@ -450,7 +475,7 @@ export async function enqueueRegenFileDescHtml(opts = {}) {
  * Called by: admin panel.
  */
 export async function enqueueRecalcFileCounts() {
-	return maintenanceQueue.add('recalc-file-counts', {}, {
+	return addDeduped(maintenanceQueue, 'recalc-file-counts', {}, {
 		jobId: 'recalc-file-counts',
 		removeOnComplete: true, removeOnFail: true,
 	});
@@ -461,7 +486,7 @@ export async function enqueueRecalcFileCounts() {
  * Called by: admin panel, CLI.
  */
 export async function enqueueScanFileArea(areaShortcode) {
-	return maintenanceQueue.add('scan-file-area', {
+	return addDeduped(maintenanceQueue, 'scan-file-area', {
 		areaShortcode: areaShortcode,
 	}, {
 		jobId: `scan-file-area--${areaShortcode}`,
@@ -485,13 +510,13 @@ export async function enqueueScanFileArea(areaShortcode) {
  * sysop sets max_age_days or max_messages somewhere.
  */
 export async function enqueueMessageMaintenance() {
-	return maintenanceQueue.add('message-maintenance', {}, {
+	return addDeduped(maintenanceQueue, 'message-maintenance', {}, {
 		jobId: 'message-maintenance',
 	});
 }
 
 export async function enqueueEcholistBatchSubscribe(opts = {}) {
-	return maintenanceQueue.add('echolist:batch-subscribe', {
+	return addDeduped(maintenanceQueue, 'echolist:batch-subscribe', {
 		networkId: opts.networkId,
 		areatags:  opts.areatags || [],
 		settings:  opts.settings || {},
@@ -506,7 +531,7 @@ export async function enqueueEcholistBatchSubscribe(opts = {}) {
  * still a directory and a scan pointer per user each time.
  */
 export async function enqueueFileboneBatchSubscribe(opts = {}) {
-	return maintenanceQueue.add('filebone:batch-subscribe', {
+	return addDeduped(maintenanceQueue, 'filebone:batch-subscribe', {
 		networkId: opts.networkId,
 		areatags:  opts.areatags || [],
 		settings:  opts.settings || {},
@@ -516,7 +541,7 @@ export async function enqueueFileboneBatchSubscribe(opts = {}) {
 }
 
 export async function enqueueNodelistImport(opts = {}) {
-	return maintenanceQueue.add('import-nodelist', {
+	return addDeduped(maintenanceQueue, 'import-nodelist', {
 		filePath:     opts.filePath,
 		networkId:    opts.networkId,
 		originalName: opts.originalName || null,
@@ -526,28 +551,28 @@ export async function enqueueNodelistImport(opts = {}) {
 }
 
 export async function enqueueScanNodelists() {
-	return maintenanceQueue.add('scan-nodelists', {}, {
+	return addDeduped(maintenanceQueue, 'scan-nodelists', {}, {
 		jobId: 'scan-nodelists-manual',
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
 export async function enqueueScanEcholists() {
-	return maintenanceQueue.add('scan-echolists', {}, {
+	return addDeduped(maintenanceQueue, 'scan-echolists', {}, {
 		jobId: 'scan-echolists-manual',
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
 export async function enqueuePurgeTossed(days) {
-	return maintenanceQueue.add('purge-tossed', days ? { days: days, manual: true } : {}, {
+	return addDeduped(maintenanceQueue, 'purge-tossed', days ? { days: days, manual: true } : {}, {
 		jobId: 'purge-tossed-manual',
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
 
 export async function enqueuePurgeBadEchomail() {
-	return maintenanceQueue.add('purge-bad-echomail', {}, {
+	return addDeduped(maintenanceQueue, 'purge-bad-echomail', {}, {
 		jobId: 'purge-bad-echomail-manual',
 		removeOnComplete: true, removeOnFail: true,
 	});

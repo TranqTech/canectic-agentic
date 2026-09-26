@@ -66,6 +66,9 @@ function producedFor(queueVar) {
 	for (var rel of PRODUCER_FILES) {
 		var src = read(rel);
 		for (var n of extract(src, new RegExp(queueVar + "\\.add\\('([a-z0-9:-]+)'", 'g'))) names.add(n);
+		// jobs.js goes through addDeduped(queue, 'name', ...) since the
+		// completed-job dedupe fix; same producer, different spelling.
+		for (var d of extract(src, new RegExp("addDeduped\\(" + queueVar + ", '([a-z0-9:-]+)'", 'g'))) names.add(d);
 		for (var s of extractSchedulerNames(src, queueVar)) names.add(s);
 	}
 	return names;
