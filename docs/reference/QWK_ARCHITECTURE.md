@@ -101,7 +101,9 @@ var result = await buildQwkForNode('9f894ef9-5333-42c2-826b-caaf84cb457e');
 ```javascript
 {
   status: true,           // false if error
-  qwkPath: '/home/.../qwk/NODEID/out/OURID.qwk',  // path to generated packet, null if no messages
+  qwkPath: '/home/.../qnet/NODEID.node/out/OURID.qwk',  // null if nothing to send
+  packetId: 'uuid',       // what the node acknowledges
+  reused: false,          // true when an uncollected packet was offered again
   totalMessages: 12,      // messages included in packet
   totalSkipped: 3,        // echo-suppressed messages
   errormessages: []       // error strings if status=false
@@ -112,17 +114,17 @@ var result = await buildQwkForNode('9f894ef9-5333-42c2-826b-caaf84cb457e');
 
 1. Loads the peer connection and resolves the local system address (explicit on connection, or network default)
 2. Resolves origin line from system address, falls back to `boardname` env var + QWK-ID
-3. Deletes any stale `.qwk` in the output directory
+3. Commits a packet the node has already collected (a sidecar with no packet beside it), then returns any packet still waiting unchanged (`reused: true`)
 4. Queries all enabled subscriptions for the connection
 5. For each subscription, gathers messages above the current `msg_idx` (up to 500 per area)
-6. Applies echo suppression (skips messages with `source_network_id` matching the connection's network)
+6. Decides per message with `exportDecision` (#70): nothing goes to a system already in its sender path, and passed-on mail carries `@VIA`
 7. Applies tear/origin: local messages get `|| Canectic ||` origin, foreign messages get their original origin restored if it was stripped
 8. Builds CONTROL.DAT with BBS info and conference list
 9. Builds MESSAGES.DAT with Record 0 header block
 10. Builds HEADERS.DAT with full-length fields and Message-IDs
 11. Builds NETFLAGS.DAT (all 0x01)
 12. Zips everything into `cwd/qnet/<NODE_ID>.node/out/<OUR_ID>.qwk`
-13. Advances `msg_idx` for all subscriptions
+13. Commits nothing: writes the `.qwk.json` sidecar (HWMs, PM ids, files) for `commitNodePacket()`/`commitPending()` once the node has the packet. Private mail comes from `pendingQwkPmsFor`, files from `out/files/`; a packet with only PMs or only files is still built
 
 ### Committing: only on acknowledgement
 
@@ -177,13 +179,9 @@ logged and the hub re-offers the same packet, which dupe checking absorbs.
 Network errors carry fetch's `cause` code and 401 says "authentication
 failed", so the transfer log classifies them.
 
-Still NOT built from the original list: an FTP server, and a pre-hook that
-builds packets for `qnet-directory.js` nodes. A directory node still gets no
-packet from a Canectic hub.
-
-Known limit: QWK private mail is not routed per connection.
-`getPendingByTransport('QWK')` returns every pending QWK PM, and whichever QWK
-connection packs first (a client push or a hub packet) takes them all.
+Shared-directory (`qnet-directory.js`) nodes get their packets from the hub
+sweep (see "Shared-directory nodes" above), and QWK private mail is routed per
+connection (`qwkPmRouting.js`). An FTP hub server is #74.
 
 ---
 
@@ -211,15 +209,15 @@ var text = buildControlDat({
 
 Returns a CRLF-terminated string ready to write as CONTROL.DAT.
 
-### buildMessagesDat(messageItems, qwkId)
+### buildMessagesDat(messageItems, qwkId, opts)
 
 ```javascript
-var result = buildMessagesDat(items, 'MYBBS');
+var result = buildMessagesDat(items, 'MYBBS', { utf8: true });  // opts optional
 // result.buffer   — Buffer, the complete MESSAGES.DAT
 // result.itemOffsets — array of byte offsets for HEADERS.DAT
 ```
 
-Each item in the array: `{ msg: <db row>, conferenceNum: <int> }`. The msg object needs `system_time`, `to_user`, `from_user`, `subject`, `body_text`, `utf8`, `reply_ref`.
+Each item in the array: `{ msg: <db row>, conferenceNum: <int> }`. The msg object needs `system_time`, `to_user`, `from_user`, `subject`, `body_text`, `reply_ref`. `opts.utf8` allows UTF-8 for messages that do not fit CP437 (#71); the builder sets `item.utf8Wire`, which `buildHeadersDatText` turns into each entry's `Utf8` line. Without it (personal packets) everything is CP437.
 
 ### buildHeadersDatText(messageItems, offsets, localQwkId)
 
@@ -227,7 +225,7 @@ Each item in the array: `{ msg: <db row>, conferenceNum: <int> }`. The msg objec
 var text = buildHeadersDatText(items, result.itemOffsets, 'MYBBS');
 ```
 
-Returns LF-terminated string ready to write as HEADERS.DAT.
+Returns an LF-terminated BYTE string (one character per byte, each entry in its own charset); write it with `'latin1'`, as `assembleQwkPacket` does.
 
 ### assembleQwkPacket(options)
 
@@ -238,7 +236,8 @@ var qwkPath = assembleQwkPacket({
   controlDat: controlText,
   messagesDat: msgBuffer,
   headersDat: headersText,     // optional
-  netflagsDat: netflagsBuffer  // optional
+  netflagsDat: netflagsBuffer, // optional
+  extraFiles: ['/path/FILE.ZIP'] // optional, #72: zipped in, never removed here
 });
 ```
 
@@ -254,7 +253,7 @@ Writes component files, zips them with system `zip -j`, cleans up intermediates.
 | `sftp` | Client | Same as FTP but over SSH. Uses `ssh2-sftp-client`. Supports password and private key auth. |
 | `directory` | Client | Copies files to/from local filesystem paths. No network connection. For same-machine setups or shared mounts. |
 | `http` | Client | This board as a QWK node of a Canectic hub, over the hub's `/api/v1/qnet` (see "QWK hub over HTTP"). `host` is the hub's web address, `username` our QWK ID there, `password` the one the hub set. Remote paths are ignored. |
-| `hub` | Hub | The node reaches us. Over HTTP at `/api/v1/qnet`, or through a shared directory (`qnet-directory.js`). REPs land in `cwd/qnet/<NODE_ID>/in/`; the node's QWK is built on request by `buildQwkForNode()`. |
+| `hub` | Hub | The node reaches us. Over HTTP at `/api/v1/qnet`, or through a shared directory (`qnet-directory.js`). REPs land in `cwd/qnet/<NODE_ID>.node/in/`; the node's QWK is built on request by `buildQwkForNode()`, or ahead of time by the hub sweep for a shared-directory node. |
 
 ---
 
