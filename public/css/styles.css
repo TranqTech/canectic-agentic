@@ -400,6 +400,45 @@ span[style*="color: rgb(1, 1, 1)"] {
 	line-height: 1.1;
 }
 
+/* Message headers. The left side (who, subject, date) is a flex item beside
+   the buttons; without min-width: 0 it cannot shrink below its content, so
+   text-truncate never truncated and a long subject pushed the header, buttons
+   and all, off the right of a phone screen. Below lg the subject has a
+   full-width row of its own under the header (.msg-subject-row) and wraps in
+   full; from lg up it stays on the who line and truncates. After the fg-*
+   rules, like .messagebody, since those set display: inline. */
+.msg-head {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.msg-who {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.msg-subject-row {
+	display: block;
+	overflow-wrap: anywhere;
+}
+@media (min-width: 992px) {
+	.msg-line {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5em;
+		min-width: 0;
+	}
+	.msg-line .msg-who {
+		flex: 0 1 auto;
+	}
+	.msg-line .msg-subject {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+}
+
 /* Prevent unclosed HTML tags in message body_html from leaking styles to siblings */
 .msg-card {
 	text-decoration: none !important;

@@ -110,13 +110,15 @@ block content
                   .msg-card(data-msgid=message.id data-thread-uuid=message.thread_uuid || '')
                     .msg-separator.border-top.border-info(style='border-width: 2px !important; opacity: 0.4;')
                     .d-flex.justify-content-between.align-items-start.py-1.px-2.bg-darkblue
-                      div
-                        .text-truncate
-                          span.fg-yellow.fw-bold= message.from_user
-                          |  → 
-                          span.fg-green= message.to_user
-                          |   
-                          span.fg-cyan.small= message.subject
+                      //- Layout rules in styles.css (.msg-head): on phones the
+                      //- subject has its own row below, on desktop it is inline.
+                      .msg-head
+                        .msg-line
+                          .msg-who
+                            span.fg-yellow.fw-bold= message.from_user
+                            |  → 
+                            span.fg-green= message.to_user
+                          span.msg-subject.fg-cyan.small.d-none.d-lg-block= message.subject
                         .small.fg-yellow
                           - var mdate = Date.parse(message.system_time)
                           - var md = DateTime.fromMillis(mdate)
@@ -148,6 +150,8 @@ block content
                             title='Delete this message'
                           )
                             i.bi.bi-trash
+                    .msg-subject-row.px-2.pb-1.bg-darkblue.d-lg-none
+                      span.fg-cyan.small= message.subject
                     .px-2.py-2
                       .messagebody.monospace.fg-brightgrey(data-art=message.isArt ? 'true' : undefined)
                         if message.isAnsi
@@ -452,12 +456,14 @@ block content
         return '<div class="msg-card" data-msgid="' + msg.id + '" data-thread-uuid="' + (msg.thread_uuid || '') + '">'
           + '<div class="msg-separator border-top border-info" style="border-width: 2px !important; opacity: 0.4;"></div>'
           + '<div class="d-flex justify-content-between align-items-start py-1 px-2 bg-darkblue">'
-          +   '<div>'
-          +     '<div class="text-truncate">'
-          +       '<span class="fg-yellow fw-bold">' + escapeHtml(msg.from_user || '') + '</span>'
-          +       ' &rarr; '
-          +       '<span class="fg-green">' + escapeHtml(msg.to_user || '') + '</span>'
-          +       ' &nbsp;<span class="fg-cyan small">' + escapeHtml(msg.subject || '') + '</span>'
+          +   '<div class="msg-head">'
+          +     '<div class="msg-line">'
+          +       '<div class="msg-who">'
+          +         '<span class="fg-yellow fw-bold">' + escapeHtml(msg.from_user || '') + '</span>'
+          +         ' &rarr; '
+          +         '<span class="fg-green">' + escapeHtml(msg.to_user || '') + '</span>'
+          +       '</div>'
+          +       '<span class="msg-subject fg-cyan small d-none d-lg-block">' + escapeHtml(msg.subject || '') + '</span>'
           +     '</div>'
           +     '<div class="small fg-yellow">' + dateStr + '</div>'
           +   '</div>'
@@ -472,6 +478,9 @@ block content
               : '')
           +   (canModerateJs ? moderationButtons(msg, msg.thread_uuid) : '')
           +   '</div>'
+          + '</div>'
+          + '<div class="msg-subject-row px-2 pb-1 bg-darkblue d-lg-none">'
+          +   '<span class="fg-cyan small">' + escapeHtml(msg.subject || '') + '</span>'
           + '</div>'
           + '<div class="px-2 py-2">'
           +   '<div class="messagebody monospace fg-brightgrey"' + (msg.isArt ? ' data-art="true"' : '') + '>'

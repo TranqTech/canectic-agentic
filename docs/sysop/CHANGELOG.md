@@ -15,6 +15,7 @@
 ### Messages
 
 - Fix: **messages looked double spaced in the web reader, worst at 80 columns on a phone.** A message body was laid out as though it were a line of text inside the page, so its lines were spaced for the page's normal text size rather than its own: roughly two and a half lines' worth each at 80 columns on a phone, and about twice what it should be everywhere else. Lines now sit at the message's own spacing, on phones and on desktop, so messages are noticeably more compact than before. Art that is too wide for the screen now scrolls sideways as intended rather than spilling out.
+- Fix: **message headers ran off the side of a phone screen, so the whole page scrolled sideways.** A long subject, or a long name next to the Reply and moderation buttons, pushed the header wider than the screen. On a phone the subject now has a line of its own under the header and wraps in full, and a name that does not fit is shortened with an ellipsis. Desktop is unchanged, except that a subject too long for the line is now cut short instead of overflowing.
 - Fix: **a word at the end of a line dropped onto a line of its own at 80 columns.** Many systems pad each line with spaces out to the full width, and those spaces were kept, so a line that fitted came out a character or two too wide and its last word wrapped. Trailing spaces are now dropped; nothing else about how a message looks changes. Messages received before updating keep the padding until regenerated; see the upgrade note.
 
 ### Upgrade Notes
