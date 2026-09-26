@@ -42,6 +42,13 @@ export async function startEmbeddedWorkers(opts = {}) {
 	const peerConnections = await import("../models/peerConnections.js");
 	const messages = await import("../models/messages.js");
 	const msgAreas = await import("../models/msgAreas.js");
+	const transferFormat = await import("../utils/transferFormat.js");
+
+	// Same as the standalone worker's: say what a QWK or NNTP transfer came to.
+	function reportTransfer(protocol, direction, uuid, result) {
+		var d = transferFormat.describeResult(protocol, direction, uuid, result);
+		alogger.writeAlog(d.level, '[Embedded/Toss] ' + d.text, d.colour);
+	}
 
 	// --- Post-toss maintenance (same as standalone worker) ---
 	async function postTossMaint() {
@@ -90,14 +97,24 @@ export async function startEmbeddedWorkers(opts = {}) {
 				eventPublisher.publish(EVENTS.TOSS_COMPLETE, { source: 'ftn', direction: 'outbound' });
 				break;
 
-			case 'qwk:pull':
-				if (job.data.connectionUUID) await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+			case 'qwk:pull': {
+				var qwkPulled = null;
+				if (job.data.connectionUUID) {
+					qwkPulled = await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+					reportTransfer('QWK', 'pull', job.data.connectionUUID, qwkPulled);
+				}
 				await postTossMaint();
-				eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'qwk' });
+				if (transferFormat.importedAnything(qwkPulled)) {
+					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'qwk' });
+				}
 				break;
+			}
 
 			case 'qwk:push':
-				if (job.data.connectionUUID) await qwkTosser.pushToQwkPeer(job.data.connectionUUID);
+				if (job.data.connectionUUID) {
+					var qwkPushed = await qwkTosser.pushToQwkPeer(job.data.connectionUUID);
+					if (!qwkPushed.notRecorded) reportTransfer('QWK', 'push', job.data.connectionUUID, qwkPushed);
+				}
 				break;
 
 			case 'qwk:pull-all':
@@ -110,20 +127,37 @@ export async function startEmbeddedWorkers(opts = {}) {
 				await qwkTosser.pushAllQWK();
 				break;
 
-			case 'qwk:hub:inbound':
-				if (job.data.connectionUUID) await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+			case 'qwk:hub:inbound': {
+				var hubPulled = null;
+				if (job.data.connectionUUID) {
+					hubPulled = await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+					reportTransfer('QWK', 'pull', job.data.connectionUUID, hubPulled);
+				}
 				await postTossMaint();
-				eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'qwk:hub' });
+				if (transferFormat.importedAnything(hubPulled)) {
+					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'qwk:hub' });
+				}
 				break;
+			}
 
-			case 'nntp:pull':
-				if (job.data.connectionUUID) await nntpTosser.pullFromPeer(job.data.connectionUUID);
+			case 'nntp:pull': {
+				var nntpPulled = null;
+				if (job.data.connectionUUID) {
+					nntpPulled = await nntpTosser.pullFromPeer(job.data.connectionUUID);
+					reportTransfer('NNTP', 'pull', job.data.connectionUUID, nntpPulled);
+				}
 				await postTossMaint();
-				eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'nntp' });
+				if (transferFormat.importedAnything(nntpPulled)) {
+					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'nntp' });
+				}
 				break;
+			}
 
 			case 'nntp:push':
-				if (job.data.connectionUUID) await nntpTosser.pushToNntpPeer(job.data.connectionUUID);
+				if (job.data.connectionUUID) {
+					var nntpPushed = await nntpTosser.pushToNntpPeer(job.data.connectionUUID);
+					if (!nntpPushed.notRecorded) reportTransfer('NNTP', 'push', job.data.connectionUUID, nntpPushed);
+				}
 				break;
 
 			case 'nntp:pull-all':

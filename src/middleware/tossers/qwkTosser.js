@@ -26,6 +26,7 @@ import { formatBodyHtml } from '../../utils/terminalText.js';
 import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
 import { splitFullMsgid } from '../../utils/ftnUtils.js';
 import { makeTransport } from '../../models/qwkTransport.js';
+import * as networkTransfers from '../../models/networkTransfers.js';
 import * as privateMessages from '../../models/privateMessages.js';
 import {
 	parseControlDat,
@@ -295,10 +296,20 @@ async function importQwkPrivateMessage(qwkMsg, remoteQwkId, peerConnectionUUID) 
 // Pull logic
 // ---------------------------------------------------------------------------
 
-// Pulls a QWK packet from a single peer connection.
+// Pulls a QWK packet from a single peer connection, and records the attempt
+// in network_transfers (see src/models/networkTransfers.js).
 async function pullFromQwkPeer(peerConnectionUUID) {
+	return await networkTransfers.track('QWK', 'pull', peerConnectionUUID,
+		function () { return _pullFromQwkPeer(peerConnectionUUID); });
+}
+
+// `stage` is how far it got, for the transfer log: config, connect,
+// download, extract, import. `bytes` is the size of the packet it handled.
+async function _pullFromQwkPeer(peerConnectionUUID) {
 	var returnObj = {
 		status: false,
+		stage: 'config',
+		bytes: 0,
 		totalImported: 0,
 		totalDuplicate: 0,
 		errormessages: []
@@ -357,11 +368,14 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 	// never extracted (e.g. extraction or processing failed on a prior run).
 	// In QWK networking the hub typically deletes the packet after the client
 	// downloads it, so we must process the local copy before trying to pull again.
+	returnObj.stage = 'extract';
 	if (!hasExisting && !isHubMode) {
 		var inFiles = fs.readdirSync(inDir);
 		var existingQwk = inFiles.find(f => f.toLowerCase().endsWith('.qwk'));
 		if (existingQwk) {
 			var existingQwkPath = path.join(inDir, existingQwk);
+			returnObj.stage = 'extract';
+			try { returnObj.bytes = fs.statSync(existingQwkPath).size; } catch (_) {}
 			alogger.writeClog(5,
 				'pullFromQwkPeer: found existing QWK packet in inbound: ' + existingQwk +
 				' — extracting before pulling new', 'tosser',
@@ -418,10 +432,13 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 					'cyan'
 				, false, false);
 				returnObj.status = true;
+				returnObj.notRecorded = true;   // a local directory, nobody was contacted
 				return returnObj;
 			}
 
 			var repPath = path.join(inDir, repFile);
+			returnObj.stage = 'extract';
+			try { returnObj.bytes = fs.statSync(repPath).size; } catch (_) {}
 			alogger.writeClog(5,
 				'pullFromQwkPeer: found REP from node: ' + repFile, 'tosser',
 				'cyan'
@@ -454,6 +471,7 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 			// Client mode: download .qwk from remote
 			var transport = null;
 			try {
+				returnObj.stage = 'connect';
 				transport = makeTransport(cd);
 				await transport.connect(cd);
 
@@ -475,6 +493,7 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 				'cyan'
 			, false, false);
 
+			returnObj.stage = 'download';
 			try {
 				await transport.downloadFile(remotePath, localQwk);
 			} catch (dlErr) {
@@ -496,6 +515,8 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 
 			await transport.disconnect();
 			transport = null;
+			returnObj.stage = 'extract';
+			try { returnObj.bytes = fs.statSync(localQwk).size; } catch (_) {}
 
 			// Extract fresh download
 			alogger.writeClog(5,
@@ -528,6 +549,7 @@ async function pullFromQwkPeer(peerConnectionUUID) {
 	}
 
 	// Phase 3: Process whatever is in the extracted directory
+	returnObj.stage = 'import';
 	try {
 		if (!fs.existsSync(extractDir)) {
 			alogger.writeClog(5, 'pullFromQwkPeer: no extracted directory — nothing to process', 'tosser', 'cyan', false, 'tosser', false, false, false);
@@ -813,10 +835,19 @@ async function pullAllQWK() {
 // Outbound — push local messages to QWK peers as REP packets
 // ---------------------------------------------------------------------------
 
-// Push locally-authored messages to a single QWK peer connection.
+// Push locally-authored messages to a single QWK peer connection, and record
+// the attempt in network_transfers.
 async function pushToQwkPeer(peerConnectionUUID) {
+	return await networkTransfers.track('QWK', 'push', peerConnectionUUID,
+		function () { return _pushToQwkPeer(peerConnectionUUID); });
+}
+
+// `stage` for the transfer log: config, build, connect, upload.
+async function _pushToQwkPeer(peerConnectionUUID) {
 	var returnObj = {
 		status: false,
+		stage: 'config',
+		bytes: 0,
 		totalPosted: 0,
 		totalSkipped: 0,
 		errormessages: []
@@ -836,6 +867,8 @@ async function pushToQwkPeer(peerConnectionUUID) {
 	// FTP hooks, HTTP endpoints, etc.) when the node requests a packet.
 	if (cd.transport === 'hub') {
 		returnObj.status = true;
+		// Nothing happens here by design, so there is nothing to record.
+		returnObj.notRecorded = true;
 		return returnObj;
 	}
 
@@ -1048,6 +1081,9 @@ async function pushToQwkPeer(peerConnectionUUID) {
 		, false, false);
 		await advanceQwkIdxForSkips(workItems);
 		returnObj.status = true;
+		// The server was never contacted, so this is not a transfer. Recorded
+		// as a success it would mask a link whose pulls are all failing.
+		returnObj.notRecorded = true;
 		return returnObj;
 	}
 
@@ -1071,8 +1107,11 @@ async function pushToQwkPeer(peerConnectionUUID) {
 
 		var transport = null;
 		try {
+			returnObj.stage = 'connect';
+			try { returnObj.bytes = fs.statSync(repPath).size; } catch (_) {}
 			transport = makeTransport(cd);
 			await transport.connect(cd);
+			returnObj.stage = 'upload';
 
 			alogger.writeClog(5,
 				'pushToQwkPeer: uploading existing ' + remotePath +
@@ -1125,11 +1164,15 @@ async function pushToQwkPeer(peerConnectionUUID) {
 			'cyan'
 		, false, false);
 
+		returnObj.stage = 'build';
 		buildRepPacket(postItems, packetName, outDir, localQwkId);
+		try { returnObj.bytes = fs.statSync(repPath).size; } catch (_) {}
 
 		// Upload
+		returnObj.stage = 'connect';
 		transport = makeTransport(cd);
 		await transport.connect(cd);
+		returnObj.stage = 'upload';
 
 		alogger.writeClog(5,
 			'pushToQwkPeer: uploading ' + remotePath +

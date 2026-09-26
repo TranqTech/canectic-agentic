@@ -78,6 +78,8 @@ import { summarise as summariseRun } from '../release/updatePhases.js';
 import * as updatePhases from '../release/updatePhases.js';
 import * as updateLayout from '../maintenance/updateLayout.js';
 import * as mailerFormat from '../utils/mailerFormat.js';
+import * as networkTransfers from '../models/networkTransfers.js';
+import * as transferFormat from '../utils/transferFormat.js';
 import * as ftnRouter from '../models/ftnRouter.js';
 import * as networkEcholist from '../models/networkEcholist.js';
 import * as fileEcholist from '../models/fileEcholist.js';
@@ -896,6 +898,8 @@ router.get('/peer/:uuid', async (req, res, next) => {
 					// so a row that reached 'failed' was invisible as well as
 					// permanent: the file simply never arrived at one downlink.
 					conn.fileDist     = await fileDistribution.summaryForConnection(conn.id);
+				} else if (conn.network_type === 'QWK' || conn.network_type === 'NNTP') {
+					conn.transfers = await networkTransfers.recent(15, { connectionId: conn.id });
 				}
 			}
 		}
@@ -923,6 +927,7 @@ router.get('/peer/:uuid', async (req, res, next) => {
 		networkAddressMap: networkAddressMap || {},
 		defaultRescanDays: appConfig.getNumber('areafix_rescan_default_days', 60),
 		fmt: mailerFormat,
+		xfmt: transferFormat,
 		now: new Date()
 	});
 });
@@ -6497,6 +6502,58 @@ router.get('/mailer', requireAdmin, async (req, res) => {
 		unmatched:   await mailerSessions.recentUnmatched(15),
 		fmt:         mailerFormat,
 		now:         now
+	});
+});
+
+// -------------------------------------------------------
+// QWK and NNTP transfers
+// -------------------------------------------------------
+//
+// The counterpart of the mailer page for the networks that are tossed to
+// rather than dialled. Reads network_transfers, one row per pull or push.
+// "Last mail" is the column that matters: a pull can succeed every time for a
+// fortnight and bring nothing, which is how DOVE-Net going quiet went unnoticed.
+
+router.get('/transfers', requireAdmin, async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var windowHours      = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 720);
+	var protocol         = ['QWK', 'NNTP'].indexOf(req.query.protocol) >= 0 ? req.query.protocol : null;
+	var failedOnly       = req.query.failed === '1';
+
+	var connections = await peerConnections.getAllConnectionsWithPeer();
+	var statsById = {}, contactById = {};
+	for (var sr of await networkTransfers.statsByConnection(windowHours)) statsById[sr.peer_connection_id] = sr;
+	for (var cr of await networkTransfers.lastContactByConnection()) contactById[cr.peer_connection_id] = cr;
+
+	var now = new Date();
+	var rows = [];
+	var byId = {};
+	for (var conn of connections) {
+		byId[conn.id] = conn;
+		if (conn.network_type !== 'QWK' && conn.network_type !== 'NNTP') continue;
+		if (protocol && conn.network_type !== protocol) continue;
+		var cd = conn.connection_data || {};
+		rows.push({
+			connection: conn,
+			host:       cd.transport === 'hub' ? 'hub (the node collects)' : (cd.host || cd.transport || ''),
+			summary:    transferFormat.summariseTransfers(statsById[conn.id], contactById[conn.id], { now: now })
+		});
+	}
+	rows.sort(function (a, b) {
+		if (a.summary.failing !== b.summary.failing) return a.summary.failing ? -1 : 1;
+		if (a.summary.everContacted !== b.summary.everContacted) return a.summary.everContacted ? -1 : 1;
+		var at = a.summary.lastContact ? a.summary.lastContact.getTime() : 0;
+		var bt = b.summary.lastContact ? b.summary.lastContact.getTime() : 0;
+		return bt - at;
+	});
+
+	res.render('admin/transfers/index', {
+		sufficientAccess, title: 'QWK and NNTP Transfers', activelink: 'transfers',
+		activenav: 'networks', currentuser,
+		rows, windowHours, protocol, failedOnly, now, byId,
+		recent: await networkTransfers.recent(60, { protocol: protocol, failedOnly: failedOnly }),
+		fmt:    transferFormat
 	});
 });
 

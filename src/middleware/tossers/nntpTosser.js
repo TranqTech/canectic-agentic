@@ -16,6 +16,7 @@ import * as postgres from '../db/postgres.js';
 import * as alogger from '../../utils/alogger.js';
 import * as peerConnections from '../../models/peerConnections.js';
 import * as networkAreas from '../../models/networkAreas.js';
+import * as networkTransfers from '../../models/networkTransfers.js';
 import { formatBodyHtml } from '../../utils/terminalText.js';
 import { cp437ToUtf8 } from '../../utils/codepageConversions.js';
 import { threadMessage, rollbackThread, pushImportedMsgId } from '../../models/messages.js';
@@ -222,10 +223,13 @@ class NNTPClient {
 			}
 		}
 
+		var size = 0;
+		for (var l of r.lines) size += Buffer.byteLength(l) + 2;
 		return {
 			code:    r.code,
 			headers: headers,
-			body:    bodyLines.join('\n')
+			body:    bodyLines.join('\n'),
+			bytes:   size
 		};
 	}
 
@@ -500,10 +504,20 @@ async function importNntpArticle(articleData, area, peerConnectionId, networkId)
 // Pull logic
 // ---------------------------------------------------------------------------
 
-// Pulls all mapped newsgroups for a single peer connection UUID.
+// Pulls all mapped newsgroups for a single peer connection UUID, and records
+// the attempt in network_transfers (see src/models/networkTransfers.js).
 async function pullFromPeer(peerConnectionUUID) {
+	return await networkTransfers.track('NNTP', 'pull', peerConnectionUUID,
+		function () { return _pullFromPeer(peerConnectionUUID); });
+}
+
+// `stage` for the transfer log: config, connect, auth, fetch, import.
+// `bytes` is the size of the articles fetched.
+async function _pullFromPeer(peerConnectionUUID) {
 	var returnObj = {
 		status: false,
+		stage: 'config',
+		bytes: 0,
 		totalImported: 0,
 		totalDuplicate: 0,
 		errormessages: []
@@ -540,6 +554,7 @@ async function pullFromPeer(peerConnectionUUID) {
 			'cyan'
 		);
 		returnObj.status = true;
+		returnObj.notRecorded = true;   // never contacted the server
 		return returnObj;
 	}
 
@@ -547,6 +562,7 @@ async function pullFromPeer(peerConnectionUUID) {
 	var client = new NNTPClient();
 
 	try {
+		returnObj.stage = 'connect';
 		var greeting = await client.connect(host, port, use_tls);
 		if (greeting.code !== 200 && greeting.code !== 201) {
 			returnObj.errormessages.push('NNTP greeting error: ' + greeting.raw);
@@ -558,6 +574,7 @@ async function pullFromPeer(peerConnectionUUID) {
 		);
 
 		if (username) {
+			returnObj.stage = 'auth';
 			var authed = await client.authenticate(username, password);
 			if (!authed) {
 				returnObj.errormessages.push('NNTP authentication failed for ' + host);
@@ -566,6 +583,7 @@ async function pullFromPeer(peerConnectionUUID) {
 			}
 		}
 
+		returnObj.stage = 'fetch';
 		for (var networkArea of mappedAreas) {
 			if (!networkArea.active) continue;
 
@@ -626,6 +644,7 @@ async function pullFromPeer(peerConnectionUUID) {
 					continue;
 				}
 
+				returnObj.bytes += articleData.bytes || 0;
 				var result = await importNntpArticle(
 					articleData,
 					area,
@@ -793,10 +812,20 @@ function formatNntpArticle(msg, areatag, domain) {
 // same network (source_network_id guard) to avoid echoing imported articles
 // back to the server they came from.
 async function pushToNntpPeer(peerConnectionUUID) {
+	return await networkTransfers.track('NNTP', 'push', peerConnectionUUID,
+		function () { return _pushToNntpPeer(peerConnectionUUID); });
+}
+
+// `stage` for the transfer log: config, connect, auth, post. A POST the server
+// refuses counts in totalRejected, so the log can say "partial".
+async function _pushToNntpPeer(peerConnectionUUID) {
 	var returnObj = {
 		status: false,
+		stage: 'config',
+		bytes: 0,
 		totalPosted: 0,
 		totalSkipped: 0,
+		totalRejected: 0,
 		errormessages: []
 	};
 
@@ -837,6 +866,7 @@ async function pushToNntpPeer(peerConnectionUUID) {
 	if (!enabledSubs || enabledSubs.length === 0) {
 		alogger.writeAlog(5, 'pushToNntpPeer: no enabled subscriptions for ' + peerConnectionUUID, 'cyan');
 		returnObj.status = true;
+		returnObj.notRecorded = true;   // never contacted the server
 		return returnObj;
 	}
 
@@ -891,12 +921,14 @@ async function pushToNntpPeer(peerConnectionUUID) {
 		alogger.writeAlog(5, 'pushToNntpPeer: nothing to post for ' + peerConnectionUUID, 'cyan');
 		await advanceNntpIdxForSkips(workItems);
 		returnObj.status = true;
+		returnObj.notRecorded = true;   // never contacted the server
 		return returnObj;
 	}
 
 	// Connect and post
 	var client = new NNTPClient();
 	try {
+		returnObj.stage = 'connect';
 		var greeting = await client.connect(host, port, use_tls);
 		if (greeting.code !== 200 && greeting.code !== 201) {
 			returnObj.errormessages.push('NNTP greeting error: ' + greeting.raw);
@@ -904,12 +936,15 @@ async function pushToNntpPeer(peerConnectionUUID) {
 		}
 
 		if (greeting.code === 201) {
+			// A permission, not a connection fault: the log reads it as auth.
+			returnObj.stage = 'auth';
 			returnObj.errormessages.push('NNTP server ' + host + ' does not permit posting (201 greeting)');
 			await client.quit();
 			return returnObj;
 		}
 
 		if (username) {
+			returnObj.stage = 'auth';
 			var authed = await client.authenticate(username, password);
 			if (!authed) {
 				returnObj.errormessages.push('NNTP authentication failed for ' + host);
@@ -918,6 +953,7 @@ async function pushToNntpPeer(peerConnectionUUID) {
 			}
 		}
 
+		returnObj.stage = 'post';
 		for (var item of workItems) {
 			if (item.skip) {
 				item.success = true;
@@ -943,12 +979,14 @@ async function pushToNntpPeer(peerConnectionUUID) {
 			if (result.code === 240) {
 				item.success = true;
 				returnObj.totalPosted++;
+				returnObj.bytes += Buffer.byteLength(item.article);
 				await postgres.write(
 					'UPDATE ' + item.msgtable + ' SET nntp_msg_id = $1 WHERE id = $2',
 					[item.nntpMsgId, item.msgId]
 				);
 			} else {
 				item.success = false;
+				returnObj.totalRejected++;
 				alogger.writeAlog(4,
 					'pushToNntpPeer: POST rejected by ' + host +
 					' code=' + result.code + ' text=' + result.text,

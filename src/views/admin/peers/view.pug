@@ -566,6 +566,49 @@ block content
                                   .p-3.text-center.text-muted.small
                                     | No sessions recorded for this connection yet.
 
+                      //- QWK and NNTP: one row per pull or push (network_transfers).
+                      else if conn.network_type === 'QWK' || conn.network_type === 'NNTP'
+                        .row.mt-3
+                          .col-12
+                            .card
+                              .card-header.d-flex.justify-content-between.align-items-center
+                                span
+                                  i.bi.bi-arrow-down-up.me-2
+                                  | Recent transfers
+                                a.btn.btn-xs.btn-sm.btn-outline-secondary(href='/admin/transfers?protocol=' + conn.network_type)
+                                  | All #{conn.network_type} peers
+                              .card-body.p-0
+                                if conn.transfers && conn.transfers.length > 0
+                                  .table-responsive
+                                    table.table.table-sm.table-hover.mb-0
+                                      thead
+                                        tr
+                                          th
+                                          th Dir
+                                          th When
+                                          th.text-end Took
+                                          th.text-end Messages
+                                          th.text-end Size
+                                          th Detail
+                                      tbody
+                                        each t in conn.transfers
+                                          tr
+                                            td
+                                              span.badge(class='bg-' + xfmt.outcomeClass(t.outcome))= xfmt.outcomeLabel(t.outcome)
+                                            td.small.text-muted= t.direction
+                                            td.small(title=t.started_at)= xfmt.relativeAge(t.started_at, now) || '-'
+                                            td.text-end.small= xfmt.formatMs(t.duration_ms)
+                                            td.text-end.small.monospace
+                                              if t.direction === 'pull'
+                                                = t.messages_in + (t.duplicates ? ' (+' + t.duplicates + ' dupe)' : '')
+                                              else
+                                                = t.messages_out + (t.rejected ? ' (' + t.rejected + ' refused)' : '')
+                                            td.text-end.small.monospace= t.bytes && t.bytes !== '0' ? xfmt.formatBytes(t.bytes) : '-'
+                                            td.small.text-muted= t.reason ? ((t.stage ? t.stage + ': ' : '') + t.reason) : ''
+                                else
+                                  .p-3.text-center.text-muted.small
+                                    | No transfers recorded for this connection yet.
+
               // -------------------------------------------------------
               // Modals
               // -------------------------------------------------------

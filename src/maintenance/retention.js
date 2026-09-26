@@ -29,6 +29,7 @@ export var RETENTION_JOBS = {
 	'purge-inbound-log':     { key: 'inbound_log_retention_days',       defaultDays: 90,  schedule: 'purge-inbound-log-daily',     pattern: '0 50 3 * * *' },
 	'purge-outbound-log':    { key: 'outbound_log_retention_days',      defaultDays: 90,  schedule: 'purge-outbound-log-daily',    pattern: '0 52 3 * * *' },
 	'purge-mailer-sessions': { key: 'mailer_session_retention_days',    defaultDays: 30,  schedule: 'purge-mailer-sessions-daily', pattern: '0 54 3 * * *' },
+	'purge-network-transfers': { key: 'network_transfer_retention_days', defaultDays: 30, schedule: 'purge-network-transfers-daily', pattern: '0 57 3 * * *' },
 	'purge-relay-log':       { key: 'netmail_relay_log_retention_days', defaultDays: 180, schedule: 'purge-relay-log-daily',       pattern: '0 56 3 * * *' },
 	'purge-update-checks':   { key: 'update_check_retention_days',      defaultDays: 90,  schedule: 'purge-update-checks-daily',   pattern: '0 58 3 * * *' },
 };

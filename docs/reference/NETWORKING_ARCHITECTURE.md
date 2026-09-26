@@ -343,6 +343,50 @@ Connection handler calls buildQwkForNode(connectionUUID)
   → node picks up via qnet-directory.js or directory transport
 ```
 
+### Transfer history (QWK and NNTP)
+
+`network_transfers` holds one row per pull or push, the counterpart of
+`mailer_sessions` for the networks that are tossed to rather than dialled.
+Before it, the QWK and NNTP tossers kept nothing: detail went to `tosser.log`,
+and the worker logged "Toss job qwk:pull finished" and published
+`MESSAGES_IMPORTED` after every pull whether it had failed, found nothing or
+brought mail. An FTP server timing out on every pull looked exactly like a
+quiet link.
+
+- **Recording.** `pullFromQwkPeer`, `pushToQwkPeer`, `pullFromPeer` and
+  `pushToNntpPeer` are thin wrappers that call `networkTransfers.track()`
+  around the real function (`_pullFromQwkPeer` and so on), so every caller
+  gets a row: schedules, the admin buttons, the hub inbound job and the CLI's
+  pull-all. `track` returns the result unchanged apart from `outcome`,
+  records an exception and rethrows it, and skips a result marked
+  `notRecorded`: the tosser sets that when it succeeded without contacting
+  anyone (nothing to send, nothing mapped, a `hub` push, a hub pull with no
+  REP waiting). Recorded, those made a link whose every pull timed out read
+  "last success: just now" because its empty push had worked.
+  A failed insert is logged and swallowed.
+- **Stage.** Each tosser sets `returnObj.stage` as it goes: `config`,
+  `connect`, `auth`, `download`/`fetch`, `extract`, `import` for a pull;
+  `config`, `build`, `connect`, `auth`, `upload`/`post` for a push. `bytes` is
+  the packet size (QWK) or the article bytes (NNTP), and NNTP pushes count a
+  refused POST in `totalRejected`.
+- **Outcome.** `transferFormat.classifyTransfer`: `complete` (moved mail, or a
+  held-over REP delivered), `idle` (worked, moved nothing), `partial` (some
+  POSTs refused), then for failures `config_error`, `auth_failed`, `timeout`,
+  `connect_failed`, `transfer_failed`, `processing_failed`, `failed`. A result
+  with any error message is a failure even with `status: true`, because both
+  push functions return true after a failed upload so the index can advance
+  past what did go.
+- **Worker.** `describeResult` gives the job's log line (failures at level 2
+  with stage and reason), and `MESSAGES_IMPORTED` is published only when
+  `importedAnything(result)`. Same in `bin/worker.js` and `src/queues/embedded.js`.
+- **Admin.** `/admin/transfers` (per-connection rollup with last attempt, last
+  success and last mail, plus recent transfers with a failures-only filter)
+  and a Recent transfers card on each QWK/NNTP connection of the peer page.
+  "Last mail" is separate from "last success" because a link can pull
+  successfully for weeks and bring nothing.
+- **Retention.** `network_transfer_retention_days` (30), purged daily by
+  `purge-network-transfers`.
+
 ---
 
 ## QWK Packet Format Reference

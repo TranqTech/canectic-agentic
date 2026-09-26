@@ -38,6 +38,7 @@ import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
 import { startClosed, attachQueueDrain, consumerUp } from "../src/maintenance/queueDrain.js";
 import * as outboundSweep from "../src/maintenance/outboundSweep.js";
 import * as maintenanceJobs from "../src/maintenance/maintenanceJobs.js";
+import * as transferFormat from "../src/utils/transferFormat.js";
 import os from 'os';
 
 // Tosser imports — relocated to middleware/tossers/
@@ -280,6 +281,14 @@ async function postTossMaint() {
 // Toss queue processor
 // ---------------------------------------------------------------------------
 
+// Log what a QWK or NNTP pull or push came to. Every one used to end with the
+// same "finished" line, so a pull that timed out read like one that worked;
+// the row in network_transfers is the durable record, this is the log line.
+function reportTransfer(protocol, direction, uuid, result) {
+	var d = transferFormat.describeResult(protocol, direction, uuid, result);
+	alogger.writeAlog(d.level, '[Worker] ' + d.text, d.colour);
+}
+
 function createTossProcessor() {
 	return async function processTossJob(job) {
 		var startTime = Date.now();
@@ -311,20 +320,26 @@ function createTossProcessor() {
 				// --- QWK -----------------------------------------------------------
 
 				// Per-connection pull (used by scheduler, admin)
-				case 'qwk:pull':
+				case 'qwk:pull': {
+					var qwkPulled = null;
 					if (job.data.connectionUUID) {
-						await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+						qwkPulled = await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+						reportTransfer('QWK', 'pull', job.data.connectionUUID, qwkPulled);
 					}
 					await postTossMaint();
-					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, {
-						source: 'qwk', connectionUUID: job.data.connectionUUID
-					});
+					if (transferFormat.importedAnything(qwkPulled)) {
+						eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, {
+							source: 'qwk', connectionUUID: job.data.connectionUUID
+						});
+					}
 					break;
+				}
 
 				// Per-connection push (used by scheduler, admin)
 				case 'qwk:push':
 					if (job.data.connectionUUID) {
-						await qwkTosser.pushToQwkPeer(job.data.connectionUUID);
+						var qwkPushed = await qwkTosser.pushToQwkPeer(job.data.connectionUUID);
+						if (!qwkPushed.notRecorded) reportTransfer('QWK', 'push', job.data.connectionUUID, qwkPushed);
 					}
 					eventPublisher.publish(EVENTS.TOSS_COMPLETE, {
 						source: 'qwk', direction: 'outbound',
@@ -348,15 +363,20 @@ function createTossProcessor() {
 					break;
 
 				// Hub mode inbound (node drops .rep)
-				case 'qwk:hub:inbound':
+				case 'qwk:hub:inbound': {
+					var hubPulled = null;
 					if (job.data.connectionUUID) {
-						await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+						hubPulled = await qwkTosser.pullFromQwkPeer(job.data.connectionUUID);
+						reportTransfer('QWK', 'pull', job.data.connectionUUID, hubPulled);
 					}
 					await postTossMaint();
-					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, {
-						source: 'qwk:hub', connectionUUID: job.data.connectionUUID
-					});
+					if (transferFormat.importedAnything(hubPulled)) {
+						eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, {
+							source: 'qwk:hub', connectionUUID: job.data.connectionUUID
+						});
+					}
 					break;
+				}
 
 				// --- TIC (file echoes) ---------------------------------------------
 
@@ -377,20 +397,26 @@ function createTossProcessor() {
 				// --- NNTP ----------------------------------------------------------
 
 				// Per-connection pull
-				case 'nntp:pull':
+				case 'nntp:pull': {
+					var nntpPulled = null;
 					if (job.data.connectionUUID) {
-						await nntpTosser.pullFromPeer(job.data.connectionUUID);
+						nntpPulled = await nntpTosser.pullFromPeer(job.data.connectionUUID);
+						reportTransfer('NNTP', 'pull', job.data.connectionUUID, nntpPulled);
 					}
 					await postTossMaint();
-					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, {
-						source: 'nntp', connectionUUID: job.data.connectionUUID
-					});
+					if (transferFormat.importedAnything(nntpPulled)) {
+						eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, {
+							source: 'nntp', connectionUUID: job.data.connectionUUID
+						});
+					}
 					break;
+				}
 
 				// Per-connection push
 				case 'nntp:push':
 					if (job.data.connectionUUID) {
-						await nntpTosser.pushToNntpPeer(job.data.connectionUUID);
+						var nntpPushed = await nntpTosser.pushToNntpPeer(job.data.connectionUUID);
+						if (!nntpPushed.notRecorded) reportTransfer('NNTP', 'push', job.data.connectionUUID, nntpPushed);
 					}
 					eventPublisher.publish(EVENTS.TOSS_COMPLETE, {
 						source: 'nntp', direction: 'outbound',

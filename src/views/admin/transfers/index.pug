@@ -1,0 +1,168 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-11.offset-lg-1.col-12
+        h2.mb-1
+          i.bi.bi-arrow-down-up.me-2
+          | QWK and NNTP Transfers
+        p.text-muted.small.mb-4
+          | One row is recorded for every pull and push, including those that never reached
+          | the server. "Last mail" is when a pull last brought in a message: a link can pull
+          | without error every time and still bring nothing.
+
+        - var qs = function (o) { var p = Object.assign({ hours: windowHours, protocol: protocol || '', failed: failedOnly ? '1' : '' }, o); return '/admin/transfers?' + Object.keys(p).filter(function (k) { return p[k] !== '' && p[k] !== null; }).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&'); }
+
+        //- ------------------------------------------------------------------
+        //- Connection rollup
+        //- ------------------------------------------------------------------
+        .card.mb-4
+          .card-header.d-flex.flex-wrap.gap-2.justify-content-between.align-items-center
+            span
+              i.bi.bi-hdd-network.me-2
+              | Connections
+            .d-flex.flex-wrap.gap-2
+              .btn-group.btn-group-sm
+                each p in [['', 'All'], ['QWK', 'QWK'], ['NNTP', 'NNTP']]
+                  a.btn(href=qs({ protocol: p[0] }) class=((protocol || '') === p[0] ? 'btn-primary' : 'btn-outline-secondary'))= p[1]
+              .btn-group.btn-group-sm
+                each h in [24, 72, 168, 720]
+                  a.btn(href=qs({ hours: h }) class=(windowHours === h ? 'btn-primary' : 'btn-outline-secondary'))= h < 168 ? h + 'h' : (h / 24) + 'd'
+          .card-body.p-0
+            if rows && rows.length > 0
+              .table-responsive
+                table.table.table-sm.table-hover.mb-0
+                  thead
+                    tr
+                      th Peer
+                      th Network
+                      th Host
+                      th.text-end Last attempt
+                      th.text-end Last success
+                      th.text-end Last mail
+                      th.text-end(title='Pulls and pushes in the selected window') Tries
+                      th.text-end OK
+                      th.text-end(title='Messages imported in the window, duplicates in brackets') In
+                      th.text-end(title='Messages sent in the window') Out
+                  tbody
+                    each row in rows
+                      - var s = row.summary
+                      tr(class=s.failing ? 'table-danger' : '')
+                        td
+                          a(href='/admin/peer/' + row.connection.peer_uuid)= row.connection.peer_name
+                          if !row.connection.active
+                            span.badge.bg-secondary.ms-2 inactive
+                          else if !row.connection.poll_enabled
+                            span.badge.bg-secondary.ms-2(title='No schedule: this connection is pulled and pushed only when asked') no poll
+                        td.small.text-muted #{row.connection.network_name} (#{row.connection.network_type})
+                        td.small.monospace= row.host || '-'
+                        td.text-end.small
+                          if s.lastContactAge
+                            span(title=s.lastContact.toISOString())= s.lastContactAge
+                            if s.lastOutcome && !fmt.isSuccess(s.lastOutcome)
+                              |
+                              span.badge(class='bg-' + fmt.outcomeClass(s.lastOutcome))= fmt.outcomeLabel(s.lastOutcome)
+                          else
+                            span.text-muted never
+                        td.text-end.small
+                          if s.lastSuccessAge
+                            span(title=s.lastSuccess.toISOString())= s.lastSuccessAge
+                          else if s.everContacted
+                            span.text-danger never
+                          else
+                            span.text-muted -
+                        td.text-end.small
+                          if s.lastMailAge
+                            span(title=s.lastMail.toISOString())= s.lastMailAge
+                          else if s.everContacted
+                            span.text-muted none recorded
+                          else
+                            span.text-muted -
+                        td.text-end.small= s.attempts || '-'
+                        td.text-end.small
+                          if s.successRate === null
+                            span.text-muted -
+                          else
+                            span(class=s.successRate === 100 ? '' : 'text-warning')= s.successRate + '%'
+                        td.text-end.small.monospace
+                          if s.messagesIn || s.duplicates
+                            = s.messagesIn + (s.duplicates ? ' (' + s.duplicates + ')' : '')
+                          else
+                            span.text-muted -
+                        td.text-end.small.monospace
+                          if s.messagesOut
+                            = s.messagesOut
+                          else
+                            span.text-muted -
+                      if s.failing && s.lastReason
+                        tr.table-danger
+                          td
+                          td.small.text-muted(colspan='9')
+                            i.bi.bi-arrow-return-right.me-1
+                            = s.lastReason
+            else
+              .p-4.text-center.text-muted No QWK or NNTP connections configured.
+
+        //- ------------------------------------------------------------------
+        //- Recent transfers
+        //- ------------------------------------------------------------------
+        .card.mb-4
+          .card-header.d-flex.flex-wrap.gap-2.justify-content-between.align-items-center
+            span
+              i.bi.bi-clock-history.me-2
+              | Recent transfers
+            .btn-group.btn-group-sm
+              a.btn(href=qs({ failed: '' }) class=(!failedOnly ? 'btn-primary' : 'btn-outline-secondary')) All
+              a.btn(href=qs({ failed: '1' }) class=(failedOnly ? 'btn-primary' : 'btn-outline-secondary')) Failures only
+          .card-body.p-0
+            if recent && recent.length > 0
+              .table-responsive
+                table.table.table-sm.table-hover.mb-0
+                  thead
+                    tr
+                      th
+                      th Peer
+                      th
+                      th When
+                      th.text-end Took
+                      th.text-end Messages
+                      th.text-end Size
+                      th Detail
+                  tbody
+                    each t in recent
+                      - var c = byId[t.peer_connection_id]
+                      tr
+                        td
+                          span.badge(class='bg-' + fmt.outcomeClass(t.outcome))= fmt.outcomeLabel(t.outcome)
+                        td.small
+                          if c
+                            a(href='/admin/peer/' + c.peer_uuid)= c.peer_name
+                            span.text-muted  #{c.network_name}
+                          else
+                            span.text-muted.monospace= t.connection_uuid || '-'
+                        td.small.text-muted #{t.protocol} #{t.direction}
+                        td.small(title=t.started_at)= fmt.relativeAge(t.started_at, now) || '-'
+                        td.text-end.small= fmt.formatMs(t.duration_ms)
+                        td.text-end.small.monospace
+                          if t.direction === 'pull'
+                            = t.messages_in + (t.duplicates ? ' (+' + t.duplicates + ' dupe)' : '')
+                          else
+                            = t.messages_out + (t.rejected ? ' (' + t.rejected + ' refused)' : '')
+                        td.text-end.small.monospace= t.bytes && t.bytes !== '0' ? fmt.formatBytes(t.bytes) : '-'
+                        td.small.text-muted= t.reason ? ((t.stage ? t.stage + ': ' : '') + t.reason) : ''
+            else
+              .p-4.text-center.text-muted
+                if failedOnly
+                  | No failed transfers recorded.
+                else
+                  | No transfers recorded yet. Rows appear here after the next scheduled pull or push.
+
+        .mb-5
+          a.btn.btn-sm.btn-outline-secondary.me-2(href='/admin/mailer')
+            i.bi.bi-activity.me-1
+            |  Mailer diagnostics
+          a.btn.btn-sm.btn-outline-secondary(href='/admin/peers')
+            i.bi.bi-hdd-network.me-1
+            |  Peers

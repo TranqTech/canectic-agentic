@@ -55,6 +55,7 @@ export const MAINTENANCE_JOBS = [
 	'purge-relay-log',
 	'purge-outbound-log',
 	'purge-mailer-sessions',
+	'purge-network-transfers',
 	'recalc-area-counts',
 	'echolist:batch-subscribe',
 	'filebone:batch-subscribe',
@@ -255,6 +256,16 @@ export async function runMaintenanceJob(name, data, opts) {
 			if (sessDays !== null) {
 				var sessPurged = await mailerSess.purgeOld(sessDays);
 				if (sessPurged > 0) alogger.writeAlog(3, 'Purged ' + sessPurged + ' mailer session history rows older than ' + sessDays + ' days', 'cyan');
+			}
+			return true;
+		}
+
+		case 'purge-network-transfers': {
+			var netTransfers = await import("../models/networkTransfers.js");
+			var xferDays = keepDays(name, data);
+			if (xferDays !== null) {
+				var xferPurged = await netTransfers.purgeOld(xferDays);
+				if (xferPurged > 0) alogger.writeAlog(3, 'Purged ' + xferPurged + ' QWK/NNTP transfer history rows older than ' + xferDays + ' days', 'cyan');
 			}
 			return true;
 		}

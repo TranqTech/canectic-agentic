@@ -313,6 +313,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'inbound_log_retention_days', defaultValue: '90',                type: 'number',  category: 'maintenance', description: 'Days to keep inbound file log entries before auto-purge (0 = keep forever)' },
 	{ key: 'outbound_log_retention_days', defaultValue: '90',              type: 'number',  category: 'maintenance', description: 'Days to keep outbound file log entries before auto-purge (0 = keep forever)' },
 	{ key: 'netmail_relay_log_retention_days', defaultValue: '180', type: 'number', category: 'maintenance', description: 'Days to keep the netmail relay decision log. Longer than the other logs by default because relay disputes surface slowly: a downlink usually notices missing mail weeks later.' },
+	{ key: 'network_transfer_retention_days', defaultValue: '30',          type: 'number',  category: 'maintenance', description: 'Days to keep QWK and NNTP transfer history before auto-purge (0 = keep forever)' },
 	{ key: 'mailer_session_retention_days', defaultValue: '30',            type: 'number',  category: 'maintenance', description: 'Days to keep mailer session history before auto-purge (0 = keep forever)' },
 	{ key: 'freq_enabled',             defaultValue: 'true',                 type: 'boolean', category: 'mailer',      description: 'Enable FREQ (File Request) responses during binkp sessions' },
 	{ key: 'freq_filebox_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Directory for FREQ filebox (files available to any authenticated session)' },

@@ -63,6 +63,7 @@ describe('managed scheduler keys', function () {
 			'purge-inbound-log-daily',
 			'purge-outbound-log-daily',
 			'purge-mailer-sessions-daily',
+			'purge-network-transfers-daily',
 			'purge-relay-log-daily',
 			'reconcile-echolists-daily',
 			'scan-echolists-daily',

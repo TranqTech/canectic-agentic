@@ -15,6 +15,8 @@
 ### Networking
 
 - **You are now told when a connection's polling schedule is removed.** When the BBS starts it removes any poll, QWK or NNTP schedule that nothing in the database asks for any more, such as one for a deleted connection or one whose polling is turned off. That was only a line in the log. Connections created before the Polling setting existed have it off, but kept polling until 0.9.6a, when those schedules were removed on the first restart and the connection stopped collecting mail without a word. You now get a notification naming each connection, its network and host, and why its schedule went. If you meant it, nothing to do; if not, turn polling back on for the connection under Peers. Switching polling off yourself does not notify.
+- **New: a history of every QWK and NNTP transfer**, under Networking > QWK and NNTP Transfers, and on each QWK or NNTP connection of a peer's page. Every pull and push is recorded, including ones that never reached the server, with what came of it (mail, nothing waiting, timeout, refused connection, login failure and so on), how far it got, how long it took, how many messages moved and the error. The connection list shows when each one last worked and, separately, when it last actually brought in mail, since a link can pull without error for weeks and bring nothing. History is kept for `network_transfer_retention_days` (30 by default).
+- Fix: **a QWK or NNTP pull that failed was logged as though it had worked.** The system log said the job finished and that messages were imported whatever happened, and the reason was only in `tosser.log`. A failed pull or push is now logged as a failure with its reason, and messages are only reported as imported when some were.
 
 ### Messages
 
