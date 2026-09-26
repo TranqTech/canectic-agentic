@@ -26,6 +26,9 @@
 ### Private Mail
 
 - Fix: **on a phone, opening a private message pushed Reply and Delete off the screen.** A long subject could not shrink, so the reader's header ran past the edge. On a phone the header now runs in rows (date and buttons, then the subject in full, then From and To); on a desktop a long subject is cut short to fit.
+- **Dates in the private mail lists are short on a phone**, "Sep 25" (or "Sep 2025" once older than six months), so the sender and subject have room; the full time is in the tooltip. Desktop still shows the full date and time.
+- Fix: **the inbox, sent and trash lists were sorted by the attachment column instead of by date.** They looked newest first only because messages arrived in that order; sorting now starts on the date, newest first, and the attachment column can no longer be sorted on.
+- The standalone Sent and Trash pages are gone: `/pm/sent` and `/pm/trash` now open those tabs of the inbox, so a bookmark still works. They were unusable on a phone, and the inbox's own tabs had replaced them.
 - Fix: **the bottom of the inbox was cut off on a phone**, for the same reason as the message list: it was sized for a desktop's navigation bar and ignored the phone's address bar. It now fits the space left on screen.
 
 ## v0.9.11a (2026-09-25)

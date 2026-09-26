@@ -17,4 +17,4 @@ mixin ts(value, mode)
   if tsMs === null
     span.text-muted -
   else
-    time.ts-local(datetime=new Date(tsMs).toISOString() data-ts=tsMs data-ts-mode=(mode === 'date' ? 'date' : 'datetime'))= formatTimestamp(tsMs, { dateOnly: mode === 'date' })
+    time.ts-local(datetime=new Date(tsMs).toISOString() data-ts=tsMs data-ts-mode=(mode === 'date' ? 'date' : mode === 'list' ? 'list' : 'datetime'))= formatTimestamp(tsMs, { dateOnly: mode === 'date' })

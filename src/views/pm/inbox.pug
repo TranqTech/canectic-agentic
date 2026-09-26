@@ -172,7 +172,7 @@ block content
                               i.bi.bi-paperclip.text-info(title='Has attachments')
                           td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;' data-order=timestampMs(msg.system_time) || 0)
                             if msg.system_time
-                              +ts(msg.system_time)
+                              +ts(msg.system_time, 'list')
 
               //- Sent table (hidden)
               #folder-sent.pm-hidden
@@ -208,7 +208,7 @@ block content
                               i.bi.bi-paperclip.text-info(title='Has attachments')
                           td.small.fg-yellow(style='opacity:0.6; white-space:nowrap;' data-order=timestampMs(msg.system_time) || 0)
                             if msg.system_time
-                              +ts(msg.system_time)
+                              +ts(msg.system_time, 'list')
 
               //- Trash table (hidden)
               #folder-trash.pm-hidden
@@ -246,7 +246,7 @@ block content
                               i.bi.bi-paperclip.text-info(title='Has attachments')
                           td.small.text-muted(style='white-space:nowrap;' data-order=timestampMs(msg.deleted_at) || 0)
                             if msg.deleted_at
-                              +ts(msg.deleted_at, 'date')
+                              +ts(msg.deleted_at, 'list')
 
             //- Reader pane
             .pm-reader
@@ -475,25 +475,30 @@ block content
         scrollCollapse: false,
         dom: 'ft',
         language: { search: '', searchPlaceholder: 'Search messages...' },
-        order: [[3, 'desc']]
+        // Newest first by date, which is column 4 in all three tables (0 is the
+        // unread dot or type, 3 the attachment clip). This said 3 from the day
+        // the attachment column was added, so the lists sorted by paperclip.
+        order: [[4, 'desc']]
       };
 
       var inboxDT = $('#inboxTable').DataTable(Object.assign({}, dtConfig, {
         columnDefs: [
-          { orderable: false, targets: 0, width: '24px' }
+          { orderable: false, targets: 0, width: '24px' },
+          { orderable: false, targets: 3 }
         ]
       }));
 
       var sentDT = $('#sentTable').DataTable(Object.assign({}, dtConfig, {
         columnDefs: [
-          { orderable: false, targets: 0, width: '24px' }
+          { orderable: false, targets: 0, width: '24px' },
+          { orderable: false, targets: 3 }
         ]
       }));
 
       var trashDT = $('#trashTable').DataTable(Object.assign({}, dtConfig, {
-        order: [[3, 'desc']],
         columnDefs: [
-          { orderable: false, targets: 0, width: '50px' }
+          { orderable: false, targets: 0, width: '50px' },
+          { orderable: false, targets: 3 }
         ]
       }));
 
@@ -524,6 +529,9 @@ block content
             }
           }
           activeFolder = folder;
+          // The tab is in the address, so a reload or a bookmark comes back
+          // to it; /pm/sent and /pm/trash redirect here with #sent / #trash.
+          try { history.replaceState(null, '', folder === 'inbox' ? location.pathname : '#' + folder); } catch (_) {}
           // Adjust DataTable columns for newly visible table
           if (dtMap[folder]) {
             dtMap[folder].columns.adjust().draw();
@@ -534,6 +542,13 @@ block content
           });
         });
       });
+
+      // Open the tab the address names (#sent, #trash).
+      var startFolder = (location.hash || '').replace('#', '');
+      if (startFolder && startFolder !== 'inbox' && folders[startFolder]) {
+        var startBtn = document.querySelector('.pm-folder-btn[data-folder="' + startFolder + '"]');
+        if (startBtn) startBtn.click();
+      }
 
       // --- Reader pane ---
       var readerEmpty       = document.getElementById('readerEmpty');

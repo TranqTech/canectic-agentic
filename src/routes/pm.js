@@ -149,61 +149,12 @@ router.get(['/', '/inbox'], async (req, res) => {
 	});
 });
 
-// GET /pm/sent — sent messages
-router.get('/sent', async (req, res) => {
-	var currentuser = await getCurrentUser(req);
-	if (!currentuser) {
-		return res.render('pm/sent', {
-			title: 'Sent Messages',
-			currentuser: null,
-			messages: []
-		});
-	}
-
-	var userId = await resolveUserId(currentuser);
-	var page = parseInt(req.query.page) || 1;
-	var limit = 50;
-	var offset = (page - 1) * limit;
-
-	var sentMessages = await privateMessages.getSentMessages(userId, { limit: limit, offset: offset });
-
-	res.render('pm/sent', {
-		title: 'Sent Messages',
-		currentuser: currentuser,
-		messages: sentMessages,
-		page: page
-	});
-});
-
-// GET /pm/trash — deleted messages
-router.get('/trash', async (req, res) => {
-	var currentuser = await getCurrentUser(req);
-	if (!currentuser) {
-		return res.render('pm/trash', {
-			title: 'Trash',
-			currentuser: null,
-			messages: []
-		});
-	}
-
-	var userId = await resolveUserId(currentuser);
-	var page = parseInt(req.query.page) || 1;
-	var limit = 50;
-	var offset = (page - 1) * limit;
-
-	var trashMessages = await privateMessages.getTrash(userId, { limit: limit, offset: offset });
-
-	res.render('pm/trash', {
-		title: 'Trash',
-		currentuser: currentuser,
-		messages: trashMessages,
-		page: page
-	});
-});
-
-// -------------------------------------------------------
-// Read Message
-// -------------------------------------------------------
+// GET /pm/sent and /pm/trash — the old standalone folder pages. The inbox has
+// Sent and Trash tabs of its own, and nothing linked here but these two pages
+// to each other; on a phone they were unusable (crushed columns, delete
+// buttons off screen). A bookmark lands on the right tab.
+router.get('/sent', function (req, res) { res.redirect('/pm/inbox#sent'); });
+router.get('/trash', function (req, res) { res.redirect('/pm/inbox#trash'); });
 
 // GET /pm/inbox/:uuid — read single inbox message
 router.get('/inbox/:uuid', async (req, res) => {

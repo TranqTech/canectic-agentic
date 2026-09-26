@@ -18,7 +18,9 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import pug from 'pug';
 import { formatTimestamp, timestampMs } from '../src/utils/dateFormat.js';
-import { format as localFormat } from '../public/js/localTime.js';
+import { format as localFormat, shortDate } from '../public/js/localTime.js';
+import { formatListDate } from '../src/utils/dateFormat.js';
+import { DateTime } from 'luxon';
 
 var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 var VIEWS = path.join(ROOT, 'src', 'views');
@@ -75,6 +77,33 @@ describe('localTime.format, in the browser', function () {
 
 	it('writes nothing for something that is not a time', function () {
 		assert.strictEqual(localFormat('x'), '');
+	});
+});
+
+// Mode "list" (the PM inbox's date columns): the full timestamp on a wide
+// screen, the short list form on a phone, where "2026-09-25 20:37:40" took
+// most of the width and left sender and subject a few characters each.
+describe('localTime list mode', function () {
+	var NOW = Date.parse('2026-09-25T18:00:00Z');
+
+	it('is the full timestamp on a wide screen and the short form on a narrow one', function () {
+		var ms = Date.parse('2026-09-25T02:37:40Z');
+		assert.strictEqual(localFormat(ms, 'list', false), localFormat(ms));
+		assert.match(localFormat(ms, 'list', true), /^[A-Z][a-z]{2} \d{2}$/);
+	});
+
+	it('agrees with formatListDate, the server\'s rule for list columns', function () {
+		var saved = process.env.TZ;
+		process.env.TZ = 'America/Edmonton';
+		try {
+			for (var iso of ['2026-09-25T02:00:00Z', '2026-04-01T12:00:00Z', '2026-03-01T12:00:00Z', '2025-09-24T12:00:00Z', '2026-10-01T12:00:00Z']) {
+				var ms = Date.parse(iso);
+				var server = formatListDate(ms, { now: DateTime.fromMillis(NOW) });
+				assert.strictEqual(shortDate(ms, NOW), server, iso);
+			}
+		} finally {
+			if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved;
+		}
 	});
 });
 

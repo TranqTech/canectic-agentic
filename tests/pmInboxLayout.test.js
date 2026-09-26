@@ -45,4 +45,22 @@ describe('PM inbox layout', function () {
 		assert.match(phone, /\.pm-reader-who \{[^}]*flex-basis: 100%/);
 		assert.match(INBOX, /\.pm-reader-actions\.flex-shrink-0/);
 	});
+
+	it('sorts every folder by its date column, not the attachment clip', function () {
+		// Column 4 is the date in inbox, sent and trash; 3 is the paperclip.
+		assert.match(INBOX, /order: \[\[4, 'desc'\]\]/);
+		assert.doesNotMatch(INBOX, /order: \[\[3, 'desc'\]\]/);
+	});
+
+	it('shows list dates, short on a phone', function () {
+		assert.strictEqual((INBOX.match(/\+ts\([^)]*'list'\)/g) || []).length, 3);
+	});
+
+	it('opens the tab named in the address, so /pm/sent and /pm/trash can redirect to it', function () {
+		assert.match(INBOX, /location\.hash/);
+		var routes = fs.readFileSync(path.join(ROOT, 'src/routes/pm.js'), 'utf8');
+		assert.match(routes, /router\.get\('\/sent', function \(req, res\) \{ res\.redirect\('\/pm\/inbox#sent'\); \}\);/);
+		assert.match(routes, /router\.get\('\/trash', function \(req, res\) \{ res\.redirect\('\/pm\/inbox#trash'\); \}\);/);
+		assert.ok(!fs.existsSync(path.join(ROOT, 'src/views/pm/sent.pug')), 'the standalone sent page is gone');
+	});
 });
