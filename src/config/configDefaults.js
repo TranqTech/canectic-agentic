@@ -237,6 +237,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'qwk_wall_conf',            defaultValue: '2',              type: 'number',  category: 'qwk',         description: 'Conference number for the wall in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
 	{ key: 'qwk_bulletins_conf',       defaultValue: '3',              type: 'number',  category: 'qwk',         description: 'Conference number for bulletins in QWK downloads (must be 1-100 reserved range, 0 to disable)' },
 	{ key: 'qnet_max_rep_bytes',       defaultValue: '20971520',       type: 'number',  category: 'qwk',         description: 'Largest REP packet a QWK node may upload to this hub over HTTP, in bytes (default 20 MB)' },
+	{ key: 'qwk_hub_sweep_minutes',    defaultValue: '5',              type: 'number',  category: 'qwk',         description: 'How often, in minutes, this hub builds packets for nodes that collect from a shared directory (qnet-directory.js) and picks up the REPs they leave. Runs only while such a node exists (0 = never)' },
 	{ key: 'qwk_group_stride',         defaultValue: '1000',           type: 'number',  category: 'qwk',         description: 'Conference number block size per message group. Each new group is auto-assigned a start at MAX(existing) + stride; areas in the group take consecutive offsets within [start, start+stride-1]. Larger stride leaves more room for future areas; smaller stride packs groups tighter.' },
 
 	// -----------------------------------------------------------------------

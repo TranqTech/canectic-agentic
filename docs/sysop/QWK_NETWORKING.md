@@ -68,11 +68,31 @@ internet, since the node's password is sent with every request.
 
 ### Nodes that use a shared directory
 
-A Synchronet node on the same machine can still use
-`src/external/synchronet/qnet-directory.js` to drop REPs into
-`qnet/<NODE_ID>/in/`. Canectic does not yet build that node's packet for it
-to collect, so for now use a node over HTTP, or link the two boards over FTN
-instead.
+A Synchronet node on the same machine, or one that can see a directory of
+yours, can exchange packets through `qnet/<NODE_ID>/` instead of calling over
+HTTP. Copy `src/external/synchronet/qnet-directory.js` to the node's `exec/`
+directory and set its call-out command for your hub to:
+
+    ?qnet-directory <YOUR_QWK_ID> /path/to/canectic/qnet/<NODE_ID>
+
+On your side, tick **Node collects from a shared directory** on the node's
+Hub (Inbound) connection. It needs no password. Every
+**qwk_hub_sweep_minutes** (QWK settings, 5 by default) the board then:
+
+1. imports any REP the node has left in `qnet/<NODE_ID>/in/`;
+2. builds the node's packet into `qnet/<NODE_ID>/out/`, named after your QWK
+   ID, if there are new messages or private mail for it.
+
+The node copies the packet away when it calls and deletes it from `out/`.
+That is how the board knows the node has it: the messages in it are counted
+as delivered at the next sweep, and a new packet is built. Until then the
+same packet waits there, so a node that does not call for a while loses
+nothing. Do not delete a packet from `out/` by hand unless you mean the node
+to go without it, since the board takes a missing packet as collected. The
+small `.qwk.json` file beside it records what the packet holds.
+
+The sweep runs only while at least one node is set to collect from a shared
+directory.
 
 ## Seeing what happened
 
@@ -95,6 +115,9 @@ address. Each connection on a peer's page shows its own recent transfers.
 - **A node gets the same messages twice:** it collected a packet but its
   confirmation did not arrive, so the hub offered the packet again. Duplicate
   checking drops the repeats.
-- QWK private mail is not yet addressed to a particular connection. With more
-  than one QWK connection, whichever one sends first carries all waiting QWK
-  private mail.
+- **A QWK private message came back as undeliverable:** no active QWK
+  connection has the QWK ID it was addressed to. Private mail goes only to
+  the system named in its address, over the connection whose Remote QWK ID
+  matches (a reply goes back over the connection the original came in on).
+  Mail for a system you do not link with directly is not passed on through
+  a hub.

@@ -538,6 +538,11 @@ router.post('/reply/:uuid', pmUpload.array('attachments', 5), async (req, res) =
 			destination_node: origTd.source_node || 0,
 			reply_to: origTd.msg_id || original.msg_id || ''
 		};
+		// A QWK reply goes back over the connection the original arrived on,
+		// not merely to a connection with the same QWK ID (qwkPmRouting.js).
+		if (transportType === 'QWK' && origTd.peer_connection_uuid) {
+			messageObj.transport_data.peer_connection_uuid = origTd.peer_connection_uuid;
+		}
 	}
 
 	var result = await privateMessages.queueMessage(messageObj, currentuser);

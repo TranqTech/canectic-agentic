@@ -961,6 +961,15 @@ block content
                                   | The node connects over HTTP to this board's address with its QWK ID and this password.
                                   | Without a password it cannot connect.
                                 br
+                                .form-check
+                                  input(type='hidden' name='qwk_hub_directory' value='false')
+                                  input.form-check-input(type='checkbox' id='nc_qwk_hub_directory' name='qwk_hub_directory' value='true')
+                                  label.form-check-label(for='nc_qwk_hub_directory') Node collects from a shared directory
+                                small.form-text.text-muted
+                                  | For a node on this machine using qnet-directory.js. Its packet is built into
+                                  | qnet/&lt;ID&gt;/out/ ahead of time and its REPs are picked up from qnet/&lt;ID&gt;/in/.
+                                  | The password is not needed.
+                                br
                               #nc_qwk_client_fields
                                 label(for='nc_qwk_host') Host:
                                 input(
@@ -1156,6 +1165,8 @@ block content
                               input(type='text' id='ec_ftn_outbox_dir' name='ftn_outbox_dir' class='form-control' tabindex='9' placeholder='e.g. peer_101 or %M/lord/outbound')
                               br
                               .form-check.mt-2
+                                //- An unticked box sends nothing; the hidden false lets it be unticked (peerConnections.checkboxValue).
+                                input(type='hidden' name='ftn_force_plain_password' value='false')
                                 input.form-check-input(type='checkbox' id='ec_ftn_force_plain' name='ftn_force_plain_password' value='true' tabindex='10')
                                 label.form-check-label(for='ec_ftn_force_plain')
                                   | Force plaintext password
@@ -1200,6 +1211,15 @@ block content
                                 small.form-text.text-muted
                                   | The node connects over HTTP to this board's address with its QWK ID and this password.
                                   | Without a password it cannot connect.
+                                br
+                                .form-check
+                                  input(type='hidden' name='qwk_hub_directory' value='false')
+                                  input.form-check-input(type='checkbox' id='ec_qwk_hub_directory' name='qwk_hub_directory' value='true')
+                                  label.form-check-label(for='ec_qwk_hub_directory') Node collects from a shared directory
+                                small.form-text.text-muted
+                                  | For a node on this machine using qnet-directory.js. Its packet is built into
+                                  | qnet/&lt;ID&gt;/out/ ahead of time and its REPs are picked up from qnet/&lt;ID&gt;/in/.
+                                  | The password is not needed.
                                 br
                               #ec_qwk_client_fields
                                 label(for='ec_qwk_host') Host:
@@ -1638,6 +1658,7 @@ block content
             document.getElementById('ec_qwk_username').value       = cd.username || '';
             document.getElementById('ec_qwk_password').value       = cd.password || '';
             document.getElementById('ec_qwk_hub_password').value   = cd.password || '';
+            document.getElementById('ec_qwk_hub_directory').checked = cd.hub_directory === true;
             document.getElementById('ec_qwk_remote_inbox').value   = cd.remote_inbox ?? '/';
             document.getElementById('ec_qwk_remote_outbox').value  = cd.remote_outbox ?? '/';
             toggleQwkClientFields('ec');

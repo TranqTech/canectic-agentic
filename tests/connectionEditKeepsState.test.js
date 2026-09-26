@@ -73,6 +73,25 @@ describe('peerConnections.mergeConnectionData', function () {
 	}
 });
 
+describe('connection form checkboxes can be unticked', function () {
+	// An unticked box sends nothing, and the form is merged over the stored
+	// row, so a box once ticked stayed ticked. The forms now send a hidden
+	// 'false' first; ticked, the body holds ['false', 'true'].
+	it('QWK hub_directory: ticked, unticked, absent', function () {
+		var stored = { transport: 'hub', remote_qwk_id: 'NODE', hub_directory: true };
+		assert.strictEqual(mergeConnectionData('QWK', stored, { qwk_hub_directory: ['false', 'true'] }).hub_directory, true);
+		assert.strictEqual(mergeConnectionData('QWK', stored, { qwk_hub_directory: 'false' }).hub_directory, false);
+		assert.strictEqual(mergeConnectionData('QWK', stored, { qwk_username: 'x' }).hub_directory, true);
+		assert.strictEqual(mergeConnectionData('QWK', {}, {}).hub_directory, false);
+	});
+
+	it('FTN force_plain_password can be turned off again', function () {
+		var stored = { address: '1:2/3', force_plain_password: true };
+		assert.strictEqual(mergeConnectionData('FTN', stored, { ftn_force_plain_password: 'false' }).force_plain_password, false);
+		assert.strictEqual(mergeConnectionData('FTN', stored, { ftn_force_plain_password: ['false', 'true'] }).force_plain_password, true);
+	});
+});
+
 describe('peerConnections.updateConnection keeps runtime state (#66)', function () {
 	this.timeout(30000);
 

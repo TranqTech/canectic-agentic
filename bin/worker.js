@@ -362,6 +362,16 @@ function createTossProcessor() {
 					});
 					break;
 
+				// Hub side of shared-directory nodes (schedule qwk-hub-sweep)
+				case 'qwk:hub-sweep': {
+					var hubSwept = await qwkTosser.serviceHubNodes();
+					if (hubSwept.repsImported > 0) await postTossMaint();
+					if (transferFormat.importedAnything(hubSwept)) {
+						eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'qwk:hub' });
+					}
+					break;
+				}
+
 				// Hub mode inbound (node drops .rep)
 				case 'qwk:hub:inbound': {
 					// Every REP the node has left, not just the first.

@@ -23,6 +23,7 @@ import * as alogger from '../utils/alogger.js';
 import * as peerConnections from './peerConnections.js';
 import * as systemAddresses from './systemAddresses.js';
 import * as privateMessages from './privateMessages.js';
+import { pendingQwkPmsFor } from './qwkPmRouting.js';
 import { utf8ToCp437 } from '../utils/codepageConversions.js';
 import {
 	QWK_RECORD_SIZE,
@@ -371,6 +372,23 @@ async function buildQwkForNode(peerConnectionUUID) {
 	// progress or failed mid-stream. The connection handler is responsible
 	// for removing the packet after confirmed delivery.
 	var existingQwk = path.join(outDir, localQwkId.toUpperCase() + '.qwk');
+
+	// A sidecar with no packet beside it means the node took the packet: a
+	// directory node (qnet-directory.js) copies it out of out/ and deletes it,
+	// and that is the only acknowledgement it gives. Commit what the packet
+	// carried before building the next one, or its messages go again. Also
+	// finishes a commitNodePacket interrupted between its two deletes; the
+	// commit is idempotent (msg_idx only moves forward, markSent repeats).
+	if (!fs.existsSync(existingQwk)) {
+		var collected = readPending(existingQwk);
+		if (collected) {
+			await commitPending(collected);
+			try { fs.unlinkSync(pendingPath(existingQwk)); } catch (_) {}
+			alogger.writeClog(5, 'buildQwkForNode: ' + remoteQwkId + ' collected ' + path.basename(existingQwk) +
+				' (' + (collected.totalMessages || 0) + ' message(s))', 'tosser', 'greenbright', false, false);
+		}
+	}
+
 	if (fs.existsSync(existingQwk)) {
 		var pending = readPending(existingQwk);
 		alogger.writeClog(5,
@@ -401,13 +419,15 @@ async function buildQwkForNode(peerConnectionUUID) {
 		[dbconn.network_id, dbconn.id]
 	);
 
+	// No conferences still leaves private mail to carry, so this is not a
+	// reason to stop: it returned here, and a node with no subscriptions
+	// never received a PM.
 	if (!enabledSubs || enabledSubs.length === 0) {
 		alogger.writeClog(5,
 			'buildQwkForNode: no enabled subscriptions for ' + peerConnectionUUID, 'tosser',
 			'cyan'
 		, false, false);
-		returnObj.status = true;
-		return returnObj;
+		enabledSubs = [];
 	}
 
 	// Build conference list and gather messages
@@ -492,7 +512,7 @@ async function buildQwkForNode(peerConnectionUUID) {
 	}
 
 	// --- Gather pending QWK private messages (conference 0) ---
-	var pendingPMs = await privateMessages.getPendingByTransport('QWK');
+	var pendingPMs = await pendingQwkPmsFor(peerConnectionUUID);
 	var pmWorkItems = [];
 
 	if (pendingPMs && pendingPMs.length > 0) {
@@ -649,12 +669,7 @@ async function commitNodePacket(peerConnectionUUID, packetId) {
 		out.errormessages.push('Packet id does not match the packet waiting');
 		return out;
 	}
-	if (pending) {
-		await advanceHwmForItems(Object.keys(pending.hwm || {}).map(function (k) {
-			return { pas_id: k, msgId: pending.hwm[k] };
-		}));
-		for (var pmId of pending.pmIds || []) await privateMessages.markSent(pmId);
-	}
+	if (pending) await commitPending(pending);
 	try { fs.unlinkSync(qwkPath); } catch (_) {}
 	try { fs.unlinkSync(pendingPath(qwkPath)); } catch (_) {}
 	alogger.writeClog(5, 'commitNodePacket: ' + remoteQwkId + ' acknowledged ' + packets[0] +
@@ -662,6 +677,14 @@ async function commitNodePacket(peerConnectionUUID, packetId) {
 	out.status = true;
 	out.committed = true;
 	return out;
+}
+
+// What delivering a packet commits: its subscriptions' HWMs and its PMs.
+async function commitPending(pending) {
+	await advanceHwmForItems(Object.keys(pending.hwm || {}).map(function (k) {
+		return { pas_id: k, msgId: pending.hwm[k] };
+	}));
+	for (var pmId of pending.pmIds || []) await privateMessages.markSent(pmId);
 }
 
 // Advance msg_idx for each subscription up to the highest consecutive

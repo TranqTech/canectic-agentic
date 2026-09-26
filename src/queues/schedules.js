@@ -320,6 +320,11 @@ export async function registerSchedules() {
 		}
 
 		// -----------------------------------------------------------------
+		// QWK hub: packets and REPs for nodes on a shared directory
+		// -----------------------------------------------------------------
+		if (await syncQwkHubSweep()) scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// FTN: mailer poll schedules
 		// -----------------------------------------------------------------
 		var ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
@@ -491,6 +496,10 @@ export async function registerSchedules() {
 export async function updateConnectionSchedule(conn, networkType) {
 	if (!conn || !conn.uuid) return;
 
+	// Before the polling checks below: a hub connection never polls, but
+	// whether it collects from a shared directory decides the hub sweep.
+	if (networkType === 'QWK') await syncQwkHubSweep();
+
 	var connectionUUID = conn.uuid;
 	var cd = conn.connection_data || {};
 
@@ -568,6 +577,32 @@ export async function updateConnectionSchedule(conn, networkType) {
 }
 
 /**
+ * The QWK hub sweep (qwkTosser.serviceHubNodes): registered while at least one
+ * active hub connection's node collects from a shared directory and
+ * `qwk_hub_sweep_minutes` is above 0, removed otherwise, so a board with no
+ * such node never lists a schedule that does nothing. Called at startup and
+ * whenever a QWK connection is saved or removed.
+ *
+ * @returns {Promise<boolean>} whether the schedule is now registered
+ */
+export async function syncQwkHubSweep() {
+	var minutes = appConfig.getNumber('qwk_hub_sweep_minutes', 5);
+	var conns = await peerConnections.getActiveConnectionsByNetworkType('QWK');
+	var wanted = minutes > 0 && (conns || []).some(peerConnections.isDirectoryHubNode);
+	if (wanted) {
+		await tossQueue.upsertJobScheduler('qwk-hub-sweep', {
+			every: minutes * 60 * 1000,
+		}, {
+			name: 'qwk:hub-sweep',
+			data: {},
+		});
+	} else {
+		await tossQueue.removeJobScheduler('qwk-hub-sweep');
+	}
+	return wanted;
+}
+
+/**
  * Remove all schedules for a connection.
  * Call when a connection is deactivated or deleted.
  */
@@ -579,6 +614,7 @@ export async function removeConnectionSchedule(connectionUUID, networkType) {
 		case 'QWK':
 			await tossQueue.removeJobScheduler(`qwk-pull:${connectionUUID}`);
 			await tossQueue.removeJobScheduler(`qwk-push:${connectionUUID}`);
+			await syncQwkHubSweep();
 			break;
 		case 'NNTP':
 			await tossQueue.removeJobScheduler(`nntp-pull:${connectionUUID}`);

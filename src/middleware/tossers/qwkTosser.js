@@ -28,6 +28,8 @@ import { splitFullMsgid } from '../../utils/ftnUtils.js';
 import { makeTransport } from '../../models/qwkTransport.js';
 import * as networkTransfers from '../../models/networkTransfers.js';
 import * as privateMessages from '../../models/privateMessages.js';
+import { pendingQwkPmsFor } from '../../models/qwkPmRouting.js';
+import * as qwkPacketBuilder from '../../models/qwkPacketBuilder.js';
 import {
 	parseControlDat,
 	parseMessagesDAT,
@@ -1059,7 +1061,7 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 	} // end if enabledSubs
 
 	// --- Gather pending QWK private messages (conference 0) ---
-	var pendingPMs = await privateMessages.getPendingByTransport('QWK');
+	var pendingPMs = await pendingQwkPmsFor(peerConnectionUUID);
 	var pmSentIds = []; // track PM outbox IDs for marking sent after delivery
 
 	if (pendingPMs && pendingPMs.length > 0) {
@@ -1300,6 +1302,54 @@ async function advanceQwkIdxAfterPost(workItems, enabledSubs) {
 	}
 }
 
+// The hub's side of a node that uses a shared directory (qnet-directory.js):
+// it never calls, so nothing else ever imports the REPs it drops into
+// qnet/<ID>/in/ or builds the packet it collects from qnet/<ID>/out/. Run by
+// the qwk-hub-sweep schedule (syncQwkHubSweep).
+//
+// Building also commits the packet the node took since the last sweep (the
+// sidecar left behind in out/), which is the only acknowledgement a
+// directory node gives. REPs are imported for HTTP nodes too, as a catch for
+// one whose import could not be queued when it arrived.
+async function serviceHubNodes() {
+	var summary = { nodes: 0, repsImported: 0, totalImported: 0, packetsBuilt: 0, errors: [] };
+	var conns = await peerConnections.getActiveConnectionsByNetworkType('QWK');
+	for (var conn of conns || []) {
+		var cd = conn.connection_data || {};
+		if (cd.transport !== 'hub') continue;
+		var nodeId = String(cd.remote_qwk_id || '').trim().toUpperCase();
+		if (!nodeId) continue;
+		summary.nodes++;
+
+		var inDir = path.join(process.cwd(), 'qnet', nodeId, 'in');
+		var reps = [];
+		try { reps = fs.readdirSync(inDir).filter(function (f) { return /\.rep$/i.test(f) && f[0] !== '.'; }); } catch (_) {}
+		if (reps.length > 0) {
+			try {
+				var pulled = await pullHubReps(conn.uuid);
+				summary.repsImported += pulled.filter(function (r) { return r.status && !r.notRecorded; }).length;
+				summary.totalImported += pulled.reduce(function (n, r) { return n + (r.totalImported || 0); }, 0);
+				for (var r of pulled) {
+					if (!r.status) summary.errors.push(nodeId + ': ' + (r.errormessages || []).join('; '));
+				}
+			} catch (err) {
+				summary.errors.push(nodeId + ': REP import: ' + err.message);
+			}
+		}
+
+		if (!peerConnections.isDirectoryHubNode(conn)) continue;
+		try {
+			var built = await qwkPacketBuilder.buildQwkForNode(conn.uuid);
+			if (!built.status) summary.errors.push(nodeId + ': ' + built.errormessages.join('; '));
+			else if (built.qwkPath && !built.reused) summary.packetsBuilt++;
+		} catch (err) {
+			summary.errors.push(nodeId + ': packet build: ' + err.message);
+		}
+	}
+	for (var e of summary.errors) alogger.writeClog(3, 'serviceHubNodes: ' + e, 'tosser', 'redbright', false, false);
+	return summary;
+}
+
 // Push outbound messages to all active QWK connections.
 async function pushAllQWK() {
 	var connections = await peerConnections.getActiveConnectionsByNetworkType('QWK');
@@ -1376,6 +1426,7 @@ export {
 	pullHubReps,
 	pullAllQWK,
 	pushToQwkPeer,
+	serviceHubNodes,
 	pushAllQWK,
 	resetQwkOutboundIdx
 };

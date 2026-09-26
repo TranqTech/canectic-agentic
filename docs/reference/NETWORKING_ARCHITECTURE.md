@@ -190,7 +190,7 @@ New areas inherit: `read_security`, `post_security`, `min_age`, `max_age`, `read
 }
 ```
 
-For hub transport, only `transport`, `remote_qwk_id`, and `high_water_marks` are used.
+For hub transport, only `transport`, `remote_qwk_id`, `password` (the node's HTTP login), `hub_directory` and `high_water_marks` are used. `hub_directory: true` marks a node that collects from `qnet/<NODE_ID>/out/` via qnet-directory.js instead of calling over HTTP (`peerConnections.isDirectoryHubNode`); it is a form checkbox, and the forms send a hidden `false` before every checkbox because `updateConnection` merges the form over the stored row, so an unticked box (which sends nothing) could otherwise never turn a setting off (`checkboxValue`).
 
 ### connection_data JSONB structure (NNTP)
 
@@ -342,6 +342,10 @@ Node GETs /api/v1/qnet/packet → buildQwkForNode(connectionUUID)
   → served; re-served unchanged until the node POSTs /packet/:id/ack
   → commitNodePacket() advances HWM, marks PMs sent, removes the packet
 ```
+
+**Shared-directory nodes** (`hub_directory`): the node never calls, so the fixed `qwk-hub-sweep` schedule (toss queue, job `qwk:hub-sweep`, every `qwk_hub_sweep_minutes`, registered by `syncQwkHubSweep()` only while such a node exists; re-synced whenever a QWK connection is saved or removed) runs `qwkTosser.serviceHubNodes()`: import any REP in every hub node's `in/` (HTTP nodes included, as a catch for an import that could not be queued), then `buildQwkForNode()` for each directory node. The node's acknowledgement is taking the packet: qnet-directory.js copies `out/<OUR_ID>.qwk` and deletes it, so a sidecar with no packet beside it is committed (`commitPending`) at the top of the next `buildQwkForNode()`, before anything is built. The commit is idempotent, which also covers a `commitNodePacket()` interrupted between its two deletes. A node with no enabled subscriptions still gets a packet when it has private mail waiting.
+
+**QWK private mail routing** (`src/models/qwkPmRouting.js`): both builders (client REP and hub packet) take PMs from `pendingQwkPmsFor(connectionUUID)`, never `getPendingByTransport('QWK')`, which handed every pending PM to whichever connection packed first. `routeQwkPm` (pure): a reply pinned to `transport_data.peer_connection_uuid` (set by the web and terminal reply paths from the inbound PM) while that connection is active and still has the destination's QWK ID; else the active connection whose `remote_qwk_id` equals `transport_data.destination || to_address`, case-insensitively, lowest id when several match (a board can be both a system's node and its hub); else undeliverable via `markOutboxUndeliverable`, which bounces to the sender. No relay through a hub (Synchronet's user@QWKID convention) is attempted.
 
 ### Transfer history (QWK and NNTP)
 

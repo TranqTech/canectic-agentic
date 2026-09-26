@@ -127,6 +127,16 @@ export async function startEmbeddedWorkers(opts = {}) {
 				await qwkTosser.pushAllQWK();
 				break;
 
+			// Hub side of shared-directory nodes (schedule qwk-hub-sweep)
+			case 'qwk:hub-sweep': {
+				var hubSwept = await qwkTosser.serviceHubNodes();
+				if (hubSwept.repsImported > 0) await postTossMaint();
+				if (transferFormat.importedAnything(hubSwept)) {
+					eventPublisher.publish(EVENTS.MESSAGES_IMPORTED, { source: 'qwk:hub' });
+				}
+				break;
+			}
+
 			case 'qwk:hub:inbound': {
 				var hubPulled = null;
 				if (job.data.connectionUUID) {

@@ -746,6 +746,19 @@ class pmEditor extends BaseSubModule {
 					destination: toAddr,
 				};
 
+				// A QWK reply to the same system goes back over the connection
+				// the original arrived on (qwkPmRouting.js).
+				if (this._transportType === "QWK" && this._mode === "reply" && this._replyToMsg &&
+					toAddr.toUpperCase() === String(this._replyToMsg.from_address || "").toUpperCase()) {
+					var origTd = this._replyToMsg.transport_data;
+					if (typeof origTd === "string") {
+						try { origTd = JSON.parse(origTd); } catch (_) { origTd = {}; }
+					}
+					if (origTd && origTd.peer_connection_uuid) {
+						messageObj.transport_data.peer_connection_uuid = origTd.peer_connection_uuid;
+					}
+				}
+
 				if (this._transportType === "FTN") {
 					// Parse FTN address components
 					var ftnMatch = toAddr.match(/^(\d+):(\d+)\/(\d+)/);

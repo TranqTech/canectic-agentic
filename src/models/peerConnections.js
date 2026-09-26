@@ -19,6 +19,15 @@ async function getPeers() {
 
 const VALID_FTN_STATUS = ['NORMAL', 'CRASH', 'HOLD'];
 
+// A checkbox's value. The forms send a hidden 'false' before each checkbox,
+// because an unticked box sends nothing and updateConnection merges the form
+// over the stored row, so without it a box could be ticked but never
+// unticked. Ticked, the body holds both values: ['false', 'true'].
+function checkboxValue(v) {
+	if (Array.isArray(v)) return v.some(checkboxValue);
+	return v === true || v === 'true' || v === 'on';
+}
+
 // --- connection_data builders ---
 // Assemble a clean, fully-defaulted connection_data object from raw form input
 // based on the network's type. Unknown types get an empty object.
@@ -74,7 +83,7 @@ function buildConnectionData(networkType, formObj) {
 				mailer_protocol:  rawMailerProtocol  ? rawMailerProtocol.trim().toLowerCase()  : 'binkp',
 				mailer_ws_url:    rawMailerWsUrl     ? rawMailerWsUrl.trim()                   : '',
 				outbox_dir:       rawOutboxDir        ? rawOutboxDir.trim()                     : '',
-				force_plain_password: rawForcePlain === true || rawForcePlain === 'true' || rawForcePlain === 'on'
+				force_plain_password: checkboxValue(rawForcePlain)
 			};
 		}
 		case 'NNTP': {
@@ -111,6 +120,7 @@ function buildConnectionData(networkType, formObj) {
 			var qOutbox    = pick(formObj.qwk_remote_outbox,  formObj.remote_outbox,  '/');
 			var qRemoteId  = pick(formObj.qwk_remote_qwk_id, formObj.remote_qwk_id,  '');
 			var qPollInterval = formObj.poll_interval_minutes || formObj.pull_interval_minutes || formObj.pull_interval || null;
+			var qHubDir    = pick(formObj.qwk_hub_directory, formObj.hub_directory, false);
 			return {
 				transport:             qTransport ? qTransport.toString().trim().toLowerCase() : 'ftp',
 				host:                  qHost ? qHost.toString().trim() : '',
@@ -120,7 +130,11 @@ function buildConnectionData(networkType, formObj) {
 				remote_inbox:          typeof qInbox === 'string'  ? qInbox.trim()  : '',
 				remote_outbox:         typeof qOutbox === 'string' ? qOutbox.trim() : '',
 				remote_qwk_id:         qRemoteId ? qRemoteId.toString().trim().toUpperCase() : '',
-				pull_interval_minutes: qPollInterval ? parseInt(qPollInterval) : 120
+				pull_interval_minutes: qPollInterval ? parseInt(qPollInterval) : 120,
+				// Hub transport only: the node collects its packet from
+				// qnet/<ID>/out/ rather than over HTTP, so the hub builds it
+				// ahead of time (qwkTosser.serviceHubNodes).
+				hub_directory:         checkboxValue(qHubDir)
 			};
 		}
 		case 'LOCAL':
@@ -159,6 +173,14 @@ function mergeConnectionData(networkType, existing, formObj) {
 		}
 	}
 	return merged;
+}
+
+// A QWK hub connection whose node collects its packet from qnet/<ID>/out/ and
+// leaves REPs in qnet/<ID>/in/ (qnet-directory.js), rather than calling over
+// HTTP. Such a node never asks for a packet, so the hub builds it ahead of time.
+function isDirectoryHubNode(conn) {
+	var cd = (conn && conn.connection_data) || {};
+	return !!(conn && conn.active !== false) && cd.transport === 'hub' && cd.hub_directory === true;
 }
 
 // Safety-check connection_data against the network type.
@@ -390,7 +412,8 @@ async function updateConnection(uuid, formObj) {
 		// QWK form fields
 		'qwk_host', 'qwk_port', 'qwk_transport', 'qwk_username',
 		'qwk_password', 'qwk_remote_inbox', 'qwk_remote_outbox',
-		'qwk_remote_qwk_id'
+		'qwk_remote_qwk_id', 'qwk_hub_directory', 'hub_directory',
+		'ftn_force_plain_password', 'force_plain_password'
 	];
 	var hasDataField = dataKeys.some(k => formObj[k] !== undefined);
 
@@ -810,6 +833,7 @@ export {
 	getActiveConnectionsByNetworkType,
 	buildConnectionData,
 	mergeConnectionData,
+	isDirectoryHubNode,
 	validateConnectionData,
 	clearNntpHwmForArea,
 	clearQwkHwmForArea,
