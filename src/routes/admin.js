@@ -55,6 +55,7 @@ import {getVariableList} from "../utils/configvars.js"
 import appConfig from "../config/appConfig.js";
 import { CONFIG_DEFINITIONS, getDefinition, getCategories, isAllowedValue } from "../config/configDefaults.js";
 import { updateConnectionSchedule, removeConnectionSchedule } from "../queues/schedules.js";
+import { connectionIntervalMinutes } from "../utils/scheduleFormat.js";
 import * as configStore from "../models/configStore.js";
 import * as fileGroups from '../models/fileGroups.js';
 import * as fileAreas from '../models/fileAreas.js';
@@ -1003,7 +1004,7 @@ async function applyConnectionSchedule(conn, what) {
 		alogger.writeAlog(4,
 			"[schedules] " + what + ": " + (cd.address || conn.uuid) +
 			" poll_enabled=" + (conn.poll_enabled ? 'yes' : 'no') +
-			" interval=" + (cd.poll_interval || cd.pull_interval || 'default'),
+			" interval=" + connectionIntervalMinutes(conn.network_type, cd) + " min",
 			"cyan");
 	} catch (err) {
 		alogger.writeAlog(2,

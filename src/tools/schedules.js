@@ -37,7 +37,7 @@ import appConfig from '../config/appConfig.js';
 import * as workerHealth from '../queues/workerHealth.js';
 import {
 	formatDuration, formatEvery, describeNext, stalledJobs, summariseCounts,
-	isManagedSchedulerKey
+	isManagedSchedulerKey, connectionIntervalMinutes
 } from '../utils/scheduleFormat.js';
 
 dotenv.config();
@@ -74,14 +74,14 @@ async function expectedSchedules() {
 			if (type === 'FTN') {
 				expected.set('poll:' + conn.uuid, {
 					queue: 'mailer', label: label,
-					every: (parseInt(cd.poll_interval) || 60) * 60 * 1000
+					every: connectionIntervalMinutes('FTN', cd) * 60 * 1000
 				});
 			} else if (type === 'QWK') {
-				var qm = (parseInt(cd.pull_interval) || 120) * 60 * 1000;
+				var qm = connectionIntervalMinutes('QWK', cd) * 60 * 1000;
 				expected.set('qwk-pull:' + conn.uuid, { queue: 'toss', label: label, every: qm });
 				expected.set('qwk-push:' + conn.uuid, { queue: 'toss', label: label, every: qm });
 			} else {
-				var nm = (parseInt(cd.pull_interval) || 60) * 60 * 1000;
+				var nm = connectionIntervalMinutes('NNTP', cd) * 60 * 1000;
 				expected.set('nntp-pull:' + conn.uuid, { queue: 'toss', label: label, every: nm });
 				expected.set('nntp-push:' + conn.uuid, { queue: 'toss', label: label, every: nm });
 			}

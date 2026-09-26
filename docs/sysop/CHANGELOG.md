@@ -23,6 +23,7 @@
 - Fix: **QWK private mail went out over whichever QWK connection sent first**, so with more than one QWK connection most of it reached the wrong system. Each message now goes only to the system in its address, over the connection whose Remote QWK ID matches, and a reply goes back over the connection the original came in on. A message addressed to a system you have no QWK connection to is returned to its sender as undeliverable instead of being sent somewhere it cannot be delivered.
 - Fix: **a QWK node with no conferences subscribed never received private mail** from a Canectic hub. Its packet is now built for private mail alone.
 - Fix: **the Force plaintext password box on an FTN connection could not be unticked**; saving with it unticked kept it on. It now turns off.
+- Fix: **saving a QWK or NNTP connection reset how often it polled** to 2 hours (QWK) or 1 hour (NNTP), whatever its interval was set to, until the BBS was next restarted. It now keeps the interval you set. `node src/tools/schedules.js` also compared each QWK and NNTP schedule against those defaults instead of your setting, so it could report a mismatch where there was none and miss a real one.
 - Fix: **a QWK or NNTP pull that failed was logged as though it had worked.** The system log said the job finished and that messages were imported whatever happened, and the reason was only in `tosser.log`. A failed pull or push is now logged as a failure with its reason, and messages are only reported as imported when some were.
 
 ### Messages

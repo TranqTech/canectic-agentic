@@ -18,7 +18,8 @@
  *
  * connection_data fields used:
  *   poll_interval  — minutes between mailer polls (FTN, default 60)
- *   pull_interval  — minutes between toss pull/push cycles (QWK default 120, NNTP default 60)
+ *   pull_interval_minutes — minutes between toss pull/push cycles (QWK default 120, NNTP default 60);
+ *                   read through scheduleFormat.connectionIntervalMinutes, never directly
  *   status         — HOLD connections are skipped for mailer polls
  *   transport      — QWK hub transport is on-demand, not scheduled
  */
@@ -335,7 +336,7 @@ export async function registerSchedules() {
 				// Skip HOLD connections — they don't get polled
 				if (cd.status === 'HOLD') continue;
 
-				var pollMinutes = parseInt(cd.poll_interval) || 60;
+				var pollMinutes = scheduleFormat.connectionIntervalMinutes('FTN', cd);
 				await mailerQueue.upsertJobScheduler(
 					`poll:${conn.uuid}`, {
 						every: pollMinutes * 60 * 1000,
@@ -360,7 +361,7 @@ export async function registerSchedules() {
 				// Hub transport is on-demand — nodes pull when they're ready
 				if (cd.transport === 'hub') continue;
 
-				var pullMinutes = parseInt(cd.pull_interval_minutes || cd.pull_interval) || 120;
+				var pullMinutes = scheduleFormat.connectionIntervalMinutes('QWK', cd);
 				await tossQueue.upsertJobScheduler(
 					`qwk-pull:${conn.uuid}`, {
 						every: pullMinutes * 60 * 1000,
@@ -390,7 +391,7 @@ export async function registerSchedules() {
 			for (var conn of nntpConns) {
 				if (!conn.poll_enabled) continue;
 				var cd = conn.connection_data || {};
-				var pullMinutes = parseInt(cd.pull_interval_minutes || cd.pull_interval) || 60;
+				var pullMinutes = scheduleFormat.connectionIntervalMinutes('NNTP', cd);
 
 				await tossQueue.upsertJobScheduler(
 					`nntp-pull:${conn.uuid}`, {
@@ -480,7 +481,7 @@ export async function registerSchedules() {
  * Update the schedule for a single peer connection.
  *
  * Call from admin routes whenever a connection's schedule inputs change:
- * poll_interval or pull_interval, active, poll_enabled, or FTN status.
+ * poll_interval or pull_interval_minutes, active, poll_enabled, or FTN status.
  *
  * Without this, schedules were only ever written by registerSchedules() at
  * gateway startup, so every change a sysop made through the admin UI sat in the
@@ -519,7 +520,7 @@ export async function updateConnectionSchedule(conn, networkType) {
 				await mailerQueue.removeJobScheduler(`poll:${connectionUUID}`);
 				return;
 			}
-			var pollMinutes = parseInt(cd.poll_interval) || 60;
+			var pollMinutes = scheduleFormat.connectionIntervalMinutes('FTN', cd);
 			await mailerQueue.upsertJobScheduler(
 				`poll:${connectionUUID}`, {
 					every: pollMinutes * 60 * 1000,
@@ -533,7 +534,7 @@ export async function updateConnectionSchedule(conn, networkType) {
 
 		case 'QWK': {
 			if (cd.transport === 'hub') return;
-			var pullMinutes = parseInt(cd.pull_interval) || 120;
+			var pullMinutes = scheduleFormat.connectionIntervalMinutes('QWK', cd);
 			await tossQueue.upsertJobScheduler(
 				`qwk-pull:${connectionUUID}`, {
 					every: pullMinutes * 60 * 1000,
@@ -554,7 +555,7 @@ export async function updateConnectionSchedule(conn, networkType) {
 		}
 
 		case 'NNTP': {
-			var pullMinutes = parseInt(cd.pull_interval) || 60;
+			var pullMinutes = scheduleFormat.connectionIntervalMinutes('NNTP', cd);
 			await tossQueue.upsertJobScheduler(
 				`nntp-pull:${connectionUUID}`, {
 					every: pullMinutes * 60 * 1000,

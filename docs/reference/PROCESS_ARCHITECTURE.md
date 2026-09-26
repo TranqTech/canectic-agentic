@@ -1058,12 +1058,17 @@ export async function registerSchedules() {
     });
 
     // --- Toss schedules (per active connection) ---
+    // Intervals are read ONLY through scheduleFormat.connectionIntervalMinutes:
+    // FTN stores poll_interval, QWK/NNTP store pull_interval_minutes. This
+    // sketch once read `pull_interval`, which nothing writes, and the save path
+    // and tools/schedules.js copied it, so saving a QWK or NNTP connection
+    // re-registered it at the default until the next restart.
     const ftnConns = await peerConnections.getActiveConnectionsByNetworkType('FTN');
     for (const conn of ftnConns) {
         const cd = conn.connection_data || {};
         if (cd.status !== 'HOLD') {
             // Mailer poll schedule for FTN connections
-            const pollMinutes = parseInt(cd.poll_interval) || 60;
+            const pollMinutes = scheduleFormat.connectionIntervalMinutes('FTN', cd);
             await mailerQueue.upsertJobScheduler(
                 `poll:${conn.uuid}`, {
                     every: pollMinutes * 60 * 1000,
@@ -1079,7 +1084,7 @@ export async function registerSchedules() {
     for (const conn of qwkConns) {
         const cd = conn.connection_data || {};
         if (cd.transport !== 'hub') {  // hub mode is on-demand, not polled
-            const pullMinutes = parseInt(cd.pull_interval) || 120;
+            const pullMinutes = scheduleFormat.connectionIntervalMinutes('QWK', cd);
             await tossQueue.upsertJobScheduler(
                 `qwk-pull:${conn.uuid}`, {
                     every: pullMinutes * 60 * 1000,
@@ -1101,7 +1106,7 @@ export async function registerSchedules() {
 
     const nntpConns = await peerConnections.getActiveConnectionsByNetworkType('NNTP');
     for (const conn of nntpConns) {
-        const pullMinutes = parseInt((conn.connection_data || {}).pull_interval) || 60;
+        const pullMinutes = scheduleFormat.connectionIntervalMinutes('NNTP', conn.connection_data);
         await tossQueue.upsertJobScheduler(
             `nntp-pull:${conn.uuid}`, {
                 every: pullMinutes * 60 * 1000,
@@ -1269,7 +1274,7 @@ The mailer's internal `_startPollScheduling()` timer has been removed. Polling i
 14. Create `src/queues/embedded.js` with `startEmbeddedWorkers()`
 15. Add `PROCESS_MODE` env var support to `gateway.js`
 16. Create `src/queues/schedules.js` with `registerSchedules()`
-17. Add `poll_interval` / `pull_interval` to `connection_data` schema
+17. Add `poll_interval` (FTN) / `pull_interval_minutes` (QWK, NNTP) to `connection_data` schema
 18. Wire admin peer connection UI to update schedules on save
 19. Remove cron dependency documentation, update deployment guide
 

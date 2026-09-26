@@ -254,10 +254,30 @@ function pruneNotification(removed) {
 	return { title: title, body: body, lines: lines };
 }
 
+// The minutes between a connection's scheduled polls or pull/push cycles.
+// The ONE reading of the setting, for startup registration, the save path,
+// the diagnostic and the log line alike. They used to read it separately:
+// QWK and NNTP store `pull_interval_minutes` (peerConnections
+// .buildConnectionData), startup read that, but the save path and
+// tools/schedules.js read `pull_interval`, which nothing writes, so saving a
+// connection re-registered it at the default and the diagnostic compared
+// against the default. `pull_interval` is still read as a fallback for rows
+// written by hand. A value that is not a positive number falls to the
+// default, since an every of NaN or 0 would be a poll loop.
+var DEFAULT_INTERVAL_MINUTES = { FTN: 60, QWK: 120, NNTP: 60 };
+
+function connectionIntervalMinutes(networkType, cd) {
+	var d = cd || {};
+	var raw = networkType === 'FTN' ? d.poll_interval : (d.pull_interval_minutes || d.pull_interval);
+	var n = parseInt(raw);
+	return n > 0 ? n : (DEFAULT_INTERVAL_MINUTES[networkType] || 60);
+}
+
 export {
 	DEFAULT_LATE_GRACE_MS,
 	DEFAULT_STALL_MS,
 	MANAGED_KEY_PREFIXES,
+	connectionIntervalMinutes,
 	formatDuration,
 	formatEvery,
 	describeNext,

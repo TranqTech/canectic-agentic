@@ -180,10 +180,71 @@ describe('connection poll schedules', function () {
 		assert.strictEqual(await schedulerFor(KEY), null);
 	});
 
+	// -----------------------------------------------------------------------
+	// QWK and NNTP: the key the form actually stores
+	// -----------------------------------------------------------------------
+
+	it('schedules QWK and NNTP at their configured pull_interval_minutes', async function () {
+		// The save path read `pull_interval`, which nothing writes, so every
+		// save of a QWK or NNTP connection re-registered it at the default
+		// (120 / 60) until the next restart, when startup read the right key.
+		var toss = new Queue('toss', { connection: createQueueConnection() });
+		try {
+			for (var t of [{ type: 'QWK', prefix: 'qwk' }, { type: 'NNTP', prefix: 'nntp' }]) {
+				await schedules.updateConnectionSchedule({
+					uuid: UUID, active: true, poll_enabled: true,
+					connection_data: { transport: 'ftp', host: 'x.invalid', pull_interval_minutes: 45 }
+				}, t.type);
+				for (var dir of ['pull', 'push']) {
+					var key = t.prefix + '-' + dir + ':' + UUID;
+					var list = await toss.getJobSchedulers(0, 500);
+					var sch = list.filter(function (x) { return String(x.key || x.id) === key; })[0];
+					assert.ok(sch, 'no scheduler ' + key);
+					assert.strictEqual(sch.every, 45 * 60 * 1000, key + ' at ' + (sch.every / 60000) + ' min');
+				}
+				await schedules.removeConnectionSchedule(UUID, t.type);
+			}
+		} finally {
+			for (var k of ['qwk-pull:', 'qwk-push:', 'nntp-pull:', 'nntp-push:']) {
+				await toss.removeJobScheduler(k + UUID).catch(function () {});
+			}
+			await toss.close();
+		}
+	});
+
 	it('takes the whole connection row, so a caller cannot forget a condition', function () {
 		// The old signature was (uuid, networkType, connectionData, active),
 		// which let a caller pass a connection with polling disabled and get a
 		// schedule anyway, because active was the only flag it looked at.
 		assert.strictEqual(schedules.updateConnectionSchedule.length, 2);
+	});
+});
+
+describe('scheduleFormat.connectionIntervalMinutes', function () {
+	var fmt;
+	before(async function () { fmt = await import('../src/utils/scheduleFormat.js'); });
+
+	it('reads each type\'s own key, with its own default', function () {
+		assert.strictEqual(fmt.connectionIntervalMinutes('FTN', { poll_interval: '240' }), 240);
+		assert.strictEqual(fmt.connectionIntervalMinutes('QWK', { pull_interval_minutes: 118 }), 118);
+		assert.strictEqual(fmt.connectionIntervalMinutes('NNTP', { pull_interval_minutes: '30' }), 30);
+		assert.strictEqual(fmt.connectionIntervalMinutes('FTN', {}), 60);
+		assert.strictEqual(fmt.connectionIntervalMinutes('QWK', null), 120);
+		assert.strictEqual(fmt.connectionIntervalMinutes('NNTP', {}), 60);
+	});
+
+	it('still reads a hand-written pull_interval, and never returns a runaway', function () {
+		assert.strictEqual(fmt.connectionIntervalMinutes('QWK', { pull_interval: 90 }), 90);
+		assert.strictEqual(fmt.connectionIntervalMinutes('QWK', { pull_interval_minutes: 0 }), 120);
+		assert.strictEqual(fmt.connectionIntervalMinutes('NNTP', { pull_interval_minutes: 'abc' }), 60);
+		assert.strictEqual(fmt.connectionIntervalMinutes('FTN', { poll_interval: -5 }), 60);
+	});
+
+	it('is the only reader: nothing reads cd.pull_interval on its own', async function () {
+		var fs = await import('fs');
+		for (var rel of ['src/queues/schedules.js', 'src/tools/schedules.js', 'src/routes/admin.js']) {
+			var src = fs.readFileSync(new URL('../' + rel, import.meta.url), 'utf8');
+			assert.doesNotMatch(src, /cd\.pull_interval\b(?!_)/, rel);
+		}
 	});
 });
