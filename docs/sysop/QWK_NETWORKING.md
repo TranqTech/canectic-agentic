@@ -162,5 +162,7 @@ address. Each connection on a peer's page shows its own recent transfers.
   connection has the QWK ID it was addressed to. Private mail goes only to
   the system named in its address, over the connection whose Remote QWK ID
   matches (a reply goes back over the connection the original came in on).
+  When a system is both your hub and your node, new mail to it goes to it as
+  your hub.
   Mail for a system you do not link with directly is not passed on through
   a hub.

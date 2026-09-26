@@ -13,8 +13,8 @@
 //   2. The active connection whose remote QWK ID is the destination
 //      (transport_data.destination, else to_address), case-insensitively. A
 //      board can reach one system over two connections (as its node and as
-//      its hub); either delivers, so the oldest connection is chosen, which
-//      keeps the answer stable from one run to the next.
+//      its hub); the one where it is our hub wins, as in Synchronet's
+//      qwk_route (#69).
 //   3. Nothing: the PM is undeliverable and the sender is told. Relaying via
 //      a hub to a system it knows (Synchronet's user@QWKID convention) is not
 //      done, and guessing an upstream would hand the hub mail addressed to
@@ -23,6 +23,7 @@
 import * as peerConnections from './peerConnections.js';
 import * as privateMessages from './privateMessages.js';
 import * as alogger from '../utils/alogger.js';
+import { remoteRole } from '../utils/qwkId.js';
 
 function tdOf(pm) {
 	var td = pm && pm.transport_data;
@@ -59,7 +60,11 @@ function routeQwkPm(pm, connections) {
 	}
 
 	if (!dest) return { uuid: null, reason: 'no destination QWK ID' };
-	var match = conns.find(function (c) { return qwkIdOf(c) === dest; });
+	// Our hub before our node, as Synchronet's qwk_route checks its hubs
+	// before its nodes (#69). With IDs unique per role (#67) there is at most
+	// one of each.
+	var matches = conns.filter(function (c) { return qwkIdOf(c) === dest; });
+	var match = matches.find(function (c) { return remoteRole(c.connection_data) === 'hub'; }) || matches[0];
 	if (match) return { uuid: match.uuid, reason: null };
 	return { uuid: null, reason: 'no QWK connection to ' + dest };
 }

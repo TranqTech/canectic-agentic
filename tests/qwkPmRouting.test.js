@@ -40,9 +40,15 @@ describe('routeQwkPm', function () {
 		assert.strictEqual(destinationOf({ to_address: 'VERT', transport_data: { destination: 'undrmine' } }), 'UNDRMINE');
 	});
 
-	it('picks the oldest when two connections reach the same system, whatever order they come in', function () {
-		assert.strictEqual(routeQwkPm({ to_address: 'UNDRMINE' }, ALL).uuid, 'u-node');
-		assert.strictEqual(routeQwkPm({ to_address: 'UNDRMINE' }, [NODE, HUB]).uuid, 'u-node');
+	it('prefers the connection where the system is our hub, as Synchronet does (#69)', function () {
+		// NODE here is our FTP link TO UNDRMINE, i.e. UNDRMINE as our hub; HUB
+		// is the hub-transport connection, UNDRMINE as our node. Oldest-first
+		// used to pick by id, which is not a rule anyone configures.
+		var asOurHub  = conn(9, 'u-ourhub', 'UNDRMINE', { transport: 'ftp' });
+		var asOurNode = conn(2, 'u-ournode', 'UNDRMINE', { transport: 'hub' });
+		assert.strictEqual(routeQwkPm({ to_address: 'UNDRMINE' }, [asOurNode, asOurHub]).uuid, 'u-ourhub');
+		assert.strictEqual(routeQwkPm({ to_address: 'UNDRMINE' }, [asOurHub, asOurNode]).uuid, 'u-ourhub');
+		assert.strictEqual(routeQwkPm({ to_address: 'UNDRMINE' }, [asOurNode]).uuid, 'u-ournode');
 	});
 
 	it('sends a reply back over the connection its original came in on', function () {
