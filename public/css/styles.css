@@ -386,7 +386,17 @@ span[style*="color: rgb(1, 1, 1)"] {
 	font-size: 1.4em;
 }
 
+/* A message body is a block (#60). It also carries a colour class such as
+   fg-brightgrey, and those set display: inline so they can colour spans
+   inside a message. Inline, the body's lines sat in its PARENT's line boxes,
+   ~29px apart at the page's normal size whatever font the body was sized
+   to: at 80 columns on a phone (7px text) every line was followed by what
+   looked like an empty one, and at 40 lines were still twice as far apart as
+   they should be. It also made overflow-x on art bodies do nothing, since
+   overflow does not apply to inline boxes. This rule must stay AFTER the
+   fg-* rules: same specificity, so the later one wins. */
 .messagebody{
+	display: block;
 	line-height: 1.1;
 }
 
