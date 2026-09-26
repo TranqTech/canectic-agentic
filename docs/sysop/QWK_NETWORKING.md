@@ -130,6 +130,16 @@ the peer page. Boards that set this up before per-role directories used
 new directory, so the node keeps working, but point its call-out at the
 `.node` path when you next change it.
 
+## Character sets
+
+Messages go out in CP437, the character set QWK was built on, whenever they
+fit it. A message that does not (emoji, or most alphabets other than Latin and
+Greek) goes as UTF-8 instead, marked in HEADERS.DAT the way Synchronet expects,
+rather than losing those characters. Untick **Send UTF-8 when a message needs
+it** on a connection whose other end cannot read UTF-8; those messages then go
+as CP437 with the characters it lacks replaced. UTF-8 messages arriving from
+another system are read as UTF-8.
+
 ## Passing messages on
 
 A board with more than one QWK connection on a network passes messages

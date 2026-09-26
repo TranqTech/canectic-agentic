@@ -31,7 +31,10 @@ import {
 	QWK_RECORD_SIZE,
 	QWK_LINE_TERM,
 	buildQwkHeader,
-	buildQwkBody
+	buildQwkBody,
+	messageNeedsUtf8,
+	encodeMessageBody,
+	headersEntryBytes
 } from './qwkClasses.js';
 import appConfig from "../config/appConfig.js";
 
@@ -111,7 +114,8 @@ function buildControlDat(options) {
 //
 // Returns { buffer, itemOffsets } where itemOffsets[i] = byte offset of
 // message i's header in the buffer (for HEADERS.DAT cross-reference).
-function buildMessagesDat(messageItems, qwkId) {
+function buildMessagesDat(messageItems, qwkId, opts) {
+	var allowUtf8 = !!(opts && opts.utf8);
 	var chunks = [];
 	var itemOffsets = [];
 	var currentOffset = 0;
@@ -130,16 +134,10 @@ function buildMessagesDat(messageItems, qwkId) {
 	for (var i = 0; i < messageItems.length; i++) {
 		var item = messageItems[i];
 
-		// Ask what the body says rather than guessing from which column is set.
-		// See messageText.canonicalText: "utf8 is set, so body_text is raw
-		// CP437" holds for a QWK message and not for an FTN one.
-		var bodyForPack = '';
-		var cp437Bytes = utf8ToCp437(item.msg.body_text || '');
-		for (var j = 0; j < cp437Bytes.length; j++) {
-			bodyForPack += String.fromCharCode(cp437Bytes[j]);
-		}
-
-		var bodyBuf = buildQwkBody(bodyForPack);
+		// CP437 unless the connection allows UTF-8 and the text needs it
+		// (#71); buildHeadersDatText writes the matching Utf8 line.
+		item.utf8Wire = messageNeedsUtf8(item.msg, allowUtf8);
+		var bodyBuf = encodeMessageBody(item.msg.body_text || '', item.utf8Wire);
 		var hdrBuf  = buildQwkHeader(item.msg, item.conferenceNum, bodyBuf.length, item.isPrivate || false);
 
 		itemOffsets.push(currentOffset);
@@ -174,8 +172,11 @@ function buildHeadersDatText(messageItems, offsets, localQwkId) {
 		// Section header — hex offset
 		lines.push('[' + offset.toString(16).toUpperCase() + ']');
 
-		// UTF-8 flag
-		lines.push('Utf8 = ' + (msg.utf8 ? 'true' : 'false'));
+		// Whether THIS entry and its body are UTF-8 (set by buildMessagesDat).
+		// It used to follow the utf8 column, set on most stored mail, while the
+		// body went out as CP437 with 0xE3 lines, so Synchronet read such a
+		// message as one run-on line (#71).
+		lines.push('Utf8 = ' + (item.utf8Wire === true ? 'true' : 'false'));
 
 		// Message-ID
 		if (msg.msg_id) {
@@ -214,7 +215,8 @@ function buildHeadersDatText(messageItems, offsets, localQwkId) {
 		// Blank line terminates entry
 		lines.push('');
 
-		entries.push(lines.join('\n'));
+		// A byte string, in the charset its own Utf8 line names.
+		entries.push(headersEntryBytes(lines.join('\n'), item.utf8Wire === true));
 	}
 
 	return entries.join('\n') + '\n';
@@ -267,7 +269,8 @@ function assembleQwkPacket(options) {
 
 	if (options.headersDat) {
 		var headersPath = path.join(tmpDir, 'HEADERS.DAT');
-		fs.writeFileSync(headersPath, options.headersDat);
+		// A byte string from buildHeadersDatText: written byte for byte.
+		fs.writeFileSync(headersPath, options.headersDat, typeof options.headersDat === 'string' ? 'latin1' : undefined);
 		filesToZip.push(headersPath);
 	}
 
@@ -577,7 +580,7 @@ async function buildQwkForNode(peerConnectionUUID) {
 		totalMessages: messageItems.length
 	});
 
-	var msgResult = buildMessagesDat(messageItems, localQwkId);
+	var msgResult = buildMessagesDat(messageItems, localQwkId, { utf8: cd.utf8 !== false });
 
 	var headersDat = buildHeadersDatText(
 		messageItems, msgResult.itemOffsets, localQwkId

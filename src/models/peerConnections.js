@@ -122,6 +122,7 @@ function buildConnectionData(networkType, formObj) {
 			var qRemoteId  = pick(formObj.qwk_remote_qwk_id, formObj.remote_qwk_id,  '');
 			var qPollInterval = formObj.poll_interval_minutes || formObj.pull_interval_minutes || formObj.pull_interval || null;
 			var qHubDir    = pick(formObj.qwk_hub_directory, formObj.hub_directory, false);
+			var qUtf8      = pick(formObj.qwk_utf8, formObj.utf8, true);
 			return {
 				transport:             qTransport ? qTransport.toString().trim().toLowerCase() : 'ftp',
 				host:                  qHost ? qHost.toString().trim() : '',
@@ -135,7 +136,11 @@ function buildConnectionData(networkType, formObj) {
 				// Hub transport only: the node collects its packet from
 				// qnet/<ID>/out/ rather than over HTTP, so the hub builds it
 				// ahead of time (qwkTosser.serviceHubNodes).
-				hub_directory:         checkboxValue(qHubDir)
+				hub_directory:         checkboxValue(qHubDir),
+				// Send a message as UTF-8 when it does not fit CP437 (#71). On by
+				// default: Synchronet honours HEADERS.DAT Utf8 whatever its own
+				// settings, and only messages that would lose characters change.
+				utf8:                  checkboxValue(qUtf8)
 			};
 		}
 		case 'LOCAL':
@@ -453,7 +458,7 @@ async function updateConnection(uuid, formObj) {
 		// QWK form fields
 		'qwk_host', 'qwk_port', 'qwk_transport', 'qwk_username',
 		'qwk_password', 'qwk_remote_inbox', 'qwk_remote_outbox',
-		'qwk_remote_qwk_id', 'qwk_hub_directory', 'hub_directory',
+		'qwk_remote_qwk_id', 'qwk_hub_directory', 'hub_directory', 'qwk_utf8', 'utf8',
 		'ftn_force_plain_password', 'force_plain_password'
 	];
 	var hasDataField = dataKeys.some(k => formObj[k] !== undefined);

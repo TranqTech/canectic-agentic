@@ -290,6 +290,10 @@ block content
                                 td
                                   small Outbox:
                                 td= cd.remote_outbox !== undefined && cd.remote_outbox !== '' ? cd.remote_outbox : '(server default)'
+                              tr
+                                td
+                                  small UTF-8:
+                                td= cd.utf8 === false ? 'Never (CP437 only)' : 'When a message needs it'
                               if conn.qnetDir
                                 tr
                                   td
@@ -964,6 +968,15 @@ block content
                                 option(value='directory') Directory
                                 option(value='hub') Hub (Inbound)
                               br
+                              .form-check
+                                //- An unticked box sends nothing; the hidden false lets it be unticked.
+                                input(type='hidden' name='qwk_utf8' value='false')
+                                input.form-check-input(type='checkbox' id='nc_qwk_utf8' name='qwk_utf8' value='true' checked)
+                                label.form-check-label(for='nc_qwk_utf8') Send UTF-8 when a message needs it
+                              small.form-text.text-muted
+                                | Messages that fit CP437 always go as CP437. One that does not goes as UTF-8, marked
+                                | in HEADERS.DAT as Synchronet expects, instead of losing characters.
+                              br
                               #nc_qwk_hub_fields(style='display:none')
                                 label(for='nc_qwk_hub_password') Node password:
                                 input(type='password' id='nc_qwk_hub_password' name='qwk_password' class='form-control' autocomplete='new-password')
@@ -1214,6 +1227,15 @@ block content
                                 option(value='http') HTTP (Canectic hub)
                                 option(value='directory') Directory
                                 option(value='hub') Hub (Inbound)
+                              br
+                              .form-check
+                                //- An unticked box sends nothing; the hidden false lets it be unticked.
+                                input(type='hidden' name='qwk_utf8' value='false')
+                                input.form-check-input(type='checkbox' id='ec_qwk_utf8' name='qwk_utf8' value='true' checked)
+                                label.form-check-label(for='ec_qwk_utf8') Send UTF-8 when a message needs it
+                              small.form-text.text-muted
+                                | Messages that fit CP437 always go as CP437. One that does not goes as UTF-8, marked
+                                | in HEADERS.DAT as Synchronet expects, instead of losing characters.
                               br
                               #ec_qwk_hub_fields(style='display:none')
                                 label(for='ec_qwk_hub_password') Node password:
@@ -1669,6 +1691,7 @@ block content
             document.getElementById('ec_qwk_password').value       = cd.password || '';
             document.getElementById('ec_qwk_hub_password').value   = cd.password || '';
             document.getElementById('ec_qwk_hub_directory').checked = cd.hub_directory === true;
+            document.getElementById('ec_qwk_utf8').checked = cd.utf8 !== false;
             document.getElementById('ec_qwk_remote_inbox').value   = cd.remote_inbox ?? '/';
             document.getElementById('ec_qwk_remote_outbox').value  = cd.remote_outbox ?? '/';
             toggleQwkClientFields('ec');

@@ -674,7 +674,7 @@ async function _pullFromQwkPeer(peerConnectionUUID) {
 		// (full-length subjects, Message-IDs, timezone info, UTF-8 flag, etc)
 		if (headersFile) {
 			try {
-				var headersText = fs.readFileSync(path.join(extractDir, headersFile), 'utf8');
+				var headersText = fs.readFileSync(path.join(extractDir, headersFile), 'latin1');  // bytes: each entry names its own charset (#71)
 				var headersDat  = parseHeadersDat(headersText);
 				var hdrCount    = Object.keys(headersDat).length;
 				alogger.writeClog(5,
@@ -1251,7 +1251,7 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		, false, false);
 
 		returnObj.stage = 'build';
-		buildRepPacket(postItems, packetName, outDir, localQwkId);
+		buildRepPacket(postItems, packetName, outDir, localQwkId, { utf8: cd.utf8 !== false });
 		try { returnObj.bytes = fs.statSync(repPath).size; } catch (_) {}
 
 		// Upload

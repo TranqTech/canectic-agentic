@@ -23,6 +23,9 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import AdmZip from 'adm-zip';
 import { cp437ToUtf8, utf8ToCp437 } from '../utils/codepageConversions.js';
+import { fitsCp437 } from '../utils/charsetPolicy.js';
+
+var CP = { cp437ToUtf8: cp437ToUtf8, utf8ToCp437: utf8ToCp437 };
 
 const QWK_RECORD_SIZE   = 128;
 const QWK_HEADER_BLOCKS = 1;
@@ -120,6 +123,101 @@ function parseControlDat(text) {
 	return result;
 }
 
+// Decode one message body: its kludge lines, origin, and text. `isUtf8` is
+// whether HEADERS.DAT marks the message "Utf8 = true" (#71).
+function decodeQwkBody(bodyBuf, isUtf8) {
+	// A CP437 body separates lines with 0xE3. A UTF-8 one (HEADERS.DAT
+	// "Utf8 = true") separates them with LF, because 0xE3 is a UTF-8 lead
+	// byte (Synchronet qwktomsg.cpp, #71). Either way the result uses \r,
+	// the BBS's own convention, with trailing EOF padding and spaces gone.
+	var bodyRaw;
+	if (isUtf8) {
+		bodyRaw = bodyBuf.toString('utf8')
+			.replace(/[\x1A]+$/g, '')
+			.trimEnd()
+			.replace(/\r\n/g, '\r')
+			.replace(/\n/g, '\r');
+	} else {
+		bodyRaw = bodyBuf.toString('binary')
+			.replace(/[\x1A]+$/g, '')
+			.trimEnd()
+			.replace(/\xE3/g, '\r');
+	}
+
+	// rawBody preserves everything (kludge lines, conference headers)
+	var rawBody = bodyRaw;
+
+	// Parse @ kludge lines from the start of the body.
+	// QWK/FTN kludges: @MSGID, @REPLY, @TZUTC, @TZ, @PID, @VIA, @INTL, etc.
+	// Capture them into a structured object, then strip from the clean body.
+	var kludges = {};
+	var bodyClean = bodyRaw;
+	while (bodyClean.startsWith('@')) {
+		var lineBreak = bodyClean.indexOf('\r');
+		if (lineBreak === -1) {
+			// Entire body is a single @ line — leave it
+			break;
+		}
+		var kludgeLine = bodyClean.substring(0, lineBreak).trim();
+		bodyClean = bodyClean.substring(lineBreak + 1);
+
+		// Parse "@ KEY: value" or "@KEY value" forms
+		var spaceIdx = kludgeLine.indexOf(' ');
+		if (spaceIdx > 1) {
+			var kKey = kludgeLine.substring(1, spaceIdx)
+				.replace(/:$/, '').toUpperCase();
+			var kVal = kludgeLine.substring(spaceIdx + 1).trim();
+			if (kKey && kVal) {
+				// VIA can appear multiple times — collect as array
+				if (kKey === 'VIA') {
+					if (!kludges.VIA) kludges.VIA = [];
+					kludges.VIA.push(kVal);
+				} else {
+					kludges[kKey] = kVal;
+				}
+			}
+		}
+	}
+
+	// Extract origin line from body: " * Origin: ..." at the end
+	var originLine = '';
+	var originMatch = bodyClean.match(/\r \* Origin: ([^\r]*)/);
+	if (originMatch) {
+		originLine = originMatch[1].trim();
+	}
+
+	// cp437 → UTF-8 conversion (on clean body only).
+	//
+	// bodyText carries the DECODED text, same as every other importer.
+	// It used to carry the raw CP437 bytes held as latin-1 characters,
+	// which made body_text mean one thing for a QWK message and another
+	// for an FTN one, and every exporter had to guess which. The QWK
+	// packer guessed wrong for FTN messages and corrupted them.
+	//
+	// utf8 is still written, identical, for one release: it is the only
+	// copy of the decoded text for rows migration 0006 rewrites, so
+	// keeping it is what makes that rewrite reversible.
+	var utf8 = null;
+	var rawUtf8 = null;
+	if (isUtf8) {
+		utf8 = bodyClean;
+		rawUtf8 = rawBody;
+	} else {
+		try {
+			utf8 = cp437ToUtf8(bodyClean);
+		} catch (_) {
+			// leave utf8 null on failure
+		}
+		// rawBody gets cp437 conversion too
+		try {
+			rawUtf8 = cp437ToUtf8(rawBody);
+		} catch (_) {}
+	}
+	var bodyText = utf8 === null ? bodyClean : utf8;
+
+	return { rawBody: rawBody, rawUtf8: rawUtf8, kludges: kludges, originLine: originLine, bodyText: bodyText, utf8: utf8 };
+}
+
 // ---------------------------------------------------------------------------
 // MESSAGES.DAT parser
 // ---------------------------------------------------------------------------
@@ -176,82 +274,7 @@ function parseMessagesDAT(buffer) {
 			offset + totalBytes
 		);
 
-		// Decode body: cp437 byte stream, 0xE3 = line terminator
-		// Convert raw bytes to a string preserving cp437 values,
-		// then strip trailing EOF padding (0x1A / Ctrl-Z) and spaces
-		var bodyRaw = bodyBuf.toString('binary')
-			.replace(/[\x1A]+$/g, '')
-			.trimEnd();
-
-		// Replace QWK line terminators with \r (FTN convention used by the BBS)
-		bodyRaw = bodyRaw.replace(/\xE3/g, '\r');
-
-		// rawBody preserves everything (kludge lines, conference headers)
-		var rawBody = bodyRaw;
-
-		// Parse @ kludge lines from the start of the body.
-		// QWK/FTN kludges: @MSGID, @REPLY, @TZUTC, @TZ, @PID, @VIA, @INTL, etc.
-		// Capture them into a structured object, then strip from the clean body.
-		var kludges = {};
-		var bodyClean = bodyRaw;
-		while (bodyClean.startsWith('@')) {
-			var lineBreak = bodyClean.indexOf('\r');
-			if (lineBreak === -1) {
-				// Entire body is a single @ line — leave it
-				break;
-			}
-			var kludgeLine = bodyClean.substring(0, lineBreak).trim();
-			bodyClean = bodyClean.substring(lineBreak + 1);
-
-			// Parse "@ KEY: value" or "@KEY value" forms
-			var spaceIdx = kludgeLine.indexOf(' ');
-			if (spaceIdx > 1) {
-				var kKey = kludgeLine.substring(1, spaceIdx)
-					.replace(/:$/, '').toUpperCase();
-				var kVal = kludgeLine.substring(spaceIdx + 1).trim();
-				if (kKey && kVal) {
-					// VIA can appear multiple times — collect as array
-					if (kKey === 'VIA') {
-						if (!kludges.VIA) kludges.VIA = [];
-						kludges.VIA.push(kVal);
-					} else {
-						kludges[kKey] = kVal;
-					}
-				}
-			}
-		}
-
-		// Extract origin line from body: " * Origin: ..." at the end
-		var originLine = '';
-		var originMatch = bodyClean.match(/\r \* Origin: ([^\r]*)/);
-		if (originMatch) {
-			originLine = originMatch[1].trim();
-		}
-
-		// cp437 → UTF-8 conversion (on clean body only).
-		//
-		// bodyText carries the DECODED text, same as every other importer.
-		// It used to carry the raw CP437 bytes held as latin-1 characters,
-		// which made body_text mean one thing for a QWK message and another
-		// for an FTN one, and every exporter had to guess which. The QWK
-		// packer guessed wrong for FTN messages and corrupted them.
-		//
-		// utf8 is still written, identical, for one release: it is the only
-		// copy of the decoded text for rows migration 0006 rewrites, so
-		// keeping it is what makes that rewrite reversible.
-		var utf8 = null;
-		try {
-			utf8 = cp437ToUtf8(bodyClean);
-		} catch (_) {
-			// leave utf8 null on failure
-		}
-		var bodyText = utf8 === null ? bodyClean : utf8;
-
-		// rawBody gets cp437 conversion too
-		var rawUtf8 = null;
-		try {
-			rawUtf8 = cp437ToUtf8(rawBody);
-		} catch (_) {}
+		var decoded = decodeQwkBody(bodyBuf, false);
 
 		messages.push({
 			msgOffset:     offset,
@@ -267,12 +290,14 @@ function parseMessagesDAT(buffer) {
 			blocks,
 			isLive,
 			conferenceNum,
-			kludges,
-			originLine,
-			rawBody,
-			rawUtf8,
-			bodyText,
-			utf8
+			kludges:       decoded.kludges,
+			originLine:    decoded.originLine,
+			rawBody:       decoded.rawBody,
+			rawUtf8:       decoded.rawUtf8,
+			bodyText:      decoded.bodyText,
+			utf8:          decoded.utf8,
+			// Kept so a HEADERS.DAT "Utf8 = true" can decode it again as UTF-8.
+			bodyBytes:     Buffer.from(bodyBuf)
 		});
 
 		offset += totalBytes;
@@ -349,10 +374,34 @@ function applyHeadersDat(messages, headersDat) {
 		var hdr = headersDat[msg.msgOffset];
 		if (!hdr) continue;
 
-		// Full-length fields — override truncated 25-char header fields
-		if (hdr['Sender'])  msg.from    = hdr['Sender'];
-		if (hdr['To'])      msg.to      = hdr['To'];
-		if (hdr['Subject']) msg.subject = hdr['Subject'];
+		// UTF-8 first (#71): the body was decoded as CP437 with 0xE3 lines, and
+		// a UTF-8 one uses LF lines, so decode it again before anything below
+		// adds to its kludges. This used to copy the CP437 decoding into utf8,
+		// which left UTF-8 text as mojibake on a single line.
+		var utf8Flag = String(hdr['Utf8'] || '').trim().toLowerCase();
+		var isUtf8 = utf8Flag === 'true';
+		if (isUtf8 && msg.bodyBytes) {
+			var redone = decodeQwkBody(msg.bodyBytes, true);
+			msg.kludges    = Object.assign(redone.kludges, {});
+			msg.originLine = redone.originLine;
+			msg.rawBody    = redone.rawBody;
+			msg.rawUtf8    = redone.rawUtf8;
+			msg.bodyText   = redone.bodyText;
+			msg.utf8       = redone.utf8;
+		} else if (isUtf8) {
+			// No raw bytes to decode again (a message built by hand): the text
+			// already held is all there is.
+			msg.utf8 = msg.bodyText;
+		}
+		msg.isUtf8 = isUtf8;
+
+		// Full-length fields — override truncated 25-char header fields.
+		// HEADERS.DAT is read as bytes; each entry's fields are in the
+		// charset its own Utf8 line names.
+		var field = function (key) { return decodeHeaderValue(hdr[key], utf8Flag); };
+		if (hdr['Sender'])  msg.from    = field('Sender');
+		if (hdr['To'])      msg.to      = field('To');
+		if (hdr['Subject']) msg.subject = field('Subject');
 
 		// Conference number override
 		if (hdr['Conference']) {
@@ -390,15 +439,61 @@ function applyHeadersDat(messages, headersDat) {
 			}
 		}
 
-		// UTF-8 flag — if true, body is already UTF-8, skip cp437 conversion
-		if (hdr['Utf8'] === 'true') {
-			// Body was decoded as cp437 by parseMessagesDAT — redo as UTF-8
-			// The raw binary body is in msg.rawBody as a binary string.
-			// Re-interpret the bodyText and utf8 fields.
-			msg.utf8 = msg.bodyText;
-			// Mark for import — utf8 field populated means "use this as display text"
-		}
 	}
+}
+
+// A HEADERS.DAT value read as bytes (latin1), in the charset its entry names:
+// UTF-8 when "Utf8 = true", CP437 when "false". With no Utf8 line (not written
+// by Synchronet, which always writes one), UTF-8 if the bytes are valid UTF-8.
+function decodeHeaderValue(value, utf8Flag) {
+	if (value === undefined || value === null) return value;
+	var bytes = Buffer.from(String(value), 'latin1');
+	if (utf8Flag === 'true') return bytes.toString('utf8');
+	if (utf8Flag === 'false') return cp437ToUtf8(bytes);
+	try {
+		return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+	} catch (_) {
+		return cp437ToUtf8(bytes);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Encoding for the wire (#71)
+// ---------------------------------------------------------------------------
+
+// Whether a message goes out as UTF-8: only when the connection allows it AND
+// its text does not fit CP437, the same rule as FTN charset 'auto', so a
+// message that fits is understood by everything on the network.
+function messageNeedsUtf8(msg, allowUtf8) {
+	if (!allowUtf8) return false;
+	var m = msg || {};
+	return [m.body_text, m.from_user, m.to_user, m.subject].some(function (t) {
+		return t && !fitsCp437(String(t), CP);
+	});
+}
+
+// A message body for MESSAGES.DAT or a REP: CP437 bytes with 0xE3 lines, or,
+// when `utf8`, UTF-8 bytes with LF lines. Padded to 128 bytes either way.
+function encodeMessageBody(text, utf8) {
+	if (!utf8) {
+		var cp = utf8ToCp437(text || '');
+		var bin = '';
+		for (var i = 0; i < cp.length; i++) bin += String.fromCharCode(cp[i]);
+		return buildQwkBody(bin);
+	}
+	var raw = Buffer.from(String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'), 'utf8');
+	var remainder = raw.length % QWK_RECORD_SIZE;
+	if (remainder === 0 && raw.length > 0) return raw;
+	var padded = Buffer.alloc(raw.length + (remainder === 0 ? 0 : QWK_RECORD_SIZE - remainder), QWK_PAD_BYTE);
+	raw.copy(padded);
+	return padded;
+}
+
+// One HEADERS.DAT entry as a byte string (one character per byte), encoded
+// as its own Utf8 line says: the file mixes UTF-8 and CP437 entries.
+function headersEntryBytes(text, utf8) {
+	var bytes = utf8 ? Buffer.from(text, 'utf8') : Buffer.from(utf8ToCp437(text));
+	return bytes.toString('latin1');
 }
 
 // Parse a HEADERS.DAT timestamp: "YYYYMMDDHHMMSS+/-ZZZZ  tzhex"
@@ -554,7 +649,8 @@ function buildQwkBody(bodyText) {
 // packetName is the hub's QWK-ID — used for filenames and Record 0.
 // Synchronet checks Record 0 matches its own QWK-ID.
 // localQwkId is the sender's QWK BBS ID (used in HEADERS.DAT ExportedFrom).
-function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
+function buildRepPacket(workItems, packetName, tmpDir, localQwkId, opts) {
+	var allowUtf8 = !!(opts && opts.utf8);
 	var msgFileName = packetName.toUpperCase() + '.MSG';
 	var repFileName = packetName.toUpperCase() + '.rep';
 
@@ -575,15 +671,9 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 		// set. The old test was "utf8 is set, so body_text must be raw CP437",
 		// which is true of a QWK message and false of an FTN one — relaying an
 		// FTN message into a QWK packet turned `Γöî` into `ô÷ε`.
-		var bodyForPack;
-		var canonical = item.msg.body_text || '';
-		var cp437Bytes = utf8ToCp437(canonical);
-		bodyForPack = '';
-		for (var i = 0; i < cp437Bytes.length; i++) {
-			bodyForPack += String.fromCharCode(cp437Bytes[i]);
-		}
-
-		var bodyBuf = buildQwkBody(bodyForPack);
+		// UTF-8 only when the connection allows it and the text needs it (#71).
+		item.utf8Wire = messageNeedsUtf8(item.msg, allowUtf8);
+		var bodyBuf = encodeMessageBody(item.msg.body_text || '', item.utf8Wire);
 		var hdrBuf  = buildQwkHeader(item.msg, item.conferenceNum, bodyBuf.length, item.isPrivate || false);
 
 		// Record the offset of this message header for HEADERS.DAT
@@ -594,9 +684,9 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 		msgOffset += hdrBuf.length + bodyBuf.length;
 
 		// Build HEADERS.DAT entry for this message
-		headersDatLines.push(buildHeadersDatEntry(
-			hdrOffset, item.msg, item.conferenceNum, localQwkId
-		));
+		headersDatLines.push(headersEntryBytes(buildHeadersDatEntry(
+			hdrOffset, item.msg, item.conferenceNum, localQwkId, item.utf8Wire
+		), item.utf8Wire));
 	}
 
 	var msgData = Buffer.concat(chunks);
@@ -607,7 +697,7 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 	var repPath     = path.join(tmpDir, repFileName);
 
 	fs.writeFileSync(msgPath, msgData);
-	fs.writeFileSync(headersPath, headersDatLines.join('\n') + '\n');
+	fs.writeFileSync(headersPath, headersDatLines.join('\n') + '\n', 'latin1');
 
 	try {
 		execSync('zip -j ' + JSON.stringify(repPath) + ' ' +
@@ -625,14 +715,17 @@ function buildRepPacket(workItems, packetName, tmpDir, localQwkId) {
 
 // Build a single HEADERS.DAT entry for one message.
 // Format matches Synchronet's output: [hex_offset], key: value pairs, LF endings.
-function buildHeadersDatEntry(offset, msg, conferenceNum, localQwkId) {
+function buildHeadersDatEntry(offset, msg, conferenceNum, localQwkId, isUtf8) {
 	var lines = [];
 
 	// Section header — hex offset of message header in .MSG file
 	lines.push('[' + offset.toString(16).toUpperCase() + ']');
 
-	// UTF-8 flag
-	lines.push('Utf8 = ' + (msg.utf8 ? 'true' : 'false'));
+	// Whether THIS entry and its body are UTF-8, which is what the reader
+	// splits lines by. It used to follow the utf8 column, set on most stored
+	// mail, while the body went out as CP437 with 0xE3 lines, so Synchronet
+	// read such a message as one run-on line (#71).
+	lines.push('Utf8 = ' + (isUtf8 ? 'true' : 'false'));
 
 	// Message-ID
 	if (msg.msg_id) {
@@ -715,5 +808,11 @@ export {
 	buildQwkHeader,
 	buildQwkBody,
 	buildRepPacket,
+	buildHeadersDatEntry,
+	decodeQwkBody,
+	decodeHeaderValue,
+	messageNeedsUtf8,
+	encodeMessageBody,
+	headersEntryBytes,
 	unzipQwkPacket
 };

@@ -452,7 +452,7 @@ async function importRepForUser(userId, repFilePath) {
 	});
 	if (headersFile) {
 		try {
-			var headersText = fs.readFileSync(path.join(extractDir, headersFile), 'utf8');
+			var headersText = fs.readFileSync(path.join(extractDir, headersFile), 'latin1');  // bytes: each entry names its own charset (#71)
 			var headersDat = parseHeadersDat(headersText);
 			applyHeadersDat(messages, headersDat);
 		} catch (hdrErr) {
