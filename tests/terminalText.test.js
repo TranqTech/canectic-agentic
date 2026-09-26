@@ -453,3 +453,53 @@ describe('formatBodyHtml — return type invariant', function () {
 	}
 
 });
+
+// #60: OTHERNETS posts pad every line with trailing spaces to the full width,
+// and the plain-text path turned them into &nbsp;, which a browser cannot drop.
+// A line that fit in 80 columns came out at 81, so its last word wrapped onto
+// a line of its own ("devoted to" -> "to"), and lines of nothing but spaces
+// filled whole rows. Rendered in headless Chromium, message 175 on desktop
+// went from 8 wrapped lines to 6 (the 6 are written longer than 80).
+describe('formatBodyHtml: trailing padding (#60)', function () {
+	// The opening of OTHERNETS message 175 as stored, padding included.
+	var PADDED =
+		'Health Network is a small FTN echomail network set up by Mike Dippel devoted to  \r' +
+		' support Sysops who want to provide Health-Related topics for their users.\r' +
+		' \r' +
+		' How to join... Joining is as simple as completing an online form, and setting  \r' +
+		' up the necessary message and file echoes.  You will then be sent an email with  \r' +
+		' any necessary details, and we will begin sending you messages.\r' +
+		'      \r' +
+		' Ingredient     1 cup     flour           \r';
+
+	function lines(html) {
+		return html.split('<br>');
+	}
+	function visibleLength(line) {
+		return line.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&[a-z#0-9]+;/g, 'x').length;
+	}
+
+	it('ends no line in padding', async function () {
+		var html = await formatBodyHtml(PADDED);
+		for (var l of lines(html)) {
+			assert.ok(!/(&nbsp;|\s)$/.test(l), 'line ends in padding: ' + JSON.stringify(l));
+		}
+	});
+
+	it('keeps every line within 80 columns', async function () {
+		var html = await formatBodyHtml(PADDED);
+		for (var l of lines(html)) assert.ok(visibleLength(l) <= 80, visibleLength(l) + ': ' + l);
+	});
+
+	it('keeps leading indentation and aligned runs inside a line', async function () {
+		var html = await formatBodyHtml(PADDED);
+		assert.match(html, /<br>&nbsp;support Sysops/, 'the leading space');
+		assert.match(html, /echoes\.&nbsp;&nbsp;You will/, 'two spaces mid-line');
+		assert.match(html, /Ingredient&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1 cup&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;flour<br>/, 'alignment kept, padding gone');
+	});
+
+	it('leaves a line of nothing but spaces as a blank line', async function () {
+		var html = await formatBodyHtml(PADDED);
+		assert.ok(lines(html).some(function (l) { return l === ''; }));
+	});
+});

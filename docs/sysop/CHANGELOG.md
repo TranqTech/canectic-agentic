@@ -15,6 +15,11 @@
 ### Messages
 
 - Fix: **messages looked double spaced in the web reader, worst at 80 columns on a phone.** A message body was laid out as though it were a line of text inside the page, so its lines were spaced for the page's normal text size rather than its own: roughly two and a half lines' worth each at 80 columns on a phone, and about twice what it should be everywhere else. Lines now sit at the message's own spacing, on phones and on desktop, so messages are noticeably more compact than before. Art that is too wide for the screen now scrolls sideways as intended rather than spilling out.
+- Fix: **a word at the end of a line dropped onto a line of its own at 80 columns.** Many systems pad each line with spaces out to the full width, and those spaces were kept, so a line that fitted came out a character or two too wide and its last word wrapped. Trailing spaces are now dropped; nothing else about how a message looks changes. Messages received before updating keep the padding until regenerated; see the upgrade note.
+
+### Upgrade Notes
+
+- **Regenerate stored messages again**, even if you did so for 0.9.11a: `node src/tools/maintenance.js --regen-html` with the worker running (`--area SHORTCODE` for one area). Messages received before this release keep the trailing padding that wraps their last word at 80 columns until then.
 
 ## v0.9.11a (2026-09-25)
 

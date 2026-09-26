@@ -621,9 +621,17 @@ async function formatBodyHtml(displayText, forceWidth) {
 			});
 		}
 
-		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces)
+		// Plain text — preserve spacing if it has alignment (3+ consecutive spaces).
+		// Trailing spaces go first (#60). formatTextForHtml turns them into
+		// &nbsp;, which a browser can neither drop nor let hang past the edge,
+		// and many systems pad every line out to the full width: OTHERNETS
+		// posts carried 79-character lines as 81, so at 80 columns the last
+		// word wrapped onto a line of its own, and all-space lines filled
+		// whole rows. Invisible anyway, and the ANSI path above already drops
+		// them. (The double spacing in the same report was the body being
+		// display: inline, fixed in styles.css.)
 		if (reflowed.includes("   ")) {
-			return formatTextForHtml(reflowed);
+			return formatTextForHtml(reflowed.replace(/[ \t]+(?=\r|$)/g, ''));
 		}
 
 		return reflowed.replace(/\r/g, '<br>');
