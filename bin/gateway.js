@@ -37,6 +37,7 @@ import * as jobs from "../src/queues/jobs.js";
 import { createEventSubscriber, EVENTS } from "../src/queues/events.js";
 import { registerSchedules } from "../src/queues/schedules.js";
 import { auditQwkIdsAndNotify } from '../src/maintenance/qwkIdAudit.js'
+import { startQwkFtpServer } from '../src/servers/qwkFtpServer.js'
 import { startWorkerWatchdog } from "../src/queues/workerWatchdog.js";
 import { registerLogWebSocket } from "../src/routes/adminLogs.js";
 import { registerNodeSpyWebSocket } from "../src/servers/nodespySocket.js";
@@ -221,6 +222,22 @@ async function startNodeManager(){
 	primaryNodeManager.listUsedNodes()
 	// Expose to Express routes (for who's online, nodespy, etc.)
 	webserver.locals.nodeManager = primaryNodeManager;
+}
+
+async function startQwkFtp() {
+	var port = appConfig.getNumber('qwk_ftp_port', 0)
+	if (!(port > 0)) return
+	try {
+		var ftp = await startQwkFtpServer({
+			port: port,
+			pasvAddress: appConfig.get('qwk_ftp_pasv_address', ''),
+			pasvPorts: appConfig.get('qwk_ftp_pasv_ports', '')
+		})
+		alogger.writeAlog(3, "  QWK hub FTP server listening on port " + ftp.port, "greenbright")
+	} catch (err) {
+		// A board whose FTP port is taken still has everything else.
+		alogger.writeAlog(1, "  QWK hub FTP server could not start on port " + port + ": " + err.message, "redbright")
+	}
 }
 
 async function startWebServer(){
@@ -581,6 +598,9 @@ async function main(){
 	await startSocatManager()
 	await startCallPools()
 	await startWebServer()
+
+	// QWK hub FTP server (#74): off unless qwk_ftp_port is set
+	await startQwkFtp()
 	if (runwssrv){
 		await startWebsockets()
 		await registerLogWebSocket(wsManager);

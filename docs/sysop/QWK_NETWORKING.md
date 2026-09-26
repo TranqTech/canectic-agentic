@@ -96,6 +96,29 @@ large a REP a node may send.
 Run the board behind HTTPS (a reverse proxy) if nodes connect over the
 internet, since the node's password is sent with every request.
 
+### Nodes that call over FTP (Synchronet and others)
+
+A Synchronet node calls its hub over FTP with `qnet-ftp.js`, and most other
+QWK software can do the same. Set **qwk_ftp_port** (QWK settings, 0 = off) to
+the port to listen on, such as 21 or 2121, and restart the BBS. Add the node's
+Hub (Inbound) connection with a **Node password**, exactly as for HTTP, and
+give the node's sysop your address, the port, their QWK ID as the login and
+the password. On Synchronet that is the hub's call-out command:
+
+    ?qnet-ftp <YOUR_QWK_ID> your.bbs.address <password> <port>
+
+The node uploads its REP as `<YOUR_QWK_ID>.rep` and downloads
+`<YOUR_QWK_ID>.qwk`, as it would from a Synchronet hub. A node has one FTP
+session at a time. When there is nothing new, the download answers "No QWK
+packet created (no new messages)". A packet counts as delivered once its
+download completes; if it fails, the next call gets the same packet again.
+
+FTP sends the password unencrypted. Behind a router, set
+**qwk_ftp_pasv_address** to your public IPv4 address and **qwk_ftp_pasv_ports**
+to a range such as `50000-50100`, and forward that range with the port. For a
+node calling over the internet, the HTTP hub behind HTTPS is safer; FTP is for
+software that cannot use it.
+
 ### Nodes that use a shared directory
 
 A Synchronet node on the same machine, or one that can see a directory of
