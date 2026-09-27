@@ -1,6 +1,8 @@
 # Canectic BBS - Changelog
 
-## Pending (since v0.9.11a)
+## Pending (since v0.9.12a)
+
+## v0.9.12a (2026-09-27)
 
 ### Updates
 
