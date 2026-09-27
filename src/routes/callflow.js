@@ -313,7 +313,7 @@ router.post('/wall', urlencodedParser, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser || !canPostWall(currentuser)) return res.json({ status: false });
 
-	var message = (req.body.message || '').trim();
+	var message = ((req.body && req.body.message) || '').trim();
 	if (message.length > 0) {
 		await addWallMessage(parseInt(currentuser.id), currentuser.username, message);
 		await purgeWall();
@@ -456,7 +456,8 @@ router.post('/complete', urlencodedParser, async (req, res) => {
 		alogger.writeAlog(5, 'Callflow session update: no user, fallback for session ' + req.cookies.sessionid, 'cyan');
 	}
 
-	var returnUrl = req.body.return_url || '/';
+	// Express 5 leaves req.body undefined when nothing is posted.
+	var returnUrl = (req.body && req.body.return_url) || '/';
 	if (returnUrl.startsWith('/callflow')) returnUrl = '/';
 	alogger.writeAlog(5, 'Callflow complete: redirecting to ' + returnUrl, 'cyan');
 	res.json({ redirect: returnUrl });

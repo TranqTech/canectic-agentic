@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.12a)
 
+### Web
+
+- Fix: **finishing the web call flow, or posting to the wall from it, returned an error when the request carried no form data.** Browsers always send some, so this was only seen from scripts; the call flow now finishes normally either way.
+
 ## v0.9.12a (2026-09-27)
 
 ### Updates
