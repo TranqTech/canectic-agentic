@@ -10,6 +10,21 @@
       "id": "qnet-role-dirs",
       "level": "info",
       "text": "QWK packets now live in one directory per link and role: qnet/<ID>.hub/ for a system that is your hub, qnet/<ID>.node/ for one that is your node. The update moves what is already in qnet/ and leaves qnet/<ID> as a link to the node directory, so a Synchronet node calling through qnet-directory.js keeps working. When you next change that node's call-out, point it at the qnet/<ID>.node path shown on its connection in the peer page."
+    },
+    {
+      "id": "qwk-pass-between-connections",
+      "level": "warning",
+      "text": "A board with more than one QWK connection on the same network now passes messages between them: a message from one system goes to every other system on that network it has not already been through, as a Synchronet hub does. This is what a QWK hub needs, but if your board is a node of two hubs carrying the same conferences, each hub will now receive the other hub's messages. Check your QWK connections under Peers before updating."
+    },
+    {
+      "id": "qwk-netmail-relay-default",
+      "level": "info",
+      "text": "Your board now relays QWK netmail for other systems on the same QWK network, as Synchronet does, and returns what it cannot deliver to its sender as BADADDR. To stop it, untick Relay QWK netmail on the network. Every decision is recorded in the Netmail Relay Log."
+    },
+    {
+      "id": "qwk-id-audit",
+      "level": "info",
+      "text": "QWK IDs are now checked against Synchronet's rules. If any of your connections or networks use an ID Synchronet would not accept, or two connections share one, you get a notification after the update naming them. They keep working; see QWK IDs in docs/sysop/QWK_NETWORKING.md for what to change."
     }
   ],
   "min_upgrade_from": "0.9.0a",
