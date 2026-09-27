@@ -81,6 +81,8 @@ block content
                     button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_access') Access
                   li.nav-item(role='presentation')
                     button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_network') Network
+                  li.nav-item(role='presentation')
+                    button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#ng_tab_retention') Retention
 
                 .tab-content
                   //- ============================================================
@@ -134,17 +136,6 @@ block content
                           option(value='true') Yes (80 columns on phones)
                         .form-text.text-muted
                           | Areas in this group open at 80 columns on phones. New areas inherit this.
-                    .row.mt-3
-                      .col-6
-                        label.form-label(for='ng_max_age_days') Max Age (days):
-                        input#ng_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit')
-                        .form-text.text-muted
-                          | Default for new areas. Blank = never prune, which is the default.
-                      .col-6
-                        label.form-label(for='ng_max_messages') Max Messages:
-                        input#ng_max_messages.form-control(type='number' name='max_messages' min=0 placeholder='no limit')
-                        .form-text.text-muted
-                          | Default for new areas. Blank = never prune.
 
                   //- ============================================================
                   //- ACCESS — security levels and flag defaults for new areas
@@ -195,6 +186,28 @@ block content
                       .form-text.text-muted
                         | Start of this group's QWK conference number block. Areas in the group take consecutive offsets within the block. Numbers 1-100 are reserved for system conferences. Pre-filled with the next available block; edit only if you want a specific arrangement.
                       .small.mt-1#ng_qwk_conf_start_status
+
+                  //- ============================================================
+                  //- RETENTION — pruning defaults for new areas in this group
+                  //- ============================================================
+                  .tab-pane.fade#ng_tab_retention(role='tabpanel')
+                    .alert.alert-secondary.small
+                      strong Both limits are off by default.
+                      |  These are the limits new areas in this group start with; leave blank for no pruning.
+                      |  To apply them to the group's existing areas, use Push Group Defaults and tick Retention.
+                    .row.mb-3
+                      .col-6
+                        label.form-label(for='ng_max_age_days') Max Age (days)
+                          |
+                          span.ms-1(data-bs-toggle='tooltip' title='New areas remove messages older than this many days, by the message date. Blank or 0 = no limit.') &#9432;
+                        input#ng_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit')
+                        small.form-text.text-muted Uses the message's own date, not when it arrived.
+                      .col-6
+                        label.form-label(for='ng_max_messages') Max Messages
+                          |
+                          span.ms-1(data-bs-toggle='tooltip' title='New areas keep only the N newest messages. Blank or 0 = no limit.') &#9432;
+                        input#ng_max_messages.form-control(type='number' name='max_messages' min=0 placeholder='no limit')
+                        small.form-text.text-muted Oldest messages roll off first.
 
                 .text-end.mt-3
                   input.btn.btn-lg.btn-success(type="submit" value="Submit")

@@ -380,6 +380,8 @@ block content
                         button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#eg_tab_access') Access
                       li.nav-item(role='presentation')
                         button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#eg_tab_network') Network
+                      li.nav-item(role='presentation')
+                        button.nav-link(type='button' role='tab' data-bs-toggle='tab' data-bs-target='#eg_tab_retention') Retention
 
                     .tab-content
                       //- ========================================================
@@ -420,12 +422,6 @@ block content
                             select#edit_ansi_area.form-select(name='ansi_area')
                               option(value='false' selected=(!msgGroup.ansi_area)) No
                               option(value='true' selected=(!!msgGroup.ansi_area)) Yes (80 columns on phones)
-                          .col-4
-                            label.form-label(for='edit_max_age_days') Max Age (days):
-                            input#edit_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit' value=(msgGroup.max_age_days === null || msgGroup.max_age_days === undefined) ? '' : msgGroup.max_age_days)
-                          .col-4
-                            label.form-label(for='edit_max_messages') Max Messages:
-                            input#edit_max_messages.form-control(type='number' name='max_messages' min=0 placeholder='no limit' value=(msgGroup.max_messages === null || msgGroup.max_messages === undefined) ? '' : msgGroup.max_messages)
                           .col-4
                             label.form-label(for='edit_active') Status:
                             select#edit_active.form-select(name='active')
@@ -479,6 +475,28 @@ block content
                           label.form-label(for='edit_qwk_conf_start') QWK Conference Start:
                           input.form-control(type='number' id='edit_qwk_conf_start' name='qwk_conf_start' min=101 value=msgGroup.qwk_conf_start || '')
                           .small.mt-1#edit_qwk_conf_start_status
+
+                      //- ============================================================
+                      //- RETENTION — pruning defaults for new areas in this group
+                      //- ============================================================
+                      .tab-pane.fade#eg_tab_retention(role='tabpanel')
+                        .alert.alert-secondary.small
+                          strong Both limits are off by default.
+                          |  These are the limits new areas in this group start with; leave blank for no pruning.
+                          |  To apply them to the group's existing areas, use Push Group Defaults and tick Retention.
+                        .row.mb-3
+                          .col-6
+                            label.form-label(for='edit_max_age_days') Max Age (days)
+                              |
+                              span.ms-1(data-bs-toggle='tooltip' title='New areas remove messages older than this many days, by the message date. Blank or 0 = no limit.') &#9432;
+                            input#edit_max_age_days.form-control(type='number' name='max_age_days' min=0 placeholder='no limit' value=(msgGroup.max_age_days === null || msgGroup.max_age_days === undefined) ? '' : msgGroup.max_age_days)
+                            small.form-text.text-muted Uses the message's own date, not when it arrived.
+                          .col-6
+                            label.form-label(for='edit_max_messages') Max Messages
+                              |
+                              span.ms-1(data-bs-toggle='tooltip' title='New areas keep only the N newest messages. Blank or 0 = no limit.') &#9432;
+                            input#edit_max_messages.form-control(type='number' name='max_messages' min=0 placeholder='no limit' value=(msgGroup.max_messages === null || msgGroup.max_messages === undefined) ? '' : msgGroup.max_messages)
+                            small.form-text.text-muted Oldest messages roll off first.
 
                     .text-end.mt-3
                       input.btn.btn-lg.btn-warning(type='submit' value='Save Changes' tabindex='6')
