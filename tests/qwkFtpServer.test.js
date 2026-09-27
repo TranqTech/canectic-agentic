@@ -162,3 +162,23 @@ describe('QWK hub FTP server (#74)', function () {
 		} finally { c.close(); }
 	});
 });
+
+describe('turning the QWK FTP hub on and off', function () {
+	it('is off by default, on port 8021 when turned on', async function () {
+		var defs = await import('../src/config/configDefaults.js');
+		var en = defs.getDefinition('qwk_ftp_enabled'), port = defs.getDefinition('qwk_ftp_port');
+		assert.ok(en && port, 'both settings are defined');
+		assert.strictEqual(en.type, 'boolean');
+		assert.strictEqual(en.defaultValue, 'false');
+		assert.strictEqual(port.defaultValue, '8021');
+		assert.strictEqual(en.restart, true);
+	});
+
+	it('the gateway starts it only when qwk_ftp_enabled is on', function () {
+		var src = fs.readFileSync('bin/gateway.js', 'utf8');
+		var fn = src.slice(src.indexOf('async function startQwkFtp()'));
+		fn = fn.slice(0, fn.indexOf('\n}\n'));
+		assert.match(fn, /if \(!appConfig\.getBoolean\('qwk_ftp_enabled', false\)\) return/);
+		assert.ok(fn.indexOf("qwk_ftp_enabled") < fn.indexOf('startQwkFtpServer('), 'checked before starting');
+	});
+});

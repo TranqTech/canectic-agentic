@@ -99,8 +99,9 @@ internet, since the node's password is sent with every request.
 ### Nodes that call over FTP (Synchronet and others)
 
 A Synchronet node calls its hub over FTP with `qnet-ftp.js`, and most other
-QWK software can do the same. Set **qwk_ftp_port** (QWK settings, 0 = off) to
-the port to listen on, such as 21 or 2121, and restart the BBS. Add the node's
+QWK software can do the same. Turn on **qwk_ftp_enabled** (QWK settings, off
+by default) and restart the BBS; it listens on **qwk_ftp_port**, 8021 unless
+you change it (use 21 only if nothing else on the machine serves FTP). Add the node's
 Hub (Inbound) connection with a **Node password**, exactly as for HTTP, and
 give the node's sysop your address, the port, their QWK ID as the login and
 the password. On Synchronet that is the hub's call-out command:

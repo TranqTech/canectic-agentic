@@ -225,8 +225,12 @@ async function startNodeManager(){
 }
 
 async function startQwkFtp() {
-	var port = appConfig.getNumber('qwk_ftp_port', 0)
-	if (!(port > 0)) return
+	if (!appConfig.getBoolean('qwk_ftp_enabled', false)) return
+	var port = appConfig.getNumber('qwk_ftp_port', 8021)
+	if (!(port > 0)) {
+		alogger.writeAlog(2, "  QWK hub FTP server is enabled but qwk_ftp_port is not a port; not started", "yellow")
+		return
+	}
 	try {
 		var ftp = await startQwkFtpServer({
 			port: port,
@@ -599,7 +603,7 @@ async function main(){
 	await startCallPools()
 	await startWebServer()
 
-	// QWK hub FTP server (#74): off unless qwk_ftp_port is set
+	// QWK hub FTP server (#74): off unless qwk_ftp_enabled is on
 	await startQwkFtp()
 	if (runwssrv){
 		await startWebsockets()
