@@ -42,6 +42,8 @@
 
 ### Messages
 
+- **Message group retention has its own Retention tab**, as message areas and file groups do. The Max Age and Max Messages limits for a group were on the Main tab among the other settings, where they were easy to miss when creating or editing a group.
+
 - Fix: **messages looked double spaced in the web reader, worst at 80 columns on a phone.** A message body was laid out as though it were a line of text inside the page, so its lines were spaced for the page's normal text size rather than its own: roughly two and a half lines' worth each at 80 columns on a phone, and about twice what it should be everywhere else. Lines now sit at the message's own spacing, on phones and on desktop, so messages are noticeably more compact than before. Art that is too wide for the screen now scrolls sideways as intended rather than spilling out.
 - Fix: **the message area and file area lists were far wider than a phone screen**, so the page scrolled sideways. On a phone they now use the full width, the header's buttons and search wrap onto their own line, and each area's description sits under its name instead of in a column of its own; the message and file counts and the last poster's name are left out on the narrowest screens. Desktop is unchanged.
 - Fix: **the file and group pages were cramped or too wide on a phone**: a file area, a single file, new files, file search, upload, and the message and file group pages, plus the front page. They kept a wide margin down each side, and their tables ran past the screen. On a phone they now use the full width, and each file or area shows as one entry with its details underneath and its counts on the right. Tablets and desktops keep the tables.
