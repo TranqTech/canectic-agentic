@@ -1319,9 +1319,11 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 			await transport.disconnect();
 			transport = null;
 
-			// Existing REP delivered — remove it, and the files it carried
+			// Existing REP delivered: remove it and commit what it carried,
+			// so the next push does not send the same messages again (#77).
 			fs.unlinkSync(repPath);
-			sentRepFiles(repPath);
+			var committed = await commitRep(repPath);
+			if (committed) returnObj.totalPosted = committed.posted;
 			alogger.writeClog(5,
 				'pushToQwkPeer: existing REP delivered and removed — ' +
 				'skipping new build this cycle to let hub process', 'tosser',
@@ -1366,10 +1368,10 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 			utf8: cd.utf8 !== false,
 			extraFiles: outgoingFiles.map(function (f) { return f.path; })
 		});
-		// Which files are in it, so they go only once it is delivered, even
-		// when that is a later cycle's retry of this same REP.
-		fs.writeFileSync(repPath + '.files.json', JSON.stringify({
-			dir: outFilesDir(cd), files: outgoingFiles.map(function (f) { return f.name; }) }));
+		// What delivering it commits, so it is committed once whichever push
+		// delivers it: this one, or a later retry of the same REP (#77).
+		fs.writeFileSync(repPath + '.json', JSON.stringify(repCommitRecord(postItems.concat(workItems.filter(function (i) { return i.skip; })),
+			outFilesDir(cd), outgoingFiles.map(function (f) { return f.name; }), peerConnectionUUID)));
 		try { returnObj.bytes = fs.statSync(repPath).size; } catch (_) {}
 
 		// Upload
@@ -1388,32 +1390,11 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		await transport.disconnect();
 		transport = null;
 
-		// Upload succeeded — remove the local REP and the files it carried
+		// Upload succeeded: remove the local REP and commit what it carried
 		fs.unlinkSync(repPath);
-		sentRepFiles(repPath);
-
-		// Mark all posted items as successful
-		for (var item of workItems) {
-			if (item.skip) {
-				item.success = true;
-				returnObj.totalSkipped++;
-			} else if (item.isPM) {
-				// Private message — mark sent in pm_outbox
-				item.success = true;
-				returnObj.totalPosted++;
-				await privateMessages.markSent(item.pmOutboxId);
-			} else {
-				item.success = true;
-				returnObj.totalPosted++;
-
-				// Write qwk_msg_id on the source message so we can track what was sent
-				var qwkMsgId = peerConnectionUUID + ':' + item.conferenceNum + ':' + item.msg.id;
-				await postgres.write(
-					'UPDATE ' + item.msgtable + ' SET qwk_msg_id = $1 WHERE id = $2',
-					[qwkMsgId, item.msgId]
-				);
-			}
-		}
+		var done = await commitRep(repPath);
+		if (done) returnObj.totalPosted = done.posted;
+		returnObj.totalSkipped = workItems.filter(function (i) { return i.skip; }).length;
 
 	} catch (err) {
 		alogger.writeClog(3,
@@ -1428,8 +1409,6 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 		// No items succeeded — idx stays unchanged.
 	}
 
-	// Advance msg_idx per subscription up through the last consecutive success/skip.
-	await advanceQwkIdxAfterPost(workItems, enabledSubs);
 
 	returnObj.status = true;
 	alogger.writeClog(5,
@@ -1441,14 +1420,52 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 	return returnObj;
 }
 
-// A REP has been delivered: remove the files recorded as travelling in it.
-function sentRepFiles(repPath) {
-	var side = repPath + '.files.json';
-	try {
-		var rec = JSON.parse(fs.readFileSync(side, 'utf8'));
-		removeSent(rec.dir, rec.files);
-	} catch (_) {}
+// What delivering a REP commits (#77), written beside it as <rep>.json when it
+// is built: each subscription's new msg_idx (a REP is delivered whole, so the
+// highest message it holds, skips included), the pm_outbox rows it carries, the
+// qwk_msg_id stamps for the messages it posts, and its files (#72). Pure.
+function repCommitRecord(workItems, filesDir, files, peerConnectionUUID) {
+	var idx = {}, pmIds = [], stamps = [];
+	for (var item of workItems || []) {
+		if (item.isPM) { pmIds.push(item.pmOutboxId); continue; }
+		if (item.pas_id === null || item.pas_id === undefined) continue;
+		var id = Number(item.msgId);
+		if (Number.isFinite(id) && (idx[item.pas_id] === undefined || id > idx[item.pas_id])) idx[item.pas_id] = id;
+		if (!item.skip && item.msgtable) stamps.push([item.msgtable, item.msgId, peerConnectionUUID + ':' + item.conferenceNum + ':' + item.msg.id]);
+	}
+	return { idx: idx, pmIds: pmIds, stamps: stamps, posted: stamps.length + pmIds.length, dir: filesDir, files: files || [] };
+}
+
+// A REP has been delivered: commit what its record says, once, whichever push
+// delivered it. Before #77 a REP retried after a failed upload committed
+// nothing, so the next push sent its messages again. A REP from before the
+// record existed has at most a <rep>.files.json (#72): its files are removed.
+// @returns the record applied, or null
+async function commitRep(repPath) {
+	var side = repPath + '.json';
+	var rec = null;
+	try { rec = JSON.parse(fs.readFileSync(side, 'utf8')); } catch (_) {}
+	if (!rec) {
+		try {
+			var legacy = JSON.parse(fs.readFileSync(repPath + '.files.json', 'utf8'));
+			removeSent(legacy.dir, legacy.files);
+		} catch (_) {}
+		try { fs.unlinkSync(repPath + '.files.json'); } catch (_) {}
+		return null;
+	}
+	for (var pasId of Object.keys(rec.idx || {})) {
+		// Only forward: a late commit must never move a pointer back.
+		await postgres.write(
+			'UPDATE peer_area_subscriptions SET msg_idx = $1 WHERE id = $2 AND (msg_idx IS NULL OR msg_idx < $1)',
+			[rec.idx[pasId], parseInt(pasId)]);
+	}
+	for (var pmId of rec.pmIds || []) await privateMessages.markSent(pmId);
+	for (var st of rec.stamps || []) {
+		await postgres.write('UPDATE ' + st[0] + ' SET qwk_msg_id = $1 WHERE id = $2', [st[2], st[1]]);
+	}
+	removeSent(rec.dir, rec.files);
 	try { fs.unlinkSync(side); } catch (_) {}
+	return rec;
 }
 
 // Advance msg_idx for a list of work items that are all skips (no posts attempted).
@@ -1465,37 +1482,6 @@ async function advanceQwkIdxForSkips(workItems) {
 			'UPDATE peer_area_subscriptions SET msg_idx = $1 WHERE id = $2',
 			[byPas[pasId], parseInt(pasId)]
 		);
-	}
-}
-
-// Advance msg_idx per subscription up through the last consecutive success/skip.
-// Stops at the first failure so unposted messages are retried next toss cycle.
-async function advanceQwkIdxAfterPost(workItems, enabledSubs) {
-	var byPas = {};
-	for (var item of workItems) {
-		if (item.pas_id === null || item.pas_id === undefined) continue; // skip PM items
-		if (!byPas[item.pas_id]) byPas[item.pas_id] = [];
-		byPas[item.pas_id].push(item);
-	}
-
-	for (var pasId of Object.keys(byPas)) {
-		var items  = byPas[pasId];
-		var newIdx = null;
-
-		for (var item of items) {
-			if (item.success) {
-				newIdx = item.msgId;
-			} else {
-				break;  // stop at first failure — retry from here next time
-			}
-		}
-
-		if (newIdx !== null) {
-			await postgres.write(
-				'UPDATE peer_area_subscriptions SET msg_idx = $1 WHERE id = $2',
-				[newIdx, parseInt(pasId)]
-			);
-		}
 	}
 }
 
