@@ -9,7 +9,7 @@ import * as os from 'os';
 import { BaseSubModule } from "../basesubmodule.js";
 import { NativeZmodemProtocol } from "../../protocols/zmodem_native.js";
 import { NativeXmodemProtocol } from "../../protocols/xmodem_native.js";
-import { buildQwkForUser, importRepForUser, getQwkBbsId, cleanupQwkPacket } from "../../models/qwkUser.js";
+import { buildQwkForUser, commitUserPacket, importRepForUser, getQwkBbsId, cleanupQwkPacket } from "../../models/qwkUser.js";
 import appConfig from "../../config/appConfig.js";
 import * as alogger from "../../utils/alogger.js";
 
@@ -150,6 +150,7 @@ class QwkTransfer extends BaseSubModule {
 		}
 
 		this._qwkPath = result.qwkPath;
+		this._qwkResult = result;   // committed only after a successful send (#78)
 		this._showLine("Built packet: " + result.totalMessages + " message(s) across " +
 			result.areaCount + " area(s)", STATUS_CLR);
 		this._showLine("", INFO_CLR);
@@ -184,6 +185,9 @@ class QwkTransfer extends BaseSubModule {
 		this._transferring = false;
 
 		if (result.success) {
+			try { await commitUserPacket(this._qwkResult); } catch (e) {
+				alogger.writeAlog(2, "QWK download: commit failed: " + e.message, "redbright");
+			}
 			alogger.writeAlog(3, "QWK packet downloaded by " +
 				(this.call.caller_username || "unknown"), "greenbright");
 			this._showLine("Transfer complete!", STATUS_CLR);
@@ -197,6 +201,7 @@ class QwkTransfer extends BaseSubModule {
 		// Clean up the temp packet
 		cleanupQwkPacket(this._qwkPath);
 		this._qwkPath = null;
+		this._qwkResult = null;
 
 		this._showLine("Press any key...", PROMPT_CLR);
 		this._state = 'result';

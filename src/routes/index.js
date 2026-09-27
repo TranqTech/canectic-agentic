@@ -37,7 +37,7 @@ import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
 import { getRecentMessages as getWallMessages, addMessage as addWallMessage, canPost as canPostWall, purgeOldMessages as purgeWall } from '../models/wall.js';
 import multer from 'multer';
 import * as flash from '../middleware/db/flash.js';
-import { buildQwkForUser, importRepForUser, getQwkBbsId, cleanupQwkPacket } from '../models/qwkUser.js';
+import { buildQwkForUser, commitUserPacket, importRepForUser, getQwkBbsId, cleanupQwkPacket } from '../models/qwkUser.js';
 import { getStats, formatFileSize } from '../models/systemStats.js';
 import { getActiveBulletins, getBulletinByUuid } from '../models/bulletins.js';
 import { evaluateCallflow, isRedirectablePath } from '../utils/callflowTrigger.js';
@@ -1496,7 +1496,14 @@ router.get('/qwk/download', async (req, res) => {
 	}
 
 	var filename = getQwkBbsId() + '.qwk';
-	res.download(result.qwkPath, filename, function(err) {
+	res.download(result.qwkPath, filename, async function(err) {
+		// Committed only once the whole packet has gone (#78); a download
+		// that fails or is abandoned leaves it all for the next packet.
+		if (!err) {
+			try { await commitUserPacket(result); } catch (e) {
+				alogger.writeAlog(2, 'QWK download: commit failed for ' + currentuser.username + ': ' + e.message, 'redbright');
+			}
+		}
 		cleanupQwkPacket(result.qwkPath);
 		if (err && !res.headersSent) {
 			res.redirect('/qwk');

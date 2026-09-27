@@ -192,6 +192,15 @@ async function handleDownload(req, res) {
 	res.setHeader('X-Qwk-Message-Count', String(result.totalMessages));
 	res.setHeader('X-Qwk-Area-Count', String(result.areaCount));
 
+	// Committed once the whole packet has been written out (#78): 'finish'
+	// fires only then, so a client that drops part way leaves it all for the
+	// next packet.
+	res.on('finish', function() {
+		qwkUser.commitUserPacket(result).catch(function (e) {
+			alogger.writeAlog(2, '[API] qwk commit failed for ' + user.username + ': ' + e.message, 'redbright');
+		});
+	});
+
 	var stream = fs.createReadStream(result.qwkPath);
 	stream.on('error', function(err) {
 		alogger.writeAlog(3, '[API] qwk download stream error: ' + err.message, 'redbright');

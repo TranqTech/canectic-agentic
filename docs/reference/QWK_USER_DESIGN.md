@@ -73,8 +73,7 @@ Steps:
    - `buildHeadersDatText()` for full-length metadata
    - No NETFLAGS.DAT (not a network packet)
 8. **Assemble**: `assembleQwkPacket()` into temp directory
-9. **Advance pointers**: For each area included, `userMsgPointers.advancePointer(userId, shortcode, highestMsgId)`
-10. **Mark PMs read**: Mark included PMs as read (they've been "downloaded")
+9. **Return what it commits, commit nothing (#78)**: `returnObj.commit` holds the per-area pointer updates, the PM ids, the packed queued downloads and `builtAt`. Each transport calls `commitUserPacket(result)` only once its transfer has succeeded (web: the `res.download` callback with no error; terminal: a successful ZMODEM/XMODEM send; API: the response's `finish` event), as Synchronet commits a user's online download only in `qwk_success`. That advances pointers (forward only), marks the PMs read, counts and dequeues the files, and sets `last_qwk_download_at` to `builtAt` (never backwards), so anything arriving during a slow download is in the next packet. A second call does nothing. Before #78 all of this happened at build, so a failed or abandoned download lost the packet's messages and files.
 
 ### Conference Number Assignment
 
@@ -180,7 +179,7 @@ Mail clients allow users to "reply" to any message they see, including announcem
 Synchronet's personal packets carry files beside the messages (pack_qwk.cpp), and so do ours, through one `PacketFileSet` (`src/models/qwkPacketFiles.js`: plain names, never a packet's own member names, a number added on a collision, each file linked into the build directory under the name the user sees because `zip -j` stores the name on disk and a file area keeps a second `NAME.EXT` as `NAME_1.EXT`). A packet is made when files are all there is to send.
 
 - **`NEWFILES.DAT`** (`src/models/qwkNewFiles.js`) when `users.qwk_files` is on (default true, as in Synchronet's `QWK_DEFAULT`): Synchronet's layout (`New files since:`, `(n) Group (n) Area` headers with a rule as long as the header, `NAME  SIZE description` lines, `N Files Listed.`), CRLF, CP437. Files uploaded after `users.qwk_files_since` (a one-off date from `FILES MM/DD/YY`, cleared by the next packet), else `last_qwk_download_at`, else the account's `created_at`, in the file areas the user can see (`fileAreaAccess.canBrowseFileArea`, area and group) and scans for new files (`userFileSubs`), as Synchronet lists every directory not excluded from new-scan. At most 2000 files.
-- **The batch download queue** (`user_file_batch`, which the file pages and FREQ fill): every queued file the user may still download (`canDownloadFileArea` on area and group) that is on disk goes in under its listed name; each is counted (`incrementDownloadCount`) and removed from the queue once the packet is built. One that cannot go stays queued.
+- **The batch download queue** (`user_file_batch`, which the file pages and FREQ fill): every queued file the user may still download (`canDownloadFileArea` on area and group) that is on disk goes in under its listed name; each is counted (`incrementDownloadCount`) and removed from the queue when the packet is committed (#78). One that cannot go stays queued.
 - **Private mail attachments** when `users.qwk_attach` is on (default true): each unread PM's `pm_attachments` (inbox rows) go in as files, and the PM body gains a line `[Attached, in this packet: NAME, ...]` so the reader knows to look.
 
 Settings: `users.qwk_files`, `users.qwk_attach`, `users.qwk_files_since`; set by REP control messages (below) and on the web `/qwk` page (Packet Settings, `POST /qwk/settings`).
@@ -267,7 +266,7 @@ New column on `users`, declared in `db/schema/tablecolumns/users.conf`:
 last_qwk_download_at TIMESTAMPTZ
 ```
 
-Advanced to NOW() at the end of each successful `buildQwkForUser()` call. Used to filter system conference content (announcements, wall, bulletins) so each download only carries new material since the previous sync.
+Set to the packet's build time by `commitUserPacket()` once the download has succeeded (#78; it used to be NOW() at build). Used to filter system conference content (announcements, wall, bulletins) so each download only carries new material since the previous sync.
 
 ## 4. Config Keys
 
@@ -299,7 +298,7 @@ A `BaseSubModule` in `src/handlers/menucommands/qwkTransfer.js`.
    - XMODEM fallback
    - The packet is a single ZIP file, straightforward single-file transfer
 7. After successful transfer: clean up temp files
-8. On cancel or transfer failure: clean up, pointers already advanced (messages will appear as "read" -- this is standard QWK behaviour)
+8. On cancel or transfer failure: clean up; nothing is committed, so the next packet carries the same messages and files (#78)
 
 #### Upload flow
 

@@ -198,11 +198,25 @@ describe('offline-reader files in personal packets (#75)', function () {
 		assert.match(reply.body_text, /ATTACH: private mail attachments are off/);
 	});
 
-	it('packs the download queue under the file\'s own name, counts it, and empties the queue', async function () {
+	it('packs the download queue under the file\'s own name, and only a delivered packet counts and dequeues it (#78)', async function () {
 		await pg.write('UPDATE pm_inbox SET read = false WHERE uuid = $1', [pmUuid]);
 		var before = await pg.queryOne('SELECT download_count FROM file_entries WHERE id = $1', [entryIds['NEWONE.ZIP']]);
+		var watermark = await pg.queryOne('SELECT last_qwk_download_at FROM users WHERE id = $1', [userId]);
+
+		// A packet built but never downloaded commits nothing: the next one
+		// carries the same file and message again.
+		var lost = await qwkUser.buildQwkForUser(userId);
+		qwkUser.cleanupQwkPacket(lost.qwkPath);
+		var still = await pg.queryOne('SELECT COUNT(*)::int AS n FROM user_file_batch WHERE user_id = $1', [userId]);
+		assert.strictEqual(still.n, 1, 'still queued');
+		assert.strictEqual((await pg.queryOne('SELECT read FROM pm_inbox WHERE uuid = $1', [pmUuid])).read, false, 'still unread');
+		assert.strictEqual(String((await pg.queryOne('SELECT last_qwk_download_at FROM users WHERE id = $1', [userId])).last_qwk_download_at),
+			String(watermark.last_qwk_download_at), 'watermark unchanged');
+
 		var built = await qwkUser.buildQwkForUser(userId);
 		assert.ok(built.qwkPath, (built.errormessages || []).join('; '));
+		assert.strictEqual(await qwkUser.commitUserPacket(built), true);
+		assert.strictEqual(await qwkUser.commitUserPacket(built), false, 'a second commit does nothing');
 		var got = await packetNames(built);
 		assert.ok(got.names.indexOf('NEWONE.ZIP') !== -1, 'stored on disk as NEWONE_1.ZIP, packed as NEWONE.ZIP: ' + got.names.join(','));
 		assert.strictEqual(got.content['NEWONE.ZIP'].toString(), 'new file bytes');
@@ -214,6 +228,18 @@ describe('offline-reader files in personal packets (#75)', function () {
 		assert.strictEqual(left.n, 0);
 	});
 
+	it('sets the watermark to when the packet was built, not when it was committed', async function () {
+		await pg.write('UPDATE pm_inbox SET read = false WHERE uuid = $1', [pmUuid]);
+		var built = await qwkUser.buildQwkForUser(userId);
+		assert.ok(built.qwkPath, 'something to send');
+		var builtAt = built.commit.builtAt;
+		await new Promise(function (r) { setTimeout(r, 50); });
+		await qwkUser.commitUserPacket(built);
+		if (built.qwkPath) qwkUser.cleanupQwkPacket(built.qwkPath);
+		var u = await pg.queryOne('SELECT last_qwk_download_at FROM users WHERE id = $1', [userId]);
+		assert.strictEqual(new Date(u.last_qwk_download_at).getTime(), new Date(builtAt).getTime());
+	});
+
 	it('makes a packet when files are all there is to send', async function () {
 		await pg.write('UPDATE users SET qwk_files = true, qwk_files_since = NULL, last_qwk_download_at = $2 WHERE id = $1', [userId, new Date('2026-01-01')]);
 		await pg.write('UPDATE pm_inbox SET read = true WHERE user_id = $1', [userId]);
@@ -221,6 +247,23 @@ describe('offline-reader files in personal packets (#75)', function () {
 		assert.ok(built.qwkPath, 'a packet with only NEWFILES.DAT');
 		var got = await packetNames(built);
 		assert.ok(got.names.indexOf('NEWFILES.DAT') !== -1);
+	});
+});
+
+describe('every QWK download commits only after it succeeds (#78)', function () {
+	it('web, terminal and API call commitUserPacket at the point the transfer has succeeded', function () {
+		var web = fs.readFileSync('src/routes/index.js', 'utf8');
+		var dl = web.slice(web.indexOf("router.get('/qwk/download'"));
+		dl = dl.slice(0, dl.indexOf('\n});'));
+		assert.match(dl, /res\.download\([\s\S]*if \(!err\) \{[\s\S]*commitUserPacket\(result\)/);
+		var term = fs.readFileSync('src/handlers/menucommands/qwkTransfer.js', 'utf8');
+		assert.match(term, /if \(result\.success\) \{\s*try \{ await commitUserPacket\(this\._qwkResult\)/);
+		var api = fs.readFileSync('src/routes/api/qwk.js', 'utf8');
+		assert.match(api, /res\.on\('finish', function\(\) \{\s*qwkUser\.commitUserPacket\(result\)/);
+		var model = fs.readFileSync('src/models/qwkUser.js', 'utf8');
+		var build = model.slice(model.indexOf('async function buildQwkForUser'), model.indexOf('async function commitUserPacket'));
+		assert.doesNotMatch(build, /advancePointer|UPDATE pm_inbox SET read|removeFromBatch|incrementDownloadCount\(|last_qwk_download_at =/,
+			'building commits nothing');
 	});
 });
 

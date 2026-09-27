@@ -79,6 +79,9 @@ async function buildQwkForUser(userId) {
 		returnObj.errormessages.push('QWK downloads are disabled');
 		return returnObj;
 	}
+	// The packet's own time: the next packet carries what arrives after it,
+	// however long this one takes to download (#78).
+	var builtAt = new Date();
 
 	// Load user record. last_qwk_download_at gates the system-conference
 	// content (announcements/wall/bulletins) so each download only carries
@@ -400,40 +403,18 @@ async function buildQwkForUser(userId) {
 		return returnObj;
 	}
 
-	// Queued downloads went: counted, and off the queue.
-	for (var b of batchSent) {
-		await incrementDownloadCount(b.id);
-		await userFileBatch.removeFromBatch(userId, b.uuid);
-	}
-
-	// Advance area pointers
-	for (var pu of pointerUpdates) {
-		await userMsgPointers.advancePointer(userId, pu.shortcode, pu.highestMsgId);
-	}
-
-	// Mark PMs as read
-	for (var pmId of pmIds) {
-		await postgres.write(
-			"UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE id = $1",
-			[pmId]
-		);
-	}
-
-	// Advance the user's QWK download watermark so the next download
-	// only includes system-conference content (announcements, wall,
-	// bulletins) that has appeared since now.
-	try {
-		// The FILES MM/DD/YY date applies to this one packet.
-		await postgres.write(
-			"UPDATE users SET last_qwk_download_at = NOW(), qwk_files_since = NULL WHERE id = $1",
-			[userId]
-		);
-	} catch (err) {
-		alogger.writeAlog(3,
-			'buildQwkForUser: last_qwk_download_at update failed for ' + user.username +
-			': ' + (err.message || err),
-			'yellow');
-	}
+	// Nothing is committed here (#78): the pointers, the PMs marked read, the
+	// download watermark and the queued downloads are committed by
+	// commitUserPacket() once the transfer has succeeded, as Synchronet
+	// commits a user's online download only in qwk_success after it. They
+	// used to be committed here, so a failed download lost them.
+	returnObj.commit = {
+		userId: userId,
+		builtAt: builtAt,
+		pointerUpdates: pointerUpdates,
+		pmIds: pmIds,
+		batch: batchSent.map(function (b) { return { id: b.id, uuid: b.uuid }; })
+	};
 
 	returnObj.status = true;
 	returnObj.qwkPath = qwkPath;
@@ -450,6 +431,42 @@ async function buildQwkForUser(userId) {
 	);
 
 	return returnObj;
+}
+
+/**
+ * Commit a personal packet the user now has (#78): advance their read
+ * pointers, mark its PMs read, set last_qwk_download_at to when the packet was
+ * built, clear a one-off FILES date, and count and dequeue its queued
+ * downloads. Called by each transport once its transfer has succeeded. Safe to
+ * call twice: pointers only move forward, and a second call does nothing.
+ */
+async function commitUserPacket(result) {
+	var c = result && result.commit;
+	if (!c || result.committed) return false;
+	result.committed = true;
+	for (var pu of c.pointerUpdates || []) {
+		await userMsgPointers.advancePointer(c.userId, pu.shortcode, pu.highestMsgId);
+	}
+	for (var pmId of c.pmIds || []) {
+		await postgres.write(
+			"UPDATE pm_inbox SET read = true, read_at = NOW(), updated_at = NOW() WHERE id = $1",
+			[pmId]
+		);
+	}
+	for (var b of c.batch || []) {
+		await incrementDownloadCount(b.id);
+		await userFileBatch.removeFromBatch(c.userId, b.uuid);
+	}
+	// The FILES MM/DD/YY date applies to one packet. Never move the
+	// watermark back if a later packet was committed first.
+	var err = await postgres.write(
+		"UPDATE users SET last_qwk_download_at = GREATEST(COALESCE(last_qwk_download_at, $2), $2), qwk_files_since = NULL WHERE id = $1",
+		[c.userId, c.builtAt]
+	);
+	if (err) {
+		alogger.writeAlog(3, 'commitUserPacket: last_qwk_download_at update failed for user ' + c.userId + ': ' + (err.message || err), 'yellow');
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -930,6 +947,7 @@ function cleanupQwkPacket(qwkPath) {
 export {
 	getQwkBbsId,
 	buildQwkForUser,
+	commitUserPacket,
 	importRepForUser,
 	cleanupQwkPacket
 };
