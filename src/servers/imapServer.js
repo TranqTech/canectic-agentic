@@ -17,6 +17,7 @@ import {
 	getFullMessage, getMailboxStatus, trashUid, trashUidToSource
 } from '../models/imapAdapter.js';
 import { getAttachments } from '../models/pmAttachments.js';
+import { clearPmNotifications } from '../models/privateMessages.js';
 import appConfig from '../config/appConfig.js';
 import { createEventPublisher, createEventSubscriber, EVENTS } from '../queues/events.js';
 
@@ -973,6 +974,7 @@ class ImapSession {
 				userId: this.userId, pmId: row.id, read: true, source: 'imap'
 			});
 		}
+		await clearPmNotifications(this.userId, [row.id]);
 	}
 
 	async _markUnread(row, uid) {

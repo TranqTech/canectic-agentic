@@ -41,6 +41,10 @@ async function ensureTable() {
 	await postgres.write(
 		"CREATE INDEX IF NOT EXISTS idx_notif_user_unread ON notifications(user_id, read, created_at DESC)"
 	);
+
+	// What a notification is about, where that is a single thing: 'pm:<id>'
+	// for pm_received, so reading the PM can clear the notice for it.
+	await postgres.write("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS ref VARCHAR(64)");
 	await postgres.write(
 		"CREATE INDEX IF NOT EXISTS idx_notif_sysop ON notifications(created_at DESC) WHERE user_id IS NULL"
 	);
@@ -69,6 +73,7 @@ async function create(userId, type, title, body, opts) {
 		read: false,
 		created_at: new Date()
 	};
+	if (opts.ref) dbObj.ref = String(opts.ref).substring(0, 64);
 
 	var result = await postgres.insertObject(dbObj, 'notifications');
 	if (!result.status) return null;
@@ -221,6 +226,32 @@ async function markAllRead(userId, isSysop, opts) {
 	);
 }
 
+// A PM's notification is read once the PM is: reading the mail anywhere (web,
+// terminal, IMAP, a QWK download) clears it, rather than leaving it in the
+// terminal's notification list until cleared there too.
+//
+// pmIds: the pm_inbox ids just marked read, or null when every PM was.
+// Notices created before `ref` existed name no PM; those clear once nothing
+// unread is left in the inbox, the nearest honest equivalent.
+// Never throws: a notification is not worth failing a read over.
+async function markPmNotificationsRead(userId, pmIds) {
+	try {
+		var base = "UPDATE notifications SET read = true, read_at = NOW() " +
+			"WHERE user_id = $1 AND type = 'pm_received' AND read = false";
+		if (pmIds === null) {
+			await postgres.write(base, [userId]);
+			return;
+		}
+		var refs = (pmIds || []).map(function (id) { return 'pm:' + id; });
+		if (refs.length) await postgres.write(base + ' AND ref = ANY($2)', [userId, refs]);
+		await postgres.write(base + ' AND ref IS NULL AND NOT EXISTS (' +
+			'SELECT 1 FROM pm_inbox WHERE user_id = $1 AND read = false AND deleted = false AND purged IS NOT TRUE)',
+			[userId]);
+	} catch (err) {
+		alogger.writeAlog(3, 'notifications: could not clear PM notices for user ' + userId + ': ' + (err.message || err), 'yellow');
+	}
+}
+
 // Get a single notification by ID.
 async function getById(id) {
 	return await postgres.queryOne('SELECT * FROM notifications WHERE id = $1', [id]);
@@ -264,6 +295,7 @@ export {
 	getUnreadCount,
 	markRead,
 	markAllRead,
+	markPmNotificationsRead,
 	getById,
 	isWebHidden,
 	WEB_HIDDEN_TYPES,

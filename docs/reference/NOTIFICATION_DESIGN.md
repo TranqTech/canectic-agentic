@@ -133,6 +133,8 @@ Click opens a dropdown showing the 10 most recent unread notifications:
 
 **Hidden on the web: `pm_received`** (`WEB_HIDDEN_TYPES` in the model). Mail has its own unread counter and envelope in the nav bar, so a bell entry per PM said the same thing twice. The notification is still created, because the terminal notification reader shows it. The model's reads take an optional `{ web: true }` that leaves hidden types out, used by the presence socket (count, replay, mark all read), `/notifications` and its Mark All Read; `create()` does not push a hidden type. Mark all read from the web must leave them alone, or the terminal would lose a notification the web never showed.
 
+**Reading the PM clears its notification.** Each `pm_received` row names its PM in `ref` (`pm:<pm_inbox id>`, column added by `ensureTable` with ADD COLUMN IF NOT EXISTS), and every path that marks a PM read calls `notifications.markPmNotificationsRead(userId, pmIds)` through `privateMessages.clearPmNotifications`: `getMessage` (web view and terminal reader), `markRead`, `markAllRead` (pmIds null = all), IMAP `\Seen`, and `qwkUser.commitUserPacket`. Rows from before `ref` existed name no PM and clear once the inbox has no unread mail left. Test: `tests/pmNotificationRead.test.js`.
+
 ### Notification dropdown item format
 
 ```

@@ -453,6 +453,7 @@ async function commitUserPacket(result) {
 			[pmId]
 		);
 	}
+	if ((c.pmIds || []).length) await privateMessages.clearPmNotifications(c.userId, c.pmIds);
 	for (var b of c.batch || []) {
 		await incrementDownloadCount(b.id);
 		await userFileBatch.removeFromBatch(c.userId, b.uuid);

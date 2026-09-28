@@ -386,7 +386,7 @@ async function deliverMessage(messageObj) {
       await notif.create(messageObj.user_id, 'pm_received',
         'New PM from ' + (messageObj.from_user || 'Unknown'),
         messageObj.subject || '(no subject)',
-        { link: '/pm/inbox', icon: 'envelope', severity: 'info' }
+        { link: '/pm/inbox', icon: 'envelope', severity: 'info', ref: 'pm:' + result.insertId }
       );
     } catch (_) {}
   } else {
@@ -468,6 +468,7 @@ async function getMessage(userId, uuid) {
     getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
       userId: userId, pmId: row.id, read: true, source: 'model'
     });
+    await clearPmNotifications(userId, [row.id]);
   }
 
   return row;
@@ -485,7 +486,19 @@ async function markRead(userId, uuid) {
   getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
     userId: userId, read: true, source: 'model'
   });
+  var row = await postgres.queryOne("SELECT id FROM pm_inbox WHERE uuid = $1 AND user_id = $2", [uuid, userId]);
+  if (row) await clearPmNotifications(userId, [row.id]);
   return result;
+}
+
+// Reading a PM clears its "New PM" notification, wherever it was read. The
+// same call is made from IMAP and the QWK packet commit, which update
+// pm_inbox themselves.
+async function clearPmNotifications(userId, pmIds) {
+  try {
+    var notif = await import('./notifications.js');
+    await notif.markPmNotificationsRead(userId, pmIds);
+  } catch (_) {}
 }
 
 async function markUnread(userId, uuid) {
@@ -507,6 +520,7 @@ async function markAllRead(userId) {
   getPmEventPublisher().publish(EVENTS.PM_READ_CHANGED, {
     userId: userId, read: true, source: 'model'
   });
+  await clearPmNotifications(userId, null);
   return result;
 }
 
@@ -1250,6 +1264,7 @@ export {
   getTrash,
   getMessage,
   markRead,
+  clearPmNotifications,
   markUnread,
   markAllRead,
   getUnreadCount,
