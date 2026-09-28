@@ -16,6 +16,7 @@ import { createQueueConnection } from './connection.js';
 import * as alogger from "../utils/alogger.js";
 import * as jobs from "./jobs.js";
 import { createEventPublisher, EVENTS } from "./events.js";
+import { runMailerJob } from "../mailer/mailerJobs.js";
 
 /**
  * Start embedded workers for toss, maintenance, and (optionally) mailer.
@@ -229,18 +230,8 @@ export async function startEmbeddedWorkers(opts = {}) {
 		var mm = opts.mailerManager;
 		var mailerWorker = new Worker('mailer', async (job) => {
 			alogger.writeAlog(3, `[Embedded/Mailer] ${job.name}`, "cyan");
-			switch (job.name) {
-				case 'signal-outbound':
-					await mm.signalOutbound(job.data.connectionUUID);
-					break;
-				case 'trigger-poll':
-					await mm.triggerPoll(job.data.connectionUUID);
-					break;
-				case 'poll-scheduled':
-					await mm.pollConnection(job.data.connectionUUID);
-					break;
-				default:
-					alogger.writeAlog(3, `[Embedded/Mailer] Unknown job: ${job.name}`, "yellowbright");
+			if (!(await runMailerJob(mm, job.name, job.data))) {
+				alogger.writeAlog(3, `[Embedded/Mailer] Unknown job: ${job.name}`, "yellowbright");
 			}
 		}, {
 			connection: mailerConnection,

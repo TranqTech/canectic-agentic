@@ -8,6 +8,7 @@
 
 ### Networking
 
+- Fix: **on a board running as a single process (`PROCESS_MODE=embedded`), outbound FTN mail waited for the next scheduled scan, and connecting to a system from the nodelist did nothing.** The mail process ignored both requests. It now handles them as the standalone mailer does.
 - Fix: **netmail your board relayed carried a Via line with no version,** just "Canectic", and the system statistics page and the terminal's system information showed the version as blank. Both now show the version the board is running.
 - Fix: **a file attached to FTN netmail was never sent.** The netmail went out marked as carrying a file, but the file itself was not queued for the mailer, so the recipient got a message referring to an attachment that never arrived. The attachment now goes with the next mail session.
 

@@ -40,6 +40,7 @@ import { Worker } from 'bullmq';
 import appConfig from "../src/config/appConfig.js";
 import { initMaintenanceWatch } from "../src/maintenance/maintenanceWatch.js";
 import { startClosed, attachQueueDrain } from "../src/maintenance/queueDrain.js";
+import { runMailerJob } from "../src/mailer/mailerJobs.js";
 
 dotenv.config();
 alogger.setProcessName('mailer');
@@ -144,40 +145,8 @@ async function main() {
 	mailerWorker = new Worker('mailer', async (job) => {
 		alogger.writeAlog(2, `[Mailer] Job: ${job.name}  connection=${job.data.connectionUUID || 'n/a'}`, "cyan");
 
-		switch (job.name) {
-			case 'signal-outbound':
-				// Worker finished outbound toss — signal the mailer to check
-				// for new packets.  For CRASH connections this triggers
-				// immediate poll; for NORMAL it's a no-op if already scheduled.
-				await mailerManager.signalOutbound(job.data.connectionUUID);
-				break;
-
-			case 'trigger-poll':
-				// Admin manual poll — bypasses guards, always connects
-				await mailerManager.triggerPoll(job.data.connectionUUID);
-				break;
-
-			case 'poll-scheduled':
-				// Repeatable schedule — normal poll with all guards
-				await mailerManager.pollConnection(job.data.connectionUUID);
-				break;
-
-			case 'nodelist-connect':
-				// Connect to a nodelist-resolved address (no peer record)
-				mailerManager.connectToNodelistAddress(
-					job.data.nodelistData,
-					job.data.destinationAddress
-				);
-				break;
-
-			case 'bso-scan':
-				// On-demand BSO directory scan — triggered by tossers after
-				// outbound packets are written
-				await mailerManager.scanOutboundNow();
-				break;
-
-			default:
-				alogger.writeAlog(3, `[Mailer] Unknown job: ${job.name}`, "yellowbright");
+		if (!(await runMailerJob(mailerManager, job.name, job.data))) {
+			alogger.writeAlog(3, `[Mailer] Unknown job: ${job.name}`, "yellowbright");
 		}
 	}, {
 		connection,
