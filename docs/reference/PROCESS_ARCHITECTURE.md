@@ -255,7 +255,7 @@ One switch, `runMaintenanceJob` in `src/maintenance/maintenanceJobs.js`, shared 
 - **Per-connection locking on toss jobs**: Two `qwk:pull` jobs for the same connectionUUID must not run concurrently (would double-download from the same FTP host). Use BullMQ's `jobId` set to `qwk-pull--${connectionUUID}` — duplicate job IDs are rejected while one is active. Same pattern for `nntp:pull`, `qwk:push`, `nntp:push`.
 - **FTN inbound is safe to overlap**: Multiple `ftn:inbound` jobs can run if they process different files. The existing move-after-toss pattern prevents double-processing.
 - **FTN outbound needs per-connection isolation**: HWM advancement must not race. Use `ftn-outbound--${connectionUUID}` as jobId (a timestamp suffix when no connection is named).
-- **Maintenance jobs are single-instance per request**: jobId deduplication. A job whose data carries options (areas, width, batch, days, dry run) gets `optionJobId(base, data)`, the base plus a hash of the options, so an identical request merges and a different one queues behind; before #79 a fixed id merged every second request and dropped its options. `regen-html` is ONE JOB PER AREA (`enqueueRegenHtml`, no areas = every active area, pure split in `regenHtmlRequests`), since a whole board overran `maintenance_job_timeout` as one job. `bulk-msgbase-import` keeps a fixed id on purpose: two imports would write to the same areas. A job returned by `addDeduped` because it was already waiting or running carries `merged` and `mergedState`, which the maintenance CLI reports as `= ... already <state>`. Note the timeout fails a job without stopping it (#85).
+- **Maintenance jobs are single-instance per request**: jobId deduplication. A job whose data carries options (areas, width, batch, days, dry run) gets `optionJobId(base, data)`, the base plus a hash of the options, so an identical request merges and a different one queues behind; before #79 a fixed id merged every second request and dropped its options. `regen-html` is ONE JOB PER AREA (`enqueueRegenHtml`, no areas = every active area, pure split in `regenHtmlRequests`), since a whole board overran `maintenance_job_timeout` as one job. `bulk-msgbase-import` keeps a fixed id on purpose: two imports would write to the same areas. A job returned by `addDeduped` because it was already waiting or running carries `merged` and `mergedState`, which the maintenance CLI reports as `= ... already <state>`. The timeout asks a job to stop (see Job timeouts, #85).
 - **`addDeduped` (`jobs.js`)**: every helper goes through it. A job with the same id is refused only while it is waiting, delayed or running; a completed or failed one is removed first. Plain `queue.add()` refuses an id in ANY retained state, so a fixed id ran once and later requests silently returned the old completed job.
 - **Mailer jobs**: `signal-outbound--${connectionUUID}` dedupes; `trigger-poll`, `bso-scan` and `nodelist-connect` carry a timestamp so every request is queued; `poll-scheduled` jobs come from the per-connection scheduler, which holds one delayed job at a time. Duplicate sessions to one peer are prevented inside `MailerManager`, not by job ids.
 
@@ -544,12 +544,19 @@ The third is the one BullMQ cannot help with. Its stalled-job detection fires wh
 
 ### Job timeouts
 
-`bin/worker.js` wraps both queue processors in `workerHealth.withTimeout`. A job that exceeds its limit rejects, BullMQ fails and retries it, and the slot returns to circulation. The timeout rejects rather than cancels, because the underlying work cannot be cancelled; the orphaned promise is accepted as the lesser cost.
+`bin/worker.js` wraps both queue processors in `workerHealth.withTimeout`. At the limit the job is ASKED TO STOP: the processor's third argument is an `AbortSignal` (BullMQ's own, for `Worker.cancelJob`, is linked to it), `runMaintenanceJob` passes it on as `opts.signal`, and the long batch jobs call `signal.throwIfAborted()` at points where stopping leaves nothing half done: regen-html and regen-pm-html between batches (rows are independent), fix-msgids between batches (an abort also skips the completion marker), rethread between AREAS only (an area's threads are cleared before rebuilding). The wrapper then waits `STOP_GRACE_MS` (60s):
+
+- stopped within the grace: the job fails as "... and was stopped", nothing runs on.
+- not stopped (it never checks, e.g. every toss job and the other maintenance jobs, or it is parked on an await that cannot be interrupted): the job fails as "... did not stop within 60s; it is still running", its slot is released as before, and a level 1 line says so. The worker keeps it in its active-job books until the processor really settles (`hooks.onSettled`; a second level 1 line when it does), so the heartbeat shows it and the watchdog can restart the worker, which is what finally ends it.
+
+Before #85 the timeout rejected and nothing else: the job was reported failed, vanished from the books and ran on, and the next job on the concurrency 1 maintenance queue ran alongside it.
 
 - `toss_job_timeout` (30 minutes)
 - `maintenance_job_timeout` (60 minutes, higher because imports and batch subscribes legitimately run long)
 
 Either set to 0 disables the limit for that queue.
+
+The watchdog judges each queue against its own limit plus the stop grace (`workerHealth.stallLimitMs`); the heartbeat carries `longestActiveMs` per queue under `toss` and `maint`. It used to compare the single overall figure with the toss limit, so a healthy 45 minute maintenance job read as a wedged worker and could get it restarted mid-job. `schedules.js` uses the same per-queue limits for its STUCK marks.
 
 ### Heartbeat
 

@@ -768,7 +768,7 @@ node src/tools/tosser.js --help
 # Regenerate body_html for all active areas
 node src/tools/maintenance.js --regen-html
 
-# Dry run — preview without writing
+# Dry run — writes nothing; each area reports how many messages would change, with sample ids
 node src/tools/maintenance.js --regen-html --dry-run
 
 # Specific area(s)

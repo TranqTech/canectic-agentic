@@ -86,31 +86,47 @@ export const MAINTENANCE_JOBS = [
  * @param {object} data    - job.data (may be empty)
  * @param {object} [opts]
  * @param {string} [opts.logPrefix] - tag for log lines, e.g. '[Worker]'
+ * @param {AbortSignal} [opts.signal] - aborted when the job has run past its
+ *          time limit (#85). Passed to the jobs with long batch loops, which
+ *          stop at the next clean point; a job that does not check it runs on.
+ * @param {function} [opts.onResult] - called with a job's summary for the
+ *          jobs that report one (regen-html, regen-pm-html), which the worker
+ *          returns as the BullMQ job's return value so the CLI can print it.
  * @returns {Promise<boolean>} false if the name is not one we handle, so the
  *          caller can log it as unknown rather than reporting silent success.
  */
 export async function runMaintenanceJob(name, data, opts) {
 	data = data || {};
 	var tag = (opts && opts.logPrefix) || '[Maint]';
+	var signal = (opts && opts.signal) || null;
+	var onResult = (opts && opts.onResult) || function () {};
 
 	switch (name) {
 
 		case 'regen-html': {
 			var messageBase = await import("./messageBase.js");
-			await messageBase.regenerateAllBodyHtml({
+			var regen = await messageBase.regenerateAllBodyHtml({
 				areas: data.areas,
 				batchSize: data.batchSize,
 				forceWidth: data.forceWidth,
+				// Never passed before #58, so --regen-html --dry-run rewrote
+				// every message it was meant only to count.
+				dryRun: data.dryRun || false,
+				signal: signal,
 			});
+			onResult(regenSummary(regen, data.dryRun));
 			return true;
 		}
 
 		case 'regen-pm-html': {
 			var pmHtmlBase = await import("./messageBase.js");
-			await pmHtmlBase.regeneratePmBodyHtml({
+			var pmRegen = await pmHtmlBase.regeneratePmBodyHtml({
 				batchSize: data.batchSize,
 				forceWidth: data.forceWidth,
+				dryRun: data.dryRun || false,
+				signal: signal,
 			});
+			onResult(regenSummary(pmRegen, data.dryRun));
 			return true;
 		}
 
@@ -325,6 +341,7 @@ export async function runMaintenanceJob(name, data, opts) {
 			await msgBase.rethreadAreas({
 				areas: data.areas || null,
 				dryRun: data.dryRun || false,
+				signal: signal,
 			});
 			return true;
 		}
@@ -335,6 +352,7 @@ export async function runMaintenanceJob(name, data, opts) {
 				areas: data.areas || null,
 				dryRun: data.dryRun || false,
 				batchSize: data.batchSize || 500,
+				signal: signal,
 			});
 			return true;
 		}
@@ -476,4 +494,25 @@ export async function runMaintenanceJob(name, data, opts) {
 		default:
 			return false;
 	}
+}
+
+// The part of a regen result worth sending back to whoever queued it: counts
+// and a few ids that differ, small enough for a BullMQ return value.
+export function regenSummary(result, dryRun) {
+	var parts = result.areaResults || result.tableResults || [];
+	var sampleIds = [];
+	for (var p of parts) {
+		for (var id of (p.sampleIds || [])) {
+			if (sampleIds.length < 5) sampleIds.push(id);
+		}
+	}
+	return {
+		dryRun: !!dryRun,
+		processed: result.totalProcessed || 0,
+		updated: result.totalUpdated || 0,
+		unchanged: result.totalUnchanged || 0,
+		skipped: result.totalSkipped || 0,
+		errors: result.totalErrors || 0,
+		sampleIds: sampleIds,
+	};
 }

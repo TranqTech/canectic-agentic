@@ -116,7 +116,11 @@ async function _tick() {
 	var hb = await workerHealth.readHeartbeat();
 	var assessment = workerHealth.assessWorker(hb, now, {
 		staleMs: appConfig.getNumber('worker_health_grace', 180) * 1000,
-		stallMs: appConfig.getNumber('toss_job_timeout', 30) * 60 * 1000
+		// Each queue against its own limit plus the stop grace: using the toss
+		// limit for everything called a healthy long maintenance job a wedged
+		// worker, and the watchdog restarts wedged workers.
+		tossStallMs:  workerHealth.stallLimitMs('toss', appConfig.getNumber.bind(appConfig)),
+		maintStallMs: workerHealth.stallLimitMs('maintenance', appConfig.getNumber.bind(appConfig))
 	});
 
 	if (!assessment.alarm) {

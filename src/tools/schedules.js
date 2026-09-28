@@ -123,7 +123,7 @@ async function expectedSchedules() {
  * schedule listing on its own.
  */
 async function reportQueueDepth(queues, now) {
-	var stallMs = appConfig.getNumber('toss_job_timeout', 30) * 60 * 1000;
+	var getNumber = appConfig.getNumber.bind(appConfig);
 	var flagged = [];
 
 	console.log('\n=== queue depth ===');
@@ -150,7 +150,7 @@ async function reportQueueDepth(queues, now) {
 		// Active jobs, oldest first. Anything past the timeout is reported as
 		// stuck rather than slow, because that is the failure that takes the
 		// pipeline down without a single log line.
-		var stuck = stalledJobs(active, now, stallMs);
+		var stuck = stalledJobs(active, now, workerHealth.stallLimitMs(qname === 'maintenance' ? 'maintenance' : 'toss', getNumber));
 		for (var job of (active || [])) {
 			if (!job || !job.processedOn) continue;
 			var age = now - job.processedOn;
@@ -174,7 +174,8 @@ async function reportWorkerHealth(now) {
 	var hb = await workerHealth.readHeartbeat();
 	var assessment = workerHealth.assessWorker(hb, now, {
 		staleMs: appConfig.getNumber('worker_health_grace', 180) * 1000,
-		stallMs: appConfig.getNumber('toss_job_timeout', 30) * 60 * 1000
+		tossStallMs:  workerHealth.stallLimitMs('toss', appConfig.getNumber.bind(appConfig)),
+		maintStallMs: workerHealth.stallLimitMs('maintenance', appConfig.getNumber.bind(appConfig))
 	});
 
 	console.log('  ' + pad('state', 24) + assessment.state.toUpperCase() + ' (' + assessment.detail + ')');

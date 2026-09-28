@@ -29,8 +29,11 @@ import { formatBodyHtml } from '../utils/terminalText.js';
 //               { area, processed, updated, skipped, total, done }
 //   forceWidth: If set, passed to formatBodyHtml to force a column width
 //   quiet:     If true, suppress console output (default: false)
+//   signal:    AbortSignal checked between batches (#85)
 //
-// Returns: { totalProcessed, totalUpdated, totalSkipped, totalErrors, areaResults[] }
+// Returns: { totalProcessed, totalUpdated, totalUnchanged, totalSkipped,
+//            totalErrors, areaResults[] }, where updated counts only rows
+//            whose HTML differs (see regenerateTableBodyHtml)
 
 async function regenerateAllBodyHtml(options) {
 	var opts = options || {};
@@ -43,6 +46,7 @@ async function regenerateAllBodyHtml(options) {
 	var result = {
 		totalProcessed: 0,
 		totalUpdated:   0,
+		totalUnchanged: 0,
 		totalSkipped:   0,
 		totalErrors:    0,
 		areaResults:    []
@@ -76,11 +80,13 @@ async function regenerateAllBodyHtml(options) {
 			dryRun:     dryRun,
 			forceWidth: forceWidth,
 			quiet:      quiet,
-			onProgress: onProgress
+			onProgress: onProgress,
+			signal:     opts.signal
 		});
 		result.areaResults.push(areaResult);
 		result.totalProcessed += areaResult.processed;
 		result.totalUpdated   += areaResult.updated;
+		result.totalUnchanged += areaResult.unchanged;
 		result.totalSkipped   += areaResult.skipped;
 		result.totalErrors    += areaResult.errors;
 	}
@@ -88,8 +94,9 @@ async function regenerateAllBodyHtml(options) {
 	if (!quiet) {
 		console.log('regenerateAllBodyHtml: complete — ' +
 			result.totalProcessed + ' processed, ' +
-			result.totalUpdated + ' updated, ' +
-			result.totalSkipped + ' unchanged, ' +
+			result.totalUpdated + (opts.dryRun ? ' would change, ' : ' updated, ') +
+			result.totalUnchanged + ' unchanged, ' +
+			result.totalSkipped + ' skipped, ' +
 			result.totalErrors + ' errors');
 	}
 
@@ -101,44 +108,76 @@ async function regenerateAllBodyHtml(options) {
 // ---------------------------------------------------------------------------
 
 async function regenerateAreaBodyHtml(shortcode, options) {
+	var tableResult = await regenerateTableBodyHtml(
+		'mb_' + shortcode.toLowerCase().trim() + '_msgs', shortcode,
+		Object.assign({}, options, { touchUpdatedAt: true }));
+	var areaResult = Object.assign({ area: shortcode }, tableResult);
+	delete areaResult.table;
+	return areaResult;
+}
+
+// ---------------------------------------------------------------------------
+// regenerateTableBodyHtml -- the loop both message areas and PM tables use
+// ---------------------------------------------------------------------------
+// Renders each row's body_text and compares the result with the stored
+// body_html. Only a row whose HTML actually differs is counted as `updated`
+// and, outside a dry run, written. Before #58 every row with text counted as
+// updated and was rewritten, so a dry run could not say how many messages a
+// regeneration would change (it reported all of them), and a real run
+// rewrote and touched updated_at on rows it left identical.
+//
+//   updated:   HTML differs (in a dry run: would be rewritten)
+//   unchanged: HTML already matches
+//   skipped:   no body_text, or the formatter returned null
+//   sampleIds: the first SAMPLE_IDS ids that differ, to look at before a run
+//
+// options.signal: an AbortSignal checked between batches, so a job that has
+// run past its time limit stops at a clean point (#85). Rows written so far
+// stay written, which is safe: each row is independent and a later run only
+// rewrites what still differs.
+
+var SAMPLE_IDS = 5;
+
+async function regenerateTableBodyHtml(tableName, label, options) {
 	var opts = options || {};
 	var batchSize  = opts.batchSize  || 100;
 	var dryRun     = opts.dryRun     || false;
 	var forceWidth = opts.forceWidth || undefined;
 	var quiet      = opts.quiet      || false;
 	var onProgress = opts.onProgress || null;
+	var signal     = opts.signal     || null;
 
-	var shorty   = shortcode.toLowerCase().trim();
-	var msgtable = 'mb_' + shorty + '_msgs';
-
-	var areaResult = {
-		area:      shortcode,
+	var result = {
+		table:     tableName,
 		processed: 0,
 		updated:   0,
+		unchanged: 0,
 		skipped:   0,
-		errors:    0
+		errors:    0,
+		sampleIds: []
 	};
 
-	// Get total count for progress reporting
-	var countRow = await postgres.queryOne(
-		'SELECT COUNT(*) AS cnt FROM ' + msgtable,
-		[]
-	);
+	var countRow = await postgres.queryOne('SELECT COUNT(*) AS cnt FROM ' + tableName, []);
 	var total = countRow ? parseInt(countRow.cnt) : 0;
 
 	if (total === 0) {
-		if (!quiet) console.log('  ' + shortcode + ': 0 messages — skipping');
-		return areaResult;
+		if (!quiet) console.log('  ' + label + ': 0 messages — skipping');
+		return result;
 	}
 
-	if (!quiet) console.log('  ' + shortcode + ': ' + total + ' message(s)');
+	if (!quiet) console.log('  ' + label + ': ' + total + ' message(s)');
 
-	// Process in batches by id to avoid OFFSET performance issues
+	var update = 'UPDATE ' + tableName + ' SET body_html = $1' +
+		(opts.touchUpdatedAt ? ', updated_at = NOW()' : '') + ' WHERE id = $2';
+
+	// Batches by id to avoid OFFSET performance issues
 	var lastId = 0;
 
 	while (true) {
+		if (signal) signal.throwIfAborted();
+
 		var rows = await postgres.query(
-			'SELECT id, body_text, utf8 FROM ' + msgtable +
+			'SELECT id, body_text, body_html FROM ' + tableName +
 			' WHERE id > $1 ORDER BY id ASC LIMIT $2',
 			[lastId, batchSize]
 		);
@@ -148,64 +187,65 @@ async function regenerateAreaBodyHtml(shortcode, options) {
 		for (var i = 0; i < rows.length; i++) {
 			var row = rows[i];
 			lastId = row.id;
-			areaResult.processed++;
+			result.processed++;
 
 			var displayText = row.body_text || '';
 			if (!displayText) {
-				areaResult.skipped++;
+				result.skipped++;
 				continue;
 			}
 
 			try {
 				var newHtml = await formatBodyHtml(displayText, forceWidth);
 
-				if (!dryRun && newHtml !== null) {
-					await postgres.write(
-						'UPDATE ' + msgtable + ' SET body_html = $1, updated_at = NOW() WHERE id = $2',
-						[newHtml, row.id]
-					);
-					areaResult.updated++;
-				} else if (newHtml !== null) {
-					areaResult.updated++;
+				if (newHtml === null) {
+					result.skipped++;
+				} else if (newHtml === row.body_html) {
+					result.unchanged++;
 				} else {
-					areaResult.skipped++;
+					if (!dryRun) await postgres.write(update, [newHtml, row.id]);
+					result.updated++;
+					if (result.sampleIds.length < SAMPLE_IDS) result.sampleIds.push(row.id);
 				}
 			} catch (err) {
-				areaResult.errors++;
+				result.errors++;
 				if (!quiet) {
-					console.log('    error on msg id=' + row.id + ': ' + (err.message || err));
+					console.log('    error on ' + label + ' id=' + row.id + ': ' + (err.message || err));
 				}
 			}
 		}
 
-		// Progress callback
 		if (onProgress) {
 			try {
 				onProgress({
-					area:      shortcode,
-					processed: areaResult.processed,
-					updated:   areaResult.updated,
-					skipped:   areaResult.skipped,
+					area:      label,
+					table:     tableName,
+					processed: result.processed,
+					updated:   result.updated,
+					unchanged: result.unchanged,
+					skipped:   result.skipped,
 					total:     total,
-					done:      areaResult.processed >= total
+					done:      result.processed >= total
 				});
 			} catch (_) {}
 		}
 
-		if (!quiet && areaResult.processed % (batchSize * 5) === 0) {
-			console.log('    ' + shortcode + ': ' + areaResult.processed + '/' + total +
-				' (' + areaResult.updated + ' updated)');
+		if (!quiet && result.processed % (batchSize * 5) === 0) {
+			console.log('    ' + label + ': ' + result.processed + '/' + total +
+				' (' + result.updated + (dryRun ? ' would change' : ' updated') + ')');
 		}
 	}
 
 	if (!quiet) {
-		console.log('    ' + shortcode + ': done — ' +
-			areaResult.updated + ' updated, ' +
-			areaResult.skipped + ' skipped, ' +
-			areaResult.errors + ' errors');
+		console.log('    ' + label + ': done — ' +
+			result.updated + (dryRun ? ' would change' : ' updated') + ', ' +
+			result.unchanged + ' unchanged, ' +
+			result.skipped + ' skipped, ' +
+			result.errors + ' errors' +
+			(result.sampleIds.length ? ' (e.g. ids ' + result.sampleIds.join(', ') + ')' : ''));
 	}
 
-	return areaResult;
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +261,7 @@ async function regeneratePmBodyHtml(options) {
 	var result = {
 		totalProcessed: 0,
 		totalUpdated:   0,
+		totalUnchanged: 0,
 		totalSkipped:   0,
 		totalErrors:    0,
 		tableResults:   []
@@ -238,6 +279,7 @@ async function regeneratePmBodyHtml(options) {
 		result.tableResults.push(tableResult);
 		result.totalProcessed += tableResult.processed;
 		result.totalUpdated   += tableResult.updated;
+		result.totalUnchanged += tableResult.unchanged;
 		result.totalSkipped   += tableResult.skipped;
 		result.totalErrors    += tableResult.errors;
 	}
@@ -245,8 +287,9 @@ async function regeneratePmBodyHtml(options) {
 	if (!quiet) {
 		console.log('regeneratePmBodyHtml: complete — ' +
 			result.totalProcessed + ' processed, ' +
-			result.totalUpdated + ' updated, ' +
-			result.totalSkipped + ' unchanged, ' +
+			result.totalUpdated + (opts.dryRun ? ' would change, ' : ' updated, ') +
+			result.totalUnchanged + ' unchanged, ' +
+			result.totalSkipped + ' skipped, ' +
 			result.totalErrors + ' errors');
 	}
 
@@ -254,105 +297,7 @@ async function regeneratePmBodyHtml(options) {
 }
 
 async function regeneratePmTableBodyHtml(tableName, options) {
-	var opts = options || {};
-	var batchSize  = opts.batchSize  || 100;
-	var dryRun     = opts.dryRun     || false;
-	var forceWidth = opts.forceWidth || undefined;
-	var quiet      = opts.quiet      || false;
-	var onProgress = opts.onProgress || null;
-
-	var tableResult = {
-		table:     tableName,
-		processed: 0,
-		updated:   0,
-		skipped:   0,
-		errors:    0
-	};
-
-	var countRow = await postgres.queryOne(
-		'SELECT COUNT(*) AS cnt FROM ' + tableName,
-		[]
-	);
-	var total = countRow ? parseInt(countRow.cnt) : 0;
-
-	if (total === 0) {
-		if (!quiet) console.log('  ' + tableName + ': 0 messages — skipping');
-		return tableResult;
-	}
-
-	if (!quiet) console.log('  ' + tableName + ': ' + total + ' message(s)');
-
-	var lastId = 0;
-
-	while (true) {
-		var rows = await postgres.query(
-			'SELECT id, body_text, utf8 FROM ' + tableName +
-			' WHERE id > $1 ORDER BY id ASC LIMIT $2',
-			[lastId, batchSize]
-		);
-
-		if (!rows || rows.length === 0) break;
-
-		for (var i = 0; i < rows.length; i++) {
-			var row = rows[i];
-			lastId = row.id;
-			tableResult.processed++;
-
-			var displayText = row.body_text || '';
-			if (!displayText) {
-				tableResult.skipped++;
-				continue;
-			}
-
-			try {
-				var newHtml = await formatBodyHtml(displayText, forceWidth);
-
-				if (!dryRun && newHtml !== null) {
-					await postgres.write(
-						'UPDATE ' + tableName + ' SET body_html = $1 WHERE id = $2',
-						[newHtml, row.id]
-					);
-					tableResult.updated++;
-				} else if (newHtml !== null) {
-					tableResult.updated++;
-				} else {
-					tableResult.skipped++;
-				}
-			} catch (err) {
-				tableResult.errors++;
-				if (!quiet) {
-					console.log('    error on ' + tableName + ' id=' + row.id + ': ' + (err.message || err));
-				}
-			}
-		}
-
-		if (onProgress) {
-			try {
-				onProgress({
-					table:     tableName,
-					processed: tableResult.processed,
-					updated:   tableResult.updated,
-					skipped:   tableResult.skipped,
-					total:     total,
-					done:      tableResult.processed >= total
-				});
-			} catch (_) {}
-		}
-
-		if (!quiet && tableResult.processed % (batchSize * 5) === 0) {
-			console.log('    ' + tableName + ': ' + tableResult.processed + '/' + total +
-				' (' + tableResult.updated + ' updated)');
-		}
-	}
-
-	if (!quiet) {
-		console.log('    ' + tableName + ': done — ' +
-			tableResult.updated + ' updated, ' +
-			tableResult.skipped + ' skipped, ' +
-			tableResult.errors + ' errors');
-	}
-
-	return tableResult;
+	return regenerateTableBodyHtml(tableName, tableName, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +337,11 @@ async function rethreadAreas(options) {
 	alogger.writeAlog(5, '[Rethread] Processing ' + areaRows.length + ' area(s)', 'cyan');
 
 	for (var area of areaRows) {
+		// Checked between areas only (#85): an area's threads are cleared
+		// before they are rebuilt, so stopping part way through one would
+		// leave it with most messages in no thread at all.
+		if (opts.signal) opts.signal.throwIfAborted();
+
 		var shorty = area.shortcode.toLowerCase();
 		var msgtable = 'mb_' + shorty + '_msgs';
 		var threadtable = 'mb_' + shorty + '_threads';
@@ -721,6 +671,11 @@ async function fixLegacyMsgIds(options) {
 
 		var lastId = 0;
 		for (;;) {
+			// Each row is split independently, so any batch boundary is a
+			// clean place to stop (#85). Throwing also skips the completion
+			// marker below, which only a full pass may set.
+			if (opts.signal) opts.signal.throwIfAborted();
+
 			var rows = await postgres.query(
 				'SELECT ' + cols + ' FROM ' + t.name +
 				' WHERE id > $1 AND ' + predicate + ' ORDER BY id LIMIT $2',
@@ -782,6 +737,7 @@ async function fixLegacyMsgIds(options) {
 export {
 	regenerateAllBodyHtml,
 	regenerateAreaBodyHtml,
+	regenerateTableBodyHtml,
 	regeneratePmBodyHtml,
 	rethreadAreas,
 	fixLegacyMsgIds,

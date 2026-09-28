@@ -54,7 +54,7 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | File | Location | Purpose |
 |------|----------|---------|
 | `messageBase.js` | `src/maintenance/` | `regenerateAllBodyHtml(options)` and `regenerateAreaBodyHtml(shortcode, options)`. Iterates active areas, regenerates `body_html` from `body_text` using current `formatBodyHtml` pipeline. Keyset pagination by id. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress`, `quiet`. |
-| `maintenance.js` | `src/tools/` | CLI runner. Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`, `--fix-msgids`, `--rethread`, `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency managed by BullMQ jobId deduplication via `addDeduped()` in `src/queues/jobs.js` (replaces PID-file locking): ids are keyed on the options, so an identical request is merged into one waiting or running (and the CLI says so with `=`) while a different one queues. `--regen-html` is one job per area, with no overall wait limit in the CLI (each job is bounded by `maintenance_job_timeout`); a job that finished before the CLI saw its result is reported with `?`. See `PROCESS_ARCHITECTURE.md`. |
+| `maintenance.js` | `src/tools/` | CLI runner. Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`, `--fix-msgids`, `--rethread`, `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency managed by BullMQ jobId deduplication via `addDeduped()` in `src/queues/jobs.js` (replaces PID-file locking): ids are keyed on the options, so an identical request is merged into one waiting or running (and the CLI says so with `=`) while a different one queues. `--regen-html` is one job per area, with no overall wait limit in the CLI (each job is bounded by `maintenance_job_timeout`); a job that finished before the CLI saw its result is reported with `?`. Regeneration compares the new HTML with the stored `body_html` and counts and writes only rows that differ (`regenerateTableBodyHtml`, shared by areas and PM tables), reporting updated/unchanged/skipped and up to five sample ids back to the CLI as the job's return value; before #58 every row counted as updated and `--dry-run` was never passed to the job, so a dry run rewrote everything. See `PROCESS_ARCHITECTURE.md`. |
 
 ---
 
@@ -736,7 +736,7 @@ Threads could be auto-subscribed when:
 # Regenerate body_html for all active areas
 node src/tools/maintenance.js --regen-html
 
-# Dry run — preview without writing
+# Dry run — writes nothing; each area reports how many messages would change, with sample ids
 node src/tools/maintenance.js --regen-html --dry-run
 
 # Specific area(s)

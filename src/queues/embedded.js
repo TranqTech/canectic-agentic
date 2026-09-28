@@ -245,19 +245,23 @@ export async function startEmbeddedWorkers(opts = {}) {
 
 	// --- Embedded maintenance worker ---
 	var maintConnection = createQueueConnection();
-	var maintWorker = new Worker('maintenance', async (job) => {
+	var maintWorker = new Worker('maintenance', async (job, token, signal) => {
 		alogger.writeAlog(3, `[Embedded/Maint] ${job.name}`, "cyan");
 
 		// Shared with bin/worker.js. This switch used to be a separate copy
 		// and had drifted to 7 of 33 job names; the other 26 fell through to
 		// default and were marked complete, so an embedded board silently
 		// never purged a log, enforced retention, or ran a timed event.
+		var result;
 		var handled = await maintenanceJobs.runMaintenanceJob(job.name, job.data, {
 			logPrefix: '[Embedded/Maint]',
+			signal: signal,
+			onResult: function (r) { result = r; },
 		});
 		if (!handled) {
 			alogger.writeAlog(3, `[Embedded/Maint] Unknown job: ${job.name}`, "yellowbright");
 		}
+		return result;
 	}, {
 		connection: maintConnection,
 		concurrency: 1,

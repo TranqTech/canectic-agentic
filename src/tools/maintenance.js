@@ -141,9 +141,9 @@ async function waitForJobs(enqueuedJobs) {
 			}
 		}
 
-		queueEvents.on('completed', ({ jobId }) => {
+		queueEvents.on('completed', ({ jobId, returnvalue }) => {
 			var j = pending.get(jobId);
-			if (j) finish(jobId, '  \u2713 ' + jobLabel(j) + ' completed', false);
+			if (j) finish(jobId, '  \u2713 ' + jobLabel(j) + ' completed' + describeResult(returnvalue), false);
 		});
 
 		queueEvents.on('failed', ({ jobId, failedReason }) => {
@@ -175,6 +175,21 @@ async function waitForJobs(enqueuedJobs) {
 			}
 		}, POLL_MS);
 	});
+}
+
+// A regen reports its counts as the job's return value; nothing else does.
+// A dry run exists to answer "how many would change", so say that.
+function describeResult(returnvalue) {
+	var r = returnvalue;
+	if (typeof r === 'string') {
+		try { r = JSON.parse(r); } catch (_) { return ''; }
+	}
+	if (!r || typeof r !== 'object' || r.processed === undefined) return '';
+	return ': ' + r.processed + ' checked, ' + r.updated + (r.dryRun ? ' would change' : ' updated') +
+		', ' + r.unchanged + ' unchanged' +
+		(r.skipped ? ', ' + r.skipped + ' skipped' : '') +
+		(r.errors ? ', ' + r.errors + ' errors' : '') +
+		(r.sampleIds && r.sampleIds.length ? ' (e.g. ids ' + r.sampleIds.join(', ') + ')' : '');
 }
 
 // Report what enqueueing did. A merged job was already waiting or running
@@ -217,7 +232,9 @@ async function main() {
 				areas: opts.areas.length > 0 ? opts.areas : null,
 				batchSize: opts.batchSize,
 				forceWidth: opts.width || null,
+				dryRun: opts.dryRun,
 			});
+			if (opts.dryRun) console.log('  [dry run] nothing will be written; each area reports how many messages would change');
 			if (regenJobs.length === 0) console.log('  regen-html: no active message areas');
 			reportQueued(regenJobs);
 			enqueuedJobs.push(...regenJobs);
@@ -227,6 +244,7 @@ async function main() {
 			var job = await jobs.enqueueRegenPmHtml({
 				batchSize: opts.batchSize,
 				forceWidth: opts.width || null,
+				dryRun: opts.dryRun,
 			});
 			reportQueued([job]);
 			enqueuedJobs.push(job);

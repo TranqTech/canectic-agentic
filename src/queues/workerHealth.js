@@ -44,7 +44,9 @@ function buildHeartbeat(fields) {
 		ts:        f.ts || Date.now(),
 		// Per-queue consumer status. `running` false means the BullMQ worker
 		// has closed or never started, which is invisible from outside the
-		// process and does not stop it exiting zero.
+		// process and does not stop it exiting zero. Each may also carry
+		// `longestActiveMs` for that queue alone, which assessWorker prefers
+		// so each queue is judged against its own time limit.
 		toss:      f.toss  || { running: false, paused: false, active: 0 },
 		maint:     f.maint || { running: false, paused: false, active: 0 },
 		// When this worker last finished a job of any kind. A worker that has
@@ -97,6 +99,8 @@ async function markStopped(pid) {
  *
  * opts.staleMs  how old a beat may be before the worker counts as stale
  * opts.stallMs  how long a job may be active before the worker counts as stuck
+ * opts.tossStallMs / opts.maintStallMs  the same per queue (see stallLimitMs),
+ *                defaulting to stallMs
  *
  * Returns { state, ageMs, detail, alarm }. `alarm` is the single boolean the
  * caller acts on; `detail` is what gets logged and shown to the sysop.
@@ -124,6 +128,7 @@ function assessWorker(hb, now, opts) {
 
 	var toss = hb.toss || {};
 	var maint = hb.maint || {};
+
 	// A consumer paused for maintenance mode has stopped on purpose. BullMQ
 	// reports it as not running, so without this every closure of the board
 	// would read as a dead worker and the watchdog would restart it.
@@ -137,7 +142,25 @@ function assessWorker(hb, now, opts) {
 
 	// The four day case. The process beats, both consumers are up, and every
 	// slot is held by a job that will never return.
-	if (hb.longestActiveMs && hb.longestActiveMs > stallMs) {
+	//
+	// Judged per queue when the heartbeat says which queue a job is on: the
+	// single figure was compared with the toss limit, so a healthy 45 minute
+	// maintenance job (limit 60) read as a wedged worker and could get it
+	// restarted mid-job. A heartbeat from a worker predating per-queue figures
+	// falls back to the old single comparison.
+	var perQueue = toss.longestActiveMs !== undefined || maint.longestActiveMs !== undefined;
+	if (perQueue) {
+		var tossStall = o.tossStallMs || stallMs;
+		var maintStall = o.maintStallMs || stallMs;
+		if ((toss.longestActiveMs || 0) > tossStall) {
+			return { state: STATE_UNHEALTHY, ageMs: ageMs, alarm: true,
+				detail: 'a toss job has been active for ' + formatDuration(toss.longestActiveMs) };
+		}
+		if ((maint.longestActiveMs || 0) > maintStall) {
+			return { state: STATE_UNHEALTHY, ageMs: ageMs, alarm: true,
+				detail: 'a maintenance job has been active for ' + formatDuration(maint.longestActiveMs) };
+		}
+	} else if (hb.longestActiveMs && hb.longestActiveMs > stallMs) {
 		return { state: STATE_UNHEALTHY, ageMs: ageMs, alarm: true,
 			detail: 'a job has been active for ' + formatDuration(hb.longestActiveMs) };
 	}
@@ -229,33 +252,122 @@ function resolveRestartCommand(command, execPath, existsSync, pathModule) {
  * pipeline is stopped, with the process still reporting healthy and not one log
  * line to say so.
  *
- * The timeout rejects, it does not cancel: the underlying work cannot be
- * cancelled and the orphaned promise runs on. That is the right trade anyway.
- * Freeing the slot lets BullMQ retry the job, and a worker that keeps
- * accumulating orphans will trip the self check and be restarted, which is a
- * far better outcome than a queue that silently stops.
+ * At the limit the job is ASKED TO STOP, then given STOP_GRACE_MS to do so
+ * (#85). The processor receives an AbortSignal as its third argument (the one
+ * BullMQ passes for Worker.cancelJob is linked to it) and the long batch jobs
+ * check it between batches, where stopping leaves nothing half done:
  *
- * timeoutMs of 0 or less disables the wrapper, for a sysop who would rather
- * have a hung job than a killed one.
+ *   - it stops within the grace: the job fails as stopped, nothing runs on.
+ *   - it does not (it never checks, or it is parked on an await that cannot
+ *     be interrupted): the job fails and its slot is released anyway, as
+ *     before, and hooks.onOrphaned says so. It is still running, so
+ *     hooks.onSettled is not called until it actually finishes; the worker
+ *     keeps it in its active list until then, where the heartbeat and the
+ *     watchdog can see it. Before this, a timed-out job was reported failed,
+ *     vanished from view and carried on, and the next job on a concurrency 1
+ *     queue ran alongside it.
+ *
+ * A job that finishes during the grace, having ignored the signal, resolves
+ * normally: it did complete.
+ *
+ * hooks.onSettled(job, { elapsedMs, stopped, orphaned, error }) runs once
+ * whenever the processor itself settles, limit or no limit.
+ *
+ * timeoutMs of 0 or less disables the limit, for a sysop who would rather
+ * have a hung job than a stopped one.
  */
-function withTimeout(processor, timeoutMs, label) {
-	return function (job) {
-		if (!timeoutMs || timeoutMs <= 0) return Promise.resolve(processor(job));
+var STOP_GRACE_MS = 60 * 1000;
 
-		var timer = null;
-		var timeout = new Promise(function (_resolve, reject) {
-			timer = setTimeout(function () {
-				reject(new Error('job exceeded the ' + Math.round(timeoutMs / 60000) +
-					' minute limit' + (label ? ' (' + label + ')' : '')));
+function withTimeout(processor, timeoutMs, label, hooks) {
+	var h = hooks || {};
+	var graceMs = h.graceMs !== undefined ? h.graceMs : STOP_GRACE_MS;
+
+	return function (job, token, bullSignal) {
+		var controller = new AbortController();
+		if (bullSignal) {
+			if (bullSignal.aborted) controller.abort(bullSignal.reason);
+			else bullSignal.addEventListener('abort', function () { controller.abort(bullSignal.reason); }, { once: true });
+		}
+
+		var startedMs = Date.now();
+		var state = { orphaned: false };
+		// Called synchronously, as BullMQ would: deferring it a tick lets an
+		// abort land before the processor has had a chance to listen for it.
+		var run;
+		try { run = Promise.resolve(processor(job, token, controller.signal)); }
+		catch (err) { run = Promise.reject(err); }
+
+		// The processor's own settlement, reported once whatever the wrapper
+		// has already told BullMQ.
+		run.then(function () { return null; }, function (err) { return err; }).then(function (err) {
+			if (h.onSettled) {
+				try {
+					h.onSettled(job, {
+						elapsedMs: Date.now() - startedMs,
+						stopped: controller.signal.aborted && !!err,
+						orphaned: state.orphaned,
+						error: err
+					});
+				} catch (_) {}
+			}
+		});
+
+		if (!timeoutMs || timeoutMs <= 0) return run;
+
+		var limitText = 'job exceeded the ' + Math.round(timeoutMs / 60000) +
+			' minute limit' + (label ? ' (' + label + ')' : '');
+
+		return new Promise(function (resolve, reject) {
+			var done = false, limitHit = false;
+			var limitTimer = null, graceTimer = null;
+
+			function finish(fn, value) {
+				if (done) return;
+				done = true;
+				if (limitTimer) clearTimeout(limitTimer);
+				if (graceTimer) clearTimeout(graceTimer);
+				fn(value);
+			}
+
+			run.then(function (value) {
+				finish(resolve, value);
+			}, function (err) {
+				if (limitHit) {
+					finish(reject, new Error(limitText + ' and was stopped'));
+				} else {
+					finish(reject, err);
+				}
+			});
+
+			limitTimer = setTimeout(function () {
+				limitHit = true;
+				controller.abort(new Error(limitText));
+				graceTimer = setTimeout(function () {
+					if (done) return;
+					state.orphaned = true;
+					if (h.onOrphaned) { try { h.onOrphaned(job, { elapsedMs: Date.now() - startedMs }); } catch (_) {} }
+					finish(reject, new Error(limitText + ' and did not stop within ' +
+						Math.round(graceMs / 1000) + 's; it is still running'));
+				}, graceMs);
 			}, timeoutMs);
 		});
-
-		return Promise.race([Promise.resolve(processor(job)), timeout]).finally(function () {
-			// Always clear it. A pending timer on a job that finished normally
-			// would keep the event loop alive and, on a busy queue, pile up.
-			if (timer) clearTimeout(timer);
-		});
 	};
+}
+
+/**
+ * How long a job on a queue may be active before the worker counts as stuck:
+ * that queue's limit plus the stop grace, since a job between the two is
+ * being asked to stop rather than stuck. A disabled limit (0) falls back to
+ * 30 minutes, as the single figure always did.
+ *
+ * queue: 'toss' or 'maintenance'; getNumber: appConfig.getNumber.
+ */
+function stallLimitMs(queue, getNumber) {
+	var minutes = queue === 'maintenance'
+		? getNumber('maintenance_job_timeout', 60)
+		: getNumber('toss_job_timeout', 30);
+	if (!minutes || minutes <= 0) minutes = 30;
+	return minutes * 60 * 1000 + STOP_GRACE_MS;
 }
 
 export {
@@ -273,5 +385,7 @@ export {
 	assessWorker,
 	shouldAttemptRestart,
 	resolveRestartCommand,
-	withTimeout
+	withTimeout,
+	stallLimitMs,
+	STOP_GRACE_MS
 };

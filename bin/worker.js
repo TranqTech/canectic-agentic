@@ -81,7 +81,9 @@ var eventPublisher;
 // keep the books itself and publish them.
 // ---------------------------------------------------------------------------
 const startedAt = Date.now();
-var _activeJobs = new Map();      // jobKey -> ms timestamp the job went active
+var _activeJobs = new Map();      // runKey -> ms timestamp the job went active
+var _runSeq = 0;                  // makes each run's key unique (see withJobTimeout)
+var _runKeys = new WeakMap();     // job -> its runKey
 var _lastJobAt = null;            // when a job of any kind last finished
 var _heartbeatTimer = null;
 var _selfCheckFailures = 0;
@@ -100,9 +102,11 @@ function activeJobCounts() {
 	return { 'toss jobs': toss, 'maintenance jobs': maint };
 }
 
-function _longestActiveMs(now) {
+// prefix: 'toss:' or 'maintenance:' for one queue, omitted for both.
+function _longestActiveMs(now, prefix) {
 	var longest = 0;
-	for (var startedMs of _activeJobs.values()) {
+	for (var [key, startedMs] of _activeJobs.entries()) {
+		if (prefix && key.indexOf(prefix) !== 0) continue;
 		var age = now - startedMs;
 		if (age > longest) longest = age;
 	}
@@ -121,24 +125,44 @@ function withJobTimeout(processor, timeoutKey, defaultMinutes) {
 	var timed = null;
 	var timedForMs = null;
 
-	return async function (job) {
-		var key = _jobKey(job);
-		_activeJobs.set(key, Date.now());
-
-		try {
-			// Read the limit per job rather than once at startup, so a sysop
-			// raising it from /admin/config takes effect without a restart.
-			// The wrapper is rebuilt only when the value actually changes.
-			var timeoutMs = appConfig.getNumber(timeoutKey, defaultMinutes) * 60 * 1000;
-			if (timed === null || timedForMs !== timeoutMs) {
-				timed = workerHealth.withTimeout(processor, timeoutMs, timeoutKey);
-				timedForMs = timeoutMs;
-			}
-			return await timed(job);
-		} finally {
-			_activeJobs.delete(key);
+	// A job is removed from the books when its processor ACTUALLY settles,
+	// not when the timeout gives up on it (#85): one that would not stop is
+	// still running, and keeping it listed is what lets the heartbeat and the
+	// watchdog see it. The key carries a run number because BullMQ may start
+	// another job with the same id while the first is still running.
+	var hooks = {
+		onSettled: function (job, info) {
+			_activeJobs.delete(_runKeys.get(job));
 			_lastJobAt = Date.now();
+			if (info.orphaned) {
+				alogger.writeAlog(1, '[Worker] ' + job.name + ' id=' + job.id +
+					', which ran past its time limit and would not stop, has now ' +
+					(info.error ? 'ended with an error: ' + (info.error.message || info.error) : 'finished') +
+					' after ' + Math.round(info.elapsedMs / 60000) + ' min', 'yellowbright', true);
+			}
+		},
+		onOrphaned: function (job, info) {
+			alogger.writeAlog(1, '[Worker] ' + job.name + ' id=' + job.id + ' passed its time limit (' +
+				timeoutKey + ') and did not stop when asked; its slot is released but it is STILL RUNNING ' +
+				'after ' + Math.round(info.elapsedMs / 60000) + ' min. Restarting the worker ends it.',
+				'redbright', true);
 		}
+	};
+
+	return async function (job, token, signal) {
+		var runKey = _jobKey(job) + '#' + (++_runSeq);
+		_runKeys.set(job, runKey);
+		_activeJobs.set(runKey, Date.now());
+
+		// Read the limit per job rather than once at startup, so a sysop
+		// raising it from /admin/config takes effect without a restart.
+		// The wrapper is rebuilt only when the value actually changes.
+		var timeoutMs = appConfig.getNumber(timeoutKey, defaultMinutes) * 60 * 1000;
+		if (timed === null || timedForMs !== timeoutMs) {
+			timed = workerHealth.withTimeout(processor, timeoutMs, timeoutKey, hooks);
+			timedForMs = timeoutMs;
+		}
+		return await timed(job, token, signal);
 	};
 }
 
@@ -183,8 +207,10 @@ async function _beat() {
 		host:      os.hostname(),
 		startedAt: startedAt,
 		ts:        now,
-		toss:      { running: !!(tossWorker && tossWorker.isRunning()),  paused: !!(tossWorker && tossWorker.isPaused()),  active: 0 },
-		maint:     { running: !!(maintWorker && maintWorker.isRunning()), paused: !!(maintWorker && maintWorker.isPaused()), active: 0 },
+		toss:      { running: !!(tossWorker && tossWorker.isRunning()),  paused: !!(tossWorker && tossWorker.isPaused()),  active: 0,
+			longestActiveMs: _longestActiveMs(now, 'toss:') },
+		maint:     { running: !!(maintWorker && maintWorker.isRunning()), paused: !!(maintWorker && maintWorker.isPaused()), active: 0,
+			longestActiveMs: _longestActiveMs(now, 'maintenance:') },
 		lastJobAt: _lastJobAt,
 		longestActiveMs: _longestActiveMs(now)
 	}), appConfig.getNumber('worker_heartbeat_interval', 30) * 6);
@@ -491,19 +517,26 @@ function createTossProcessor() {
 // ---------------------------------------------------------------------------
 
 function createMaintenanceProcessor() {
-	return async function processMaintenanceJob(job) {
+	return async function processMaintenanceJob(job, token, signal) {
 		alogger.writeAlog(2, `[Worker] Maintenance: ${job.name}`, "cyan");
 
 		// The switch lives in src/maintenance/maintenanceJobs.js because the
 		// embedded worker consumes this same queue and used to carry its own
 		// copy, which had drifted to 7 of 33 job names. An unhandled name is
 		// marked complete, so the drift was silent.
+		// signal: aborted at the job's time limit, checked by the long batch
+		// jobs (#85). The result, for the jobs that report one, becomes the
+		// job's return value, which is how the CLI prints a regen's counts.
+		var result;
 		var handled = await maintenanceJobs.runMaintenanceJob(job.name, job.data, {
 			logPrefix: '[Worker]',
+			signal: signal,
+			onResult: function (r) { result = r; },
 		});
 		if (!handled) {
 			alogger.writeAlog(3, `[Worker] Unknown maintenance job: ${job.name}`, "yellowbright");
 		}
+		return result;
 	};
 }
 

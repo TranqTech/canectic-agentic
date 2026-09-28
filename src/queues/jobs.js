@@ -398,6 +398,7 @@ export function regenHtmlRequests(areas, opts = {}) {
 			areas: [area],
 			batchSize: opts.batchSize || 100,
 			forceWidth: opts.forceWidth || null,
+			dryRun: opts.dryRun || false,
 		};
 		requests.push({ data: data, jobId: optionJobId('regen-html', data) });
 	}
@@ -420,6 +421,7 @@ export async function enqueueRegenPmHtml(opts = {}) {
 	var data = {
 		batchSize: opts.batchSize || 100,
 		forceWidth: opts.forceWidth || null,
+		dryRun: opts.dryRun || false,
 	};
 	return addDeduped(maintenanceQueue, 'regen-pm-html', data, {
 		jobId: optionJobId('regen-pm-html', data),

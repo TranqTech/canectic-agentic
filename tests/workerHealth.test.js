@@ -213,6 +213,56 @@ describe('workerHealth.buildHeartbeat', function () {
 	});
 });
 
+describe('workerHealth per-queue stall limits', function () {
+	before(function () { if (!wh) this.skip(); });
+
+	var NOW = 10000000000;
+	var MIN = 60 * 1000;
+	function beat(tossMs, maintMs) {
+		return wh.buildHeartbeat({ ts: NOW, pid: 1,
+			toss: { running: true, paused: false, active: 0, longestActiveMs: tossMs },
+			maint: { running: true, paused: false, active: 0, longestActiveMs: maintMs },
+			longestActiveMs: Math.max(tossMs, maintMs) });
+	}
+	var limits = { tossStallMs: 31 * MIN, maintStallMs: 61 * MIN };
+
+	it('does not call a 45 minute maintenance job a wedged worker when its limit is 60', function () {
+		// Judged against the toss limit, it was, and the watchdog restarts
+		// wedged workers: the job was killed part way through.
+		var a = wh.assessWorker(beat(0, 45 * MIN), NOW, limits);
+		assert.strictEqual(a.alarm, false, a.detail);
+	});
+
+	it('still flags a toss job past its own limit', function () {
+		var a = wh.assessWorker(beat(45 * MIN, 0), NOW, limits);
+		assert.strictEqual(a.alarm, true);
+		assert.ok(/toss job/.test(a.detail));
+	});
+
+	it('flags a maintenance job past its own limit, such as one that would not stop', function () {
+		var a = wh.assessWorker(beat(0, 90 * MIN), NOW, limits);
+		assert.strictEqual(a.alarm, true);
+		assert.ok(/maintenance job/.test(a.detail));
+	});
+
+	it('falls back to the single figure for a heartbeat from an older worker', function () {
+		var hb = wh.buildHeartbeat({ ts: NOW, pid: 1,
+			toss: { running: true, paused: false, active: 0 },
+			maint: { running: true, paused: false, active: 0 },
+			longestActiveMs: 45 * MIN });
+		assert.strictEqual(wh.assessWorker(hb, NOW, Object.assign({ stallMs: 30 * MIN }, limits)).alarm, true);
+	});
+
+	it('sets each limit at the queue timeout plus the stop grace', function () {
+		var cfg = { toss_job_timeout: 30, maintenance_job_timeout: 60 };
+		var get = function (k, d) { return cfg[k] !== undefined ? cfg[k] : d; };
+		assert.strictEqual(wh.stallLimitMs('toss', get), 30 * MIN + wh.STOP_GRACE_MS);
+		assert.strictEqual(wh.stallLimitMs('maintenance', get), 60 * MIN + wh.STOP_GRACE_MS);
+		cfg.maintenance_job_timeout = 0;
+		assert.strictEqual(wh.stallLimitMs('maintenance', get), 30 * MIN + wh.STOP_GRACE_MS);
+	});
+});
+
 describe('workerHealth.withTimeout', function () {
 	before(function () { if (!wh) this.skip(); });
 
@@ -221,16 +271,93 @@ describe('workerHealth.withTimeout', function () {
 		// await that never returns keeps its concurrency slot for ever. Three
 		// of these and the toss queue stops moving with nothing logged.
 		var never = function () { return new Promise(function () {}); };
-		var wrapped = wh.withTimeout(never, 40, 'toss_job_timeout');
+		var wrapped = wh.withTimeout(never, 40, 'toss_job_timeout', { graceMs: 20 });
 
 		wrapped({ id: '1' }).then(
 			function () { done(new Error('a job that never settles must not resolve')); },
 			function (err) {
 				assert.ok(/minute limit/.test(err.message));
 				assert.ok(/toss_job_timeout/.test(err.message));
+				assert.ok(/still running/.test(err.message), err.message);
 				done();
 			}
 		);
+	});
+
+	// #85: the limit used to reject and nothing else, so the job ran on after
+	// being reported failed, and the next job on a concurrency 1 queue ran
+	// alongside it.
+	it('asks the job to stop at the limit, and a job that listens stops', async function () {
+		var settled = null;
+		var wrote = 0;
+		var batches = async function (job, token, signal) {
+			for (;;) {
+				signal.throwIfAborted();
+				wrote++;
+				await new Promise(function (r) { setTimeout(r, 5); });
+			}
+		};
+		var wrapped = wh.withTimeout(batches, 40, 'maintenance_job_timeout', {
+			graceMs: 1000,
+			onSettled: function (job, info) { settled = info; }
+		});
+
+		await assert.rejects(wrapped({ id: '1' }), /minute limit \(maintenance_job_timeout\) and was stopped/);
+		await new Promise(function (r) { setTimeout(r, 20); });
+		var after = wrote;
+		await new Promise(function (r) { setTimeout(r, 50); });
+		assert.strictEqual(wrote, after, 'the job kept working after it was reported stopped');
+		assert.ok(settled && settled.stopped && !settled.orphaned, JSON.stringify(settled));
+	});
+
+	it('reports a job that will not stop as still running, and says when it finally ends', async function () {
+		var release;
+		var stubborn = function () { return new Promise(function (r) { release = r; }); };
+		var orphaned = null, settled = null;
+		var wrapped = wh.withTimeout(stubborn, 30, 'x', {
+			graceMs: 30,
+			onOrphaned: function (job, info) { orphaned = info; },
+			onSettled: function (job, info) { settled = info; }
+		});
+
+		await assert.rejects(wrapped({ id: '1' }), /did not stop within/);
+		assert.ok(orphaned, 'onOrphaned was not called');
+		assert.strictEqual(settled, null, 'a job still running must not be reported settled');
+
+		release('late');
+		await new Promise(function (r) { setTimeout(r, 10); });
+		assert.ok(settled && settled.orphaned && !settled.error, JSON.stringify(settled));
+	});
+
+	it('passes a job that finishes during the grace through as completed', async function () {
+		var slow = function () { return new Promise(function (r) { setTimeout(function () { r('made it'); }, 60); }); };
+		var wrapped = wh.withTimeout(slow, 30, 'x', { graceMs: 500 });
+		assert.strictEqual(await wrapped({ id: '1' }), 'made it');
+	});
+
+	it('forwards the abort BullMQ gives the processor for Worker.cancelJob', async function () {
+		var bull = new AbortController();
+		var seen = null;
+		var job = function (j, token, signal) {
+			return new Promise(function (resolve) {
+				signal.addEventListener('abort', function () { seen = signal.reason; resolve('cancelled'); });
+			});
+		};
+		var wrapped = wh.withTimeout(job, 5000, 'x');
+		var p = wrapped({ id: '1' }, 'tok', bull.signal);
+		bull.abort(new Error('cancelled by sysop'));
+		assert.strictEqual(await p, 'cancelled');
+		assert.ok(/cancelled by sysop/.test(seen.message));
+	});
+
+	it('reports settlement once for a job that completes normally', async function () {
+		var calls = 0;
+		var wrapped = wh.withTimeout(async function () { return 1; }, 5000, 'x', {
+			onSettled: function () { calls++; }
+		});
+		await wrapped({ id: '1' });
+		await new Promise(function (r) { setImmediate(r); });
+		assert.strictEqual(calls, 1);
 	});
 
 	it('lets a job that finishes in time through untouched', async function () {
