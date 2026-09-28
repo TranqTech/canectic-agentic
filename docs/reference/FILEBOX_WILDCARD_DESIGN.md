@@ -2,6 +2,8 @@
 
 Design for per-peer outbound fileboxes and sysop-configurable inbound file wildcard routing.
 
+**Status**: Implemented, apart from inbound fileboxes (section 5, still deferred) and the `outbox_dir` existence warning in `validateConnectionData()` (not built). Code: `src/utils/fileboxPath.js`, `src/mailer/bsoScanner.js` (`_scanOutboundFileboxes`), `src/mailer/session.js`, `src/mailer/transfer.js` (`_routeInboundFile`), `src/models/fileWildcards.js`, admin at `/admin/wildcards`. Details below that the implementation changed have been corrected.
+
 ## Motivation
 
 Inter-BBS (IBBS) door games (LORD, TradeWars, etc.) drop outbound files into directories and expect inbound files in specific directories. DOS-based games have no knowledge of Linux directory structures, BSO transports, or netmail file-attach. Fileboxes and wildcards bridge this gap by letting the mailer scan game output directories for outbound delivery and route inbound files to game input directories based on filename patterns.
@@ -70,17 +72,17 @@ In `bsoScanner.js`, after the normal BSO directory scan completes:
 1. Query all active FTN peer connections that have `outbox_dir` set
 2. For each, resolve the outbox path via `resolveFileboxPath()`
 3. If directory exists and contains files, add them to the scan results
-4. Use the connection's existing `status` field for BSO flavour (NORMAL/CRASH/HOLD/DIRECT)
-5. Files are queued with delete-after-send semantics
+4. Use the connection's existing `status` field for flavour: `CRASH` and `HOLD` map to Crash and Hold, anything else to Normal. A HOLD peer is therefore never dialled for its filebox; the files go when it calls in
+5. The address is only added when the BSO pass has not already found mail for it. The scanner only decides whether to connect; files are queued (with delete-after-send) by the session
 
 ### Session Integration
 
-In `session.js _buildOutboundList()`:
+In `session.js _buildOutboundList()` (and the second, single-connection list builder in the same file):
 
 1. For each peer connection in the session, check for `outbox_dir`
 2. If set, resolve path and scan for files
-3. Queue all files found with `deleteAfterSend: true`
-4. These are queued after normal BSO flow files and direct packets
+3. Queue all regular files found with `deleteAfterSend: true`
+4. These are queued after normal BSO flow files, direct packets and FREQ `.req` files
 
 ### Edge Cases
 
@@ -115,10 +117,10 @@ Sysop-configurable rules that match inbound filenames against glob patterns and 
 
 ### Path Resolution
 
-`target_dir` follows the same `%X` substitution + resolution pattern as outbox paths:
+`target_dir` follows the same `%X` substitution + resolution pattern as outbox paths (`TransferEngine` calls `resolveFileboxPath(target_dir)` with no base argument):
 - `substitute()` applied first for `%X` variable expansion (includes `~` expansion)
 - Absolute paths used as-is
-- Relative paths resolved against current working directory
+- Relative paths resolved against `filebox_base_dir` (not the current working directory, as first planned)
 
 Example: `%M/lord/inbound/` expands to `~/.dosemu/drive_c/lord/inbound/` then to the full home path.
 
@@ -128,22 +130,23 @@ Example: `%M/lord/inbound/` expands to `~/.dosemu/drive_c/lord/inbound/` then to
 - Standard glob syntax: `*` matches any characters, `?` matches single character
 - Examples: `LORD*.*`, `TW2002*.PKT`, `NODEDIFF.*`, `*.TIC`
 - No path separators in patterns (matching is filename-only)
-- Use `minimatch` or equivalent for glob evaluation (already a transitive dependency check, otherwise simple hand-rolled glob is fine for `*` and `?` only)
+- Implemented as a hand-rolled glob (`_globMatch` in `fileWildcards.js`) converting `*` and `?` to a case-insensitive anchored regex; no `minimatch`
 
 ### Transfer Integration
 
-In `transfer.js _onFileComplete()`, after the file is fully received and verified:
+`transfer.js _onFileComplete()` verifies the received size, then calls `_routeInboundFile()`:
 
 ```
-1. Load active wildcard rules (cached, refreshed on config change)
+1. Load active wildcard rules (cached until WILDCARDS_CHANGED)
 2. Test filename against each rule in sort_order
 3. If match found:
-   a. Resolve target_dir (~ expansion, absolute check)
+   a. Resolve target_dir via resolveFileboxPath()
    b. Ensure target directory exists (create if needed)
-   c. Move file to target_dir (same collision handling as today)
-   d. If still_toss is false: skip toss queue, emit event, done
-   e. If still_toss is true: also enqueue toss job as normal
-4. If no match: fall through to existing ftn/in/ placement and toss
+   c. Move file to target_dir (an existing name gets a _<timestamp> suffix)
+   d. skipToss = !still_toss
+4. If no match (or matching throws): existing ftn/in/ placement
+5. Send M_GOT, emit receiveComplete with { path, wildcardMatch, skipToss }
+   so the session decides whether to enqueue a toss
 ```
 
 ### Caching
@@ -165,7 +168,8 @@ Cache invalidation wiring:
 - `getById(id)` -- single rule
 - `create(data)` -- insert new rule
 - `update(id, data)` -- update rule
-- `delete(id)` -- remove rule
+- `remove(id)` -- remove rule (named `remove`, not `delete`)
+- `invalidateCache()` -- drop the in-process rule cache
 - `reorder(ids)` -- bulk update sort_order
 - `matchFilename(filename, rules)` -- test filename against rule set, return first match or null
 
@@ -180,7 +184,9 @@ New section under Networking in the admin navbar, or as a tab on an existing pag
 - Modal for create/edit with fields: pattern, target_dir, description, still_toss checkbox, active checkbox
 - `%X` variable reference tooltip/popover on target_dir field (same pattern as door config forms)
 - Delete with confirmation
-- Test tool: enter a filename, see which rule matches (or "no match -- would go to ftn/in/")
+- Test tool: enter a filename, see which rule matches (or "no match -- would go to ftn/in/"); `POST /admin/wildcards/test`
+
+Built as a page under Networking (Inbound Wildcards) with routes `GET /admin/wildcards`, `POST /admin/wildcards/new`, `/:id/update`, `/:id/delete`, `/reorder` and `/test`.
 
 ---
 
@@ -199,8 +205,8 @@ Add `outbox_dir` field to the FTN peer connection edit form:
 
 ### Validation
 
-- `buildConnectionData()`: extract `outbox_dir` from form input, trim, store if non-empty
-- `validateConnectionData()`: if `outbox_dir` is set, warn (not block) if directory doesn't exist yet
+- `buildConnectionData()`: extracts `outbox_dir` from the form field `ftn_outbox_dir` (or `outbox_dir`), trimmed; stored as an empty string when blank
+- `validateConnectionData()`: the planned warning for a missing directory was not built; `outbox_dir` is not validated
 
 ---
 

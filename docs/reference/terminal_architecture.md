@@ -48,7 +48,7 @@ Shared singleton managing node number allocation and a registry of active sessio
 
 ## Call Flows
 
-Declared as ordered arrays of stage names in `callFlows`. The reserved name `"goodbye"` triggers hangup.
+DB-backed (`call_flows` / `call_pools` tables via `src/models/callFlows.js`, editable at `/admin/callflows`); the `callFlows` object in `callmanager.js` is the fallback when the table is empty. The reserved name `"goodbye"` triggers hangup.
 
 ```
 Standard:   negotiate -> logon -> last_callers -> check_online -> announcements -> wall -> verify_mail -> check_email -> check_batch -> menu -> goodbye
@@ -80,6 +80,10 @@ Maps stage names to factory functions:
 | `check_email` | `SubModuleAdapter(pmCheck)` | Unread PM prompt, optionally launches reader |
 | `check_batch` | `SubModuleAdapter(fileBatchCheck)` | Prompts to download pending file batch from previous session |
 | `webdoor_auth` | `WebDoorAuthHandler` | Token-based auth for browser door launcher sessions |
+| `wall` | `SubModuleAdapter(WallHandler)` | Wall/oneliners with a post prompt |
+| `sysinfo` | `SubModuleAdapter(SysInfo)` | System information |
+| `bulletins` | `SubModuleAdapter(BulletinViewer)` | Bulletin menu |
+| `displayScreen` | `SubModuleAdapter(DisplayScreen)` | Shows one art screen (stage arg as for the menu command), waits for a key |
 
 ### TerminalNegotiator (`terminalnegotiator.js`)
 
@@ -147,7 +151,7 @@ Handler logic
     → BaseCommands._send() [abstract]
       → tcpCommands: socket.write()
       → websockCommands: socket.send()
-      → telnetCommands: socket.write() (TODO: IAC escaping)
+      → telnetCommands: socket.write() (0xFF doubled as IAC IAC)
     → call.writeOutputBuffer() → OutputRingBuffer (for node-spy)
 ```
 
@@ -166,7 +170,7 @@ Handler logic
 Connection subclasses only override `_send()`:
 - `tcpCommands` — `socket.write()`
 - `websockCommands` — `socket.send()`
-- `telnetCommands` — `socket.write()` (IAC escaping TODO)
+- `telnetCommands`: `socket.write()`, with every 0xFF byte escaped as `0xFF 0xFF` (fast path when none present)
 
 ### OutputRingBuffer (`ringbuffer.js`)
 
@@ -229,6 +233,10 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `bulletins` | Sub-module: numbered bulletin selection menu, displays art file or body_text. Also available as call flow stage |
 | `fileNewscan` | Sub-module: scans subscribed file areas for files new since the previous visit, displays summary |
 | `notifications` | Sub-module: lightbar notification list with detail view, mark all read |
+| `qwkTransfer` | Sub-module: QWK packet download / REP upload over ZMODEM or XMODEM |
+| `newsViewer` | Sub-module: shows active news/score files in turn, ESC skips all |
+| `displayScreen` | Sub-module: shows one art file (`type:Welcome` style random pick, or `subdir/file`) with @ codes, waits for a key |
+| `fireEvent` | Fires a message template event for the current user (`event_code` or `event_code|{json}`), returns at once |
 | `runXtrn` | Calls `call.launchDoor(arg, true)` |
 | `loadMenu` | Validates existence, navigates to target menu |
 | `previousMenu` | Pops menu history |
@@ -248,16 +256,14 @@ For sixel terminals, the `.six` art renders visually while a companion `.ans` ov
 | `newScanGroup` | Sub-module (current group) |
 | `testDownload` | Sub-module |
 | `passwordReset` | Sub-module (logged-in password change) |
-| `mailVerify` | Sub-module (request email verification) |
 | `fileGroupChange` | Sub-module |
 | `fileAreaChange` | Sub-module |
-| `fileBrowser` | Sub-module |
+| `fileBrowser` / `fileList` | Sub-module (same browser) |
 | `downloadBatch` | Sub-module |
 | `fileSearch` | Sub-module |
 | `fileUpload` | Sub-module |
 | `doorBrowser` | Sub-module (door browser with collections) |
 | `announcements` | Sub-module |
-| `notifications` | Sub-module (notification reader: lightbar list, detail, mark all read) |
 | `verifyMail` | Sub-module (request email verification) |
 
 **Sub-module management**: `_runSubModule()` pauses the menu, wires `ModuleReturn` and `HangupSignal`, starts the module. Menu handler owns inactivity timeouts even while a sub-module is active. On return, `_doModuleReturn()` cleans up and redraws.
@@ -333,7 +339,7 @@ Central mapping of activity identifiers to display labels. Three components:
 
 Sysop-only sub-module for live node monitoring. Lists active terminal nodes and allows real-time snooping of their terminal output. See `NODESPY_DESIGN.md` for the full system design including web interface.
 
-**States**: `list` -> `watching` -> `message` -> `list` (or return)
+**States**: `list` -> `watching` -> `chatting` -> `watching` -> `list` (or return). `C` while watching starts split-screen sysop chat (`SYSOP_CHAT_DESIGN.md`), queued until the target is at a menu
 
 **List state**: Displays active nodes (excluding self) in a columnar table matching the Who's Online layout. Sysop types a node number + Enter to watch. ESC exits to menu. Dumb terminal fallback included.
 
@@ -346,6 +352,12 @@ Sysop-only sub-module for live node monitoring. Lists active terminal nodes and 
 **CallManager access**: `this.call.callPool.callManager.getCallByNode(nodenum)` -- back-reference set during pool creation.
 
 **Cleanup**: `clearHandler()` removes all listeners from the target's outputBuffer to prevent leaks.
+
+---
+
+## Maintenance Mode (`src/maintenance/terminalDrain.js`)
+
+While the `.maintenance` flag is set, `refuseNewCaller()` is checked by the TCP, Telnet and WebSocket servers before a call is created, so a new caller (sysops included) gets the reason and expected return time and no node. `attachTerminalDrain()` (wired in `bin/gateway.js`) warns connected callers on the bottom line (cursor saved/restored with CSI s/u, plain lines if size was never negotiated) on enter or change, reminds at 60 s and 15 s before the deadline, then `hangUpCall()`s everyone. It reports `terminal calls` as a drain source. See `docs/sysop/MAINTENANCE.md`.
 
 ---
 
@@ -444,7 +456,7 @@ User ↔ SerialPort (port1) ↔ socat pair ↔ dosemu COM5 (port2)
 
 ### AnnouncementHandler (`announcementhandler.js`)
 
-Displays unread system announcements to users during login. Placed in the call flow after `last_callers`. Queries `announcements.getUnreadForUser(userId)` and displays each announcement sequentially. Each announcement is marked as read after display. Users press any key to advance through announcements.
+A `BaseSubModule` run as the `announcements` stage through `SubModuleAdapter` (after `check_online` in the Standard flow) and as a menu command. Displays unread system announcements during login. Queries `announcements.getUnreadForUser(userId)` and displays each announcement sequentially. Each announcement is marked as read after display. Users press any key to advance through announcements.
 
 ### WebDoorAuthHandler (`webdoorauthhandler.js`)
 
@@ -475,8 +487,8 @@ _Section for tracking development plans, priorities, and stage completion._
 
 | Area | Item | Status | Notes |
 |------|------|--------|-------|
-| Telnet | IAC escaping in `telnetCommands._send()` | TODO | Currently uses raw `socket.write()` |
-| Menus | Lightbar menu type | TODO | `menu_type` column in schema, admin UI persists it, handler does not yet branch |
+| Telnet | IAC escaping in `telnetCommands._send()` | **Done** | 0xFF doubled |
+| Menus | Lightbar menu type | **Done** | See Lightbar mode under MenuHandler |
 | Messages | Phase 1: Unified area selector with lightbar | **Done** | `msgAreaSelector.js` — replaces old msggroups + msgareas |
 | Messages | Phase 2: Fullscreen message reader | **Done** | `msgReader.js` — thread list + message view + flat mode |
 | Messages | Phase 2d: Newscan | **Done** | `newscan.js` — summary screen + sequential reader launch |
@@ -497,7 +509,7 @@ The message models are shared between the web and terminal sides. See `message_a
 
 **Models used by terminal message commands:** `messages.js` (viewing + posting), `userMsgPointers.js` (read tracking), `msgGroups.js`, `msgAreas.js`, `useraccounts.js` (persists current group/area), `userAreaSubs.js` (newscan subscription overrides).
 
-**Message body for terminal display:** Use `msg.utf8 || msg.body_text`. The `body_html` field is for web rendering only. Terminal messages may contain ANSI escape codes, pipe codes (`|XX`), or Ctrl-A codes that should be passed through directly to ANSI-capable terminals. For dumb terminals, strip escape sequences and display plain text.
+**Message body for terminal display:** Use `msg.body_text`, canonical Unicode for every source since migration `0006-normalise-body-text`; `utf8` is still written but deliberately unread. The `body_html` field is for web rendering only. Terminal messages may contain ANSI escape codes, pipe codes (`|XX`), or Ctrl-A codes that should be passed through directly to ANSI-capable terminals. For dumb terminals, strip escape sequences and display plain text.
 
 **Key area columns:** `thread_mode` (standard/no_threads/subscribe_only), `post_as` (username/realname), `newscan_default` (boolean), `ansi_area` (boolean), `read_security`/`post_security` (integer), `read_perm_flags`/`read_rest_flags`/`post_perm_flags`/`post_rest_flags` (JSONB arrays). Groups have the same security and flag columns. See `message_architecture.md` for full column documentation and access control logic.
 
@@ -707,7 +719,7 @@ Row H:   [Left] Prev [Right] Next [R]eply [L]ast [[] []] Thd [T]oggle [Q]uit
 Handled by `termMsgFormat.js` utility module, called from `msgReader._prepareBodyLines()`.
 
 **Processing pipeline per message:**
-1. Get raw text: `msg.utf8 || msg.body_text || ''`
+1. Get raw text: `msg.body_text || ''` (canonical Unicode since migration 0006)
 2. **CP437 → UTF-8 conversion**: If terminal is UTF-8 and message has no `utf8` field (body is CP437), convert extended bytes (0x80-0xFF) to Unicode equivalents
 3. **Pipe code conversion**: `|XX` patterns (|00-|23) → ANSI SGR escape sequences
 4. **Ctrl-A code conversion**: `\x01X` patterns → ANSI SGR escape sequences (Synchronet-style)
@@ -798,6 +810,7 @@ The thread list and message view share the `threadList` reference, so selecting 
 | F | Switch to flat message view |
 | S | Enter search mode (filter threads by subject/author) |
 | M | Mark entire area as read |
+| J | Jump to another area (opens `msgAreaSelector`) |
 | ESC/Q | Return to menu |
 
 **Message view mode:**
@@ -816,6 +829,8 @@ The thread list and message view share the `threadList` reference, so selecting 
 | [ | Previous thread (threaded mode only) |
 | T | Toggle threaded/flat (standard areas only) |
 | R | Reply — launch message editor (only when `_canPost` is true) |
+| J | Jump to another area (opens `msgAreaSelector`) |
+| D / M | Moderator delete / move, shown in the nav bar when `message.moderation` allows |
 | ESC/Q | Back to thread list (threaded) or exit (flat in no_threads area) |
 
 #### Module Structure
@@ -1211,29 +1226,26 @@ The menu command dispatch in `menuhandler.js` already has slots for these comman
 | `listMessages` | `msgReader` (Phase 2) | Opens in thread list or flat mode based on area config |
 | `readMessages` | `msgReader` (Phase 2) | Same module, could start at first unread directly |
 | `postMessage` | `msgEditor` (Phase 3) | New thread mode via menu; reply mode via reader's R key |
-| `newscan` | `newscan` (Phase 2d) | All-groups mode; new slot in menu command dispatch |
-| `newscanGroup` | `newscan` (Phase 2d) | Current-group mode; new slot in menu command dispatch |
-| `markAreaRead` | Inline in menu dispatch | Calls `markAreaRead()` directly, no sub-module needed |
+| `newScan` | `newscan` (Phase 2d) | All-groups mode |
+| `newScanGroup` | `newscan` (Phase 2d) | Current-group mode |
 | `email` | `pmReader` | Full terminal mail reader with inbox/sent/trash folders |
 | `checkEmail` | `pmCheck` | Unread count prompt, optionally launches pmReader |
 | `fileGroupChange` | `fileAreaSelector` (Phase 5) | Unified file area selector — same module for both commands |
 | `fileAreaChange` | `fileAreaSelector` (Phase 5) | Same module — both hotkeys open same selector |
 | `fileBrowser` | `fileBrowser` (Phase 5) | File listing browser for current file area |
 | `fileList` | `fileBrowser` (Phase 5) | Alias for fileBrowser |
-| `fileBatchDownload` | `fileBatchDownload` | Standalone batch download menu command |
+| `downloadBatch` | `fileBatchDownload` | Standalone batch download menu command |
 
 The `readMessages` wrapper should detect `call.term_type` and route to line reader (dumb terminals) or fullscreen reader (ANSI terminals). Same pattern for the editor.
 
 ### Future Considerations
 
 - ~~File transfer protocols (Zmodem, etc.)~~ — **Done**. Native XMODEM and ZMODEM engines (`src/transfers/`) with protocol selection prompts. All five handlers (fileBrowser, fileBatchDownload, fileSearch, fileBatchCheck, fileUpload) use native engines. lrzsz wrappers remain as fallback.
-- Announcement handler
 - Top menu handler
 - Logoff handler with call statistics
 - RIP graphics support depth
 - Sixel image rendering pipeline
-- Inter-node messaging / chat
-- Node-spy (sysop) live terminal mirroring (infrastructure exists via `OutputRingBuffer`)
+- Inter-node messaging (sysop chat is done, see Node Spy)
 - Thread preferences (subscribe/ignore/mute) — schema designed, not yet implemented
 - ~~User QWK download/upload from terminal menu~~ — **Done**. `qwkTransfer` menu command with D/U/Q hotkey menu, ZMODEM/XMODEM protocol selection.
 - Web newscan route/view using `getNewscanSummary()` with `userAreaSubs` filtering
@@ -1314,7 +1326,8 @@ Minimal unread-mail prompt. Queries `getUnreadCount()`, shows "no messages" or "
 | `flat.pug` / `thread.pug` | Offcanvas backdrop dimmed screen and blocked input | Fixed — `data-bs-backdrop='false'` |
 | `qwkTosser.js` _(in `src/middleware/tossers/`)_ | Downloaded `.qwk` could be lost if extraction failed — hub already deleted it | Fixed — Phase 1.5 checks for existing `.qwk` in inDir before downloading |
 | `flat.pug` | Flat-mode reply `thread_uuid` is null for some messages | Pending — needs `getThreadByDbId()` lookup |
-| `telnetCommands` | IAC escaping in `_send()` | Pending |
+| `telnetCommands` | IAC escaping in `_send()` | Fixed: 0xFF doubled |
+| `msgReader.js` | Fullscreen moderation keys: `d`/`m` cases sit in `_onCharThreadList` (after the Mark Read `m`, so Move is unreachable there) and not in `_onCharMessageView`, so D/M shown in the message view nav bar do nothing. Dumb mode dispatches them correctly | Fixed: moved to `_onCharMessageView`; `m` in the thread list is Mark Read only |
 
 ---
 
@@ -1330,7 +1343,7 @@ Mirrors `msgAreaSelector.js` for file areas. Displays all accessible file groups
 - Loads active file groups via `fileGroups.getActiveGroups()`, areas via `fileAreas.getAreasInGroup()`
 - Access control: security level + permission flags + restriction flags (both groups and areas)
 - Groups with zero accessible areas are excluded
-- New file count per area using `userFilePointers.getNewCount()`
+- New file count per area: `fileEntries.countNewSince(area.id, newFilesBaseline.forCall(call))`, i.e. since `call.prev_logon`
 - Selecting an area updates `call.file_group`, `call.file_area`, titles, and persists via `updateUserFileGroup/Area()`
 - Search mode (S key) — live filtering by name/shortcode/description/group
 - Dumb terminal fallback with numbered list
@@ -1434,7 +1447,7 @@ Terminal menu command for offline QWK packet download and REP upload. Menu comma
 | `fileGroups.js` | models | File group CRUD, active group listing |
 | `fileAreas.js` | models | File area CRUD, directory resolution, stats |
 | `fileEntries.js` | models | File entry CRUD, search, dupe checking, download counts |
-| `userFilePointers.js` | models | Per-user per-area file scan pointers |
+| `userFilePointers.js` | models | LEGACY per-user per-area file scan pointers: still populated, read by nothing (new files use `newSince.js` / `newFilesBaseline.js`) |
 | `echomail.js` | models | FTN protocol helpers: `ftnToDb`, `dbToFtn`, `getOutboundForConnection` |
 | `messages.js` | models | Canonical message model. All CRUD, posting, unified threading (`threadMessage`, `createThreadRow`, `updateThreadStats`, `rollbackThread`), inbound dispatcher (`handleInboundEchoMessage`), orphan reconciliation, sanitization, deletion |
 | `qwkUser.js` | models | User QWK packet generation (`buildQwkForUser`) and REP import (`importRepForUser`) |

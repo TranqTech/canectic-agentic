@@ -2,6 +2,8 @@
 
 Design document for the enhanced menu layout system. Covers margin-based entry regions, auto-column sizing, vertical centering, art-embedded codes, and the three display modes.
 
+**Status: implemented.** All three phases in section 9 are complete. Section 1 describes the system before this work. Where the build differs from the design (the art walk order in 8.3, async stat codes, the `@DT@` format) it is noted inline.
+
 ---
 
 ## 1. Current State
@@ -127,16 +129,18 @@ These codes work in any art file (menus, login screens, headers, etc.) and are r
 | `@UN@` | Current username | `call.caller_username` |
 | `@RN@` | Real name | `call.caller_fullname` |
 | `@ND@` | Node number | `call.nodenum` |
-| `@DT@` | Current date | Formatted date |
-| `@TM@` | Current time | Formatted time |
+| `@DT@` | Current date | `MM/DD/YYYY` |
+| `@TM@` | Current time | `HH:MM` (24-hour) |
 | `@MG@` | Current message group | Current group name |
 | `@MA@` | Current message area | Current area name |
 | `@FG@` | Current file group | Current file group name |
 | `@FA@` | Current file area | Current file area name |
-| `@VR@` | Software version | System version string |
-| `@ON@` | Users online count | Node count + web presence count |
-| `@TC@` | Total calls | Total call count |
-| `@TU@` | Total users | Registered user count |
+| `@VR@` | Software version | `systeminfo.softwareVersion()` (package.json first) |
+| `@ON@` | Users online count | Terminal nodes in use + web presence count |
+| `@TC@` | Total calls | `COUNT(*)` on `calls` |
+| `@TU@` | Total users | `COUNT(*)` on `users` |
+
+As built, `@ON@`, `@TC@` and `@TU@` are async and cached (`STAT_TTL_MS`: 10 s for `ON`, 60 s for the counts). A render waits at most `art_stat_timeout_ms` (default 1500) for a stale value to refresh, then uses the last known value and lets the refresh finish in the background, so a slow Redis or PostgreSQL never holds up a menu redraw. The terminal node part of `@ON@` is added locally and never cached.
 
 Universal codes are replaced with the value padded or truncated to fit the code's character width. The code itself is 4 characters (`@XX@`), so short values are right-padded with spaces and long values are truncated.
 
@@ -278,11 +282,13 @@ Given a terminal at WxH columns/rows:
 6. Default ASCII          filename.asc
 ```
 
+**As built** (`_findArtFile()` in `src/commandsets/terminalcommands.js`), the order is three passes, each across every format the terminal supports in `_getArtFormats()` order (`rip` when RIP is in use, `sixel`, `utf8` for UTF-8 terminals, `ans` unless dumb, then `asc`): (1) exact `filename-WxH` in any format, (2) column match in any format, (3) untagged `filename` in any format. So an exact-size ANSI beats a column-matched sixel, which is stricter than the list above and in the same spirit (size fit beats format).
+
 **Column tolerance**: a variant is a column match if its column count is within 5 columns of the terminal width AND does not exceed the terminal width. So on an 84-column terminal, 80-col art matches. On a 132-column terminal, 80-col art does not.
 
 **Row selection within column matches**: among files that pass the column filter, pick the one with the largest row count that does not exceed the terminal height. This gives the best visual fill without overflow. If no variant fits within the terminal height, pick the smallest available (least overflow).
 
-**Default files** (no size tag) are treated as 80x25 targets for the purpose of matching. They always serve as a fallback after sized variants are exhausted.
+**Default files** (no size tag) always serve as a fallback after sized variants are exhausted. As built they are not matched as 80x25 targets; they are only the third pass.
 
 **Scope**: This size-aware walk order applies to ALL art file discovery via `_findArtFile()`, not just menus. Login screens, logoff screens, headers, and any other art rendered via `drawscreen()` benefit from the same logic. Sysops can create size variants for any art file in the system.
 

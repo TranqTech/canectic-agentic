@@ -1,6 +1,19 @@
 # Web Sysop Chat Design
 
-Extends sysop chat to web-browsing users. The sysop initiates chat from the NodeSpy dashboard; the web user sees a chat overlay on whatever page they're viewing. The same infrastructure will later support user-to-user telegrams (IMs).
+Extends sysop chat to web-browsing users. The sysop initiates chat from the NodeSpy dashboard; the web user sees a chat overlay on whatever page they're viewing. The same infrastructure also carries user-to-user telegrams (IMs).
+
+**Status: implemented**, using the "Sysop-side via PresenceSocket (preferred approach)" below; the AJAX-route alternative (`/admin/nodespy/web-chat/...`) was not built. User-to-user telegrams, listed under "later" at the end, are also built. The "Current State" section describes the situation before this work.
+
+### Implementation notes (where the build differs)
+
+- **No `activeChats` map.** Sessions live only in Redis; `userSockets` (userId -> Set of ws) is the in-memory routing index in `src/servers/presenceSocket.js`.
+- **`chat:{chatId}` is a JSON string** (`SET ... EX`), not a hash, with `chatId, initiatorUserId, initiatorName, targetUserId, targetName, mode, startedAt`. `chat:{chatId}:msgs` is a list; `chat:user:{userId}` holds the active chatId. TTL `CHAT_TTL` is 3600 s, refreshed on each message.
+- **`chat_initiate` takes `mode`**: `sysop` (default, requires the admin check) or `telegram` (any logged-in user; started from the who's online partial via `window._webChat.telegram(userId)`). Refusals come back as `{ type: 'chat_error', error }` (chat disabled, insufficient permissions, invalid target, user not online, either side already in a chat).
+- **Messages carry more fields**: server `chat_start` has `targetName` (to the initiator) or `peerName` (to the target) plus `mode`; `chat_msg` has `from` and `name`; `chat_restore` adds `role` (`initiator`/`target`) and `mode`.
+- **Who can close**: in sysop mode only the initiator (the sysop) gets a close control; the target cannot end a sysop chat. Either side can close a telegram.
+- **UI**: the overlay markup is `src/views/partials/chatOverlay.pug`, included by BOTH `layouts/user.pug` and `layouts/admin.pug`; the `window._webChat` client code is inline in each layout.
+- **Config keys** are in the `chat` category, not `system`.
+- The same socket also carries `notification`, `notification_count`, `notification_read(_all)` and the maintenance-mode `maintenance` push (`src/maintenance/webDrain.js`); see `web_architecture.md`.
 
 ## Current State
 
@@ -241,8 +254,8 @@ The only differences from sysop chat: permission model (any user can initiate, n
 
 | Key | Type | Default | Category | Description |
 |-----|------|---------|----------|-------------|
-| `web_chat_enabled` | boolean | `true` | system | Enable/disable sysop-to-web-user chat |
-| `web_chat_sound` | boolean | `true` | system | Play notification sound on chat events |
+| `web_chat_enabled` | boolean | `true` | chat | Enable/disable sysop-to-web-user chat |
+| `web_chat_sound` | boolean | `true` | chat | Play notification sound on chat events |
 
 ## Files to modify/create
 

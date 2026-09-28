@@ -2,6 +2,8 @@
 
 Sysop node monitoring system. Allows sysops to view active terminal sessions in real-time from both the web admin panel (xterm.js) and the terminal (menu command).
 
+**Status: implemented**, including the sysop chat extension (section 5.5) and web presence users on the dashboard (see `WEB_CHAT_DESIGN.md`). Section 7 lists what is still future work.
+
 ---
 
 ## 1. Overview
@@ -68,7 +70,7 @@ Terminal sub-modules access it via `call.callPool.callManager` (back-reference s
 
 Card grid of active terminal nodes. Each card shows node number, username, activity (via `formatActivity()`), connection type badge, terminal dimensions, and duration. "Watch" button navigates to the snoop view.
 
-Dashboard auto-updates every 4 seconds via `fetch()` to `status.json`, rebuilding cards from JSON. Initial render is server-side.
+Dashboard auto-updates every 4 seconds (`POLL_INTERVAL = 4000`) via `fetch()` to `status.json`, rebuilding cards from JSON. Initial render is server-side and lists terminal nodes only; `status.json` returns `{ nodes, webUsers }`, where `webUsers` are web presence users from `getOnlineUsers()` (excluding usernames already on a terminal node), so web user cards appear from the first poll onwards. Web user cards offer chat rather than Watch (see `WEB_CHAT_DESIGN.md`).
 
 Empty state shown when no terminal nodes are active.
 
@@ -107,7 +109,7 @@ xterm.js terminal matched to the target node's dimensions (`call.term_width` x `
 
 ### 3.4 Admin Navigation
 
-"Node Spy" link in admin nav (`src/views/includes/admin-nav.pug`), alongside existing admin sections.
+Link labelled "Nodes" in the admin navbar (`src/views/includes/admin-nav.pug`, included by `layouts/admin.pug`), pointing at `/admin/nodespy`; the page title is "Node Spy".
 
 ---
 

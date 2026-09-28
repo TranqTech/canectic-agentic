@@ -1,6 +1,6 @@
 # EMSI/Wazoo Protocol Design for Canectic BBS Mailer
 
-**Status**: Design complete, pending implementation
+**Status**: Largely implemented (phases 4a to 4c): `src/mailer/protocols/emsi.js`, `src/mailer/wazooTransfer.js`, `ZmodemEngine.sendEmpty()`, first-byte detection in `session.js` (`_detectProtocol()`), `mailer_protocol` on the peer connection with EMSI/Wazoo selectable in the admin peer forms, unit tests in `tests/emsiProtocol.test.js` and `tests/wazooTransfer.test.js`. Not built: the shared `fileCleanup.js` (section 4), so a Wazoo session does no post-send cleanup at all (flow file lines are not marked, `.out` packets and filebox files are not deleted); the dedicated `MAILER_EMSI_PORT` listener; EMSI_HBT/EMSI_CLI. The Wazoo outbound list covers the primary connection only, not grouped connections. No test against a real EMSI mailer is recorded.
 **Phase**: Mailer Phase 4 (per MAILER_ARCHITECTURE.md)
 
 ---
@@ -103,18 +103,21 @@ All EMSI packets are ASCII text with CRC-16/CCITT checksums (same polynomial as 
 
 Brace-delimited `{value}` with backslash escaping for literal braces:
 
+As built, `_sendOurDat()` in `emsi.js` writes the fields in this order:
+
 | Field | Content | Notes |
 |-------|---------|-------|
-| system_name | `appConfig.get('boardname')` | Display name |
-| city | Location string or empty | |
-| sysop | `appConfig.get('sysopname')` | |
+| system_name | board name | Display name |
+| city | `Internet` | Fixed string |
+| sysop | sysop name | |
 | phone | `-Unpublished-` | Standard for IP nodes |
 | baud | `300` | Required but meaningless for IP |
 | flags | `XA,CM,IBN,IFC` | Capability flags |
-| addresses | Space-separated FTN addresses | Same as binkp M_ADR |
-| password | Session password (plaintext) | No CRAM-MD5 in EMSI |
 | link_codes | `8N1` | Dummy for IP |
 | compat_codes | `ZMO,ZAP` | Supported transfer protocols |
+| mailer_code | product name and version | From `systeminfo` at send time |
+| addresses | Space-separated FTN addresses | Same as binkp M_ADR |
+| password | Session password (plaintext) | No CRAM-MD5 in EMSI |
 
 ### Handshake State Machines
 
@@ -197,7 +200,9 @@ Accumulate incoming data in a buffer, scan for known ASCII sequences:
 
 **Included**: EMSI_INQ, EMSI_REQ, EMSI_DAT, EMSI_ACK, CRC-16 validation, ZMO compat code, plaintext password
 
-**Excluded**: EMSI_NAK retry (add if testing requires), EMSI_HBT heartbeat, EMSI_CLI, JANUS bidirectional, modem flags
+(As built, EMSI_NAK is also handled: the last packet is resent on NAK. Retries are 6 at 5s, ACK waits 10s.)
+
+**Excluded**: EMSI_HBT heartbeat, EMSI_CLI, JANUS bidirectional, modem flags
 
 ---
 
@@ -296,6 +301,8 @@ class WazooTransferEngine extends EventEmitter {
 
 ## 4. Shared File Cleanup
 
+**Not implemented.** `src/mailer/fileCleanup.js` does not exist, and `WazooTransferEngine` performs no cleanup after a send. Flow files are pruned (`floFile.pruneFlowFile()`) when the Wazoo outbound list is built, the same as for binkp.
+
 ### File: `src/mailer/fileCleanup.js`
 
 Extract post-send cleanup logic from `TransferEngine` into a shared module:
@@ -342,7 +349,7 @@ _endSession('complete')
 
 ### Outbound File List
 
-For EMSI sessions, `_collectOutboundFiles()` reuses the existing BSO scanning logic but returns an array of `{ path, name, size, mtime, floFile, floPrefix, deleteAfterSend }` instead of calling `transfer.queueFile()`. The `WazooTransferEngine` maps these to `ZmodemEngine.send()` format.
+For EMSI sessions, `_buildOutboundFileList()` (named `_collectOutboundFiles()` in the plan) reuses the existing BSO scanning logic but returns an array of `{ path, name, size, mtime, floFile, floPrefix, deleteAfterSend }` instead of calling `transfer.queueFile()`. The `WazooTransferEngine` maps these to `ZmodemEngine.send()` format.
 
 ---
 
@@ -350,13 +357,13 @@ For EMSI sessions, `_collectOutboundFiles()` reuses the existing BSO scanning lo
 
 ### MailerManager Modifications
 
-1. **`_connectToPeer(conn)`**: Pass `mailerProtocol: cd.mailer_protocol || 'binkp'` in session options
+1. **`_connectToPeer(conn)`**: Pass `mailerProtocol: cd.mailer_protocol || 'binkp'` in session options (as built, the manager passes nothing: the outbound session reads `connection_data.mailer_protocol` itself in `session.js`)
 2. **`stop()`**: `EmsiProtocol.sendERR()` is a no-op/disconnect (EMSI has no error frame)
 3. **Max sessions BSY**: Sends binkp M_BSY frame regardless of protocol -- EMSI clients see binary garbage and disconnect (acceptable behavior)
 
 ### Admin UI
 
-Remove `disabled` attribute from EMSI option in `src/views/admin/peers/view.pug`.
+Remove `disabled` attribute from EMSI option in `src/views/admin/peers/view.pug`. (Done: the option is selectable.)
 
 ---
 

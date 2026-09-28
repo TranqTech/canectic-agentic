@@ -2,6 +2,8 @@
 
 Design document for terminal-side file transfers in Canectic BBS. Covers protocol architecture, native XMODEM and ZMODEM engine implementation, batch management, and integration with the existing file browser and menu system.
 
+**Status: design document, largely implemented.** The native engines, wrappers, protocol and hangup prompts, tagging, batch download and uploads are built. Built differently from this design: there is no `FileTransferHandler` (`fileTransfer.js`); single-file downloads run inside `fileBrowser` and `fileSearch` (the "direct approach" of 5.4) and batches through `fileBatchDownload.js` (menu command `downloadBatch`) and the login-flow `fileBatchCheck.js`. The batch is persisted per user in the `user_file_batch` table (`src/models/userFileBatch.js`) rather than living only on the call, and the `src/utils/fileBatch.js` helpers were not written. Not built: the `viewBatch` and `clearBatch` menu commands. `FILES_ARCHITECTURE.md` describes the system as it is.
+
 For the file area system (schemas, storage, TIC networking), see `FILE_SYSTEM_DESIGN.md`.
 For the terminal architecture (handlers, call lifecycle, raw mode, doors), see `terminal_architecture.md`.
 For the process model, see `PROCESS_ARCHITECTURE.md`.
@@ -121,7 +123,7 @@ This ensures transfers succeed even when terminal detection is wrong.
 
 ### 3.1 FileTransferHandler -- BaseSubModule
 
-A new `BaseSubModule` subclass at `src/handlers/menucommands/fileTransfer.js`. This is the terminal-facing handler that manages the full download lifecycle within the menu system.
+(Not built as designed; see the status note at the top.) A new `BaseSubModule` subclass at `src/handlers/menucommands/fileTransfer.js`. This is the terminal-facing handler that manages the full download lifecycle within the menu system.
 
 **Why BaseSubModule, not BaseHandler**: Downloads are launched from within the menu system (from the file browser or a menu command). `BaseSubModule` is the correct pattern for inline operations within `MenuHandler`, following the same approach as `msgReader`, `fileBrowser`, and all other menu commands. The menu handler manages inactivity timeouts and cleanup.
 
@@ -259,11 +261,13 @@ Each entry in the array is a lightweight reference object:
 }
 ```
 
+As built, entries carry `uuid`, `id`, `filename`, `file_size`, `area_shortcode` and `disk_path` (no `area_id`), and are mirrored to the `user_file_batch` table so a batch survives a disconnect: loaded into `call.file_batch` at login, updated on tag and untag, cleared after a successful batch download.
+
 **Why lightweight references instead of full DB rows**: The batch may persist for the entire session. Storing only the fields needed for transfer and display keeps memory usage low and avoids stale data issues. The full file path is resolved at download time by looking up the group and area.
 
 ### 4.2 Batch operations
 
-These are utility functions, not a separate class. They can live in a small module `src/utils/fileBatch.js` or be methods directly on the handler that uses them:
+These are utility functions, not a separate class. They can live in a small module `src/utils/fileBatch.js` or be methods directly on the handler that uses them (as built: the handlers edit `call.file_batch` directly and persist through `userFileBatch.js`: `loadBatch`, `addToBatch`, `removeFromBatch`, `clearBatch`, `syncBatch`, `getBatchCount`):
 
 - **addToBatch(call, fileEntry, areaConfig)** -- Push a batch reference. Deduplicate by UUID (skip if already tagged).
 - **removeFromBatch(call, uuid)** -- Remove by UUID.
@@ -275,7 +279,7 @@ These are utility functions, not a separate class. They can live in a small modu
 
 ### 4.3 Batch size limit
 
-Configurable maximum batch size (default: 50 files). Prevents users from tagging the entire file base. Enforced in `addToBatch()`.
+Maximum batch size 50 files (as built, a constant in the handlers, not a setting). Prevents users from tagging the entire file base. Enforced in `addToBatch()`.
 
 ### 4.4 Resolving file paths at download time
 
@@ -346,13 +350,13 @@ When `B` is pressed in the file list:
 
 ### 6.1 New properties on IncomingCall
 
-Add to the constructor in `callmanager.js`:
+Add to the constructor in `src/managers/callmanager.js`:
 
 ```js
 this.file_batch = []
 ```
 
-This is the only change to the call object. The batch array persists for the session lifetime and is cleaned up when the call ends (garbage collected with the call object).
+This is the only change to the call object. The batch array persists for the session lifetime and is cleaned up when the call ends (garbage collected with the call object). As built, the batch is also stored in `user_file_batch`, so it outlives the call.
 
 ### 6.2 No new properties needed for protocol state
 
@@ -369,8 +373,8 @@ Add to the command dispatch table in `menuhandler.js` and the command list in `m
 | Command | Arg | Action |
 |---------|-----|--------|
 | `downloadBatch` | (none) | Launch FileTransferHandler with `call.file_batch` contents |
-| `viewBatch` | (none) | Show tagged files, allow remove/clear/download |
-| `clearBatch` | (none) | Clear `call.file_batch` |
+| `viewBatch` | (none) | Show tagged files, allow remove/clear/download (not built) |
+| `clearBatch` | (none) | Clear `call.file_batch` (not built) |
 
 ### 7.2 downloadBatch command
 
@@ -397,7 +401,7 @@ This can be a simple implementation -- the batch is small (max 50 items), so no 
 
 ## 8. Implementation Status
 
-All phases are complete. The system uses native XMODEM and ZMODEM engines with protocol selection prompts in all handlers.
+All phases are complete except the `viewBatch` and `clearBatch` menu commands. The system uses native XMODEM and ZMODEM engines with protocol selection prompts in all handlers.
 
 ### Completed
 
@@ -405,7 +409,7 @@ All phases are complete. The system uses native XMODEM and ZMODEM engines with p
 2. StreamAdapter wrappers in `src/protocols/` (xmodem_native.js, zmodem_native.js).
 3. All five terminal handlers (fileBrowser, fileBatchDownload, fileBatchCheck, fileSearch, fileUpload) use native engines with protocol selection.
 4. Batch management with tagging, batch download, login-flow batch check.
-5. Menu commands: `downloadBatch`, `viewBatch`, `clearBatch`.
+5. Menu command `downloadBatch` (`fileBatchDownload.js`). `viewBatch` and `clearBatch` were not built.
 6. Upload support via native XMODEM and ZMODEM receive. XMODEM uploads prompt for filename.
 7. Test suite: `tests/transferCrc.test.js`, `tests/xmodem.test.js`, `tests/zmodemSend.test.js`, `tests/zmodemRecv.test.js`.
 

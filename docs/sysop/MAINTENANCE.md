@@ -19,7 +19,7 @@ Updates use it automatically. You can also switch it on yourself at any time.
 | Logged-in web users | A login by anyone but a sysop is refused. | Sent a notification and a countdown banner on every page they have open. Anything they post before the countdown ends is kept. When it ends, every page except the admin shows them the maintenance page. The board does not wait for them. |
 | Sysops on the web | Can log in. | Keep the whole site, so you can check things before reopening. The admin pages show a banner while the board is closed. |
 | Mail clients (IMAP, SMTP) | Refused in the protocol's own terms: IMAP says `BYE`, SMTP says `421`, so a sending mail server keeps the message and tries again later. No internet mail is lost. | Closed when the grace runs out. |
-| binkp links | Answered with `M_BSY`, which a remote mailer treats as "try later". No outbound calls are made; outbound mail waits in the outbound until you reopen. | Left to finish. Each session has its own time limit. |
+| binkp links | Answered with `M_BSY`, which a remote mailer treats as "try later". No outbound calls are made; outbound mail waits in the outbound until you reopen. | Left to finish until the grace runs out, then ended with `M_ERR` ("System closing for maintenance"). |
 | The worker | Stops taking new jobs. Tosses and maintenance jobs queue up and run when you reopen. | Jobs already running finish. |
 | The REST API | Answered with a `503` and a JSON body saying why. | |
 
@@ -91,7 +91,7 @@ stopped process has nothing in flight.
 
 An update closes the board as soon as it starts, so the grace runs while the
 backup is taken rather than after it. Before stopping the BBS it waits for the
-board to drain: callers disconnected when the grace runs out, binkp sessions and
+board to drain: callers and binkp sessions disconnected when the grace runs out,
 queue jobs finished. It waits at most the rest of the grace plus
 `update_drain_timeout` (fifteen minutes unless you change it); anything still
 running after that is ended by the stop, and a job ended that way is retried
@@ -115,10 +115,10 @@ If you had closed the board yourself before starting the update, the update puts
 your closure back afterwards rather than reopening a board you closed on
 purpose.
 
-**The first update into this release cannot drain.** The processes it is
-replacing predate maintenance mode and never report, so the update notices that
-after about twenty seconds and carries on as updates always have, stopping the
-BBS without warning anyone. Updates after that one drain properly.
+**An update from a release older than 0.9.8a cannot drain.** The processes it
+is replacing predate maintenance mode and never report, so the update notices
+that after about twenty seconds and carries on, stopping the BBS without
+warning anyone. Updates after that one drain properly.
 
 ## Troubleshooting
 
@@ -127,10 +127,10 @@ running, or what is running predates maintenance mode. `pm2 status` tells you
 which.
 
 **It has said "Draining" for a long time.** The table names what is left. A
-terminal caller or mail client is disconnected when the grace runs out, so if
-the grace has passed it is a binkp session or a job. A binkp session ends on
-its own time limit; a job that never finishes is the stuck-worker case, and
-`node src/tools/schedules.js` shows how long it has been running.
+terminal caller, mail client or binkp session is disconnected when the grace
+runs out, so if the grace has passed it is almost always a job. A job that
+never finishes is the stuck-worker case, and `node src/tools/schedules.js`
+shows how long it has been running.
 
 **The board reopened by itself.** An update that completes reopens the board
 it closed. If you had closed it yourself first, check the Maintenance page: the

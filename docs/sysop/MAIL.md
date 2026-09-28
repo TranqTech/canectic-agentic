@@ -24,7 +24,7 @@ Admin pages:
 
 Before any of this works you need:
 
-- **`mail_domain`** set in `.env` (preferred) or `/admin/config` network category. This is the IANA domain your BBS uses for mail -- e.g. `bbs.undermine.ca`. All user email addresses are of the form `<username>@<mail_domain>`.
+- **`mail_domain`** set in `.env` (preferred) or `/admin/config` network category. This is the IANA domain your BBS uses for mail -- e.g. `bbs.undermine.ca`. All user email addresses are of the form `<username>@<mail_domain>`. Until it is set, the mail process starts no servers at all (IMAP, SMTP submission and the inbound gateway alike): it logs `[Mail] Waiting: mail_domain is not configured` and starts them as soon as the setting is saved, without a restart.
 - Your BBS hostname reachable from wherever the inbound MTA is running (on a private network, internal IP is fine).
 - An SMTP relay you have credentials for (outbound only), and/or an upstream MTA you control (inbound only).
 
@@ -265,7 +265,7 @@ QUIT
 221 Bye
 ```
 
-If the BBS rejects you with 554, your IP isn't in `email_trusted_hosts`. If the BBS refuses the connection entirely, the mail process isn't listening -- check `pm2 logs mail` for `[Mail] Inbound SMTP (trusted) server listening on port 1026`.
+If the BBS rejects you with 554, your IP isn't in `email_trusted_hosts`. If the BBS refuses the connection entirely, the mail process isn't listening -- check `pm2 logs mail` for `SMTP inbound (trusted) server listening on port 1026`, or a `[Mail] Waiting:` line saying why it has not started.
 
 ## Mail Client Access (IMAP + SMTP Submission)
 
@@ -278,7 +278,7 @@ Users can read and send their BBS private messages from any standard mail client
 | IMAP4rev1 | 10143 | `imapport` |
 | SMTP submission | 10587 | `smtpport` |
 
-Both listen on all interfaces. The mail process runs both servers when `imapport` / `smtpport` are non-zero (they default on).
+Both listen on all interfaces. The mail process runs both servers when `mail_domain` is set and `imapport` / `smtpport` are non-zero (they default on). Both ports are in the network category of `/admin/config` and need `pm2 restart mail` after a change.
 
 ### Client configuration
 
@@ -298,9 +298,9 @@ Deleting a message from inbox or sent moves it to Trash where it can be restored
 1. **User action** (web Delete-from-Trash button or IMAP `STORE \Deleted` + `EXPUNGE` while Trash is selected): the row is tagged for cleanup. Instant; no disk work happens here. Tagged rows disappear from every view immediately, even though their attachment files are still on disk.
 2. **Background cleanup** runs hourly (`pm-purged-cleanup-hourly` BullMQ schedule, or on-demand within seconds of the user action). This is the job that actually unlinks the files and removes the rows. Failures here are retried on the next cycle, not surfaced to the user.
 
-This split keeps user actions non-blocking even when a mail client like Thunderbird fires "Empty Trash" against hundreds of messages — the IMAP `EXPUNGE` returns instantly and the file unlinks happen behind the scenes.
+This split keeps user actions non-blocking even when a mail client like Thunderbird fires "Empty Trash" against hundreds of messages: the IMAP `EXPUNGE` returns instantly and the file unlinks happen behind the scenes.
 
-The daily 03:00 retention sweep (`pm_trash_retention_days`, default 30) handles trash messages the user *didn't* explicitly purge: rows whose `deleted_at` is older than the retention window get tagged the same way and picked up by the next cleanup tick. Adjust the retention window via `pm_trash_retention_days` in `/admin/config` PM category.
+The daily 03:00 retention sweep (`pm_trash_retention_days`, default 30) handles trash messages the user *didn't* explicitly purge: rows whose `deleted_at` is older than the retention window get tagged the same way and picked up by the next cleanup tick. Adjust the retention window via `pm_trash_retention_days` in `/admin/config` maintenance category.
 
 ### TLS for mail client access
 
@@ -314,10 +314,10 @@ Relevant config keys (in `/admin/config` security category):
 
 | Key | Default | Purpose |
 |---|---|---|
-| `verified_security` | `30` | Security level granted on successful verification |
+| `verified_security` | `60` | Security level granted on successful verification (only if higher than the user's current level) |
 | `unverified_retention_days` | `14` | Days before unverified accounts are auto-purged. `0` disables purge. |
 
-Users in the unverified state have the `Unverified` restriction flag which blocks message posting, file upload, etc. until they complete verification. The email side of the flow requires outbound relay to be configured -- if `email_relay_host` is blank, the verification handler tells the user to pick netmail instead or contact the sysop.
+Users in the unverified state have the `Unverified` restriction flag which blocks message posting, file upload, etc. until they complete verification. The email side of the flow requires outbound relay to be configured -- if `email_relay_host` is blank, an email verification request is refused with "Email relay is not configured. Contact the sysop." and the user can verify by netmail instead.
 
 Email verification messages use the **system** sender (`email_from_address` / `email_from_name`) regardless of who the recipient is -- they're identified as coming from the BBS itself.
 
@@ -376,7 +376,7 @@ Check:
 3. The user's BBS password is correct (same as web/terminal login)
 4. No firewall is blocking the client from reaching the port
 
-`pm2 logs mail` will show authentication failures with `SMTP AUTH failed for <username>` or `IMAP LOGIN failed for <username>`.
+Failed logins are not logged; the client simply gets `NO LOGIN failed` (IMAP) or `535 Authentication failed` (SMTP). At log level 4, `pm2 logs mail` shows each successful login as `IMAP LOGIN: <username>` or `SMTP AUTH: <username>`, so a user who never appears there is not getting past authentication.
 
 ### The port/secure override warning keeps firing
 
@@ -411,16 +411,18 @@ All keys are in the `email` category of `/admin/config` unless otherwise noted.
 
 ### Mail Client Access
 
+These two are in the `network` category.
+
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `imapport` | number | `10143` | IMAP4rev1 server port. `0` disables. |
-| `smtpport` | number | `10587` | SMTP submission server port. `0` disables. |
+| `imapport` | number | `10143` | IMAP4rev1 server port. `0` disables. Requires `pm2 restart mail`. |
+| `smtpport` | number | `10587` | SMTP submission server port. `0` disables. Requires `pm2 restart mail`. |
 
 ### Related (other categories)
 
 | Key | Category | Purpose |
 |---|---|---|
-| `mail_domain` | network | IANA domain for user addresses. Required for user-generated email to have routable reply addresses. |
+| `mail_domain` | network | IANA domain for user addresses. Required for the mail process to start any server, and for user-generated email to have routable reply addresses. |
 | `verified_security` | security | Security level granted after email/netmail verification. |
 | `unverified_retention_days` | security | Days before unverified accounts are auto-purged. |
 
@@ -435,5 +437,5 @@ The outbound email tosser itself runs in the **worker** process (not mail), beca
 
 When you change any email config via `/admin/config`, all processes subscribe to the `CONFIG_CHANGED` Redis event and reload their appConfig cache automatically -- no restart needed for most settings. The exceptions are:
 
-- `email_inbound_port` -- requires `pm2 restart mail` because a new TCP listener has to be opened
+- `email_inbound_port`, `imapport`, `smtpport` -- require `pm2 restart mail` because a listener has to be opened or closed (the one exception: when the mail process is still waiting for `mail_domain`, setting it starts every enabled server without a restart)
 - `email_trusted_hosts` -- the SmtpServer instance caches the parsed allowlist at construction, so changes take effect on the next `pm2 restart mail`

@@ -91,7 +91,7 @@ carries the node's QWK ID, so the ID on its own proves nothing.
    again, so nothing is lost.
 
 Setting **qnet_max_rep_bytes** (QWK settings, 20 MB by default) limits how
-large a REP a node may send.
+large a REP a node may send, over HTTP or FTP.
 
 Run the board behind HTTPS (a reverse proxy) if nodes connect over the
 internet, since the node's password is sent with every request.

@@ -60,10 +60,12 @@ Add `--verbose` to list every file rather than a summary.
 | `--channel NAME` | `stable` or `development`. Defaults to `update_channel` |
 | `--version V` | A specific release rather than the newest |
 | `--staging DIR` | Where to build the release. Defaults to `<target>/.canectic-update` |
-| `--apply` | Actually write it, in this process. **Stop the BBS first** |
-| `--handoff` | Hand off to the new release's updater, detached. **Stop the BBS first** |
+| `--apply` | Actually write it, in this process |
+| `--handoff` | Hand off to the new release's updater, detached, and return |
+| `--acknowledge-notices` | You have read the upgrade notes; `--apply` and `--handoff` need it when any is a warning or they could not be verified |
 | `--status` | Report the last update run on `--target` and stop |
-| `--keep-staging` | Keep the staging directory, and with it the backup |
+| `--prune` | Delete old update backups and leftover staging now, then stop (add `--dry-run` to see what) |
+| `--keep-staging` | Keep the staging directory after a report-only run, which otherwise deletes it |
 | `--verbose` | List every file |
 
 `--from-dir` is not only for testing. An artifact that arrived down a file echo,
@@ -110,7 +112,13 @@ tell.
 
 ## Applying
 
-Stop the BBS first. This tool does not.
+You do not need to stop the BBS yourself. The update closes the board for
+maintenance, waits for it to drain, and stops and starts the processes with
+`update_stop_command` (`pm2 stop all`) and `update_start_command`
+(`pm2 start ecosystem.config.cjs`). If your processes are supervised by
+something those commands do not cover, turn `update_process_control` off (or
+pass `--no-restart`), stop the BBS yourself first, and start it again
+afterwards.
 
 Both ways below print the move's upgrade notes first (see "Upgrade notes" in
 `docs/sysop/UPDATES.md`), verified against the release's signed checksum list.
@@ -128,8 +136,7 @@ the work.
 ### `--apply`: this release applies the new one
 
 ```bash
-pm2 stop all
-node src/tools/update.js --target /opt/canectic --apply --keep-staging
+node src/tools/update.js --target /opt/canectic --apply
 ```
 
 Simple, synchronous, and fine when you are at the console.
@@ -137,9 +144,10 @@ Simple, synchronous, and fine when you are at the console.
 ### `--handoff`: the new release applies itself
 
 ```bash
-pm2 stop all
 node src/tools/update.js --target /opt/canectic --handoff
 ```
+
+This is what the Update button on `/admin/update` does.
 
 This stages the release, then launches the **new** version's updater as a
 detached process and returns immediately. Two reasons it exists:
@@ -159,16 +167,18 @@ node src/tools/update.js --status --target /opt/canectic
 ```
 
 ```
-  run      20260913-162739-p29p   COMPLETE
-  moving   0.9.6a -> 0.9.8a
-  elapsed  1s
+  run      20260927-162739-p29p   COMPLETE
+  moving   0.9.11a -> 0.9.12a
+  elapsed  94s
 
     done  preflight    920 files verified
-    done  backup       /opt/canectic/logs/update/20260913-162739-p29p.backup
-    skip  stop         this updater does not stop the BBS; stop it yourself
+    done  backup       /opt/canectic/.canectic-update/backup/20260927-162739-p29p
+    done  stop         processes stopped (...)
     done  files        38 written, 2 removed, 14 backed up
-    skip  dependencies run npm install --omit=dev yourself
-    skip  schema       run node src/tools/dbmigrations.js yourself
+    done  directories  all present
+    skip  env          an existing installation keeps its own .env
+    done  dependencies npm install --omit=dev
+    done  schema       declarative schema and migration ledger applied
     ...
     done  verify       all written files match the release
 ```
@@ -186,28 +196,34 @@ tool says so and tells you to use `--apply` instead.
 Under `.canectic-update/`. That is not tidiness: `node_modules` resolves by
 walking up from a module's own directory, and a release ships none, so an
 updater staged in `/tmp` cannot import anything with a dependency. Nothing
-scans, replaces or backs up that directory. It is safe to delete once an update
-has finished and you no longer want the backup.
+scans, replaces or backs up that directory.
 
 Everything either mode overwrites or deletes is copied into a backup directory
-first, at its own relative path, before anything is touched. `--apply` puts it
-under the staging directory; `--handoff` puts it beside the run state in
-`logs/update/`. Both print the path.
+first, at its own relative path, before anything is touched:
+`.canectic-update/backup/<run id>/`, which also holds the database dump. The
+backup phase in `--status` names it. See "Disk the updater is holding" below
+for how long it is kept.
 
 ## What it does, in order
 
 | Phase | What happens |
 |-------|--------------|
-| preflight | Verifies the staged tree against its manifest, checks Node and disk |
+| preflight | Verifies the staged tree against its manifest and its signature, checks Node |
 | backup | Sets aside everything about to be overwritten or deleted |
-| stop | Waits for the board to drain, then `pm2 stop all` |
+| stop | Waits for the board to drain, then runs `update_stop_command` (`pm2 stop all`) |
 | files | Writes the release |
+| directories | Creates any runtime directory the release expects and the install lacks |
+| env | Always skipped on an update: your `.env` is never touched |
 | dependencies | `npm install --omit=dev` |
 | schema | **Dumps the database**, then runs `dbmigrations.js` |
 | migrations | Covered by the same `dbmigrations` run |
 | steps | Runs the release's automatic upgrade steps |
-| start | `pm2 start ecosystem.config.cjs` |
+| start | `update_start_command` (`pm2 start ecosystem.config.cjs`) |
 | verify | Confirms every written file matches the release |
+
+After verify, and outside the phases so that it can never fail an update that
+worked, it deletes older backups and staged releases (see "Disk the updater is
+holding").
 
 The board is closed for maintenance before any of this, as soon as the update
 starts, so connected callers and logged-in web users get their warning while the
@@ -239,20 +255,20 @@ before the update, so you can put it back.
 | `--no-dump` | Do not dump the database before migrating |
 | `--no-deps` | Do not run `npm install` |
 | `--no-schema` | Do not run `dbmigrations` |
-| `--no-restart` | Do not stop or start the BBS |
+| `--no-restart` | Do not stop or start the BBS; stop it yourself first |
 
 Each one records itself as a skipped phase with the command you now owe.
 
 ## If something fails partway
 
-**Before the database is migrated**, the files are put back automatically from
-the backup, and the BBS is started again. The only thing that changed was files,
-so undoing it is complete.
+**If the files or dependencies phase fails**, the files are put back
+automatically from the backup, and the BBS is started again. The only thing that
+changed was files, so undoing it is complete.
 
-**After the database is migrated**, the files are left alone deliberately. Old
-code over a migrated database is a worse state than the failure, so the update
-stops, tells you where the backup and the dump are, and leaves the decision to
-you. The BBS is still started again.
+**From the schema phase on**, the files are left alone deliberately. Old code
+over a migrated database is a worse state than the failure, so the update stops,
+tells you where the backup and the dump are, and leaves the decision to you. The
+BBS is still started again.
 
 Either way **the board stays closed for maintenance** after a failure at or
 after the stop, so nobody calls in while you look. Reopen it from the
@@ -341,17 +357,20 @@ None of these can leave your installation half updated.
 
 ## Going back
 
-The backup holds every file that was displaced, at its own relative path, so a
-restore is a copy back:
+The backup holds every file that was displaced, at its own relative path, plus
+`database.dump`, so a restore of the files is a copy back of everything but the
+dump:
 
 ```bash
-cp -a <staging>/backup/. /opt/canectic/
+cd /opt/canectic/.canectic-update/backup/<run id>
+tar cf - --exclude=./database.dump . | tar xf - -C /opt/canectic
 ```
 
 That returns the files that were overwritten or deleted. Files the update
-created are not in the backup, because they were not there before; the
-`rollback` function in `src/maintenance/updateApply.js` removes those as well
-and is what the finished updater will use.
+created are not in the backup, because they were not there before, so they
+stay; an automatic rollback after a failure removes those as well.
+
+`database.dump` is a `pg_dump -Fc` dump, restored with `pg_restore`.
 
 Rolling back code is nearly free. Rolling back a database migration is not, so
 the order matters: apply files, confirm the BBS starts, and only then run
@@ -400,7 +419,12 @@ is no more trustworthy than a downloaded one.
 ## Updating from the web
 
 `/admin/update` has an Update button when a release newer than the one you run
-is available and nothing in the preflight is blocking. The page judges the last
+is available and nothing in the preflight is blocking. The button always takes
+the release over HTTP from `update_check_url`; a release from a file echo is
+applied with `node src/tools/update.js` (see "Updating over FTN").
+
+The Channel box at the top of the page switches between stable and development;
+see "Switching channel" in `docs/sysop/UPDATES.md`. The page judges the last
 check against the version running now, so straight after an update it does not
 offer the release you have just installed, and it says when the check was made
 on an older version. It shows you what the update will do first, including
@@ -439,7 +463,9 @@ a file the update writes as it goes.
 ## Updating over FTN
 
 With `update_check_transport` set to `ftn`, the tool takes releases from your
-configured file area instead of over HTTP. Everything else is identical: the
+configured file area (`update_stable_file_area`, or `update_dev_file_area` on
+the development channel) instead of over HTTP. With it set to `both`, the
+update check looks in both places but the tool itself uses HTTP. Everything else is identical: the
 same plan, the same categories, the same phases.
 
 Upgrade notes are not shown for a release from a file echo, since there is no
@@ -456,4 +482,5 @@ See `docs/sysop/UPDATES.md` for what FTN integrity does and does not guarantee.
 ## Related
 
 - `docs/sysop/UPDATES.md` for the update check, which tells you a release exists
-- `docs/reference/UPDATE_SYSTEM_DESIGN.md` for what is still to come
+- `docs/sysop/MAINTENANCE.md` for what closing the board does to callers
+- `docs/reference/UPDATE_SYSTEM_DESIGN.md` for the design

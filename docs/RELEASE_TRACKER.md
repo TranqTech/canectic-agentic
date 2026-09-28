@@ -2,7 +2,7 @@
 
 Status tracking for releases.
 
-Last updated: 2026-09-13
+Last updated: 2026-09-27 (v0.9.12a)
 
 ---
 
@@ -39,7 +39,7 @@ Last updated: 2026-09-13
 - [x] Last callers display (source column, current caller highlight)
 - [x] Who's online (terminal nodes + web presence, conditional call flow stage)
 - [x] User list
-- [x] Door game support (NativeShell, ExecNative, SpawnNative, Dosemu, DosemuPty)
+- [x] Door game support (NativeShell, NativeCommand, Dosemu, DosemuPty; ExecNative and SpawnNative are accepted as legacy aliases for NativeCommand)
 - [x] Door browser (collection navigation, description panel, ANSI colour rendering)
 - [x] Announcement viewer (scrolling viewport, arrow navigation, call flow + menu command)
 - [x] Mail verification handler (call flow + menu command, send/enter/change address)
@@ -92,6 +92,15 @@ Last updated: 2026-09-13
 - [x] Message areas list sort toggle (sysop ordering or most recently active,
       within each group, remembered in `localStorage`), and a last-message
       column that shows the year once a date is older than six months
+- [x] Reader 40 | 80 column switch on phones (`public/js/readerWidth.js`),
+      remembered per area; ANSI art always shown at 80, and a "Mostly ANSI
+      art" (`ansi_area`) setting on areas and groups
+- [x] Mobile layout pass (0.9.12a): area, file, thread, message header and
+      private mail pages fit a phone screen without sideways scrolling
+- [x] "New" files mean new since the previous visit, on web and terminal alike
+      (`src/utils/newSince.js`); the terminal M (Mark Read) key is gone
+- [x] Every DataTables date column sorts by date and shows in the viewer's
+      timezone (`src/utils/dateFormat.js`, `+ts` mixin, `public/js/localTime.js`)
 
 ### Admin Panel
 - [x] Dashboard
@@ -224,6 +233,26 @@ Last updated: 2026-09-13
       (`echomail.ftnToDb` and `smbImport`), falling back to the receive time. A
       corrupt future date otherwise pins an area to the top of the recently
       active sort for ever and keeps it inside every retention window
+- [x] QWK hub and node over the internet between Canectic boards (HTTP), and
+      QWK hub for Synchronet nodes over FTP (`src/servers/qwkFtpServer.js`,
+      `qwk_ftp_enabled`, off by default, port 8021)
+- [x] QWK hub passes messages between its nodes, routes netmail to systems it
+      does not link with directly (learned from `@VIA` paths), and routes QWK
+      private mail only over the connection whose Remote QWK ID matches
+- [x] Files in QWK packets both ways, and `NEWFILES.DAT`, download queue and
+      PM attachments in personal QWK packets
+- [x] QWK IDs validated to Synchronet's rules (`src/utils/qwkId.js`), optional
+      long IDs per network, per-role packet directories (`qnet/<ID>.hub/`,
+      `qnet/<ID>.node/`), UTF-8 on the wire only when a message needs it
+- [x] Shared-directory QWK hub nodes swept every `qwk_hub_sweep_minutes`
+      (`qwk-hub-sweep` schedule, registered only while such a node exists)
+- [x] QWK and NNTP transfer history (`src/models/networkTransfers.js`), shown
+      under Networking and on each connection
+- [x] Forwarded echomail keeps every SEEN-BY line and appends to PATH rather
+      than replacing it (`src/utils/ftnSeenPath.js`); author TZUTC passes through
+- [x] File echo loop check reads the TIC `Path` only (the Seenby check refused
+      every file an uplink sent); `Replaces` moves the old file aside and honours
+      wildcards
 - [ ] Peer interop: BBBS has no `%RESCAN` on either AreaFix or FileFix, so file
       echo backfill from a BBBS uplink needs the sysop to re-send by hand. Its
       FREQ support over binkp specifically is unverified. See PEER_INTEROP.md
@@ -398,9 +427,11 @@ Last updated: 2026-09-13
       upgrade no longer breaks boot (verified by cold boot, not just restart)
 - [x] OS upgrade runbook (docs/sysop/OS_UPGRADE.md), written against a real
       24.04 to 26.04 run with PostgreSQL 16 to 18 and Redis 7 to 8
-- [x] Node 26 target, Node 22 floor. Every dependency at its current release,
-      `npm outdated` empty and `npm audit` at 0 from 17 advisories. `better-sqlite3`
-      13 is N-API, so the native binary survives a Node major upgrade
+- [x] Node 26 target, Node 22 floor. Every dependency moved to its then-current
+      release on 2026-09-04 and `npm audit` went from 17 advisories to 0 (still 0
+      on 2026-09-27; `npm outdated` now lists in-range updates, see
+      `docs/DEPENDENCY_AUDIT.md`). `better-sqlite3` 13 is N-API, so the native
+      binary survives a Node major upgrade
 - [x] npm 12 `allowScripts`: the three native modules plus `better-sqlite3`
       approved and pinned to version, three optional accelerators denied
       explicitly rather than omitted so the decision is visible
@@ -421,9 +452,35 @@ Last updated: 2026-09-13
       ever. Confined by an explicit allowlist, and only run after a registration
       pass that completed, since pruning against a half-built expected set would
       delete live schedules
+- [x] Release signing: `SHA256SUMS.asc` and `MANIFEST.asc`, checked by the
+      bootstrap against the key fingerprint built into `setup/bootstrap.sh`, and
+      by the updater against the installed board's key
+      (`update_require_signature` enforced)
+- [x] Release withdrawal and supersession (`release.mjs --withdraw` /
+      `--supersede`): a withdrawn release leaves the channel's release list, is
+      refused by name by the bootstrap and the updater, and a board running one
+      is told, with the newest listed replacement
+- [x] Maintenance mode (`.maintenance` flag file, `/admin/maintenance`,
+      `src/tools/maintenanceMode.js`): closes the board with a grace countdown,
+      drains queues, binkp sessions and terminal callers; updates use it
+- [x] Update progress page served on the gateway's own port while the BBS is
+      stopped (`src/maintenance/updateStatusServer.js`), with an updater guard
+      so a client reset cannot kill the run
+- [x] Upgrade notices shown before and after an update, verified against the
+      signed `SHA256SUMS`, acknowledged before the Update button applies
+- [x] Update housekeeping: only the last `update_backup_keep` (1) backups and
+      the running staging directory are kept (`update.js --prune`)
+- [x] Channel switch (stable/development) from `/admin/update`, with a confirm
+      step before moving to development
+- [x] Daily log rotation (`rotate-logs` job, `src/tools/rotateLogs.js`,
+      `log_retention_days` 30) and a separate `tic.log` for file echo processing
+- [x] Retention purges read their days when they run, and a purge switched off
+      has its schedule removed
+- [x] Boot unit check and install (`src/tools/bootUnit.js`), so a board set up
+      with `pm2 startup` keeps booting after an nvm Node upgrade
 
 ### Testing
-- [x] 3,278 tests passing (mocha)
+- [x] Mocha suite passing (3,278 tests on 2026-09-12; about 4,700 `it(` cases in `tests/` as of 2026-09-27, not re-counted by a run)
 - [x] Protocol tests (XMODEM, ZMODEM, binkp, EMSI/Wazoo)
 - [x] Routing tests (FTN router, BSO scanner)
 - [x] Parsing tests (TIC, QWK, nodelist, codepage, terminal)
@@ -468,7 +525,7 @@ Last updated: 2026-09-13
 | 17 | areas.bbs import | [x] | Parse areas.bbs from FTN hub, batch-create message areas + network mappings + peer subscriptions |
 | 18 | Web art + seasonal art | [x] | Web art from txtfiles/webart/, random selection, seasonal overrides with admin CRUD, call flow welcome splash |
 | 19 | Top 10 lists | [ ] | Top posters, top downloaders, most active users (week/month). Web page + terminal command |
-| 20 | Birthday messages | [~] | Detection and delivery are done: the daily template sweep in `bin/worker.js` fires the built-in `user_birthday` event (with `event.age`) through `messageTemplates`, so a sysop can already send a birthday PM, email or netmail. The call flow greeting is still missing, which is the half this item was originally about. No `birthday` stage exists in `call_flows`, terminal or web. |
+| 20 | Birthday messages | [~] | Detection and delivery are done: the daily template sweep (`runDailyTemplateEvents()` in `src/models/useraccounts.js`, run by the `user-maintenance` job) fires the built-in `user_birthday` event (with `event.age`) through `messageTemplates`, so a sysop can already send a birthday PM, email or netmail. The call flow greeting is still missing, which is the half this item was originally about. No `birthday` stage exists in `call_flows`, terminal or web. |
 | 21 | FTN netmail file attach | [x] | Inbound: recognize file-attach flag, link received files to netmail PM. Outbound: place attachment in BSO for binkp delivery. |
 | 22 | PM file attachments | [x] | Full attachment system across all transports (LOCAL, EMAIL, FTN, Web, IMAP, terminal indicator). pm_attachments table, disk storage, config limits. |
 | 23 | Session management | [x] | Remember Me, configurable session TTL, Log Out All Other Sessions, admin kill sessions |
@@ -552,6 +609,9 @@ Last updated: 2026-09-13
 | `API_DESIGN.md` | [x] |
 | `PEER_INTEROP.md` | [x] |
 | `HUB_COORDINATOR_DESIGN.md` | [x] |
-| `UPDATE_SYSTEM_DESIGN.md` | [x] design, unimplemented |
+| `UPDATE_SYSTEM_DESIGN.md` | [x] implemented (all phases built; released since 0.9.6a) |
+| `RELEASE_PROCESS.md` | [x] |
+| `QWK_ARCHITECTURE.md` | [x] |
 | `INSTALL.md` (sysop-facing) | [x] |
+| `UPDATING.md`, `UPDATES.md`, `MAINTENANCE.md` (sysop-facing) | [x] |
 | `README.md` (user-facing) | [x] |

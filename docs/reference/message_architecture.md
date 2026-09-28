@@ -17,18 +17,18 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 | File | Purpose |
 |------|---------|
-| `messages.js` | **Canonical message model** (post April 2026 consolidation). Owns all message CRUD, posting, threading, sanitization, and read operations. **Viewing:** `listMsgGroups(userSecurity)`, `getAreasInGroup(shortcode, userSecurity)`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml` (re-exported from `terminalText.js`). **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `resolveAreaAddress(areaId)` (origin line and FTN address resolution). **Unified threading** (called by all three tossers FTN/QWK/NNTP): `threadMessage(message, messagetable, threadtable, shortcode)` — 4-step algorithm: Step A (pre-assigned threadid) → Step B (reply_to MSGID lookup, case-insensitive) → Step C (subject match, case-sensitive, 365d for replies/30d for new) → Step D (guaranteed thread creation). No message exits with NULL threadid. `getExistingThreadBySubject` — subject-based matching helper. `createThreadRow`, `updateThreadStats`, `rollbackThread` — low-level thread helpers. **Inbound orchestrator:** `handleInboundEchoMessage(message)` — called by FTN tosser; delegates FTN-specific conversion to `echomail.ftnToDb` then runs unified threading and insertion. **Thread update queue:** `threadUpdateArray`, `drainThreadUpdateArray`, `pushThreadIdToUpdateQueue`. **Orphan reconciliation:** `pushImportedMsgId`, `drainImportedMsgIds`, `reconcileOrphans(shortcode, batchMsgIds)` (post-batch re-linking), `applyThreadingForArea(shortcode)` (retroactive orphan repair). **Thread maintenance:** `updateThread`, `updateThreadArray`, `updateDailyThreads`, `updateAreaThreads`, `mergeThreads`, `mergeRecentThreads`. **Security:** `sanitizeMessageFields` — strips dangerous HTML and URIs; called by user posting and importable by tossers. **Deletion:** `deleteMessageByUUID`, `deleteThreadByUUID`. **Moderation:** `moderationForArea`, `moderationFor`, `attachModeration`, `moderationTargetAllowed`, `buildMoveTargets`, `networkedAreaIds`, `canMoveMessageToArea`, `areaIsNetworked`, `threadOriginSummary`, `moveThreadToArea`, `moveMessageToArea`, `messageForClient` (wire shape shared by both lazy-load endpoints). See the Moderation section. |
+| `messages.js` | **Canonical message model** (post April 2026 consolidation). Owns all message CRUD, posting, threading, sanitization, and read operations. **Viewing:** `listMsgGroups(userSecurity)`, `getAreasInGroup(shortcode, userSecurity)`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml` (re-exported from `terminalText.js`). **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `resolveAreaAddress(areaId)` (origin line and FTN address resolution). **Unified threading** (called by all three tossers FTN/QWK/NNTP): `threadMessage(message, messagetable, threadtable, shortcode)`: a 4-step algorithm: Step A (pre-assigned threadid) → Step B (reply_to MSGID lookup, case-insensitive) → Step C (subject match, case-sensitive, 365d for replies/30d for new) → Step D (guaranteed thread creation). No message exits with NULL threadid. `getExistingThreadBySubject` is the subject-based matching helper. `createThreadRow`, `updateThreadStats`, `rollbackThread` are low-level thread helpers. **Inbound orchestrator:** `handleInboundEchoMessage(message)`, called by FTN tosser; delegates FTN-specific conversion to `echomail.ftnToDb` then runs unified threading and insertion. **Thread update queue:** `threadUpdateArray`, `drainThreadUpdateArray`, `pushThreadIdToUpdateQueue`. **Orphan reconciliation:** `pushImportedMsgId`, `drainImportedMsgIds`, `reconcileOrphans(shortcode, batchMsgIds)` (post-batch re-linking), `applyThreadingForArea(shortcode)` (retroactive orphan repair). **Thread maintenance:** `updateThread`, `updateThreadArray`, `updateDailyThreads`, `updateAreaThreads`, `mergeThreads`, `mergeRecentThreads`. **Security:** `sanitizeMessageFields` strips dangerous HTML and URIs; called by user posting and importable by tossers. **Deletion:** `deleteMessageByUUID`, `deleteThreadByUUID`. **Moderation:** `moderationForArea`, `moderationFor`, `attachModeration`, `moderationTargetAllowed`, `buildMoveTargets`, `networkedAreaIds`, `canMoveMessageToArea`, `areaIsNetworked`, `threadOriginSummary`, `getMessageByUUID`, `moveThreadToArea`, `moveMessageToArea`, `messageForClient` (wire shape shared by both lazy-load endpoints). See the Moderation section. **Retention:** `enforceRetentionLimits`, `previewRetentionForArea` (both call the internal `pruneArea`). See the Retention section. |
 | `userMsgPointers.js` | Message read tracking model. Two-tier pointer system: area-level scan pointers (`user_msg_pointers`) and per-thread pointers (`user_thread_pointers`). Area pointer is a floor — any message with `id <= area_pointer` is read. Thread pointers add granularity above the floor. Effective read threshold for a thread: `MAX(area_pointer, COALESCE(thread_pointer, 0))`. Provides: `advancePointer`, `advanceThreadPointer`, `markAreaRead`, `getThreadUnreadCounts` (batch), `getUnreadCount`, `hasNewMessages`, `getNewscanSummary`, `getFirstUnreadInThread`, `getFirstUnreadInArea`. Pre-populates pointers on user/area creation. Table bootstrap via `ensureConstraintsAndIndexes()` at startup. |
-| `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId)` returns `Map<shortcode, boolean>` resolving: user override → area `newscan_default` → true. `getSubscription(userId, shortcode)`, `setSubscription(userId, shortcode, subscribed)`, `removeSubscription(userId, shortcode)` for individual management. Used by terminal newscan, area selector, and future web newscan. |
-| `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). `normalizeFlags(input)` — coerces form input (string, array, or undefined) to JSON array for JSONB storage. Schema includes `thread_mode`, `post_as`, `newscan_default`, `ansi_area`, and four flag JSONB columns (`read_perm_flags`, `read_rest_flags`, `post_perm_flags`, `post_rest_flags`). |
-| `msgGroups.js` | Message group CRUD. `getGroupByShortcode`, `getActiveGroups`, `getAllGroups`, `getAllGroupsWithAreas`, `newGroup`, `updateGroup`, `removeGroup` (cascading area removal). `normalizeFlags(input)` — same coercion as `msgAreas.js`. Schema includes `read_security`, `post_security`, and four flag JSONB columns (same names as areas). Groups act as default templates — new areas inherit the parent group's security levels and flags. |
-| `echomail.js` | FTN protocol helpers only (post April 2026 consolidation). `ftnToDb(ftnMessage)` — converts FTN message object to DB row format. `dbToFtn(dbMessage)` — reverse conversion for outbound delivery. `getOutboundForConnection(conn)` — builds outbound message list for an FTN peer. All message reads, posting, threading, and inbound handling now live in `messages.js`. |
+| `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId, areasWithDefaults)` takes `[{ shortcode, newscan_default }]` and returns a plain object keyed by shortcode, resolving: user override, then area `newscan_default`, then true when that is null. `getSubscribedAreas(userId, areasWithDefaults)` returns the subscribed shortcodes. `isSubscribed`, `setSubscription`, `subscribe`, `unsubscribe`, `toggleSubscription`, `clearOverride` for individual management; `removeSubsForUser`, `removeSubsForArea` for cleanup. Used by terminal newscan and area selector, the web area list's subscribe toggle, the web call flow and QWK packets. |
+| `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `moveArea` (between groups), `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove), `updateStatsForArea`. Internal `normalizeFlags(input)` coerces form input (string, array, or undefined) to a JSON array for JSONB storage (`msgGroups.js` has the same helper). QWK conference numbering: `ensureQwkConfNumbers`, `nextConfNumberInGroup`. Schema includes `thread_mode`, `charset`, `post_as`, `newscan_default`, `ansi_area`, `max_age_days`, `max_messages`, `qwk_conf_number`, and four flag JSONB columns (`read_perm_flags`, `read_rest_flags`, `post_perm_flags`, `post_rest_flags`). |
+| `msgGroups.js` | Message group CRUD. `getGroupByShortcode`, `getActiveGroups`, `getInactiveGroups`, `getAllGroups`, `getAllGroupsWithAreas`, `newGroup`, `updateGroup`, `removeGroup` (cascading area removal), `reorderGroups`, `reorderAreas`, `pushDefaultsToAreas(shortcode, fields)` (fields: `security`, `flags`, `post_as`, `thread_mode`, `charset`, `newscan_default`, `ansi_area`, `retention`, or `all`), plus QWK block helpers (`nextGroupConfStart`, `validateGroupConfStart`, `renumberGroupAreas`). Schema includes `read_security`, `post_security`, and four flag JSONB columns (same names as areas). Groups act as default templates: new areas inherit the parent group's security levels, flags and the other defaults listed under `message_groups` below. |
+| `echomail.js` | FTN protocol helpers only (post April 2026 consolidation). `ftnToDb(ftnMessage)` converts an FTN message object to DB row format. `dbToFtn(dbMessage)` is the reverse conversion for outbound delivery. `getOutboundForConnection(conn)` builds the outbound message list for an FTN peer, using `evaluateOutbound` (per-message eligibility: imported history, not back to source, SEEN-BY, PATH) and `stampForHop`. All message reads, posting, threading, and inbound handling live in `messages.js`. |
 
 ### Text Formatting Pipeline
 
 | File | Purpose |
 |------|---------|
-| `terminalText.js` | Terminal text formatter and shared HTML body generator. `VirtualTerminal` class converts ANSI escape codes, pipe codes (`|XX`), and Synchronet Ctrl-A attribute codes to HTML with CSS classes. Supports cursor positioning, color, and a virtual terminal buffer. **`noWrap` mode**: when enabled, lines extend without column wrapping — CSS handles responsive layout. Smart space handling in noWrap mode: single spaces between words stay as regular ` ` (browser can word-wrap), leading/multi-spaces use `&nbsp;` (preserves formatting). **`formatBodyHtml(displayText, forceWidth)`**: consolidated HTML formatter used by all three tossers and the maintenance regeneration tool. Pipeline: ANSI art detection (`detectAnsiArt`) on the RAW text → paragraph reflow (`reflowText`), SKIPPED when the body is art → routing: art uses fixed-width VT, colored text uses noWrap VT, plain text uses `formatTextForHtml` or `<br>` replacement. **Two causes FIXED Sep 2026 (see issue #50); #48 closed 2026-09-22.** The order was wrong: reflow ran before anything asked whether the body was art, and `reflowParagraphs` joins any consecutive line at or above the width threshold, which every 78-to-80 column art row is. Three rows collapsed to one, and detection then ran on the wreckage. Separately `detectAnsiArt` only counted cursor positioning, so art built from SGR colour plus CP437 block glyphs read as ordinary coloured text; that half affected the terminal too. Both are fixed: `formatBodyHtml` now detects on the RAW text and skips reflow for art, mirroring what `processMessageBody` always did, and `detectAnsiArt` carries a second signal for block-drawn art (two or more art-like lines, at least one 40+ columns wide). The deliberate trade is that prose carrying two or more full-width rules now reads as art and loses reflow; no shape test separates the two, and reflow was previously merging such a rule onto the preceding sentence anyway. `body_html` is pre-rendered at toss time, so this does not repair stored messages: those need `maintenance.js --regen-html`, and only recover if `body_text` survived import intact. The raw sample off the hub settled #48: the one recurring bad Othernets post (Outpost BBS's [ANSI] Micronet notice) arrives with its rows already split by CRs from an escape-blind 79-byte wrapper upstream of 1:153/757, so nothing here can repair it. A third cause was found later reading at 80 columns on a phone: ASCII art and other laid-out text had its rows joined by reflow; `reflowParagraphs` now skips lines `isLaidOut()` identifies (see termMsgFormat.js). |
+| `terminalText.js` | Terminal text formatter and shared HTML body generator. `VirtualTerminal` class converts ANSI escape codes, pipe codes (`|XX`), and Synchronet Ctrl-A attribute codes to HTML with CSS classes. Supports cursor positioning, color, and a virtual terminal buffer. **`noWrap` mode**: when enabled, lines extend without column wrapping and CSS handles responsive layout. Smart space handling in noWrap mode: single spaces between words stay as regular ` ` (browser can word-wrap), leading/multi-spaces use `&nbsp;` (preserves formatting). **`formatBodyHtml(displayText, forceWidth)`**: consolidated HTML formatter used by all three tossers and the maintenance regeneration tool. Pipeline: ANSI art detection (`detectAnsiArt`) on the RAW text → paragraph reflow (`reflowText`), SKIPPED when the body is art → routing: art uses fixed-width VT, colored text uses noWrap VT (fixed width when `forceWidth` is given), plain text with a 3+ space run uses `formatTextForHtml` after trailing spaces and tabs are stripped from every line (#60), other plain text gets `\r` to `<br>` replacement. **Two causes FIXED Sep 2026 (see issue #50); #48 closed 2026-09-22.** The order was wrong: reflow ran before anything asked whether the body was art, and `reflowParagraphs` joins any consecutive line at or above the width threshold, which every 78-to-80 column art row is. Three rows collapsed to one, and detection then ran on the wreckage. Separately `detectAnsiArt` only counted cursor positioning, so art built from SGR colour plus CP437 block glyphs read as ordinary coloured text; that half affected the terminal too. Both are fixed: `formatBodyHtml` now detects on the RAW text and skips reflow for art, mirroring what `processMessageBody` always did, and `detectAnsiArt` carries a second signal for block-drawn art (two or more art-like lines, at least one 40+ columns wide). The deliberate trade is that prose carrying two or more full-width rules now reads as art and loses reflow; no shape test separates the two, and reflow was previously merging such a rule onto the preceding sentence anyway. `body_html` is pre-rendered at toss time, so this does not repair stored messages: those need `maintenance.js --regen-html`, and only recover if `body_text` survived import intact. The raw sample off the hub settled #48: the one recurring bad Othernets post (Outpost BBS's [ANSI] Micronet notice) arrives with its rows already split by CRs from an escape-blind 79-byte wrapper upstream of 1:153/757, so nothing here can repair it. A third cause was found later reading at 80 columns on a phone: ASCII art and other laid-out text had its rows joined by reflow; `reflowParagraphs` now skips lines `isLaidOut()` identifies (see termMsgFormat.js). |
 | `termMsgFormat.js` | Terminal message body formatting pipeline. CP437↔UTF-8 conversion, pipe/Ctrl-A/ANSI code conversion, semantic line classification (`classifyLine` → NORMAL/QUOTE/TEAR/TAGLINE/ORIGIN/KLUDGE), paragraph reflow (`reflowParagraphs` at 80% threshold reassembles text from wider editors, but never joins a line `isLaidOut()` calls laid out: two or more gaps of 3+ spaces, one gap of 4+, or under half letters and digits), ANSI art detection (`detectAnsiArt` — cursor positioning CSI sequences, plus a second signal for block-drawn art via `artLineWidths`), and ANSI-aware word wrapping (`wordWrapLineAnsi` with `measureVisualWidth`/`findStringIndexAtVisualCol`). Exports `reflowText(text, wrapWidth)` — normalizes line endings, reflows, joins with `\r` for VirtualTerminal compatibility. Does NOT import `terminalText.js` (dependency flows one direction only). |
 | `codepageConversions.js` | Shared CP437↔UTF-8 conversion utilities. `formatTextForHtml()` for lightweight space-preservation formatting of plain text with alignment. HTML entity escaping as defense-in-depth against XSS. |
 
@@ -36,7 +36,7 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 | File | Purpose |
 |------|---------|
-| `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile`. Helpers: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `parseFlags`, `checkAreaReadAccess`, `checkAreaPostAccess`. Access checks combine security level + permission flags (must have ALL) + restriction flags (must have NONE). Works on both group and area objects (same column names). All area/thread routes pass `sufficientAccess` and `canPost` booleans. Group listing filters groups and areas by `checkAreaReadAccess`, hides groups with zero accessible areas. Area listing gates group access and filters child areas. All JSON lazy-load endpoints use `checkAreaReadAccess`. POST routes use `checkAreaPostAccess`. Guard chain pattern in templates. Bidirectional lazy scroll with auto-fill for short content. Mark-area-read. |
+| `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile`. Local helpers: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `decorateModeration`. Access helpers `parseFlags`, `checkAreaReadAccess`, `checkAreaPostAccess`, `canModerateArea` are imported from `src/utils/areaAccess.js`. Access checks combine security level + permission flags (must have ALL) + restriction flags (must have NONE). Works on both group and area objects (same column names). All area/thread routes pass `sufficientAccess` and `canPost` booleans. Group listing filters groups and areas by `checkAreaReadAccess`, hides groups with zero accessible areas. Area listing gates group access and filters child areas. All JSON lazy-load endpoints use `checkAreaReadAccess`. POST routes use `checkAreaPostAccess`. Guard chain pattern in templates. Bidirectional lazy scroll with auto-fill for short content. Mark-area-read. |
 
 ### Views
 
@@ -53,8 +53,8 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `messageBase.js` | `src/maintenance/` | `regenerateAllBodyHtml(options)` and `regenerateAreaBodyHtml(shortcode, options)`. Iterates active areas, regenerates `body_html` from `utf8`/`body_text` using current `formatBodyHtml` pipeline. Keyset pagination by id. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress`, `quiet`. |
-| `maintenance.js` | `src/tools/` | CLI runner. Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`, `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency managed by BullMQ jobId deduplication (replaces PID-file locking). See `PROCESS_ARCHITECTURE.md`. |
+| `messageBase.js` | `src/maintenance/` | `regenerateAllBodyHtml(options)` and `regenerateAreaBodyHtml(shortcode, options)`. Iterates active areas, regenerates `body_html` from `body_text` using current `formatBodyHtml` pipeline. Keyset pagination by id. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress`, `quiet`. |
+| `maintenance.js` | `src/tools/` | CLI runner. Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`, `--fix-msgids`, `--rethread`, `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency managed by BullMQ jobId deduplication via `addDeduped()` in `src/queues/jobs.js` (replaces PID-file locking): a repeat request is refused while the first is waiting or running, and runs once it has finished. See `PROCESS_ARCHITECTURE.md`. |
 
 ---
 
@@ -73,6 +73,8 @@ Each row represents a message group containing one or more areas. Groups provide
 - `area_count` — cached count of child areas
 - `active` — boolean
 - `created_at`, `updated_at`, `created_by_uuid`, `created_by_name`
+- Defaults for new areas in the group (see the matching `message_areas` columns): `post_as`, `thread_mode`, `charset`, `newscan_default`, `ansi_area`, `max_age_days`, `max_messages`
+- `qwk_conf_start` (the group's QWK conference block), `sort_order`
 
 ### message_areas
 
@@ -109,21 +111,28 @@ Each row represents a message area (forum/conference) belonging to a message gro
 - `post_as` — VARCHAR(16), DEFAULT 'username'. Controls how the poster's name appears:
   - `username` — posts display the user's login name
   - `realname` — posts display the user's full name (falling back to username)
-- `newscan_default` — BOOLEAN, DEFAULT true. Whether this area is included in newscan by default for users who haven't set an explicit override. Resolved by `userAreaSubs.getSubscriptionMap()`: user override → this column → true.
+- `newscan_default`: BOOLEAN, column DEFAULT false (`newArea` writes the form's value). Whether this area is included in newscan by default for users who haven't set an explicit override. Resolved by `userAreaSubs.getSubscriptionMap()`: user override, then this column, then true only when the column is null.
+- `charset`: VARCHAR(16), DEFAULT 'auto' (`auto` / `cp437` / `utf8`, vocabulary in `src/utils/charsetPolicy.js`). The wire encoding of outbound FTN from this area, declared in a CHRS kludge. `auto` sends CP437 whenever the body round-trips losslessly (`fitsCp437`) and UTF-8 only when it would not (`charsetForMessage`, called from `ftnTosser.js`). Also on `message_groups` as the default for new areas, pushable via Push Group Defaults (unticked by default). Per area rather than per link, because everyone carrying an echo shares its encoding.
+- `qwk_conf_number`: the area's QWK conference number, allocated inside its group's `qwk_conf_start` block.
+- `max_age_days`, `max_messages`: retention limits, see Retention.
+- `sort_order`: display order within the group.
 - `ansi_area` — BOOLEAN, DEFAULT false. "Mostly ANSI art": the web reader starts this area at 80 columns on phones instead of 40 (#54). Set on the area form; `message_groups.ansi_area` is the default a new area inherits when the form does not say, and Push Group Defaults can apply it (unticked by default), the same shape as `thread_mode`. It only chooses the starting width; readers can switch, and messages detected as art show at 80 regardless. It does not control whether escape sequences survive or whether text is reflowed. Unsettable from March to September 2026 (#49).
 
 ### Message tables (per area)
 
 Each message area has `mb_<shortcode>_msgs` and `mb_<shortcode>_threads` tables.
 
+Columns come from `src/templates/msgTable.conf` and `src/templates/threadTable.conf`, applied to every active area by `msgAreas.createMsgTables()`.
+
 Key columns on message records:
-- `msg_id` — canonical message ID (from @MSGID kludge or HEADERS.DAT Message-ID)
+- `msg_id`: canonical message ID (from @MSGID kludge or HEADERS.DAT Message-ID); `msg_orig_addr` holds the MSGID's origin address separately, and `reply_to` / `reply_orig_addr` likewise
 - `qwk_msg_id` — QWK-specific dupe ID: `{connectionUUID}:{confNum}:{msgNum}`
 - `nntp_msg_id` — NNTP Message-ID (separate column, allows cross-posting)
 - `source_network_id` — which network this message originated from (for echo suppression)
 - `origin_line` — extracted origin/tagline (stored separately, may be stripped from body)
-- `body_text` — message body (CP437 if from QWK/FTN, UTF-8 if from NNTP or local)
-- `utf8` — UTF-8 version of body (null if body_text is already UTF-8)
+- `body_text`: message body as canonical Unicode for every source, since migration `0006-normalise-body-text`. Read this directly.
+- `utf8`: still written (identically) but read by nothing. It is the only copy of the decoded text for the rows 0006 rewrote (QWK rows that held raw CP437 in `body_text`), kept so that rewrite stays reversible; a later release drops it.
+- `raw_text`, `seen_by`, `path`, `product_string`, `signature_string`, `imported` (history imported rather than tossed, excluded from outbound)
 - `body_html` — pre-rendered HTML for web display (see body_html Pipeline below)
 - `thread_id`, `threadid`, `reply_to` — threading
 
@@ -235,7 +244,10 @@ disposable: nodelist distribution, BBS ads, announcement echoes.
 | `max_messages` | `message_areas`, `message_groups` | keep the N newest, remove the rest |
 
 The group copies are defaults seeded into new areas created in that group, the
-same relationship `file_groups` has with `file_areas`. To reach areas that
+same relationship `file_groups` has with `file_areas`. They are edited on the
+Retention tab of the group's create and edit forms (`admin/msgGroups/index.pug`,
+`admin/msgGroups/view.pug`), as for areas and file groups; before 0.9.12a they
+sat on the Main tab. To reach areas that
 already exist, use `msgGroups.pushDefaultsToAreas(shortcode, ['retention'])`,
 exposed as a Retention tickbox in the Push Group Defaults modal on the group
 page.
@@ -325,21 +337,24 @@ All three tossers and the maintenance tool use `formatBodyHtml()` from `terminal
 ### Pipeline Steps
 
 ```
-displayText (utf8 or body_text)
-  → reflowText(text, wrapWidth)
+displayText (body_text)
+  → detectAnsiArt(displayText) on the RAW text (see below)
+  → reflowText(text, wrapWidth), SKIPPED when the body is art
       normalizes \r\n → \n, \r → \n, splits into lines
       reflowParagraphs(): normal text lines at ≥80% wrapWidth joined with next line and re-wrapped,
                           unless either line isLaidOut() (columns, alignment, drawing)
       joins with \r (VirtualTerminal expects \r for line breaks)
   → detect color codes: \x1b[, |XX, \x01
       → if found:
-          detectAnsiArt(): cursor positioning CSI (CUP, CUU/CUD/CUF/CUB),
-                            or 2+ block-glyph lines with one 40+ wide
+          art flag from the first step: cursor positioning CSI (CUP, CUU/CUD/CUF/CUB),
+                            or 2+ block-glyph lines with one 40+ wide;
           NOT just color-only SGR
           → ANSI art: fixed-width VirtualTerminal (terminalWidth, wrap enabled)
-          → colored text only: noWrap VirtualTerminal (CSS handles responsive layout)
+          → colored text only: noWrap VirtualTerminal (CSS handles responsive layout;
+                               fixed width instead when forceWidth is given)
       → if no color codes:
-          triple-space alignment (3+ consecutive spaces) → formatTextForHtml()
+          triple-space alignment (3+ consecutive spaces) → strip trailing spaces/tabs
+                                                          per line → formatTextForHtml()
           plain text → \r → <br> replacement
 ```
 
@@ -505,7 +520,9 @@ CREATE INDEX idx_uas_user ON user_area_subscriptions(user_id);
 
 - **Terminal newscan** (`newscan.js`): calls `getSubscriptionMap()` to filter which areas to scan
 - **Terminal area selector** (`msgAreaSelector.js`): unsubscribed areas displayed dimmed, T key toggles subscription
-- **Future web newscan**: same `getSubscriptionMap()` filtering
+- **Web message area list** (`GET /messages`): `getSubscriptionMap()` marks each area, and `POST /messages/area/:shortcode/subscribe` toggles it
+- **Web call flow** and **QWK packets** (`/qwk`, `qwkUser.js`): `getSubscribedAreas()`
+- **Future web newscan page**: same filtering
 
 ---
 
@@ -629,9 +646,9 @@ Empty flag arrays impose no constraint. All three layers must pass for access to
 
 **Area/thread views**: `sufficientAccess` from `checkAreaReadAccess`, `canPost` from `checkAreaPostAccess`, both passed to templates for guard chains and UI gating.
 
-**JSON lazy-load endpoints**: all three (`threads.json`, `messages.json`, thread `messages.json`) use `checkAreaReadAccess`.
+**JSON lazy-load endpoints**: all three (`/messages/area/:shortcode/threads/load`, `/messages/area/:shortcode/messages/load`, `/messages/area/:shortcode/thread/:uuid/load`) use `checkAreaReadAccess`.
 
-**POST routes**: `newthread` and `reply` use `checkAreaPostAccess`.
+**POST routes**: `newthread` and `reply` use `checkAreaPostAccess`. The moderation routes (`/thread/:uuid/delete`, `/message/:uuid/delete`, `/thread/:uuid/move`, `/message/:uuid/move` under `/messages/area/:shortcode`) use `canModerateArea`, and a move re-checks the destination with `canMoveMessageToArea`.
 
 #### Template guard chains
 
@@ -654,13 +671,13 @@ else → content (with canPost gating on post/reply UI)
 
 #### Admin management
 
-Groups and areas share the same four flag columns. Flag values are JSONB arrays of string tags. The admin UI uses a badge + select + add-button pattern (same as user flag management). Available flags are defined in `admin.js` as `availablePermissions` ("Sysop", "Mod", "Adult", "Admin") and `availableRestrictions` ("Underage", "Banned").
+Groups and areas share the same four flag columns. Flag values are JSONB arrays of string tags. The admin UI uses a badge + select + add-button pattern (same as user flag management). Available flags come from `getAvailablePermissions()` / `getAvailableRestrictions()` in `admin.js`: built-in `BUILTIN_PERMISSIONS` ("Sysop", "Mod", "Adult", "Admin", "Email", "Netmail") and `BUILTIN_RESTRICTIONS` ("Underage", "Unverified", "Banned", "Email", "Netmail", "Private Messages"), plus the sysop's `custom_permission_flags` / `custom_restriction_flags` config keys, passed to views as `availablePermissions` and `availableRestrictions`.
 
 Groups act as templates: when creating a new area, the new-area modal pre-populates read/post security and all four flag sets from the parent group. The `msgAreas/index` view fetches defaults via `GET /admin/msgGroup/:shortcode/defaults` (JSON endpoint) when the group selector changes. Individual areas can override any setting.
 
 ### Message Headers
 
-Stacked two-line layout on all screen sizes: from/to/subject on top, date below. Reply button floated right with `flex-shrink-0`. Uses `d-flex align-items-start` (not `align-items-center`) so the button aligns to the top.
+Stacked layout: `.msg-head` holds from and to (`.msg-who`, truncated with an ellipsis when too long) with the date below; Reply and the moderation buttons sit in a `flex-shrink-0` group on the right. Uses `d-flex align-items-start` (not `align-items-center`) so the buttons align to the top. In the flat view the subject shares the who line from lg up and truncates; below lg it gets a full-width `.msg-subject-row` of its own and wraps (`public/css/styles.css`).
 
 ---
 
@@ -758,7 +775,7 @@ node src/tools/maintenance.js --regen-html --batch 50
 
 11. **Responsive layout with offcanvas sidebar**: Desktop (xl) shows sidebar column. Below xl, offcanvas with `data-bs-backdrop='false'`. Desktop nav buttons hidden on mobile since they're in the offcanvas.
 
-12. **Auto-sizing monospace text**: Probe measures at reference size, scales to fill container. `ansi_area` forces 80 cols. Desktop → 80, mobile → 40.
+12. **Auto-sizing monospace text**: Probe measures at reference size, scales to fill container. Desktop: 80. Mobile: the reader's 40/80 choice for the area, else 80 for an `ansi_area`, else 40; detected art is always 80.
 
 13. **Model-layer input sanitization**: `sanitizeMessageFields()` strips dangerous HTML at the model layer, covering both web posts and (future) network imports.
 
@@ -797,4 +814,4 @@ Per-network registry of available echomail areas. See `NETWORKING_ARCHITECTURE.m
 - **Tosser sanitization integration**: Wire `sanitizeMessageFields()` into all three tosser inbound paths
 - **Message body word-wrapping on post**: Enforce 80 columns before DB save for FTN/QWK compatibility
 - **Flat-mode reply thread UUID resolution**: Currently null for some messages — needs `getThreadByDbId()` lookup
-- ~~**QWK packet integration**~~ — **Done**. `qwkUser.js` generates personal `.qwk` packets using `userMsgPointers` scan pointers and imports `.rep` replies via `echomail.startNewThread()`/`replyToThread()`. Conference numbers via `message_areas.qwk_conf_number`, allocated in per-group blocks (`message_groups.qwk_conf_start` + `qwk_group_stride`, default 1000). Numbers 1-100 reserved for system conferences (announcements, wall, bulletins). See `QWK_USER_DESIGN.md`.
+- ~~**QWK packet integration**~~: **Done**. `qwkUser.js` generates personal `.qwk` packets using `userMsgPointers` scan pointers and imports `.rep` replies via `messages.startNewThread()`/`replyToThread()`. Conference numbers via `message_areas.qwk_conf_number`, allocated in per-group blocks (`message_groups.qwk_conf_start` + `qwk_group_stride`, default 1000). Numbers 1-100 reserved for system conferences (announcements, wall, bulletins). See `QWK_USER_DESIGN.md`.

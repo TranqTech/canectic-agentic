@@ -86,11 +86,37 @@ node scripts/release.mjs --stable 0.9.6a --dry-run
 | `--allow-advisories` | Cut despite a fixable high or critical advisory |
 | `--allow-dirty` | Build from uncommitted work. Never for a real release |
 | `--allow-migration-gap` | Publish a stable that drops a development migration |
-| `--no-tag` | Skip the release commit and the tag |
-| `--sign` | GPG sign `SHA256SUMS` |
+| `--no-tag` | Skip the release commit and the tag (stable only). Also skips the GitLab release |
+| `--no-gitlab` | Do not create the GitLab release for the tag |
+| `--sign` | Sign with the release key: `SHA256SUMS`, the `MANIFEST` inside the archive, and the tag (see below) |
+| `--publish <version>` | Only create the GitLab release for an already cut, pushed tag |
+| `--withdraw <version>` | Withdraw a published release (needs `--reason`), see "Withdrawing a release" |
+| `--supersede <version>` | Name the replacement of a withdrawn release (needs `--by`) |
+| `--by <version>` | The replacement, optional with `--withdraw` |
+| `--reason "..."` | Why it was withdrawn, required with `--withdraw` |
 | `--base-manifest PATH` | Point a delta at a base manifest held elsewhere |
 | `--date YYYY-MM-DD` | Override the release date |
 | `--counter N` | Force a same-day development build counter |
+
+### Signing
+
+`--sign` signs with the key whose fingerprint is read out of
+`setup/canectic-release.asc`, never a configured one, so a cut cannot be signed
+by some other key on the box that nobody pinned (`releaseKeyFingerprint()` in
+`scripts/release.mjs`). `assertCanSign` in `src/release/signing.js` proves the
+key is usable before the suite, the bookkeeping and the commit, and on the
+withdraw/supersede path before the index is touched.
+
+Three things are signed:
+
+- `SHA256SUMS`, as `SHA256SUMS.asc` beside it. A build without `--sign` removes
+  a stale `SHA256SUMS.asc`, since a signature over the previous list would read
+  as tampering
+- `MANIFEST`, as `MANIFEST.asc` **inside** the archive. This is the only
+  signature that reaches a board fed by a file echo, and the one a board checks
+  on update (`verifyTreeSignature`, pinned to the installed board's key; refused
+  when `bad`, and when anything but `verified` with `update_require_signature` on)
+- the tag, `git tag -s` rather than `git tag -a`
 
 ### The dependency audit
 
@@ -151,8 +177,9 @@ what happens to be on the maintainer's disk.
 7. Stages the shipped tree, builds `MANIFEST`, packs the archive
 8. Writes the metadata, the standalone manifest, the channel index, the
    bootstrap and its checksum, and `SHA256SUMS`
-9. Creates the GitLab release for the tag, with the release notes as its
-   description and the artifacts attached (see section 3)
+9. Tries to create the GitLab release for the tag (see section 3). Never
+   fatal, and normally refused at this point because a cut does not push and
+   the tag is not on the remote yet; push, then run `--publish <version>`
 
 The bookkeeping happens **before** the artifact is staged, so a release archive
 contains its own release notes and its own changelog entry. Building first would
@@ -238,7 +265,7 @@ because a development build may be based on it and because removing a file
 people may already hold solves nothing.
 
 On the notes and the changelog: the changelog needs no special handling, being
-append-only and chronological — the replacement gets its own section and the
+append-only and chronological: the replacement gets its own section and the
 withdrawn release keeps its own, which is exactly right for somebody reading
 what they are about to receive. The release **notes** are a different matter,
 since a sysop jumping from the version before the withdrawal to the replacement
@@ -293,8 +320,14 @@ before anything is cut.
 | `SHA256SUMS` | Checksums for everything above |
 | `SHA256SUMS.asc` | Detached signature, with `--sign` |
 
-The archive unpacks to `canectic-<version>/` and carries a `MANIFEST` at its
-root.
+| `canectic-release.asc` | The public release key, copied from `setup/` |
+
+The archive unpacks to `canectic-<version>/`, which carries `MANIFEST` (and
+`MANIFEST.asc` when signed). Three sidecars sit at the archive root, outside
+that directory, because they describe the archive rather than the software:
+`CANECTIC.ID`, `canectic-<version>.json` (without its own checksum) and a
+generated `FILE_ID.DIZ` (`src/release/identity.js`). The FTN file echo path
+identifies an archive by its `CANECTIC.ID`.
 
 `SHA256SUMS` is built by exclusion: everything in the publish directory except
 the list itself and a signature over it. It used to be built from a pattern
@@ -311,6 +344,12 @@ as the description and the archive, its two sidecars, `SHA256SUMS`,
 `SHA256SUMS.asc` and the public key uploaded to the project's generic package
 registry. `--no-gitlab` skips it, and a missing or unauthenticated `glab` is
 reported rather than failing a cut that is already complete.
+
+It refuses while the tag is not on the remote, or is there as a lightweight
+(unsigned) tag, because `glab` silently creates a missing tag, unsigned, at the
+remote's head (`src/release/gitlabRelease.js`, checked with `git ls-remote`).
+At the end of a cut the tag is normally not pushed yet, so the usual order is
+cut, push with tags, then `node scripts/release.mjs --publish <version>`.
 
 The release host stays canonical: `update_check_url` points there and the
 bootstrap fetches from there. The page is where a person finds a release.
@@ -441,7 +480,12 @@ counting an unlisted file as a problem because the list is built by exclusion,
 and verifies `SHA256SUMS.asc` when there is one. After sending, it downloads
 every release file through the public URL and compares bytes, checks that a
 missing file is a real 404 (the update check reads a 404 as "nothing published
-on this channel"), and checks the changelog and notes pages answer. A file can
+on this channel"), and checks the changelog and notes pages answer.
+
+It also refuses release notes that still carry the placeholders the cut's
+skeleton leaves for a human (the one-line summary and the Highlights):
+v0.9.7a reached the site with both, through a verification that only compared
+bytes and signatures. A file can
 arrive intact on the host and still be served wrong.
 
 The changelog goes as the tree has it, `Pending` included, so running the
@@ -491,8 +535,19 @@ Two retention constraints, neither of them a preference:
 | `src/release/pipelineCheck.js` | The migration coverage rule, both callers |
 | `src/release/changelog.js` | Reading and closing `Pending` |
 | `src/release/updateVerdict.js` | Whether an update exists and may be taken (phase 5) |
+| `src/release/signing.js` | Signing on the cut, and signature verification on the board |
+| `src/release/auditCheck.js` | The dependency audit rule |
+| `src/release/identity.js` | `CANECTIC.ID`, the metadata sidecar and `FILE_ID.DIZ` |
+| `src/release/entryPoint.js` | `bootstrap.sh`, its checksum, `INSTALL.md` and the public key |
+| `src/release/gitlabRelease.js` | The GitLab releases page |
+| `src/release/lockfile.js` | Stamping and comparing `package-lock.json` |
+| `src/release/upgradeNotices.js` | Which notices a board is shown |
+| `scripts/rehearsal/` | The rehearsal kit (section 2), tracked, never shipped |
 | `docs/releases/pending.json` | The declarations accumulating this cycle |
 
-Everything under `src/release/` is pure or filesystem-only, and unit tested in
-`tests/release*.test.js` and `tests/shippedTree.test.js`. The CLI is
-deliberately thin: it is the part a test cannot usefully assert.
+Everything under `src/release/` is pure or filesystem-only (signing and the
+GitLab mirror shell out to `gpg`, `git` and `glab`), and unit tested in
+`tests/release*.test.js`, `tests/shippedTree.test.js`, `tests/publish.test.js`
+and `tests/gitlabRelease.test.js`. The CLI's helpers are importable too:
+`main()` runs only when `release.mjs` is the program, so the orchestration is
+tested in `tests/releaseOrchestration.test.js`.

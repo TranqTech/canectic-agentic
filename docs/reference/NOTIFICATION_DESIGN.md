@@ -2,6 +2,10 @@
 
 Centralised notification system for both sysop operational alerts and user activity notifications. Delivered in real-time via PresenceSocket, persisted in PostgreSQL for history.
 
+**Status: implemented, with deviations from this design.** Built: table and model (`src/models/notifications.js`), PresenceSocket push, bell and dropdown in both layouts, `/notifications` history page, terminal reader menu command, daily purge. Changed from the design: sysop notifications are one row PER SYSOP, not a `user_id = NULL` broadcast (see Schema); the terminal reader has fewer keys than designed; there is no `notifications_max_per_page` key. Not built: the call flow notification stage, the terminal sysop danger alert (`pendingNotification`), type/severity filters and bulk actions on `/notifications`, and most of the producers originally listed (see Notification Types). The model has no delete function.
+
+Not to be confused with `privateMessages.notifySysops(subject, body)`, which delivers a private message to every sysop's PM inbox (used by the FTN netmail adapter and the QWK tosser) and does not write to this table.
+
 ## Overview
 
 Two notification channels:
@@ -30,64 +34,67 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 ```
 
+Created by `notifications.ensureTable()`, not by a `db/schema` file. `user_id` is written for every row, but the column is nullable.
+
 Indexes:
-- `(user_id, read, created_at DESC)` -- fast unread query per user
-- `(user_id IS NULL, read, created_at DESC)` -- sysop broadcast query
+- `idx_notif_user_unread (user_id, read, created_at DESC)` -- fast unread query per user
+- `idx_notif_sysop (created_at DESC) WHERE user_id IS NULL` -- left over from the broadcast design; nothing writes NULL rows now
 
 ### user_id conventions
 
-- `user_id = N`: notification for a specific user
-- `user_id = NULL`: sysop broadcast (visible to all users with Sysop permission flag)
+- `user_id = N`: every notification, including sysop ones.
+- `createSysop()` inserts one row for each active user with the Sysop permission flag and pushes each over PresenceSocket, so each sysop's read state is their own. It returns the first inserted id. The original `user_id = NULL` broadcast was replaced for this reason.
 
 ## Notification Types
 
-### Sysop (user_id = NULL)
+Every producer in the code as of 0.9.12a (grep `createSysop(` and `notifications.create(`). `createSysop` defaults to severity `warning` and icon `exclamation-triangle` when a producer passes none.
+
+### Sysop (one row per sysop, via `createSysop`)
 
 | Type | Severity | Title Example | Produced By |
 |------|----------|---------------|-------------|
-| `tic_error` | danger | Bad TIC file: FILENAME.TIC | ticTosser |
-| `tic_received` | info | TIC file received: FILENAME in AREA | ticTosser |
-| `pm_undeliverable` | warning | Undeliverable PM to "Username" | privateMessages |
-| `areafix_request` | info | AreaFix request from 1:123/456 | areafix |
-| `filefix_request` | info | FileFix request from 1:123/456 | filefix |
-| `freq_served` | info | FREQ: served 3 file(s) to 1:123/456 | freq/session |
-| `freq_failed` | warning | FREQ: 2 file(s) not found for 1:123/456 | freq/session |
-| `user_registered` | info | New user registered: Username | useraccounts |
-| `user_verified` | success | User verified: Username | mailVerification |
-| `mailer_error` | danger | Mailer session failed: 1:123/456 | mailer/session |
-| `mailer_auth_fail` | warning | Auth failure from 1.2.3.4 | mailer/session |
-| `nodelist_imported` | success | Nodelist imported: 1234 nodes | nodelistImport |
-| `nodelist_error` | danger | Nodelist import failed: reason | nodelistImport |
-| `toss_error` | danger | FTN inbound error: reason | ftnTosser |
-| `packet_rejected` | warning | Packet rejected: bad password | ftnTosser |
+| `tic_error` | danger | Bad TIC file: FILENAME.TIC | `src/middleware/tossers/ticTosser.js` |
+| `pm_undeliverable` | warning | Undeliverable PM to "Username" | `src/models/privateMessages.js` |
+| `areafix_request` | info | AreaFix request from 1:123/456 | `src/models/areafix.js` |
+| `filefix_request` | info | FileFix request from 1:123/456 | `src/models/filefix.js` |
+| `user_registered` | info | New user registered: Username | `src/models/useraccounts.js` `createNewUser()` |
+| `echolist_removal` / `filebone_removal` | warning | Echolist areas removed: NAME | echolist/filebone import in `src/routes/admin.js`, and `src/maintenance/echolistScan.js` |
+| `echolist_batch_subscribe` / `filebone_batch_subscribe` | info, or warning when some failed | Batch subscribe finished: N area(s) created | `src/maintenance/echolistBatchSubscribe.js`, `fileboneBatchSubscribe.js` |
+| `worker_health` | danger by default; warning for overdue schedules | Scheduled jobs are overdue | `src/queues/workerWatchdog.js` |
+| `schedule_removed` | warning | (names the connection, network and host) | `src/queues/schedules.js`, when gateway startup prunes a poll/QWK/NNTP schedule nothing in the database asks for (0.9.12a) |
+| `update_available` | from the check result | (update check verdict) | `src/maintenance/updateCheck.js` |
+| `qwk_id_problem` | warning | (lists QWK IDs that break the rules) | `src/maintenance/qwkIdAudit.js`, at startup (0.9.12a) |
+| `qwk_file_received` | info | Received FILE from ID via QWK | `src/models/qwkFiles.js` (0.9.12a) |
 
-### User (user_id = specific)
+### User (`create(userId, ...)`)
 
 | Type | Severity | Title Example | Produced By |
 |------|----------|---------------|-------------|
-| `pm_received` | info | New PM from Username | privateMessages |
-| `thread_reply` | info | Reply in "Subject" by Username | echomail (future) |
-| `file_new` | info | New file in Area Name: filename | fileEntries (future) |
-| `announcement` | info | New announcement: Title | announcements (future) |
-| `security_change` | warning | Your password was changed | useraccounts |
-| `verification` | success | Address verified successfully | mailVerification |
+| `pm_received` | info | New PM from Username | `src/models/privateMessages.js` |
+| `maintenance` | warning | (board closing for maintenance) | `src/maintenance/webDrain.js`, one per connected web user when maintenance mode is entered |
+
+### Proposed in the original design, not produced
+
+`tic_received`, `freq_served`, `freq_failed`, `user_verified`, `mailer_error`, `mailer_auth_fail`, `nodelist_imported`, `nodelist_error`, `toss_error`, `packet_rejected` (sysop); `thread_reply`, `file_new`, `announcement`, `security_change`, `verification` (user). Nothing in the code creates these.
 
 ## Model: src/models/notifications.js
 
 ```javascript
-// Core functions
+// Exports as implemented
 async function ensureTable()
+function setPresenceServer(server)                      // gateway hands over the PresenceSocket
 async function create(userId, type, title, body, opts)  // opts: { link, icon, severity }
-async function createSysop(type, title, body, opts)     // shorthand: userId = null
-async function getUnread(userId, limit)
-async function getAll(userId, limit, offset)
-async function getSysopUnread(limit)                    // where user_id IS NULL
+async function createSysop(type, title, body, opts)     // one row per active sysop
+async function getUnread(userId, isSysop, limit)
+async function getAll(userId, isSysop, limit, offset)
+async function getUnreadCount(userId, isSysop)
 async function markRead(id, userId)
 async function markAllRead(userId)
-async function getUnreadCount(userId)
-async function getSysopUnreadCount()
-async function purgeOld(days)                           // maintenance cleanup
+async function getById(id)
+async function purgeOld(days)                           // read rows older than N days
 ```
+
+`create` and `createSysop` return null without writing when `notifications_enabled` is false. The query functions accept `isSysop` but filter on `user_id` alone, since sysop rows are per user. There is no separate sysop-unread query.
 
 ## Delivery via PresenceSocket
 
@@ -107,7 +114,7 @@ presenceServer._sendToUser(userId, {
 });
 ```
 
-For sysop broadcasts, send to all connected users with the Sysop permission flag. The PresenceServer already has session data including permission flags.
+`createSysop()` does the same for each sysop row it inserts. On connect, PresenceSocket sends `notification_count` and then replays up to 10 recent unread notifications to populate the dropdown.
 
 ## UI: Nav Bar Bell Icon
 
@@ -134,11 +141,7 @@ Colour-coded by severity: info (blue), success (green), warning (yellow), danger
 
 ## Web Page: /notifications
 
-Full notification history with pagination. Table or card list with:
-- Filter by type/severity
-- Mark read/unread toggle
-- Bulk mark read
-- Sysop sees both their personal notifications and sysop broadcasts
+Full notification history, 50 per page (`?page=N`, hardcoded), route in `src/routes/index.js`, view `src/views/notifications/index.pug`. Implemented: per-row Mark read (`POST /notifications/read/:id`) and Mark all read (`POST /notifications/read-all`). Not implemented: type/severity filters and a mark-unread toggle.
 
 ## PresenceSocket Message Types
 
@@ -188,19 +191,20 @@ await notifications.createSysop('areafix_request',
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `notifications_enabled` | boolean | `true` | Enable/disable notification system |
-| `notifications_retention_days` | number | `30` | Days to keep read notifications before purge |
-| `notifications_max_per_page` | number | `50` | Pagination limit for notification history |
+| `notifications_enabled` | boolean | `true` | Enable/disable notification system (category system) |
+| `notifications_retention_days` | number | `30` | Days to keep read notifications before purge, `0` never purges (category maintenance) |
+
+The designed `notifications_max_per_page` was not added; the page size is fixed at 50.
 
 ## Maintenance
 
-Daily purge job (add to schedules.js):
-- Delete read notifications older than `notifications_retention_days`
+Daily `purge-notifications` maintenance job (schedule `purge-notifications-daily`, 02:30), declared in `RETENTION_JOBS` in `src/maintenance/retention.js` and run by `src/maintenance/maintenanceJobs.js`. It reads `notifications_retention_days` when it runs, and `registerSchedules` removes its schedule when the setting is 0:
+- Delete read notifications whose `read_at` is older than `notifications_retention_days`
 - Keep unread notifications indefinitely (until explicitly read or manually purged)
 
 ## Terminal: Notification Reader
 
-Menu command `notifications` (`BaseSubModule` in `handlers/menucommands/notificationReader.js`).
+Menu command `notifications` (`BaseSubModule` in `handlers/menucommands/notificationReader.js`). Implemented as a menu command only; the controls and call flow stage below were the design, and what was built differs as noted.
 
 ### Display
 
@@ -212,22 +216,24 @@ Lightbar list of recent notifications (newest first), similar to the PM reader p
 
 ### Controls
 
+As built:
+
 - **Up/Down**: navigate list
-- **Enter**: view notification detail (title, full body, link info)
-- **R**: mark selected as read
-- **A**: mark all as read
-- **D**: delete selected
+- **Enter**: view notification detail (title and body) and mark it read; any key then leaves the reader
+- **R**: mark ALL as read
 - **ESC/Q**: exit
+
+Designed but not built: mark one read with R, A for mark all, D to delete.
 
 ### Call flow integration
 
-Optional call flow stage: if the user has unread notifications, show a summary before or after the PM check stage. "You have N unread notification(s). View now? [Y/n]"
+Not built: there is no notification call flow stage in `src/managers/callmanager.js` or `src/models/callFlows.js`. Designed as an optional call flow stage: if the user has unread notifications, show a summary before or after the PM check stage. "You have N unread notification(s). View now? [Y/n]"
 
 This mirrors the terminal `check_email` pattern -- a brief prompt that can be added to the call flow or used as a standalone menu command.
 
 ### Sysop terminal priority
 
-For sysop notifications with severity `danger`, the terminal could display an immediate alert when the sysop returns to a menu -- similar to how `pendingChat` fires when returning to menu. A `pendingNotification` flag on the call object would trigger a brief "!! ALERT: Bad TIC file: filename.tic -- press any key !!" before the menu redraws.
+Not built (no `pendingNotification` in the code). Designed: for sysop notifications with severity `danger`, the terminal could display an immediate alert when the sysop returns to a menu -- similar to how `pendingChat` fires when returning to menu. A `pendingNotification` flag on the call object would trigger a brief "!! ALERT: Bad TIC file: filename.tic -- press any key !!" before the menu redraws.
 
 ## Implementation Order
 
@@ -246,7 +252,7 @@ For sysop notifications with severity `danger`, the terminal could display an im
 
 1. **Single table, not per-type tables**: notifications are structurally identical regardless of type. The `type` column enables filtering. Simpler schema, simpler queries.
 
-2. **user_id NULL for sysop broadcasts**: avoids duplicating rows for every sysop user. The query just checks `user_id = $1 OR (user_id IS NULL AND user_is_sysop)`.
+2. **user_id NULL for sysop broadcasts** (superseded): the original idea avoided a row per sysop, but one row's read state would have been shared by every sysop. The implementation writes one row per sysop and queries on `user_id` alone.
 
 3. **PresenceSocket for delivery**: already connected on every page, already handles session auth and multi-tab routing. No new WebSocket endpoint needed.
 

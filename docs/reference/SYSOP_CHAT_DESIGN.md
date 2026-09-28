@@ -2,6 +2,18 @@
 
 Design document for the sysop chat system. Extends NodeSpy with bidirectional communication: the sysop can page a user, break into their session, and conduct a split-screen chat conversation.
 
+**Status: partly implemented.** Phases 1 to 3 (split-screen engine, terminal break-in, web break-in) are built. Phase 4 (the page system: `pageSysop` command, `call.chatState`, page indicators) and most of Phase 5 (chat logging beyond start/stop lines in the system log, configurable colours, multi-sysop coordination) are not. The build differs from this design in the ways listed below; the numbered sections are the original design and are kept for reference.
+
+### Implementation notes (where the build differs)
+
+- **Engine**: `SplitScreenChat` in `src/handlers/splitscreenchat.js`. `setscrollregion()`, `resetscrollregion()`, `savecursor()`, `restorecursor()` are on `BaseCommands` (`src/commandsets/terminalcommands.js`). Options include `allowExit`, `showPeekLine`, `onSend`, `onTyping`, `onExit`, `exitLabel`, colours.
+- **Layout** is not a midpoint split. Target: title row 2, divider row 3, conversation rows 4 to N-3 (DECSTBM region), divider row N-2, input row N-1. The sysop's screen adds a peek line on row 3 showing what the user is typing, so its conversation starts at row 5.
+- **Message flow**: each side has its own `SplitScreenChat` instance drawing to its own terminal. A sent line is appended to both instances directly, and does not rely on the ring buffer echo described in 4.4. The terminal sysop's snoop forwarding is suspended while chatting; the web viewer keeps receiving the target's ring buffer and gets chat lines as JSON `chat_msg` frames.
+- **The user cannot exit**: the target instance is created with `allowExit: false`, so only the sysop ends the chat (see `NODESPY_DESIGN.md` section 5). Sections 4.7 and 8 below, which say the user can always ESC out, are superseded.
+- **Only at a menu**: chat starts only when the target is at a menu. Otherwise it is queued on `call.pendingChat` and fires when the target's `updateNodeStatus('menu')` is called; the sysop sees a "CHAT QUEUED" indicator.
+- **Start and end**: the user gets 5 beeps on start; both nodes get node status `sysop_chat`. On end, rawmode is restored and `call.currentHandler._drawMenu()` redraws the menu (not `_redrawMenu()` or `CMD_REDRAW`).
+- **Web**: the watch page uses a chat input bar (text field, send button, typing peek), not xterm.js input. The nodespy WebSocket carries JSON `chat_start`, `chat_end`, `chat_input` from the client and `chat_started`, `chat_ended`, `chat_queued`, `chat_msg`, `chat_typing` from the server (`src/servers/nodespySocket.js`).
+
 ---
 
 ## 1. Overview
@@ -292,7 +304,7 @@ New menu command `pageSysop`:
 - Chat input from web is validated (length limits, no control injection beyond chat protocol)
 - Page rate limiting prevents spam (one active page per user)
 - Chat sessions are logged for audit
-- Target user can always ESC out of chat (cannot be trapped)
+- Target user can always ESC out of chat (cannot be trapped). **Not as built**: the target cannot exit; only the sysop ends a chat
 
 ---
 

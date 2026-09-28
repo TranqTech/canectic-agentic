@@ -1,4 +1,4 @@
-# Canectic BBS — Installation Guide
+# Canectic BBS: Installation Guide
 
 ## Prerequisites
 
@@ -176,13 +176,21 @@ instead, covering every file in the tree.
 
 | Flag | Effect |
 |------|--------|
-| `--target DIR` | Where to install. Asked for if not given |
+| `--target DIR` | Where to install. Asked for if not given (default `/opt/canectic`) |
 | `--channel development` | Track development builds rather than stable |
-| `--version 0.9.9a` | A specific release |
+| `--version 0.9.12a` | A specific release |
+| `--url BASE` | A different release host |
 | `--from DIR` | Artifacts already on disk, from a file echo or copied by hand |
 | `--download-only` | Fetch and verify, then stop, so you can inspect it |
-| `--create-database` | Also create the PostgreSQL role and database |
+| `--extract-only DIR` | Fetch, verify and unpack into `DIR`, then stop, so you can read the docs and run the setup scripts first |
+| `--create-database` | Also create the PostgreSQL role and database (needs sudo to `postgres`) |
+| `--db-name` / `--db-user` / `--db-pass` / `--db-host` | Database credentials, instead of being asked |
+| `--yes` | Take the defaults and ask nothing (needs `--target`) |
 | `--no-deps` / `--no-database` / `--no-start` | Leave those to you |
+
+Any flag the bootstrap does not know itself is passed through to the release's
+installer. The bootstrap needs `unzip`, `sha256sum`, Node 22 or later, and
+`curl` or `wget` unless you use `--from`, and stops at once if one is missing.
 
 The installer asks where to install and for database credentials, writes `.env`
 at mode 600, creates the runtime directories, installs dependencies, runs the
@@ -207,8 +215,8 @@ gets you a verified artifact and stops:
 
 ```bash
 bash bootstrap.sh --download-only
-unzip canectic-0.9.9a.zip
-cd canectic-0.9.9a
+unzip canectic-0.9.12a.zip
+cd canectic-0.9.12a
 node src/tools/install.js --target /opt/canectic
 ```
 
@@ -227,13 +235,13 @@ Canectic itself rather than running it.
 
 Download the latest release from the [Canectic Releases page](https://gitlab.tranqsoft.com/drog007/canectic/-/releases) and extract:
 ```bash
-unzip canectic-0.9.9a.zip
-cd canectic-0.9.9a
+unzip canectic-0.9.12a.zip
+cd canectic-0.9.12a
 ```
 
 **From git (specific release):**
 ```bash
-git clone --branch v0.9.9a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
+git clone --branch v0.9.12a --depth 1 https://gitlab.tranqsoft.com/drog007/canectic.git
 cd canectic
 ```
 
@@ -373,7 +381,7 @@ action; see the troubleshooting section if you see a block warning.
 node src/tools/dbmigrations.js
 ```
 
-This creates all tables and columns. Safe to run multiple times — it only adds what's missing.
+This creates all tables and columns. Safe to run multiple times: it only adds what's missing.
 
 ### 7. Start the BBS
 
@@ -418,10 +426,10 @@ Choose "New User" and complete registration.
 
 ### 9. Verify
 
-- **Web UI:** `http://localhost:8080` — you should see the landing page
-- **Admin panel:** `http://localhost:8080/admin` — accessible after logging in as Sysop
-- **Health check:** `http://localhost:8080/health` — should return `{"status":"ok"}`
-- **Terminal:** `telnet localhost 2023` — should show terminal negotiation and login prompt
+- **Web UI:** `http://localhost:8080` should show the landing page
+- **Admin panel:** `http://localhost:8080/admin` is accessible after logging in as Sysop
+- **Health check:** `http://localhost:8080/health` should return `{"status":"ok","postgres":"ok","redis":"ok"}`
+- **Terminal:** `telnet localhost 2023` should show terminal negotiation and the login prompt
 
 ---
 
@@ -554,8 +562,16 @@ pm2 jlist | python3 -c "import json,sys; [print(p['name'], p['pm2_env']['node_ve
 | IMAP | 10143 | `imapport` | PM access from mail clients |
 | SMTP Submission | 10587 | `smtpport` | Send PMs from mail clients |
 | Binkp (FTN) | 24554 | `MAILER_BINKP_PORT` | FTN mailer (if enabled) |
+| QWK hub FTP | 8021 | `qwk_ftp_port` | Off unless `qwk_ftp_enabled` is on |
 
 Set any port to `0` to disable that listener. Port changes require a process restart.
+
+The QWK hub FTP server is for QWK nodes that call your board over FTP (such as
+Synchronet's `qnet-ftp.js`). It is plain FTP, so passwords are not encrypted;
+over the internet the HTTP hub behind HTTPS is the better choice. If you turn it
+on behind a firewall or NAT, set `qwk_ftp_pasv_ports` to a range such as
+`50000-50100` and open that range as well as the control port, and set
+`qwk_ftp_pasv_address` to your public IPv4 address when the board is behind NAT.
 
 ---
 
@@ -575,9 +591,11 @@ Either route closes the board for maintenance and warns callers and web users,
 waits for the board to drain, then stops the processes, replaces the files,
 installs dependencies, dumps the database, migrates it, runs the release's
 declared upgrade steps, starts everything again, checks every file it wrote and
-reopens the board. `docs/sysop/MAINTENANCE.md` covers what callers see. Your art, `public/css/custom.css`, door icons and
-anything you have edited under `config/` are kept, and the update tells you what
-it left alone.
+reopens the board. `docs/sysop/MAINTENANCE.md` covers what callers see. Your
+art, `public/css/custom.css`, door icons and anything you have edited under
+`config/` are kept, and the update tells you what it left alone. Once an update
+completes it deletes the backups of older updates, keeping the last
+`update_backup_keep` (1 by default).
 
 Everything it displaces is copied aside first. A failure before the database has
 been migrated puts your files back automatically; after that point it stops and
@@ -646,6 +664,7 @@ After installation, your run directory contains:
 ```
 /opt/canectic/
 ├── .env                    # Your configuration (not overwritten on update)
+├── .canectic-update/       # Update staging, cached releases and update backups
 ├── ecosystem.config.cjs    # PM2 process configuration
 ├── bin/                    # Process entry points
 ├── src/                    # Application source code
@@ -664,10 +683,13 @@ After installation, your run directory contains:
 │   ├── bad/                # Bad/rejected packets
 │   └── tmp/                # Temp working directory
 ├── qwk/                    # QWK network packet staging
+├── qnet/                   # QWK link packet directories: <ID>.hub/ and <ID>.node/
 ├── files/                  # File area storage
 │   └── staging/            # Upload staging directory
 ├── logs/                   # Log files
-│   └── production/         # PM2 process logs
+│   ├── production/         # Process and PM2 logs
+│   │   └── archive/        # Rotated logs, one directory per day
+│   └── update/             # Record of every update run
 ├── xtrn/                   # Door game programs
 ├── setup/                  # Setup scripts
 ├── examples/               # Example configuration files
@@ -675,6 +697,19 @@ After installation, your run directory contains:
 │   ├── sysop/              # This guide and other sysop docs
 │   └── reference/          # Architecture reference (developers)
 └── tests/                  # Test suite
+```
+
+### Log rotation
+
+Every night at 23:59 each log in `logs/production/` is compressed into
+`logs/production/archive/YYYY-MM-DD/` and started afresh, and archives older
+than `log_retention_days` (30 by default, 0 keeps them all) are deleted.
+`log_rotation_enabled` turns it off, from the next gateway restart. To rotate now, or see what rotation would
+do, without the worker:
+
+```bash
+node src/tools/rotateLogs.js --dry-run
+node src/tools/rotateLogs.js
 ```
 
 ---
@@ -705,7 +740,7 @@ npm 12, which ships with Node 26, no longer runs dependency `install` and
 no longer execute code on your machine simply by being installed. Packages must
 be listed in the `allowScripts` field of `package.json`.
 
-Canectic ships that allowlist, so a normal install needs no action. Three
+Canectic ships that allowlist, so a normal install needs no action. Four
 dependencies are approved because their install script is what resolves the
 native binary, and nothing works without it:
 
@@ -734,7 +769,7 @@ optional dependency of `ssh2`, whose `require` is wrapped in a `try`), and
 exits successfully when that fails. Denying them costs a little SFTP and
 queue-serialisation speed and nothing else.
 
-The three approvals are **pinned to versions**. After upgrading any of them you
+The four approvals are **pinned to versions**. After upgrading any of them you
 will see the block warning again, which is intended: re-approve deliberately
 with
 

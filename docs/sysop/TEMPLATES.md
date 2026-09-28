@@ -5,7 +5,7 @@ Message templates let you write reusable messages that are automatically deliver
 ## Overview
 
 - **Events** are the triggers (e.g. `user_registered`, `user_birthday`). Events come in two flavours:
-  - **Built-in**: ~14 events seeded on install, fired automatically from user lifecycle code and the daily maintenance job. Cannot be deleted.
+  - **Built-in**: 15 events seeded on install, fired automatically from user lifecycle code, the QWK API and the daily maintenance job. Cannot be deleted.
   - **Custom**: Sysop-defined events with their own codes. Fired manually via admin UI, CLI, menu command, or timed event.
 - **Templates** bind to events. A template specifies the subject, body, delivery methods, and optional conditions. Multiple templates can target the same event -- all matching templates fire in sort order.
 
@@ -28,6 +28,9 @@ Admin pages:
 | `user_account_anniversary` | Daily, if today matches user's created_at date | `event.anniversary_years` |
 | `user_birthday` | Daily, if today matches user's birthdate | `event.age` |
 | `user_dormant` | Daily for users inactive >= 30 days; templates filter by `conditions.days_inactive` | -- |
+| `user_qwk_fetched` | A QWK packet downloaded or a REP uploaded through the REST API (not the web QWK page or the terminal) | `event.kind`, `event.area_count`, `event.message_count`, `event.posted_count`, `event.error_count` (see [API.md](API.md#template-event-integration)) |
+
+Four more built-in events are listed on the Template Events page, `user_first_message_post`, `user_nth_post`, `user_first_file_upload` and `user_nth_upload`, but nothing fires them yet, so a template attached to one is never sent.
 
 Birthday / anniversary / dormant events fire from the daily `user-maintenance` job. Ensure that job is enabled (it is by default).
 
@@ -133,7 +136,7 @@ Useful for cron jobs, shell scripts, or external integrations.
 
 ### 3. Menu command
 
-Add a menu entry with `command_name: fireEvent` and `command_arg: event_code` (optionally `event_code|{json extra vars}`). Fires for the current session user.
+Add a menu entry with `command_name: fireEvent` and `command_arg: event_code` (optionally `event_code|{json extra vars}`). Fires for the current session user. The menu editor's Command list does not offer this command yet, so add the entry to an exported menu JSON file and import it (see [MENUS.md](MENUS.md#export-and-import)).
 
 Example: fire a custom `door_played` event after a door launch, with the door slug as extra data:
 
@@ -144,10 +147,10 @@ command_arg: door_played|{"event":{"door":"LORD"}}
 
 ### 4. Timed events
 
-Admin > **Timed Events** > add an event with launch type **FireEvent**. Enter the event code and an optional user filter SQL WHERE clause (restricted to safe columns; no DELETE/DROP/UPDATE/etc allowed). Runs on the configured cron schedule.
+Admin > **Timed Events** > add an event with launch type **Fire Template Event**. Enter the event code and an optional user filter SQL WHERE clause (restricted to safe columns; no DELETE/DROP/UPDATE/etc allowed). Runs on the configured cron schedule.
 
 Example: send a monthly engagement message to active verified users on the 1st of the month at 9 AM:
-- Launch type: FireEvent
+- Launch type: Fire Template Event
 - Event Code: `monthly_engagement`
 - User Filter: `mailverified = true AND lastlogon > NOW() - INTERVAL '90 days'`
 - Cron: `0 9 1 * *`
@@ -158,7 +161,7 @@ On `/admin/templates`, each template row has a **send** (paper plane) icon. Clic
 
 ## Troubleshooting
 
-- **Template doesn't fire**: check that the event code is correct, the template is active, and conditions (if any) match the target user. The main log shows `[Template] Event X fired for user Y: N delivered, M skipped` on every fire.
+- **Template doesn't fire**: check that the event code is correct, the template is active, and conditions (if any) match the target user. At log level 4 the system log shows `[Template] Event X fired for user Y: N delivered, M skipped` whenever a template was delivered or failed.
 - **Email skipped**: user may not have an email address on file, mailtype may be set to netmail, or the email relay isn't configured (admin > config > email category). Full email troubleshooting is in [MAIL.md](MAIL.md#troubleshooting).
 - **Netmail skipped**: user may not have a parseable FTN address.
 - **Unresolved tokens in delivered message**: you typo'd a variable name; tokens that don't resolve are left in place with their braces so you can see what broke.

@@ -3,7 +3,7 @@
 // Displays active news files (ANSI/ASCII art) in sequence.
 // Each file is shown full-screen with optional centering for
 // oversized terminals. Press any key to advance, ESC to skip all.
-// Used as both a call flow stage and a menu command.
+// Used as a menu command.
 
 import { BaseSubModule } from "../basesubmodule.js";
 import { getActiveNewsFiles } from "../../models/newsFiles.js";

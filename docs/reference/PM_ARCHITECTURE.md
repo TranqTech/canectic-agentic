@@ -33,7 +33,8 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 | File | Purpose |
 |------|---------|
-| `views/pm/inbox.pug` | Main webmail interface. Split-pane layout: folder sidebar, DataTables message list with search/sort, inline reader pane with reply/delete/restore. Compose modals (Local + Network). Reply modal with line-quoting system. |
+| `views/pm/inbox.pug` | Main webmail interface. Split-pane layout: folder sidebar, DataTables message list with search/sort, inline reader pane with reply/delete/restore. Compose modals (Local + Network). Reply modal with line-quoting system. The Inbox, Sent and Trash folders are tabs of this one page; `GET /pm/sent` and `GET /pm/trash` redirect to `/pm/inbox#sent` and `/pm/inbox#trash`, and the page opens the tab the fragment names. The standalone `sent.pug` and `trash.pug` were removed. |
+| `views/pm/read.pug`, `views/pm/read_sent.pug` | Single-message pages for `GET /pm/inbox/:uuid` and `GET /pm/sent/:uuid` (direct links; the inbox page reads messages inline via the JSON endpoints). |
 | `views/pm/undeliverable.pug` | Admin undeliverable message queue with filter tabs. |
 | `views/pm/undeliverable_detail.pug` | Admin review detail — deliver to user / discard / return to sender. |
 | `views/partials/flash.pug` | Reusable Bootstrap alert partial for flash messages. |
@@ -43,8 +44,9 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | File | Changes |
 |------|---------|
 | `ftnTosser.js` _(in `src/middleware/tossers/`)_ | `TossInboundFile` and `OldTossInbound` route netmail through `ftnNetmailAdapter.importFtnNetmail()` instead of `netmail.newInboundNetmail()`. `TossOutboundNetmail` uses `privateMessages.getPendingByTransport('FTN')` with per-message zone-aware source resolution via `systemAddresses.resolveSourceForDestinationZone()`. |
-| `qwkTosser.js` _(in `src/middleware/tossers/`)_ | `pullFromQwkPeer` delivers conference 0 messages as PMs via `importQwkPrivateMessage()`. `pushToQwkPeer` gathers pending QWK PMs and packs them as conference 0 with private status byte (`0x2A`). |
-| `qwkPacketBuilder.js` | `buildQwkForNode` gathers pending QWK PMs for conference 0 in hub-mode packets. `buildMessagesDat` passes `isPrivate` through to `buildQwkHeader`. |
+| `qwkTosser.js` _(in `src/middleware/tossers/`)_ | `pullFromQwkPeer` delivers conference 0 messages as PMs via `importQwkPrivateMessage()`, which also reads Synchronet's netmail forms and relays QWK netmail for other systems. `pushToQwkPeer` takes the pending QWK PMs routed to that connection (`qwkPmRouting.pendingQwkPmsFor`) and packs them as conference 0 with private status byte (`0x2A`). |
+| `qwkPmRouting.js` _(in `src/models/`)_ | Decides which QWK connection carries each pending QWK PM (`routeQwkPm`, `pendingQwkPmsFor`, `wireFor`); a PM no connection can carry is marked undeliverable with the reason. See `QWK_ARCHITECTURE.md`. |
+| `qwkPacketBuilder.js` | `buildQwkForNode` gathers the pending QWK PMs routed to that node for conference 0 in hub-mode packets. `buildMessagesDat` passes `isPrivate` through to `buildQwkHeader`. |
 | `qwkClasses.js` | `buildQwkHeader` accepts `isPrivate` parameter — sets status byte to `0x2A` (private) or `0x20` (public). `buildRepPacket` passes `isPrivate` through. |
 
 ### Maintenance
@@ -85,13 +87,14 @@ Inbound messages delivered to a local user. One row per recipient per message.
 | `uuid` | UUID | Public identifier |
 | `user_id` | INTEGER | FK to users — the recipient |
 | `msg_id` | TEXT | Canonical message ID (MSGID, QWK Message-ID, or generated UUID) |
+| `msg_orig_addr` | VARCHAR(64) | Origin-address half of an FTN MSGID tuple, stored apart from `msg_id` |
 | `from_user` | TEXT | Sender display name |
 | `to_user` | TEXT | Recipient display name |
 | `from_address` | TEXT | Sender address (FTN address, QWK-ID, username for LOCAL) |
 | `to_address` | TEXT | Recipient address |
 | `subject` | TEXT | |
-| `body_text` | TEXT | Plain text body |
-| `utf8` | TEXT | UTF-8 version of body (null if body_text is already UTF-8) |
+| `body_text` | TEXT | Plain text body, canonical Unicode (migration `0006-normalise-body-text` covers the PM tables too, since it finds every table with both `body_text` and `utf8`) |
+| `utf8` | TEXT | Still written, not read for display; see `message_architecture.md` |
 | `body_html` | TEXT | Pre-rendered HTML for web display |
 | `raw_text` | TEXT | Raw message text including kludge lines |
 | `read` | BOOLEAN | DEFAULT false |
@@ -114,8 +117,9 @@ Outbound messages queued for delivery or already sent. One row per sent message.
 |--------|------|-------|
 | `id` | BIGSERIAL | Primary key |
 | `uuid` | UUID | Public identifier |
-| `user_id` | INTEGER | FK to users — the sender |
+| `user_id` | INTEGER | FK to users, the sender |
 | `msg_id` | TEXT | Canonical message ID |
+| `msg_orig_addr` | VARCHAR(64) | As in `pm_inbox` |
 | `from_user` | TEXT | Sender display name |
 | `to_user` | TEXT | Recipient display name |
 | `from_address` | TEXT | Sender address |
@@ -149,20 +153,23 @@ Sysop review queue for messages that could not be delivered automatically.
 |--------|------|-------|
 | `id` | BIGSERIAL | Primary key |
 | `uuid` | UUID | Public identifier |
+| `msg_id`, `msg_orig_addr` | | As in `pm_inbox` |
 | `from_user` | TEXT | |
 | `to_user` | TEXT | |
 | `from_address` | TEXT | |
 | `to_address` | TEXT | |
 | `subject` | TEXT | |
 | `body_text` | TEXT | |
+| `utf8`, `body_html`, `raw_text` | TEXT | As in `pm_inbox` |
 | `transport_type` | VARCHAR(16) | |
 | `transport_data` | JSONB | |
-| `reason` | TEXT | Why delivery failed |
+| `reason` | TEXT | Why delivery failed (QWK imports record theirs too, as of 0.9.12a) |
 | `reviewed` | BOOLEAN | DEFAULT false |
 | `reviewed_at` | TIMESTAMP | |
 | `reviewed_by` | INTEGER | FK to users — sysop who reviewed |
 | `action_taken` | TEXT | 'delivered', 'deleted', 'returned' |
-| `delivered_to` | INTEGER | FK to users — if manually delivered |
+| `delivered_to` | INTEGER | FK to users, if manually delivered |
+| `system_time` | TIMESTAMP | Message creation time |
 | `created_at` | TIMESTAMP | |
 
 ### pm_attachments
@@ -171,17 +178,20 @@ File attachments linked to private messages. One row per attached file.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `id` | BIGSERIAL | Primary key |
-| `message_uuid` | UUID | FK to pm_inbox/pm_outbox uuid |
-| `filename` | TEXT | Original filename |
-| `disk_path` | TEXT | Relative path under `pm_attachment_dir` |
-| `size` | BIGINT | File size in bytes |
-| `mime_type` | TEXT | MIME content type |
+| `id` | SERIAL | Primary key |
+| `message_uuid` | VARCHAR(64) | uuid of the pm_inbox/pm_outbox row (no FK) |
+| `message_table` | VARCHAR(16) | `inbox` or `outbox` |
+| `filename` | VARCHAR(255) | Sanitised original filename |
+| `mime_type` | VARCHAR(128) | MIME content type |
+| `file_size` | BIGINT | File size in bytes |
+| `storage_path` | VARCHAR(512) | Path to the file on disk (`{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`) |
 | `created_at` | TIMESTAMP | Row creation time |
+
+The table and the two `has_attachments` columns are created by `pmAttachments.ensureTable()`, not by `db/schema`.
 
 Both `pm_inbox` and `pm_outbox` include a `has_attachments` boolean column (DEFAULT false) for fast filtering without joining the attachments table.
 
-Attachment files are stored at `{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`, where `pm_attachment_dir` is configured via appConfig (default `data/pm_attachments`). The `YYYY-MM` prefix provides natural archiving and prevents any single directory from growing too large.
+Attachment files are stored at `{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`, where `pm_attachment_dir` is configured via appConfig (default `files/pm_attachments`). The `YYYY-MM` prefix provides natural archiving and prevents any single directory from growing too large.
 
 ---
 
@@ -226,6 +236,7 @@ Attachment files are stored at `{pm_attachment_dir}/{YYYY-MM}/{uuid}/{filename}`
 ```json
 {
   "source": "VERT",
+  "source_path": "VERT",
   "peer_connection_uuid": "9f894ef9-...",
   "conference": 0,
   "msg_number": 42,
@@ -311,11 +322,11 @@ Remote system sends .pkt → ftnTosser.TossInboundFile()
     → LOCAL: netmailRoutes.matchRoute() → alias / dump / ignore
     → LOCAL: isAutomatedProcessor() → areafix / filefix / ping
     → LOCAL: resolveRecipient() → deliverMessage() to pm_inbox
-    → RELAY (if allow_netmail_relay=true):
+    → RELAY (netmail_relay_mode allows it, see Netmail Relay below):
         ftnVia.hasPassedThrough() → refuse loops
         ftnVia.appendVia() → stamp our hop
         ftnRouter.resolveRoute() → queueOutbound()
-    → RELAY (if relay disabled): write to ftn/bad/ → notifySysops()
+    → RELAY refused by netmail_relay_mode: write to ftn/bad/ → notifySysops()
     → UNRESOLVABLE: insertUndeliverable() → notifySysops()
 ```
 
@@ -341,9 +352,12 @@ Triggered by: scheduled toss cycle, CLI (node src/tools/tosser.js --out --ftn),
 pullFromQwkPeer() → parseMessagesDAT() → applyHeadersDat()
   → for each message:
     → conferenceNum === 0 → importQwkPrivateMessage()
+      → parseNetmailAddress(): To = "NETMAIL" (address on the first body line)
+        or To = user@QWKID, as Synchronet writes netmail
+      → addressed to another system: relayQwkNetmail() (QWK_ARCHITECTURE.md)
       → resolveRecipient(to)
       → resolved: deliverMessage() to pm_inbox (transport_type='QWK')
-      → unresolved: insertUndeliverable() + notifySysops()
+      → unresolved: insertUndeliverable(reason) + notifySysops()
     → conferenceNum > 0 → importQwkMessage() (existing echomail path)
 ```
 
@@ -351,23 +365,28 @@ pullFromQwkPeer() → parseMessagesDAT() → applyHeadersDat()
 
 ```
 pushToQwkPeer() → gather echomail work items per subscription
-  → privateMessages.getPendingByTransport('QWK')
-  → add PM work items as conference 0, isPrivate=true, utf8=null
+  → qwkPmRouting.pendingQwkPmsFor(connection)   (only PMs routed to this link;
+      unroutable PMs are marked undeliverable here and the sender told)
+  → add PM work items as conference 0, isPrivate=true, To/body from wireFor()
   → buildRepPacket() → buildQwkHeader with status 0x2A
-    → utf8ToCp437 conversion → buildQwkBody with 0xE3 line terminators
-  → upload .REP → markSent() for each PM on success
+    → encodeMessageBody(): CP437 with 0xE3 line terminators, or UTF-8 when
+      the connection allows it and the text does not fit CP437
+  → upload .REP → commitRep() marks each PM sent once the REP is delivered
+    (a REP retried after a failed upload commits on the push that delivers it)
 ```
 
 ### QWK Outbound (Hub Mode — buildQwkForNode)
 
 ```
 buildQwkForNode() → gather echomail from subscriptions
-  → privateMessages.getPendingByTransport('QWK')
+  → qwkPmRouting.pendingQwkPmsFor(connection)
   → add PM items as conference 0, isPrivate=true
   → conferences.unshift({ number: 0, name: 'Personal' })
   → buildMessagesDat() → buildQwkHeader with isPrivate
-  → assembleQwkPacket() → .qwk file
-  → markSent() for each PM
+  → assembleQwkPacket() → .qwk file, with a pending sidecar listing its PMs
+  → commitPending() marks each PM sent only once the node has the packet
+    (commitNodePacket on HTTP/FTP acknowledgement, or the packet gone from
+    out/ for a shared-directory node)
 ```
 
 ---
@@ -530,9 +549,12 @@ separately, is not implemented.
 
 `resolveRecipient(toUser)` cascade:
 
-1. **Username match** — `userAccounts.getUserRecord(toUser)`. Exact username lookup (case-insensitive).
-2. **Realname match** — `userAccounts.getUsersByRealname(toUser)`. If exactly one match, resolved. If multiple matches, returns `{ resolved: false, reason: 'ambiguous_match' }`.
-3. **Sysop alias** — if `toUser` is "Sysop" (case-insensitive), resolves to the first user with the "Sysop" permission flag via `getUsersByPermissionFlag('Sysop')`.
+1. **Username match**: `userAccounts.getUserRecord(toUser)`. Exact username lookup (case-insensitive).
+2. **Realname match**: `userAccounts.getUsersByRealname(toUser)`. If exactly one match, resolved. If multiple matches, returns `{ resolved: false, reason: 'ambiguous_match' }`.
+3. **Dotted realname**: when the input contains a dot, `first.last` is retried as `first last` against real names (the convention external mailers use), with the same ambiguity rule.
+4. **Sysop alias**: if `toUser` is `sysop`, `system operator` or `sysadmin` (case-insensitive), resolves to the lowest-id user with the "Sysop" permission flag via `getUsersByPermissionFlag('Sysop')`.
+
+Failure reasons: `empty_to_user`, `ambiguous_match`, `no_user_match`.
 
 Returns `{ resolved, userId, username, reason }`.
 
@@ -578,7 +600,9 @@ When a message cannot be delivered (destination zone not found, address unparsea
 2. `notifySenderUndeliverable(outboxRow, reason)` — delivers a bounce notification to the sender's inbox as a LOCAL/SYSTEM transport message
 3. For FTN: `getPendingByTransport('FTN')` excludes `undeliverable=true` and `deleted=true` rows, so the tosser stops retrying
 
-For QWK inbound: unresolvable recipients go to `pm_undeliverable` for sysop review rather than bouncing (since the sender is on a remote system).
+For QWK inbound: unresolvable recipients go to `pm_undeliverable` for sysop review rather than bouncing (since the sender is on a remote system), with the reason recorded.
+
+For QWK outbound: `qwkPmRouting.pendingQwkPmsFor()` marks a PM that no QWK connection can carry undeliverable (`markOutboxUndeliverable`) instead of leaving it queued, so it stops waiting.
 
 ---
 
@@ -645,7 +669,9 @@ Two sites are intentionally not filtered:
 
 - Undeliverable inbound FTN netmail
 - Undeliverable inbound QWK PMs
-- Relay denials (when `allow_netmail_relay=false`)
+- FTN relay refusals (by `netmail_relay_mode`)
+
+Separately, `insertUndeliverable()` raises a `pm_undeliverable` sysop notification (`notifications.createSysop`, linking to `/pm/undeliverable`) for every row it writes.
 
 ---
 
@@ -671,7 +697,7 @@ Webmail-style split-pane layout filling `calc(100vh - 56px)`:
 ```
 
 - **Sidebar** (180px fixed): folder buttons (Inbox/Sent/Trash), compose buttons, mark all read. Collapses to horizontal strip on mobile.
-- **Message list** (40%): DataTables with `paging: false`, `scrollY`, search box, column sorting. Three tables (inbox/sent/trash) toggled by folder buttons.
+- **Message list** (40%): DataTables with `paging: false`, `scrollY`, search box, column sorting. Three tables (inbox/sent/trash) toggled by folder buttons. All three sort newest first by the date column (column 4, ordered by `data-order=timestampMs(...)`; the trash sorts by `deleted_at`); the attachment clip column (3) and the first column are not sortable. Dates render through `+ts` in the viewer's timezone, in the short list form below the `lg` breakpoint.
 - **Reader pane** (60%): inline message display with header (subject, from, to, date, transport badge) and action buttons (Reply, Delete, or Restore for trash). Empty state overlay when no message selected.
 
 ### AJAX Endpoints
@@ -681,7 +707,7 @@ Webmail-style split-pane layout filling `calc(100vh - 56px)`:
 | GET | `/pm/inbox/:uuid/json` | Load inbox message as JSON, marks read |
 | GET | `/pm/sent/:uuid/json` | Load sent message as JSON |
 
-Both return `{ uuid, from_user, to_user, from_address, to_address, subject, body_html, body_text, transport_type, system_time, canReply }`.
+Both return `{ uuid, from_user, to_user, from_address, to_address, subject, body_html, body_text, transport_type, system_time, attachments }`; the inbox form adds `read` and `canReply`, the sent form `sent`, `sent_at` and `send_error`.
 
 ### Compose Modals
 
@@ -894,7 +920,9 @@ QWK uses conference 0 for personal/private messages. The status byte in the QWK 
 
 ### Outbound
 
-PM work items set `utf8: null` so that `buildRepPacket` / `buildMessagesDat` run `utf8ToCp437()` conversion on the body text. The `body_text` field receives the UTF-8 content (`pm.utf8 || pm.body_text`). This ensures proper CP437 encoding with `0xE3` line terminators.
+Which connection carries a PM is decided by `qwkPmRouting.routeQwkPm()` (reply pinned to the connection its original came in on, then a direct connection, an explicit `HUB/NODE/DEST` path, or a learned route); see `QWK_ARCHITECTURE.md`. `wireFor(pm)` gives the To field and body as Synchronet writes netmail (`NETMAIL` plus an address line while hops remain, `@VIA` on relayed mail). The body is `pm.body_text`, and `encodeMessageBody()` writes it as CP437 with `0xE3` line terminators, or as UTF-8 when the connection allows it and the text does not fit CP437 (`messageNeedsUtf8`). The work items still set `utf8: null`, which the packers no longer read.
+
+Personal QWK packets (`qwkUser.js`) carry the user's unread PMs as conference 0; they are marked read only when the download completes (`commitUserPacket`).
 
 ---
 
@@ -953,9 +981,11 @@ Private messages support file attachments across all transport types. Attachment
 
 | Key | Default | Category | Description |
 |-----|---------|----------|-------------|
-| `pm_attachment_dir` | `data/pm_attachments` | pm | Base directory for attachment storage |
-| `pm_max_attachment_size` | `10485760` (10MB) | pm | Maximum size per attachment in bytes |
-| `pm_max_attachments` | `5` | pm | Maximum attachments per message |
+| `pm_attachment_dir` | `files/pm_attachments` | paths | Base directory for attachment storage |
+| `pm_max_attachment_size` | `10485760` (10MB) | security | Maximum size per attachment in bytes |
+| `pm_max_attachments` | `5` | security | Maximum attachments per message |
+
+The web compose and reply routes also cap uploads at 5 files in the multer call (`pmUpload.array('attachments', 5)`), whatever `pm_max_attachments` says.
 
 ### Storage Layout
 
@@ -974,7 +1004,7 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 
 ### Transport Coverage
 
-**LOCAL**: Attachment files are stored once on disk. Both the inbox and outbox rows reference the same files via `message_uuid`, so LOCAL messages share a single copy.
+**LOCAL**: Attachment files are stored once on disk. `copyAttachmentsToInbox()` adds `pm_attachments` rows for the inbox copy pointing at the same `storage_path`, so LOCAL messages share a single file (hence the reference count in `deleteAttachments`).
 
 **EMAIL inbound**: The SMTP inbound handler (`smtpServer.js`) extracts MIME attachments from multipart messages. Recursive nested multipart structures are traversed. Base64 and quoted-printable content-transfer-encodings are decoded. Extracted files are saved to disk and linked to the delivered PM.
 
@@ -982,13 +1012,15 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 
 **FTN inbound**: The FTN tosser parses the file-attach flag (attribute word bit 0x0010) from type-2 packet netmail headers. When set, files delivered during the binkp session are linked to the netmail PM from the `ftn/in` directory.
 
-**FTN outbound**: When a PM with attachments is tossed outbound, the file-attach flag (0x0010) is set on the FTN message attribute word. Attachment file paths are written as entries in the BSO `.flo` flow file for binkp delivery alongside the `.pkt`.
+**FTN outbound**: When a PM with attachments is tossed outbound, the file-attach flag (0x0010) is set on the FTN message attribute word (`privateMessageToFtn`). `TossOutboundNetmail` then means to write each attachment path into the destination's BSO `.flo` flow file (bare path, send and leave). As of 0.9.12a that step imports `'../models/pmAttachments.js'` relative to `src/middleware/tossers/`, a path that does not exist, and its catch only logs to the console, so no attachment file is queued: the netmail goes out flagged but without its file.
+
+**QWK personal packets**: `qwkUser.js` adds the attachments of each unread PM (inbox rows only) to the user's packet as files via `qwkPacketFiles.js`, and appends `[Attached, in this packet: ...]` to the message body, when the user's `qwk_attach` is on (default true; `ATTACH ON`/`ATTACH OFF` to `SBBS`, or the QWK page). QWK network packets (REP and hub packets) do not carry PM attachments.
 
 **Web**: The compose and reply forms use multer for multipart file upload. Uploaded files are validated against `pm_max_attachment_size` and `pm_max_attachments` limits. The download route (`GET /pm/attachment/:id`) verifies ownership (sender or recipient) before serving the file.
 
 **IMAP**: The IMAP adapter renders messages with attachments as `multipart/mixed` in the BODYSTRUCTURE response. Full RFC 2822 message rendering includes base64-encoded attachment MIME parts, so mail clients can download attachments natively.
 
-**Terminal**: The PM reader displays an indicator line when a message has attachments: `"[Attachments available -- use web or IMAP to download]"`. Terminal users cannot download attachments directly due to the interactive transfer protocol constraints.
+**Terminal**: The PM reader displays an indicator line when a message has attachments: `"[Attachments available -- use web or IMAP to download]"`. The PM reader offers no download; a terminal user can get them through a personal QWK packet.
 
 ---
 
@@ -1004,7 +1036,7 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 
 5. **`simpleTextToHtml` fallback**: If `formatBodyHtml` returns empty or throws, a simple HTML-escape + line-break conversion ensures `body_html` is always populated for web-composed messages. The view layer has its own fallback chain as defense-in-depth.
 
-6. **QWK `utf8: null` convention**: PM work items set `utf8: null` to trigger CP437 conversion in the packet builders. The echomail convention (`utf8` truthy = `body_text` is already CP437) doesn't apply to web-composed PMs which are always UTF-8.
+6. **QWK body encoding from `body_text`**: the packers encode `body_text` (canonical Unicode) directly via `encodeMessageBody()`. The old convention, where PM work items set `utf8: null` to force CP437 conversion because a truthy `utf8` meant `body_text` held raw CP437, ended with migration 0006; the `utf8: null` lines remain in the work items but are not read.
 
 7. **Flash messages via Redis**: Avoids adding session middleware dependencies. Short TTL (30 seconds) means abandoned flashes auto-expire. Append-on-set supports multiple redirects stacking messages.
 
@@ -1031,6 +1063,9 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 | `pm_trash_retention_days` | 30 | Days to keep soft-deleted messages before hard purge |
 | `netmail_relay_mode` | nodelist | FTN netmail relay: `nodelist`, `off`, or `on` |
 | `allow_netmail_relay` | false | Deprecated and ignored, replaced by `netmail_relay_mode` |
+| `pm_attachment_dir` | `files/pm_attachments` | Attachment storage directory |
+| `pm_max_attachment_size` | 10485760 | Maximum attachment size in bytes |
+| `pm_max_attachments` | 5 | Maximum attachments per message |
 | `netmail_ping_enabled` | true | Answer netmail addressed to "Ping" with a Pong showing the route taken |
 | `boardname` | 'Canectic BBS' | Used in bounce notifications and FTN origin lines |
 
@@ -1042,10 +1077,10 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 - **Meshtastic transport adapter**: LoRa mesh radio message delivery
 - **`netmail.js` retirement**: Old FTN-specific module can be dropped once all paths confirmed working through the unified PM system
 - **Old `netmail_in` / `netmail_out` tables**: Can be dropped or renamed to `_legacy` after migration verified
-- **Areafix/filefix routing**: Stub in `importFtnNetmail` -- conference 0 messages addressed to automated processors (areafix, filefix) should be routed to handler modules instead of user inboxes
 - **Terminal reader pagination**: Currently loads a single batch of 50 messages per folder. Lazy-loading of older/newer batches (like `msgReader`) for mailboxes exceeding the batch size
 - **Terminal address book**: Quick-select from recent recipients or known network addresses rather than typing addresses manually
 
 ### Completed
 
+- **Areafix/filefix routing**: `importFtnNetmail` Step 2 dispatches netmail addressed to `AUTOMATED_PROCESSORS` to `areafix.js`, `filefix.js` and `netmailPing.js`.
 - **EMAIL transport adapter**: Internet email delivery via SMTP relay. Outbound triggered by `email:outbound` toss job, inbound via SMTP gateway. See `EMAIL_ARCHITECTURE.md` for full details.

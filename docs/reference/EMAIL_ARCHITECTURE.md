@@ -21,16 +21,18 @@ For the web and terminal compose interfaces, see `PM_ARCHITECTURE.md` and `web_a
 | `imapAdapter.js` | `src/models/` | IMAP rendering for EMAIL transport — real email addresses in From/To headers. |
 | `privateMessages.js` | `src/models/` | EMAIL wired into `_triggerOutboundToss()` → `enqueueEmailOutbound()`. |
 | `jobs.js` | `src/queues/` | `enqueueEmailOutbound()` job helper. |
-| `configDefaults.js` | `src/config/` | Ten `email` category config keys. |
+| `configDefaults.js` | `src/config/` | Ten `email` category config keys, plus `mail_domain`, `imapport` and `smtpport` under `network`. |
 | `pm.js` | `src/routes/` | EMAIL address validation and transport_data building in web compose. |
-| `mail.js` | `bin/` | Starts trusted inbound SMTP listener alongside existing IMAP/SMTP servers. |
-| `worker.js` | `bin/` | `email:outbound` job handler in toss processor, email in outbound-sweep. |
+| `mail.js` | `bin/` | Starts trusted inbound SMTP listener alongside existing IMAP/SMTP servers. With no `mail_domain`, or every mail port 0, it waits rather than exiting and starts its servers on a `CONFIG_CHANGED` reload that allows it. Under maintenance mode every mail server refuses new connections and closes open sessions at the deadline (`setMaintenance`, `closeSessionsForMaintenance`). |
+| `mailStartup.js` | `src/servers/` | `mailDisabledReason(cfg)`: the pure rule for whether the mail process can start (needs `mail_domain`, and at least one of `imapport`, `smtpport`, `email_inbound_port` above 0). |
+| `worker.js` | `bin/` | `email:outbound` job handler in toss processor. |
+| `outboundSweep.js` | `src/maintenance/` | The periodic all-protocol outbound sweep, which includes email. |
 
 ---
 
 ## Configuration
 
-All keys are in the `email` category in `configDefaults.js`, managed via Admin UI at `/admin/config`.
+All keys below are in the `email` category in `configDefaults.js` except `mail_domain`, which is in `network`; all are managed via Admin UI at `/admin/config`.
 
 ### Outbound Relay
 
@@ -44,13 +46,15 @@ All keys are in the `email` category in `configDefaults.js`, managed via Admin U
 | `email_from_address` | _(empty)_ | Envelope From address for **system-generated** email (verification, password reset, templates, sysop broadcasts). Required for outbound. User-generated PMs use a per-user address instead (see "Sender identity"). |
 | `email_from_name` | _(empty)_ | Display name for **system-generated** email. Falls back to `boardname`. |
 | `email_max_outbound_batch` | `50` | Maximum emails sent per toss cycle. Prevents relay rate-limit issues. |
-| `mail_domain` | _(empty)_ | IANA domain name the BBS uses for all mail addressing. Required for user-generated outbound to build `<username>@<mail_domain>` sender addresses. |
+| `mail_domain` | _(empty)_ | (`network` category.) IANA domain name the BBS uses for all mail addressing. Required for user-generated outbound to build `<username>@<mail_domain>` sender addresses, and for the mail process to start any server at all. |
 
 ### Inbound Gateway
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `email_inbound_port` | `0` | Trusted inbound SMTP port (e.g. 1026). `0` = disabled. Requires restart. |
+
+The submission and IMAP ports are `smtpport` (10587) and `imapport` (10143), both `network` category, restart required, `0` disables.
 | `email_trusted_hosts` | `127.0.0.1` | Comma-separated mix of IPv4 addresses and IPv4 CIDR blocks allowed to inject without authentication. E.g. `127.0.0.1, 10.0.0.0/8, 192.168.1.5`. IPv6 still requires exact addresses. |
 
 ---
@@ -458,8 +462,8 @@ EMAIL uses its own permission and restriction flags, separate from FTN/QWK netma
 - `getAllowedTransports(session)` includes EMAIL only when permitted
 
 Admin flags in `admin.js`:
-- Permission: `"Email"` in `availablePermissions`
-- Restriction: `"Email"` in `availableRestrictions`
+- Permission: `"Email"` in `BUILTIN_PERMISSIONS`
+- Restriction: `"Email"` in `BUILTIN_RESTRICTIONS`
 
 ---
 
@@ -477,13 +481,7 @@ case 'email:outbound':
 
 ### Outbound Sweep
 
-The periodic `outbound-sweep` job (all-protocol backstop) includes email:
-
-```javascript
-try { await emailTosser.tossOutbound(); } catch (e) {
-    alogger.writeAlog(3, "[Worker] Email outbound sweep error: " + e.message, "yellow");
-}
-```
+The periodic `outbound-sweep` job (all-protocol backstop) includes email. The sweep lives in `src/maintenance/outboundSweep.js` (`SWEEP_PROTOCOLS = ['tic', 'ftn', 'qwk', 'nntp', 'email']`); each protocol runs as an isolated step, so an email failure is logged and does not stop the others.
 
 ### Config Change Handling
 
@@ -541,7 +539,7 @@ Any SMTP relay that accepts authenticated submissions:
 
 ## Testing
 
-41 tests in `tests/emailTransport.test.js` covering:
+`tests/emailTransport.test.js` (114 tests at 0.9.12a) covers:
 
 - **IMAP adapter rendering** — EMAIL From/To headers, display name format, bare address fallback
 - **SMTP address resolution** — external domains → EMAIL, .ftn/.qwk still correct
@@ -549,7 +547,9 @@ Any SMTP relay that accepts authenticated submissions:
 - **SmtpServer trusted host config** — comma parsing, defaults, non-trusted mode
 - **Transport access control** — Email permission/restriction flags, Sysop override
 - **SMTP message parsing** — plain text, multipart MIME, HTML-only, no body
-- **Config defaults** — all 10 email keys exist with correct category and defaults
+- **Config defaults**: all 10 email keys exist with correct category and defaults
+
+Related: `tests/mailStartup.test.js` (the `mailDisabledReason` rule) and `tests/mailServerMaintenance.test.js` (mail servers under maintenance mode).
 
 ---
 

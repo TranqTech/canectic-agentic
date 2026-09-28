@@ -1,4 +1,6 @@
-# Canectic BBS — FTN Nodelist System Design
+# Canectic BBS: FTN Nodelist System Design
+
+**Status (checked against the code 2026-09-27):** Phases 1 to 5 are implemented, with the deviations noted inline: import, lookup model, router steps 3 and 4, mailer connects to nodelist-only systems, the admin UI, and a daily auto-import scan from a file area. Not implemented: Phase 6 (nodelist diffs), the `--import-nodelist` CLI flag, the `nodelist_config` JSON block (replaced by `config.nodelist_area_shortcode`), and the "Create Connection from Nodelist" button. Code: `src/utils/nodelistParser.js`, `src/models/ftnNodelist.js`, `src/maintenance/nodelistImport.js`, `src/models/ftnRouter.js`, `src/mailer/manager.js` (`connectToNodelistAddress`), routes in `src/routes/admin.js`. Nodelist flag definitions (`nodelist_flag_definitions`, `src/models/nodelistFlags.js`, `/admin/nodelist-flags`) were added later and are not covered here; see `HUB_COORDINATOR_DESIGN.md`.
 
 ## Overview
 
@@ -32,7 +34,9 @@ For the process model and job queues, see `PROCESS_ARCHITECTURE.md`.
 
 ### Table: `ftn_nodelist`
 
-One row per node entry in a nodelist. Composite unique constraint on `(network_id, zone, net, node, point)`.
+One row per node entry in a nodelist. Unique on `(network_id, zone, net, node, point)`.
+
+As built, the columns are declared in `db/schema/tablecolumns/ftn_nodelist.conf` and also created by `ftnNodelist.ensureTable()` (called at the start of every import). Differences from the sketch below: `network_id` carries no foreign key; `region` is a real column (see section 5); a `connection_types JSONB DEFAULT '[]'` column holds the protocols derived from the flags (binkp, telnet, ip, vmodem, ssh, ifcico, ift, binkd, isdn, imi, email, icm, uucp, ipv6, ipv6only, pots); `imported_at` is nullable; uniqueness is the index `idx_ftn_nodelist_unique_addr`, plus an extra index `idx_ftn_nodelist_network_active` on `(network_id, active)`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS ftn_nodelist (
@@ -114,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_ftn_nodelist_keyword
 
 ### Schema file
 
-Add `ftn_nodelist` to `/home/kostie/canectic/db/schema/tables/tablenames.conf`.
+`ftn_nodelist` is listed in `db/schema/tables/tablenames.conf`, with its columns in `db/schema/tablecolumns/ftn_nodelist.conf`.
 
 ---
 
@@ -122,24 +126,24 @@ Add `ftn_nodelist` to `/home/kostie/canectic/db/schema/tables/tablenames.conf`.
 
 ### File: `src/utils/nodelistParser.js`
 
-A stateless parser that reads a nodelist text file and returns an array of parsed entry objects. Does not touch the database.
+A parser that reads a nodelist text file and returns an array of parsed entry objects. It keeps zone/region/net/hub context per call and does not touch the database.
 
 ### Exported functions
 
 ```
 parseNodelistFile(filePath)   -> Promise<{ entries: Array, errors: Array }>
 parseNodelistText(text)       -> { entries: Array, errors: Array }
-parseFlagString(flagsCsv)     -> { hostname, binkpPort, telnetPort, isCM, isIP, isIBN }
+parseFlagString(flagsArray)   -> { hostname, binkpPort, telnetPort, isCM, isIP, isIBN, connectionTypes }
 ```
 
 ### Parsing logic
 
 The parser maintains a context as it reads line by line:
 
-- `currentZone` — set when a `Zone,N` line is encountered
-- `currentRegion` — set when a `Region,N` line is encountered (reset on new Zone)
-- `currentNet` — set when a `Host,N` line is encountered (reset on new Zone/Region)
-- `currentHub` — set when a `Hub,N` line is encountered (reset on new Host)
+- `currentZone`: set when a `Zone,N` line is encountered
+- `currentRegion`: set when a `Region,N` line is encountered (reset on new Zone)
+- `currentNet`: set when a `Host,N` line is encountered; `Zone,N` and `Region,N` also set it to N, since those coordinators are listed as `zone:N/0`
+- `currentHub`: set when a `Hub,N` line is encountered (reset on new Zone, Region or Host)
 
 For each non-comment, non-blank line:
 
@@ -171,7 +175,8 @@ If no `INA:` flag is present but the phone field looks like a hostname (contains
 ### Edge cases
 
 - Lines with keyword `Down`, `Hold`, or `Pvt` are imported with their keyword but will be excluded from routing queries (they are not dialable).
-- Point lists (POINTLIST files) are not handled in Phase 1. Point entries within a standard nodelist (rare) would be parsed if present.
+- Point lists (POINTLIST files) are not handled. As built, the parser writes `point = 0` for every entry, so point entries are not represented at all.
+- As built, `is_ip` is also inferred from any of `INA:`, `IBN` or `ITN`, and an entry with a real phone number gets `pots` in `connection_types`.
 - Malformed lines increment the errors array but do not abort parsing.
 
 ---
@@ -180,34 +185,29 @@ If no `INA:` flag is present but the phone field looks like a hostname (contains
 
 ### Import paths (all converge on the same import logic)
 
-1. **CLI tool** — `node src/tools/maintenance.js --import-nodelist --file /path/to/NODELIST.074 --network fidonet`
-   Enqueues a `maintenance` job with `{ task: 'import-nodelist', file: '/path/...', networkDomain: 'fidonet' }`.
+1. **CLI tool**: NOT IMPLEMENTED. `src/tools/maintenance.js` has no `--import-nodelist` flag.
 
-2. **Admin UI upload** — `POST /admin/nodelists/import` (multipart form, file + network selector)
-   Saves uploaded file to a temp directory, enqueues the same maintenance job.
+2. **Admin UI upload**: `POST /admin/nodelists/import` (multipart form, file + network selector)
+   Saves the uploaded file and enqueues an `import-nodelist` maintenance job with `{ filePath, networkId, originalName }` (`jobs.enqueueNodelistImport`).
 
-3. **Automated daily scan** — `scanForNewNodelists()` in `src/maintenance/nodelistImport.js`
-   For each FTN network with a `nodelist_area_shortcode` in its config, scans the configured file area for the newest file uploaded since the last successful import (`MAX(last_seen)` from `ftn_nodelist`). Pass 1 prefers files literally named `NODELIST.*`; pass 2 falls back to the newest non-junk file in the area (filtering `.diz`, `.nfo`, `.txt`, etc.). This handles networks with non-standard naming conventions (AgoraNet ships `agoranet.z00`, FsxNet ships `FSXNET.Z00`, etc.) and the `.Z00` "current weekly" placeholder used by many hubs. `importFromFile()` validates the candidate is actually a parseable nodelist before committing. Can also be triggered manually via `POST /admin/nodelists/scan`.
+3. **Automated daily scan**: `scanForNewNodelists()` in `src/maintenance/nodelistImport.js`
+   For each FTN network with a `nodelist_area_shortcode` in its config, scans the configured file area for the newest file uploaded since the last successful import (`MAX(last_seen)` from `ftn_nodelist`). Pass 1 prefers files literally named `NODELIST.*`; pass 2 falls back to the newest non-junk file in the area (filtering `.diz`, `.nfo`, `.txt`, etc.). This handles networks with non-standard naming conventions (AgoraNet ships `agoranet.z00`, FsxNet ships `FSXNET.Z00`, etc.) and the `.Z00` "current weekly" placeholder used by many hubs. `importFromFile()` validates the candidate is actually a parseable nodelist before committing. Scheduled as `scan-nodelists-daily` (job `scan-nodelists`, 04:00 daily, `src/queues/schedules.js`). Can also be triggered manually from the Events page (`POST /admin/events/trigger` with job `scan-nodelists`). ZIP archives are detected and the nodelist extracted from them.
 
 All imports are processed by the Worker via the existing `maintenance` BullMQ queue.
 
 ### Import worker logic
 
-Located in `src/maintenance/nodelistImport.js`:
+Split in two as built: `importFromFile(filePath, networkId, opts)` in `src/maintenance/nodelistImport.js` parses and validates, then calls `ftnNodelist.importNodelist(networkId, parsedNodes, opts)` in the model for the database work.
 
-```
-importNodelist(filePath, networkId, options)
-```
-
-1. Parse the file via `parseNodelistFile(filePath)` → array of node objects
-2. If errors exceed a threshold (e.g., >5% of lines), abort with error
+1. Parse the file via `parseNodelistFile(filePath)` (or `parseNodelistText` on the text extracted from a ZIP) into an array of node objects
+2. If no entries parse, or errors exceed `opts.maxErrorRate` (default 5% of lines), abort with error
 3. **Mark all existing nodes for this network as candidates for deactivation** (track which addresses we see)
 4. For each parsed node:
    - **UPSERT**: `INSERT ... ON CONFLICT (network_id, zone, net, node, point) DO UPDATE SET` — updates system_name, location, sysop, hostname, flags, etc. Sets `last_seen = NOW()`, `active = true`, `removed_at = NULL`, `updated_at = NOW()`. Preserves `first_seen` (never overwritten).
    - Track the address as "seen in this import"
 5. **Deactivate missing nodes**: `UPDATE ftn_nodelist SET active = false, removed_at = NOW() WHERE network_id = $1 AND active = true AND last_seen < $importTimestamp` — any node not touched by step 4 was absent from the new nodelist
 6. Log summary: new nodes, updated nodes, deactivated nodes, time taken
-7. Return `{ status: true, newNodes: N, updatedNodes: N, deactivatedNodes: N, errors: [...] }`
+7. Return `{ status: true, newNodes, updatedNodes, deactivatedNodes, totalEntries, parseErrors, nodelistNumber, elapsed }`
 
 ### Why upsert with historical tracking, not bulk replace
 
@@ -231,7 +231,9 @@ Rather than individual INSERT ... ON CONFLICT statements for 10K rows, batch the
 
 Model providing query functions for the imported nodelist data.
 
-### Core lookup functions (all filter `active = true`)
+As built, the exports are: `ensureTable`, `ensureIndexes`, `importNodelist`, `getNode`, `getNetHost`, `getNodeHub`, `getRegionCoord`, `getZoneCoord`, `findConnectable` (the dialability check, as a query), `getNodesInNet`, `searchNodes`, `getRecentlyAdded`, `getRecentlyRemoved`, `getNetworkStats`, `getNodeHistory`, `getImportInfo` (`{ last_import, nodelist_number, entry_count }`) and `clearNetwork`. The design names below that were not built are `getLongestRunning`, `isDialable`, `getSystemInfo` and `getImportStatus`.
+
+### Core lookup functions as designed (all filter `active = true`)
 
 ```javascript
 // Exact node lookup (active only)
@@ -309,7 +311,7 @@ When `ftnRouter` needs to look up a destination, it needs to know which `network
 
 ## 5. Integration with ftnRouter.js
 
-The routing cascade in `ftnRouter.resolveRoute()` currently has stubs for steps 3 and 4. Here is how they will be implemented:
+Implemented as designed in `ftnRouter.resolveRoute(destinationAddress, networkId)`: step 3 uses `ftnNodelist.findConnectable`, step 4 walks hub, host, region, zone, checking configured connections before the nodelist at each level. When `networkId` is not passed, `inferNetworkId` picks the network of the first FTN connection whose address is in the destination zone, else the first FTN connection's network.
 
 ### Step 3: Nodelist direct lookup
 
@@ -394,7 +396,9 @@ The existing `resolveRoute(destinationAddress)` takes only a string. For nodelis
 
 ## 6. Integration with Mailer Outbound Resolution
 
-Currently, `MailerManager._connectToPeer(conn)` reads host/port from `connection_data.remote_host` / `connection_data.remote_port`. This works for configured peer connections but not for nodelist-resolved routes.
+Implemented: `MailerManager.connectToNodelistAddress(nodelistData, destinationAddress)` connects to `nodelistData.hostname:nodelistData.binkpPort` with no peer record; the BSO scanner calls it for routes carrying `nodelistData`. Connect backoff for these addresses is kept in memory (`_nodelistBackoff`), since there is no peer row to hold it. The rest of this section is the original design.
+
+`MailerManager._connectToPeer(conn)` reads host/port from `connection_data.remote_host` / `connection_data.remote_port`. This works for configured peer connections but not for nodelist-resolved routes.
 
 ### Changes needed in MailerManager
 
@@ -434,7 +438,7 @@ Each FTN network has its own nodelist. The `network_id` column in `ftn_nodelist`
 
 ### Network configuration
 
-Add a `nodelist_config` field to the `message_networks.config` JSONB (which already exists) for FTN networks:
+Not built as designed. As built, the only nodelist key is `config.nodelist_area_shortcode` on the network (set on the network edit form): the file area the daily scan reads. No directory, prefix or per-network auto-import toggle exists; a network with no area is import-by-upload only. The original design:
 
 ```json
 {
@@ -463,8 +467,7 @@ For Phase 1, the explicit `networkId` parameter on `resolveRoute()` handles this
 
 ### Nodelist management page: `/admin/nodelists`
 
-Route: `src/routes/admin.js` (add section) or `src/routes/adminNodelists.js` (new file, mounted at `/admin/nodelists`).
-View: `src/views/admin/nodelists.pug`
+As built, routes are in `src/routes/admin.js`: `GET /admin/nodelists` (per-network summary and upload), `POST /admin/nodelists/import`, `POST /admin/nodelists/clear/:networkId`, `GET /admin/nodelist/:networkId` (browse, with detail modal and flag glossary) and `GET /admin/nodelist/:networkId/search.json`. Views: `src/views/admin/nodelists/index.pug` and `view.pug`.
 
 ### Page layout
 
@@ -503,13 +506,13 @@ When the admin finds a system in the nodelist browser and wants to set up a peer
 - Remote port from `binkp_port`
 - System name as suggested peer name
 
-This is a convenience feature for Phase 2.
+This is a convenience feature for Phase 2. Not implemented.
 
 ---
 
 ## 9. Implementation Phases
 
-### Phase 1: Core Import and Lookup (Priority: HIGH)
+### Phase 1: Core Import and Lookup (Priority: HIGH) (DONE)
 
 **Goal:** Import nodelists into the database and make them queryable by the router and mailer.
 
@@ -523,7 +526,7 @@ This is a convenience feature for Phase 2.
 
 **Deliverables:** Can import a nodelist via CLI and query it programmatically.
 
-### Phase 2: Router Integration (Priority: HIGH)
+### Phase 2: Router Integration (Priority: HIGH) (DONE)
 
 **Goal:** Complete the ftnRouter cascade with nodelist steps 3 and 4.
 
@@ -537,7 +540,7 @@ This is a convenience feature for Phase 2.
 
 **Deliverables:** Outbound netmail can route through the FTN hierarchy via nodelist data.
 
-### Phase 3: Mailer Integration (Priority: MEDIUM)
+### Phase 3: Mailer Integration (Priority: MEDIUM) (DONE)
 
 **Goal:** Mailer can connect to systems resolved from the nodelist.
 
@@ -548,7 +551,7 @@ This is a convenience feature for Phase 2.
 
 **Deliverables:** Mailer can dial systems not in peer_connections, using nodelist data.
 
-### Phase 4: Admin UI (Priority: MEDIUM)
+### Phase 4: Admin UI (Priority: MEDIUM) (DONE, except the create-connection button)
 
 **Goal:** Admin can manage nodelists through the web interface.
 
@@ -560,7 +563,7 @@ This is a convenience feature for Phase 2.
 
 **Deliverables:** Full admin UI for nodelist lifecycle management.
 
-### Phase 5: Auto-Import and Directory Scan (Priority: LOW)
+### Phase 5: Auto-Import and Directory Scan (Priority: LOW) (DONE, differently: daily scan of a file area, see section 3)
 
 **Goal:** Nodelists are automatically imported when new editions arrive.
 
@@ -571,7 +574,7 @@ This is a convenience feature for Phase 2.
 
 **Deliverables:** Hands-off nodelist updates for active FTN networks.
 
-### Phase 6: Nodelist Diff Support (Priority: LOW)
+### Phase 6: Nodelist Diff Support (Priority: LOW) (NOT IMPLEMENTED)
 
 **Goal:** Apply nodelist diffs instead of requiring full nodelist files.
 
@@ -585,7 +588,7 @@ This is a convenience feature for Phase 2.
 
 ## Documentation Updates Required
 
-When implementation begins:
+Historical: this list was written before implementation.
 
 - **`NETWORKING_ARCHITECTURE.md`** — Update the FTN Routing section to document completed steps 3 and 4. Add `nodelistData` to routeResult shape documentation. Add ftn_nodelist to the database schema section.
 - **`MAILER_ARCHITECTURE.md`** — Add section on nodelist-resolved outbound connections and the no-peer-connection session path.

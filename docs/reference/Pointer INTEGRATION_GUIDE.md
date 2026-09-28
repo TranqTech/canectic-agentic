@@ -1,5 +1,7 @@
 # Integration Guide — messages.js migration + pointer system
 
+> **Historical document.** This is the March 2026 migration guide for moving view-facing message code from `echomail.js` into `messages.js` and introducing `userMsgPointers.js`. The migration it describes is complete and the code has moved on since (for example, all message model logic now lives in `messages.js`, threading is `messages.threadMessage()` for all three tossers, read tracking is area scan pointers plus per-thread pointers, and there is no `migrations/001_pointer_system.sql`; schema lives in `db/schema/`). Do not follow it as instructions. For the current system see `message_architecture.md`.
+
 ## Overview
 
 Two new model files:

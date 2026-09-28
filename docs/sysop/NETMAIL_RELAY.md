@@ -11,6 +11,10 @@ Setting: `netmail_relay_mode`, on `/admin/config` under **network**.
 | **Off** | Refuses everything not addressed to you |
 | **On** | Carries anything your system can route |
 
+This page is about FTN netmail. `netmail_relay_mode` does not apply to QWK
+netmail, which has its own setting per QWK network; see
+[QWK netmail](#qwk-netmail) below.
+
 ## Which one you want
 
 **Nodelist only** for almost everyone, including net and region coordinators.
@@ -113,8 +117,6 @@ If you were deliberately running an open relay, set the mode to **On** again.
 
 Every relay decision writes one row to `netmail_relay_log`, whatever the decision was. Refusals are recorded alongside relays on purpose: a gate you cannot see refusing anything is a gate you cannot validate.
 
-Before this, the traces were scattered. A success wrote a log line and a `pm_outbox` row. A refusal wrote a different log line. A loop wrote an undeliverable row. An unroutable address wrote a text dump into `ftn/bad`. Two of those roll over, so the question "did we relay what we should have, and did it leave" was not answerable after the fact.
-
 The admin page is at **Networking > Netmail Relay Log** (`/admin/relay-log`). It leads with anything relayed and not sent, then a summary by decision, then every decision with a detail view per row showing the Via chain as it arrived, the AKA you stamped, and the route taken. Filter by decision, and change the window with the selector.
 
 The same thing from the command line:
@@ -138,4 +140,21 @@ node src/tools/relayLog.js --stuck
 
 Relayed but never sent is the failure nothing else surfaces. Accepting a message for relay and queueing it looks like success at every other point, and a message then sitting unsent in `pm_outbox` produces no further event at all. Anything listed here was accepted and has not gone; start with whether the next hop is being polled (`node src/tools/schedules.js`).
 
+QWK netmail decisions are in the same log, with relay mode `qwk`.
+
 Rows are kept for `netmail_relay_log_retention_days`, default 180. That is longer than the other logs because relay disputes surface slowly: a downlink usually notices missing mail weeks after the fact.
+
+## QWK netmail
+
+QWK netmail that other systems send through yours is relayed under a separate
+rule. Each QWK network has a **Relay QWK netmail between systems on this
+network** setting (Networking > Networks, edit the network), on by default.
+While it is on, the board passes QWK netmail on within the network it arrived
+on, never from one network to another, by a direct link, a spelled-out path or
+a route learned from the mail that arrives. Mail that cannot be passed on (no
+route, relaying off, or a loop) goes back to its sender with the subject
+`BADADDR:` and the reason, as Synchronet does. Nothing is written to `ftn/bad`
+for QWK.
+
+Every QWK decision is a row in the Netmail Relay Log with relay mode `qwk`,
+alongside the FTN ones. See `QWK_NETWORKING.md` for the rest.

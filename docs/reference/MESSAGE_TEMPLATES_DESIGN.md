@@ -2,6 +2,8 @@
 
 Event-triggered sysop-authored message templates with PM/email/netmail delivery.
 
+**Status: implemented**, except the post and upload milestone events (seeded, never fired; see "What's Not Included").
+
 ## Motivation
 
 Sysops needed a way to customise system-generated messages (welcomes, verifications, password resets) without editing code, plus new capabilities like birthday greetings, anniversaries, and dormant-user nudges. Previously these messages were hardcoded strings buried in `mailVerification.js` and `passwordReset.js`, with no facility for sysop customisation or new events.
@@ -85,11 +87,12 @@ Built-in event hooks, one-line `fireEvent` calls in try/catch:
 | `password_reset_completed` | `src/models/passwordReset.js` `completeReset()` | after password update + token clear |
 | `user_first_login` / `user_nth_login` | `src/models/useraccounts.js` `updateUserCalls()` | after `logoncount` bump; first_login only when newcount === 1 |
 | `user_purge_warning` | `src/models/useraccounts.js` `purgeUnverifiedUsers()` | fired for users in their last 3 days before purge (loop runs before the actual DELETE) |
-| `user_birthday` / `user_account_anniversary` / `user_login_anniversary` / `user_dormant` | `src/models/useraccounts.js` `runDailyTemplateEvents()` | scheduled from `bin/worker.js` user-maintenance daily job |
+| `user_birthday` / `user_account_anniversary` / `user_login_anniversary` / `user_dormant` | `src/models/useraccounts.js` `runDailyTemplateEvents()` | called by the daily `user-maintenance` job in `src/maintenance/maintenanceJobs.js` (worker or embedded mode) |
+| `user_qwk_fetched` | `src/routes/api/qwk.js` `logApiCall()` | after each successful `/api/v1/qwk/download` or `/qwk/upload`; not for web or terminal QWK transfers (see `API_DESIGN.md`) |
 
 ### Custom Event Fire Sources
 
-Four independent paths, all calling the same `fireEvent` / `fireEventForMany`:
+Four independent paths, all calling the same `fireEvent` / `fireEventForMany` (plus a per-template Test button, `POST /admin/templates/:id/test`, which fires that template's event for the current sysop with `event.test_fire = true`, so other active templates on the same event fire too):
 
 1. **Admin UI** -- `/admin/templates/fire` (route in `src/routes/admin.js`, view `src/views/admin/templates/fire.pug`). Targets: single user, all active, all verified.
 
@@ -167,7 +170,7 @@ DB-dependent paths (full fireEvent roundtrip, admin CRUD, hook firing) require a
 
 **Modified:**
 - `bin/gateway.js` -- seed on startup
-- `bin/worker.js` -- daily event scan in user-maintenance job
+- `src/maintenance/maintenanceJobs.js` -- daily event scan in the `user-maintenance` job (originally `bin/worker.js`; the job switch now lives here for both worker and embedded mode)
 - `src/models/useraccounts.js` -- user_registered, login milestones, purge warning, runDailyTemplateEvents
 - `src/models/mailVerification.js` -- user_verified
 - `src/models/passwordReset.js` -- password_reset_completed

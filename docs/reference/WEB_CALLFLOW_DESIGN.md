@@ -2,6 +2,8 @@
 
 A guided login experience for web users, mirroring the terminal call flow. Walks users through what's new since their last visit rather than dropping them on a static home page.
 
+**Status: implemented** (`src/routes/callflow.js`, mounted at `/callflow`; views in `src/views/callflow/`; trigger rule in `src/utils/callflowTrigger.js`). The build adds a Welcome stage and a News stage to the sequence below, and `POST /callflow/complete` answers JSON rather than redirecting; details inline.
+
 ## Entry Modes
 
 ### 1. Fresh login (always)
@@ -35,7 +37,9 @@ The call flow is a single page (`/callflow`) that presents stages as cards in se
 
 ### Stages (in order)
 
-1. **New Announcements** -- announcements created since the user's last visit (tracked via `user.last_callflow_at` or the previous call record timestamp). If no new announcements, skip this stage silently.
+As built, `GET /callflow/stages.json` returns: `welcome` (always), `announcements`, `lastcallers`, `whosonline`, `wall`, `newsfiles` (active news/score files, skipped when none), `newmsgs`, `newfiles`. The design's list:
+
+1. **New Announcements** -- announcements created since the user's last completed call flow (`users.last_callflow_at`), plus any pinned announcement regardless of age. If none, skip this stage silently.
 
 2. **Last Callers** -- recent callers list (reuses `partials/lastCallers.pug` data). Always shown.
 
@@ -63,7 +67,7 @@ All data is already available from existing models:
 
 | Stage | Data source | Query |
 |-------|------------|-------|
-| New Announcements | `announcements.getActiveAnnouncements()` | Filter by `created_at > user.last_callflow_at` |
+| New Announcements | `announcements.getActiveAnnouncements(20)` | `created_at > users.last_callflow_at`, or `pinned` |
 | Last Callers | `callers.getLastCallers()` | Same as `/lastcallers` route |
 | Who's Online | `getOnlineUsers()` + nodeManager | Same as `/whosonline` route |
 | Wall | `wall.getRecentMessages()` | Same as `/wall` route |
@@ -89,10 +93,14 @@ This keeps the server logic simple (one JSON endpoint + partials per stage) and 
 ```
 GET  /callflow              -- main page (layout + stage container + JS driver)
 GET  /callflow/stages.json  -- list of active stages for this user (pre-filtered)
-GET  /callflow/stage/:name  -- HTML partial for a specific stage
-POST /callflow/wall         -- post a wall message inline (AJAX)
-POST /callflow/complete     -- mark call flow complete, clear flags, redirect
+GET  /callflow/stage/:name  -- HTML partial for a specific stage (one route per stage:
+                               welcome, announcements, lastcallers, whosonline, wall,
+                               newsfiles, newmsgs, newfiles; rendered with layout: false)
+POST /callflow/wall         -- post a wall message inline (AJAX), answers { status }
+POST /callflow/complete     -- mark call flow complete, clear flags, answer { redirect: <url> }
 ```
+
+`POST /callflow/complete` takes an optional `return_url` form field. Under Express 5 `req.body` is undefined when nothing is posted, so both POST routes read it as `(req.body && req.body.x)`; a missing body falls back to `/` rather than answering 500. A `return_url` starting with `/callflow` is replaced by `/`. `GET /callflow` also clears a sticky `callflow_pending` flag on the session, and does nothing but redirect to the return URL when `callflow_enabled` is off.
 
 ### Session flags
 
@@ -106,21 +114,13 @@ session.last_callflow_at = Date.now()  // Updated on call flow completion
 
 ## Login redirect
 
-In `src/routes/users.js`, the login POST handler currently redirects to `/` on success. Change to redirect to `/callflow` instead:
-
-```javascript
-// After successful login:
-req.session.callflow_return_url = req.body.return_url || '/';
-res.redirect('/callflow');
-```
+In `src/routes/users.js`, the login POST handler, when `callflow_enabled` is on, stores the original destination as `callflow_return_url` in the Redis session (`sessionStore.sessionUpdate`) and redirects to `/callflow` (or returns `{ status: true, redirect: '/callflow' }` for an AJAX login). It also caches `last_callflow_at` and `_callflow_checked` on the new session.
 
 ## Idle resume detection
 
-In `src/middleware/webActivity.js`, when a new call record is logged (idle threshold exceeded):
+In `src/middleware/webActivity.js`, when a request arrives after more than `web_idle_threshold` minutes (default 120) of inactivity, a new call record is logged, `prev_logon` is written to the session (the baseline for "new files since the previous visit"), and, if `callflow_on_resume` is on and there was a previous activity timestamp, `callflow_pending: 'true'` is set:
 
 ```javascript
-// In _trackActivity(), after logging the new call:
-session.callflow_pending = true;
 await sessionStore.sessionUpdate(sessionid, { callflow_pending: 'true' });
 ```
 
@@ -175,7 +175,9 @@ Progress indicator (dots or step counter) shows position in the sequence.
 |------|---------|
 | `src/routes/callflow.js` | New router: main page, stages.json, stage partials, wall post, complete |
 | `src/views/callflow/index.pug` | Main page with stage container and JS driver |
+| `src/views/callflow/welcome.pug` | Welcome stage partial (added in the build) |
 | `src/views/callflow/announcements.pug` | Announcement stage partial |
+| `src/views/callflow/newsfiles.pug` | News/score files stage partial (added in the build) |
 | `src/views/callflow/lastcallers.pug` | Last callers stage partial (wraps existing partial) |
 | `src/views/callflow/whosonline.pug` | Who's online stage partial (wraps existing partial) |
 | `src/views/callflow/wall.pug` | Wall stage partial with inline post form |

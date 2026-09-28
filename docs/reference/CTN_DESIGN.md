@@ -1,4 +1,6 @@
-# Canectic Network (CTN) — Forward-Looking Design Notes
+# Canectic Network (CTN): Forward-Looking Design Notes
+
+**Status (checked against the code 2026-09-27):** Not implemented. No CTN negotiation, base36 MSGID or other extension exists in the code. One neighbouring problem has since been addressed inside plain FTN rather than CTN: body encoding (see the note under "Other CTN ideas").
 
 This document captures design ideas for a Canectic-native networking layer, a tentative "CTN" (Canectic Transport Network) spec. CTN is not implemented; this file exists to preserve design decisions that came out of FTN compatibility discussions so the ideas aren't lost when we circle back.
 
@@ -16,7 +18,7 @@ CTN is not a break from FTN. It's a carefully negotiated extension set that Cane
 
 ## Status
 
-**Nothing in this document is implemented.** It exists to capture design thinking that surfaced during other work so we can come back to it later without re-deriving it. Expect everything here to change.
+**Nothing in this document is implemented** (still true as of 2026-09-27). It exists to capture design thinking that surfaced during other work so we can come back to it later without re-deriving it. Expect everything here to change.
 
 ## Preserved ideas
 
@@ -103,7 +105,7 @@ function _nextMsgIdSerial() {
 Placeholders for future expansion:
 
 - **Area naming**: FTN's areatag is 40 characters, uppercase, limited charset. CTN could allow longer mixed-case UTF-8 area names while still emitting a mapping to an FTN-compliant areatag for downstream peers.
-- **Body encoding**: FTN is CP437 with a `CHRS:` kludge for alternative charsets. CTN could mandate UTF-8 as the default body encoding with CP437 downgrade at the gateway to FTN-only peers.
+- **Body encoding**: FTN is CP437 with a `CHRS:` kludge for alternative charsets. CTN could mandate UTF-8 as the default body encoding with CP437 downgrade at the gateway to FTN-only peers. (Since written, plain FTN output got a per-area `charset` setting, `auto`/`cp437`/`utf8` on `message_areas` and `message_groups`, vocabulary in `src/utils/charsetPolicy.js`: `auto` sends CP437 when the body round-trips losslessly and UTF-8 otherwise, and every outbound message declares its encoding with CHRS. That is FTN behaviour for every peer, not a CTN extension.)
 - **TLS at the mailer layer**: binkp has a TLS extension (binkp/1.1 STA) but it's unevenly supported. CTN could mandate TLS negotiation at the mailer handshake and fall back cleanly to plain binkp for peers that don't advertise support.
 - **Large attachment handling**: FTN's file-attach flag is crude. CTN could define a content-addressed attachment store (SHA-256 keys) with deduplication across messages and areas.
 - **Message-level ACKs**: FTN has no per-message delivery confirmation. CTN could add an opt-in ACK protocol for messages that want end-to-end delivery proof.

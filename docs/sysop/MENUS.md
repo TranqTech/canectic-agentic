@@ -48,7 +48,7 @@ Click **Add Entry**. Fields:
 - **Hotkey** -- 1-4 character key combination. Users press this to activate the entry. Examples: `M`, `Q`, `1`, `?`, `PG`.
 - **Display Text** -- Text shown in the menu entry list. Leave blank for hidden hotkeys (the hotkey still works but nothing is displayed).
 - **Command** -- What happens when the user presses the hotkey. The dropdown is sorted alphabetically.
-- **Argument** -- Only shown for commands that need it. For "Load Menu", shows a dropdown of all other menus. For "Run Door Game", shows a dropdown of all doors.
+- **Argument** -- Only shown for commands that need it. For "Load Menu", shows a dropdown of all other menus. For "Run Door Game", shows a dropdown of all doors. For "Display Screen", the screen to show (see the table below).
 - **Sort Order** -- Controls display position. Entries are sorted ascending.
 - **Min Security** -- Minimum security level required to see/use this entry. Leave blank for no restriction.
 - **Featured** -- Mark as "Yes" to use the featured colour instead of the standard option colour. Use for important entries like Log Off or Verify Address.
@@ -68,13 +68,14 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Command | Needs Argument | Description |
 |---------|---------------|-------------|
 | Announcements | No | Display system announcements |
-| Browsing Doors | No | Door game browser with collections |
 | Change File Area | No | File area selector |
 | Change File Group | No | File group selector |
-| Change Message Area | No | Message area selector |
-| Change Message Group | No | Message group selector |
+| Change Msg Area | No | Message area selector |
+| Change Msg Group | No | Message group selector |
 | Change Password | No | Logged-in password change |
 | Check Email | No | Check for new private messages |
+| Display Screen | Screen | Show an art screen and wait for a key. `type:Welcome` (or `Goodbye`, `Logoff`, `Login`, `Logon`, `Registration`) picks one at random from that art directory; `screens/rules` shows that specific file |
+| Door Browser | No | Door game browser with collections |
 | Download Batch | No | Download tagged files |
 | Exit Stage | No | Advance to next call flow stage |
 | File Browser | No | Browse files in current area |
@@ -91,7 +92,7 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | New File Scan | No | Scan subscribed file areas for new files since last visit |
 | News Viewer | No | Display configured news/score files (ANSI/ASCII art) in sequence |
 | Notifications | No | View notifications (lightbar list, detail view, mark all read) |
-| QWK Transfer | No | QWK offline mail — download QWK packet and upload REP replies |
+| QWK Transfer | No | QWK offline mail: download a QWK packet and upload REP replies |
 | New Scan (All) | No | Scan all areas for new messages |
 | New Scan (Group) | No | Scan current group for new messages |
 | Post Message | No | Compose a new message |
@@ -167,8 +168,10 @@ Entries that fail access control are hidden from the display and their hotkeys a
 The `main` menu is loaded automatically after the login flow completes. The standard call flow is:
 
 ```
-negotiate -> logon -> last_callers -> check_online -> announcements -> verify_mail -> check_email -> check_batch -> menu -> goodbye
+negotiate -> logon -> last_callers -> check_online -> announcements -> wall -> verify_mail -> check_email -> check_batch -> menu -> goodbye
 ```
+
+Flows are edited under **Flows** (`/admin/callflows`) in the admin panel.
 
 The `menu` stage loads the menu specified by `call.currentMenu` (defaults to `main`). When the menu handler's `exitStage` command is invoked, the flow advances to `goodbye` and the session ends.
 
@@ -191,7 +194,7 @@ Art files (ANSI, UTF-8, ASCII) support `@` codes that are replaced with dynamic 
 | `@MA@` | Message area | Current area name |
 | `@FG@` | File group | Current file group name |
 | `@FA@` | File area | Current file area name |
-| `@VR@` | Software version | e.g. `0.9.1-alpha.1` |
+| `@VR@` | Software version | e.g. `0.9.12a` |
 | `@ON@` | Users online | Terminal + web count |
 | `@TC@` | Total calls | All-time call count |
 | `@TU@` | Total users | Registered user count |

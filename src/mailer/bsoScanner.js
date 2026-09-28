@@ -6,7 +6,7 @@
 // that drops correctly-named files into the BSO structure will have them
 // discovered and delivered.
 //
-// See docs/BSO_SCANNER_DESIGN.md for the full design rationale.
+// See docs/reference/BSO_SCANNER_DESIGN.md for the full design rationale.
 
 import * as fs from 'fs';
 import * as path from 'path';

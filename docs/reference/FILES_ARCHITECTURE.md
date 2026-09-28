@@ -29,17 +29,22 @@ Cross-references:
 |------|---------|
 | `fileGroups.js` | File group CRUD. `newGroup` (creates record + base directory), `updateGroup`, `removeGroup` (cascading area removal, optional disk cleanup), `getGroupByShortcode`, `getAllGroups`, `getActiveGroups`, `getAllGroupsWithAreas` (joins areas + network mappings), `recalculateAreaCounts`. `normalizeFlags(input)` coerces form input to JSONB array. |
 | `fileAreas.js` | File area CRUD. `newArea` (creates record, area directory, pointer rows, group count recalc), `updateArea`, `removeArea` (cascading cleanup of entries, network areas, peer subscriptions, pointers, user subscriptions, optional disk deletion), `getAreaByShortcode`, `getAreasInGroup`, `getAllAreas`, `getActiveAreas`. `resolveAreaPath(group, area)` — three-level directory resolution. `updateStatsForArea(shortcode)` — refreshes `file_count`, `total_bytes`, `last_upload`, `last_filename`, `last_uploader` from live data. `recalculateFileCounts()` — batch recalc across all active areas. |
-| `fileEntries.js` | File entry CRUD, search, dupe checking. `addFileEntry`, `getEntryByUUID`, `getEntryById`, `getEntriesForArea` (paginated with configurable sort), `getEntryCount`, `searchEntries` (ILIKE across filename, short_desc, long_desc, full_text), `checkDupe` (by area + filename + optional CRC-32), `updateEntry`, `incrementDownloadCount`, `deactivateEntry`, `flagEntry`, `deleteEntry` (cascading distribution row cleanup), `getNewFileCount` (entries above scan pointer), `getNewEntriesForArea` (the entries themselves, `oldestFirst` for a catch-up listing that advances a pointer as it goes), `newEntriesOrderBy`, `getMaxIdForArea`. |
+| `fileEntries.js` | File entry CRUD, search, dupe checking. `addFileEntry`, `getEntryByUUID`, `getEntryById`, `getEntriesForArea` (paginated with configurable sort), `getEntryCount`, `searchEntries` (ILIKE across filename, short_desc, long_desc, full_text), `checkDupe(areaId, filename, crc32, fileSize)` (see Loop prevention for the matching rules), `updateEntry`, `incrementDownloadCount`, `deactivateEntry`, `flagEntry`, `deleteEntry` (cascading distribution row cleanup), `countNewSince(areaId, since)` / `getNewSince(areaId, since, opts)` (active entries with `upload_date > since`: what "new" means, see Read Tracking), `getMaxIdForArea`. Maintenance: `cleanDuplicates`, `cleanMissingFiles`, `enforceRetentionLimits`, `regenerateDescHtml`, `scanAreaDirectory`. Legacy id-pointer queries still exported: `getNewFileCount` (entries above a scan pointer, used only by `userFilePointers.getNewCount`), `getNewEntriesForArea`, `newEntriesOrderBy`. |
 | `fileDistribution.js` | Outbound file distribution tracking. Each row = one file to one peer. `createDistributionRows` (bulk, idempotent via existence check), `getPendingForConnection`, `getAllPending` (joined with file_entries + peer_connections), `getDistributionForEntry`, `markSent`, `markFailed`, `markSkipped`, `retryFailed` (returns the count reset, and THROWS on a database error, unlike the other writes here, because it is a sysop waiting on a button), `summaryForConnection` (status counts plus recent failures, for the peer page), `partitionByAreatag` (pure). Status lifecycle: `pending` -> `sent` / `failed` / `skipped`. **`failed` is terminal**: the outbound pass reads pending rows only, so nothing retries a failed row on its own. That is why `partitionByAreatag` exists: the outbound pass needs an areatag to build a descriptor and fails a row without one, so a peer subscribed to an area not carried on its network used to collect one permanent dead row per file. All three creation paths (TIC inbound, web upload, terminal upload) now filter through it and log the mismatch. |
 | `fileNetworkAreas.js` | Maps file areas to FTN networks with areatags. `getAreaByTag(networkId, areatag)` — resolves inbound TIC area tags. `getNetworksByFileArea`, `getMappingsForNetwork`, `getMapping`, `getMappingById`, `addMapping` (dupe checks on both network+area and network+areatag), `removeMapping`, `updateMapping`. |
 | `filePeerSubscriptions.js` | Per-connection subscription state for file areas. Two-flag model: `allowed` (sysop permits) + `enabled` (sysop activates). `getSubscriptionsByConnection`, `getSubscribedConnections` (requires both allowed AND enabled AND connection active), `isSubscribed`, `setSubscriptions` (bulk toggle by field), `syncConnectionToFileAreas` (bootstrap missing rows), `allowAllFileAreas`, `enableAllAllowed`, `syncFileAreaToConnections` (propagate new area to all connections on a network), `removeSubscriptionsForFileArea`. |
-| `userFilePointers.js` | LEGACY: per-user per-area scan pointers. No longer used for "new" (see Read Tracking); rows are still created for new areas. Floor-based: any file with `id <= scan_pointer` is considered "seen". `ensureConstraintsAndIndexes` (table bootstrap), `advancePointer` (GREATEST — only moves forward; coerces its argument, since postgres returns ids as strings), `highestId(rows)` (the numeric max id of a result set — the obvious loop comparing `row.id > max` turns lexicographic after the first assignment, where `'9' > '37'`, which pinned pointers below the true maximum and left new-file counts that nothing could clear), `markAreaRead` (jump to current max), `getPointer`, `getNewCount`, `initPointersForArea` (pre-populate all users when area created, pointer=0), `initPointersForUser` (pre-populate all areas when user created, pointer=max to hide history). |
+| `userFilePointers.js` | LEGACY: per-user per-area scan pointers. No longer used for "new" (see Read Tracking); rows are still created for new areas (`fileAreas.newArea` calls `initPointersForArea`) and removed with an area. Floor-based: any file with `id <= scan_pointer` is considered "seen". `ensureConstraintsAndIndexes` (table bootstrap), `advancePointer` (GREATEST, only moves forward; coerces its argument, since postgres returns ids as strings), `highestId(rows)` (the numeric max id of a result set: the obvious loop comparing `row.id > max` turns lexicographic after the first assignment, where `'9' > '37'`, which pinned pointers below the true maximum and left new-file counts that nothing could clear), `markAreaRead` (jump to current max), `getPointer`, `getNewCount`, `initPointersForArea` (pre-populate all users when area created, pointer=0), `initPointersForUser` (pre-populate all areas, pointer=max; has no caller: new users get message pointers only). |
+| `userFileSubs.js` | Per-user file area subscription overrides (`user_file_subscriptions`): `isSubscribed` (user override, else the area's `newscan_default`). Decides which areas the terminal new file scan, `/files/new` and the QWK `NEWFILES.DAT` list cover. |
+| `userFileBatch.js` | Persisted download batch (`user_file_batch` table): `loadBatch`, `addToBatch`, `removeFromBatch`, `clearBatch`, `syncBatch`, `getBatchCount`. Loaded into `call.file_batch` at login so tagged files survive a disconnect; also the queue a personal QWK packet carries and a QWK `FREQ` adds to. |
+| `newFilesBaseline.js` | `forWeb(req, sessionUser)` / `forCall(call)`: the "new since" Date for this visit (see Read Tracking). |
 
 ### Utilities
 
 | File | Purpose |
 |------|---------|
 | `fileHasher.js` | `computeCRC32` (via `zlib.crc32`, uppercase hex, zero-padded to 8), `computeSHA256`, `computeHashes` (both in one read). Used by TIC tosser, web upload, terminal upload. |
+| `newSince.js` | `newSinceMs(prevLogon, createdAt)`, `isNewSince(uploadDate, sinceMs)`: the one rule for what a new file is. |
+| `fileAreaAccess.js` | `canBrowseFileArea`, `canDownloadFileArea`, `parseFlags`: the browse and download access rules, shared by `routes/files.js` and the QWK file features (`qwkNewFiles.js`, `qwkControl.js`, `qwkUser.js`). Pure. |
 | `fileDescExtractor.js` | `extractDescription(filePath)` — extracts FILE_ID.DIZ from ZIP archives (via `adm-zip`), returns `{ long_desc, long_desc_html, short_desc }`. `long_desc_html` generated via `formatBodyHtml()` (shared with message system). `applyDescriptions(entryObj, filePath)` — mutates entry object in place, only filling empty fields. |
 
 ### Native Transfer Engines
@@ -67,8 +72,9 @@ Cross-references:
 |------|---------|
 | `menucommands/fileAreaSelector.js` | Lightbar area selector. Flattened group/area list, cursor navigation, incremental search, new file counts per area. Persists selection to `call.file_group`/`call.file_area` and user record. Dumb terminal fallback with numbered list. |
 | `menucommands/fileBatchCheck.js` | Login flow batch check. If `call.file_batch` is non-empty at login, prompts user to download pending batch with hangup-after-transfer option. |
-| `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. Download (single and batch) with protocol selection prompt (XMODEM/ZMODEM) and hangup-after-transfer prompt, batch tagging (T key, max 50 files stored on `call.file_batch`), search (DB-backed via ILIKE when >= 2 chars), mark area read. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
+| `menucommands/fileBrowser.js` | Two-state file browser (FILE_LIST / FILE_DETAIL). Lightbar file list with columns (filename, desc, size, date), file detail view with scrollable long description. Download (single and batch) with protocol selection prompt (XMODEM/ZMODEM) and hangup-after-transfer prompt, batch tagging (T key, max 50 files stored on `call.file_batch` and persisted via `userFileBatch`), search (DB-backed via ILIKE when >= 2 chars). New files are marked via `isNewSince`; there is no Mark Read key. Lazy pagination (loads 50 at a time, load-ahead on scroll). Dumb terminal fallback with 20-line paging. |
 | `menucommands/fileBatchDownload.js` | Standalone batch download module. State machine: `hangup_ask → downloading → result → done`. Shows batch summary, protocol selection and hangup prompts, resolves disk paths, runs native engine send with all paths, increments download counts, clears batch on success. Auto-disconnects or returns based on hangup choice. |
+| `menucommands/fileNewscan.js` | New file scan (menu command `fileNewscan`): counts files new since the previous visit (`countNewSince`) in every subscribed, browsable area and shows a summary. |
 | `menucommands/fileUpload.js` | Terminal upload handler. Checks upload access, prompts for protocol selection (XMODEM/ZMODEM), receives files via native engine into staging dir, then for each file: hash, dupe check, move to area dir, extract FILE_ID.DIZ, create entry, update stats. XMODEM uploads prompt for filename. |
 | `menucommands/fileSearch.js` | Terminal file search with scope selection (area/group/global), search input, lightbar results with detail view. Filters by browse access. Supports download with protocol selection (with hangup-after-transfer prompt on status row) and batch tagging from search results. |
 
@@ -76,7 +82,7 @@ Cross-references:
 
 | File | Purpose |
 |------|---------|
-| `middleware/tossers/ticTosser.js` | FTN TIC file echo processor. **Inbound** (`tossInbound`): scan inbound dir for `.tic` files, parse TIC format, resolve source connection, validate password, resolve areatag via `file_network_areas`, verify CRC-32, dupe check, handle Replaces, move file to area dir, create entry, extract FILE_ID.DIZ if no LDesc, create distribution rows (excluding source + seenby), update area stats. **Outbound** (`tossOutbound`): get all pending distributions, group by connection, for each: resolve areatag, build TIC descriptor (append path/seenby), stage TIC + file in outbound dir (hardlink preferred, copy fallback), mark sent, signal mailer for CRASH connections. |
+| `middleware/tossers/ticTosser.js` | FTN TIC file echo processor. **Inbound** (`tossInbound`): scan inbound dir for `.tic` files, parse TIC format, resolve source connection, validate password, resolve areatag via `file_network_areas`, verify CRC-32, loop check (our address in Path), dupe check, handle Replaces (wildcards allowed, `replacesPattern`), place the file (`placeInboundFile`), create entry, extract FILE_ID.DIZ if no LDesc, create distribution rows (excluding source, Seenby and Path via `forwardExclusions`, filtered by `partitionByAreatag`), update area stats. **Outbound** (`tossOutbound`): get all pending distributions, group by connection, for each: resolve areatag, build TIC descriptor (append path/seenby), stage TIC + file in outbound dir (hardlink preferred, copy fallback), mark sent, signal mailer for CRASH connections. |
 | `models/filefix.js` | FileFix automated TIC file area manager. Processes netmail commands from FTN peers to subscribe/unsubscribe file distribution areas. Same command set as AreaFix (+AREATAG, -AREATAG, %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME). Authenticates via `areafix_password` in `connection_data`. Operates on `file_network_areas` + `file_peer_subscriptions`. See `NETWORKING_ARCHITECTURE.md` for full AreaFix/FileFix documentation. |
 
 ### Routes
@@ -115,6 +121,9 @@ Each row represents a file group containing one or more file areas. Groups provi
 - `read_security`, `post_security` — security levels for read/upload access
 - `read_perm_flags`, `read_rest_flags` — JSONB arrays for read permission/restriction flags
 - `post_perm_flags`, `post_rest_flags` — JSONB arrays for upload permission/restriction flags
+- `browse_security`, `browse_perm_flags`, `browse_rest_flags`: browse tier (null falls back to the read tier)
+- `newscan_default`, `max_age_days`, `max_files`: defaults for new areas (pushable to existing areas with Push Group Defaults)
+- `sort_order`: display order
 - `area_count` — cached count of active child areas
 - `active` — boolean
 - `created_at`, `updated_at`, `created_by_uuid`, `created_by_name`
@@ -133,6 +142,9 @@ Each row represents a file area belonging to a group. Files live in the single `
 - `file_count`, `total_bytes` — cached stats (refreshed by `updateStatsForArea`)
 - `last_upload`, `last_filename`, `last_uploader` — cached last-upload info
 - `newscan_default` — boolean, default true (controls user subscription default)
+- `browse_security`, `browse_perm_flags`, `browse_rest_flags`: browse tier (null falls back to the read tier)
+- `max_age_days`, `max_files`: retention limits, NULL or 0 = no limit (see File Maintenance Worker Job)
+- `sort_order`: display order
 - `active` — boolean
 - `created_at`, `updated_at`, `created_by_uuid`, `created_by_name`
 
@@ -200,7 +212,7 @@ Per-connection subscription state for file areas. Two-flag model controls distri
 
 ### user_file_pointers
 
-Per-user scan pointers for file areas (mirrors `user_msg_pointers`). Floor-based: any `file_entries.id <= scan_pointer` is "seen".
+LEGACY since 2026-09-25: read by nothing (see Read Tracking); kept, and still populated for new areas. Per-user scan pointers for file areas (mirrors `user_msg_pointers`). Floor-based: any `file_entries.id <= scan_pointer` is "seen".
 
 - `id` (SERIAL) — identifier
 - `user_id` — FK to users
@@ -219,6 +231,10 @@ Per-user area subscription overrides for newscan filtering (mirrors `user_area_s
 - `area_shortcode` — file area shortcode
 - `subscribed` — boolean (overrides area's `newscan_default`)
 - `updated_at`
+
+### user_file_batch
+
+A user's tagged download batch, persisted so it survives a disconnect (`userFileBatch.js`). One row per file: `user_id`, `file_entry_uuid`, `file_entry_id`, `filename`, `file_size`, `area_shortcode`, `disk_path`, `added_at`.
 
 ---
 
@@ -267,7 +283,8 @@ ftn/
 | `file_allowed_extensions` | `''` (all) | Comma-separated whitelist (empty = allow all) |
 | `tic_staging_dir` | `'ftn/tic_staging'` | TIC processing staging directory |
 | `tic_inbound_dir` | `''` | TIC inbound dir (defaults to `ftninbound`) |
-| `tic_auto_forward` | `'true'` | Auto-forward received TIC files to subscribed peers |
+| `tic_auto_forward` | `'true'` | Described as auto-forwarding received TIC files; read by nothing, forwarding is unconditional |
+| `zmodem_default_crc` | `'auto'` | ZMODEM CRC mode for downloads (`auto` / `zbin32` / `zbin_crc16`) |
 
 ---
 
@@ -279,7 +296,7 @@ ftn/
 2. `multer` receives the file into `file_upload_staging_dir` with size limit from `file_max_upload_size`
 3. Extension whitelist checked (if configured)
 4. `computeHashes()` produces CRC-32 + SHA-256
-5. `checkDupe()` by area + filename + CRC-32
+5. `checkDupe()` by area + filename + CRC-32 + size
 6. File moved from staging to resolved area directory (`resolveAreaPath`)
 7. `applyDescriptions()` extracts FILE_ID.DIZ from ZIP archives
 8. User-provided `short_desc` overrides extracted description if present
@@ -299,7 +316,7 @@ ftn/
 
 1. Worker picks up `tic:inbound` job from the `toss` queue
 2. `tossInbound()` scans inbound dir for `.tic` files
-3. For each TIC file: parse, find attached file (case-insensitive), resolve source connection, validate password, resolve areatag via `file_network_areas`, verify CRC-32, dupe check, handle Replaces (deactivate old entry), move file to area dir, build entry with descriptions from TIC LDesc or FILE_ID.DIZ fallback, create entry, create distribution rows for subscribed peers (excluding source + seenby), update area stats
+3. For each TIC file: parse, find attached file (case-insensitive), resolve source connection, validate password, resolve areatag via `file_network_areas`, verify CRC-32, dupe check, loop check, handle Replaces (deactivate the old entry, delete its file), place the file in the area dir, build entry with descriptions from TIC LDesc or FILE_ID.DIZ fallback, create entry, create distribution rows for subscribed peers (excluding source, Seenby and Path), update area stats
 4. TIC file moved to tossed dir (or bad dir on error)
 5. Worker publishes `FILES_IMPORTED` event via Redis pub/sub
 
@@ -371,7 +388,8 @@ This replaced a per-area read pointer (`user_file_pointers`) on 2026-09-25. Many
 
 
 - **New area created**: `initPointersForArea()` creates rows for all active users with `scan_pointer = 0` (all existing files appear as new)
-- **New user created**: `initPointersForUser()` creates rows for all active areas with `scan_pointer = MAX(id)` (history hidden, only future files appear new)
+- **New user created**: nothing. `initPointersForUser()` exists but has no caller
+- **Area removed**: its rows are deleted
 
 ---
 
@@ -405,7 +423,7 @@ Applied to: upload form display, upload POST, terminal upload handler.
 
 The browse tier allows users to see files they cannot download. If `browse_security` / `browse_*_flags` are not set (null), they fall back to the download-tier values for backward compatibility.
 
-Groups and areas use the same column names so the same check functions work on both. Admin UI labels: "Browse Security" / "Download Security" / "Upload Security".
+Groups and areas use the same column names so the same check functions work on both. The browse and download rules live in `src/utils/fileAreaAccess.js` (`canBrowseFileArea`, `canDownloadFileArea`); the `checkFileArea*Access` helpers in `routes/files.js` delegate to them, and the QWK new-files list and `FREQ` use them directly. Admin UI labels: "Browse Security" / "Download Security" / "Upload Security".
 
 ---
 
@@ -559,7 +577,7 @@ Multi-value keys (LDesc, Path, Seenby) accumulate into arrays. The parser is cas
 
 Job ID deduplication: `tic-inbound--<connectionUUID or timestamp>`, `tic-outbound--<connectionUUID or timestamp>`.
 
-**Both consumers of the `toss` queue must handle every one of these names.** There are two: `bin/worker.js` and, under `PROCESS_MODE=embedded`, `src/queues/embedded.js`. A name missing from either does not raise anything — BullMQ delivers the job, the switch falls through to `default`, one line is logged at level 3, and the job is marked complete. The queue drains and the work never happens. `tests/tossJobCoverage.test.js` derives the required set from the producers and holds both switches to it.
+**Both consumers of the `toss` queue must handle every one of these names.** There are two: `bin/worker.js` and, under `PROCESS_MODE=embedded`, `src/queues/embedded.js`. A name missing from either does not raise anything: BullMQ delivers the job, the switch falls through to `default`, one line is logged at level 3, and the job is marked complete. The queue drains and the work never happens. `tests/queueJobCoverage.test.js` derives the required set from the producers and holds both switches to it.
 
 `tic:outbound` is reachable two ways on purpose. The signal at the end of `tic:inbound` is the fast path, and the outbound sweep is the backstop for anything it misses: a worker restarted mid-toss, a signal that failed to enqueue, rows left pending by a rescan. Distribution rows are inert until something stages them, so a file echo with only the on-demand path is one missed signal away from stopping for ever, with nothing to show for it.
 
@@ -645,7 +663,7 @@ Two-state file browser with state machine (`STATE.LOADING`, `STATE.FILE_LIST`, `
 - Scrollable body: word-wrapped long_desc
 - Navigation: Up/Down (scroll body), PgUp/PgDn (page body), Left/Right (prev/next file), D (download), T (tag), B (batch), Space (page down), Q/Esc (back to list)
 
-**Batch System**: Files tagged with T are stored on `call.file_batch` (array of `{ uuid, id, filename, file_size, area_shortcode, disk_path }`). Maximum 50 files. Batch persists across file browser sessions within the same call. B key triggers batch download from either list or detail view.
+**Batch System**: Files tagged with T are stored on `call.file_batch` (array of `{ uuid, id, filename, file_size, area_shortcode, disk_path }`) and mirrored to `user_file_batch`, so the batch survives across calls. Maximum 50 files. B key triggers batch download from either list or detail view.
 
 **Hangup-After-Transfer Prompt**: All download paths (D key single file, B key batch) prompt for protocol selection (XMODEM/ZMODEM) and display a "Hang up after transfer?" `[Y/n]` prompt. Enter defaults to Yes. After a successful transfer, if the user chose hangup the system auto-disconnects after a 1500 ms delay; otherwise it shows "press any key" and returns to the previous view. Managed via `_hangupPrompt`/`_hangupResult` flags on the browser instance.
 
@@ -674,7 +692,10 @@ Standalone upload sub-module. Validates area selection and upload access, prompt
 | GET | `/files` | `files/index` | File group listing (filtered by read access, new counts, total-new button) |
 | GET | `/files/new` | `files/new` | New files (since the previous visit) across subscribed areas, with a per-area preview |
 | GET | `/files/group/:shortcode` | `files/groups/view` | Areas in a group (filtered, new counts, upload indicators) |
-| GET | `/files/area/:shortcode` | `files/areas/view` | File listing in area (paginated); NEW marks files since the previous visit. `?new=1` lists only files above the pointer, oldest first |
+| GET | `/files/area/:shortcode` | `files/areas/view` | File listing in area (paginated); NEW marks files since the previous visit. `?new=1` lists only those, newest first |
+| POST | `/files/area/:shortcode/subscribe` | (JSON) | Toggle the user's subscription to the area (`userFileSubs.toggleSubscription`) |
+| GET | `/files/search` | `files/search` | Search across every area the user may browse (`searchEntries`, up to 200 results, filtered by browse access) |
+| GET | `/files/info/:uuid.json` | (JSON) | File info for one entry |
 | GET | `/files/view/:uuid` | `files/view` | Single file detail (breadcrumb to area/group) |
 | GET | `/files/download/:uuid` | — | File download (increments count, `res.download()`) |
 | GET | `/files/area/:shortcode/files.json` | — | JSON pagination (sortable) |
@@ -693,6 +714,10 @@ Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`,
 | POST | `/admin/fileGroup/:shortcode/update` | Update group |
 | POST | `/admin/fileGroup/:shortcode/delete` | Delete group (optional disk cleanup) |
 | POST | `/admin/fileGroups/recalculateAreaCounts` | Force area count recalc |
+| POST | `/admin/fileGroup/:shortcode/pushDefaults` | Push group defaults to its areas (ticked fields only) |
+| GET | `/admin/fileGroup/:shortcode/defaults` | Group defaults as JSON |
+| POST | `/admin/fileGroups/reorder`, `/admin/fileAreas/reorder` | Drag-to-reorder |
+| GET / POST | `/admin/fileGroup/checkdir`, `/admin/fileGroup/mkdir` | Check for / create a group base directory |
 | POST | `/admin/fileGroup/:shortcode/newArea` | Create area in group |
 | GET | `/admin/fileAreas` | List all areas across groups |
 | GET | `/admin/fileArea/:shortcode` | View area detail (entries, network mappings, resolved path) |
@@ -701,6 +726,7 @@ Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`,
 | POST | `/admin/fileEntry/:uuid/update` | Update file entry metadata |
 | POST | `/admin/fileEntry/:uuid/delete` | Delete entry (optional disk file removal) |
 | POST | `/admin/fileEntry/:uuid/move` | Move entry to different area (moves file on disk) |
+| POST | `/admin/fileArea/:shortcode/scan` | Scan the area directory for files not yet in the database |
 
 Network area mappings and peer file subscriptions are managed through the existing network/peer admin pages (inline in `/admin/networks/:shortcode`).
 
@@ -720,9 +746,9 @@ Rather than embedding distribution state in `file_entries` or `source_data`, a s
 
 TIC processing runs on the existing `toss` BullMQ queue alongside FTN/QWK/NNTP message tossing. This keeps all networking I/O in the Worker process and reuses the existing job infrastructure. The `tic:inbound` and `tic:outbound` job names are distinct from message toss jobs.
 
-### Scan Pointer (Single-Tier)
+### New Since Last Visit (no pointer)
 
-Files use a single scan pointer (floor-based) without the second thread-pointer tier that messages have. Files have no threading, so the simpler model suffices. The pointer is the highest `file_entries.id` the user has seen — any file above that ID is "new".
+Files originally used a single floor-based scan pointer (`user_file_pointers`). Since 2026-09-25 "new" is time-based instead: `upload_date` after the start of the previous visit, so nothing a user does during a visit changes what is marked new. See Read Tracking.
 
 ### `source_data` JSONB
 
@@ -734,7 +760,7 @@ File transfers use native JavaScript XMODEM and ZMODEM engines (`src/transfers/`
 
 ### Cross-Area Search
 
-`searchEntries()` supports searching within a single area or globally, but the web interface currently only exposes per-area search. Global search across all accessible areas is not yet available in the web UI.
+`searchEntries()` supports searching within a single area or globally. The web `/files/search` page searches globally and filters the results by browse access; the terminal `fileSearch` offers area, group or global scope.
 
 ---
 
@@ -742,12 +768,12 @@ File transfers use native JavaScript XMODEM and ZMODEM engines (`src/transfers/`
 
 ### File Maintenance Worker Job
 
-The `file-maintenance` job on the `maintenance` BullMQ queue runs two cleanup functions:
+The `file-maintenance` job on the `maintenance` BullMQ queue (`src/maintenance/maintenanceJobs.js`) runs three functions in order:
 
-- **`cleanDuplicates()`** -- Scans for duplicate file entries within the same area (matching filename + CRC-32). Deactivates the older duplicate, keeping the most recent entry active.
-- **`cleanMissingFiles()`** -- Checks each active file entry's resolved disk path. If the file no longer exists on disk, the entry is deactivated. Logs each removal for audit.
+- **`cleanDuplicates()`** -- Finds entries in the same area with the same filename (exact, case-sensitive; active or not). Keeps the lowest id (the oldest) and hard-deletes the others with their distribution rows.
+- **`cleanMissingFiles()`** -- Checks each active file entry's resolved disk path (`disk_path`, else `filename`). If the file no longer exists on disk, the entry and its distribution rows are deleted. Areas whose directory does not exist are skipped. Logs each removal at level 4.
 
-Both functions are also available for direct invocation from admin routes.
+- **`enforceRetentionLimits()`** -- For each active area with `max_age_days` or `max_files` set: removes active files older than `max_age_days` (by `upload_date`) and all but the newest `max_files`, deleting the file from disk and the row via `deleteEntry` (hard delete, distribution rows included), then refreshes area stats. 0 or null means no limit.
 
 ### SMB Import
 
@@ -776,5 +802,4 @@ Per-network registry of available file echo areas, imported from FILEBONE.NA or 
 ### Planned/Possible Enhancements
 
 - **Additional archive formats** -- RAR, 7z, ARJ, LHA support in `fileDescExtractor.js`
-- **File newscan** -- terminal newscan integration for new file notifications (user_file_subscriptions infrastructure is in place)
-- **QWK/NNTP file support** -- currently TIC-only for network distribution
+- **NNTP file support** -- file echo distribution is TIC-only. QWK packets do carry files (personal packets: `NEWFILES.DAT`, the download batch and PM attachments, see `qwkUser.js` / `qwkNewFiles.js` / `qwkPacketFiles.js`; network packets: `qwkFiles.js`, see `QWK_ARCHITECTURE.md`), but outside the file area distribution model

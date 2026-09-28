@@ -71,7 +71,7 @@ function usage() {
 		'  --version V        a specific release (default: the newest on the channel)',
 		'  --target DIR       the installation to plan against (default: this tree)',
 		'  --staging DIR      where to build the release (default: <target>/.canectic-update)',
-		'  --apply            actually write it, in this process. Stop the BBS first',
+		'  --apply            actually write it, in this process; stops and restarts the BBS itself',
 		'  --handoff          hand off to the NEW release\'s updater, detached,',
 		'                     and return. Survives the BBS being stopped',
 		'  --status           report the last update run on --target and stop',

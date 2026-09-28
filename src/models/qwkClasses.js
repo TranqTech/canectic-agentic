@@ -641,9 +641,9 @@ function buildQwkBody(bodyText) {
 // DB row with at minimum: id, system_time, to_user, from_user, subject,
 // body_text, utf8, reply_ref.
 //
-// Body encoding: QWK packets are CP437. If msg.utf8 is populated, body_text
-// is already CP437 (use directly). If msg.utf8 is null, body_text is UTF-8
-// and must be converted via utf8ToCp437 before packing.
+// Body encoding: body_text is Unicode. A message goes as CP437 unless the
+// link allows UTF-8 (opts.utf8) and the message does not fit CP437
+// (messageNeedsUtf8); msg.utf8 is not read.
 //
 // Returns the path to the generated .REP file.
 // packetName is the hub's QWK-ID — used for filenames and Record 0.

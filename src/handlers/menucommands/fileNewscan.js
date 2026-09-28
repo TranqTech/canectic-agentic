@@ -1,7 +1,7 @@
 // fileNewscan.js -- New file scan across subscribed file areas
 //
-// Scans all subscribed file areas for files added since the user's last
-// scan pointer. Displays a summary and optionally marks areas as read.
+// Scans all subscribed file areas for files added since the user's previous
+// visit began (src/utils/newSince.js) and displays a summary.
 
 import { BaseSubModule } from "../basesubmodule.js";
 import { getActiveGroups } from "../../models/fileGroups.js";

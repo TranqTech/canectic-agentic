@@ -1,5 +1,7 @@
 # Canectic BBS -- File Area System Architecture
 
+**Status: design document, implemented.** The six phases in section 9 are built, except that search is `ILIKE` matching (`fileEntries.searchEntries`) rather than a `tsvector` full-text index. `FILES_ARCHITECTURE.md` is the reference for how the system works now; where the two differ, it and the code win. Notable departures from this design: "new files" is time-based (new since the previous visit, `src/utils/newSince.js`), not the `user_file_pointers` scan pointer of section 1.7, which is legacy; TIC loop prevention checks our address in Path only, never Seenby; the dupe check and Replaces handling are broader than 4.2 describes; outbound delivery is signalled with a BSO scan rather than a per-connection CRASH job; and a `failed` distribution row is terminal until a sysop retries it.
+
 ## Overview
 
 The file area system adds file distribution capabilities to Canectic BBS, supporting local uploads/downloads via both web and terminal interfaces, and networked file distribution via TIC (FTN file echoes) with extensibility for future protocols.
@@ -252,6 +254,8 @@ updated_by_name      VARCHAR(255)
 
 ### 1.7 `user_file_pointers`
 
+**Legacy since 2026-09-25**: read by nothing. "New" is now `upload_date` after the start of the user's previous visit (`src/utils/newSince.js`, `fileEntries.countNewSince` / `getNewSince`); the table is kept and still populated for new areas. The rest of this section is the original design.
+
 Per-user per-area scan pointer for "new files" tracking. Same pattern as `user_msg_pointers` for messages. The pointer stores the highest `file_entries.id` the user has seen in that area. Any file with `id > pointer` in the area is considered "new."
 
 ```
@@ -446,6 +450,7 @@ Worker picks up tic:inbound job
   |   |-- Validate TIC password against peer connection's tic_password
   |   |-- Locate attached file (same directory, filename from TIC Area field)
   |   |-- Resolve file area from TIC Area tag via file_network_areas
+  |   |-- Loop check (our address in Path; see FILES_ARCHITECTURE.md "Loop prevention")
   |   |-- Dupe check (CRC-32 from TIC + filename + area)
   |   |-- Move file to resolved area path
   |   |-- Extract file_id.diz from ZIP if long_desc not in TIC
@@ -540,13 +545,13 @@ The TIC processor is a new tosser module: `src/middleware/tossers/ticTosser.js`
    f. Resolve `Area` tag to a `file_areas` row via `file_network_areas`
    g. If area not found and auto-create is enabled (appConfig `tic_auto_create_areas`), log and skip (do not auto-create -- sysop must map areas manually)
    h. Check `file_peer_subscriptions` -- is this area allowed/enabled for the sending connection?
-   i. Dupe check: `SELECT id FROM file_entries WHERE file_hash_crc32 = $1 AND area_id = $2 AND filename = $3`
-   j. Handle `Replaces`: if present, mark the old file entry as `active = false`
+   i. Dupe check: `SELECT id FROM file_entries WHERE file_hash_crc32 = $1 AND area_id = $2 AND filename = $3` (as built, `fileEntries.checkDupe`: filename compared case-insensitively with the CRC, or CRC-32 and size under any name, active or not; a loop check on Path runs first)
+   j. Handle `Replaces`: if present, mark the old file entry as `active = false` (as built, the old file is also deleted from disk, and `*`/`?` wildcards are honoured when they name at least 3 literal characters before the first dot)
    k. Move the attached file from inbound to the resolved area directory
    l. Extract `file_id.diz` if `LDesc` was not present in the TIC
    m. Compute SHA-256 hash
    n. Insert `file_entries` row
-   o. Create `file_distribution` rows for all peer connections subscribed to this file area, excluding the source peer (check `Seenby`/`Path`)
+   o. Create `file_distribution` rows for all peer connections subscribed to this file area, excluding the source peer (check `Seenby`/`Path`) (as built: also excluding peers whose network carries no areatag for the area, `partitionByAreatag`)
    p. Move `.tic` to `ftntossed` directory
    q. Log via `alogger`
 
@@ -576,9 +581,9 @@ The TIC processor is a new tosser module: `src/middleware/tossers/ticTosser.js`
       ii. Write `.tic` file to the peer's outbound directory (BSO structure)
       iii. Copy/link the attached file to the outbound directory
       iv. Update `file_distribution` row: `status = 'sent'`, `sent_at = now()`
-   c. If the peer connection is CRASH status, enqueue `signal-outbound` mailer job
+   c. If the peer connection is CRASH status, enqueue `signal-outbound` mailer job (as built: one mailer BSO scan is enqueued after the pass instead)
 
-4. Errors: update `file_distribution` row with `status = 'failed'`, increment `attempts`, set `error_message`
+4. Errors: update `file_distribution` row with `status = 'failed'`, increment `attempts`, set `error_message`. As built, `failed` is terminal: the outbound pass reads pending rows only, and the Retry Failed button on the peer page (`fileDistribution.retryFailed`) puts them back to pending
 
 ### 4.4 Hatching (local file distribution)
 

@@ -15,17 +15,19 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 ## Startup Sequence
 
-Entry point: `bin/gateway.js` (renamed from `doorserver.js`). Orchestrates the gateway process startup:
+Entry point: `bin/gateway.js` (renamed from `doorserver.js`; an older `bin/doorserver.js` is still in the tree but is not one of the four processes in `ecosystem.config.cjs`). Orchestrates the gateway process startup:
 
-1. **Pre-run maintenance** — `userMsgPointers.ensureConstraintsAndIndexes()`, `userAreaSubs.ensureConstraintsAndIndexes()`. Creates tables/indexes/constraints if missing.
+1. **Pre-run maintenance** (`prerunMaint()`): `ensureConstraintsAndIndexes()` for `userMsgPointers`, `userAreaSubs`, `userFilePointers`, `userFileSubs`, then QWK conference numbers, several `ensureTable()` calls (news files, PM attachments, notifications, FREQ, seasonal art), and call flow/pool seeding plus loading. Runs after `appConfig.load()` and the theme, nodelist flag and template event seeds.
 2. **Node manager** — Tracks active terminal nodes (allocated slots for connected users).
 3. **Socat manager** — Manages socat bridge processes for legacy connections.
-4. **Call pools** — `CallManager` creates named pools (`PrimaryBBS`, `Doorserver`) with flow order configuration. Call pools handle the terminal-side call lifecycle.
-5. **HTTP server** — `http.createServer(webserver)` wraps the Express app. Listens on `process.env.webport` (default 8080). **Single HTTP server** shared by Express routes and all WebSocket pools.
-6. **WebSocket pools** — `WsManager` created with the HTTP server. Named pools created and linked to call pools by configuration. WebSocket upgrade requests are path-routed to the matching pool.
+4. **Call pools**: `CallManager` creates the pools read from the `call_pools` table (`PrimaryBBS`, `Doorserver`, `WebDoor` by default; hardcoded fallbacks if the table is empty), each with its call flow. Call pools handle the terminal-side call lifecycle.
+5. **HTTP server**: `http.createServer(webserver)` wraps the Express app. Listens on `process.env.webport` (default 8080). **Single HTTP server** shared by Express routes and all WebSocket pools. The QWK hub FTP server starts next when `qwk_ftp_enabled` is on.
+6. **WebSocket pools**: `WsManager` created with the HTTP server. One pool per path in each call pool's `ws_paths`, linked to that call pool. Then `/ws/presence`, `/ws/adminlogs` and `/ws/nodespy` handlers are registered. Upgrade requests are path-routed. Then the unified terminal server (and legacy TCP/Telnet servers if their ports are set).
 7. **Process mode startup** — If `PROCESS_MODE=embedded`, starts the mailer (`MailerManager`) and BullMQ workers in-process. If `PROCESS_MODE=separate` (default), the mailer and worker run as independent processes (`bin/mailer.js`, `bin/worker.js`). See `PROCESS_ARCHITECTURE.md`.
-8. **Event subscriber** — Listens for cross-process notifications (new messages imported, PMs delivered) for real-time UI updates.
-9. **Job schedules** — Registers BullMQ repeatable jobs for poll cycles, toss schedules, and maintenance tasks.
+8. **Event subscriber**: listens for cross-process notifications (new messages imported, PMs delivered, cache invalidations) for real-time UI updates.
+9. **Maintenance watch**: `startMaintenanceWatch()` follows the `.maintenance` flag file and attaches the terminal, web and (embedded) queue drains (see Maintenance Mode below).
+10. **Job schedules**: registers BullMQ repeatable jobs for poll cycles, toss schedules, and maintenance tasks.
+11. **QWK ID audit and worker watchdog**: `auditQwkIdsAndNotify()`, then `startWorkerWatchdog()` (skipped in embedded mode).
 
 Shutdown handlers on `SIGINT`/`SIGTERM` drain embedded workers (if any), close BullMQ connections, clean up socat processes, close the Postgres pool, and shut down Redis.
 
@@ -35,7 +37,7 @@ Global `uncaughtException` and `unhandledRejection` handlers log to alogger but 
 
 ## Express Application (`src/servers/webserver.js`)
 
-Standard Express 4 setup with Pug view engine.
+Express 5 (`express` ^5.2.1) with the Pug view engine. Under Express 5 `req.body` is `undefined`, not `{}`, when a request has no body, so handlers read fields as `(req.body && req.body.x)`.
 
 ### Middleware Stack (in order)
 
@@ -43,25 +45,30 @@ Standard Express 4 setup with Pug view engine.
 1. `express.json()` — JSON body parsing
 2. `express.urlencoded({ extended: false })` — URL-encoded form bodies
 3. `cookieParser()` — Parses cookies (session ID lives here)
-4. `express.static('public')` — Serves static assets (CSS, JS, images) with dotfiles allowed
-5. `activityMiddleware` -- Session renewal, web engagement tracking, idle detection (fires before all route handlers)
+4. `express.static('public')`: serves static assets (CSS, JS, images) with dotfiles allowed; `/webart` serves `<textdir>/webart`
+5. CSRF check: every non-GET/HEAD/OPTIONS request must carry an `Origin` (or, failing that, `Referer`) whose host matches `Host`, else 403 JSON. `/health` and `/api/*` are exempt (bearer-token auth)
+6. View helpers: `res.locals.formatTimestamp` / `timestampMs` (see Dates in tables)
+7. `maintenanceMiddleware()` (`src/middleware/maintenanceWeb.js`): maintenance mode on the web, see Maintenance Mode below. Placed after static files so the maintenance page keeps its CSS, and before activity tracking so a refused request is not logged as a call
+8. `activityMiddleware`: session renewal, web engagement tracking, idle detection (fires before all route handlers)
 
 ### Route Mounting
 
 | Mount Point | Router | Purpose |
 |---|---|---|
-| `/` | `indexRouter` (`src/routes/index.js`) | Public landing page + message browsing/posting |
+| `/api/v1` | `apiV1Router` (`src/routes/api.js`) | REST API v1, bearer-token auth, JSON 404 fallback. QWK user routes (`src/routes/api/qwk.js`: `POST /qwk/download`, `POST /qwk/upload`) and the QWK HTTP hub (`src/routes/api/qnet.js`: `GET /qnet/hello`, `GET /qnet/packet`, `POST /qnet/packet/:id/ack`, `POST /qnet/rep`, HTTP Basic auth as a QWK node, failures to `security.log`). Mounted before `/`. See `API_DESIGN.md` and `QWK_ARCHITECTURE.md` |
+| `/` | `indexRouter` (`src/routes/index.js`) | Public landing page, message browsing/posting, and also `/doors`, `/lastcallers`, `/whosonline`, `/bulletins`, `/stats`, `/wall`, `/qwk` (+ `/qwk/settings`, `/qwk/download`, `/qwk/upload`), `/notifications` |
 | `/admin` | `adminRouter` (`src/routes/admin.js`) | Admin panel — all admin routes are prepended with `/admin` |
 | `/users` | `usersRouter` (`src/routes/users.js`) | Authentication (login/logout/register) |
 | `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply with multer file attachments, attachment download (`/pm/attachment/:id` with ownership check), AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
 | `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
-| `/doors` | `doorsRouter` (`src/routes/doors.js`) | Door listing and web door launcher |
+| `/adminlogs` | `adminLogRouter` (`src/routes/adminLogs.js`) | Admin log viewer (plus the `/ws/adminlogs` socket) |
 | `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion |
-| `/notifications` | `notificationsRouter` (`src/routes/notifications.js`) | Notification history with pagination, mark-read, bell dropdown data |
+
+There is no separate doors or notifications router: `/doors*` and `/notifications*` are routes in `index.js`. `GET /health` (DB and Redis ping, 503 when degraded) is defined directly in `webserver.js`, after the routers.
 
 ### Dates in tables
 
-Every DataTables view renders a date through one mixin, `+ts(value[, 'date'])` in `views/partials/mixins/timestamp.pug`, included by the admin and user layouts, inside a cell that carries `data-order=timestampMs(value) || 0` (#56). The text is `yyyy-MM-dd HH:mm:ss` (or `yyyy-MM-dd`), zero padded and 24-hour, from `dateFormat.formatTimestamp`, in the server's timezone; `public/js/localTime.js` rewrites each `<time data-ts>` in the viewer's timezone in the same format and again on every table draw, and names the zone in the tooltip. Sorting uses the epoch in `data-order` and never the text. They used `toLocaleString()` ("9/22/2026, 5:57:03 PM") or month-name formats, and every date column sorted as text. `formatTimestamp` and `timestampMs` are set in `res.locals` app-wide by a middleware in `webserver.js`. `tests/tableTimestamps.test.js` fails a DataTables view that formats a date itself or has a date cell without `data-order`. About 26 display-only views still use `toLocaleString` and sort nothing (#59).
+Every DataTables view renders a date through one mixin, `+ts(value[, 'date'])` in `views/partials/mixins/timestamp.pug`, included by the admin and user layouts, inside a cell that carries `data-order=timestampMs(value) || 0` (#56). The text is `yyyy-MM-dd HH:mm:ss` (or `yyyy-MM-dd`), zero padded and 24-hour, from `dateFormat.formatTimestamp`, in the server's timezone; `public/js/localTime.js` rewrites each `<time data-ts>` in the viewer's timezone in the same format and again on every table draw, and names the zone in the tooltip. Sorting uses the epoch in `data-order` and never the text. They used `toLocaleString()` ("9/22/2026, 5:57:03 PM") or month-name formats, and every date column sorted as text. `formatTimestamp` and `timestampMs` are set in `res.locals` app-wide by a middleware in `webserver.js`. `tests/tableTimestamps.test.js` fails a DataTables view that formats a date itself or has a date cell without `data-order`. Some display-only views still use `toLocaleString` and sort nothing (#59). List columns that want a short date use `formatListDate` (`MMM dd` while recent, `MMM yyyy` once older than six months), exposed as `res.locals.formatListDate` / `formatListDateFull`.
 
 ### Error Handling
 
@@ -73,7 +80,7 @@ Every DataTables view renders a date through one mixin, `+ts(value[, 'date'])` i
 
 ### Storage
 
-Sessions are stored in Redis as hash maps. Each session is keyed by `session:{sessionId}` where `sessionId` is a v4 UUID generated at login time. TTL is configurable via `process.env.session_ttl` (default 3600 seconds).
+Sessions are stored in Redis as hash maps. Each session is keyed by `session:{sessionId}` where `sessionId` is a v4 UUID generated at login time. TTL comes from the `session_ttl` config key, in MINUTES (default 720 = 12 hours), converted to seconds by `sessionStore()`.
 
 ### Session Data
 
@@ -89,16 +96,17 @@ A reverse lookup maps `session_index:{username}` → Set of session IDs. This en
 |---|---|---|
 | Create | `sessionStore(id, data, ttl)` | Sets hash + TTL, indexes by username |
 | Read | `sessionGet(id)` | Returns parsed session object or null |
-| Renew | `sessionRenew(id, ttl)` | Resets TTL -- called centrally by the activity middleware on every authenticated request |
+| Renew | `sessionRenew(id, ttl)` | Resets TTL (using the session's stored `_session_ttl`) and re-adds the session to the username index, so the index lives as long as the session. Called centrally by the activity middleware on every authenticated request |
 | Destroy | `sessionDestroy(id)` | Removes from Redis + username index |
 | Exists | `sessionExists(id)` | Boolean check |
 | List | `sessionList()` | Returns all session keys (admin use) |
+| Update one | `sessionUpdate(id, fields)` | Writes fields on one session |
 | Bulk update | `sessionUpdateUser(username, fields)` | Updates fields on all sessions for a username |
-| Kill all | `sessionDestroyAllForUser(username, exceptId)` | Destroys all sessions for a user except the current one (Log Out All Other Sessions) |
+| Kill all | `destroyAllForUser(username, exceptId)` | Destroys all sessions for a user except the current one (Log Out All Other Sessions) |
 
 ### Session TTL
 
-Default session TTL is 12 hours (`session_ttl` config key, in seconds). The TTL is stored per-session in the Redis hash so that `sessionRenew()` uses the correct value for each session rather than a global default. Remember Me sessions use a longer TTL based on `remember_me_days` (default 14 days).
+Default session TTL is 12 hours (`session_ttl` config key, in minutes, default 720). The TTL is stored per-session in the Redis hash so that `sessionRenew()` uses the correct value for each session rather than a global default. Remember Me sessions use a longer TTL based on `remember_me_days` (default 14 days).
 
 ### Cookie
 
@@ -112,7 +120,7 @@ The login form includes a "Remember Me" checkbox. When checked, the session is c
 
 ### Log Out All Other Sessions
 
-Available on the user profile page. Requires password confirmation. Calls `sessionDestroyAllForUser(username, currentSessionId)` to remove all sessions except the current one from Redis. Admin users can also kill all sessions for any user via the admin user management panel.
+Available on the user profile page. Requires password confirmation. Calls `destroyAllForUser(username, currentSessionId)` to remove all sessions except the current one from Redis. Admin users can also kill all sessions for any user via the admin user management panel.
 
 ---
 
@@ -133,6 +141,8 @@ Available on the user profile page. Requires password confirmation. Calls `sessi
 1. `userAccounts.checkUserPass(username, password)` validates credentials (salt+pepper hashing)
 2. On success: `buildSessionData(userobj)` prepares session fields, `sessionStore()` saves to Redis, `setSessionCookie()` sets the HTTP-only cookie
 3. Post-login redirect: `req.body.redirect` with `safeRedirect()` validation (rejects absolute URLs and protocol-relative paths to prevent open redirect)
+4. When `callflow_enabled` is on, that destination is saved as `callflow_return_url` on the session and the login goes to `/callflow` instead (see `WEB_CALLFLOW_DESIGN.md`). `buildSessionData` also records `prev_logon` (the previous visit's start, read before `updateUserCalls` overwrites `users.lastlogon`) for "new files since the previous visit"
+5. While maintenance mode is on, a login by anyone but a sysop is refused
 
 ### Registration Flow
 
@@ -213,6 +223,7 @@ Used by the registration wizard for real-time field validation without full form
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/doors` | Lists available door games with descriptions, filtered by user access level |
+| GET | `/doors/collection/:slug` | Doors in one door collection |
 | GET | `/doors/play/:slug` | Web door launcher page with embedded xterm.js terminal |
 
 The web door launcher (`/doors/play/:slug`) provides browser-based door game access:
@@ -241,7 +252,7 @@ Each router (`index.js`, `admin.js`, `users.js`, `pm.js`) uses a consistent patt
 1. **Cookie parser** — `router.use(cookieParser())`
 2. **Shared locals injection** -- A `router.use()` middleware that sets template variables available to all views in that router: `boardname`, `faviconlink`, `currentPath`, `activelink`, and (for index.js, users.js, files.js) `ismobile`
 3. **Unread PM count** -- `index.js`, `admin.js`, and `pm.js` all fetch `pmUnreadCount` via `privateMessages.getUnreadCount(userId)` in their shared middleware, making it available to nav templates for the mail badge
-4. **Flash messages** -- `pm.js` loads flash messages via `flash.get(req)` into `res.locals.flash` for one-shot user feedback after redirects
+4. **Flash messages** -- one-shot feedback after a redirect via `flash.setOne(req, type, text)` / `flash.get(req)` (`src/middleware/db/flash.js`, Redis, 30 s TTL). Used by `pm.js`, `index.js` (QWK page) and widely by `admin.js`: the network and peer detail pages, message group view, config, update, maintenance, nodelists, echolist and filebone pages load `res.locals.flash` and include `partials/flash`
 
 ### getCurrentUser Pattern
 
@@ -259,10 +270,10 @@ In `index.js` and `pm.js`, `resolveUserId(sessionUser)` handles the string-to-in
 
 Two-layer admin check:
 
-1. **Security level** — `parseInt(user.security) >= adminsecurity` (from `process.env.adminsecurity`, default 200)
+1. **Security level**: `parseInt(user.security) >= adminsecurity` (config key `adminsecurity`, default 200)
 2. **Sysop flag** — `user.permissionflags` must include `"Sysop"`
 
-`checkAdminAccess(user)` performs both checks. GET routes call it to set a `sufficientAccess` boolean that templates use for guard chains. POST routes use `requireAdmin` middleware that blocks the request entirely with a 403 if the check fails.
+`checkAdminAccess(user)` performs both checks. GET routes call it to set a `sufficientAccess` boolean that templates use for guard chains. POST routes (and newer GET pages such as Update, Maintenance, Mailer, Transfers and the logs) use `requireAdmin` middleware, which blocks the request with a 403: JSON `{ error, message }` when the request wants JSON, otherwise the `admin/unauthorized` page. Refusals are logged at level 3.
 
 ### Route Structure
 
@@ -276,9 +287,9 @@ Two-layer admin check:
 | Peers | Peer connection management | Remote system configuration, message area subscriptions, file area subscriptions |
 | File Network Areas | `POST /admin/network/:uuid/addfilearea`, `POST /admin/network/filearea/:id/{update,remove}` | Map file areas to networks (areatag), manage TIC file echo mappings. Uses `fileNetworkAreas` model. |
 | File Peer Subscriptions | `POST /admin/connection/:uuid/setfile{allowed,enabled}` | Per-connection allowed/enabled file areas for TIC distribution. Uses `filePeerSubscriptions` model. |
-| Netmail | `GET/POST /admin/netmail/*` | Netmail browser and viewer |
-| Tosser | `POST /admin/tosser/*` | Enqueues toss jobs on the BullMQ queue (replaces direct tosser calls) |
-| Users | `GET /admin/users`, `POST /admin/users/:uuid/*` | User list, edit, password reset |
+| Retention preview | `GET /admin/msgArea/:shortcode/retention/preview` | JSON: what proposed `max_age_days`/`max_messages` would prune, deletes nothing. Group limits are edited on the group's Retention tab (`msgGroups/view.pug`) and pushed via Push Group Defaults |
+| Events | `GET /admin/events`, `POST /admin/events/{poll,trigger,clean}`, `GET /admin/events/queues.json` | Queue status and manual triggers (toss inbound/outbound per protocol, polls). There is no `/admin/tosser` or `/admin/netmail` route |
+| Users | `GET /admin/users`, `POST /admin/users/:uuid/{update,resetpassword,kill-sessions}`, `POST /admin/users/maintenance` | User list, edit, password reset, kill sessions |
 | Menus | `GET /admin/menus`, `GET /admin/menus/:id`, `POST /admin/menus/*` | Menu CRUD — list, view with entries, create/update/delete. Entry CRUD and reorder within a menu. Duplicate (`POST /:id/duplicate`), export (`GET /:id/export.json`), import (`POST /menus/import` multipart). |
 | Doors | `GET /admin/doors`, `POST /admin/doors/*` | Door game CRUD — list, create/update/delete. Variable reference panel with %X tokens. |
 | Group Defaults | `GET /admin/msgGroup/:shortcode/defaults` | JSON endpoint — returns group security/flag defaults for new area modal auto-populate |
@@ -288,7 +299,7 @@ Two-layer admin check:
 | File Entry Ops | `POST /admin/fileEntry/:uuid/{update,delete,move}` | File entry update (desc, active, flagged), delete (optional disk removal), move to another area (optional disk move) |
 | Directory Scan | `POST /admin/fileArea/:shortcode/scan` | Scans area directory for untracked files, creates file_entries rows for new files, updates area stats |
 | File Group Defaults | `GET /admin/fileGroup/:shortcode/defaults` | JSON endpoint — returns file group security/flag defaults for new area modal auto-populate |
-| Config | `GET /admin/config`, `POST /admin/config`, `POST /admin/config/reset/:key` | System configuration management — view/edit all config settings organized by category, reset individual keys to defaults. Uses accordion layout with per-category save forms. Environment-overridden settings shown as read-only. |
+| Config | `GET /admin/config`, `POST /admin/config`, `POST /admin/config/reset/:key`, `POST /admin/config/reload` | System configuration management: view/edit all config settings organized by category, reset individual keys to defaults. Uses accordion layout with per-category save forms. Environment-overridden settings shown as read-only. |
 | Nodelists | `GET /admin/nodelists` | FTN nodelist management — per-network import status, stats, upload/clear actions. Requires admin access. |
 | Nodelist Import | `POST /admin/nodelists/import` | Multipart file upload (multer). Saves to temp dir, enqueues `import-nodelist` BullMQ job. Flash message confirms queuing. |
 | Nodelist Clear | `POST /admin/nodelists/clear/:networkId` | Deletes all nodelist data for a network via `ftnNodelist.clearNetwork()`. Confirmation modal in UI. |
@@ -311,6 +322,14 @@ Two-layer admin check:
 | Import areas.bbs Run | `POST /admin/import/areasbbs/run` | Execute import: create new areas or map existing ones, sync peer subscriptions with per-area allow/enable flags. |
 | Export areas.bbs | `GET /admin/export/areasbbs/:networkId` | Download areas.bbs for a message network (areatag + description per line). Button on network detail page. |
 | Export files.bbs | `GET /admin/export/filesbbs/:networkId` | Download files.bbs for a file network (file echo areatag + description per line). Button on network detail page. |
+| Mailer Diagnostics | `GET /admin/mailer?hours=N` | Per-connection FTN mailer session history and outcomes (`mailerSessions`), window 1-720 h, default 24 |
+| QWK and NNTP Transfers | `GET /admin/transfers?hours=N&protocol=QWK|NNTP&failed=1` | Transfer history per QWK/NNTP connection (`networkTransfers`), including the HTTP hub side |
+| Inbound / Outbound File Log | `GET /admin/inbound-log`, `GET /admin/outbound-log` | Files received / acknowledged by peers |
+| Netmail Relay Log | `GET /admin/relay-log?days=N&decision=...` | One row per relay decision (`netmailRelayLog`), days 1-365, default 7 |
+| Update | `GET /admin/update`, `POST /admin/update/{check,channel,apply}`, `GET /admin/update/progress(.json)` | Update check results and history, channel switch, upgrade notes, apply, progress page. See Update and Maintenance Pages below |
+| Maintenance | `GET /admin/maintenance`, `GET /admin/maintenance/status.json`, `POST /admin/maintenance/{enter,leave}` | Close and reopen the board, drain status per process |
+| Wall | `GET /admin/wall`, `POST /admin/wall/delete/:uuid` | Wall message list and delete |
+| API Tokens | `GET /admin/api-tokens`, `POST /admin/api-tokens/{new,:id/revoke,:id/delete}` | REST API bearer tokens |
 
 ### Modal-Driven Editing Pattern
 
@@ -359,7 +378,7 @@ Accessible from "Menus > Themes" in the admin nav.
 
 ### Config Admin Views (`views/admin/config/`)
 
-Single view: `index.pug` with Bootstrap accordion layout. Each category (system, network, display, security, performance, maintenance, logging, terminal, doors, paths, mailer, worker) gets its own collapsible accordion section containing a form. Settings display type-appropriate inputs: text for strings, number for numbers, switch/checkbox for booleans. Each setting shows a source badge (Default/gray, Database/blue, Environment/yellow) and optionally a "Requires restart" badge. Environment-overridden settings are disabled/read-only. Database-overridden settings show a "Reset" button that POSTs to `/admin/config/reset/:key` to restore the default value. Each category form has its own "Save" button that submits all settings for that category. The POST handler uses `configStore.setValues()` for batch upsert, which automatically publishes `CONFIG_CHANGED` for cross-process invalidation via Redis pub/sub.
+Single view: `index.pug` with Bootstrap accordion layout. Each category (system, network, display, security, performance, maintenance, logging, terminal, doors, paths, mailer, worker) gets its own collapsible accordion section containing a form. Settings display type-appropriate inputs: text for strings, number for numbers, switch/checkbox for booleans. Each setting shows a source badge (Default/gray, Database/blue, Environment/yellow) and optionally a "Requires restart" badge. Environment-overridden settings are disabled/read-only. Database-overridden settings show a "Reset" button that POSTs to `/admin/config/reset/:key` to restore the default value. A key with an `options` list in `configDefaults.js` renders as a select, and the save route refuses a value outside the list. A Reload button (`POST /admin/config/reload`) re-reads the `.env` file and the database without a restart; `.env` keys are read from the file on disk, and a banner shows where it disagrees with the inherited environment. Each category form has its own "Save" button that submits all settings for that category. The POST handler uses `configStore.setValues()` for batch upsert, which automatically publishes `CONFIG_CHANGED` for cross-process invalidation via Redis pub/sub.
 
 Data flow: `CONFIG_DEFINITIONS` from `configDefaults.js` provides metadata (type, category, description, restart flag, default value). `appConfig.getAll()` provides current merged values. `appConfig.getSource(key)` provides the tier each value comes from. The route pre-builds a flat array of setting objects combining all three sources for the template.
 
@@ -371,7 +390,7 @@ Used for permission/restriction flags on users, groups, and areas:
 2. **Select + Add button** — Dropdown shows only flags not already active. "Add" button appends the selected flag.
 3. **Hidden inputs** — Each active flag has a `<input type="hidden" name="fieldname" value="flag">`. Multiple inputs with the same name submit as an array.
 4. **renderFlags() function** — Rebuilds badges, hidden inputs, and select options. Called on init, add, and remove. Shared pattern across all flag editors.
-5. **Available flags** — Defined as constants in `admin.js`: `availablePermissions` ("Sysop", "Mod", "Adult", "Admin") and `availableRestrictions` ("Underage", "Banned"). Passed to templates via render calls.
+5. **Available flags**: built-ins are constants in `admin.js`, `BUILTIN_PERMISSIONS` ("Sysop", "Mod", "Adult", "Admin", "Email", "Netmail") and `BUILTIN_RESTRICTIONS` ("Underage", "Unverified", "Banned", "Email", "Netmail", "Private Messages"), extended by the `custom_permission_flags` / `custom_restriction_flags` config keys through `getAvailablePermissions()` / `getAvailableRestrictions()`. Passed to templates as `availablePermissions` / `availableRestrictions`.
 
 ### AJAX Group Defaults
 
@@ -451,6 +470,11 @@ User-facing file browsing system. Follows the same architecture as `src/routes/i
 | GET | `/files/view/:uuid` | File detail — metadata, descriptions, download button |
 | GET | `/files/download/:uuid` | Download — access-checked, increments download count, sends file via `res.download()` |
 | GET | `/files/area/:shortcode/files.json` | JSON pagination — `?offset=N&limit=N&sort=column&order=asc|desc` |
+| GET | `/files/new` | New files since the previous visit, across subscribed areas |
+| GET | `/files/search` | File search |
+| GET | `/files/info/:uuid.json` | File info for the shared info modal (`files/partials/_fileInfoModal.pug`) |
+| POST | `/files/area/:shortcode/subscribe` | Toggle the user's subscription to an area |
+| GET/POST | `/files/area/:shortcode/upload` | Upload form and multipart upload (staging, hash, dupe check, FILE_ID.DIZ) |
 
 ### Templates
 
@@ -460,6 +484,9 @@ User-facing file browsing system. Follows the same architecture as `src/routes/i
 | `files/groups/view.pug` | `../../layouts/user` | Areas in group — file counts, sizes, latest upload, new badge, upload icon |
 | `files/areas/view.pug` | `../../layouts/user` | File listing in area — DataTables, breadcrumb, upload button placeholder |
 | `files/view.pug` | `../layouts/user` | File detail — metadata table, long description, download button |
+| `files/new.pug`, `files/search.pug`, `files/upload.pug` | `../layouts/user` | New files, search, upload |
+
+On a phone (below Bootstrap `md`) the file index, file group and file area lists render each area or file as one stacked entry (details underneath, counts on the right) instead of a table; tablets and desktops keep the tables.
 
 ### Access Control
 
@@ -485,20 +512,22 @@ A file is **new** if it arrived (`upload_date`) after the start of the user's PR
 
 ### Layouts
 
-Two layouts in `src/views/layouts/`:
+Four layouts in `src/views/layouts/`:
 
 | Layout | Nav Include | Usage |
 |---|---|---|
 | `admin.pug` | `includes/admin-nav.pug` | All admin views (`extends ../../layouts/admin`) |
 | `user.pug` | `includes/user-nav.pug` | All public/user views (`extends ../../layouts/user`) |
+| `public.pug` | `includes/user-nav.pug` | Minimal layout (Darkly, `styles.css`, `custom.css`, `bootstrap.min.js`) |
+| `callflow.pug` | none | Call flow pages |
 
-Both layouts share identical asset loading: Bootstrap 5 (Darkly theme), Bootstrap Icons, custom `styles.css`, DataTables CSS/JS, jQuery, TinyMCE, and a custom `console.parsers.js` for pipe-code rendering. Fixed-top navbar with 70px body padding.
+`admin.pug` and `user.pug` share asset loading: Bootstrap 5 (Darkly theme), Bootstrap Icons, `styles.css`, DataTables CSS/JS, jQuery, TinyMCE, `console.parsers.js` for pipe-code rendering, and `localTime.js` as a module. Both include the `ts` timestamp mixin (`partials/mixins/timestamp.pug`), `partials/maintenanceBanner` and `partials/chatOverlay`, and carry the presence WebSocket client inline. `public/css/custom.css` is loaded last in all four layouts so sysop rules win. Fixed-top navbar with 70px body padding.
 
 ### Navigation
 
-**Admin nav** (`admin-nav.pug`): Brand links to `/`. Dashboard as a top-level nav item (`activelink === 'dashboard'`). Dropdown menus for Messages (Groups, Areas, Networks), Doors, Files. Direct link for Users. Right side: Notification bell (bell icon + unread count badge + dropdown with 10 recent items) + Mail link (envelope icon + "Mail" + unread badge from `pmUnreadCount`) + user dropdown with Logout, or Login link. Active state driven by `activelink` local variable.
+**Admin nav** (`admin-nav.pug`): Brand links to `/`. Dashboard as a top-level nav item. Dropdowns and links, in order: Messages (Message Groups, Message Areas, Bad Echomail), Files (File Groups, File Areas), Networking (see Admin Dashboard below), Content (Announcements, Bulletins, Message Templates, Template Events, News Files, Seasonal Art, Wall Messages), Doors (Door Games, Door Collections), Users, Menus (Menu Editor, Themes), Update, Maintenance, Nodes (`/admin/nodespy`), Flows (`/admin/callflows`), Events (`/admin/timed-events`), Logs (`/adminlogs`). Right side: Notification bell (bell icon + unread count badge + dropdown with 10 recent items) + Mail link (envelope icon + "Mail" + unread badge from `pmUnreadCount`) + user dropdown with Logout, or Login link. Active state driven by `activelink` local variable.
 
-**User nav** (`user-nav.pug`): Brand links to `/`. Direct links for Messages, Files, Doors. Right side: Dashboard link (gear icon, only shown when `currentuser.isSysop` is true) + Notification bell (bell icon + unread count badge + dropdown) + Mail link (envelope icon + "Mail" + unread badge) + user dropdown with Profile + Logout, or Login link. Active state driven by `activelink` local variable.
+**User nav** (`user-nav.pug`): Brand links to `/`. Direct links for Messages, Files, Doors, Chat (`/whosonline`), Wall. Right side: Dashboard link (gear icon, only shown when `currentuser.isSysop` is true) + Notification bell (bell icon + unread count badge + dropdown) + Mail link (envelope icon + "Mail" + unread badge) + user dropdown with Profile + Logout, or Login link. Active state driven by `activelink` local variable.
 
 Both navs display `boardname` (from `process.env.boardname`) as the brand text. The Mail unread badge uses `pmUnreadCount` fetched in each router's shared middleware. The notification bell uses `notificationUnreadCount` fetched by shared middleware; the dropdown loads the 10 most recent notifications via AJAX. Real-time push of new notifications via PresenceSocket updates the badge count without page reload.
 
@@ -530,14 +559,16 @@ The `is-mobile` package checks `User-Agent` server-side. The result is passed to
 
   upgrade event --+-- /ws/bbs -------> WsPool -> CallPool (PrimaryBBS)
                   |-- /ws/doorserver -> WsPool -> CallPool (Doorserver)
+                  |-- /ws/webdoor ---> WsPool -> CallPool (WebDoor)
+                  |-- /ws/presence, /ws/adminlogs, /ws/nodespy -> handlers
                   +-- /            --> WsPool -> CallPool (PrimaryBBS)
 
   Embedded mode only:
-                  +-- /ws/mailer ----> WsPool -> MailerManager (in-process)
+                  +-- /ws/mailer/binkp -> WsPool -> MailerManager (in-process)
 
   Separate mode:
       Mailer process (bin/mailer.js) binds its own HTTP listener
-      on MAILER_WS_PORT for /ws/mailer WebSocket connections.
+      on MAILER_WS_PORT for /ws/mailer/binkp WebSocket connections.
 ```
 
 ### WsManager
@@ -568,17 +599,21 @@ Configured in `bin/gateway.js` as an array of `{ name, path, callpool }` objects
 |---|---|---|---|
 | `/ws/bbs` | BBS | PrimaryBBS | Main BBS terminal connections |
 | `/ws/doorserver` | Doorserver | Doorserver | Door game server connections |
-| `/ws/legacy` | Legacy | PrimaryBBS | Legacy connector clients (DosBox/vmodem); pool created with `{ legacy: true }` |
+| `/ws/webdoor` | WebDoor | WebDoor | Web door launcher (one-time Redis token, `webdoor_auth` stage) |
 | `/` | Catchall | PrimaryBBS | Default path for clients that don't specify |
-| `/ws/nodespy` | NodeSpy | (raw WSS) | Sysop live snoop — token-auth, one-time use, read-only mirror of target node output |
+| `/ws/presence` | (handler) | none | `PresenceServer`: heartbeat, web chat, notifications, maintenance push |
+| `/ws/adminlogs` | (handler) | none | Admin live log viewer |
+| `/ws/nodespy` | NodeSpy | (raw WSS) | Sysop live snoop and chat, token-auth, one-time use |
+
+As built, the pool paths come from each row of the `call_pools` table (`ws_paths` JSONB, seeded by `src/models/callFlows.js`), with the array in `bin/gateway.js` only as the fallback when the table is empty. No pool is created with `{ legacy: true }` by default: the option is supported by `WsPool` but nothing configures a `/ws/legacy` path.
 
 In **embedded mode**, an additional pool is registered for the mailer:
 
 | Path | Pool Name | Call Pool | Purpose |
 |---|---|---|---|
-| `/ws/mailer` | Mailer | (none) | FTN mailer connections (handled by MailerManager, not CallPool) |
+| `/ws/mailer/binkp` | Mailer Binkp Pool | (none) | FTN binkp-over-WebSocket connections (handled by MailerManager, not CallPool) |
 
-In **separate mode**, `/ws/mailer` is served by the mailer process on its own port (`MAILER_WS_PORT`). See `PROCESS_ARCHITECTURE.md`.
+In **separate mode**, `/ws/mailer/binkp` is served by the mailer process on its own port (`MAILER_WS_PORT`, default 24555). See `PROCESS_ARCHITECTURE.md`.
 
 ---
 
@@ -631,6 +666,10 @@ Served from `public/` directory at the project root.
 | `css/styles.css` | Custom BBS styles — `.monospace`, `.messagebody`, `.fg-*`/`.bg-*` color classes, Win95-style modal buttons, pipe-code color mapping |
 | `css/dataTables.bootstrap5.min.css` | DataTables Bootstrap 5 integration |
 | `css/Datatables.custom.css` | Custom DataTables pagination styling |
+| `css/custom.css` | Sysop overrides, loaded last in every layout; seeded once on install, never overwritten by an update |
+| `css/xterm.css` | xterm.js (web door player, NodeSpy) |
+
+Other Bootswatch themes (`brite`, `cerulean`, `cyborg`, `flatly`, `materia`, `slate`, `vapor`) sit in `public/css/` but no layout loads them.
 
 ### JavaScript
 
@@ -640,7 +679,15 @@ Served from `public/` directory at the project root.
 | `js/jquery-3.7.0.js` | jQuery (required by DataTables) |
 | `js/jquery.dataTables.min.js` | DataTables library |
 | `js/console.parsers.js` | Client-side pipe-code color parser — converts pipe codes in `.messagebody` elements to colored spans for message display |
-| `js/tinymce/tinymce.min.js` | TinyMCE rich text editor (loaded but not yet used — future rich message composition) |
+| `js/tinymce/tinymce.min.js` | TinyMCE rich text editor (used for door descriptions and announcements; not yet for message composition) |
+| `js/localTime.js` | Module: rewrites each `<time data-ts>` in the viewer's timezone, again on every DataTables draw |
+| `js/readerWidth.js` | Module: message reader column sizing and the 40/80 switch (see Message Reader Width) |
+| `js/fitHeight.js` | Sizes a scrolling list (`data-fit-height`) to the space left on screen, following `visualViewport` so a phone's address bar is allowed for. Used by the message views and the PM inbox |
+| `js/messageAreas.js` | Module: `/messages` sort toggle (sysop order or most recently active), remembered in localStorage; also on `window.CanecticAreaSort` |
+| `js/maintenanceBanner.js` | Module: maintenance countdown for users, standing reminder for sysops; fed by server-rendered data or the presence `maintenance` push |
+| `js/xterm/` | xterm.js for the web door player and NodeSpy |
+
+The project-authored modules keep their rules in pure exported functions so they are unit-tested (`readerWidth`, `fitHeight`, `messageAreas`).
 
 ---
 
@@ -679,7 +726,7 @@ No model knows whether it's being called from a web route or a terminal handler.
 
 ### Environment Variables
 
-Most operational config is now managed through `appConfig` (backed by the `config_settings` PostgreSQL table) and editable via `/admin/config`. The `.env` file is only required for bootstrap variables that are needed before the database is available, or that sit in circular dependency chains (logging, Redis).
+Most operational config is now managed through `appConfig` (backed by the `settings` PostgreSQL table, `src/models/configStore.js`) and editable via `/admin/config`. The `.env` file is only required for bootstrap variables that are needed before the database is available, or that sit in circular dependency chains (logging, Redis).
 
 **Bootstrap variables (must stay in `.env`):**
 
@@ -718,7 +765,7 @@ Express middleware attached after CSRF protection, before route handlers. Tracks
 **How it works:**
 - On every authenticated request (skips static assets and `/health`)
 - Reads `web_activity:<sessionid>` timestamp from Redis
-- If no previous activity, or gap exceeds `web_idle_threshold` (default 120 minutes): logs a new call record via `callers.logCall()` and updates user login stats
+- If no previous activity, or gap exceeds `web_idle_threshold` (default 120 minutes): writes `prev_logon` to the session (the baseline for "new files since the previous visit", read before `updateUserCalls` overwrites `users.lastlogon`), logs a new call record via `callers.logCall()` and updates user login stats; on an idle resume (a previous timestamp existed) with `callflow_on_resume` on, also sets `callflow_pending`
 - Updates the activity timestamp in Redis (expires with the session TTL)
 - Non-blocking: fires async without waiting, never delays the response
 
@@ -741,7 +788,7 @@ Lightweight WebSocket endpoint at `/ws/presence` for real-time online user track
 - `presence:web:online` - Redis SET of online user IDs. Pruned on read.
 
 **Client integration:**
-Both user and admin Pug layouts include an auto-connecting heartbeat script when `currentuser` is present. Reconnects with 5-second delay on disconnect.
+Both user and admin Pug layouts include an auto-connecting heartbeat script when `currentuser` is present. Reconnects with exponential backoff (5 s doubling to a 60 s cap).
 
 **API:**
 - `markOnline(userId, username)` - called by heartbeat handler. Preserves an existing `activity` field when refreshing the heartbeat so activity context survives across heartbeat cycles.
@@ -753,7 +800,7 @@ Both user and admin Pug layouts include an auto-connecting heartbeat script when
 
 **Display labels:** `formatActivity()` from `src/utils/activityMap.js` is the central display label resolver. It maps internal activity keys to human-readable labels for the Who's Online display and other presence views.
 
-**Future extension:** The presence channel is designed for user-to-user instant messaging. Messages would be published via Redis pub/sub and delivered to connected clients through the WebSocket. The `_onMessage` handler has a placeholder for the `'im'` message type. Message history would be stored in Redis lists with configurable retention.
+**Beyond heartbeats:** the same socket now carries sysop-to-web-user chat and user-to-user telegrams (`chat_initiate` with `mode` `sysop` or `telegram`, `chat_msg`, `chat_typing`, `chat_end`, `chat_restore` on reconnect; see `WEB_CHAT_DESIGN.md`), notifications (`notification`, `notification_count`, client `notification_read` / `notification_read_all`), and the maintenance-mode `maintenance` push from `src/maintenance/webDrain.js`. The server closes with code 4001 when the session has expired, and the client then goes to the login page. The client reconnects with exponential backoff from 5 s up to 60 s, and a hidden tab defers reconnecting until it is visible again.
 
 ---
 
@@ -813,7 +860,21 @@ Three layers ensure the sentinel renders correctly on the web:
 
 The admin dashboard (`/admin`) uses a tabbed card layout with 8 category tabs (System as default, plus Messages, Files, Networking, Content, Doors, Users, All). Each tool is an icon card with name and description. A search bar filters all cards in real-time, auto-switching to the All tab when typing.
 
-Admin navbar order: Dashboard, Messages, Files, Networking, Content, Doors, Users, Menus, Nodes, Logs. The Networking dropdown contains: Networks, Linked Nodes, Nodelists, Echolists, Filebones, FREQ, Migrations.
+Admin navbar order (`src/views/includes/admin-nav.pug`): Dashboard, Messages, Files, Networking, Content, Doors, Users, Menus, Update, Maintenance, Nodes, Flows, Events, Logs. The Networking dropdown contains: Networks, Linked Nodes, Nodelists, Nodelist Flags, Echolists, Filebones, File Requests (FREQ), Inbound Wildcards, Netmail Routes, Mailer Diagnostics, QWK and NNTP Transfers, Inbound File Log, Outbound File Log, Netmail Relay Log, Migrations.
+
+## Update and Maintenance Pages
+
+**Update** (`/admin/update`, `src/views/admin/update/index.pug`): the last update check re-judged against the running version (`reconcileWithRunning`), the check history, a Channel box (`POST /admin/update/channel`: refused when `.env` sets `update_channel`; a switch to development needs `confirmed=yes`, set by the page's confirm dialog showing `DEVELOPMENT_WARNING` from `src/release/channelSwitch.js`; saves the setting, reloads appConfig, runs a forced check), Check now (`POST /admin/update/check`, runs even when the daily check is off), the withdrawn-release notice (`partials/update/withdrawnNotice.pug`) and the upgrade notes panel (`partials/update/upgradeNotes.pug`). `POST /admin/update/apply` refuses unless the posted `ack` token matches the notes shown for exactly that version, records the sysops' session hashes for the progress page, and hands off to the updater. `GET /admin/update/progress` and `.json` render the same progress page the updater serves on the web port while the BBS is stopped (`src/maintenance/updateProgress.js`). See `UPDATE_SYSTEM_DESIGN.md` and `docs/sysop/UPDATING.md`.
+
+**Maintenance** (`/admin/maintenance`, `/admin/maintenance/status.json`): `POST /admin/maintenance/enter` writes the `.maintenance` flag (reason, expected minutes, grace seconds, set by); re-entering updates the details but keeps the original start, so the grace does not restart. `POST /admin/maintenance/leave` removes it. The page shows the deadline and each process's drain status.
+
+## Maintenance Mode on the Web
+
+`src/middleware/maintenanceWeb.js`, `decide()` (pure): while the flag is set, `/admin`, `/adminlogs`, `/health`, `/users/login` and `/users/logout` always pass; `/api/*` gets a JSON 503; sysops pass everywhere; a logged-in user gets pages with a countdown banner until the grace deadline, then the maintenance page; anonymous visitors get the maintenance page at once. The page is a 503 with `Retry-After`. A non-sysop login is refused (`loginAllowed`, `src/routes/users.js`). On entering maintenance, `src/maintenance/webDrain.js` pushes a `maintenance` presence message to every open page and one notification per connected user (skipped when already past the deadline). The banner is `partials/maintenanceBanner.pug` + `public/js/maintenanceBanner.js`. See `docs/sysop/MAINTENANCE.md`.
+
+## Message Reader Width
+
+`public/js/readerWidth.js` (pure `viewCols` / `bodyCols` / `fontPx`, loaded by `partials/messages/_msgAutoSize.pug`) scales the monospace font so a message body fills the reader at a target column count: 80 on desktop; below 992 px (Bootstrap `lg`) the reader's 40 | 80 switch (`partials/messages/_readerWidth.pug`, remembered per area in localStorage `canectic.readerCols.<AREA>`), defaulting to 80 when the area's `ansi_area` ("Mostly ANSI art") is set and 40 otherwise. A body carrying `data-art` (from `detectAnsiArt(body_text)`, `msg.isArt`) is always sized to 80. Message lists and the PM inbox are sized to the visible screen by `fitHeight.js`. On a phone the thread list, message headers and PM reader header stack into rows rather than tables or single lines.
 
 ## User Navigation
 
@@ -833,7 +894,7 @@ Consolidated at `/admin/migrations`. Import tools: SMB message base, areas.bbs, 
 
 - **Rich text editor integration** - TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
 - **Admin real-time dashboard** - Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
-- **Rate limiting** - No rate limiting on login attempts or API endpoints currently.
+- **Rate limiting** - No rate limiting on login attempts or API endpoints currently (honeypot logins and QWK hub auth failures are logged to `security.log` for fail2ban).
 
 ### Recently Completed
 
@@ -847,7 +908,7 @@ Consolidated at `/admin/migrations`. Import tools: SMB message base, areas.bbs, 
 - **Node Spy** -- `/admin/nodespy` dashboard with auto-updating cards, `/admin/nodespy/:nodenum` live snoop with xterm.js and token-auth WebSocket (`/ws/nodespy`). See `NODESPY_DESIGN.md`.
 - **Who's online** -- `/whosonline` public page with reusable `partials/whosOnline.pug` card. Merges terminal nodes (via `req.app.locals.nodeManager`) with web presence users, deduplicates web-originated terminal sessions. Both partials designed for embedding in virtual call flow and dashboard.
 - **The Wall** -- `/wall` public page with `partials/wall.pug` card and post form. `GET` shows recent messages (30), `POST` adds a message. Access controlled by `wall_post_security`, `wall_post_required_flags`, `wall_post_restricted_flags` config. Wall partial also embedded on the home page.
-- **QWK Offline Mail** -- `/qwk` transfer page with download button and REP upload form. `/qwk/download` builds a `.qwk` packet of new messages from subscribed areas plus unread PMs, streams as file download. `/qwk/upload` accepts `.rep` multipart upload and posts replies. Uses `qwkUser.js` model with `qwkPacketBuilder.js` low-level functions. Controlled by `qwk_enabled` config. See `QWK_USER_DESIGN.md`.
+- **QWK Offline Mail** -- `/qwk` transfer page with download button and REP upload form. `/qwk/download` builds a `.qwk` packet of new messages from subscribed areas plus unread PMs, streams as file download. `/qwk/upload` accepts `.rep` multipart upload and posts replies. A Packet Settings card (`POST /qwk/settings`) sets the user's `qwk_files` (include NEWFILES.DAT) and `qwk_attach` (include PM attachments); files queued for download also travel in the next packet. Uses `qwkUser.js` model with `qwkPacketBuilder.js` low-level functions. Controlled by `qwk_enabled` config. See `QWK_USER_DESIGN.md`.
 - **Web Call Flow** -- `/callflow` guided login experience. AJAX-driven single page that walks users through what's new: announcements (new since last visit), last callers, who's online, wall (with inline post), new message summary, new file summary. Login ALWAYS routes through callflow (regardless of redirect target); original destination stored as `callflow_return_url` on session and restored after completion. Time-based triggers: 2+ hours since last callflow shows prominent banner on non-home pages and redirects home page; 24+ hours force-redirects all pages. `last_callflow_at` cached on session (loaded from DB once per session, updated on all user sessions on completion via `sessionUpdateUser()`). Stages with no data auto-skip. Keyboard navigable (Enter to advance, Escape to skip). Config: `callflow_enabled`, `callflow_on_resume`. See `WEB_CALLFLOW_DESIGN.md`.
 - **Notifications** -- Bell icon in both nav bars with unread count badge and dropdown showing 10 recent items. `/notifications` full history page with pagination. Centralised `notifications` model with user-targeted and sysop-broadcast notification types. Real-time push via PresenceSocket (count sent on connect, new notifications pushed as they arrive). Notification producers: `tic_error` (bad TIC), `pm_undeliverable`, `areafix_request`, `filefix_request`, `user_registered` (sysop); `pm_received` (user). Daily purge job for old read notifications. Config: `notifications_enabled`, `notifications_retention_days`.
 - **Web Sysop Chat** -- Sysop-to-web-user real-time chat via PresenceSocket (`/ws/presence`). Sysop initiates from NodeSpy dashboard (web user cards with Chat button). Chat sessions persisted in Redis (`chat:{id}`, `chat:{id}:msgs`, `chat:user:{userId}`) for page navigation survival. Floating overlay widget (`partials/chatOverlay.pug`) in both user and admin layouts, with minimise/restore, typing indicators, unread badge. `chat_restore` message replays history on page navigation. Controlled by `web_chat_enabled` config. See `WEB_CHAT_DESIGN.md`.

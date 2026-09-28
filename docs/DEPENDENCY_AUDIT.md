@@ -1,5 +1,31 @@
 # Dependency Audit
 
+## Current state (checked 2026-09-27, v0.9.12a)
+
+Everything below the first rule is the 2026-09-04 audit and upgrade pass, kept
+as the record of why each decision was made. What holds today, read from
+`package.json` and `package-lock.json`:
+
+- `engines.node` is `>=22.0.0`. The dev box runs Node v26.8.1 with npm 12.0.2.
+- `npm audit` (with and without `--omit=dev`) reports 0 vulnerabilities.
+- `npm outdated` lists only in-range patch/minor updates (bullmq 6.3.9, chalk
+  6.0.1, file-type 22.1.1, mocha 12.0.2, morgan 1.12.1, multer 2.4.0,
+  nodemailer 10.0.11, ws 8.22.0) plus one major, `dotenv` 18. None has been
+  taken or assessed.
+- The lockfile now resolves `adm-zip` 0.6.1 (0.6.0 at the time of the audit);
+  every other version in the "Completed 2026-09-04" table is unchanged.
+- `acorn` ^8.18.0 is a new dev dependency, used by
+  `tests/entryPointBindings.test.js`.
+- Both Redis clients are still pinned to RESP2 (`src/middleware/db/redis.js`,
+  `src/queues/connection.js`); the RESP3 follow-up below is still open.
+- `sanitize-html` is still imported in `src/routes/index.js` and
+  `src/routes/admin.js` and still never called; `morgan` is still imported with
+  its middleware commented out (`src/servers/webserver.js`).
+
+---
+
+## Audit of 2026-09-04
+
 Snapshot taken 2026-09-04. Local development runs Node v24.13.1, where every
 current pin works. **The target is Node 26**, which is what new systems will
 install, and that is where the breakage appears.
@@ -416,10 +442,14 @@ deliberate `npm install-scripts approve`. That is friction worth keeping: a
 native module changing version is exactly when its install script deserves
 another look.
 
-**Not verified locally.** This box runs npm 11.8.0, which has no
-`install-scripts` command and ignores the field, so the allowlist is inert here.
-It parses, and `npm install` is unaffected. The blocking behaviour itself has to
-be confirmed on the Node 26 machine. What was verified is the reasoning behind
-each denial: `msgpackr-extract` and `cpu-features` are declared optional by
+**Verified on npm 12.0.2** (2026-09-05, after the dev box moved to Node 26):
+the policy was read from npm's own source and exercised with a real clean
+`npm ci`. Two findings from that pass: a registry dependency matches on the name
+and version in the lockfile's resolved URL, and a package with a `binding.gyp`
+but no `install` script (`better-sqlite3`) still needs an entry, since npm's
+implicit `node-gyp rebuild` is gated by the same policy. Version-pinned keys
+silently stop matching when a dependency is bumped, so compare `allowScripts`
+against `package-lock.json` after any upgrade. The reasoning behind
+each denial was also verified: `msgpackr-extract` and `cpu-features` are declared optional by
 their parents, ssh2 guards its `require` in a `try`, and ssh2's install script
 exits 0 on failure by design.

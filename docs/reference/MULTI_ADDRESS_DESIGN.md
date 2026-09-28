@@ -2,7 +2,9 @@
 
 Handling binkp sessions where the remote system advertises multiple FTN addresses that map to different local peer connections, and batching outbound for shared remotes.
 
-## Current Behaviour
+**Status: implemented** (`src/mailer/session.js`, `src/mailer/manager.js`). The implementation differs from the plan below in three places: `_matchPeer()` still returns a single connection and the grouping into `this.peerConnections` happens after authentication (in `_onPasswordReceived()` when answering, `_onAuthenticated()` when calling); FREQ still uses the primary connection; and echo suppression does not use `source_network_id` (see section 5). The "Current Behaviour" list below describes the system before this work.
+
+## Behaviour Before This Design
 
 - Protocol layer already handles multiple addresses (M_ADR is space-separated, `peerAddresses` is an array)
 - Session matches ONE peer connection via `_matchPeer()` (first match wins)
@@ -16,7 +18,7 @@ Handling binkp sessions where the remote system advertises multiple FTN addresse
 
 When a remote sends `M_ADR 1:123/456 21:100/100`, update `_matchPeer()` to find ALL matching peer connections, not just the first.
 
-**Changes to `_matchPeer()`:**
+**Changes to `_matchPeer()`** (as built, `_matchPeer()` still returns one connection, the primary; the answerer builds `this.peerConnections` from it in `_onPasswordReceived()`):
 - Return an array of matching connections instead of a single connection
 - The first match becomes the "primary" (used for password validation)
 - All matches stored as `this.peerConnections` (array)
@@ -55,7 +57,7 @@ This handles:
 - Remotes that change their address list over time
 - No need to group connections by host:port in advance
 
-**Implementation in `_onAuthenticated()`:**
+**Implementation in `_onAuthenticated()`** (as built, this runs for caller sessions; answerer sessions do the same grouping in `_onPasswordReceived()` before `confirmAuth()`):
 ```javascript
 // After primary connection matched and password validated,
 // scan for additional connections matching the remote's other addresses.
@@ -97,13 +99,13 @@ Rationale:
 
 ### 5. Data leakage prevention
 
-**Echo suppression:** Already per-connection via `source_network_id` on messages. A message from network A won't be echoed back to network A even if the session handles both networks. No change needed.
+**Echo suppression:** Not done by the session. Outbound eligibility is decided per destination when packets are written (`echomail.evaluateOutbound()`: imported history, do not send back to the source connection, SEEN-BY, PATH), and it deliberately does NOT test `source_network_id`. The session only transmits what is already in the BSO for each grouped connection. No change needed.
 
 **HWM tracking:** `peer_area_subscriptions.msg_idx` is per `peer_connection_id`. Each connection advances its own HWM independently. `_buildOutboundList()` reads subscriptions per connection. No change needed beyond iterating connections.
 
 **Subscription filtering:** Each connection has its own enabled/allowed subscriptions. The tosser writes packets for each connection independently based on its subscriptions. The session just transmits whatever's in the BSO. No change needed.
 
-**FREQ:** `_processFreqRequest()` uses `this.peerConnection.id` for file entry access control. For multi-connection sessions, FREQ should use the connection matching the address the .req file was addressed to, or the primary connection. Minor change.
+**FREQ:** `_processFreqRequest()` uses `this.peerConnection.id` for file entry access control. For multi-connection sessions, FREQ should use the connection matching the address the .req file was addressed to, or the primary connection. As built it uses the primary connection (`this.peerConnection`).
 
 **AreaFix/FileFix:** Already route by the netmail's destination address, not the session's connection. No change needed.
 

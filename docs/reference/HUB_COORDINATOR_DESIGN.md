@@ -2,6 +2,8 @@
 
 Design for FTN network hub and coordinator functionality. Enables Canectic to serve as a Hub, Network Coordinator (NC), Region Coordinator (RC), or Zone Coordinator (ZC) for FTN-style networks.
 
+**Status (checked against the code 2026-09-27):** Largely implemented. The nested segment model, managed nodes, stub generation and distribution, scheduled stub generation, on-demand nodelist compilation and the admin UI (`/admin/coordinator/:networkId`) exist. Not implemented: parsing a received external stub into a node list (it is shown as raw text only), a UI for `coordinator_roles`, scheduled compilation, a true netmail file-attach, and everything under Future Considerations. Code: `src/models/coordinatorSegments.js`, `src/models/managedNodes.js`, `src/models/nodelistFlags.js`, `src/maintenance/stubDistribution.js`, `src/maintenance/nodelistCompiler.js`, routes in `src/routes/admin.js`.
+
 ## Motivation
 
 Sysops who coordinate network segments need tools to manage their nodes, produce nodelist stubs, compile nodelists from downstream stubs, and distribute the results. Currently this requires external tools. Building it into Canectic provides a unified workflow: manage nodes, generate stubs, distribute via the existing mailer/TIC infrastructure.
@@ -17,12 +19,13 @@ Nested segment model is implemented. Segments form a tree (parent/child), suppor
 What exists:
 - `coordinator_segments` table with `parent_segment_id`, `source`, `stub_file_area`, `depth`
 - `managed_nodes` table -- nodes with segment_id
-- Per-network `coordinator_roles` config (ordered array in network JSONB, defaults to `['ZC', 'RC', 'NC', 'Hub']`)
+- Per-network `coordinator_roles` config (ordered array in network JSONB, defaults to `['ZC', 'RC', 'NC', 'Hub']`). Read by `getRolesForNetwork()`; nothing in the admin UI sets it, so every network uses the default unless the JSONB is edited directly
 - Internal segments: managed nodes edited by sysop, stub generation, distribution
 - External segments: read-only, content from received stub files in configured file area
-- Tree-recursive nodelist compilation (internal = generate from nodes, external = read stub file)
-- Stub distribution via filebox, BSO flow files, or manual download
-- Scheduled generation via cron patterns
+- Tree-recursive nodelist compilation (internal = generate from nodes, external = read stub file), run on demand by the Compile button (`POST /admin/coordinator/:networkId/compile`, maintenance job `compile-nodelist`); it has no schedule
+- Stub distribution via filebox, BSO flow files, or manual download (see Distribution)
+- Scheduled stub generation via cron patterns (schedule `generate-stub:<segmentId>`, job `generate-stub`)
+- Nodelist flag definitions in `nodelist_flag_definitions` (`src/models/nodelistFlags.js`, seeded from `config/default/nodelist-flags.json`, admin `/admin/nodelist-flags`), which drive the node editor's flag checkboxes; flags marked `auto_managed` are shown disabled, not editable
 - Admin UI: tree view with indentation, source badges, context-aware Add Child with role defaults
 - Node editor: role-aware keyword filtering, auto-populated zone/net from segment, hub routing dropdown, flag checkboxes with progressive disclosure
 
@@ -119,9 +122,9 @@ Tree view instead of flat card list. Each segment shows:
 - Source selector: Internal (I manage this) or External (I receive stubs for this)
 
 **External segment management:**
-- Configure which file area receives stubs for this segment
+- Configure which file area receives stubs for this segment (falls back to the network's `stub_intake_area`)
 - View the latest received stub content (read-only)
-- Import: parse a received stub file and display the nodes it contains
+- Import: parse a received stub file and display the nodes it contains (not implemented; the stub is shown as raw text)
 
 **Node editing (internal segments only):**
 - Auto-populate zone/net/region from the segment context
@@ -145,15 +148,18 @@ The existing flat data can migrate to nested:
 
 When a stub changes, send it to the upstream coordinator:
 
+The segment's `distribution_method` is one of `manual`, `filebox`, `tic` or `netmail_attach` (`src/maintenance/stubDistribution.js`):
+
 | Method | How |
 |--------|-----|
-| Filebox | Place in upstream peer's `outbox_dir` -- sent on next session |
-| BSO | Stage in zone-aware outbound dir with `.flo` entry + BSO scan trigger |
-| Manual | Generate for download only |
+| `filebox` | Copy into the upstream connection's `outbox_dir` (sent on next session) |
+| `tic` | Despite the name, no TIC is written: the stub is staged in the zone-aware outbound dir with a `.flo` entry, then a BSO scan is enqueued |
+| `netmail_attach` | Not a real file-attach yet: falls back to the same `.flo` staging as `tic`, addressed to `upstream_address` |
+| `manual` | Generate for download only |
 
 ### Scheduled generation
 
-Cron pattern on each segment. BullMQ repeatable jobs registered at gateway startup. "Send" button for on-demand generation.
+Cron pattern on each segment (`schedule`, default `manual`, which registers nothing). Registered at gateway startup as `generate-stub:<segmentId>` schedulers, which are in the managed set and so pruned when a segment is removed or set back to manual. "Send" button (`POST /admin/coordinator/segment/:segmentId/generate`) for on-demand generation.
 
 ---
 
@@ -165,11 +171,14 @@ Cron pattern on each segment. BullMQ repeatable jobs registered at gateway start
 | `echolist_area` | File area for echolist files |
 | `filebone_area` | File area for filebone files |
 | `infopack_area` | File area for network infopack ZIPs |
-| `stub_intake_area` | File area where downstream stubs arrive (for compilation) |
+| `stub_intake_area` | File area where downstream stubs arrive (for compilation); fallback for an external segment with no `stub_file_area` |
+| `coordinator_roles` | Ordered role list for the segment tree (no UI; default `['ZC', 'RC', 'NC', 'Hub']`) |
 
 ---
 
-## UX Improvements (Planned)
+## UX Improvements (mostly implemented)
+
+Implemented in `src/views/admin/coordinator/nodes.pug`: keyword choices limited by segment role, hub routing dropdown, flag checkboxes driven by `nodelist_flag_definitions`, phone default `-Unpublished-`, baud default 300 (schema default on `managed_nodes`), and a tabbed identity/system/connectivity/flags editor. Not checked item by item against the list below.
 
 ### Hierarchy-aware node editing
 

@@ -10,7 +10,7 @@ The first release focuses on QWK packet download and REP upload -- the biggest p
 - **Auth**: `Authorization: Bearer <token>` header on every request (except `/api/v1/ping`)
 - **Content**: JSON in and JSON out for everything except QWK/REP binary transfers
 - **Tokens**: issued from the user profile page or `/admin/api-tokens`; shown exactly once
-- **Call logging**: every successful API call is recorded in the caller log (source `QWK-API`) with logoncount bump throttled per user
+- **Call logging**: every successful QWK download or REP upload is recorded in the caller log (source `QWK-API`) with logoncount bump throttled per user
 
 Tokens grant the same access the calling user has in terminal/web -- banned users' tokens are rejected at auth time. Put the system behind HTTPS (reverse proxy TLS termination) before handing out tokens.
 
@@ -22,12 +22,13 @@ Tokens grant the same access the calling user has in terminal/web -- banned user
 | `/api/v1/me` | GET | required | any | Who am I (profile summary) |
 | `/api/v1/qwk/download` | POST | required | `qwk` | Build + stream personal QWK packet |
 | `/api/v1/qwk/upload` | POST | required | `qwk_rw` | Import REP packet |
+| `/api/v1/qnet/...` | GET/POST | HTTP Basic | -- | QWK network hub for Canectic nodes (see below) |
 
-Authentication errors return JSON: `401 auth_required`, `401 invalid_token`, `403 insufficient_scope`, `403 account_restricted`. Unknown paths under `/api/v1` also return JSON 404 (not the HTML error page).
+Authentication errors return JSON: `401 auth_required`, `401 invalid_token`, `403 insufficient_scope`, `403 account_restricted`. Unknown paths under `/api/v1` also return JSON 404 (`{ "error": "not_found", "path": ... }`, not the HTML error page).
 
 ### GET /api/v1/ping
 
-No auth required. Returns `{ ok: true, version: "v1" }`. Use to verify the API is reachable and the namespace is correct.
+No auth required. Returns `{ "status": "ok", "api": "canectic", "version": "v1" }`. Use to verify the API is reachable and the namespace is correct.
 
 ### GET /api/v1/me
 
@@ -35,17 +36,11 @@ Requires any active token. Returns the authenticated user's summary:
 
 ```json
 {
-  "user": {
-    "id": 42,
-    "username": "bob",
-    "security": 50,
-    "mailaddress": "bob@example.org"
-  },
-  "token": {
-    "label": "iPhone QWK reader",
-    "scope": "qwk_rw",
-    "last_used_at": "2026-04-10T12:34:56Z"
-  }
+  "username": "bob",
+  "fullname": "Bob Smith",
+  "security": 50,
+  "scope": "qwk_rw",
+  "token_label": "iPhone QWK reader"
 }
 ```
 
@@ -53,14 +48,15 @@ Useful for confirming that a newly issued token is wired up correctly before scr
 
 ### POST /api/v1/qwk/download
 
-Requires scope `qwk` (or `qwk_rw`, which implies `qwk`). Builds a personal QWK packet containing new messages from the caller's subscribed message areas (respecting scan pointers) plus unread PMs.
+Requires scope `qwk` (or `qwk_rw`, which implies `qwk`). Builds a personal QWK packet containing new messages from the caller's subscribed message areas (respecting scan pointers) plus unread PMs, and the files the user's packet settings ask for (new files list, download queue, private mail attachments), the same packet the web QWK page gives.
 
 - **Request body**: none
 - **Success (200)**: `Content-Type: application/octet-stream`, `Content-Disposition: attachment; filename=<bbsid>.qwk`. Response headers include `X-Qwk-Message-Count` and `X-Qwk-Area-Count`. Body is the raw `.qwk` ZIP.
-- **Nothing new (204)**: empty body, no headers -- the caller's pointers are already up to date.
+- **Nothing new (204)**: empty body, no headers. There are no new messages and no files to send.
+- **Build failure (500)**: JSON `{ "error": "generation_failed", ... }`.
 - **Auth errors**: JSON 401/403 as above.
 
-Scan pointers advance on successful download so subsequent calls only return newer messages.
+Scan pointers advance, and the packet's private mail is marked read, only once the whole packet has been sent. If the client drops the connection part way, nothing is marked and the next call returns the same messages again.
 
 ### POST /api/v1/qwk/upload
 
@@ -75,13 +71,32 @@ Response is JSON:
 
 ```json
 {
-  "ok": true,
-  "posted": 3,
-  "errors": []
+  "status": true,
+  "totalPosted": 3,
+  "totalErrors": 1,
+  "details": [
+    "GENERAL: posted \"Re: Hello\"",
+    "Conference 1 (Announce): Announcements conference is read-only"
+  ]
 }
 ```
 
-`posted` is the number of successful replies; `errors` is an array of per-reply failure descriptions (access denied, unknown area, etc.). A partial success still returns `ok: true` -- inspect `errors.length` to tell.
+`totalPosted` is the number of successful replies and `totalErrors` the number rejected; `details` has one line per message (posted, or why it was refused: access denied, unknown conference, and so on). A partial success still returns `status: true`, so check `totalErrors`. The user also gets a private message listing any rejected replies.
+
+Other responses: `400 no_file` (empty request), `400 unsupported_content_type`, `413 too_large` (raw body over 10 MB), `500 import_failed` (the packet could not be read).
+
+### QWK network hub: /api/v1/qnet
+
+These endpoints are not for users. They are how another Canectic board, set up as a QWK node of yours, collects its packet and sends its REP (the **HTTP (Canectic hub)** transport). They do not use API tokens: the node logs in with HTTP Basic auth, its QWK ID as the user name and the **Node password** on its Hub (Inbound) connection under Peers. A failed login is written to `security.log` in the form the shipped fail2ban filter matches.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/v1/qnet/hello` | GET | Connect check: returns `{ hub, node, protocol }` |
+| `/api/v1/qnet/packet` | GET | The node's QWK packet (204 when there is nothing), with `X-Qnet-Packet-Id` and `X-Qnet-Messages` headers |
+| `/api/v1/qnet/packet/:id/ack` | POST | The node confirms it has the packet; only then are its messages counted as delivered (409 if the id does not match the waiting packet) |
+| `/api/v1/qnet/rep` | POST | The node's REP as `application/octet-stream`, up to `qnet_max_rep_bytes` (20 MB by default); queued for import, 202 |
+
+See `QWK_NETWORKING.md` for setting up a node.
 
 ## Token Scopes
 
@@ -123,7 +138,7 @@ Revocation takes effect immediately -- the next request using the token returns 
 
 ## Call Logging and Logoncount
 
-Every successful API call appears in the caller log with `source=QWK-API` so you can see API activity alongside terminal and web sessions at `/admin/callers`.
+Every successful QWK download and REP upload appears in the caller log with source `QWK-API`, so API activity shows alongside terminal and web calls on the Last Callers page (`/lastcallers`).
 
 To balance "active users show as regulars" against "polling clients don't inflate metrics", logoncount is throttled:
 
@@ -134,7 +149,7 @@ The window is controlled by the `api_call_count_interval_hours` config key (defa
 
 ## Template Event Integration
 
-The built-in event `user_qwk_fetched` fires after every successful QWK download or upload. Attach a [message template](TEMPLATES.md) to it to:
+The built-in event `user_qwk_fetched` fires after every successful QWK download or REP upload through the API (not the web QWK page or the terminal). Attach a [message template](TEMPLATES.md) to it to:
 
 - Send a confirmation PM when a user downloads a packet
 - Log API usage via notification
@@ -223,17 +238,17 @@ var upRes = await fetch(BASE + '/qwk/upload', {
   body: rep
 });
 var result = await upRes.json();
-console.log('Posted', result.posted, 'errors:', result.errors);
+console.log('Posted', result.totalPosted, 'rejected:', result.totalErrors, result.details);
 ```
 
 ## Operational Notes
 
 - **HTTPS**: do not deploy `/api/v1` over plain HTTP. Tokens are long-lived credentials. Terminate TLS at your reverse proxy (nginx/Caddy/HAProxy).
 - **CSRF**: the `/api/*` path is exempt from CSRF middleware because Bearer auth is not vulnerable the way cookie auth is. Do not add cookie-authenticated endpoints under `/api/*`.
-- **Rate limiting**: there is no built-in rate limit yet. If you expose the API to the open internet and notice abuse, block by IP at your reverse proxy or use fail2ban against the `401 invalid_token` log lines.
+- **Rate limiting**: there is no built-in rate limit yet. If you expose the API to the open internet and notice abuse, block by IP at your reverse proxy. Rejected tokens are answered with `401 invalid_token` but are not written to any log, so there is nothing for fail2ban to match; the QWK hub endpoints (`/api/v1/qnet`) are the exception and log failed logins to `security.log`.
 - **Token storage**: tokens are stored as bcrypt hashes with the same cost factor as user passwords. Leaked tokens cannot be recovered from the database -- only verified against.
 - **Expiry**: tokens can have an optional `expires_at`. Leave blank for no expiry. Expired tokens still show in the UI but fail auth.
-- **Monitoring**: watch the caller log for the `QWK-API` source and the application log for `[api]` entries. Every auth failure logs the reason at info level.
+- **Monitoring**: watch the caller log for the `QWK-API` source and the system log for `[API]` entries: a packet that could not be built or imported is logged at level 3, and each download and upload at level 4.
 
 ## Planned Endpoints
 
@@ -250,4 +265,4 @@ When a new endpoint appears it will be added to the table at the top of this doc
 
 - Architecture / design notes: [../reference/API_DESIGN.md](../reference/API_DESIGN.md)
 - Message template integration: [TEMPLATES.md](TEMPLATES.md)
-- Caller log viewing: admin panel -> Users -> Caller Log
+- Caller log viewing: the Last Callers page (`/lastcallers`)

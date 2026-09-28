@@ -1,7 +1,7 @@
 // notificationReader.js -- Terminal notification reader.
 //
 // Displays recent notifications in a list. Sysops see sysop broadcasts
-// alongside personal notifications. Used as a menu command and call flow stage.
+// alongside personal notifications. Used as a menu command.
 
 import { BaseSubModule } from "../basesubmodule.js";
 import * as alogger from "../../utils/alogger.js";

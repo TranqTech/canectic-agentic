@@ -10,7 +10,7 @@ The QWK half of Canectic's message networking in detail: identity, packet direct
 
 ## Hub behaviour, routing and content
 
-**Shared-directory nodes** (`hub_directory`): the node never calls, so the fixed `qwk-hub-sweep` schedule (toss queue, job `qwk:hub-sweep`, every `qwk_hub_sweep_minutes`, registered by `syncQwkHubSweep()` only while such a node exists; re-synced whenever a QWK connection is saved or removed) runs `qwkTosser.serviceHubNodes()`: import any REP in every hub node's `in/` (HTTP nodes included, as a catch for an import that could not be queued), then `buildQwkForNode()` for each directory node. The node's acknowledgement is taking the packet: qnet-directory.js copies `out/<OUR_ID>.qwk` and deletes it, so a sidecar with no packet beside it is committed (`commitPending`) at the top of the next `buildQwkForNode()`, before anything is built. The commit is idempotent, which also covers a `commitNodePacket()` interrupted between its two deletes. A node with no enabled subscriptions still gets a packet when it has private mail waiting.
+**Shared-directory nodes** (`hub_directory`): the node never calls, so the fixed `qwk-hub-sweep` schedule (toss queue, job `qwk:hub-sweep`, every `qwk_hub_sweep_minutes` (default 5, 0 = never), registered by `syncQwkHubSweep()` only while such a node exists; re-synced whenever a QWK connection is saved or removed) runs `qwkTosser.serviceHubNodes()`: import any REP in every hub node's `in/` (HTTP nodes included, as a catch for an import that could not be queued), then `buildQwkForNode()` for each directory node. The node's acknowledgement is taking the packet: qnet-directory.js copies `out/<OUR_ID>.qwk` and deletes it, so a sidecar with no packet beside it is committed (`commitPending`) at the top of the next `buildQwkForNode()`, before anything is built. The commit is idempotent, which also covers a `commitNodePacket()` interrupted between its two deletes. A node with no enabled subscriptions still gets a packet when it has private mail waiting.
 
 **Sender paths and passing mail on (#70), `src/utils/qwkVia.js`:** an imported QWK message's `path` holds its sender path as Synchronet stores SENDERNETADDR: the QWK ID of the connection that handed it to us, then that message's `@VIA` (`senderPath`), so `HUB/A/B` means B wrote it and the ORIGIN is the last element (`originOf`). Rows imported before #70 hold the bare `@VIA` or nothing. A message whose `@VIA` already contains our QWK ID is refused as circular (Synchronet `route_circ`). **Export (`exportDecision`)** replaced a rule that skipped every message with `source_network_id` equal to the connection's network, which meant a Canectic hub never passed one node's mail to its other nodes and a mid-tier board never passed its nodes' mail up (the FTN version of the same bug was 940b1be): local mail and mail from another network go as before; mail from this network goes to every connection whose remote ID is NOT in its path, and carries `@VIA: <path>` as the first body line (`withVia`, Synchronet QM_VIA); mail from this network with no path (pre-#70 rows) keeps the old skip. **Netmail forms (`parseNetmailAddress`)**: a conference-0 message with To `NETMAIL` and `user@address` on the first body line, or To `user@address`, is netmail (QWKnet when the address does not start with a digit and has no `.` or `:`, as in Synchronet's qwktonetmail). `importQwkPrivateMessage` delivers it locally when the path's last element is our QWK ID (dropping the address line), and otherwise records it undeliverable with the reason (not relayed until #73; FidoNet and internet addresses are not gatewayed). PMs keep `from_address` = origin and `transport_data.source_path`. The undeliverable record now stores its reason and a single-encoded transport_data (both were wrong before).
 
@@ -33,7 +33,8 @@ Zip archive containing:
 - `CONTROL.DAT` — BBS info, conference list (CRLF line endings)
 - `MESSAGES.DAT` — Record 0 (128-byte ID block with hub's QWK-ID) + message records
 - `HEADERS.DAT` — Extended headers keyed by byte offset (LF line endings)
-- `NETFLAGS.DAT` — One byte per conference (0x01 = networked)
+- `NETFLAGS.DAT`: one byte per conference (0x01 = networked)
+- Any other member is a file carried with the packet (#72, network packets; `NEWFILES.DAT`, queued downloads and PM attachments in personal packets, #75)
 
 ### .REP packet (node → hub)
 Zip archive containing:
@@ -44,7 +45,7 @@ Zip archive containing:
 
 | Offset | Length | Field | Notes |
 |--------|--------|-------|-------|
-| 0 | 1 | Status | 0x20 = public |
+| 0 | 1 | Status | 0x20 = public, 0x2A = private |
 | 1 | 7 | MsgNumber | Conference number, left-aligned (REP) |
 | 8 | 8 | Date | MM-DD-YY |
 | 16 | 5 | Time | HH:MM |
@@ -60,9 +61,9 @@ Zip archive containing:
 | 127 | 1 | Tagline flag | 0x2A (*) |
 
 ### Body encoding
-- Line terminator: 0xE3 (CP437 pilcrow)
+- Line terminator: 0xE3 (CP437 pilcrow); LF on a message sent as UTF-8
 - Padding: 0x20 (space) to 128-byte boundary
-- Character set: CP437
+- Character set: CP437, or UTF-8 when the message does not fit CP437, the connection allows it, and HEADERS.DAT says `Utf8 = true` (#71)
 - Kludge lines start with `@` at beginning of body
 
 ### HEADERS.DAT format
@@ -88,7 +89,7 @@ Sections separated by blank lines. LF line endings. Hex offset matches the byte 
 
 ## Using buildQwkForNode()
 
-`buildQwkForNode(peerConnectionUUID)` generates a complete `.qwk` packet for a hub-mode node connection. It is **not** called by the tosser — it is designed to be called on-demand by whatever connection handler serves the node.
+`buildQwkForNode(peerConnectionUUID)` generates a complete `.qwk` packet for a hub-mode node connection. It has three callers, one per way a node reaches us: `GET /api/v1/qnet/packet` (HTTP), `RETR <OUR_ID>.qwk` on the FTP hub server (#74), and `qwkTosser.serviceHubNodes()` in the hub sweep for shared-directory nodes. A pull or push of our own connections never calls it.
 
 ### Import
 
@@ -119,7 +120,7 @@ var result = await buildQwkForNode('9f894ef9-5333-42c2-826b-caaf84cb457e');
 ### What it does
 
 1. Loads the peer connection and resolves the local system address (explicit on connection, or network default)
-2. Resolves origin line from system address, falls back to `boardname` env var + QWK-ID
+2. Resolves origin line from system address, falls back to the `boardname` setting + QWK-ID
 3. Commits a packet the node has already collected (a sidecar with no packet beside it), then returns any packet still waiting unchanged (`reused: true`)
 4. Queries all enabled subscriptions for the connection
 5. For each subscription, gathers messages above the current `msg_idx` (up to 500 per area)
@@ -187,7 +188,7 @@ failed", so the transfer log classifies them.
 
 Shared-directory (`qnet-directory.js`) nodes get their packets from the hub
 sweep (see "Shared-directory nodes" above), and QWK private mail is routed per
-connection (`qwkPmRouting.js`). Nodes that call over FTP use the FTP hub server (#74, below).
+connection (`qwkPmRouting.js`). Nodes that call over FTP use the FTP hub server (#74, above).
 
 ---
 
@@ -259,7 +260,7 @@ Writes component files, zips them with system `zip -j`, cleans up intermediates.
 | `sftp` | Client | Same as FTP but over SSH. Uses `ssh2-sftp-client`. Supports password and private key auth. |
 | `directory` | Client | Copies files to/from local filesystem paths. No network connection. For same-machine setups or shared mounts. |
 | `http` | Client | This board as a QWK node of a Canectic hub, over the hub's `/api/v1/qnet` (see "QWK hub over HTTP"). `host` is the hub's web address, `username` our QWK ID there, `password` the one the hub set. Remote paths are ignored. |
-| `hub` | Hub | The node reaches us. Over HTTP at `/api/v1/qnet`, or through a shared directory (`qnet-directory.js`). REPs land in `cwd/qnet/<NODE_ID>.node/in/`; the node's QWK is built on request by `buildQwkForNode()`, or ahead of time by the hub sweep for a shared-directory node. |
+| `hub` | Hub | The node reaches us. Over HTTP at `/api/v1/qnet`, over FTP to the QWK FTP server (`qwk_ftp_enabled`), or through a shared directory (`qnet-directory.js`, `connection_data.hub_directory`). REPs land in `cwd/qnet/<NODE_ID>.node/in/`; the node's QWK is built on request by `buildQwkForNode()`, or ahead of time by the hub sweep for a shared-directory node. |
 
 ---
 
@@ -272,6 +273,7 @@ Separate from the network-level QWK tosser, the user QWK system (`src/models/qwk
 - **Reuses the same low-level functions**: `buildControlDat()`, `buildMessagesDat()`, `buildHeadersDatText()`, `assembleQwkPacket()` from `qwkPacketBuilder.js` and `parseMessagesDAT()`, `parseHeadersDat()`, `applyHeadersDat()`, `unzipQwkPacket()` from `qwkClasses.js`.
 - **Different conference numbering**: Network QWK uses areatags from `network_areas` as conference numbers. User QWK uses `message_areas.qwk_conf_number` — a system-wide column allocated in per-group blocks via `message_groups.qwk_conf_start` + `qwk_group_stride` (default 1000), with conference numbers 1-100 reserved for system conferences (announcements, wall, bulletins). Per-area sysop overrides are supported as an escape hatch. These are independent of network conference numbers; a sysop may choose to align them manually.
 - **Different pointer system**: Network QWK tracks HWM via `peer_area_subscriptions.msg_idx`. User QWK uses the same `user_msg_pointers.scan_pointer` as web and terminal newscan.
+- **Same commit rule (#78)**: `buildQwkForUser()` commits nothing and returns `result.commit`; each transport (web `res.download` callback, terminal after a successful send, API response `finish`) calls `commitUserPacket(result)` only once the transfer succeeded. That advances pointers (forward only), marks the PMs read, counts and dequeues queued downloads and sets `last_qwk_download_at` to the build time.
 - **Different posting path**: Network QWK imports via the tosser (`importQwkMessage()`). User REP imports via the standard posting path (`messages.startNewThread()`/`replyToThread()`), which enforces access control, user attribution, and body_html generation.
 - **No NETFLAGS.DAT**: User packets don't participate in message routing.
 - **Conference 0 = PMs**: Unread PMs are included in the download; conference 0 replies in REP are delivered as new PMs.
@@ -287,8 +289,10 @@ Personal packets carry the new-files list (`NEWFILES.DAT`), the user's batch dow
 
 ### Config keys
 
-- `qwk_enabled` (boolean, default true) — enable/disable user QWK transfers
-- `qwk_bbsid` (string) — QWK BBS ID for packet filenames (max 8 chars, falls back to boardname)
-- `qwk_max_msgs_per_area` (number, default 500) — per-area message cap in user packets
+- `qwk_enabled` (boolean, default true): enable/disable user QWK transfers
+- `qwk_bbsid` (string): QWK BBS ID for packet filenames (max 8 chars, falls back to boardname)
+- `qwk_max_msgs_per_area` (number, default 500): per-area message cap in user packets
+- `qwk_announcements_conf` (1), `qwk_wall_conf` (2), `qwk_bulletins_conf` (3): reserved system conferences, 0 disables each
+- `qwk_group_stride` (1000): conference number block per message group
 
 ---

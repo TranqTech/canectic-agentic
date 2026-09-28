@@ -3,7 +3,22 @@
 Design for release engineering, distribution, and in-BBS installation and
 update for Canectic.
 
-**Status:** design, not implemented. Written 2026-09-12.
+**Status:** built. Written 2026-09-12 as a design; all eight phases in section
+12 are implemented and in use (stable releases published so far: 0.9.6a,
+0.9.9a, 0.9.10a, 0.9.11a, 0.9.12a; 0.9.7a and 0.9.8a withdrawn). Sections 1 to
+11 are the original design and are kept as written, with notes where the build
+differs; sections 13 to 17 record what each phase actually decided. Built since
+the design and not described in it: maintenance mode and the drain during an
+update (#52, `docs/sysop/MAINTENANCE.md`), the progress page served by the
+updater on the gateway's port (#53), upgrade notices with acknowledgement (#55,
+`src/release/upgradeNotices.js`), release withdrawal (`RELEASE_PROCESS.md`),
+signed releases (a published key, `MANIFEST.asc` inside the archive, pinned
+fingerprint in `setup/bootstrap.sh`), backup and staging housekeeping (#62,
+`update.js --prune`), and the channel switch on `/admin/update`. Not built:
+publishing a release into a file echo is still a manual step (section 17), and
+there is no automatic database rollback (section 15, "The rollback line").
+`RELEASE_PROCESS.md` is the maintainer guide; `docs/sysop/UPDATES.md`,
+`UPDATING.md` and `INSTALL.md` are the sysop guides.
 
 ## Motivation
 
@@ -211,6 +226,12 @@ on stable has not asked to hear about development builds.
 | `canectic-<version>.json` | Machine-readable release metadata |
 | `SHA256SUMS` | Checksums for both |
 | `SHA256SUMS.asc` | Detached signature (optional, see section 11) |
+
+As built the publish directory also carries the standalone manifest, the
+channel index, the bootstrap with its checksum, `INSTALL.md` and the public key
+`canectic-release.asc`; development builds are named `canectic-<v>.delta.zip`.
+Signing is by `scripts/release.mjs --sign`, which also signs `MANIFEST` inside
+the archive (`MANIFEST.asc`). The full list is in `RELEASE_PROCESS.md` section 3.
 
 The archive contains the code directories and the shipped data files, with a
 `MANIFEST` of content hashes for every shipped file so the updater can tell a
@@ -438,12 +459,19 @@ icon in both nav bars, so this needs no new delivery mechanism.
 
 | Key | Default | Category | Description |
 |-----|---------|----------|-------------|
-| `update_channel` | `stable` | system | Which channel this install follows |
-| `update_check_enabled` | `false` | system | Run the daily check |
-| `update_check_transport` | `http` | system | `http`, `ftn`, or `both` |
-| `update_check_url` | (release index) | system | Where the HTTP index lives |
-| `update_stable_file_area` | null | system | File area carrying stable artifacts |
-| `update_dev_file_area` | null | system | File area carrying development artifacts |
+| `update_channel` | `stable` | updates | Which channel this install follows |
+| `update_check_enabled` | `false` | updates | Run the daily check |
+| `update_check_transport` | `http` | updates | `http`, `ftn`, or `both` |
+| `update_check_url` | `https://canectic.tranqsoft.com/releases/` | updates | Where the HTTP index lives |
+| `update_stable_file_area` | empty | updates | File area shortcode carrying stable artifacts |
+| `update_dev_file_area` | empty | updates | File area shortcode carrying development artifacts |
+
+As built (`src/config/configDefaults.js`) the category is `updates`, not
+`system` (section 14), and the updater added `update_process_control`,
+`update_stop_command`, `update_start_command`, `update_backup_keep` (1),
+`update_base_cache_keep` (2), `update_require_signature` (false),
+`update_progress_page` (true) and `update_drain_timeout` (900);
+`update_check_retention_days` (90) sits under `maintenance`.
 
 Off by default because an outbound request from a sysop's box should be
 something they turned on, not something they have to discover and turn off.
@@ -477,7 +505,10 @@ rather than the one after. The old code's job -- fetch, verify, extract, hand
 off -- is small enough to get right once and then leave alone.
 
 It also means there is no source directory the sysop maintains. Staging is
-created and deleted per update.
+created and deleted per update. (As built, staging lives under
+`.canectic-update/staging/<version>`; the directory the updater runs from cannot
+delete itself, so it is removed by the housekeeping after the next completed
+update, #62.)
 
 ### Detachment
 
@@ -490,10 +521,13 @@ replacing. Same lesson as `setup/canectic-pm2.sh` needing to live outside
 
 Progress has to survive the gateway going away and coming back, so each phase
 writes a durable row. When the browser reconnects, the page reads the state and
-reports what happened rather than showing a lost connection.
+reports what happened rather than showing a lost connection. (As built it is a
+JSON run file under `logs/update/`, not a row; see section 15.)
 
 Phases: preflight, backup, stop, files, dependencies, schema, migrations, steps,
-start, verify.
+start, verify. As built (`PHASES` in `src/release/updatePhases.js`) there are
+twelve: `directories` and `env` were added after `files` for the installer, and
+an update skips `env`.
 
 ---
 
@@ -561,7 +595,7 @@ started cleanly.
 
 Database rollback is not. A `pg_dump` on a real hub is minutes and gigabytes.
 Whether that is required, offered, or merely warned about is an open decision
-(section 11).
+(section 11). (Resolved: offered and on by default, `--no-dump` to skip.)
 
 ---
 
@@ -617,9 +651,15 @@ told stable is available and reachable.
 
 ## 11. Open decisions
 
-1. **Signing.** GPG-signed `SHA256SUMS` is the right answer for a sysop
+1. ~~**Signing.** GPG-signed `SHA256SUMS` is the right answer for a sysop
    audience, but it means key management and a documented verification path.
-   Checksums alone are weaker but free.
+   Checksums alone are weaker but free.~~ **Resolved: signed.** The release key
+   is published as `setup/canectic-release.asc` (and beside the releases), its
+   primary fingerprint is pinned in `setup/bootstrap.sh`, and a cut with
+   `--sign` signs `SHA256SUMS`, the in-archive `MANIFEST` and the tag. A board
+   checks `MANIFEST.asc` against the key it already holds
+   (`signing.verifyTreeSignature`): a bad signature is always refused, an
+   unsigned or unverifiable one only when `update_require_signature` is on.
 2. ~~**Does the update page offer "check now"?**~~ **Resolved: yes.** The
    opt-out is about this system reaching out on its own, unprompted. A person
    pressing a button is not that, and refusing them would mean the only way to
@@ -749,6 +789,10 @@ pending, which is the state v0.9.5a shipped in.
 
 ### Still open after phase 4
 
+(Historical. Publishing is now `scripts/publish.mjs` to the release host,
+signing is resolved (section 11), and phases 5 and 6 consume the index and
+`verifyTree`.)
+
 - Publishing is by hand. There is no upload step and no channel host.
 - Signing is wired (`--sign` runs `gpg --detach-sign --armor`) but no key is
   published and no verification path is documented. Open decision 1 stands.
@@ -769,7 +813,8 @@ decided that the design above did not.
 `update_check_enabled`, `update_channel`, `update_check_url` and
 `update_check_retention_days`. The three FTN keys in section 5's table
 (`update_check_transport`, `update_stable_file_area`, `update_dev_file_area`)
-are deliberately absent until phase 8 ships that transport.
+were deliberately absent until phase 8 shipped that transport; they exist now,
+with `update_check_transport` offering `http`, `ftn` and `both` as `options`.
 
 Shipping a setting whose only other value does nothing is precisely what the
 `options` mechanism exists to prevent: a sysop selects `ftn`, nothing changes,
@@ -827,6 +872,8 @@ schedule sync, the same as every other schedule-affecting setting.
 
 ### What phase 5 does not do
 
+(Historical: phases 6 to 8 added all of this.)
+
 No download, no verify, no apply, no preflight. `/admin/update` reports and
 offers Check now. The page says plainly that applying is not implemented and
 points at `setup/update.sh`.
@@ -837,10 +884,11 @@ the default, this system makes no outbound request at all.
 
 ---
 
-## 15. Phase 6 so far
+## 15. Phase 6 as built
 
-Half of phase 6 exists: everything up to and including putting files on disk,
-with nothing that touches a running system. `docs/sysop/UPDATING.md` covers the
+Phase 6 is complete. This section was first written when only the half up to
+putting files on disk existed, and the parts below that say so are kept as the
+record of that step. `docs/sysop/UPDATING.md` covers the
 tool. This records the decisions.
 
 ### What is built
@@ -897,7 +945,10 @@ success across a failure would tell a sysop their board is updated when it is
 half replaced, and nothing else in the system would contradict it. "Never
 reached" and "deliberately not done" are also distinct: this updater performs
 four of the ten phases and records the other six as skipped with reasons, so the
-run reads as incomplete on purpose rather than as stuck.
+run reads as incomplete on purpose rather than as stuck. (That was the first
+cut. The runner now performs every phase an update needs; it skips `env`
+always, `migrations` because `schema` applies them, `stop`/`start` when process
+control is off, and whatever `--no-deps`/`--no-schema` asked for.)
 
 ### One phase sequence, two ways in
 
@@ -976,7 +1027,7 @@ is visible on the page rather than looking like nothing happened.
 ### The base cache
 
 `.canectic-update/base/`. A delta is always one hop against its own named base,
-so a sysop tracking development needs the same stable tarball for every build
+so a sysop tracking development needs the same stable archive for every build
 cut on it, and re-fetching 7.6 MB each time is waste over HTTP and worse down a
 file echo.
 
@@ -1082,7 +1133,8 @@ with a warning saying which half could not be checked.
 
 Open decisions 1, 3 and 4 all land in the rest of this phase: signing, whether a
 database dump is required before migrating, and how the cached stable base is
-stored and retired. Nothing built so far forecloses any of them.
+stored and retired. Nothing built so far forecloses any of them. (All three are
+now resolved, see section 11.)
 
 ---
 
@@ -1170,8 +1222,13 @@ The documented path is download, check the published checksum, then run.
 about provenance and it costs one line.
 
 Signature verification is wired: when `SHA256SUMS.asc` is published and `gpg` is
-present it is checked, and a signature that cannot be verified warns loudly. No
-key is published yet, so its absence is not yet a refusal.
+present it is checked against the primary fingerprint built into
+`setup/bootstrap.sh` (`RELEASE_KEY_FPR`, overridable with
+`CANECTIC_RELEASE_KEY_FPR` for testing). A bad signature, an expired or revoked
+key, or a signature by any other key stops the install before anything is
+unpacked; a signature that cannot be checked because no copy of the key could
+be had warns and falls back to the checksums. An absent `SHA256SUMS.asc` is
+still not a refusal.
 
 ---
 
@@ -1256,5 +1313,6 @@ one genuinely expensive change here.
 
 Consistent with phase 4. The maintainer drops the artifact into their own file
 area and the existing TIC machinery distributes it, which is a path already
-built and tested. A `--publish` flag can wait until a release has actually gone
-out this way once.
+built and tested. A publish-to-echo flag can wait until a release has actually
+gone out this way once. (`scripts/release.mjs --publish` exists but is
+unrelated: it creates the GitLab release page for a pushed tag.)

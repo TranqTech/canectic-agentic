@@ -1255,7 +1255,7 @@ async function _pushToQwkPeer(peerConnectionUUID) {
 					to_user: wireFor(pm).to,
 					subject: pm.subject || '',
 					body_text: wireFor(pm).body,
-					utf8: null, // null so buildRepPacket runs utf8ToCp437 conversion
+					utf8: null, // unread: the wire encoding is decided from body_text (messageNeedsUtf8)
 					system_time: pm.system_time || new Date(),
 					reply_ref: 0
 				}

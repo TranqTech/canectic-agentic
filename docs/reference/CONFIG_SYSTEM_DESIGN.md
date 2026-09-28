@@ -1,10 +1,22 @@
-# Canectic BBS — In-Process Config Singleton: Detailed Implementation Design
+# Canectic BBS: In-Process Config Singleton, Detailed Implementation Design
 
 ## Overview
 
 This document provides a complete implementation plan for the centralized configuration management system. The design replaces scattered `process.env` reads, the nearly-dead `config/system.json`, and hardcoded defaults with a single `appConfig` module backed by three tiers: `.env` (secrets/bootstrap), PostgreSQL (admin-editable operational config), and a defaults file (fallback values).
 
-Cross-process invalidation uses the existing Redis pub/sub event system so that config changes made via the admin UI take effect across all three processes (Gateway, Worker, Mailer) without restart.
+Cross-process invalidation uses the existing Redis pub/sub event system so that config changes made via the admin UI take effect across all four processes (Gateway, Mail, Worker, Mailer) without restart.
+
+### Implementation status (checked against the code, 0.9.12a)
+
+Built and in use. What differs from, or goes beyond, the plan below:
+
+- **The code is authoritative for keys and defaults.** `src/config/configDefaults.js` holds 183 definitions across 19 categories (system, network, display, security, performance, maintenance, logging, terminal, doors, paths, mailer, worker, email, files, qwk, wall, chat, callflow, updates). There is no separate `pm` or `notifications` category: `pm_attachment_dir` is under paths, the PM size limits under security, `notifications_enabled` under system and `notifications_retention_days` under maintenance. Section 1 is the design-time audit of `process.env` and is kept as history: several of its values are no longer true (for example `session_ttl` is now 720 **minutes**, `currentversion` defaults to the `package.json` version and is read-only in effect, `allow_netmail_relay` is deprecated and ignored in favour of `netmail_relay_mode`).
+- **The table is `settings`**, not `config_settings` (`configStore.js` `TABLE = 'settings'`). Every mention of `config_settings` below means `settings`. It gained a `source` column (`'default'` when seeded, `'sysop'` when written through `setValue`/`setValues`), added by `configStore.ensureTable()` with `ADD COLUMN IF NOT EXISTS` because `appConfig.load()` runs before `dbmigrations.js` can. `configStore.wasSetBySysop(key)` is the question a config migration asks before honouring an old key.
+- **Source attribution** (`appConfig.getSource(key)`, `'env' | 'db' | 'default'`): a stored row counts as `db` only when a sysop set it OR its value differs from what this release ships (`sourceForStoredValue(row, shipped)`, also a named export). Row presence alone means nothing, since every default is seeded.
+- **Fixed-choice keys** carry `options: [{value, label, hint}]`. `/admin/config` renders a select and the save route refuses anything outside the list via `configDefaults.isAllowedValue()`. Currently `netmail_relay_mode`, `zmodem_default_crc`, `update_channel` and `update_check_transport`.
+- **Restart-only keys** carry `restart: true` (12 of them, mostly listener ports) and show a "Requires restart" badge.
+- **Reload without restart**: `POST /admin/config/reload` calls `configStore.publishReload()` (a `CONFIG_CHANGED` with no write), and `reload()` re-reads the `.env` file as well as the DB.
+- `config/system.json` and the `src/models/settings.js` stub have both been removed.
 
 ---
 
@@ -146,7 +158,7 @@ Theme files (`config/themes/canectic.json`) define ANSI color mappings for termi
 
 ## 2. Detailed Module Design
 
-### 2.1 `src/config/appConfig.js` — The Singleton
+### 2.1 `src/config/appConfig.js`: The Singleton
 
 #### Design Philosophy
 
@@ -160,6 +172,9 @@ The singleton is a plain JS object cache with async initialization and getter fu
 var _cache = {};         // The merged config object. Flat key-value.
 var _loaded = false;     // Whether initial load has completed
 var _loading = null;     // Promise for in-flight load (deduplication)
+var _sources = {};       // key -> 'env' | 'db' | 'default' (for the admin UI)
+var _envFile = {};       // parsed .env file (tier 1)
+var _divergent = [];     // keys where the .env file and process.env disagree
 ```
 
 #### API Surface
@@ -214,6 +229,15 @@ appConfig.getCategory(category)
 // given category (looked up from configDefaults metadata).
 // Used by admin UI to organize settings by section.
 
+appConfig.getSource(key)
+// 'env', 'db' or 'default': where the value in effect came from.
+
+appConfig.getEnvDivergence()
+// [{ key, file, ambient, bootstrap, secret }], see below.
+
+appConfig.getEnvFilePath()
+// Absolute path of the .env file actually read, or null.
+
 appConfig.isLoaded()
 // Returns _loaded boolean. For guard checks during early startup.
 ```
@@ -266,7 +290,8 @@ are redacted in all three.
 
 ```
 Phase 1: Start with configDefaults (all known keys with default values)
-Phase 2: Query config_settings table, overlay DB values onto defaults
+Phase 2: Query the settings table, overlay DB values onto defaults
+         (null, undefined and '' rows are skipped)
 Phase 3: Overlay .env values for bootstrap keys and any explicit overrides
 
 Result: _cache = { ...defaults, ...dbValues, ...envOverrides }
@@ -281,19 +306,20 @@ Result: _cache = { ...defaults, ...dbValues, ...envOverrides }
 
 The DB credentials (`dbuser`, `dbhost`, `dbname`, `dbpass`, `dbport`) **must** come from `.env` because they're needed to connect to PostgreSQL in the first place. The `postgres.js` module reads them at import time (module-level `const`), which happens before `appConfig.load()` could run.
 
-**Solution: `appConfig.load()` is called _after_ `dotenv.config()` and after the first import of `postgres.js`.** The DB connection pool is already initialized by the time `appConfig.load()` queries `config_settings`. The bootstrap variables remain read from `process.env` directly by the modules that need them (`postgres.js`, `redis.js`, `connection.js`). They are also copied into the cache for reference (admin UI can display them as read-only).
+**Solution: `appConfig.load()` is called _after_ `dotenv.config()` and after the first import of `postgres.js`.** The DB connection pool is already initialized by the time `appConfig.load()` queries `settings`. `load()` runs `configStore.ensureTable()` and `configStore.seedDefaults()` before reading, on every start. The bootstrap variables remain read from `process.env` directly by the modules that need them (`postgres.js`, `redis.js`, `connection.js`). They are also copied into the cache for reference (admin UI can display them as read-only).
 
 Startup order in each process:
 
 ```
-1. dotenv.config()                    — populates process.env
-2. import postgres.js (side effect)   — creates pgpool from process.env
-3. import redis.js (side effect)      — creates redis client from process.env
-4. await appConfig.load()             — queries DB, merges three tiers
+1. dotenv.config()                    : populates process.env
+2. import postgres.js (side effect)   : creates pgpool from process.env
+3. import redis.js (side effect)      : creates redis client from process.env
+4. await appConfig.load()             : reads .env file, ensures and seeds
+                                        the table, queries DB, merges
 5. ... rest of startup ...
 ```
 
-If PostgreSQL is unreachable during `load()`, the initial load **throws** (process should not start with incomplete config). This matches the existing behavior — if the DB is down, nothing works anyway.
+If PostgreSQL is unreachable during `load()`, the initial load **throws** (process should not start with incomplete config). This matches the existing behavior: if the DB is down, nothing works anyway.
 
 #### Race Conditions During Reload
 
@@ -304,9 +330,12 @@ Reload is triggered by a pub/sub event (another process changed config via admin
 ```javascript
 async function reload() {
     try {
-        var fresh = buildMergedCache(await loadFromDB());
-        _cache = fresh;  // atomic swap
-        alogger.writeAlog(3, "[appConfig] Reloaded from DB", "cyan");
+        _envFile = readEnvFile();                 // .env re-read too
+        var result = buildMergedCache(await configStore.loadAll());
+        _cache = result.merged;                   // atomic swap
+        _sources = result.sources;
+        alogger.writeAlog(3, "[appConfig] Reloaded from .env + DB", "cyan");
+        warnOnDivergence();
     } catch (err) {
         // Keep old cache on failure
         alogger.writeAlog(2, "[appConfig] Reload failed, keeping previous config: " + err.message, "redbright");
@@ -314,12 +343,12 @@ async function reload() {
 }
 ```
 
-**Deduplication:** If multiple reload events arrive in rapid succession (e.g., admin saves multiple settings quickly), use a simple debounce. Set `_loading` to the active promise; if a reload is called while one is in-flight, return the existing promise.
+**Deduplication:** there is no timed debounce. `load()` and `reload()` share `_loading`: a call made while one is in flight returns the existing promise.
 
 #### Sync vs Async
 
 - `load()` and `reload()` are **async** (DB reads are async)
-- All getters (`get`, `getNumber`, `getBoolean`, `getJSON`, `getAll`, `getCategory`) are **synchronous** (read from in-memory cache)
+- All getters (`get`, `getNumber`, `getBoolean`, `getJSON`, `getAll`, `getCategory`, `getSource`, `getEnvDivergence`, `getEnvFilePath`) are **synchronous** (read from in-memory cache)
 - This is critical: Express middleware, Pug template rendering, and terminal handler constructors all execute synchronously and need config values inline
 
 #### Module Export Shape
@@ -335,17 +364,25 @@ export default {
     getJSON,
     getAll,
     getCategory,
-    isLoaded
+    getSource,
+    isLoaded,
+    getEnvDivergence,
+    getEnvFilePath
 };
+
+// plus one named export, the pure display rule:
+export { sourceForStoredValue };
 ```
 
 Import pattern: `import appConfig from '../config/appConfig.js';`
 
-### 2.2 `src/config/configDefaults.js` — Default Values
+### 2.2 `src/config/configDefaults.js`: Default Values
 
 #### Structure
 
-Flat key-value object with metadata. Each entry has a `key`, `defaultValue`, `type`, `category`, and `description`. The flat key matches what's stored in the DB and what `.env` uses.
+Flat key-value object with metadata. Each entry has a `key`, `defaultValue`, `type`, `category`, and `description`, and optionally `options` (fixed choices) and `restart: true`. The flat key matches what's stored in the DB and what `.env` uses.
+
+The listing below is the original seed from the design and is illustrative only; the file now holds 183 entries and some of these values have changed (see Implementation status).
 
 ```javascript
 var CONFIG_DEFINITIONS = [
@@ -443,15 +480,16 @@ export var CONFIG_DEFINITIONS;      // The full definitions array (for admin UI 
 export function getDefaults();      // Returns { key: defaultValue } flat object
 export function getDefinition(key); // Returns the definition object for a key, or null
 export function getCategories();    // Returns array of distinct category strings
+export function isAllowedValue(key, value); // false only for a value outside a key's options
 ```
 
 #### How Defaults Relate to DB `category` Field
 
-The `category` in `CONFIG_DEFINITIONS` maps 1:1 to the `category` column in the `config_settings` DB table. When a value is inserted into the DB (via admin UI or seed script), it gets the category from the definitions. The admin UI uses categories to group settings into tabs or accordion sections.
+The `category` in `CONFIG_DEFINITIONS` maps 1:1 to the `category` column in the `settings` DB table. When a value is inserted into the DB (via admin UI or seed script), it gets the category from the definitions. The admin UI uses categories to group settings into tabs or accordion sections.
 
-### 2.3 `src/models/configStore.js` — PostgreSQL CRUD
+### 2.3 `src/models/configStore.js`: PostgreSQL CRUD
 
-#### Table Schema: `config_settings`
+#### Table Schema: `settings`
 
 The existing `settings` table schema (`db/schema/tablecolumns/settings.conf`) has `name` and `value` columns but lacks `category`, `description`, and `type`. **Recommendation: extend the schema.**
 
@@ -467,7 +505,10 @@ description TEXT
 readonly BOOLEAN DEFAULT false
 created_at TIMESTAMPTZ DEFAULT NOW()
 updated_at TIMESTAMPTZ DEFAULT NOW()
+source VARCHAR(16) DEFAULT 'default'
 ```
+
+`source` was added after the table shipped (`'default'` = seeded, `'sysop'` = written by a sysop). `readonly` exists but is always written false and read by nothing: `.env`-sourced keys are protected by the save route skipping any key whose source is `env`.
 
 Changes from existing:
 - `name` renamed to `key` (clearer semantics, avoids SQL reserved word proximity)
@@ -476,7 +517,7 @@ Changes from existing:
 - Added `UNIQUE` constraint on `key`
 - Added `updated_at` for admin audit trail
 
-**Migration note:** The existing `settings` table appears unused (the model file `src/models/settings.js` is a single-line comment stub). The migration should `DROP TABLE IF EXISTS settings` and recreate, or `ALTER TABLE` if there's any concern about existing data. Given the stub state, a clean recreation is safe.
+**Migration note (as built):** `configStore.ensureTable()`, called at the top of every `appConfig.load()`, drops a `settings` table that still has the old `name` column and no `key` column, creates the table if absent, then adds `source` if missing.
 
 #### CRUD Functions
 
@@ -500,13 +541,13 @@ async function getValue(key)
 // Returns: string value or null
 
 async function setValue(key, value)
-// UPSERT: INSERT ... ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+// UPSERT: INSERT ... ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), source = 'sysop'
 // After write: publish invalidation event
 // Returns: boolean success
 
 async function setValues(kvArray)
 // Batch upsert using a transaction
-// kvArray: [{ key, value }, ...]
+// kvArray: [{ key, value }, ...]  (each row written with source = 'sysop')
 // After write: publish single invalidation event
 // Returns: boolean success
 
@@ -523,13 +564,26 @@ async function getByCategory(category)
 async function seedDefaults(definitions)
 // INSERT each definition where key doesn't already exist
 // Preserves admin-customized values, fills in new keys on upgrade
-// Called during appConfig.load() on first run or schema upgrade
+// Rows written with source = 'default'
+// Called by every appConfig.load()
+
+async function wasSetBySysop(key)
+// true only when the row's source is 'sysop'; a missing row is false
+
+async function ensureTable()
+// Create/upgrade the table (see Migration note)
 
 // --- Invalidation trigger ---
 
 async function publishInvalidation()
 // Uses the existing events.js publisher to fire CONFIG_CHANGED event
 // All processes receive this and call appConfig.reload()
+
+function publishReload()
+// CONFIG_CHANGED with no write (the admin Reload button)
+
+function shutdown()
+// Close the cached publisher
 ```
 
 #### How Updates Trigger Pub/Sub
@@ -543,12 +597,14 @@ async function publishInvalidation()
 #### Route Structure
 
 ```
-GET  /admin/config           — Config settings page (all categories)
-POST /admin/config           — Update one or more settings
-POST /admin/config/reset/:key — Reset a setting to its default value
+GET  /admin/config            : Config settings page (all categories)
+POST /admin/config            : Save one category (`_category`); env-sourced keys skipped,
+                                values outside `options` refused
+POST /admin/config/reload     : Publish CONFIG_CHANGED so every process re-reads .env + DB
+POST /admin/config/reset/:key : Write the key's default back (via setValue, so source = 'sysop')
 ```
 
-Mounted as additional routes in `src/routes/admin.js` (or a new `src/routes/adminConfig.js` if the admin router is getting too large).
+Mounted in `src/routes/admin.js`; view `src/views/admin/config/index.pug`.
 
 #### How Categories Organize the View
 
@@ -558,14 +614,14 @@ The admin config page uses a tabbed or accordion layout with one section per cat
 - **Value** — editable input (type-appropriate: text, number, checkbox for boolean)
 - **Default** — shown as placeholder or reference text
 - **Description** — help text from the definition
-- **Source indicator** — badge showing "Default", "Database", or "Environment" to indicate where the current value comes from
+- **Source indicator**: badge showing "Default", "Database", or "Environment" to indicate where the current value comes from, plus "Requires restart" for `restart: true` keys
 
 #### Read-Only Display for .env Values
 
 Bootstrap keys (DB credentials, Redis URL, NODE_ENV, PROCESS_MODE, MAILER_ENABLED) are displayed in a "Bootstrap / Environment" section with:
 - Values shown but inputs disabled
 - A note: "These values come from .env and cannot be changed via the admin panel"
-- The `readonly` column in the DB marks these; the admin POST route rejects writes to readonly keys
+- As built, the save route skips any key whose `getSource()` is `env`; the `readonly` column is not used
 
 #### Pattern Consistency
 
@@ -577,7 +633,7 @@ Follows the existing modal-driven CRUD pattern. For config, a simpler inline-edi
 
 ### 3.1 Process Initialization
 
-Each of the three processes needs the same initialization pattern. The key addition is `await appConfig.load()` early in startup, and subscribing to the `CONFIG_CHANGED` event.
+Each of the four processes (gateway, mail, worker, mailer) uses the same initialization pattern; `bin/mail.js` also uses `CONFIG_CHANGED` to start its servers once a `mail_domain` is configured. The key addition is `await appConfig.load()` early in startup, and subscribing to the `CONFIG_CHANGED` event.
 
 #### `bin/gateway.js`
 
@@ -614,7 +670,7 @@ var eventSubscriber = createEventSubscriber((event) => {
 
 #### `bin/mailer.js`
 
-Same pattern as worker — add `appConfig.load()` and a CONFIG_CHANGED subscriber.
+Same pattern as worker: `appConfig.load()` and a CONFIG_CHANGED subscriber. `bin/mail.js` is the same again.
 
 ### 3.2 Pub/Sub Event Flow
 
@@ -634,7 +690,7 @@ export const EVENTS = {
 };
 ```
 
-No other changes needed to `events.js`. The existing pub/sub infrastructure handles it.
+As built, `CONFIG_CHANGED: 'config:changed'` is in `EVENTS` (`src/queues/events.js`), alongside many events added since this list was written.
 
 #### Event Flow
 
@@ -647,6 +703,7 @@ Admin saves config in web UI
         → Gateway event subscriber receives it → appConfig.reload()
         → Worker event subscriber receives it → appConfig.reload()
         → Mailer event subscriber receives it → appConfig.reload()
+        → Mail event subscriber receives it → appConfig.reload()
 ```
 
 The Gateway (which hosts the admin UI) also reloads its own config via the same pub/sub event, which means the publishing process also reloads. This is correct — the admin route handler writes to the DB, the pub/sub fires, and the gateway's own subscriber triggers a reload from DB. This ensures all processes converge on the same state.
@@ -822,7 +879,7 @@ This is the correct behavior: config is cached in-memory and only refreshed on c
 - The admin UI should indicate when a value is being overridden by .env (show the .env value and a note like "Overridden by environment variable")
 - This is a safety feature: if the admin puts a bad value in the DB, the sysop can always fix it via .env
 
-**Detection:** `appConfig.getSource(key)` could return `'env'`, `'db'`, or `'default'` to indicate where the active value came from. Useful for admin UI display.
+**Detection:** `appConfig.getSource(key)` returns `'env'`, `'db'`, or `'default'` and drives the admin badges; env-sourced keys cannot be saved from the page.
 
 ### 5.3 Config Values That Are JSON Arrays
 
@@ -871,7 +928,7 @@ Some values cannot truly hot-reload because they're consumed once at startup and
 - **Worker concurrency** (`WORKER_CONCURRENCY`) — BullMQ worker is created with a fixed concurrency
 - **BaseHandler timeout values** — read in constructor, apply per-session. New sessions get new values; existing sessions keep old ones. This is acceptable.
 
-The admin UI should mark these values with a "Requires restart" indicator.
+As built, these carry `restart: true` in `configDefaults.js` and the admin UI shows a "Requires restart" badge.
 
 ### 5.8 First-Run / Empty Database
 
@@ -881,11 +938,13 @@ When `config_settings` is empty (fresh install), `appConfig.load()` calls `confi
 - Admin can immediately edit values in the web UI
 - `.env` overrides still apply on top
 
-On upgrade (new version adds new config keys), `seedDefaults()` uses `INSERT ... ON CONFLICT (key) DO NOTHING`, so existing admin-customized values are preserved while new keys are added with defaults.
+On upgrade (new version adds new config keys), `seedDefaults()` uses `INSERT ... ON CONFLICT (key) DO NOTHING`, so existing admin-customized values are preserved while new keys are added with defaults. As built it runs on every `load()`, not only on an empty table. A consequence: a default changed in a later release does not reach an existing install's seeded row, which is why `sourceForStoredValue` reports such a stale seeded value as `db`.
 
 ---
 
 ## 6. Documentation Plan
+
+(Original plan, kept as history. The reference is this file; there is no `docs/CONFIG_ARCHITECTURE.md`.)
 
 ### 6.1 Architecture Doc
 
@@ -948,6 +1007,8 @@ Add the `/admin/config` routes to the admin route table. Document the config adm
 ---
 
 ## 7. Summary of New/Modified Files
+
+(Original plan. `config/system.json` and `src/models/settings.js` have since been deleted; the table kept the name `settings`.)
 
 | File | Action | Purpose |
 |---|---|---|

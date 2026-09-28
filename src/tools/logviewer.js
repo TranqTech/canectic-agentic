@@ -24,7 +24,7 @@ dotenv.config();
 
 const LOG_CHANNEL = 'alog:stream';
 const HISTORY_PREFIX = 'alog:history:';
-const ALL_PROCESSES = ['gateway', 'worker', 'mailer'];
+const ALL_PROCESSES = ['gateway', 'worker', 'mailer', 'mail'];
 
 // -----------------------------------------------------------------------
 // Argument parsing

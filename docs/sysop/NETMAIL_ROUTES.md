@@ -6,11 +6,11 @@ Admin UI: `/admin/netmail-routes` (Networking dropdown in the admin navbar).
 
 ## When routes are evaluated
 
-Inbound netmail flows through `ftnNetmailAdapter.importFtnNetmail()` in four steps. Custom routes run as Step 1.5:
+Inbound netmail flows through `ftnNetmailAdapter.importFtnNetmail()` in these steps. Custom routes run second, after the address check:
 
 1. Is the destination address ours? (relay/reject if not)
 2. **Custom routes match?** (alias / dump / ignore)
-3. Is `to_user` a built-in processor? (areafix / filefix / tic / etc)
+3. Is `to_user` a built-in processor? (`areafix`, `areamgr`, `filefix`, `filemgr`, `tic`, `raidfix`, `ping`; `raidfix` is recognised but has no handler, so mail to it is consumed without a reply)
 4. Resolve `to_user` to a local user account, deliver to PM inbox
 
 Custom routes beat built-in processors, so a route aliasing `areamanager` to `areafix` wins over the hardcoded list. A route with `action=ignore` wins over everything else -- the message is dropped before any dispatch.
@@ -68,9 +68,9 @@ Attached files are untouched. If your IBBS game delivers a `.QWK`/`.REP` as a ne
 
 Each rule has an optional `log_level` (default `0` = silent). When set, rule matches log at that level via alogger:
 
-- `0` — silent (default). The whole point of `ignore` is noise reduction; silent is correct for normal operation.
-- `3` — normal. Visible at default log verbosity.
-- `4`–`5` — verbose / debug. Bump a single rule while diagnosing why it's (not) matching.
+- `0`: silent (default). The whole point of `ignore` is noise reduction; silent is correct for normal operation.
+- `3`: normal. Visible at default log verbosity.
+- `4` to `5`: verbose / debug. Bump a single rule while diagnosing why it's (not) matching.
 
 ## Examples
 
@@ -106,7 +106,7 @@ Dump messages addressed to `bbs-link` for a custom handler:
 
 Active rules are cached in memory inside the model. Every CRUD operation invalidates the cache, so changes take effect on the next inbound netmail without a service restart.
 
-The cache is process-local (no Redis pub/sub invalidation yet). In the four-process layout, only the `worker` process hits `importFtnNetmail`, so a single-process cache suffices. If you later run multiple workers, each has to be restarted after a rule change; file a ticket and we'll wire the `CONFIG_CHANGED` event.
+The rules are matched in the worker (the FTN tosser), while you edit them in the gateway. Each change is announced to the other processes, and the worker drops its cached copy when it hears it, so no restart is needed in the four-process layout either.
 
 ## Test tool
 

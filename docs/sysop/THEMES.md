@@ -21,10 +21,10 @@ The theme editor organizes colour properties into categories via accordion panel
 
 | Category | Properties | Purpose |
 |----------|-----------|---------|
-| General | Title, Header, Borders, Error, Warning, Progress, Default Text, Label, Time, Version | Core UI chrome |
+| General | Title, Title Background, Header, Header/Box/List Borders, Error, Warning, Progress, Default Text, Label, Time Display, Version | Core UI chrome |
 | System | Board Name, Board Location | System identification text |
 | Menu | Prompt, Menu Prompt, Hotkey, Command, Option, Featured | Menu display elements |
-| Lightbar | Lightbar, Lightbar Command, Lightbar Option | Arrow-key navigation (future) |
+| Lightbar | Lightbar, Lightbar Command, Lightbar Option | The highlight bar on Lightbar menus and the login screen's selection bar |
 | Input | Input, Field, Username, Password (and their labels) | Login and input prompts |
 | Editor | Editor Prompt | Message editor |
 | Content | Door Description, Announcement Body | Rich text content defaults (terminal + web) |

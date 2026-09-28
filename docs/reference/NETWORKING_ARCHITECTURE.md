@@ -17,23 +17,25 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 ### Models (business logic)
 
+Files are in `src/models/` unless the row says otherwise.
+
 | File | Purpose |
 |------|---------|
 | `ftnClasses.js` | FTN data classes. `Packet` (FTN type-2 packet envelope: source/dest addresses, password, timestamps, message array) and `Message` (single FTN message: type, area tag, addressing, kludge fields, body, origin line). Used by both the tosser and netmail modules. |
 | `ftnNodelist.js` | FTN nodelist database model. `ensureTable()` creates the `ftn_nodelist` table with unique constraint on (network_id, zone, net, node, point). `importNodelist()` performs batch upsert (500/batch) with historical tracking (first_seen preserved, last_seen updated, absent nodes deactivated). Lookups: `getNode`, `getNetHost`, `getNodeHub`, `getRegionCoord`, `getZoneCoord`, `findConnectable` (IBN+hostname+not Down/Hold/Pvt), `searchNodes`, `getNodesInNet`. Historical: `getRecentlyAdded`, `getRecentlyRemoved`, `getNetworkStats`, `getNodeHistory`. Utility: `getImportInfo`, `clearNetwork`. |
 | `ftnRouter.js` | FTN routing resolver. Given a destination FTN address, determines the next-hop peer connection. Cascade: direct connection match → routing rule wildcard match → nodelist direct → coordinator walk (hub → host → region → zone). Returns `routeResult` with nextHop, connection UUID, method, packet flavour, and `nodelistData` for nodelist-resolved routes. Accepts optional `networkId` parameter. |
-| `ftnUtils.js` | FTN utility functions. Message-ID generation, datetime string formatting, system time parsing with timezone offset handling. |
+| `ftnUtils.js` | _(Located in `src/utils/`)_ FTN utility functions. Message-ID generation (see MSGID below), datetime string formatting, system time parsing with timezone offset handling, `sanitiseMessageDate` (a date over 2 days ahead, before 1980 or unparseable falls back to the receive time), `tzutcFor`, and the CHRS kludge read/write (`charsetFromKludge`, `chrsValueFor`). |
 | `areafix.js` | AreaFix automated echomail area manager. Processes netmail commands from FTN peers to subscribe/unsubscribe echomail areas. Authenticates via `areafix_password` in `connection_data`. Commands: +AREATAG, -AREATAG, %LIST, %QUERY, %AREAS, %HELP, %PAUSE, %RESUME, %RESCAN. Builds response netmail via `buildResponse()`. |
 | `filefix.js` | FileFix automated TIC file area manager. Same command set and authentication as AreaFix, operates on `file_network_areas` + `file_peer_subscriptions`. Handles netmail addressed to 'filefix', 'filemgr', or 'tic'. |
 | `rescan.js` | %RESCAN grammar shared by AreaFix and FileFix, plus the two executors. Only the parser is shared: the mechanisms differ (see Rescan below). |
-| `ftnNetmailAdapter.js` | FTN netmail processor routing. Routes inbound netmail by `ToUser` field to AreaFix ('areafix'/'areamgr'), FileFix ('filefix'/'filemgr'/'tic'), or standard PM delivery. Queues response netmail as outbound packets. |
-| `netmail.js` | FTN netmail (private point-to-point messages). Separate `netmail_in` and `netmail_out` tables. Handles inbound import with dupe checking, outbound creation with address validation, pending queue retrieval (`getPendingNetmail`), and sent marking. Bidirectional `ftnToDb`/`dbToFtn` conversion. |
+| `ftnNetmailAdapter.js` | Inbound FTN netmail (`importFtnNetmail(message, pktOrigin)`, called by the FTN tosser). Netmail not addressed to one of our addresses goes to the relay path (see Netmail below). For ours: sysop netmail routes (`netmailRoutes.matchRoute`), then processors by `ToUser`: AreaFix ('areafix'/'areamgr'), Ping ('ping', `netmailPing.js`), FileFix ('filefix'/'filemgr'/'tic'), else delivery into the PM system (`pm_inbox`). Responses are queued in `pm_outbox`. `resolveOutboundSource()` keeps the message header (who wrote it) apart from the packet header (who hands the packet over). |
+| `netmail.js` | Legacy. The original netmail model over the `netmail_in` / `netmail_out` tables. Nothing imports it any more: inbound netmail goes through `ftnNetmailAdapter.js` into the PM system, and outbound FTN netmail is read from `pm_outbox` (`privateMessages.getPendingByTransport('FTN')`). The tables are still in the schema. |
 | `qwkClasses.js` | Low-level QWK/REP binary packet parsing and building. Header byte layouts, body encoding (CP437/0xE3 line terminators), kludge extraction, HEADERS.DAT parsing, CONTROL.DAT parsing, REP packet assembly using system `zip`. |
 | `qwkTosser.js` | _(Located in `src/middleware/tossers/`)_ QWK network tosser. Pull (inbound) and push (outbound) for client connections. Handles FTP/SFTP/directory/hub transports. Imports messages with dupe checking, threading (via `threadMessage`/`rollbackThread`/`pushImportedMsgId` from `messages.js`), HWM tracking. Builds REP packets with HEADERS.DAT for outbound client pushes. **Phase 1.5**: before downloading, checks `inDir` for an existing `.qwk` from a prior failed run — extracts and processes it instead of pulling again (prevents data loss when hubs delete after download). Post-processing cleanup removes both extracted directory and source `.qwk`. Imports `formatBodyHtml` from `terminalText.js`. |
 | `qwkPacketBuilder.js` | QWK packet generation module. Builds complete `.qwk` packets (CONTROL.DAT + MESSAGES.DAT + HEADERS.DAT + NETFLAGS.DAT) for hub-mode delivery to nodes. Designed with low-level reusable functions and a high-level `buildQwkForNode()` entry point. |
-| `qwkTransport.js` | Transport abstraction layer. FTP (`basic-ftp`), SFTP (`ssh2-sftp-client`), Directory (local filesystem copy), and Hub (inbound, no transport needed). Factory function `makeTransport(cd)` selects the right class. |
+| `qwkTransport.js` | Transport abstraction layer for client connections: FTP (`basic-ftp`), SFTP (`ssh2-sftp-client`), Directory (local filesystem copy) and HTTP (`HttpTransport`, calling a Canectic hub's `/api/v1/qnet`). Factory function `makeTransport(cd)` selects the class. A `hub` connection (the node reaches us) has no transport; the tosser handles it before asking for one. |
 | `nntpTosser.js` | _(Located in `src/middleware/tossers/`)_ NNTP tosser. Pulls articles from NNTP servers, pushes local messages as NNTP posts. Uses `threadMessage`/`rollbackThread`/`pushImportedMsgId` from `messages.js` for unified thread management. Imports `formatBodyHtml` from `terminalText.js` for body_html pre-rendering. |
-| `peerConnections.js` | Peer connection CRUD. Manages connection records, connection_data JSONB (transport settings, HWM, credentials), subscription management. `buildConnectionData()` handles form→JSONB for all network types. `getConnectionByUUIDWithNetwork()` joins with network metadata for tosser use. `getActiveConnectionsByNetworkType()` returns all active connections for a given protocol. |
+| `peerConnections.js` | Peer connection CRUD. Manages connection records, connection_data JSONB (transport settings, HWM, credentials), subscription management. `buildConnectionData()` handles form→JSONB for all network types. `mergeConnectionData()` is what an edit saves: the rebuilt form fields over the stored row, so keys the form does not edit (NNTP/QWK `high_water_marks`, FTN connect backoff) survive. The one exception is FTN backoff when a key in `FTN_DIAL_KEYS` (`address`, `remote_host`, `remote_port`, `mailer_transport`, `mailer_protocol`, `mailer_ws_url`) changes: those failures were against the old target, so the failure count and next-allowed time are cleared. Backoff helpers: `isInBackoff`, `recordConnectFailure`, `recordConnectSuccess`, `resetBackoff`. `getConnectionByUUIDWithNetwork()` joins with network metadata for tosser use. `getActiveConnectionsByNetworkType()` returns all active connections for a given protocol. |
 | `peers.js` | Peer (remote system) CRUD. Parent entity above connections. Handles cascading deletion (peer → connections → subscriptions). Fields: name, sysop_name, contact, notes. |
 | `peerAreaSubscriptions.js` | Manages per-area subscription state for each connection. `syncConnectionToNetwork()` bootstraps rows when connections or areas are created. `setSubscriptions()` bulk-toggles `allowed` or `enabled` flags. `allowAllNetworkAreas()` marks all active network areas as allowed for a connection (called on new connection creation). `syncNetworkAreaToConnections()` syncs a newly added area to all connections on a network with optional allow/enable. `removeSubscriptionsForNetworkArea()` cleans up subscription rows when an area is removed from a network. `resetOutboundIdx(peerConnectionUUID, areaId)` zeroes `msg_idx` for a connection (all areas or one area) so the next toss cycle rescans from the beginning — used by admin HWM reset routes, replacing the protocol-specific reset functions previously in the tossers. Lazy-imports peerConnections to avoid circular dependency. |
 | `systemAddresses.js` | System address management. Each network has one or more addresses identifying the local system (FTN address, QWK-ID, NNTP host). Includes origin_line field for tear/origin on outgoing messages. |
@@ -41,51 +43,50 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 | `msgAreas.js` | Message area CRUD. `newArea` (creates area record, backing tables, pointer rows, network mapping, area count recalculation), `updateArea`, `removeArea` (with cascading cleanup of pointers, subscriptions, optional table deletion), `recalculateAreaCounts` (correlated UPDATE from actual data, called on every add/remove). Schema includes `thread_mode` (standard/subscribe_only/no_threads) and `post_as` (username/realname) columns. |
 | `networkAreas.js` | Maps message areas to networks with areatags. For QWK networks, areatags are conference numbers (numeric strings). For FTN, areatags are echomail tag names (e.g. "DOVE-NET"). |
 | `msgNetworks.js` | Network definitions (name, domain, type, config). |
-| `echomail.js` | FTN echomail network import/export. Inbound: `handleInboundEchoMessage` (FTN-to-DB conversion, thread resolution, body_html pre-rendering via `formatBodyHtml` imported from `terminalText.js`, source_network_id tagging). Outbound: `getOutboundForConnection`, `dbToFtn` conversion. Thread management: `threadMessage`, `applyThreadingForArea`, `updateAreaThreads`, `updateThread`, `mergeRecentThreads`. **Shared thread helpers** for all tossers: `createThreadRow(threadtable, threadidStr, subject, systemTime, fromUser)` → `{threadId, threadidStr}`, `updateThreadStats(threadtable, threadId, systemTime, fromUser)`, `rollbackThread(threadtable, threadidStr)`. View-facing and posting methods have been migrated to `messages.js`. |
-| `messages.js` | Message viewing, posting, and sanitization model. Owns all view-facing and user-posting logic. **Viewing:** `listMsgGroups`, `getAreasInGroup`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated with `afterId`/`beforeId`/`threadId` filtering), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml`, `escapeHtml`. **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `updateThread` (stat refresh after reply). **Security:** `sanitizeMessageFields` — strips `<script>`, `<style>`, dangerous tags, event handlers, and `javascript:` URIs from all text fields. Called at the model layer for both web posts and importable by tossers for inbound network packets. **Deletion:** `deleteMessageByUUID`. |
+| `echomail.js` | FTN-specific echomail layer only. Exports `ftnToDb` and `dbToFtn` (field conversion), `getOutboundForConnection` (export to one FTN connection), `evaluateOutbound` and `stampForHop` (see Outbound eligibility). Inbound orchestration (`handleInboundEchoMessage`) and all threading, including the shared thread helpers `createThreadRow`, `updateThreadStats`, `rollbackThread` and `threadMessage`, live in `messages.js`. |
+| `messages.js` | Message viewing, posting, and sanitization model. Owns all view-facing and user-posting logic. **Viewing:** `listMsgGroups`, `getAreasInGroup`, `getMessage`, `getMessageById`, `getMessageCount`, `countMessagesBefore`, `getMessages` (paginated with `afterId`/`beforeId`/`threadId` filtering), `getMessagesForThread`, `getMessagesForArea`, `getThreadsForArea`, `getRecentThreadsForArea`, `getThreadsPage` (keyset pagination), `getThreadCount`, `getThreadByUUID`, `getThreadUUIDMap` (batch lookup), `buildMessageTree`, `formatBodyHtml` (re-exported from `terminalText.js`). **Inbound:** `handleInboundEchoMessage` and the threading helpers used by all tossers (`threadMessage`, `createThreadRow`, `updateThreadStats`, `rollbackThread`, `reconcileOrphans`). **Posting:** `startNewThread`, `replyToThread`, `saveMessage` (dispatcher), `updateThread` (stat refresh after reply). **Security:** `sanitizeMessageFields` strips `<script>`, `<style>`, dangerous tags, event handlers, and `javascript:` URIs from all text fields. Called at the model layer for both web posts and importable by tossers for inbound network packets. **Deletion:** `deleteMessageByUUID`, `deleteThreadByUUID`. Also moderation, moving between areas and retention (`enforceRetentionLimits`). |
 | `codepageConversions.js` | Shared CP437↔UTF-8 conversion utilities. Also provides `formatTextForHtml()` for lightweight space-preservation formatting of plain text with ASCII art alignment. Includes HTML entity escaping as defense-in-depth against XSS. Used by `terminalText.js` for the plain-text-with-alignment path. |
-| `termMsgFormat.js` | Terminal message body formatting pipeline. CP437↔UTF-8 conversion, pipe/Ctrl-A/ANSI code conversion, semantic line classification (`classifyLine` → NORMAL/QUOTE/TEAR/TAGLINE/ORIGIN/KLUDGE), paragraph reflow (`reflowParagraphs` at 80% threshold reassembles text from wider editors), ANSI art detection (`detectAnsiArt` — checks for cursor positioning CSI sequences, not just color SGR), and ANSI-aware word wrapping (`wordWrapLineAnsi` with `measureVisualWidth`/`findStringIndexAtVisualCol`). Exports `reflowText(text, wrapWidth)` convenience function that normalizes line endings, reflows, and joins with `\r` for VirtualTerminal compatibility. Does NOT import `terminalText.js` (dependency flows one direction only). |
-| `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId)` returns `Map<shortcode, boolean>` resolving: user override → area `newscan_default` → true. `getSubscription(userId, shortcode)`, `setSubscription(userId, shortcode, subscribed)`, `removeSubscription(userId, shortcode)` for individual management. Used by terminal newscan and area selector. |
-| `terminalText.js` | Terminal text formatter and shared HTML body generator. `VirtualTerminal` class converts ANSI escape codes, pipe codes (`|XX`), and Synchronet Ctrl-A attribute codes to HTML with CSS classes. Supports cursor positioning, color, and a virtual terminal buffer. **`noWrap` mode**: when enabled, lines extend without column wrapping — CSS handles responsive layout. **`formatBodyHtml(displayText, forceWidth)`**: consolidated HTML formatter used by all three tossers and the maintenance regeneration tool. Pipeline: paragraph reflow (`reflowText`) → ANSI art detection (`detectAnsiArt`) → routing: art uses fixed-width VT, colored text uses noWrap VT, plain text uses `formatTextForHtml` or `<br>` replacement. Optional `forceWidth` parameter overrides noWrap to wrap at a specific column width. Imports `detectAnsiArt`/`reflowText` from `termMsgFormat.js` and `formatTextForHtml` from `codepageConversions.js`. |
+| `termMsgFormat.js` | Terminal message body formatting pipeline. CP437↔UTF-8 conversion, pipe/Ctrl-A/ANSI code conversion, semantic line classification (`classifyLine` → NORMAL/QUOTE/TEAR/TAGLINE/ORIGIN/KLUDGE), paragraph reflow (`reflowParagraphs` at 80% threshold reassembles text from wider editors, and never joins a line `isLaidOut()` calls laid out), ANSI art detection (`detectAnsiArt`: cursor positioning CSI sequences, or block-drawn art via `artLineWidths`), and ANSI-aware word wrapping (`wordWrapLineAnsi` with `measureVisualWidth`/`findStringIndexAtVisualCol`). Exports `reflowText(text, wrapWidth)` convenience function that normalizes line endings, reflows, and joins with `\r` for VirtualTerminal compatibility. Does NOT import `terminalText.js` (dependency flows one direction only). |
+| `userAreaSubs.js` | User area subscription model for newscan filtering. `getSubscriptionMap(userId)` returns `Map<shortcode, boolean>` resolving: user override → area `newscan_default` → true. `isSubscribed`, `setSubscription`, `subscribe`, `unsubscribe`, `toggleSubscription`, `clearOverride` for individual management. Used by terminal newscan and area selector. |
+| `terminalText.js` | Terminal text formatter and shared HTML body generator. `VirtualTerminal` class converts ANSI escape codes, pipe codes (`|XX`), and Synchronet Ctrl-A attribute codes to HTML with CSS classes. Supports cursor positioning, color, and a virtual terminal buffer. **`noWrap` mode**: when enabled, lines extend without column wrapping; CSS handles responsive layout. **`formatBodyHtml(displayText, forceWidth)`**: consolidated HTML formatter used by all three tossers and the maintenance regeneration tool. Pipeline: ANSI art detection on the RAW text (`detectAnsiArt`) → paragraph reflow (`reflowText`) only when it is not art → routing: art uses fixed-width VT, colored text uses noWrap VT, plain text uses `formatTextForHtml` or `<br>` replacement. Optional `forceWidth` parameter overrides noWrap to wrap at a specific column width. Imports `detectAnsiArt`/`reflowText` from `termMsgFormat.js` and `formatTextForHtml` from `codepageConversions.js`. |
 
 ### Middleware / Routes
 
 | File | Purpose |
 |------|---------|
 | `tosser.js` | CLI entry point (located in `src/tools/`). Enqueues toss jobs on the BullMQ `toss` queue and waits for completion. Supports `--in`, `--out`, `--ftn`, `--nntp`, `--qwk` flags. Concurrency is managed by BullMQ jobId deduplication (replaces PID-file locking). Requires the worker process (`bin/worker.js`) or embedded mode to be running. |
-| `maintenance.js` | CLI entry point (located in `src/tools/`). Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. Supports `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`. Flags: `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency is managed by BullMQ jobId deduplication (replaces PID-file locking). Requires the worker process (`bin/worker.js`) or embedded mode to be running. |
-| `messageBase.js` | Message base maintenance functions (located in `src/maintenance/`). `regenerateAllBodyHtml(options)` iterates active areas and regenerates `body_html` from `utf8`/`body_text` using the current `formatBodyHtml` pipeline. `regenerateAreaBodyHtml(shortcode, options)` processes a single area. Uses keyset pagination (by id) for scalability. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress` callback, `quiet`. |
+| `maintenance.js` | CLI entry point (located in `src/tools/`). Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits for completion. Supports `--regen-html`, `--regen-pm-html`, `--purge-pm-trash`, `--recalc-counts`, `--rethread`, `--fix-msgids`. Flags: `--area SHORTCODE` (repeatable), `--dry-run`, `--width N`, `--batch N`, `--days N`. Concurrency is managed by BullMQ jobId deduplication (replaces PID-file locking). Requires the worker process (`bin/worker.js`) or embedded mode to be running. |
+| `messageBase.js` | Message base maintenance functions (located in `src/maintenance/`). `regenerateAllBodyHtml(options)` iterates active areas and regenerates `body_html` from `body_text` using the current `formatBodyHtml` pipeline. `regenerateAreaBodyHtml(shortcode, options)` processes a single area. Uses keyset pagination (by id) for scalability. Options: `areas`, `batchSize`, `dryRun`, `forceWidth`, `onProgress` callback, `quiet`. |
 | `admin.js` | Admin routes for connection management, network area CRUD, HWM resets (via `peerAreaSubscriptions.resetOutboundIdx`). Message group/area management with thread_mode and post_as selectors. `recalculateAreaCounts` enqueues via BullMQ maintenance queue. All DB access through model methods; heavy operations go through job queues. |
 | `index.js` | User-facing message routes. Shared middleware injects `boardname`, `faviconlink`, `currentPath`, `DateTime`, `ismobile` into all views. Helper functions: `getCurrentUser`, `resolveUserId`, `resolvePostName`, `checkAreaReadAccess`, `checkAreaPostAccess`. Group/area/thread browsing with unread counts. Thread listing with keyset pagination. Thread reader and flat-view reader with bidirectional lazy scroll and position-aware progress bars. All area/thread routes pass `sufficientAccess` and `canPost` booleans — templates use guard chains (`!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found) instead of separate early-return renders per condition. Message posting (`POST newthread`, `POST reply`) with `post_as` name resolution and model-layer sanitization. Mark-area-read. JSON lazy-load endpoints for both directions. Resolves `thread_mode` to render threaded or flat view. |
-| `ftnTosser.js` | _(Located in `src/middleware/tossers/`)_ FTN tosser. `TossInbound()` reads type-2 FTN packets from inbound directory, parses messages via `ReadPkt`, routes echomail to `echomail.handleInboundEchoMessage()` and netmail to `netmail.newInboundNetmail()`. Unknown areatags stored in `echomail_bad` holding table via `badEchomail.storeBadMessage()` with sender lookup from `inbound_file_log`. `TossOutbound()` gathers pending echomail and netmail, routes via `ftnRouter.resolveRoute()`, builds type-2 packets with dynamically-sized buffers, writes to zone-aware BSO outbound directories with `.flo` entries, and enqueues a `bso-scan` job to trigger mailer delivery. Handles archive extraction, packet validation, and move-after-toss. |
+| `ftnTosser.js` | _(Located in `src/middleware/tossers/`)_ FTN tosser. `TossInbound()` reads type-2 FTN packets from inbound directory, parses messages via `ReadPkt`, routes echomail to `echomail.handleInboundEchoMessage()` and netmail to `netmail.newInboundNetmail()`. Unknown areatags stored in `echomail_bad` holding table via `badEchomail.storeBadMessage()` with sender lookup from `inbound_file_log`. `TossOutbound()` runs netmail then echomail: echomail per active FTN connection through `echomail.getOutboundForConnection()` and `WritePktsToNode()`, netmail from `pm_outbox` through `WritePkts()` addressed to the destination (or to `PacketDestination` for relayed mail). Packets are written to zone-aware BSO outbound directories and listed in flow files; route resolution happens later, when the BSO scanner reads the outbound. Finally it enqueues a `bso-scan` job (`enqueueMailerBsoScan`) to trigger mailer delivery. Handles archive extraction, packet validation, and move-after-toss. |
 | `badEchomail.js` | _(Located in `src/models/`)_ Bad echomail holding table and tag tracking. `storeBadMessage()` stores messages for unknown areatags (preserves both `source_address` and `destination_address` for full recovery fidelity). `recoverMessages()` rebuilds an FTN message object from stored fields -- `Source`/`Destination` address strings and Zone/Net/Node integers are restored from stored addresses via `parseFtnAddressInto()`, then passed to `handleInboundEchoMessage()` for import. `purgeOld(days)` removes expired entries. `bad_echo_tags` table tracks areatag history (first/last seen, total count, source info). Admin: `/admin/bad-echomail`. |
 | `inboundFileLog.js` | _(Located in `src/models/`)_ Tracks files received via mailer sessions. `logFile()` records filename, path, size, peer info. `lookupSender(filename)` returns most recent sender for a file. Used by tosser to trace bad echomail back to the sending peer. |
-| `ticTosser.js` | _(Located in `src/middleware/tossers/`)_ FTN TIC file echo processor. `tossInbound()` scans the inbound directory for `.tic` files, parses each descriptor, validates CRC-32 and TIC password, resolves file area via `fileNetworkAreas.getAreaByTag()`, dupe-checks via `fileEntries.checkDupe()`, handles `Replaces` deactivation, moves file to area directory, extracts FILE_ID.DIZ if no LDesc, inserts `file_entries` row, creates `file_distribution` rows for subscribed peers (excluding source via seenby/path), and moves `.tic` to tossed. `tossOutbound()` queries pending `file_distribution` rows, groups by connection, builds TIC descriptors with proper path/seenby propagation, stages `.tic` + attached files in zone-aware BSO outbound directory (hardlink preferred, copy fallback), creates `.flo` flow file entries for both TIC descriptor and attached file (`^` = delete after send), and enqueues a `bso-scan` job to trigger mailer delivery. Uses: `fileEntries`, `fileAreas`, `fileGroups`, `fileNetworkAreas`, `filePeerSubscriptions`, `fileDistribution`, `fileHasher`, `fileDescExtractor`. |
+| `ticTosser.js` | _(Located in `src/middleware/tossers/`)_ FTN TIC file echo processor. `tossInbound()` scans the inbound directory for `.tic` files, parses each descriptor, validates CRC-32 and TIC password, resolves file area via `fileNetworkAreas.getAreaByTag()`, dupe-checks via `fileEntries.checkDupe()`, refuses a file that has already been through this system (`ticHasPassedThrough`: our address in Path only, never Seenby, since a sender lists every recipient in Seenby), handles `Replaces` (`replacesPattern`: `*`/`?` honoured, but a wildcard needs `REPLACES_MIN_LITERALS` (3) literal characters before the first dot; the replaced file is moved aside and deleted only after the new row is inserted, `placeInboundFile`), moves file to area directory, extracts FILE_ID.DIZ if no LDesc, inserts `file_entries` row, creates `file_distribution` rows for subscribed peers whose network carries an areatag for the area (`partitionByAreatag`), excluding the source and everyone in the TIC's Seenby/Path (`forwardExclusions`), and moves `.tic` to tossed. `tossOutbound()` queries pending `file_distribution` rows, groups by connection, builds TIC descriptors with proper path/seenby propagation, stages `.tic` + attached files in zone-aware BSO outbound directory (hardlink preferred, copy fallback), creates `.flo` flow file entries for both TIC descriptor and attached file (`^` = delete after send), and enqueues a `bso-scan` job to trigger mailer delivery. Uses: `fileEntries`, `fileAreas`, `fileGroups`, `fileNetworkAreas`, `filePeerSubscriptions`, `fileDistribution`, `fileHasher`, `fileDescExtractor`. |
 | `fileNetworkAreas.js` | _(Located in `src/models/`)_ Maps file areas to networks with file echo areatags. `getAreaByTag(networkId, areatag)` resolves inbound TIC area tags. `getNetworksByFileArea(areaId)` returns all network mappings for outbound TIC generation. `getMappingsForNetwork(networkId)` lists all mappings for admin UI. Analogous to `networkAreas.js` for messages. |
 | `filePeerSubscriptions.js` | _(Located in `src/models/`)_ Per-connection subscription state for file areas. `getSubscribedConnections(fileAreaId)` returns peer connections with allowed+enabled for distribution row creation. `isSubscribed(peerConnectionId, fileAreaId)` checks inbound authorization. `syncConnectionToFileAreas(peerConnectionId, networkId)` bootstraps rows (same pattern as `peerAreaSubscriptions.syncConnectionToNetwork`). `setSubscriptions`, `allowAllFileAreas`, `enableAllAllowed` for admin management. |
-| `fileDistribution.js` | _(Located in `src/models/`)_ Outbound file distribution tracking. One row per file per peer. `createDistributionRows(fileEntryId, peerConnectionIds, protocol)` bulk-creates pending rows (idempotent). `getAllPending()` returns pending rows grouped by connection for outbound processing. `markSent(id)`, `markFailed(id, errorMessage)`, `markSkipped(id, reason)` for status transitions. `retryFailed(peerConnectionId)` resets failed rows to pending. |
+| `fileDistribution.js` | _(Located in `src/models/`)_ Outbound file distribution tracking. One row per file per peer. `createDistributionRows(fileEntryId, peerConnectionIds, protocol)` bulk-creates pending rows (idempotent). `getAllPending()` returns pending rows grouped by connection for outbound processing. `markSent(id)`, `markFailed(id, errorMessage)`, `markSkipped(id, reason)` for status transitions. `failed` is terminal (the outbound pass reads pending rows only); `retryFailed(peerConnectionId)` resets failed rows to pending, driven by the Retry Failed button on the peer page, and `summaryForConnection` feeds that page. `partitionByAreatag(subscribers, mappings)` splits subscribers into deliverable and undeliverable before rows are created. |
 
 ### Views
 
 | File | Purpose |
 |------|---------|
-| `peers_view.pug` | Peer connections admin UI. Create/edit/remove connections. QWK-specific: transport selector (FTP/SFTP/Directory/Hub), Remote QWK ID, show/hide of client fields based on transport type, Reset Idx button. Allowed/enabled area lists are deduplicated per-connection (filtered by subscription rows) and empty groups are hidden. |
-| `msgNets_view.pug` | Network admin UI. Network details, system addresses (QWK-ID + origin line for QWK networks), network areas with numeric areatag validation for QWK, peer connection overview. Add-area modal has a grouped searchable select (areas organized by message group, already-mapped areas excluded) and checkboxes for "allow all peers" (checked by default) and "enable all peers" (unchecked by default). |
-| `msgGroups/index.pug` | Admin message groups listing with area counts. Manual "Recalculate Area Counts" button. New group modal. |
-| `msgGroups/view.pug` | Admin group detail — area listing with area info/edit/delete modals. Thread mode selector (Standard/No Threads/Subscribe Only). Post As selector (Username/Real Name). |
+| `admin/peers/view.pug` | Peer connections admin UI. Create/edit/remove connections. QWK-specific: transport selector (FTP/SFTP/Directory/HTTP/Hub), Remote QWK ID, show/hide of client fields based on transport type, Reset Idx button. Allowed/enabled area lists are deduplicated per-connection (filtered by subscription rows) and empty groups are hidden. |
+| `admin/msgNets/view.pug` | Network admin UI. Network details, system addresses (QWK-ID + origin line for QWK networks), network areas with numeric areatag validation for QWK, peer connection overview. Add-area modal has a grouped searchable select (areas organized by message group, already-mapped areas excluded) and checkboxes for "allow all peers" (checked by default) and "enable all peers" (unchecked by default). |
+| `admin/msgGroups/index.pug` | Admin message groups listing with area counts. Manual "Recalculate Area Counts" button. New group modal. |
+| `admin/msgGroups/view.pug` | Admin group detail: area listing with area info/edit/delete modals. Thread mode selector (Standard/No Threads/Subscribe Only). Post As selector (Username/Real Name). |
 | `messages/index.pug` | User-facing message group listing with aggregate unread counts per group. |
 | `messages/groups/view.pug` | User-facing area listing within a group. Per-area unread counts, last post info. |
 | `messages/areas/view.pug` | Threaded area view. Thread listing table with keyset-paginated lazy scroll. Unread badges per thread. New Thread modal with monospace textarea. Mark Read button. Flat View toggle (when thread_mode allows). |
 | `messages/areas/flat.pug` | Flat (threadless) area view. Guard chain: `!currentuser` → login, `!sufficientAccess` → unauthorized, `!msgArea` → not found. Column layout: `col-xl-6.offset-xl-3.col-lg-10.col-12` — centered on xl, wide on lg, full on mobile. Sidebar column hidden below xl (`d-none.d-xl-block`), replaced with offcanvas panel (hamburger ☰ in card header, `data-bs-backdrop='false' data-bs-scroll='true'`, Win95-style close button). Desktop nav buttons (Post, Threads, group-back) hidden below xl. Stacked message headers (from/to/subject over date, reply button right-aligned). All messages displayed chronologically with bidirectional lazy scroll. Position-aware progress bar. `data-force80` (from `msgArea.ansi_area`) and `data-can-post` on container. Post/Reply buttons, modals, quote system, and JS `buildMsgHtml` all gated behind `canPost`. Mark All Read in sidebar/offcanvas. |
 | `messages/areas/thread.pug` | Thread reader. Same guard chain, column layout, offcanvas, and `canPost` gating as flat.pug. `← Threads` button hidden on mobile (available in offcanvas). Stacked message headers. Bidirectional lazy scroll starting from first unread message. Position-aware progress bar. Reply button on each message header gated behind `canPost`. Reply to Thread button in sidebar/offcanvas (targets thread root) gated behind `canPost`. Reply modal with collapsible quote panel — click a line to insert it as `"  > "` prefixed text at cursor. `data-force80` and `data-can-post` on container. |
 | `partials/messages/_msgAutoSize.pug` | Loads `public/js/readerWidth.js`: 80 columns on desktop; on phones the reader's 40 \| 80 choice per area, else 80 for `ansi_area` areas, else 40, and 80 for bodies marked `data-art`. See `message_architecture.md`, Auto-Sizing. |
-| `console_parsers.js` | Client-side pipe code color parser for message bodies. Largely superseded by server-side `body_html` pre-rendering; retained as fallback for edge cases. |
 
 ### External / Synchronet Integration
 
 | File | Purpose |
 |------|---------|
-| `qnet-directory.js` | Synchronet SpiderMonkey JS module for directory-based QWK exchange. Runs as a SCFG call-out command on the Synchronet side. Copies REP/QWK packets between Synchronet's data directory and the Canectic exchange directory. Logs to `<exchange-dir>/qnet.log`. |
+| `qnet-directory.js` | (`xtrn/synchronet/`, copy in `src/external/synchronet/`) Synchronet SpiderMonkey JS module for directory-based QWK exchange. Runs as a SCFG call-out command on the Synchronet side. Copies REP/QWK packets between Synchronet's data directory and the Canectic exchange directory. Logs to `<exchange-dir>/qnet.log`. |
 
 ---
 
@@ -113,6 +114,9 @@ Each row represents a single connection to a peer on a specific network. A peer 
 - `connection_type` — 'FTN', 'NNTP', 'QWK', 'LOCAL'
 - `connection_data` — JSONB containing transport-specific settings (see below)
 - `active`
+- `poll_enabled`: only polled connections get a scheduled poll/pull job
+
+An edit saves through `mergeConnectionData()` (see `peerConnections.js` above), so what the system writes into `connection_data` for itself survives a form save.
 
 When a new connection is created, `peerAreaSubscriptions.syncConnectionToNetwork()` is called to bootstrap a subscription row for every network_area on that network, then `allowAllNetworkAreas()` marks them all as allowed. The admin can then selectively revoke areas.
 
@@ -123,7 +127,7 @@ Links a peer connection to message areas. One row per connection per area on the
 - `area_id` — FK to message_areas
 - `allowed` — whether this peer is permitted to send/receive in this area (admin-controlled gate)
 - `enabled` — whether message exchange is currently active for this area (can be toggled without revoking permission)
-- `msg_idx` — outbound HWM (last message ID sent/processed for QWK push)
+- `msg_idx`: outbound HWM (last message ID sent/processed for this connection, used by FTN, QWK and NNTP export)
 
 Rows are pre-created by `syncConnectionToNetwork()` when a connection is established or when a new area is added to a network that already has connections. Both `allowed` and `enabled` default to `false` on row creation, but `allowAllNetworkAreas()` immediately sets `allowed = true` for new connections.
 
@@ -165,17 +169,25 @@ New areas inherit: `read_security`, `post_security`, `min_age`, `max_age`, `read
   "packet_password": "...",
   "tic_password": "...",
   "areafix_password": "...",
-  "routing_rules": ["1:*", "2:234/*"]
+  "routing_rules": ["1:*", "2:234/*"],
+  "remote_host": "",
+  "remote_port": null,
+  "poll_interval": 60,
+  "mailer_transport": "tcp",
+  "mailer_protocol": "binkp",
+  "mailer_ws_url": "",
+  "outbox_dir": "",
+  "force_plain_password": false
 }
 ```
 
-`address` is the remote system's FTN address. `status` controls packet flavour (NORMAL/CRASH/HOLD). `routing_rules` is an array of wildcard patterns for the routing cascade (see FTN Routing below). Passwords are per-connection for session, packet, TIC file, and AreaFix authentication.
+`address` is the remote system's FTN address. `status` controls packet flavour (NORMAL/CRASH/HOLD). `routing_rules` is an array of wildcard patterns for the routing cascade (see FTN Routing below). Passwords are per-connection for session, packet, TIC file, and AreaFix authentication. `remote_host` empty means the nodelist supplies the dial target; `poll_interval` is minutes. The mailer also writes its connect backoff state here (`consecutive_failures`, `last_failure_at`, `last_failure_reason`, `next_allowed_poll_at`, `last_success_at`); see `MAILER_ARCHITECTURE.md`.
 
 ### connection_data JSONB structure (QWK)
 
 ```json
 {
-  "transport": "ftp|sftp|directory|hub",
+  "transport": "ftp|sftp|directory|http|hub",
   "host": "dove.synchro.net",
   "port": 21,
   "username": "undredux",
@@ -183,6 +195,9 @@ New areas inherit: `read_security`, `post_security`, `min_age`, `max_age`, `read
   "remote_inbox": "/",
   "remote_outbox": "/",
   "remote_qwk_id": "VERT",
+  "pull_interval_minutes": 120,
+  "hub_directory": false,
+  "utf8": true,
   "high_water_marks": {
     "2010": 1234,
     "14002": 567
@@ -203,6 +218,7 @@ QWK ID rules (unique per role, the long-ID network setting) and the per-role pac
   "use_tls": false,
   "username": "...",
   "password": "...",
+  "pull_interval_minutes": 60,
   "high_water_marks": {
     "alt.bbs": 3074,
     "alt.bbs.ads": 13236
@@ -210,10 +226,12 @@ QWK ID rules (unique per role, the long-ID network setting) and the per-role pac
 }
 ```
 
+The poll/pull interval is read only through `scheduleFormat.connectionIntervalMinutes(networkType, cd)`: `poll_interval` for FTN, `pull_interval_minutes` (older rows: `pull_interval`) for QWK and NNTP, with a per-type default when unset. The schedule registration and the admin page both use it, so they cannot disagree about a link's interval.
+
 ### network_areas
 Maps message areas to networks with an areatag.
 
-- `network_id`, `area_id` — composite key
+- `network_id`, `area_id`: one row per area per network
 - `areatag` — for QWK networks this is the conference number as a string (e.g. "14002")
 - `active`
 
@@ -254,15 +272,16 @@ Remote system sends type-2 FTN packet → inbound directory
         can handle it
     → .pkt files queued for processing
   → ReadPkt() parses packet header + messages
-  → Per message: ProcessMessage() extracts kludge lines, body, origin
+  → Per message: kludge lines, body, origin, SEEN-BY and PATH extracted
   → Echomail → messages.handleInboundEchoMessage(message)
     → ftnToDb() converts FTN fields to DB columns
     → formatBodyHtml() generates body_html
     → threadMessage() resolves/creates thread
     → postgres.insertObject() → mb_<shortcode>_msgs
-  → Netmail → netmail.newInboundNetmail(message)
-    → ftnToDb() → postgres.insertObject() → netmail_in
-  → Move processed .pkt to processed directory
+  → Netmail → ftnNetmailAdapter.importFtnNetmail(message, pktOrigin)
+    → ours: routes / processors / PM delivery (pm_inbox)
+    → not ours: relay decision (netmail_relay_mode), queued in pm_outbox
+  → Move processed .pkt to the tossed directory (ftn_keep_tossed_days)
 ```
 
 **Mail bundle filename gating** (`isMailBundleFilename()` in `ftnTosser.js`)
@@ -286,19 +305,20 @@ out so nothing gets silently lost).
 
 **Outbound:**
 ```
-Echomail: DB messages pending export
-  → per subscribed peer connection:
-    → gather messages above HWM, skip echo suppression (source_network_id)
-    → echomail.dbToFtn() converts to FTN Message objects
-    → append tear/origin, seen-by, path lines
-    → ftnRouter.resolveRoute(destination) determines next hop
-    → build type-2 packet → write to outbound directory
+Echomail: echomail.getOutboundForConnection(conn), per active FTN connection
+  → per enabled subscription: messages above msg_idx
+    → evaluateOutbound() (see Outbound eligibility), stampForHop()
+    → echomail.dbToFtn() converts to FTN Message objects, area charset applied
+    → WritePktsToNode() → packet for that connection → BSO outbound
     → advance msg_idx
 
-Netmail: netmail.getPendingNetmail()
-  → ftnRouter.resolveRoute(destination) per message
-  → build type-2 packet per destination → outbound directory
-  → netmail.markMessageSent()
+Netmail: privateMessages.getPendingByTransport('FTN') (pm_outbox)
+  → resolveOutboundSource() sets message and packet source
+  → WritePkts() → packet per destination (PacketDestination on relayed mail)
+  → privateMessages.markSentArray()
+
+Then enqueueMailerBsoScan(): the BSO scanner resolves each outbound address
+through ftnRouter.resolveRoute() and triggers the mailer session.
 ```
 
 **Multi-address binkp sessions:** When a remote system advertises multiple AKAs in M_ADR, a single binkp session handles outbound mail for all matched peer connections. Additional connections are grouped only if their `session_password` matches the authenticated password and is non-empty (password-filtered grouping). The session's `_buildOutboundList()` iterates all grouped connections independently. See `MAILER_ARCHITECTURE.md` for details.
@@ -316,7 +336,7 @@ Remote Hub → [FTP/SFTP download] → cwd/qnet/<HUB_ID>.hub/in/<HUB_ID>.qwk
 
 **Push (outbound):**
 ```
-DB messages (above HWM) → workItems with echo suppression + tear/origin
+DB messages (above HWM) → workItems, skipping what is already in the message's path (qwkVia.exportDecision) + tear/origin
   → buildRepPacket() → MESSAGES.DAT + HEADERS.DAT → system zip → <HUB_ID>.rep
   → [FTP/SFTP upload] → remote hub processes REP
   → advance msg_idx per subscription
@@ -338,7 +358,7 @@ Node POSTs /api/v1/qnet/rep (or drops .rep in cwd/qnet/<NODE_ID>.node/in/ via qn
 ```
 Node GETs /api/v1/qnet/packet → buildQwkForNode(connectionUUID)
   → gathers messages from subscribed areas above HWM
-  → applies echo suppression + tear/origin
+  → skips what is already in the message's path (qwkVia.exportDecision) + tear/origin
   → buildControlDat() + buildMessagesDat() + buildHeadersDatText()
   → assembleQwkPacket() → cwd/qnet/<NODE_ID>.node/out/<OUR_ID>.qwk (+ .qwk.json sidecar)
   → served; re-served unchanged until the node POSTs /packet/:id/ack
@@ -453,16 +473,18 @@ match whatever convention the keyword requires:
 ```
 \x01MSGID: 1:2/3 abcdef01      — colon-space (FTS-0004 standard)
 \x01REPLY: 1:2/3 abcdef02
-\x01PID: Canectic 0.9
-\x01TID: Canectic Tosser 0.1
+\x01PID: SomeEditor 1.0         (kept from the author, never written here)
+\x01TID: Canectic 0.9.12a
 \x01TZUTC: -0600
 \x01CHRS: UTF-8 4
 \x01PATH: 1:134/101 1:134/100
 \x01INTL 2:250/1 1:134/107     — bare space (INTL/TOPT/FMPT/Via)
 \x01TOPT 5
 \x01FMPT 3
-\x01Via 1:2/3 @20260410.123456 Canectic
+\x01Via 1:2/3 20260410.123456.UTC Canectic 0.9.12a
 ```
+
+The Via chain (`src/utils/ftnVia.js`: `buildViaLine`, `parseViaLine`, `viaChain`, `hasPassedThrough`, `appendVia`) is stamped on netmail this system relays or answers. Reading accepts the optional `@` before the timestamp; writing omits it. Another system's Via lines are kept verbatim. Loop matching is on the bare address, case insensitive, so a relay refuses mail that has already passed through one of our addresses.
 
 The space-separated keywords are tracked in a `Set` at module scope:
 `SPACE_SEPARATED_KLUDGES = {INTL, TOPT, FMPT, Via, VIA}`. Adding a
@@ -580,14 +602,14 @@ RFC 5322 IDs aren't FTN MSGIDs.
 messages without existing kludges (very old SMB bases, legacy
 archives), they should use `dayBucketForDate(originalTimestamp)`
 to place the synthetic serial at the correct chronological
-position within the day field. The counter half can come from
-the shared Redis counter or be pinned explicitly if the import
-needs deterministic ordering. Pre-1980 messages clamp to day 0.
+position within the day field (`allocateHistoricalSerial` does
+this through the same `msgid_day_watermark` allocator). Pre-1980
+messages clamp to day 0.
 
 See `docs/reference/CTN_DESIGN.md` for forward-looking notes on a
 base36 MSGID encoding that would use the same epoch and day
-numbering while expanding the burst capacity and removing the
-Redis hot-path dependency. Not currently implemented.
+numbering while expanding the burst capacity. Not currently
+implemented.
 
 After the body: `SEEN-BY:` lines (network distribution tracking) and `\x01PATH:` lines (routing trace), both colon-space, as many lines of each as the list needs. Every line is part of one list.
 
@@ -639,12 +661,13 @@ The `routeResult` object shape:
 
 ### Netmail
 
-FTN netmail is private point-to-point messaging, separate from echomail (public messages). Stored in dedicated tables:
+FTN netmail is private point-to-point messaging, separate from echomail (public messages). It lives in the PM system (`PM_ARCHITECTURE.md`): inbound netmail for local users is delivered to `pm_inbox`, and anything leaving by FTN (user netmail, AreaFix/FileFix/Ping replies, relayed transit mail) is a `pm_outbox` row with transport `FTN`. The older `netmail_in` / `netmail_out` tables and `netmail.js` are no longer used.
 
-- `netmail_in` — inbound messages received from remote systems
-- `netmail_out` — outbound messages composed locally, with `sent` flag and `sent_at` timestamp
+Outbound flow: `TossOutboundNetmail()` reads pending `pm_outbox` rows → converts each to an FTN Message, with `resolveOutboundSource()` choosing the source address and INTL added → `WritePkts()` packs them into type-2 packets in the BSO outbound, keyed on `PacketDestination` when relaying → `markSentArray()`. Next-hop routing happens in the BSO scanner, not here.
 
-Outbound flow: `newOutboundNetmail()` validates the destination FTN address and creates the DB record → `getPendingNetmail()` retrieves unsent messages as FTN Message objects → tosser routes each via `ftnRouter` and packs into type-2 packets → `markMessageSent()` flags delivered messages.
+**Relay.** Netmail addressed to someone else is relayed according to `netmail_relay_mode`: `nodelist` (default; only when sender and recipient are both listed in the same network's nodelist), `off`, or `on` (anything `resolveRoute` can reach, which is far broader than it reads). A relay refuses a loop through the Via chain, stamps its own Via line, and routes with `ftnRouter.resolveRoute()`. Every decision is logged (see Relay decision log below). See `docs/sysop/NETMAIL_RELAY.md`.
+
+**Ping.** Netmail to `Ping` gets a Pong carrying the Via chain the request accumulated (`netmailPing.js`, `netmail_ping_enabled`, default true), sent from the address the ping was aimed at.
 
 ### Echomail
 
@@ -652,18 +675,18 @@ FTN echomail (public networked messages) flows through `messages.handleInboundEc
 
 | FTN Field | DB Column | Notes |
 |-----------|-----------|-------|
-| `MsgId` | `msg_id` | `@MSGID` kludge — used for dupe checking |
-| `ReplyTo` | `reply_to` | `@REPLY` kludge — parent message for threading |
+| `MsgId` | `msg_id` | `@MSGID` kludge serial, origin in `msg_orig_addr`; used for dupe checking |
+| `ReplyTo` | `reply_to` | `@REPLY` kludge: parent message for threading (serial; origin in `reply_orig_addr`) |
 | `AreaTag` | (used for routing) | Maps to network_areas.areatag to find the message area |
 | `Source` | `source` | Full FTN address of originating system |
 | `FromUser` | `from_user` | Sender display name |
 | `ToUser` | `to_user` | Recipient (often "All" for public posts) |
-| `BodyText` | `body_text` | Message body (CP437, `\r\n` line endings) |
+| `BodyText` | `body_text` | Message body, canonical Unicode (decoded per the CHRS kludge) |
 | `OriginLine` | `origin_line` | Extracted `* Origin:` line |
 | `SeenBy` | `seen_by` | SEEN-BY distribution tracking |
 | `Path` | `path` | PATH routing trace |
 | `TZUTC` | `tz_utc` | Timezone offset from `@TZUTC` kludge |
-| `TosserId` | `tosser_id` | `@PID` kludge — producing software |
+| `TosserId` | `tosser_id` | `@TID` or `@PID` kludge: producing software |
 
 ---
 
@@ -685,12 +708,14 @@ The parser extracts `* Origin:` lines from the body and stores them in the `orig
 
 ---
 
-## Environment Variables
+## Configuration Keys
 
-| Variable | Default | Used by |
+These are `appConfig` keys (`configDefaults.js`, category `system`), not environment variables.
+
+| Key | Default | Used by |
 |----------|---------|---------|
 | `boardname` | `'Canectic BBS'` | Tear/origin line, CONTROL.DAT BBS name |
-| `boardlocation` | `''` | CONTROL.DAT location field |
+| `boardlocation` | `'The Ether'` | CONTROL.DAT location field |
 | `boardphone` | `'N/A'` | CONTROL.DAT phone field |
 | `sysopname` | `'Sysop'` | CONTROL.DAT sysop field |
 
@@ -702,7 +727,7 @@ The parser extracts `* Origin:` lines from the body and stores them in the `orig
 |---------|---------|---------|
 | `basic-ftp` | qwkTransport.js | FTP client |
 | `ssh2-sftp-client` | qwkTransport.js | SFTP client (lazy loaded) |
-| `adm-zip` | qwkClasses.js | Unzipping inbound QWK/REP packets only |
+| `adm-zip` | qwkClasses.js, ftnTosser.js | Unzipping inbound QWK/REP packets and FTN mail bundles |
 | `uuid` | qwkTosser.js, echomail.js, netmail.js | UUIDv4 generation for message records |
 | `file-type` | ftnTosser.js | Archive type detection for inbound FTN bundles |
 | `luxon` | tosser.js, alogger.js | Date/time formatting |
@@ -714,7 +739,7 @@ System dependency: `zip` command (Info-ZIP) for creating outbound packets. `adm-
 
 ## Tosser CLI Usage
 
-The tosser CLI enqueues jobs on the BullMQ `toss` queue. The worker process (`bin/worker.js`) or embedded mode must be running to consume them. PID-file locking is no longer used — BullMQ's jobId deduplication handles concurrency.
+The tosser CLI enqueues jobs on the BullMQ `toss` queue. The worker process (`bin/worker.js`) or embedded mode must be running to consume them. PID-file locking is no longer used. Jobs are added through `jobs.addDeduped()`: a request whose jobId is already waiting, delayed or running returns that job, and a finished job with the id is removed first so the new one runs (plain `queue.add()` would silently return the old completed job).
 
 ```bash
 # Default — all directions, all types
@@ -775,9 +800,9 @@ _Networking-specific decisions. For message platform decisions (read tracking, b
 
 4. **HEADERS.DAT**: Generated on all outbound packets (both REP and QWK). Parsed on all inbound packets when present. Provides full-length fields (subjects > 25 chars), proper Message-IDs for dupe checking, timezone info, and UTF-8 flag.
 
-5. **On-demand QWK generation**: Hub-mode QWK packets are built when the node requests them, not during the toss cycle. This prevents stale packets accumulating in the output directory.
+5. **On-demand QWK generation**: Hub-mode QWK packets are built when the node requests them, not during the toss cycle, and the HWM advances only when the node acknowledges the packet (`commitNodePacket`). The exception is a shared-directory node (`hub_directory`), which never asks, so its packet is built ahead of time by the `qwk-hub-sweep` schedule. See `QWK_ARCHITECTURE.md`.
 
-6. **Echo suppression**: Messages are tagged with `source_network_id` on import. On export, messages whose `source_network_id` matches the target connection's `network_id` are skipped to prevent echoing back to the originating network.
+6. **Echo suppression**: Messages are tagged with `source_network_id` on import. Only the NNTP push still skips a message whose `source_network_id` matches the target connection's network. FTN uses SEEN-BY/PATH (`evaluateOutbound`) and QWK the message's sender path (`qwkVia.exportDecision`), because a network-wide rule stops a hub passing mail from its uplink to its downlinks on the same network.
 
 7. **System address resolution**: The tosser checks `dbconn.system_address_id` first (explicit per-connection), then falls back to `getDefaultAddress(network_id)` (network default). This provides flexibility while ensuring an identity is always available.
 
@@ -826,6 +851,7 @@ Both handlers support the same command set (case-insensitive, one per line in th
 | `%HELP` | Show command reference |
 | `%PAUSE` | Disable all subscriptions (preserves config) |
 | `%RESUME` | Re-enable all previously allowed subscriptions |
+| `%RESCAN` | Resend content already held (see Rescan below) |
 
 ### Response Generation
 
@@ -876,7 +902,7 @@ The FTN tosser moves processed `.pkt` files to a tossed directory after import. 
 - **0**: Delete immediately after tossing (no retention)
 - **999**: Keep forever
 
-A daily maintenance job (`purge-tossed`) runs at 2 AM to remove packets older than the configured retention period. The tosser reads this config value at runtime rather than using hardcoded constants.
+A daily maintenance job (`purge-tossed`, schedule `purge-tossed-daily`, 2 AM) removes packets older than the configured retention period. The schedule carries no day count: the job reads `ftn_keep_tossed_days` when it runs, and the schedule is removed while the setting is 0 or 999 (`src/maintenance/retention.js`).
 
 ---
 
@@ -1098,7 +1124,6 @@ Migration tool for importing linked FTN node configuration from Synchronet BBS.
 _Networking-specific items. For message platform items (web newscan, rich editor, thread preferences, etc.), see `message_architecture.md`._
 
 - **HEADERS.DAT on inbound FTN**: The parser infrastructure exists — could be extended to generate HEADERS.DAT-equivalent metadata from FTN kludge lines.
-- **HWM split for hub mode**: Return HWM data from `buildQwkForNode()` without advancing, let the caller confirm delivery before advancing.
 - **Voting/polls**: VOTING.DAT support in QWK packets (Synchronet generates empty VOTING.DAT).
 - **Tosser sanitization integration**: Wire `sanitizeMessageFields()` calls into the `handleInboundEchoMessage` orchestrator in messages.js, plus nntpTosser.js and qwkTosser.js inbound paths (see `message_architecture.md` Input Sanitization section).
 
@@ -1108,7 +1133,7 @@ _Networking-specific items. For message platform items (web newscan, rich editor
 
 See `message_architecture.md` for the full two-tier pointer system, schemas, read-state resolution, pointer advancement, unread queries, view loading strategy, and progress bar implementation.
 
-**QWK Packet Integration**: User QWK downloads use the area scan pointer as the starting point for message gathering — same role as `msg_idx` on `peer_area_subscriptions` for node connections. After a successful QWK download, `buildQwkForUser()` advances the area scan pointer to the highest message ID included in the packet. REP upload uses the standard `replyToThread`/`startNewThread` posting path via `importRepForUser()`. See the "User QWK Packets" section above and `QWK_USER_DESIGN.md`.
+**QWK Packet Integration**: User QWK downloads use the area scan pointer as the starting point for message gathering, the same role as `msg_idx` on `peer_area_subscriptions` for node connections. After a successful QWK download, `buildQwkForUser()` advances the area scan pointer to the highest message ID included in the packet. REP upload uses the standard `replyToThread`/`startNewThread` posting path via `importRepForUser()`. See "User QWK Packets" in `QWK_ARCHITECTURE.md` and `QWK_USER_DESIGN.md`.
 
 ---
 

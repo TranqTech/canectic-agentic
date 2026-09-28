@@ -92,13 +92,15 @@ curl -fsSLO https://canectic.tranqsoft.com/releases/bootstrap.sh.sha256
 sha256sum -c bootstrap.sh.sha256 && bash bootstrap.sh --target /opt/canectic --create-database
 ```
 
-Releases are signed. To have the bootstrap check the signature as well as the
-checksum, import the key first and compare its fingerprint with this one:
+Releases are signed. With `gpg` installed, the bootstrap checks the signature
+as well as the checksum, against the release key with this fingerprint, which is
+built into the bootstrap and printed when the check passes:
 
-```bash
-curl -fsSLO https://canectic.tranqsoft.com/releases/canectic-release.asc
-gpg --import canectic-release.asc      # F3F1 6D36 59AF 25FB F947  4C6D B5D8 AB14 3016 761F
 ```
+F3F1 6D36 59AF 25FB F947  4C6D B5D8 AB14 3016 761F
+```
+
+Importing the key into your own keyring is optional.
 
 The installer asks where to install and for database credentials, writes `.env`,
 creates the directory structure, installs dependencies, builds the schema and
@@ -189,6 +191,7 @@ See [docs/sysop/INSTALL.md](docs/sysop/INSTALL.md) for the full installation gui
 ```bash
 # PM2 (production)
 pm2 start ecosystem.config.cjs
+pm2 save && node src/tools/bootUnit.js --install   # start at boot, surviving Node upgrades
 pm2 logs
 pm2 monit
 
@@ -211,6 +214,7 @@ MAILER_ENABLED=true node bin/mailer.js   # FTN binkp
 | IMAP | 10143 | PM access from mail clients |
 | SMTP | 10587 | Send PMs from mail clients |
 | Binkp | 24554 | FTN mailer (when enabled) |
+| QWK hub FTP | 8021 | For QWK nodes that call over FTP; off unless `qwk_ftp_enabled` is on |
 
 ## Tests
 
@@ -223,6 +227,8 @@ npm test
 - [Installation Guide](docs/sysop/INSTALL.md) - Full setup walkthrough
 - [Updating](docs/sysop/UPDATING.md) - Applying a release, and what it does to your files
 - [Update Checking](docs/sysop/UPDATES.md) - The opt-in release check, channels and FTN delivery
+- [Maintenance Mode](docs/sysop/MAINTENANCE.md) - Closing the board for an update or other work
+- [OS Upgrades](docs/sysop/OS_UPGRADE.md) - Upgrading the operating system under a running board
 - [Changelog](docs/sysop/CHANGELOG.md) - Every change, by release
 - [Architecture Reference](docs/reference/) - Developer documentation for all subsystems
 - [Release Tracker](docs/RELEASE_TRACKER.md) - Feature completion status

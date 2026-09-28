@@ -10,8 +10,9 @@ what it will not do.
 An opt-in daily check that fetches a release index, compares it against what you
 are running, and raises a sysop notification when something newer exists.
 
-**It never downloads an artifact and never applies anything.** Installing an
-update is still `setup/update.sh`. The in-BBS updater is not built yet.
+**It never downloads an artifact and never applies anything.** Applying an
+update is a separate, deliberate step: the Update button on `/admin/update`, or
+`node src/tools/update.js`. See `docs/sysop/UPDATING.md`.
 
 ---
 
@@ -27,11 +28,18 @@ On `/admin/config`, under **Updates**:
 | `update_check_transport` | `http` | `http`, `ftn`, or `both` |
 | `update_stable_file_area` | unset | File area carrying stable artifacts (FTN) |
 | `update_dev_file_area` | unset | File area carrying development builds (FTN) |
-| `update_check_retention_days` | 90 | How much check history to keep |
+| `update_require_signature` | off | Refuse any release not signed by the release key (see Signatures) |
 
-Turning it on registers the daily job, which needs a gateway restart or
-`node src/tools/schedules.js --sync` to take effect. The same is true of turning
-it off.
+`update_check_retention_days` (90, under **Maintenance**) sets how much check
+history is kept.
+
+Turning it on registers the daily job at the next gateway restart
+(`pm2 restart gateway`); `node src/tools/schedules.js --sync` does not register
+it. Turning it off takes effect at once, since the job does nothing while the
+setting is off, and its schedule is removed at the next gateway restart.
+
+The settings that control how an update is applied (`update_process_control`,
+`update_backup_keep` and the rest) are covered in `docs/sysop/UPDATING.md`.
 
 You do not have to turn it on to ask. `/admin/update` has a **Check now** button
 that works whatever the setting says: the opt-out is about this system reaching
@@ -225,11 +233,11 @@ panel above the Update button.
   read the release notes.
 
 Boards on 0.9.10a or earlier show nothing before updating, because the Update
-page you see is the one from the release you are running. An update from 0.9.11a
-or earlier into 0.9.11a showed nothing afterwards either; from the release after
-0.9.11a on, the notes appear on the progress page and after updating whatever
-you update from, and the panel before the button appears once you are running
-0.9.11a or later.
+page you see is the one from the release you are running; the panel before the
+button appears once you are running 0.9.11a or later. From 0.9.12a on, the
+notes appear on the progress page and after updating whichever release you
+update from. An update into 0.9.11a from an earlier release showed nothing
+afterwards either.
 
 ---
 
@@ -244,7 +252,8 @@ If the release you are **running** has been withdrawn, `/admin/update` says so a
 the top, with the reason and, once there is one, the release that replaces it,
 and the update check sends a notification saying the same (see below). When
 the named replacement has itself been withdrawn since, you are pointed at the
-newest release still listed rather than at one you would be refused. Until a replacement is published the advice is to stay where you are: the
+newest release still listed rather than at one you would be refused. Until a
+replacement is published the advice is to stay where you are: the
 withdrawn release is only as broken as the reason says, and moving back to an
 older one is not something the updater does.
 
@@ -274,7 +283,8 @@ is published later, that arrives as an ordinary "is available" notification.
 
 **Nothing ever happens.** Check that `update_check_enabled` is on, then that the
 schedule registered: `node src/tools/schedules.js` lists it as
-`update-check-daily`. A registered schedule whose next run is in the past means
+`update-check-daily`. If it is not listed, restart the gateway, which is what
+registers it. A registered schedule whose next run is in the past means
 the worker is not draining the maintenance queue, which is a bigger problem than
 the update check.
 
@@ -291,6 +301,6 @@ release that ships the migration, which is normally the next one.
 
 ## Related
 
-- `docs/reference/UPDATE_SYSTEM_DESIGN.md` for the whole design, including the
-  parts not built yet
+- `docs/sysop/UPDATING.md` for applying an update
+- `docs/reference/UPDATE_SYSTEM_DESIGN.md` for the whole design
 - `docs/reference/RELEASE_PROCESS.md` for how a release is cut in the first place

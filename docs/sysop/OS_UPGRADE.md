@@ -96,7 +96,7 @@ The database does not contain your `.env`, your art, or your file areas.
 ```bash
 cd /path/to/canectic
 tar czf ~/canectic-files-$(date +%Y%m%d).tar.gz \
-    .env config/ ftn/ qwk/ files/ xtrn/ public/css/custom.css
+    .env config/ ftn/ qwk/ qnet/ files/ xtrn/ txtfiles/ public/css/custom.css
 ```
 
 Also save the pm2 unit and wrapper, which are outside the repo:
@@ -116,10 +116,17 @@ Write down every PPA and its suite. The upgrade disables all of them, and you wi
 
 ### 6. Stop the BBS
 
+Close the board for maintenance first, so connected callers and web users are
+warned and network work in progress finishes, then stop it once it has drained:
+
 ```bash
+node src/tools/maintenanceMode.js --on --reason "Operating system upgrade" --minutes 120 --wait
 pm2 stop all
 sudo systemctl stop pm2-$USER
 ```
+
+The board stays closed until you reopen it, including across the reboot, which
+is what you want while you check it afterwards. See `MAINTENANCE.md`.
 
 Leaving it running risks writes landing in a database that is about to be replaced underneath it.
 
@@ -388,12 +395,20 @@ ss -ltnp | grep -E ':(8080|2023|10143|10587|24554)'
 
 # Web and health. /health is the single best check: it exercises the app's own
 # database and Redis connections rather than probing them from outside.
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/   # 503 while closed for maintenance
 curl -s http://127.0.0.1:8080/health
 # expect: {"status":"ok","postgres":"ok","redis":"ok"}
 
 # No new errors
 tail -50 logs/production/*-error.log
+```
+
+The board is still closed for maintenance from before the upgrade. A closed
+board refuses terminal callers (sysops included) and mail clients, so once the
+checks above pass, reopen it before exercising the rest:
+
+```bash
+node src/tools/maintenanceMode.js --off
 ```
 
 Then exercise the parts that touch the pieces you just moved:

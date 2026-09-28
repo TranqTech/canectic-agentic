@@ -52,7 +52,7 @@ Requests use the classic BSO `.req` file: the binary carries the outbound name f
 
 ### Transports
 
-binkp, EMSI, Hydra, Zmodem. It advertises **`binkp/1.0`**, not 1.1, so do not expect multi-batch behaviour on a session with this peer. See issue #32 for the multi-batch work that assumption interacts with.
+binkp, EMSI, Hydra, Zmodem. It advertises **`binkp/1.0`**, not 1.1, so do not expect multi-batch behaviour on a session with this peer. Our side already allows for that: Canectic advertises binkp/1.1 but opens a second batch only for a peer that advertised 1.1 or later (`peerMultiBatch` in `src/mailer/protocols/binkp.js`, the same test binkd applies), so a session with BBBS stays single-batch.
 
 ---
 

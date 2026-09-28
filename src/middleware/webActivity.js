@@ -46,7 +46,7 @@ async function _trackActivity(req) {
 	await sessionStore.sessionRenew(sessionid);
 
 	var now = Date.now();
-	var thresholdMs = appConfig.getNumber('web_idle_threshold', 30) * 60 * 1000;
+	var thresholdMs = appConfig.getNumber('web_idle_threshold', 120) * 60 * 1000;
 
 	// Check last activity timestamp
 	var rc = await redis.getClient();

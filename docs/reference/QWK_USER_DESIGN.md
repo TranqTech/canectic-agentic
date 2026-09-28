@@ -31,24 +31,24 @@ Two access paths:
 | `privateMessages` | `privateMessages.js` | PM inbox/outbox, delivery, unread counts |
 | Access control | `index.js` | `checkAreaReadAccess()` pattern: security level + perm flags + restriction flags |
 
-### What needs building
+### Built for this feature
 
-1. **`message_areas.qwk_conf_number`** -- new column, auto-assigned, sysop-editable
-2. **`src/models/qwkUser.js`** -- user QWK packet generation and REP import logic
+1. **`message_areas.qwk_conf_number`** -- column, auto-assigned from the group's block, sysop-editable
+2. **`src/models/qwkUser.js`** -- user QWK packet generation, commit and REP import logic
 3. **Terminal menu command** -- `src/handlers/menucommands/qwkTransfer.js`
-4. **Web routes** -- download/upload endpoints on the messages router
-5. **Admin config keys** -- QWK system ID, max messages per area, etc.
+4. **Web routes** -- `/qwk`, `/qwk/download`, `/qwk/upload`, `/qwk/settings` in `src/routes/index.js`; API routes in `src/routes/api/qwk.js`
+5. **Config keys** -- QWK system ID, max messages per area, system conference numbers, group stride
 
 ## 1. QWK Packet Generation Pipeline
 
 ### Entry point: `buildQwkForUser(userId)`
 
-Returns `{ status, qwkPath, totalMessages, areaCount, errormessages }`.
+Returns `{ status, qwkPath, totalMessages, areaCount, newFiles, files, batchFiles, commit, errormessages }`. `qwkPath` is null (with `status` true) when there is nothing to send: no messages and no files.
 
 Steps:
 
 1. **Load user record** -- need username, security level, permission/restriction flags
-2. **Resolve QWK-ID** -- system's QWK-ID from config key `qwk_bbsid` (new), falling back to `boardname` truncated to 8 chars uppercase. This is the BBS identifier in CONTROL.DAT and the packet filename.
+2. **Resolve QWK-ID** -- system's QWK-ID from config key `qwk_bbsid`, falling back to `boardname` upper-cased with everything but A-Z and 0-9 removed, truncated to 8 chars (`BBS` if nothing is left). This is the BBS identifier in CONTROL.DAT and the packet filename.
 3. **Get accessible subscribed areas**:
    - Query all active message areas with their groups
    - Filter by read access: `security_level >= read_security`, has all `read_perm_flags`, has none of `read_rest_flags`
@@ -65,7 +65,7 @@ Steps:
    - `max_per_area` from config key `qwk_max_msgs_per_area` (default 500)
    - Track the highest message ID per area for pointer advancement
 6. **Gather unread PMs** (conference 0):
-   - Query `pm_inbox WHERE user_id = $1 AND read = false AND deleted = false ORDER BY created_at ASC`
+   - Query `pm_inbox WHERE user_id = $1 AND read = false AND deleted = false AND purged IS NOT TRUE ORDER BY created_at ASC`
    - Include as conference 0 messages with `isPrivate: true`
 7. **Build packet components**:
    - `buildControlDat()` with system info, username as recipient, conference list
@@ -142,7 +142,7 @@ All three keys default to the values shown above. Setting a key to `0` disables 
 
 ### Read tracking: `users.last_qwk_download_at`
 
-A new column on the users table tracks the last successful QWK build for each user. System conference content is filtered against this timestamp so each download only carries new material since the previous fetch. After the packet is fully assembled and about to ship, `last_qwk_download_at` is updated to NOW().
+A column on the users table tracks the last successfully downloaded QWK packet for each user. System conference content is filtered against this timestamp so each download only carries new material since the previous fetch. `commitUserPacket()` sets it to the packet's build time once the download has succeeded (#78), never moving it backwards.
 
 **Known limitation**: users who download QWK to multiple devices will have each sync advance the server-side timestamp, so the second device will miss content the first device already received. This is documented in the sysop docs as a multi-device caveat. Users with this workflow need to sync their offline readers themselves.
 
@@ -194,7 +194,7 @@ A REP message addressed to `SBBS`, in any conference, is a control message (Sync
 
 ### Entry point: `importRepForUser(userId, repFilePath)`
 
-Returns `{ status, totalPosted, totalErrors, errormessages }`.
+Returns `{ status, totalPosted, totalErrors, details, errormessages }`.
 
 Steps:
 
@@ -204,7 +204,9 @@ Steps:
 4. **Parse HEADERS.DAT** if present: `parseHeadersDat()` + `applyHeadersDat()`
 5. **Resolve conference numbers**: Look up `message_areas` by `qwk_conf_number` to map conference numbers back to area shortcodes
 6. **Process each message**:
-   - **Conference 0** (PM reply): Create outbound PM via `privateMessages.deliverMessage()` or compose new PM
+   - **To `SBBS`**, any conference: a control message (see above), answered by one `QWK settings` PM
+   - **Conference 0** (PM): the To name goes through `privateMessages.resolveRecipient()` and the PM is delivered locally (`transport_type` `LOCAL`) via `privateMessages.deliverMessage()`. A name that does not resolve to a local user is rejected; a REP PM is never routed to FTN, QWK or email
+   - **System conferences** (announcements, wall, bulletins): see section 1.5
    - **Conference > 0** (area post):
      a. Resolve conference number to area shortcode via `message_areas.qwk_conf_number`
      b. Verify user has write access to the area (security + permission flags + restriction flags, same pattern as read access but using `write_security`, `write_perm_flags`, `write_rest_flags`)
@@ -219,14 +221,14 @@ Steps:
 
 | REP field | Maps to |
 |-----------|---------|
-| `from` | User's display name (override with actual username for security) |
+| `from` | Ignored: the authenticated user's username, or their full name in an area whose `post_as` is `realname` |
 | `to` | `to_user` on the message (or PM recipient) |
 | `subject` | `subject` |
 | `body` | `body_text` (CP437 decoded to UTF-8) |
 | `conferenceNum` | `message_areas.qwk_conf_number` lookup to area shortcode |
 | `date`/`time` | `system_time` (use current server time, not client-supplied) |
 
-Security: Always override the `from` field with the authenticated user's username. QWK readers let users set arbitrary "from" names, but the BBS must enforce identity.
+Security: Always override the `from` field with the authenticated user's identity. QWK readers let users set arbitrary "from" names, but the BBS must enforce identity.
 
 ## 3. Database Schema
 
@@ -289,22 +291,19 @@ A `BaseSubModule` in `src/handlers/menucommands/qwkTransfer.js`.
 #### Download flow
 
 1. Display status: "Preparing QWK packet..."
-2. Call `buildQwkForUser(userId)` 
-3. If no messages: display "No new messages" and return
-4. Display summary: "Built packet: X messages across Y areas"
-5. Prompt: "Download QWK packet? [Y/n]"
-6. On confirm: initiate file transfer using the same native ZMODEM/XMODEM engine used by `fileBrowser.js` downloads
-   - ZMODEM preferred (auto-detected from terminal negotiation)
-   - XMODEM fallback
-   - The packet is a single ZIP file, straightforward single-file transfer
-7. After successful transfer: clean up temp files
+2. Call `buildQwkForUser(userId)`
+3. If there is no packet (no messages and no files): display "No new messages." and return
+4. Display summary: "Built packet: X message(s) across Y area(s)"
+5. Prompt for the protocol: `[X]modem / [Z]modem (default)`
+6. Send with the same native ZMODEM/XMODEM engines used by `fileBrowser.js` downloads; the packet is a single ZIP file
+7. After a successful transfer: `commitUserPacket(result)`, then clean up temp files
 8. On cancel or transfer failure: clean up; nothing is committed, so the next packet carries the same messages and files (#78)
 
 #### Upload flow
 
-1. Prompt: "Upload REP packet? [Y/n]"
-2. On confirm: initiate file receive (ZMODEM/XMODEM)
-3. Receive file to temp directory
+1. Prompt for the protocol: `[X]modem / [Z]modem (default)`
+2. Receive the file (ZMODEM/XMODEM) to a temp directory
+3. Refuse the upload if no `.rep` file arrived
 4. Call `importRepForUser(userId, repFilePath)`
 5. Display results: "Posted X messages, Y errors"
 6. Clean up temp files
@@ -328,7 +327,7 @@ The terminal file transfer uses the same `StreamAdapter` pattern from `src/proto
 
 ## 6. Web Routes
 
-Added to `src/routes/index.js` (messages router) or a new `src/routes/qwk.js` router.
+In `src/routes/index.js` (messages router). The same packets are available to scripted clients through the REST API (`POST /api/v1/qwk/download`, `POST /api/v1/qwk/upload`, `src/routes/api/qwk.js`; see `docs/sysop/API.md`).
 
 ### GET `/qwk/download`
 
@@ -339,10 +338,10 @@ Response: application/zip, Content-Disposition: attachment; filename="<BBSID>.qw
 ```
 
 1. Check `qwk_enabled` config
-2. Build packet via `buildQwkForUser(req.session.user.id)`
-3. If no messages: redirect back with flash "No new messages for QWK download"
-4. Stream the ZIP file as response
-5. Clean up temp files after send
+2. Build packet via `buildQwkForUser(currentuser.id)`
+3. If there is no packet: redirect back with flash "No new messages for QWK download"
+4. Send the ZIP with `res.download`
+5. In its callback: `commitUserPacket(result)` only when there was no error (#78), then clean up temp files
 
 ### POST `/qwk/upload`
 
@@ -354,7 +353,7 @@ Response: redirect with flash summary
 ```
 
 1. Check `qwk_enabled` config
-2. Validate uploaded file: must end in `.rep`, size limit (configurable, default 10MB)
+2. Validate uploaded file: must end in `.rep`, size limit 10 MB (fixed in the multer config)
 3. Save to temp directory
 4. Process via `importRepForUser(req.session.user.id, tempPath)`
 5. Clean up temp file
@@ -363,19 +362,26 @@ Response: redirect with flash summary
 ### GET `/qwk` (QWK transfer page)
 
 Simple page with:
-- Download button (links to `/qwk/download`)
+- Download button (links to `/qwk/download`); highlighted when there are new messages, unread PMs or queued downloads, but never disabled, since a packet can carry files alone
 - Upload form (posts to `/qwk/upload`)
-- Display of subscribed area count and estimated new message count
-- Last download timestamp (from highest `last_read_at` on user pointers, or a dedicated field)
+- Subscribed area count, new message count, unread PM count and queued download count
+- Packet Settings: the new-files list and PM attachment switches (`users.qwk_files`, `users.qwk_attach`), posted to `/qwk/settings`
+
+### POST `/qwk/settings`
+
+Saves the two Packet Settings checkboxes. Each checkbox sends a hidden `false` first, so a ticked box arrives as `['false', 'true']`.
 
 ## 7. Model: `src/models/qwkUser.js`
 
 Public API:
 
 ```javascript
-// Generate a QWK packet for a user
-// Returns { status, qwkPath, totalMessages, areaCount, conferences, errormessages }
+// Generate a QWK packet for a user; commits nothing
+// Returns { status, qwkPath, totalMessages, areaCount, newFiles, files, batchFiles, commit, errormessages }
 async function buildQwkForUser(userId)
+
+// Commit a packet the user now has (#78); safe to call twice
+async function commitUserPacket(result)
 
 // Import a REP packet uploaded by a user
 // Returns { status, totalPosted, totalErrors, details[], errormessages }
@@ -384,9 +390,11 @@ async function importRepForUser(userId, repFilePath)
 // Get the resolved QWK BBS ID
 function getQwkBbsId()
 
-// Backfill qwk_conf_number for areas that don't have one yet
-async function ensureConfNumbers()
+// Remove a built packet and its temp directory
+function cleanupQwkPacket(qwkPath)
 ```
+
+Conference number backfill lives in `msgAreas.ensureQwkConfNumbers` (startup) and `src/tools/qwkConfRenumber.js`, not here.
 
 ### Internal helpers
 
@@ -409,23 +417,26 @@ The access check function should be extracted from `index.js` into a shared util
 
 ## 9. Pointer Behaviour
 
-QWK download advances area scan pointers (`user_msg_pointers.scan_pointer`) to the highest message ID included in the packet for each area. This is the same pointer used by web and terminal newscan.
+A completed QWK download advances area scan pointers (`user_msg_pointers.scan_pointer`) to the highest message ID included in the packet for each area, when `commitUserPacket()` runs after the transfer (#78). This is the same pointer used by web and terminal newscan. A download that fails or is abandoned moves nothing.
 
 This means:
 - After downloading a QWK packet, those messages no longer appear as "new" in web or terminal
 - If the user reads messages on the web between QWK downloads, the web-advanced pointer is respected (QWK only gathers messages above the current pointer)
 - Thread pointers are NOT advanced by QWK download (only the area floor moves) -- this matches the flat-view behaviour documented in `userMsgPointers.js`
 
-For PMs: downloaded PMs are marked as read. This matches the "you've received them in your offline reader" semantic.
+For PMs: downloaded PMs are marked as read at the same commit. This matches the "you've received them in your offline reader" semantic.
 
 ## 10. File Layout
 
 ```
 src/models/qwkUser.js                         -- core logic
 src/handlers/menucommands/qwkTransfer.js       -- terminal menu command
-src/routes/qwk.js (or additions to index.js)   -- web routes
-src/views/qwk/index.pug                        -- QWK transfer page
-src/views/qwk/results.pug                      -- upload results (or use flash)
+src/routes/index.js                            -- web routes (/qwk*)
+src/routes/api/qwk.js                          -- REST API routes
+src/views/qwk/index.pug                        -- QWK transfer page (upload results are a flash)
+src/models/qwkControl.js                       -- REP control messages to SBBS
+src/models/qwkNewFiles.js                      -- NEWFILES.DAT
+src/models/qwkPacketFiles.js                   -- files carried in the packet
 ```
 
 ## 11. Implementation Order
@@ -439,14 +450,14 @@ src/views/qwk/results.pug                      -- upload results (or use flash)
 7. **Web routes**: Download and upload endpoints
 8. **Web view**: QWK transfer page
 9. **Terminal command**: `qwkTransfer.js` with download/upload flows
-10. **Area creation path**: Set `qwk_conf_number = id` on new area creation (after INSERT returns the id)
+10. **Area creation path**: assign `qwk_conf_number` on new area creation (originally the area id; since replaced by per-group block allocation, see "Conference Number Assignment")
 11. **CLAUDE.md update**: Document new files, column, and config keys
 
 ## Design Decisions
 
-1. **Conference numbers are a system-wide property of the area** (`message_areas.qwk_conf_number`), not per-user. Defaults to the area's database `id`, sysop-editable. This is simpler than a per-user mapping table and matches traditional BBS behaviour. Using the area ID as default avoids any allocation logic and naturally avoids conference 0. The QWK network areatags (used for peer-to-peer networking) are a separate concept on `network_areas` and are not coupled to the local conference number.
+1. **Conference numbers are a system-wide property of the area** (`message_areas.qwk_conf_number`), not per-user. Allocated from the area's group block (see "Conference Number Assignment"), sysop-editable. This is simpler than a per-user mapping table and matches traditional BBS behaviour. The QWK network areatags (used for peer-to-peer networking) are a separate concept on `network_areas` and are not coupled to the local conference number.
 
-2. **Pointer advancement happens at build time**, not after confirmed transfer. This matches traditional QWK BBS behaviour (Synchronet, Mystic, etc.) and avoids complexity around transfer failure detection. If a download fails, the user simply re-downloads -- the packet will be empty for areas where all messages were already marked read.
+2. **Pointer advancement happens after a completed transfer**, not at build time (#78). Synchronet commits a user's online download only in `qwk_success`; committing at build lost every message in a packet whose download failed. Each transport reports success its own way (web `res.download` callback, terminal transfer result, API response `finish`) and then calls `commitUserPacket()`.
 
 3. **No NETFLAGS.DAT in user packets**. NETFLAGS.DAT is a QWK networking extension that tells the receiving system which conferences to pass through to other nodes. User packets don't participate in message routing.
 
@@ -454,6 +465,6 @@ src/views/qwk/results.pug                      -- upload results (or use flash)
 
 5. **System time on REP messages uses server time**, not the time from the QWK reader. This prevents clock drift issues and matches what happens when users post via web or terminal.
 
-6. **From field override**: The `from` field in REP messages is always replaced with the authenticated user's username, regardless of what the QWK reader sends. This prevents impersonation.
+6. **From field override**: The `from` field in REP messages is always replaced with the authenticated user's username (or full name where the area posts as real name), regardless of what the QWK reader sends. This prevents impersonation.
 
 7. **PMs in conference 0**: Unread PMs are included in the download packet. PM replies in conference 0 of the REP are delivered as new PMs. This is standard QWK offline reader behaviour.
