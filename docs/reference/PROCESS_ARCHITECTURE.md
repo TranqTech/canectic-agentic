@@ -255,7 +255,7 @@ One switch, `runMaintenanceJob` in `src/maintenance/maintenanceJobs.js`, shared 
 - **Per-connection locking on toss jobs**: Two `qwk:pull` jobs for the same connectionUUID must not run concurrently (would double-download from the same FTP host). Use BullMQ's `jobId` set to `qwk-pull--${connectionUUID}` — duplicate job IDs are rejected while one is active. Same pattern for `nntp:pull`, `qwk:push`, `nntp:push`.
 - **FTN inbound is safe to overlap**: Multiple `ftn:inbound` jobs can run if they process different files. The existing move-after-toss pattern prevents double-processing.
 - **FTN outbound needs per-connection isolation**: HWM advancement must not race. Use `ftn-outbound--${connectionUUID}` as jobId (a timestamp suffix when no connection is named).
-- **Maintenance jobs are single-instance**: Use jobId deduplication. Only one `regen-html` at a time.
+- **Maintenance jobs are single-instance per request**: jobId deduplication. A job whose data carries options (areas, width, batch, days, dry run) gets `optionJobId(base, data)`, the base plus a hash of the options, so an identical request merges and a different one queues behind; before #79 a fixed id merged every second request and dropped its options. `regen-html` is ONE JOB PER AREA (`enqueueRegenHtml`, no areas = every active area, pure split in `regenHtmlRequests`), since a whole board overran `maintenance_job_timeout` as one job. `bulk-msgbase-import` keeps a fixed id on purpose: two imports would write to the same areas. A job returned by `addDeduped` because it was already waiting or running carries `merged` and `mergedState`, which the maintenance CLI reports as `= ... already <state>`. Note the timeout fails a job without stopping it (#85).
 - **`addDeduped` (`jobs.js`)**: every helper goes through it. A job with the same id is refused only while it is waiting, delayed or running; a completed or failed one is removed first. Plain `queue.add()` refuses an id in ANY retained state, so a fixed id ran once and later requests silently returned the old completed job.
 - **Mailer jobs**: `signal-outbound--${connectionUUID}` dedupes; `trigger-poll`, `bso-scan` and `nodelist-connect` carry a timestamp so every request is queued; `poll-scheduled` jobs come from the per-connection scheduler, which holds one delayed job at a time. Duplicate sessions to one peer are prevented inside `MailerManager`, not by job ids.
 
@@ -294,7 +294,7 @@ Using a separate Redis DB keeps job data isolated from session data and flash me
 
 ### `jobs.js`: Enqueue helpers
 
-Thin wrappers that fix the jobId convention for each job name, all through `addDeduped` (see above). Per-connection jobs use `${name}--${connectionUUID}`; singleton maintenance jobs a fixed id; one-shot and all-connection jobs a `Date.now()` suffix. BullMQ disallows colons in custom job IDs, hence `--`. `enqueueTossCycle(opts)` fans a CLI toss request out into the per-protocol jobs.
+Thin wrappers that fix the jobId convention for each job name, all through `addDeduped` (see above). Per-connection jobs use `${name}--${connectionUUID}`; singleton maintenance jobs a fixed id, or `optionJobId(base, data)` when they carry options; one-shot and all-connection jobs a `Date.now()` suffix. BullMQ disallows colons in custom job IDs, hence `--`. `enqueueTossCycle(opts)` fans a CLI toss request out into the per-protocol jobs.
 
 ### `events.js`: Cross-process notifications
 

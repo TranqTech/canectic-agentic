@@ -28,6 +28,9 @@ describe('addDeduped against a real queue', function () {
 			var conn = await import('../src/queues/connection.js');
 			queue = new bull.Queue(NAME, { connection: conn.createQueueConnection(),
 				defaultJobOptions: { removeOnComplete: { count: 200 } } });
+			// Start empty: a run interrupted mid-test leaves a job stuck active
+			// under a fixed id, which the next run would be handed as merged.
+			await queue.obliterate({ force: true });
 			worker = new bull.Worker(NAME, async function () {
 				ran++;
 				if (release) await release;
@@ -66,6 +69,11 @@ describe('addDeduped against a real queue', function () {
 		await waitFor(function () { return ran === 1; });
 		var second = await jobs.addDeduped(queue, 'x', {}, { jobId: 'fixed--two' });
 		assert.strictEqual(second.id, first.id);
+		// ...and says so, so a caller can report it rather than announce the
+		// request as queued (#79).
+		assert.strictEqual(second.merged, true);
+		assert.strictEqual(second.mergedState, 'active');
+		assert.ok(!first.merged, 'a freshly added job is not merged');
 		open(); release = null;
 		await settle(500);
 		assert.strictEqual(ran, 1, 'a duplicate ran alongside the first');

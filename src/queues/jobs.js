@@ -10,6 +10,10 @@
  *     duplicate jobIds while one is active, preventing concurrent operations
  *     against the same peer.
  *   - Singleton jobs (maintenance) use a fixed jobId — only one at a time.
+ *     When the job's data carries options (areas, width, days, dry run) the id
+ *     is `optionJobId(base, data)` instead, so a request with different
+ *     options queues behind the first rather than being merged into it and
+ *     losing its options (#79). An identical request still merges.
  *   - One-shot jobs (e.g. manual FTN inbound with no specific connection) use
  *     a timestamp suffix to allow multiple enqueues.
  *
@@ -17,6 +21,7 @@
  * delimiter between job name and connection UUID.
  */
 
+import { createHash } from 'crypto';
 import { tossQueue, mailerQueue, maintenanceQueue } from './queues.js';
 import appConfig from '../config/appConfig.js';
 
@@ -38,11 +43,42 @@ export async function addDeduped(queue, name, data, opts) {
 		var existing = await queue.getJob(id);
 		if (existing) {
 			var state = await existing.getState();
-			if (state !== 'completed' && state !== 'failed') return existing;
+			if (state !== 'completed' && state !== 'failed') {
+				// Tell the caller it was handed a job already waiting or
+				// running, whose data may not be what it asked for. The CLI
+				// used to announce the request as queued regardless.
+				existing.merged = true;
+				existing.mergedState = state;
+				return existing;
+			}
 			try { await existing.remove(); } catch (_) {}
 		}
 	}
 	return queue.add(name, data, opts);
+}
+
+/**
+ * A jobId for a singleton job that carries options: the base alone when
+ * there are none, else the base plus a short hash of the options. Equal
+ * requests get equal ids whatever the key or area order; null, false and
+ * empty lists count as absent, so `dryRun: false` is the same request as no
+ * dryRun at all. Hashed rather than spelled out because an area list can be
+ * long, and BullMQ refuses colons in ids.
+ */
+export function optionJobId(base, data) {
+	var parts = {};
+	for (var k of Object.keys(data || {}).sort()) {
+		var v = data[k];
+		if (v === null || v === undefined || v === false) continue;
+		if (Array.isArray(v)) {
+			if (v.length === 0) continue;
+			v = v.map(String).sort();
+		}
+		parts[k] = v;
+	}
+	var canon = JSON.stringify(parts);
+	if (canon === '{}') return base;
+	return base + '--' + createHash('sha1').update(canon).digest('hex').slice(0, 12);
 }
 
 // =========================================================================
@@ -323,18 +359,57 @@ export async function enqueueFileMaintenance() {
 }
 
 /**
- * Regenerate body_html for message area messages.
- * Called by: admin panel, CLI, scheduler.
+ * Regenerate body_html for message area messages, as ONE JOB PER AREA.
+ * No areas means every active area. Returns the jobs, in area order; a job
+ * with `merged` set was already waiting or running for the same area and
+ * options.
+ *
+ * Per area because a whole board is too big for one job: 334k messages on
+ * the hub at about 60 a second is 90 minutes, past maintenance_job_timeout,
+ * so it had to be run by hand as a series of --area batches (#79). Each area
+ * now gets its own timeout, and an area request overlapping one already
+ * queued merges for that area only.
+ * Called by: admin panel, CLI.
  */
 export async function enqueueRegenHtml(opts = {}) {
-	return addDeduped(maintenanceQueue, 'regen-html', {
-		areas: opts.areas || null,
-		batchSize: opts.batchSize || 100,
-		forceWidth: opts.forceWidth || null,
-	}, {
-		jobId: 'regen-html',
-		removeOnComplete: true, removeOnFail: true,
-	});
+	var areas = opts.areas && opts.areas.length > 0 ? opts.areas : await activeAreaShortcodes();
+	var queued = [];
+	for (var req of regenHtmlRequests(areas, opts)) {
+		queued.push(await addDeduped(maintenanceQueue, 'regen-html', req.data, {
+			jobId: req.jobId,
+			removeOnComplete: true, removeOnFail: true,
+		}));
+	}
+	return queued;
+}
+
+/**
+ * The per-area jobs enqueueRegenHtml adds, as { data, jobId }. Pure, and
+ * split out so the split and the ids can be tested without a queue.
+ * A repeated area is listed once.
+ */
+export function regenHtmlRequests(areas, opts = {}) {
+	var seen = new Set();
+	var requests = [];
+	for (var area of areas || []) {
+		if (seen.has(area)) continue;
+		seen.add(area);
+		var data = {
+			areas: [area],
+			batchSize: opts.batchSize || 100,
+			forceWidth: opts.forceWidth || null,
+		};
+		requests.push({ data: data, jobId: optionJobId('regen-html', data) });
+	}
+	return requests;
+}
+
+// The same list regenerateAllBodyHtml walks when given no areas.
+async function activeAreaShortcodes() {
+	var postgres = await import('../middleware/db/postgres.js');
+	var rows = await postgres.query(
+		'SELECT shortcode FROM message_areas WHERE active ORDER BY shortcode ASC', []);
+	return (rows || []).map(function (r) { return r.shortcode; });
 }
 
 /**
@@ -342,11 +417,12 @@ export async function enqueueRegenHtml(opts = {}) {
  * Called by: admin panel, CLI, scheduler.
  */
 export async function enqueueRegenPmHtml(opts = {}) {
-	return addDeduped(maintenanceQueue, 'regen-pm-html', {
+	var data = {
 		batchSize: opts.batchSize || 100,
 		forceWidth: opts.forceWidth || null,
-	}, {
-		jobId: 'regen-pm-html',
+	};
+	return addDeduped(maintenanceQueue, 'regen-pm-html', data, {
+		jobId: optionJobId('regen-pm-html', data),
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
@@ -360,8 +436,9 @@ export async function enqueueRegenPmHtml(opts = {}) {
 export async function enqueuePurgePmTrash(days) {
 	// Days only when the caller chose them; otherwise the job reads the
 	// setting when it runs (src/maintenance/retention.js).
-	return addDeduped(maintenanceQueue, 'purge-pm-trash', days ? { days: days, manual: true } : {}, {
-		jobId: 'purge-pm-trash',
+	var data = days ? { days: days, manual: true } : {};
+	return addDeduped(maintenanceQueue, 'purge-pm-trash', data, {
+		jobId: optionJobId('purge-pm-trash', data),
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
@@ -398,11 +475,14 @@ export async function enqueueRecalcAreaCounts() {
  * Called by: admin panel, CLI.
  */
 export async function enqueueRethread(opts = {}) {
-	return addDeduped(maintenanceQueue, 'rethread', {
+	var data = {
 		areas: opts.areas || null,
 		dryRun: opts.dryRun || false,
-	}, {
-		jobId: 'rethread' + (opts.areas ? '-' + opts.areas.join('-') : '-all'),
+	};
+	// Keyed on dryRun as well as areas: a dry run queued while a real run of
+	// the same areas waited used to be handed the real one, and vice versa.
+	return addDeduped(maintenanceQueue, 'rethread', data, {
+		jobId: optionJobId('rethread', data),
 		removeOnComplete: true,
 		removeOnFail: true,
 	});
@@ -434,12 +514,13 @@ export async function enqueueBulkMsgBaseImport(opts = {}) {
  * Called by: maintenance CLI (--fix-msgids).
  */
 export async function enqueueFixMsgIds(opts = {}) {
-	return addDeduped(maintenanceQueue, 'fix-msgids', {
+	var data = {
 		areas: opts.areas || null,
 		dryRun: opts.dryRun || false,
 		batchSize: opts.batchSize || 500,
-	}, {
-		jobId: 'fix-msgids' + (opts.areas ? '-' + opts.areas.join('-') : '-all'),
+	};
+	return addDeduped(maintenanceQueue, 'fix-msgids', data, {
+		jobId: optionJobId('fix-msgids', data),
 		removeOnComplete: true,
 		removeOnFail: true,
 	});
@@ -462,10 +543,11 @@ export async function enqueueReconcileEcholists() {
  * Called by: admin panel, CLI.
  */
 export async function enqueueRegenFileDescHtml(opts = {}) {
-	return addDeduped(maintenanceQueue, 'regen-file-desc-html', {
+	var data = {
 		batchSize: opts.batchSize || 100,
-	}, {
-		jobId: 'regen-file-desc-html',
+	};
+	return addDeduped(maintenanceQueue, 'regen-file-desc-html', data, {
+		jobId: optionJobId('regen-file-desc-html', data),
 		removeOnComplete: true, removeOnFail: true,
 	});
 }
@@ -565,8 +647,9 @@ export async function enqueueScanEcholists() {
 }
 
 export async function enqueuePurgeTossed(days) {
-	return addDeduped(maintenanceQueue, 'purge-tossed', days ? { days: days, manual: true } : {}, {
-		jobId: 'purge-tossed-manual',
+	var data = days ? { days: days, manual: true } : {};
+	return addDeduped(maintenanceQueue, 'purge-tossed', data, {
+		jobId: optionJobId('purge-tossed-manual', data),
 		removeOnComplete: true, removeOnFail: true,
 	});
 }

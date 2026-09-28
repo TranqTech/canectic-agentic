@@ -5,8 +5,10 @@
 //
 // Enqueues maintenance jobs on the BullMQ `maintenance` queue and waits
 // for completion.  The worker process (bin/worker.js) does the actual work.
-// PID-file locking is no longer needed — BullMQ's jobId deduplication
-// prevents concurrent operations.
+// PID-file locking is no longer needed: a request identical to one already
+// waiting or running is merged into it (and reported as such), while one with
+// different options (areas, width, days, dry run) queues behind it. A regen
+// of message HTML is one job per area.
 //
 // Requires the worker process or embedded mode to be running.
 //
@@ -27,7 +29,7 @@ import * as dotenv from 'dotenv';
 import { QueueEvents } from 'bullmq';
 import { createQueueConnection } from '../queues/connection.js';
 import * as jobs from '../queues/jobs.js';
-import { closeQueues } from '../queues/queues.js';
+import { closeQueues, maintenanceQueue } from '../queues/queues.js';
 
 dotenv.config();
 
@@ -92,62 +94,104 @@ function parseArgs() {
 // Job tracking — wait for enqueued jobs to complete or fail
 // ---------------------------------------------------------------------------
 
-async function waitForJobs(enqueuedJobs, timeoutMs) {
-	if (enqueuedJobs.length === 0) return;
+// What a job is, for the progress lines: its name plus the area it covers.
+function jobLabel(job) {
+	var areas = job && job.data && job.data.areas;
+	return job.name + (areas && areas.length ? ' (' + areas.join(', ') + ')' : '');
+}
 
-	var timeout = timeoutMs || 600000;  // 10 minute default (maintenance can be slow)
-	var connection = createQueueConnection();
-	var queueEvents = new QueueEvents('maintenance', { connection });
+// No overall time limit. A whole-board regen runs one area job after another
+// and can take hours, which the old ten-minute cap abandoned while the worker
+// carried on. Each job is still bounded by maintenance_job_timeout on the
+// worker, which fails it and so ends the wait for it. A worker that is not
+// running shows here as jobs that stay waiting, reported every five minutes.
+var PROGRESS_EVERY_MS = 5 * 60 * 1000;
+var POLL_MS = 5000;
 
+async function waitForJobs(enqueuedJobs) {
 	var pending = new Map();
 	for (var job of enqueuedJobs) {
-		if (job && job.id) {
-			pending.set(job.id, job.name);
-		}
+		if (job && job.id) pending.set(job.id, job);
 	}
+	if (pending.size === 0) return;
 
-	if (pending.size === 0) {
-		connection.disconnect();
-		return;
-	}
+	var connection = createQueueConnection();
+	var queueEvents = new QueueEvents('maintenance', { connection });
+	var queue = maintenanceQueue;
+	await queueEvents.waitUntilReady();
 
-	console.log('Waiting for ' + pending.size + ' job(s) to complete...');
+	var total = pending.size;
+	var failed = 0;
+	console.log('Waiting for ' + total + ' job(s) to complete... (Ctrl-C stops waiting; the jobs carry on)');
 
 	return new Promise((resolve) => {
-		var timer = setTimeout(() => {
-			console.log('Timeout: ' + pending.size + ' job(s) still pending after ' + (timeout / 1000) + 's');
-			cleanup();
-			resolve();
-		}, timeout);
+		var lastProgress = Date.now();
 
-		function cleanup() {
-			clearTimeout(timer);
-			queueEvents.close();
-			connection.disconnect();
+		function finish(jobId, line, isFailure) {
+			if (!pending.has(jobId)) return;
+			console.log(line);
+			pending.delete(jobId);
+			if (isFailure) failed++;
+			if (pending.size === 0) {
+				clearInterval(poll);
+				queueEvents.close();
+				connection.disconnect();
+				if (failed) console.log(failed + ' of ' + total + ' job(s) failed.');
+				resolve();
+			}
 		}
 
 		queueEvents.on('completed', ({ jobId }) => {
-			if (pending.has(jobId)) {
-				console.log('  \u2713 ' + pending.get(jobId) + ' completed');
-				pending.delete(jobId);
-				if (pending.size === 0) {
-					cleanup();
-					resolve();
-				}
-			}
+			var j = pending.get(jobId);
+			if (j) finish(jobId, '  \u2713 ' + jobLabel(j) + ' completed', false);
 		});
 
 		queueEvents.on('failed', ({ jobId, failedReason }) => {
-			if (pending.has(jobId)) {
-				console.log('  \u2717 ' + pending.get(jobId) + ' failed: ' + failedReason);
-				pending.delete(jobId);
-				if (pending.size === 0) {
-					cleanup();
-					resolve();
-				}
-			}
+			var j = pending.get(jobId);
+			if (j) finish(jobId, '  \u2717 ' + jobLabel(j) + ' failed: ' + failedReason, true);
 		});
+
+		// Jobs are removed on completion, so one that finished before the
+		// listener was ready is simply gone. Without this check the wait for
+		// it would never end.
+		var poll = setInterval(async () => {
+			var counts = { waiting: 0, active: 0, other: 0 };
+			for (var [jobId, j] of Array.from(pending.entries())) {
+				var current = await queue.getJob(jobId);
+				if (!current) {
+					finish(jobId, '  ? ' + jobLabel(j) + ' finished before its result was seen (see pm2 logs worker)', false);
+					continue;
+				}
+				var state = await current.getState();
+				if (state === 'active') counts.active++;
+				else if (state === 'waiting' || state === 'prioritized' || state === 'delayed') counts.waiting++;
+				else counts.other++;
+			}
+			if (pending.size > 0 && Date.now() - lastProgress >= PROGRESS_EVERY_MS) {
+				lastProgress = Date.now();
+				console.log('  ... ' + (total - pending.size) + ' of ' + total + ' done, ' +
+					counts.active + ' running, ' + counts.waiting + ' waiting' +
+					(counts.active === 0 && counts.waiting > 0 ? ' (is the worker running?)' : ''));
+			}
+		}, POLL_MS);
 	});
+}
+
+// Report what enqueueing did. A merged job was already waiting or running
+// with the same options, so this request adds nothing and the wait is on
+// that job; saying "+ queued" for it is what #79 was about.
+function reportQueued(queued) {
+	var fresh = queued.filter(function (j) { return j && !j.merged; });
+	var merged = queued.filter(function (j) { return j && j.merged; });
+	if (queued.length <= 10) {
+		for (var j of fresh) console.log('  + ' + jobLabel(j));
+		for (var m of merged) console.log('  = ' + jobLabel(m) + ': already ' + m.mergedState + ' with the same options, waiting on that one');
+	} else {
+		console.log('  + ' + fresh.length + ' ' + (queued[0].name) + ' job(s) queued');
+		if (merged.length) {
+			console.log('  = ' + merged.length + ' already waiting or running with the same options: ' + merged.map(jobLabel).join('; '));
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -168,13 +212,15 @@ async function main() {
 
 	try {
 		if (opts.regenHtml) {
-			var job = await jobs.enqueueRegenHtml({
+			// One job per area; no --area means every active area.
+			var regenJobs = await jobs.enqueueRegenHtml({
 				areas: opts.areas.length > 0 ? opts.areas : null,
 				batchSize: opts.batchSize,
 				forceWidth: opts.width || null,
 			});
-			enqueuedJobs.push(job);
-			console.log('  + regen-html' + (opts.areas.length > 0 ? ' (areas: ' + opts.areas.join(', ') + ')' : ''));
+			if (regenJobs.length === 0) console.log('  regen-html: no active message areas');
+			reportQueued(regenJobs);
+			enqueuedJobs.push(...regenJobs);
 		}
 
 		if (opts.regenPmHtml) {
@@ -182,21 +228,22 @@ async function main() {
 				batchSize: opts.batchSize,
 				forceWidth: opts.width || null,
 			});
+			reportQueued([job]);
 			enqueuedJobs.push(job);
-			console.log('  + regen-pm-html');
 		}
 
 		if (opts.purgePmTrash) {
 			var retentionDays = opts.days || parseInt(process.env.pm_trash_retention_days) || 30;
 			var job = await jobs.enqueuePurgePmTrash(retentionDays);
+			reportQueued([job]);
+			console.log('    (days: ' + retentionDays + ')');
 			enqueuedJobs.push(job);
-			console.log('  + purge-pm-trash (days: ' + retentionDays + ')');
 		}
 
 		if (opts.recalcCounts) {
 			var job = await jobs.enqueueRecalcAreaCounts();
+			reportQueued([job]);
 			enqueuedJobs.push(job);
-			console.log('  + recalc-area-counts');
 		}
 
 		if (opts.rethread) {
@@ -204,8 +251,9 @@ async function main() {
 				areas: opts.areas.length > 0 ? opts.areas : null,
 				dryRun: opts.dryRun,
 			});
+			reportQueued([job]);
+			if (opts.areas.length === 0) console.log('    (all areas)');
 			enqueuedJobs.push(job);
-			console.log('  + rethread' + (opts.areas.length > 0 ? ' (areas: ' + opts.areas.join(', ') + ')' : ' (all areas)'));
 		}
 
 		if (opts.fixMsgIds) {
@@ -214,9 +262,10 @@ async function main() {
 				dryRun: opts.dryRun,
 				batchSize: opts.batchSize,
 			});
+			reportQueued([job]);
+			console.log('    ' + (opts.areas.length > 0 ? '' : '(all areas) ') + (opts.dryRun ? '[dry run] ' : '') +
+				'Progress is logged by the worker. Check: pm2 logs worker');
 			enqueuedJobs.push(job);
-			console.log('  + fix-msgids' + (opts.areas.length > 0 ? ' (areas: ' + opts.areas.join(', ') + ')' : ' (all areas)') + (opts.dryRun ? ' [dry run]' : ''));
-			console.log('    Progress is logged by the worker. Check: pm2 logs worker');
 		}
 
 		if (enqueuedJobs.length === 0) {

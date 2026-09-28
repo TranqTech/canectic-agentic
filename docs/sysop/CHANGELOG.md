@@ -15,6 +15,11 @@
 - Fix: **a file request (FREQ) to a system outside zone 1 was never sent,** and the Request Files form on the FREQ page did nothing at all for a host or hub address (node 0, such as 2:203/0). The request was written to the zone 1 outbound whatever the address, where no session for that system looks, and it ignored `MAILER_OUTBOUND_DIR`. Requests now go to the outbound the mailer reads for that address. A second request to the same system before it has been sent is now added to the first rather than replacing it.
 - **The FREQ filebox now has its own directory, `ftn/freq`, on new installs.** It used to default to `ftn/filebox`, which also holds the per-peer outbound fileboxes, so any file left at the top of `ftn/filebox` could be requested by any system you link with. Existing boards keep their setting; see the upgrade note to move yours.
 
+### Maintenance
+
+- Fix: **running `node src/tools/maintenance.js --regen-html` again while one was still going ignored the second request,** including its `--area`, `--width` and `--batch`, although the tool said those areas had been queued. A request with different options now queues behind the first; an identical one joins it, and the tool now says `already running` rather than claiming to have queued it. The same applied to regenerating private mail or file descriptions, purging PM trash or tossed packets with a different `--days`, and a `--dry-run` of rethreading or MSGID repair queued alongside a real one.
+- **Regenerating message HTML now runs one area at a time,** from the command line and from the admin Events page. A large board could not finish in a single job before `maintenance_job_timeout` (60 minutes) stopped it, so it had to be done by hand in `--area` batches. The command waits until every area is done, however long that takes, and reports each one as it finishes.
+
 ### Web
 
 - Fix: **finishing the web call flow, or posting to the wall from it, returned an error when the request carried no form data.** Browsers always send some, so this was only seen from scripts; the call flow now finishes normally either way.
