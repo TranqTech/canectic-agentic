@@ -572,7 +572,7 @@ Last updated: 2026-09-27 (v0.9.12a)
 |---|------|--------|-------|
 | 5 | Docker Compose setup | [ ] | Lower barrier to entry for testers |
 | 6 | ZMODEM IcyTerm compatibility | [ ] | Send/receive fails with IcyTerm; all other clients work |
-| 7 | Systemd unit files | [ ] | Alternative to PM2 for production |
+| 7 | Systemd boot through PM2 | [x] | PM2 stays as the supervisor; `bootUnit.js --install` writes the systemd unit that starts it through `canectic-pm2`, surviving Node upgrades (#21) |
 | 8 | Terminal reader pagination | [ ] | Lazy-load beyond 50-message batch |
 | 9 | Terminal address book | [ ] | Quick-select recent recipients |
 | 10 | Deployment guide (production) | [ ] | TLS, reverse proxy, MTA integration |
