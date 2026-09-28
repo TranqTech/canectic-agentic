@@ -1078,6 +1078,9 @@ router.post('/messages/area/:shortcode/newthread', urlencodedParser, async (req,
 
 	var formObj     = req.body;
 	formObj.from_user = resolvePostName(currentuser, msgArea);
+	// Always the session's user, never the form's: the model records it as
+	// the author and credits the post to that account.
+	formObj.user_id = parseInt(currentuser.id);
 
 	var resultObj = await messages.startNewThread(formObj, shortcode);
 	if (resultObj.status === true) {
@@ -1114,6 +1117,9 @@ router.post('/messages/area/:shortcode/thread/:uuid/reply', urlencodedParser, as
 
 	var formObj     = req.body;
 	formObj.from_user = resolvePostName(currentuser, msgArea);
+	// Always the session's user, never the form's: the model records it as
+	// the author and credits the post to that account.
+	formObj.user_id = parseInt(currentuser.id);
 
 	var resultObj = await messages.replyToThread(formObj, shortcode, uuid);
 	if (resultObj.status !== true) {

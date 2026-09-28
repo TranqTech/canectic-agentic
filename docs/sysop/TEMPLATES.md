@@ -28,9 +28,13 @@ Admin pages:
 | `user_account_anniversary` | Daily, if today matches user's created_at date | `event.anniversary_years` |
 | `user_birthday` | Daily, if today matches user's birthdate | `event.age` |
 | `user_dormant` | Daily for users inactive >= 30 days; templates filter by `conditions.days_inactive` | -- |
+| `user_first_message_post` | A user's first message posted here (web, terminal or QWK reply packet) | `event.area_shortcode`, `event.subject` |
+| `user_nth_post` | Every message a user posts here; use `conditions.nth_count` for the milestones | `event.post_count`, `event.area_shortcode` |
+| `user_first_file_upload` | A user's first file upload (web or terminal) | `event.filename`, `event.area_shortcode` |
+| `user_nth_upload` | Every file a user uploads; use `conditions.nth_count` for the milestones | `event.upload_count`, `event.filename`, `event.area_shortcode` |
 | `user_qwk_fetched` | A QWK packet downloaded or a REP uploaded through the REST API (not the web QWK page or the terminal) | `event.kind`, `event.area_count`, `event.message_count`, `event.posted_count`, `event.error_count` (see [API.md](API.md#template-event-integration)) |
 
-Four more built-in events are listed on the Template Events page, `user_first_message_post`, `user_nth_post`, `user_first_file_upload` and `user_nth_upload`, but nothing fires them yet, so a template attached to one is never sent.
+The post and upload counts start from what the board already held when you updated: uploads exactly, and posts from messages posted on this board under the user's name or real name. Messages that arrived from a network are never counted, even under the same name. So nobody with a posting history is greeted as a first-time poster.
 
 Birthday / anniversary / dormant events fire from the daily `user-maintenance` job. Ensure that job is enabled (it is by default).
 

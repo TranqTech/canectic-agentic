@@ -24,6 +24,7 @@
 
 ### Administration
 
+- Fix: **the First Message Post, Nth Message Post, First File Upload and Nth File Upload template events never fired,** so a template attached to one was never sent. They now fire when a user posts a message (on the web, in the terminal or in a QWK reply packet) or uploads a file. Each user's count starts from what your board already held, so nobody with a posting history is greeted as a first-time poster; messages that arrived from a network are never counted.
 - **Fire Template Event is now in the menu editor's Command list.** A menu entry could already fire a message template event, but the editor did not offer the command, so it had to be added by importing menu JSON. Its argument box suggests the event codes your board has.
 
 ### Security

@@ -21,6 +21,7 @@ import { detectAnsiArt } from '../utils/termMsgFormat.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from "../config/appConfig.js";
 import * as systeminfo from "../utils/systeminfo.js";
+import * as userActivity from "./userActivity.js";
 
 
 
@@ -611,12 +612,17 @@ async function startNewThread(formObj, shortcode) {
 		origin_line: addrInfo.origin_line,
 		product_string: systeminfo.versionMsg()
 	};
+	// The local author. The column always existed but a post never filled it
+	// in, so a message could only be traced to a user by its From name (#82).
+	var posterId = parseInt(formObj.user_id);
+	if (posterId > 0) dbObj.user_id = posterId;
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);
 	if (msgresult.status === true) {
 		returnObj.status     = true;
 		returnObj.insertId   = msgresult.insertId;
 		returnObj.threaduuid = tuuid;
+		if (posterId > 0) await userActivity.recordPost(posterId, { area: shortcode, subject: formObj.subject });
 	} else {
 		// Roll back thread record if message failed to save
 		await postgres.write("DELETE FROM " + threadtable + " WHERE id = $1", [thread_id]);
@@ -722,6 +728,10 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 		origin_line: addrInfo.origin_line,
 		product_string: systeminfo.versionMsg()
 	};
+	// The local author. The column always existed but a post never filled it
+	// in, so a message could only be traced to a user by its From name (#82).
+	var posterId = parseInt(formObj.user_id);
+	if (posterId > 0) dbObj.user_id = posterId;
 
 	var msgresult = await postgres.insertObject(dbObj, msgtable);
 	if (msgresult.status === true) {
@@ -729,6 +739,7 @@ async function replyToThread(formObj, shortcode, threaduuid) {
 		returnObj.insertId = msgresult.insertId;
 		// Update thread stats (message count, last_message, last_message_from)
 		await updateThread(thread_id, shortcode);
+		if (posterId > 0) await userActivity.recordPost(posterId, { area: shortcode, subject: formObj.subject });
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(msgresult.errormessages);
 	}

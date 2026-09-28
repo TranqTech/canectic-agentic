@@ -942,6 +942,7 @@ class msgEditor extends BaseSubModule {
 			to_user: this._toValue || "All",
 			subject: this._subjectValue.trim(),
 			body_text: bodyText,
+			user_id: this.call.user_record ? this.call.user_record.id : null,
 		};
 
 		// Identify the parent message by its DB uuid; replyToThread looks

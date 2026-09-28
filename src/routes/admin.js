@@ -1712,6 +1712,8 @@ router.post('/msgArea/:shortcode/newthread', urlencodedParser, requireAdmin, asy
 	var currentuser = await getCurrentUser(req);
 	var shortcode   = req.params.shortcode.toLowerCase().trim();
 	var formObj     = req.body;
+	// Never taken from the form: the model credits the post to this account.
+	formObj.user_id = currentuser ? parseInt(currentuser.id) : null;
 	if (currentuser) {
 		formObj.from_user = formObj.from_user || currentuser.username;
 	}
@@ -1728,6 +1730,8 @@ router.post('/msgArea/:shortcode/thread/:uuid/newreply', urlencodedParser, requi
 	var shortcode   = req.params.shortcode.toLowerCase().trim();
 	var uuid        = req.params.uuid.toLowerCase().trim();
 	var formObj     = req.body;
+	// Never taken from the form: the model credits the post to this account.
+	formObj.user_id = currentuser ? parseInt(currentuser.id) : null;
 	if (currentuser) {
 		formObj.from_user = formObj.from_user || currentuser.username;
 	}

@@ -53,6 +53,12 @@ async function addFileEntry(formObj) {
 		returnObj.entryId = dbres.insertId;
 		returnObj.uuid = uuid;
 		alogger.writeAlog(5, "File entry added: " + formObj.filename + " in area " + (formObj.area_shortcode || formObj.area_id), "greenbright");
+		// A user's upload (a TIC or a scan has no uploader): count it and
+		// fire the upload template events (#82).
+		if (pgObj.uploader_uuid) {
+			var userActivity = await import('./userActivity.js');
+			await userActivity.recordUpload(pgObj.uploader_uuid, { filename: formObj.filename, area: formObj.area_shortcode || '' });
+		}
 	} else {
 		returnObj.errormessages = returnObj.errormessages.concat(dbres.errormessages);
 	}

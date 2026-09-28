@@ -2,7 +2,7 @@
 
 Event-triggered sysop-authored message templates with PM/email/netmail delivery.
 
-**Status: implemented**, except the post and upload milestone events (seeded, never fired; see "What's Not Included").
+**Status: implemented.** The post and upload milestone events were seeded but never fired until #82; see "Post and upload events".
 
 ## Motivation
 
@@ -147,7 +147,7 @@ DB-dependent paths (full fireEvent roundtrip, admin CRUD, hook firing) require a
 
 ## What's Not Included (Deferred)
 
-- **Message/file post milestone hooks** (`user_first_message_post`, `user_nth_post`, etc.) -- defined as event types in the seed JSON but no hook wires them up yet. Firing requires a per-user post count, and the per-area message tables don't make that cheap to compute. Adding a `post_count` column to users is the right fix for a future pass.
+- **Post and upload events (built, #82).** `users.post_count` / `users.upload_count`, kept by `src/models/userActivity.js`: `recordPost` from `messages.startNewThread` / `replyToThread` when the post carries a local author (`formObj.user_id`, which the web routes set from the session and never from the form, the terminal editor from the call, QWK REP from the user), and `recordUpload` from `fileEntries.addFileEntry` for an entry with an `uploader_uuid` (not TIC or scans). First fires at count 1, nth on every post/upload with the count, as login does. Posts now store `user_id` in `mb_*_msgs`; before #82 no local post did, so migration `0009-user-activity-counts` backfilled by id where set and otherwise by From name (username or full name) over rows with no `tosser_id` or `source_network_id` and not imported (`backfillPostCounts`, pure); uploads by `uploader_uuid`. Two users sharing a full name are both credited: the known limit of a best-effort count.
 - **Upload milestone hooks** -- same situation.
 - **Template preview / variable picker UI** -- the admin edit modal has a static reference panel listing standard vars. A dynamic "insert variable" dropdown driven by `context_schema` would be a future polish.
 - **TinyMCE for body_html** -- the admin UI uses plain textareas for both body_text and body_html. Adding TinyMCE to match the announcements pattern is a future polish.
