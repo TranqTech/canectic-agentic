@@ -92,7 +92,7 @@ describe('runtimeDirs', function () {
 
 	it('names the directories no release ships', function () {
 		var dirs = runtimeDirs();
-		for (var required of ['logs/production', 'ftn/in', 'ftn/out', 'ftn/bad', 'ftn/filebox',
+		for (var required of ['logs/production', 'ftn/in', 'ftn/out', 'ftn/bad', 'ftn/filebox', 'ftn/freq',
 			'files/staging', 'qwk', 'tmp', 'export']) {
 			assert.ok(dirs.indexOf(required) !== -1, 'missing ' + required);
 		}

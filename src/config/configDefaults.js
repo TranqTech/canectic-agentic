@@ -322,7 +322,7 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'network_transfer_retention_days', defaultValue: '30',          type: 'number',  category: 'maintenance', description: 'Days to keep QWK and NNTP transfer history before auto-purge (0 = keep forever)' },
 	{ key: 'mailer_session_retention_days', defaultValue: '30',            type: 'number',  category: 'maintenance', description: 'Days to keep mailer session history before auto-purge (0 = keep forever)' },
 	{ key: 'freq_enabled',             defaultValue: 'true',                 type: 'boolean', category: 'mailer',      description: 'Enable FREQ (File Request) responses during binkp sessions' },
-	{ key: 'freq_filebox_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Directory for FREQ filebox (files available to any authenticated session)' },
+	{ key: 'freq_filebox_dir',         defaultValue: 'ftn/freq',             type: 'string',  category: 'paths',       description: 'Directory for the FREQ filebox: every file at its top level can be requested by any linked system. Keep it apart from filebox_base_dir (0.9.12a and earlier defaulted both to ftn/filebox)' },
 	{ key: 'filebox_base_dir',         defaultValue: 'ftn/filebox',          type: 'string',  category: 'paths',       description: 'Parent directory for per-peer filebox subdirectories (outbox_dir resolves relative to this)' },
 	{ key: 'freq_max_files',           defaultValue: '10',                   type: 'number',  category: 'mailer',      description: 'Maximum files to send per FREQ request' },
 	{ key: 'pm_attachment_dir',        defaultValue: 'files/pm_attachments', type: 'string',  category: 'paths',    description: 'Storage directory for PM file attachments' },

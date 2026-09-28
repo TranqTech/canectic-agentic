@@ -36,6 +36,7 @@ var FIXED_DIRS = [
 	'ftn/bad',
 	'ftn/tmp',
 	'ftn/filebox',
+	'ftn/freq',
 	'qwk',
 	'files',
 	'files/staging',

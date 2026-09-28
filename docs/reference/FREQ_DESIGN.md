@@ -19,7 +19,7 @@ FREQ has two sides:
 3. `freq.resolveRequest()` parses the file: one filename per line, the first whitespace-separated token is the filename, anything after it (password, flags) is dropped
 4. For each requested filename, searches three sources in order:
    a. **Magic aliases** (`freq_magic` table): admin-configured name-to-path mappings
-   b. **Filebox directory**: files dropped in `ftn/filebox/` (or configured path) -- sysop-curated, open to any authenticated session
+   b. **Filebox directory**: files dropped in `ftn/freq/` (or configured path) -- sysop-curated, open to any authenticated session
    c. **File entries** (`file_entries` table): files in file areas the peer has access to -- broadest fallback, scoped to peer's subscribed areas
 5. Found files are queued for sending via `transfer.queueFile()` (`deleteAfterSend: false`) and sending is restarted, in case M_EOB had already gone
 6. Not-found files are logged at level 5; once `freq_max_files` files have been found, later lines are reported not found with reason "max files reached"
@@ -59,9 +59,9 @@ The planned `ABOUT` seed was not built.
 
 A sysop-curated directory on disk. Files dropped here are deliberately made available for FREQ. Open to any authenticated session. No per-area access control -- if the sysop put it in the filebox, it's available.
 
-Config key: `freq_filebox_dir` (default: `ftn/filebox`, category paths). Only top-level regular files match, case-insensitively. A relative path resolves against the working directory (no `%X` substitution).
+Config key: `freq_filebox_dir` (default: `ftn/freq`, category paths; `ftn/filebox` up to 0.9.12a). Only top-level regular files match, case-insensitively. A relative path resolves against the working directory (no `%X` substitution).
 
-This is the same default directory as `filebox_base_dir`, under which relative per-peer `outbox_dir` paths resolve. Outbox subdirectories are not reachable by FREQ since only top-level files match, but a file placed at the top level is requestable by anyone.
+Up to 0.9.12a this defaulted to `ftn/filebox`, the same directory as `filebox_base_dir`, under which relative per-peer `outbox_dir` paths and inbound wildcard targets resolve. Outbox subdirectories were never reachable (only top-level files match), but any file at the top level was requestable, as was anything an outbox or wildcard target resolving to the base itself put there (#80). The default is now `ftn/freq`, created on install and update. An upgraded board keeps its seeded `ftn/filebox` row, which stays in effect and shows as from the database since it differs from the shipped default; the 0.9.12a -> next upgrade notice `freq-filebox-shared-dir` tells the sysop how to separate them.
 
 This takes priority over file_entries so the sysop can override database files with specific versions for FREQ (e.g. a custom README, a specific release build).
 
@@ -138,7 +138,7 @@ if (fs.existsSync(reqFile)) {
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `freq_enabled` | boolean | `true` | Enable/disable FREQ responses (category mailer) |
-| `freq_filebox_dir` | string | `ftn/filebox` | Directory for FREQ filebox files (category paths) |
+| `freq_filebox_dir` | string | `ftn/freq` | Directory for FREQ filebox files (category paths) |
 | `freq_max_files` | number | `10` | Maximum files to send per FREQ request (category mailer) |
 
 ## Schema

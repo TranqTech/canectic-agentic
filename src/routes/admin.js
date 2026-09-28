@@ -5936,7 +5936,7 @@ router.get('/freq', requireAdmin, async (req, res) => {
 	}
 
 	// Filebox listing
-	var fileboxDir = appConfig.get('freq_filebox_dir', 'ftn/filebox');
+	var fileboxDir = appConfig.get('freq_filebox_dir', 'ftn/freq');
 	var fileboxFiles = [];
 	try {
 		var fsList = (await import('fs')).default || await import('fs');

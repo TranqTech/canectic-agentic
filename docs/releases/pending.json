@@ -1,6 +1,13 @@
 {
   "steps": [],
-  "notices": [],
+  "notices": [
+    {
+      "id": "freq-filebox-shared-dir",
+      "level": "info",
+      "from_max": "0.9.12a",
+      "text": "If freq_filebox_dir is still ftn/filebox (the old default), your board serves file requests (FREQ) from the same directory that holds per-peer outbound fileboxes, so any file left at its top level can be requested by any system you link with. New installs now use a separate ftn/freq, which this update creates; your setting is not changed. To separate them, move the files you mean to offer into ftn/freq and set freq_filebox_dir to ftn/freq under Paths on the Configuration page."
+    }
+  ],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }

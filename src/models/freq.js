@@ -130,7 +130,7 @@ async function resolveFile(filename, connectionId) {
 	}
 
 	// Layer 2: Filebox
-	var fileboxDir = appConfig.get('freq_filebox_dir', 'ftn/filebox');
+	var fileboxDir = appConfig.get('freq_filebox_dir', 'ftn/freq');
 	if (fs.existsSync(fileboxDir)) {
 		// Case-insensitive search
 		try {
@@ -258,7 +258,7 @@ async function _generateFilelist() {
 		}
 
 		// Write to temp file
-		var tmpPath = path.join(appConfig.get('freq_filebox_dir', 'ftn/filebox'), '_FILES.LST');
+		var tmpPath = path.join(appConfig.get('freq_filebox_dir', 'ftn/freq'), '_FILES.LST');
 		var dir = path.dirname(tmpPath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(tmpPath, lines.join('\r\n') + '\r\n');
