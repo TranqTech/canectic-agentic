@@ -1693,7 +1693,7 @@ async function TossOutboundNetmail(){
 
 		// Write flow file entries for file-attach netmail attachments
 		try {
-			var pmAtt = await import('../models/pmAttachments.js');
+			var pmAtt = await import('../../models/pmAttachments.js');
 			for (var smsg of sendArray) {
 				if (!smsg._attachmentInfo) continue;
 				var atts = await pmAtt.getAttachments(smsg._attachmentInfo.pmUuid);

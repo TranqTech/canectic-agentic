@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.12a)
 
+### Networking
+
+- Fix: **a file attached to FTN netmail was never sent.** The netmail went out marked as carrying a file, but the file itself was not queued for the mailer, so the recipient got a message referring to an attachment that never arrived. The attachment now goes with the next mail session.
+
 ### Web
 
 - Fix: **finishing the web call flow, or posting to the wall from it, returned an error when the request carried no form data.** Browsers always send some, so this was only seen from scripts; the call flow now finishes normally either way.
