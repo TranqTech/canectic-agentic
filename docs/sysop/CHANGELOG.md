@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.12a)
 
+### Messages
+
+- Fix: **in the terminal message reader, D (delete) and M (move) did nothing** for a moderator reading a message full screen, although the bottom bar offered them. They now work there. In the thread list M is Mark Read, as before.
+
 ### Networking
 
 - Fix: **netmail your board relayed carried a Via line with no version,** just "Canectic", and the system statistics page and the terminal's system information showed the version as blank. Both now show the version the board is running.

@@ -1610,12 +1610,6 @@ class msgReader extends BaseSubModule {
 			case "j":
 				this._launchJump();
 				return;
-			case "d":
-				this._beginDelete();
-				return;
-			case "m":
-				this._beginMove();
-				return;
 		}
 	}
 
@@ -1754,6 +1748,12 @@ class msgReader extends BaseSubModule {
 				return;
 			case "j":
 				this._launchJump();
+				return;
+			case "d":
+				this._beginDelete();
+				return;
+			case "m":
+				this._beginMove();
 				return;
 		}
 	}

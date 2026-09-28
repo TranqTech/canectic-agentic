@@ -55,11 +55,6 @@ describe('terminal reader moderation wiring', function () {
 			'ask it about one area and act on another');
 	});
 
-	it('offers delete and move from the message view', function () {
-		assert.ok(/case "d":\s*\n\s*this\._beginDelete\(\);/.test(src));
-		assert.ok(/case "m":\s*\n\s*this\._beginMove\(\);/.test(src));
-	});
-
 	it('offers them on a dumb terminal too', function () {
 		// The dumb path has its own key dispatch, which is exactly the sort of
 		// second door a feature gets added to the first one only.
@@ -117,6 +112,35 @@ describe('terminal reader moderation behaviour', function () {
 		{ shortcode: 'LOCAL', name: 'Local', group_shortcode: 'G', networked: false },
 		{ shortcode: 'NET', name: 'Net', group_shortcode: 'G', networked: true }
 	];
+
+	// Which handler a key reaches, sent through the handler itself. This used to
+	// be a search of the source for `case "d": this._beginDelete()`, which the
+	// cases sat in the thread list's switch satisfied: in the full-screen
+	// message view D and M were shown and did nothing, and in the thread list
+	// Move sat behind an earlier "m" (Mark Read) and could never run.
+	function keyLog(overrides) {
+		var calls = [];
+		var r = fake(Object.assign({
+			_beginDelete: function () { calls.push('delete'); },
+			_beginMove: function () { calls.push('move'); },
+			_markAreaRead: function () { calls.push('markRead'); return new Promise(function () {}); }
+		}, overrides || {}));
+		return { r: r, calls: calls };
+	}
+
+	it('sends D and M in the message view to delete and move', function () {
+		var k = keyLog();
+		P._onCharMessageView.call(k.r, 'd');
+		P._onCharMessageView.call(k.r, 'M');
+		assert.deepStrictEqual(k.calls, ['delete', 'move']);
+	});
+
+	it('keeps M in the thread list for Mark Read, and D does not act on a message there', function () {
+		var k = keyLog({ _threadSearchMode: false });
+		P._onCharThreadList.call(k.r, 'm');
+		P._onCharThreadList.call(k.r, 'd');
+		assert.deepStrictEqual(k.calls, ['markRead']);
+	});
 
 	it('offers the keys the message on screen actually allows', function () {
 		var local = { uuid: 'm-1', from_user: 'a', source_network_id: null };
