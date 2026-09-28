@@ -116,6 +116,20 @@ describe('nothing reads the version for itself', function () {
 			'these read package.json for the version instead of going through systeminfo');
 	});
 
+	it('nothing reads a version out of appConfig under another key', function () {
+		// There is no 'version' key, so appConfig.get('version', '') is always
+		// the fallback: the netmail relay stamped every Via line it added with
+		// "Canectic" and no version at all.
+		var offenders = [];
+		for (var f of sourceFiles('src').concat(sourceFiles('bin'))) {
+			if (ALLOWED.indexOf(f.split(path.sep).join('/')) !== -1) continue;
+			var body = read(f);
+			if (body && /appConfig\.get\(\s*['"][a-z_]*version['"]/i.test(body)) offenders.push(f);
+		}
+		assert.deepStrictEqual(offenders, [],
+			'these read a version from appConfig instead of going through systeminfo');
+	});
+
 	it('the mailers do not carry a hardcoded product version', function () {
 		// The one that was actually wrong on the wire. A literal here is a
 		// number that will be right on the day it is written and wrong

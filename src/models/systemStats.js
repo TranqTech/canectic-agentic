@@ -3,6 +3,7 @@
 
 import * as postgres from '../middleware/db/postgres.js';
 import appConfig from '../config/appConfig.js';
+import * as systeminfo from '../utils/systeminfo.js';
 
 async function getStats() {
 	var queries = await Promise.all([
@@ -23,7 +24,7 @@ async function getStats() {
 		boardName:      appConfig.get('boardname', 'BBS'),
 		sysopName:      appConfig.get('sysopname', 'Sysop'),
 		boardLocation:  appConfig.get('boardlocation', ''),
-		systemVersion:  appConfig.get('version', ''),
+		systemVersion:  systeminfo.softwareVersion(),
 	};
 }
 

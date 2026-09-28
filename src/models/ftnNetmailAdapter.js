@@ -19,6 +19,7 @@ import * as ftnVia from '../utils/ftnVia.js';
 import * as ftnNodelist from './ftnNodelist.js';
 import { parseFtnAddress } from './ftnRouter.js';
 import appConfig from "../config/appConfig.js";
+import * as systeminfo from '../utils/systeminfo.js';
 import * as netmailRelayLog from './netmailRelayLog.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -496,7 +497,7 @@ async function relayNetmail(ftnMessage, pmObj) {
       var attrs = Array.isArray(ftnMessage.OptionalAttributes)
         ? ftnMessage.OptionalAttributes.slice()
         : [];
-      ftnVia.appendVia(attrs, viaAddress, new Date(), appConfig.get('version', ''));
+      ftnVia.appendVia(attrs, viaAddress, new Date(), systeminfo.canonicalVersion());
       pmObj.transport_data = Object.assign({}, pmObj.transport_data, {
         optional_attributes: attrs
       });
