@@ -1566,8 +1566,8 @@ router.get('/notifications', async (req, res) => {
 	var limit = 50;
 	var offset = (page - 1) * limit;
 
-	var notifList = await notifications.getAll(userId, isSysop, limit, offset);
-	var unreadCount = await notifications.getUnreadCount(userId, isSysop);
+	var notifList = await notifications.getAll(userId, isSysop, limit, offset, { web: true });
+	var unreadCount = await notifications.getUnreadCount(userId, isSysop, { web: true });
 
 	res.render('notifications/index', {
 		title: 'Notifications',
@@ -1590,7 +1590,7 @@ router.post('/notifications/read-all', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (!currentuser) return res.redirect('/users/login');
 	var isSysop = !!(currentuser.permissionflags && currentuser.permissionflags.includes && currentuser.permissionflags.includes('Sysop'));
-	await notifications.markAllRead(parseInt(currentuser.id), isSysop);
+	await notifications.markAllRead(parseInt(currentuser.id), isSysop, { web: true });
 	res.redirect('/notifications');
 });
 

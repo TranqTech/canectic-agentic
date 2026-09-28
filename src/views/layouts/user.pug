@@ -176,6 +176,8 @@ html
               if (!msg.initial) {
                 notifUnread++;
                 updateNotifBadge(notifUnread);
+                // Arriving while the dropdown is open: it is being seen now.
+                if (notifOpen) markNotifsSeen();
               }
             }
           }
@@ -332,17 +334,29 @@ html
             while (list.children.length > 10) list.removeChild(list.lastChild);
           }
 
-          document.addEventListener('DOMContentLoaded', function() {
-            var markAllBtn = document.getElementById('notif-mark-all');
-            if (markAllBtn) {
-              markAllBtn.addEventListener('click', function() {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ type: 'notification_read_all' }));
-                }
-                document.querySelectorAll('.notif-unread').forEach(function(el) { el.classList.remove('notif-unread'); });
-                updateNotifBadge(0);
-              });
+          // Opening the dropdown marks everything read: the user has now seen
+          // it, and a badge that stays lit until each item is clicked or a
+          // button pressed trains people to ignore it. Items keep their
+          // unread highlight while the dropdown stays open, so what is new
+          // can still be told apart, and lose it when it closes.
+          var notifOpen = false;
+          function markNotifsSeen() {
+            if (notifUnread > 0 && ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'notification_read_all' }));
             }
+            updateNotifBadge(0);
+          }
+          document.addEventListener('DOMContentLoaded', function() {
+            var bell = document.getElementById('notif-bell');
+            if (!bell) return;
+            bell.addEventListener('shown.bs.dropdown', function() {
+              notifOpen = true;
+              markNotifsSeen();
+            });
+            bell.addEventListener('hidden.bs.dropdown', function() {
+              notifOpen = false;
+              document.querySelectorAll('#notif-list .notif-unread').forEach(function(el) { el.classList.remove('notif-unread'); });
+            });
           });
 
           // Expose for chat initiation from other page scripts

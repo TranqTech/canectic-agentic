@@ -497,7 +497,7 @@ class PresenceServer {
 	async _sendNotificationCount(ws, userId, isSysop, includeRecent) {
 		try {
 			var notifMod = await import('../models/notifications.js');
-			var count = await notifMod.getUnreadCount(userId, isSysop);
+			var count = await notifMod.getUnreadCount(userId, isSysop, { web: true });
 			this._sendJson(ws, { type: 'notification_count', count: count });
 
 			// On connect, also send recent unread notifications to populate the
@@ -507,7 +507,7 @@ class PresenceServer {
 			// message above. Without this flag the badge ends up at 2x the
 			// real count (one from notification_count, one increment per replay).
 			if (includeRecent && count > 0) {
-				var recent = await notifMod.getUnread(userId, isSysop, 10);
+				var recent = await notifMod.getUnread(userId, isSysop, 10, { web: true });
 				for (var n of recent) {
 					this._sendJson(ws, {
 						type: 'notification',
@@ -537,7 +537,7 @@ class PresenceServer {
 	async _handleNotificationReadAll(ws, client) {
 		try {
 			var notifMod = await import('../models/notifications.js');
-			await notifMod.markAllRead(client.userId, client._isSysop);
+			await notifMod.markAllRead(client.userId, client._isSysop, { web: true });
 			this._sendJson(ws, { type: 'notification_count', count: 0 });
 		} catch (_) {}
 	}

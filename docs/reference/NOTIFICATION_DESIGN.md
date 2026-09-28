@@ -70,7 +70,7 @@ Every producer in the code as of 0.9.12a (grep `createSysop(` and `notifications
 
 | Type | Severity | Title Example | Produced By |
 |------|----------|---------------|-------------|
-| `pm_received` | info | New PM from Username | `src/models/privateMessages.js` |
+| `pm_received` | info | New PM from Username | `src/models/privateMessages.js` (terminal only; hidden on the web, see Bell) |
 | `maintenance` | warning | (board closing for maintenance) | `src/maintenance/webDrain.js`, one per connected web user when maintenance mode is entered |
 
 ### Proposed in the original design, not produced
@@ -124,11 +124,14 @@ Both user and admin layouts get a bell icon in the nav bar:
 [Bell Icon] (3)     -- unread count badge
 ```
 
-Click opens a dropdown showing the 10 most recent notifications:
-- Unread items highlighted
-- Click a notification with a link: navigate and mark read
-- "Mark All Read" button at the bottom
+Click opens a dropdown showing the 10 most recent unread notifications:
+- OPENING THE DROPDOWN MARKS EVERYTHING READ (`notification_read_all` on Bootstrap's `shown.bs.dropdown`) and clears the badge. There is no Mark All Read button in the dropdown any more; `/notifications` keeps one
+- Unread items stay highlighted while the dropdown is open and lose it when it closes, so what was new can still be told apart
+- A notification pushed while the dropdown is open is marked read at once
+- Click a notification with a link: navigate
 - "View All" link to a full notifications page
+
+**Hidden on the web: `pm_received`** (`WEB_HIDDEN_TYPES` in the model). Mail has its own unread counter and envelope in the nav bar, so a bell entry per PM said the same thing twice. The notification is still created, because the terminal notification reader shows it. The model's reads take an optional `{ web: true }` that leaves hidden types out, used by the presence socket (count, replay, mark all read), `/notifications` and its Mark All Read; `create()` does not push a hidden type. Mark all read from the web must leave them alone, or the terminal would lose a notification the web never showed.
 
 ### Notification dropdown item format
 

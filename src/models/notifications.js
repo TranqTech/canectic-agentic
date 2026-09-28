@@ -75,8 +75,8 @@ async function create(userId, type, title, body, opts) {
 
 	var notifId = result.insertId;
 
-	// Push via PresenceSocket
-	if (_presenceServer && userId) {
+	// Push via PresenceSocket, which only feeds the web bell
+	if (_presenceServer && userId && !isWebHidden(type)) {
 		_presenceServer._sendToUser(userId, {
 			type: 'notification',
 			id: notifId,
@@ -151,31 +151,55 @@ async function createSysop(type, title, body, opts) {
 // Queries
 // ---------------------------------------------------------------------------
 
+// Types the web does not show. A new PM already has its own unread counter
+// and envelope in the nav bar, so a bell entry for it said the same thing
+// twice. The terminal has no such counter and keeps showing them.
+//
+// Every read below takes an optional last argument `{ web: true }`, which
+// leaves these types out. That includes markAllRead: opening the web bell
+// must not mark read something the web never showed, or the terminal would
+// lose it too.
+var WEB_HIDDEN_TYPES = ['pm_received'];
+
+function webFilter(opts, nextParam) {
+	if (!opts || !opts.web || WEB_HIDDEN_TYPES.length === 0) return { sql: '', params: [] };
+	return { sql: ' AND type <> ALL($' + nextParam + ')', params: [WEB_HIDDEN_TYPES] };
+}
+
+function isWebHidden(type) {
+	return WEB_HIDDEN_TYPES.indexOf(type) !== -1;
+}
+
 // Get unread notifications for a user.
 // All notifications are per-user (sysop broadcasts create one row per sysop).
-async function getUnread(userId, isSysop, limit) {
+async function getUnread(userId, isSysop, limit, opts) {
 	var max = limit || 20;
+	var f = webFilter(opts, 3);
 	return await postgres.query(
-		'SELECT * FROM notifications WHERE user_id = $1 AND read = false ORDER BY created_at DESC LIMIT $2',
-		[userId, max]
+		'SELECT * FROM notifications WHERE user_id = $1 AND read = false' + f.sql +
+		' ORDER BY created_at DESC LIMIT $2',
+		[userId, max].concat(f.params)
 	) || [];
 }
 
 // Get all notifications with pagination.
-async function getAll(userId, isSysop, limit, offset) {
+async function getAll(userId, isSysop, limit, offset, opts) {
 	var max = limit || 50;
 	var off = offset || 0;
+	var f = webFilter(opts, 4);
 	return await postgres.query(
-		'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
-		[userId, max, off]
+		'SELECT * FROM notifications WHERE user_id = $1' + f.sql +
+		' ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+		[userId, max, off].concat(f.params)
 	) || [];
 }
 
 // Get unread count.
-async function getUnreadCount(userId, isSysop) {
+async function getUnreadCount(userId, isSysop, opts) {
+	var f = webFilter(opts, 2);
 	var row = await postgres.queryOne(
-		'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = $1 AND read = false',
-		[userId]
+		'SELECT COUNT(*) AS cnt FROM notifications WHERE user_id = $1 AND read = false' + f.sql,
+		[userId].concat(f.params)
 	);
 	return row ? parseInt(row.cnt) : 0;
 }
@@ -189,10 +213,11 @@ async function markRead(id, userId) {
 }
 
 // Mark all as read for a user.
-async function markAllRead(userId) {
+async function markAllRead(userId, isSysop, opts) {
+	var f = webFilter(opts, 2);
 	await postgres.write(
-		'UPDATE notifications SET read = true, read_at = NOW() WHERE user_id = $1 AND read = false',
-		[userId]
+		'UPDATE notifications SET read = true, read_at = NOW() WHERE user_id = $1 AND read = false' + f.sql,
+		[userId].concat(f.params)
 	);
 }
 
@@ -240,5 +265,7 @@ export {
 	markRead,
 	markAllRead,
 	getById,
+	isWebHidden,
+	WEB_HIDDEN_TYPES,
 	purgeOld
 };
