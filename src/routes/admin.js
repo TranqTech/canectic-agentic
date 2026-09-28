@@ -92,6 +92,7 @@ import { maintenanceWatch } from '../maintenance/maintenanceWatch.js';
 import { recordSysopSessions } from '../middleware/maintenanceWeb.js';
 import { progressSnapshot, renderProgressPage, tailFile } from '../maintenance/updateProgress.js';
 import { formatActivity } from '../utils/activityMap.js';
+import { parseFtnAddress } from '../utils/bsoPaths.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import * as redis from '../middleware/db/redis.js';
 import multer from 'multer';
@@ -5987,15 +5988,11 @@ router.post('/freq/request', urlencodedParser, requireAdmin, async (req, res) =>
 		if (conn) {
 			var cd = conn.connection_data;
 			if (typeof cd === 'string') { try { cd = JSON.parse(cd); } catch (_) { cd = {}; } }
-			var addr = cd.address || '';
-			if (addr) {
-				var parts = addr.split(':');
-				var netNode = parts[1] ? parts[1].split('/') : [];
-				var destNet = parseInt(netNode[0]) || 0;
-				var destNode = parseInt(netNode[1]) || 0;
-				if (destNet && destNode) {
-					freqModel.createReqFile(destNet, destNode, filenames);
-				}
+			// Node 0 is a real address (a host or hub), which the old
+			// truthiness check refused along with a malformed one.
+			var dest = parseFtnAddress(cd.address);
+			if (dest) {
+				freqModel.createReqFile(dest.net, dest.node, filenames, { zone: dest.zone });
 			}
 		}
 	}

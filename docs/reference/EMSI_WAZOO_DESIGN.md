@@ -1,6 +1,6 @@
 # EMSI/Wazoo Protocol Design for Canectic BBS Mailer
 
-**Status**: Largely implemented (phases 4a to 4c): `src/mailer/protocols/emsi.js`, `src/mailer/wazooTransfer.js`, `ZmodemEngine.sendEmpty()`, first-byte detection in `session.js` (`_detectProtocol()`), `mailer_protocol` on the peer connection with EMSI/Wazoo selectable in the admin peer forms, unit tests in `tests/emsiProtocol.test.js` and `tests/wazooTransfer.test.js`. Not built: the shared `fileCleanup.js` (section 4), so a Wazoo session does no post-send cleanup at all (flow file lines are not marked, `.out` packets and filebox files are not deleted); the dedicated `MAILER_EMSI_PORT` listener; EMSI_HBT/EMSI_CLI. The Wazoo outbound list covers the primary connection only, not grouped connections. No test against a real EMSI mailer is recorded.
+**Status**: Largely implemented (phases 4a to 4c): `src/mailer/protocols/emsi.js`, `src/mailer/wazooTransfer.js`, `ZmodemEngine.sendEmpty()`, first-byte detection in `session.js` (`_detectProtocol()`), `mailer_protocol` on the peer connection with EMSI/Wazoo selectable in the admin peer forms, unit tests in `tests/emsiProtocol.test.js` and `tests/wazooTransfer.test.js`. Post-send cleanup (section 4) is `finishSentFile()` in `src/mailer/transfer.js` rather than a separate `fileCleanup.js`: binkp calls it on M_GOT, Wazoo on the receiver's ZRINIT after ZEOF (`ZmodemEngine` reports the source `path` on `fileComplete` so entries sharing a basename are told apart). Until #81 a Wazoo session did none of it, so an EMSI peer was offered the same packets every session, and received files were never counted for the post-session toss. The Wazoo list now also sends an outbound `.req`, as binkp does; answering an inbound FREQ over Wazoo is not built. Not built: the dedicated `MAILER_EMSI_PORT` listener; EMSI_HBT/EMSI_CLI. The Wazoo outbound list covers the primary connection only, not grouped connections. No test against a real EMSI mailer is recorded.
 **Phase**: Mailer Phase 4 (per MAILER_ARCHITECTURE.md)
 
 ---
@@ -301,7 +301,7 @@ class WazooTransferEngine extends EventEmitter {
 
 ## 4. Shared File Cleanup
 
-**Not implemented.** `src/mailer/fileCleanup.js` does not exist, and `WazooTransferEngine` performs no cleanup after a send. Flow files are pruned (`floFile.pruneFlowFile()`) when the Wazoo outbound list is built, the same as for binkp.
+**Built differently (#81).** No `fileCleanup.js`: the shared function is `finishSentFile(item)` exported from `src/mailer/transfer.js`, with `item` = `{ filepath, floFile, floPrefix, deleteAfterSend }`. `session._buildOutboundFileList()` tags each Wazoo entry with those fields and the session's `sendComplete` handler calls it, matching the confirmed file by source path. `WazooTransferEngine` itself still does no cleanup. Flow files are also pruned (`floFile.pruneFlowFile()`) when the Wazoo outbound list is built, the same as for binkp. Test: `tests/wazooSessionCleanup.test.js`. The design as originally written follows.
 
 ### File: `src/mailer/fileCleanup.js`
 

@@ -23,6 +23,7 @@ import * as peerConnections from '../models/peerConnections.js';
 import * as mailerSessions from '../models/mailerSessions.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
+import { outboundDirForZone } from '../utils/bsoPaths.js';
 
 // Bootstrap — these bind at startup and can't hot-reload
 const MAILER_ENABLED        = process.env.MAILER_ENABLED === 'true';
@@ -795,13 +796,7 @@ class MailerManager extends EventEmitter {
 	// Default zone (1): ftn/out/
 	// Alternate zones:  ftn/out.002/, ftn/out.003/, etc.
 	_getOutboundDirForZone(zone) {
-		var outDir = appConfig.get('MAILER_OUTBOUND_DIR') || appConfig.get('ftnoutbound', 'ftn/out');
-		var z = parseInt(zone) || 1;
-		if (z === 1) {
-			return outDir;
-		}
-		var zoneHex = z.toString(16).padStart(3, '0');
-		return outDir + '.' + zoneHex;
+		return outboundDirForZone(zone);
 	}
 
 	_hasOutboundMail(peerAddress) {

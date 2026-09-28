@@ -12,6 +12,7 @@ import * as path from 'path';
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
+import { reqFilePath } from '../utils/bsoPaths.js';
 
 // ---------------------------------------------------------------------------
 // Table bootstrap
@@ -300,18 +301,23 @@ async function _findLatestNodelist() {
 // .req file creation (outbound FREQ)
 // ---------------------------------------------------------------------------
 
-function createReqFile(destNet, destNode, filenames) {
-	var outDir = appConfig.get('ftnoutbound', 'ftn/out');
+// Written to the zone outbound the mailer reads for that address (see
+// bsoPaths.js). It used to go to `ftnoutbound` whatever the zone, so a request
+// to a peer outside zone 1, or on a board with MAILER_OUTBOUND_DIR set, was
+// never picked up by any session.
+//
+// opts.zone    -- destination zone (default 1)
+// opts.baseDir -- outbound base directory (default: the mailer's)
+function createReqFile(destNet, destNode, filenames, opts) {
+	var o = opts || {};
+	var reqPath = reqFilePath(o.zone || 1, destNet, destNode, o.baseDir);
+	var outDir = path.dirname(reqPath);
 	if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-
-	var netHex = parseInt(destNet).toString(16).padStart(4, '0');
-	var nodeHex = parseInt(destNode).toString(16).padStart(4, '0');
-	var reqPath = path.join(outDir, netHex + nodeHex + '.req');
 
 	var content = filenames.join('\r\n') + '\r\n';
 	fs.writeFileSync(reqPath, content);
 
-	alogger.writeAlog(3, 'FREQ: created ' + path.basename(reqPath) + ' with ' + filenames.length + ' request(s)', 'cyan');
+	alogger.writeAlog(3, 'FREQ: created ' + reqPath + ' with ' + filenames.length + ' request(s)', 'cyan');
 	return reqPath;
 }
 

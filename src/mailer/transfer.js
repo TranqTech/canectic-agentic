@@ -199,22 +199,7 @@ class TransferEngine extends EventEmitter {
 			var item = this._sendActive;
 			this._sendActive = null;
 
-			// Handle file cleanup based on source
-			if (item.deleteAfterSend) {
-				// Direct BSO packet file (.out/.cut/.hut) — delete
-				this._deleteFile(item.filepath);
-			} else if (item.floFile && item.floPrefix === '^') {
-				// Flow file entry with ^ prefix — delete after send
-				this._deleteFile(item.filepath);
-				this._markFloLineSent(item.floFile, item.filepath);
-			} else if (item.floFile && item.floPrefix === '#') {
-				// Flow file entry with # prefix — truncate after send
-				this._truncateFile(item.filepath);
-				this._markFloLineSent(item.floFile, item.filepath);
-			} else if (item.floFile) {
-				// Flow file entry with no prefix — leave file, mark line sent
-				this._markFloLineSent(item.floFile, item.filepath);
-			}
+			finishSentFile(item);
 
 			this.emit('sendComplete', {
 				name:     info.name,
@@ -455,85 +440,114 @@ class TransferEngine extends EventEmitter {
 		this._sendActive = null;
 	}
 
-	// -----------------------------------------------------------------------
-	// Post-send cleanup
-	// -----------------------------------------------------------------------
-
-	_deleteFile(filepath) {
-		try {
-			if (fs.existsSync(filepath)) {
-				fs.unlinkSync(filepath);
-				alogger.writeClog(5, 'TransferEngine: deleted sent file ' + filepath, 'mailer', 'green');
-			}
-		} catch (err) {
-			alogger.writeClog(3, 'TransferEngine: cannot delete ' + filepath + ': ' + err.message, 'mailer', 'redbright');
-		}
-	}
-
-	_truncateFile(filepath) {
-		try {
-			if (fs.existsSync(filepath)) {
-				fs.truncateSync(filepath, 0);
-				alogger.writeClog(5, 'TransferEngine: truncated sent file ' + filepath, 'mailer', 'green');
-			}
-		} catch (err) {
-			alogger.writeClog(3, 'TransferEngine: cannot truncate ' + filepath + ': ' + err.message, 'mailer', 'redbright');
-		}
-	}
-
-	// Mark a flow file line as sent by replacing its prefix with ~
-	// If all lines in the flow file are marked sent, delete the flow file.
+	// Kept as a method: tests and older callers reach it on the engine.
 	_markFloLineSent(floFile, filepath) {
-		try {
-			if (!fs.existsSync(floFile)) return;
-
-			var content = fs.readFileSync(floFile, 'utf8');
-			var lines   = content.split('\n');
-			var updated = false;
-			var allSent = true;
-
-			for (var i = 0; i < lines.length; i++) {
-				var line = lines[i].trim();
-				if (!line) continue;
-
-				// Extract the filepath from this line (strip prefix if present)
-				var linePrefix = '';
-				var lineFile   = line;
-				if (line[0] === '^' || line[0] === '#' || line[0] === '~') {
-					linePrefix = line[0];
-					lineFile   = line.substring(1).trim();
-				}
-				lineFile = lineFile.replace(/\r/g, '');
-
-				// Match by filepath
-				if (lineFile === filepath && linePrefix !== '~') {
-					lines[i] = '~' + lineFile;
-					updated = true;
-				}
-
-				// Check if this line is still pending
-				var checkPrefix = lines[i].trim()[0];
-				if (checkPrefix !== '~' && lines[i].trim().length > 0) {
-					allSent = false;
-				}
-			}
-
-			// Deletion used to be gated on `updated`, so a flow file whose last
-			// line was marked in an earlier session was never removed: nothing
-			// changed this time round, so nothing checked whether anything was
-			// left. It then read as pending mail on every scan.
-			if (allSent) {
-				fs.unlinkSync(floFile);
-				alogger.writeClog(5, 'TransferEngine: all files sent, deleted flow file ' + floFile, 'mailer', 'green');
-			} else if (updated) {
-				// Write updated flow file with ~ markers
-				fs.writeFileSync(floFile, lines.join('\n'));
-				alogger.writeClog(5, 'TransferEngine: marked sent in ' + path.basename(floFile) + ': ' + path.basename(filepath), 'mailer', 'green');
-			}
-		} catch (err) {
-			alogger.writeClog(3, 'TransferEngine: cannot update flow file ' + floFile + ': ' + err.message, 'mailer', 'redbright');
-		}
+		markFloLineSent(floFile, filepath);
 	}
 }
 
-export { TransferEngine };
+// ---------------------------------------------------------------------------
+// Post-send cleanup
+//
+// What happens to a file once the peer has confirmed it: a direct packet
+// (.out/.cut/.hut) or filebox file is deleted, a flow file entry is deleted,
+// truncated or left according to its prefix, and its line is marked ~ so it is
+// not sent again. Shared by binkp (on M_GOT) and EMSI/Wazoo (on the receiver's
+// ZRINIT after ZEOF). Wazoo used to do none of it, so the same packets were
+// offered to an EMSI peer on every session.
+//
+// item: { filepath, floFile?, floPrefix?, deleteAfterSend? }
+// ---------------------------------------------------------------------------
+
+function finishSentFile(item) {
+	if (!item || !item.filepath) return;
+	if (item.deleteAfterSend) {
+		deleteSentFile(item.filepath);
+	} else if (item.floFile && item.floPrefix === '^') {
+		deleteSentFile(item.filepath);
+		markFloLineSent(item.floFile, item.filepath);
+	} else if (item.floFile && item.floPrefix === '#') {
+		truncateSentFile(item.filepath);
+		markFloLineSent(item.floFile, item.filepath);
+	} else if (item.floFile) {
+		markFloLineSent(item.floFile, item.filepath);
+	}
+}
+
+function deleteSentFile(filepath) {
+	try {
+		if (fs.existsSync(filepath)) {
+			fs.unlinkSync(filepath);
+			alogger.writeClog(5, 'TransferEngine: deleted sent file ' + filepath, 'mailer', 'green');
+		}
+	} catch (err) {
+		alogger.writeClog(3, 'TransferEngine: cannot delete ' + filepath + ': ' + err.message, 'mailer', 'redbright');
+	}
+}
+
+function truncateSentFile(filepath) {
+	try {
+		if (fs.existsSync(filepath)) {
+			fs.truncateSync(filepath, 0);
+			alogger.writeClog(5, 'TransferEngine: truncated sent file ' + filepath, 'mailer', 'green');
+		}
+	} catch (err) {
+		alogger.writeClog(3, 'TransferEngine: cannot truncate ' + filepath + ': ' + err.message, 'mailer', 'redbright');
+	}
+}
+
+// Mark a flow file line as sent by replacing its prefix with ~
+// If all lines in the flow file are marked sent, delete the flow file.
+function markFloLineSent(floFile, filepath) {
+	try {
+		if (!fs.existsSync(floFile)) return;
+
+		var content = fs.readFileSync(floFile, 'utf8');
+		var lines   = content.split('\n');
+		var updated = false;
+		var allSent = true;
+
+		for (var i = 0; i < lines.length; i++) {
+			var line = lines[i].trim();
+			if (!line) continue;
+
+			// Extract the filepath from this line (strip prefix if present)
+			var linePrefix = '';
+			var lineFile   = line;
+			if (line[0] === '^' || line[0] === '#' || line[0] === '~') {
+				linePrefix = line[0];
+				lineFile   = line.substring(1).trim();
+			}
+			lineFile = lineFile.replace(/\r/g, '');
+
+			// Match by filepath
+			if (lineFile === filepath && linePrefix !== '~') {
+				lines[i] = '~' + lineFile;
+				updated = true;
+			}
+
+			// Check if this line is still pending
+			var checkPrefix = lines[i].trim()[0];
+			if (checkPrefix !== '~' && lines[i].trim().length > 0) {
+				allSent = false;
+			}
+		}
+
+		// Deletion used to be gated on `updated`, so a flow file whose last
+		// line was marked in an earlier session was never removed: nothing
+		// changed this time round, so nothing checked whether anything was
+		// left. It then read as pending mail on every scan.
+		if (allSent) {
+			fs.unlinkSync(floFile);
+			alogger.writeClog(5, 'TransferEngine: all files sent, deleted flow file ' + floFile, 'mailer', 'green');
+		} else if (updated) {
+			// Write updated flow file with ~ markers
+			fs.writeFileSync(floFile, lines.join('\n'));
+			alogger.writeClog(5, 'TransferEngine: marked sent in ' + path.basename(floFile) + ': ' + path.basename(filepath), 'mailer', 'green');
+		}
+	} catch (err) {
+		alogger.writeClog(3, 'TransferEngine: cannot update flow file ' + floFile + ': ' + err.message, 'mailer', 'redbright');
+	}
+}
+
+export { TransferEngine, finishSentFile, markFloLineSent };

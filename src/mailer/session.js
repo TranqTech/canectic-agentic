@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BinkpProtocol, verifyCramMD5 } from './protocols/binkp.js';
 import { EmsiProtocol } from './protocols/emsi.js';
-import { TransferEngine } from './transfer.js';
+import { TransferEngine, finishSentFile } from './transfer.js';
 import { WazooTransferEngine } from './wazooTransfer.js';
 import * as peerConnections from '../models/peerConnections.js';
 import * as systemAddresses from '../models/systemAddresses.js';
@@ -24,6 +24,7 @@ import { resolveFileboxPath } from '../utils/fileboxPath.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as outboundFileLog from '../models/outboundFileLog.js';
 import * as floFile from '../utils/floFile.js';
+import { outboundDirForZone } from '../utils/bsoPaths.js';
 
 class SessionController extends EventEmitter {
 	constructor(transport, role, options) {
@@ -471,6 +472,17 @@ class SessionController extends EventEmitter {
 		});
 
 		wazoo.on('sendComplete', (info) => {
+			// The receiver has confirmed the file (ZRINIT after ZEOF), which is
+			// when binkp's M_GOT does the same: delete or truncate it, mark its
+			// flow line. Matched on the source path because two entries can
+			// share a basename.
+			var sent = outboundFiles.find(function(f) { return f.path === info.path; });
+			if (sent) finishSentFile({
+				filepath: sent.path,
+				floFile: sent.floFile,
+				floPrefix: sent.floPrefix,
+				deleteAfterSend: sent.deleteAfterSend
+			});
 			this.filesSent++;
 			this.bytesSent += (info.size || 0);
 			alogger.writeClog(5, 'Session ' + this.uuid + ': Wazoo sent ' + info.name, 'mailer', 'green');
@@ -478,6 +490,10 @@ class SessionController extends EventEmitter {
 		});
 		wazoo.on('receiveComplete', (info) => {
 			this.filesReceived++;
+			// Counted for the post-session toss, which the manager runs only
+			// when this is non-zero. Wazoo has no wildcard routing, so every
+			// received file wants tossing.
+			this.filesToToss++;
 			this.bytesReceived += info.size;
 			alogger.writeClog(5, 'Session ' + this.uuid + ': Wazoo received ' + info.name +
 				' (' + info.size + ' bytes)', 'mailer', 'green');
@@ -544,7 +560,7 @@ class SessionController extends EventEmitter {
 					if (prefix === '~') continue;
 					filepath = filepath.replace(/\r/g, '');
 					if (filepath && fs.existsSync(filepath)) {
-						files.push({ path: filepath });
+						files.push({ path: filepath, floFile: floPath, floPrefix: prefix });
 					}
 				}
 			}
@@ -555,8 +571,14 @@ class SessionController extends EventEmitter {
 		for (var pktExt of pktExtensions) {
 			var pktPath = outDir + '/' + desthex + pktExt;
 			if (fs.existsSync(pktPath)) {
-				files.push({ path: pktPath });
+				files.push({ path: pktPath, deleteAfterSend: true });
 			}
+		}
+
+		// Outbound FREQ, as binkp sends it
+		var reqPath = outDir + '/' + desthex + '.req';
+		if (fs.existsSync(reqPath)) {
+			files.push({ path: reqPath, deleteAfterSend: true });
 		}
 
 		// Per-peer outbound filebox
@@ -569,7 +591,7 @@ class SessionController extends EventEmitter {
 						var fbPath = outboxPath + '/' + fbEntry;
 						try {
 							var fbStat = fs.statSync(fbPath);
-							if (fbStat.isFile()) files.push({ path: fbPath });
+							if (fbStat.isFile()) files.push({ path: fbPath, deleteAfterSend: true });
 						} catch (_) {}
 					}
 				} catch (_) {}
@@ -587,13 +609,7 @@ class SessionController extends EventEmitter {
 	// Default zone (1): ftn/out/
 	// Alternate zones:  ftn/out.002/, ftn/out.003/, etc.
 	_getOutboundDirForZone(zone) {
-		var z = parseInt(zone) || 1;
-		if (z === 1) {
-			return this._outboundDir;
-		}
-		// BSO convention: base dir name + '.' + 3-digit hex zone
-		var zoneHex = z.toString(16).padStart(3, '0');
-		return this._outboundDir + '.' + zoneHex;
+		return outboundDirForZone(zone, this._outboundDir);
 	}
 
 	async _buildOutboundList() {

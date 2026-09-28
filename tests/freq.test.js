@@ -4,10 +4,10 @@
 //
 //   1. Export validation — all expected named exports are present and are functions.
 //
-//   2. createReqFile(destNet, destNode, filenames) — writes a .req file to the
-//      BSO outbound directory.  With an unloaded appConfig the default outbound
-//      path is 'ftn/out' (the second argument to appConfig.get()).  Tests create
-//      files there and clean up in after().
+//   2. createReqFile(destNet, destNode, filenames, { zone, baseDir }) -- writes
+//      a .req file to the zone outbound. Every test passes a temporary baseDir:
+//      these tests used to write into the board's real ftn/out, and one of them
+//      deleted that directory recursively to prove it would be recreated.
 //
 //   3. resolveRequest parsing — reads a .req file and extracts filenames.
 //      Blank lines and comment lines (;) are skipped; passwords after filenames
@@ -29,9 +29,8 @@ import { dbAvailable } from './helpers/dbAvailable.js';
 
 var __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// With unloaded appConfig, createReqFile uses get('ftnoutbound', 'ftn/out')
-// which falls back to 'ftn/out' relative to cwd (/home/kostie/canectic).
-var OUTBOUND_DIR = path.resolve('ftn/out');
+// Outbound base for createReqFile tests, never the board's own.
+var OUTBOUND_DIR = path.join(__dirname, 'tmp', 'freq-out');
 
 // Temporary directory for .req files used by resolveRequest tests.
 var TMP_REQ_DIR = path.join(__dirname, 'tmp', 'freq');
@@ -107,42 +106,33 @@ describe('freq exports', function () {
 
 describe('createReqFile', function () {
 
-	// Track paths created during tests so we can remove them in after()
+	// Every path created lives under OUTBOUND_DIR (or its zone siblings).
 	var createdPaths = [];
-
-	before(function () {
-		// Ensure clean slate — the function creates the dir itself if needed
-		// but we want to confirm it does so; no pre-creation here.
-	});
+	var OPTS = { baseDir: OUTBOUND_DIR };
 
 	after(function () {
-		// Remove all files created by tests in this suite
-		for (var i = 0; i < createdPaths.length; i++) {
-			try { fs.unlinkSync(createdPaths[i]); } catch (_) {}
-		}
-		// Remove the outbound directory if it is now empty (or didn't exist before)
-		try { fs.rmdirSync(OUTBOUND_DIR); } catch (_) {}
+		fs.rmSync(OUTBOUND_DIR, { recursive: true, force: true });
+		fs.rmSync(OUTBOUND_DIR + '.002', { recursive: true, force: true });
 	});
 
 	it('should return the path of the created .req file', function () {
-		var reqPath = createReqFile(100, 200, ['NODELIST.Z']);
+		var reqPath = createReqFile(100, 200, ['NODELIST.Z'], OPTS);
 		createdPaths.push(reqPath);
 		assert.strictEqual(typeof reqPath, 'string');
 		assert.ok(reqPath.length > 0, 'Expected a non-empty path');
 	});
 
 	it('should create the outbound directory if it does not exist', function () {
-		// Remove outbound dir first so we can test creation
-		try { fs.rmSync(OUTBOUND_DIR, { recursive: true, force: true }); } catch (_) {}
+		fs.rmSync(OUTBOUND_DIR, { recursive: true, force: true });
 
-		var reqPath = createReqFile(1, 1, ['TEST.FILE']);
+		var reqPath = createReqFile(1, 1, ['TEST.FILE'], OPTS);
 		createdPaths.push(reqPath);
 		assert.ok(fs.existsSync(OUTBOUND_DIR), 'Outbound directory should be created');
 	});
 
 	it('should name the file using net hex (4 chars) + node hex (4 chars) + .req', function () {
 		// net=100 (0x0064), node=200 (0x00c8) => 006400c8.req
-		var reqPath = createReqFile(100, 200, ['ANYFILE.ZIP']);
+		var reqPath = createReqFile(100, 200, ['ANYFILE.ZIP'], OPTS);
 		createdPaths.push(reqPath);
 		var basename = path.basename(reqPath);
 		assert.strictEqual(basename, '006400c8.req');
@@ -150,7 +140,7 @@ describe('createReqFile', function () {
 
 	it('should pad net hex to 4 characters with leading zeros', function () {
 		// net=1 => 0001
-		var reqPath = createReqFile(1, 1, ['FILE.ZIP']);
+		var reqPath = createReqFile(1, 1, ['FILE.ZIP'], OPTS);
 		createdPaths.push(reqPath);
 		var basename = path.basename(reqPath);
 		assert.strictEqual(basename.substring(0, 4), '0001', 'Net hex should be 4 chars: ' + basename);
@@ -158,7 +148,7 @@ describe('createReqFile', function () {
 
 	it('should pad node hex to 4 characters with leading zeros', function () {
 		// node=1 => 0001
-		var reqPath = createReqFile(1, 1, ['FILE.ZIP']);
+		var reqPath = createReqFile(1, 1, ['FILE.ZIP'], OPTS);
 		// Already tracked from above call — path is deterministic
 		var basename = path.basename(reqPath);
 		assert.strictEqual(basename.substring(4, 8), '0001', 'Node hex should be 4 chars: ' + basename);
@@ -166,7 +156,7 @@ describe('createReqFile', function () {
 
 	it('should use lowercase hex digits', function () {
 		// net=255 (0x00ff), node=255 (0x00ff)
-		var reqPath = createReqFile(255, 255, ['FILE.ZIP']);
+		var reqPath = createReqFile(255, 255, ['FILE.ZIP'], OPTS);
 		createdPaths.push(reqPath);
 		var basename = path.basename(reqPath);
 		assert.strictEqual(basename, '00ff00ff.req');
@@ -174,28 +164,28 @@ describe('createReqFile', function () {
 
 	it('should handle larger net/node values correctly', function () {
 		// net=32768 (0x8000), node=1 (0x0001)
-		var reqPath = createReqFile(32768, 1, ['NODELIST.Z']);
+		var reqPath = createReqFile(32768, 1, ['NODELIST.Z'], OPTS);
 		createdPaths.push(reqPath);
 		var basename = path.basename(reqPath);
 		assert.strictEqual(basename, '80000001.req');
 	});
 
 	it('should write a single filename as the file content', function () {
-		var reqPath = createReqFile(10, 20, ['NODELIST.Z']);
+		var reqPath = createReqFile(10, 20, ['NODELIST.Z'], OPTS);
 		createdPaths.push(reqPath);
 		var content = fs.readFileSync(reqPath, 'utf8');
 		assert.strictEqual(content, 'NODELIST.Z\r\n');
 	});
 
 	it('should join multiple filenames with \\r\\n', function () {
-		var reqPath = createReqFile(10, 21, ['NODELIST.Z', 'FILES.LST', 'ALLFIX.ZIP']);
+		var reqPath = createReqFile(10, 21, ['NODELIST.Z', 'FILES.LST', 'ALLFIX.ZIP'], OPTS);
 		createdPaths.push(reqPath);
 		var content = fs.readFileSync(reqPath, 'utf8');
 		assert.strictEqual(content, 'NODELIST.Z\r\nFILES.LST\r\nALLFIX.ZIP\r\n');
 	});
 
 	it('should terminate the last filename with \\r\\n', function () {
-		var reqPath = createReqFile(10, 22, ['ONLYFILE.ZIP']);
+		var reqPath = createReqFile(10, 22, ['ONLYFILE.ZIP'], OPTS);
 		createdPaths.push(reqPath);
 		var content = fs.readFileSync(reqPath, 'utf8');
 		assert.ok(content.endsWith('\r\n'), 'File content should end with \\r\\n');
@@ -203,28 +193,30 @@ describe('createReqFile', function () {
 
 	it('should write exactly the filenames provided without modification', function () {
 		var filenames = ['README.TXT', 'SYSOP.ZIP', 'NODEDIFF.A56'];
-		var reqPath = createReqFile(10, 23, filenames);
+		var reqPath = createReqFile(10, 23, filenames, OPTS);
 		createdPaths.push(reqPath);
 		var content = fs.readFileSync(reqPath, 'utf8');
 		var lines = content.replace(/\r\n$/, '').split('\r\n');
 		assert.deepStrictEqual(lines, filenames);
 	});
 
-	it('should create the file at a path inside the outbound directory', function () {
-		var reqPath = createReqFile(300, 400, ['TEST.ZIP']);
-		createdPaths.push(reqPath);
-		// createReqFile uses appConfig.get('ftnoutbound', 'ftn/out') which with an
-		// unloaded appConfig returns the literal string 'ftn/out'.  path.join
-		// does not resolve to absolute, so compare dirname of the returned path
-		// against the same relative form used by the function.
-		assert.strictEqual(path.dirname(reqPath), path.normalize('ftn/out'));
+	it('should put a zone 1 request in the outbound base itself', function () {
+		var reqPath = createReqFile(300, 400, ['TEST.ZIP'], { zone: 1, baseDir: OUTBOUND_DIR });
+		assert.strictEqual(path.dirname(reqPath), OUTBOUND_DIR);
+	});
+
+	it('should put a request for another zone in that zone outbound (#80)', function () {
+		// 2:203/0 -> out.002/00cb0000.req, where the mailer looks for it
+		var reqPath = createReqFile(203, 0, ['FILES'], { zone: 2, baseDir: OUTBOUND_DIR });
+		assert.strictEqual(reqPath, path.join(OUTBOUND_DIR + '.002', '00cb0000.req'));
+		assert.strictEqual(fs.readFileSync(reqPath, 'utf8'), 'FILES\r\n');
 	});
 
 	it('should overwrite an existing .req file for the same address', function () {
 		// Two calls with the same net/node — second should overwrite
-		var first = createReqFile(50, 60, ['FIRST.ZIP']);
+		var first = createReqFile(50, 60, ['FIRST.ZIP'], OPTS);
 		createdPaths.push(first);
-		var second = createReqFile(50, 60, ['SECOND.ZIP']);
+		var second = createReqFile(50, 60, ['SECOND.ZIP'], OPTS);
 		// same path, already tracked
 		var content = fs.readFileSync(second, 'utf8');
 		assert.strictEqual(content, 'SECOND.ZIP\r\n');

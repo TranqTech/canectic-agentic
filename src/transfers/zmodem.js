@@ -185,6 +185,7 @@ class ZmodemEngine extends EventEmitter {
 		this._fileHandle = null;
 		this._fileSize = 0;
 		this._fileName = '';
+		this._filePath = '';
 		this._fileMtime = 0;
 		this._fileOffset = 0;      // Current send position
 		this._resolveMain = null;
@@ -329,7 +330,9 @@ class ZmodemEngine extends EventEmitter {
 		if (this._state === 'await_zrinit_next' && this._fileHandle) {
 			fs.close(this._fileHandle, function() {});
 			this._fileHandle = null;
-			this.emit('fileComplete', { name: this._fileName, size: this._fileSize });
+			// path: the source file, so a caller sending several with the same
+			// basename can tell which one the receiver confirmed.
+			this.emit('fileComplete', { name: this._fileName, size: this._fileSize, path: this._filePath });
 		}
 
 		// Transition state immediately to prevent duplicate ZRINITs from
@@ -374,6 +377,7 @@ class ZmodemEngine extends EventEmitter {
 
 			self._fileSize = fileSpec.size || stats.size;
 			self._fileName = fileSpec.name || path.basename(filePath);
+			self._filePath = filePath;
 			self._fileMtime = fileSpec.mtime || Math.floor(stats.mtimeMs / 1000);
 			self._fileOffset = 0;
 
