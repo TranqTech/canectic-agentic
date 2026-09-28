@@ -100,7 +100,7 @@ Admin page at `/admin/freq`:
 **Create File Request** (`POST /admin/freq/request`):
 - Select destination peer connection (dropdown of active FTN connections)
 - Enter filenames (textarea, one per line)
-- Submit calls `freq.createReqFile(net, node, filenames, { zone })`, which writes (overwriting) the `.req` file in the zone outbound the mailer reads for that address: `MAILER_OUTBOUND_DIR` when set, else `ftnoutbound`, plus `.NNN` (hex) for any zone but 1. Path rule in `src/utils/bsoPaths.js`, shared with the mailer. Before #80 it always wrote to `ftnoutbound`, so a request to a peer outside zone 1 was never sent, and the form refused any node 0 address (a host or hub) outright
+- Submit calls `freq.createReqFile(net, node, filenames, { zone })`, which appends to the `.req` file (skipping names already listed, case-insensitively; it overwrote until #80's follow-up, dropping an earlier request still waiting for a session) in the zone outbound the mailer reads for that address: `MAILER_OUTBOUND_DIR` when set, else `ftnoutbound`, plus `.NNN` (hex) for any zone but 1. Path rule in `src/utils/bsoPaths.js`, shared with the mailer. Before #80 it always wrote to `ftnoutbound`, so a request to a peer outside zone 1 was never sent, and the form refused any node 0 address (a host or hub) outright
 
 The `.req` filename follows BSO convention: `NNNNOOOO.req` where NNNN = destination net hex, OOOO = destination node hex. The BSO scanner treats a `.req` as pending mail (flavour Normal), so it triggers a connection on the next scan.
 

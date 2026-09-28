@@ -314,10 +314,27 @@ function createReqFile(destNet, destNode, filenames, opts) {
 	var outDir = path.dirname(reqPath);
 	if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
-	var content = filenames.join('\r\n') + '\r\n';
-	fs.writeFileSync(reqPath, content);
+	// Append to a request still waiting for a session, as BSO mailers do: it
+	// used to be overwritten, so a second request to the same system before
+	// the next session silently dropped the first. A name already listed is
+	// not added again. An existing file written elsewhere may lack a final
+	// line ending, so one is added before appending.
+	var existing = '';
+	try { existing = fs.readFileSync(reqPath, 'utf8'); } catch (_) {}
+	var listed = existing.split(/\r?\n/).map(function(l) { return (l.trim().split(/\s+/)[0] || '').toLowerCase(); });
+	var added = filenames.filter(function(f, i) {
+		var key = f.trim().split(/\s+/)[0].toLowerCase();
+		return key && listed.indexOf(key) === -1 && filenames.findIndex(function(g) {
+			return g.trim().split(/\s+/)[0].toLowerCase() === key;
+		}) === i;
+	});
+	if (added.length > 0) {
+		var lead = existing && !/\n$/.test(existing) ? '\r\n' : '';
+		fs.appendFileSync(reqPath, lead + added.join('\r\n') + '\r\n');
+	}
 
-	alogger.writeAlog(3, 'FREQ: created ' + reqPath + ' with ' + filenames.length + ' request(s)', 'cyan');
+	alogger.writeAlog(3, 'FREQ: ' + (existing ? 'added ' : 'created ') + reqPath + ' with ' + added.length + ' request(s)' +
+		(added.length < filenames.length ? ' (' + (filenames.length - added.length) + ' already listed)' : ''), 'cyan');
 	return reqPath;
 }
 

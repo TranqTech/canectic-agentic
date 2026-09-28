@@ -212,14 +212,27 @@ describe('createReqFile', function () {
 		assert.strictEqual(fs.readFileSync(reqPath, 'utf8'), 'FILES\r\n');
 	});
 
-	it('should overwrite an existing .req file for the same address', function () {
-		// Two calls with the same net/node — second should overwrite
+	it('should append to a request still waiting for a session', function () {
+		// It used to overwrite, so the first request was silently dropped.
 		var first = createReqFile(50, 60, ['FIRST.ZIP'], OPTS);
 		createdPaths.push(first);
 		var second = createReqFile(50, 60, ['SECOND.ZIP'], OPTS);
-		// same path, already tracked
-		var content = fs.readFileSync(second, 'utf8');
-		assert.strictEqual(content, 'SECOND.ZIP\r\n');
+		assert.strictEqual(second, first);
+		assert.strictEqual(fs.readFileSync(second, 'utf8'), 'FIRST.ZIP\r\nSECOND.ZIP\r\n');
+	});
+
+	it('should not list a name twice, ignoring case and any password', function () {
+		var reqPath = createReqFile(50, 61, ['FILES', 'NODELIST.Z'], OPTS);
+		createReqFile(50, 61, ['files', 'NODELIST.Z SECRET', 'NEW.ZIP', 'new.zip'], OPTS);
+		assert.strictEqual(fs.readFileSync(reqPath, 'utf8'), 'FILES\r\nNODELIST.Z\r\nNEW.ZIP\r\n');
+	});
+
+	it('should end an existing request line before appending to it', function () {
+		var reqPath = path.join(OUTBOUND_DIR, '00320040.req');
+		fs.mkdirSync(OUTBOUND_DIR, { recursive: true });
+		fs.writeFileSync(reqPath, 'OTHER.ZIP');
+		createReqFile(50, 64, ['MINE.ZIP'], OPTS);
+		assert.strictEqual(fs.readFileSync(reqPath, 'utf8'), 'OTHER.ZIP\r\nMINE.ZIP\r\n');
 	});
 
 });
