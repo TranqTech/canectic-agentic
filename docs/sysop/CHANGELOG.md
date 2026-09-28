@@ -25,7 +25,7 @@
 ### Web
 
 - **Opening the notification bell now marks your notifications read.** The badge clears as soon as you look, rather than staying lit until you clicked each one or pressed Mark All Read, which is gone from the dropdown (the full Notifications page still has it). New ones stay highlighted until you close the dropdown.
-- **New private mail no longer shows in the notification bell on the web,** since the mail icon already counts it. Callers still see new mail in the terminal's notification list, and reading the message, on the web, in the terminal, in a mail client or in a QWK packet, now clears it there.
+- **New private mail no longer shows in the notification bell on the web,** since the mail icon already counts it. Callers still see new mail in the terminal's notification list, and reading or deleting the message, on the web, in the terminal, in a mail client or in a QWK packet, now clears it there.
 - Fix: **finishing the web call flow, or posting to the wall from it, returned an error when the request carried no form data.** Browsers always send some, so this was only seen from scripts; the call flow now finishes normally either way.
 
 ## v0.9.12a (2026-09-27)

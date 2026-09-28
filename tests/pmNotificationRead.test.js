@@ -1,13 +1,14 @@
-// tests/pmNotificationRead.test.js -- reading a PM clears its "New PM"
-// notification, wherever it was read.
+// tests/pmNotificationRead.test.js -- reading or deleting a PM clears its
+// "New PM" notification, wherever it happened.
 //
 // The web hides pm_received (the mail icon counts new mail), but the terminal
 // notification reader shows it, and reading the mail anywhere left it there
 // unread until it was cleared in the terminal as well. Each notice now names
 // its PM (ref 'pm:<id>'), and every read path clears the notices for the PMs
 // it marked read: viewing (getMessage, which the web and terminal readers
-// use), the mark read button, mark all read, IMAP (same helper, not driven
-// here) and a committed QWK download.
+// use), the mark read button, mark all read, IMAP \Seen (same helper, not
+// driven here) and a committed QWK download; and deleting, from the web and
+// terminal (deleteMessage) or a mail client (IMAP move to Trash).
 //
 // Uses a user id no account holds; pm_inbox and notifications have no foreign
 // key to users. Rows removed in after().
@@ -87,6 +88,27 @@ describe('reading a PM clears its notification', function () {
 		var a = await deliver('one');
 		await qwkUser.commitUserPacket({ commit: { userId: UID, pmIds: [a.insertId], builtAt: new Date() } });
 		assert.strictEqual(await unreadFor(a), false);
+	});
+
+	it('clears only the deleted PM\'s notification on delete', async function () {
+		var a = await deliver('one');
+		var b = await deliver('two');
+		await pm.deleteMessage(UID, a.uuid);
+		assert.strictEqual(await unreadFor(a), false);
+		assert.strictEqual(await unreadFor(b), true);
+	});
+
+	it('clears it when a mail client moves the PM to Trash', async function () {
+		var a = await deliver('one');
+		var imap = await import('../src/servers/imapServer.js');
+		var session = {
+			selectedMailbox: 'INBOX', userId: UID,
+			_resolveTable: function () { return { table: 'pm_inbox', source: 'inbox' }; }
+		};
+		await imap.ImapSession.prototype._markDeleted.call(session, { id: a.insertId }, 1);
+		assert.strictEqual(await unreadFor(a), false);
+		var row = await pg.queryOne('SELECT deleted FROM pm_inbox WHERE id = $1', [a.insertId]);
+		assert.strictEqual(row.deleted, true);
 	});
 
 	it('clears a notice from before refs only once no unread mail is left', async function () {

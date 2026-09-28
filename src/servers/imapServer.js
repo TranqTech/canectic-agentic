@@ -1021,6 +1021,8 @@ class ImapSession {
 				"UPDATE " + info.table + " SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2",
 				[row.id, this.userId]
 			);
+			// Its "New PM" notice goes with it, as for a web or terminal delete
+			if (info.table === 'pm_inbox') await clearPmNotifications(this.userId, [row.id]);
 		}
 	}
 

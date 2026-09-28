@@ -491,9 +491,9 @@ async function markRead(userId, uuid) {
   return result;
 }
 
-// Reading a PM clears its "New PM" notification, wherever it was read. The
-// same call is made from IMAP and the QWK packet commit, which update
-// pm_inbox themselves.
+// Reading or deleting a PM clears its "New PM" notification, wherever it
+// happened. The same call is made from IMAP and the QWK packet commit, which
+// update pm_inbox themselves.
 async function clearPmNotifications(userId, pmIds) {
   try {
     var notif = await import('./notifications.js');
@@ -538,10 +538,16 @@ async function getUnreadCount(userId) {
 // ============================================================
 
 async function deleteMessage(userId, uuid) {
-  return await postgres.write(
+  var result = await postgres.write(
     "UPDATE pm_inbox SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE uuid = $1 AND user_id = $2",
     [uuid, userId]
   );
+  // A deleted PM's "New PM" notice announces mail that is no longer there.
+  // Every deletion starts here or in IMAP's move to Trash: purging only
+  // ever touches rows already in the trash.
+  var row = await postgres.queryOne("SELECT id FROM pm_inbox WHERE uuid = $1 AND user_id = $2", [uuid, userId]);
+  if (row) await clearPmNotifications(userId, [row.id]);
+  return result;
 }
 
 // Restore a soft-deleted message back to the inbox. Refuses to touch a row
