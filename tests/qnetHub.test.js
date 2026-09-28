@@ -58,8 +58,9 @@ describe('hub: who a node is', function () {
 		var src = read('src/routes/api/qnet.js');
 		var filter = read('examples/fail2ban/filter.d/canectic-auth.conf');
 		assert.match(filter, /Failed login for/);
-		assert.match(src, /'\[AUTHFAIL\] Failed login for "QWK node ' \+/);
-		assert.match(src, /'" from ' \+ clientIp\(req\), 'security'/);
+		// The text itself is src/utils/authFailLog.js since #83, checked
+		// against this filter in tests/authFailLog.test.js.
+		assert.match(src, /logAuthFail\('failed', 'QWK node ' \+ creds\.user, clientIp\(req\), 'QWK HTTP'\)/);
 	});
 });
 

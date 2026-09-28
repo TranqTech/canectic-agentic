@@ -19,6 +19,7 @@
 import * as apiTokens from '../models/apiTokens.js';
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
+import { logAuthFail } from '../utils/authFailLog.js';
 
 /**
  * Parse a Bearer token from the Authorization header.
@@ -50,6 +51,9 @@ async function apiAuth(req, res, next) {
 	}
 
 	if (!token) {
+		// A presented token that matches nothing is a failed login as far as
+		// fail2ban is concerned (#83). The token itself is never written.
+		logAuthFail('failed', 'API token', req.ip || (req.socket && req.socket.remoteAddress), 'API');
 		return res.status(401).json({ error: 'invalid_token', message: 'Token not recognised, expired, or revoked' });
 	}
 

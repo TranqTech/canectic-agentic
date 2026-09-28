@@ -894,7 +894,7 @@ Consolidated at `/admin/migrations`. Import tools: SMB message base, areas.bbs, 
 
 - **Rich text editor integration** - TinyMCE is loaded but not yet wired to message composition. See `message_architecture.md` future development section.
 - **Admin real-time dashboard** - Live session counts, active mailer connections, tosser/worker status. Uses cross-process event subscriber (see `PROCESS_ARCHITECTURE.md`) for mailer session events and toss completion notifications. BullMQ dashboard integration for job queue visibility.
-- **Rate limiting** - No rate limiting on login attempts or API endpoints currently (honeypot logins and QWK hub auth failures are logged to `security.log` for fail2ban).
+- **Rate limiting** - No rate limiting on login attempts or API endpoints currently (honeypot logins, failed logins from every service and rejected API tokens are logged to `security.log` for fail2ban, see LOGGING_SYSTEM.md).
 
 ### Recently Completed
 

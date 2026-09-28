@@ -275,7 +275,7 @@ class SmtpSession {
 			var atIdx = username.indexOf('@');
 			if (atIdx >= 0) username = username.substring(0, atIdx);
 
-			var result = await checkUserPass(username, password);
+			var result = await checkUserPass(username, password, { ip: this.socket.remoteAddress, service: 'SMTP' });
 			if (result.isvalid) {
 				this.authenticated = true;
 				this.userId = result.useraccount.id;
@@ -306,7 +306,7 @@ class SmtpSession {
 		var atIdx = username.indexOf('@');
 		if (atIdx >= 0) username = username.substring(0, atIdx);
 
-		var result = await checkUserPass(username, password);
+		var result = await checkUserPass(username, password, { ip: this.socket.remoteAddress, service: 'SMTP' });
 		if (result.isvalid) {
 			this.authenticated = true;
 			this.userId = result.useraccount.id;

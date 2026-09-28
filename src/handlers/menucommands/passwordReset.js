@@ -196,7 +196,7 @@ class passwordReset extends BaseSubModule {
 			return;
 		}
 
-		var result = await checkUserPass(this._username, pw);
+		var result = await checkUserPass(this._username, pw, { ip: this.call.callerId, service: 'terminal password change' });
 		if (result.isvalid) {
 			this._showNewPrompt();
 		} else {

@@ -35,6 +35,7 @@ import * as networkTransfers from '../models/networkTransfers.js';
 import { matchNode, looksLikeZip } from '../utils/qnetAuth.js';
 import { qnetInDir, qnetOutDir } from '../utils/qnetPaths.js';
 import { isActive as maintenanceActive } from '../maintenance/maintenanceFlag.js';
+import { logAuthFail } from '../utils/authFailLog.js';
 
 var IDLE_MS = 5 * 60 * 1000;
 var DATA_WAIT_MS = 30 * 1000;
@@ -159,8 +160,7 @@ class QwkFtpSession {
 		try { conns = await peerConnections.getActiveConnectionsByNetworkType('QWK'); } catch (_) {}
 		var conn = matchNode({ user: this.user, pass: pass }, conns);
 		if (!conn) {
-			alogger.writeClog(3, '[AUTHFAIL] Failed login for "QWK node ' + this.user.replace(/"/g, '') +
-				'" from ' + this.ip, 'security', 'yellow');
+			logAuthFail('failed', 'QWK node ' + this.user, this.ip, 'QWK FTP');
 			this.badLogins++;
 			this.reply(530, 'Login incorrect');
 			if (this.badLogins >= MAX_BAD_LOGINS) this.close();

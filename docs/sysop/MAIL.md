@@ -376,7 +376,7 @@ Check:
 3. The user's BBS password is correct (same as web/terminal login)
 4. No firewall is blocking the client from reaching the port
 
-Failed logins are not logged; the client simply gets `NO LOGIN failed` (IMAP) or `535 Authentication failed` (SMTP). At log level 4, `pm2 logs mail` shows each successful login as `IMAP LOGIN: <username>` or `SMTP AUTH: <username>`, so a user who never appears there is not getting past authentication.
+A failed login gets `NO LOGIN failed` (IMAP) or `535 Authentication failed` (SMTP), and is written to `security.log` as `[AUTHFAIL] Failed login for "<user>" from <address> via IMAP` (or `via SMTP`, or `Login attempt for unknown user` for a name that does not exist), which the fail2ban filter in `examples/fail2ban/` matches. At log level 4, `pm2 logs mail` shows each successful login as `IMAP LOGIN: <username>` or `SMTP AUTH: <username>`, so a user who never appears there is not getting past authentication.
 
 ### The port/secure override warning keeps firing
 

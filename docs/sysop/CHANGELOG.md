@@ -22,6 +22,10 @@
 - Fix: **a maintenance or toss job that ran past its time limit was reported failed but carried on running,** and the next job started alongside it. Such a job is now asked to stop: regenerating message HTML, MSGID repair and rethreading stop at the next safe point, and the job is reported as stopped. A job that cannot stop is logged as still running, and the worker health check keeps showing it until it ends. The health check also measured every job against the toss limit (30 minutes), so a maintenance job that was healthy but ran longer than that could get the worker restarted under it; each job is now measured against its own queue's limit.
 - **Regenerating message HTML now runs one area at a time,** from the command line and from the admin Events page. A large board could not finish in a single job before `maintenance_job_timeout` (60 minutes) stopped it, so it had to be done by hand in `--area` batches. The command waits until every area is done, however long that takes, and reports each one as it finishes.
 
+### Security
+
+- Fix: **failed logins from mail clients and rejected API tokens could not be banned by fail2ban.** A wrong IMAP or SMTP password was logged without the caller's address, and an API request with a bad token was not logged at all. Both are now written to `security.log` with the address, in the form the shipped filter in `examples/fail2ban/` already matches, and each line now says which service it came from (`via IMAP`, `via SMTP`, `via API`). A wrong current password when changing your password, on the web or in the terminal, is logged the same way. No change to the filter is needed.
+
 ### Web
 
 - **Opening the notification bell now marks your notifications read.** The badge clears as soon as you look, rather than staying lit until you clicked each one or pressed Mark All Read, which is gone from the dropdown (the full Notifications page still has it). New ones stay highlighted until you close the dropdown.

@@ -235,7 +235,7 @@ class ImapSession {
 		var atIdx = username.indexOf('@');
 		if (atIdx >= 0) username = username.substring(0, atIdx);
 
-		var result = await checkUserPass(username, password);
+		var result = await checkUserPass(username, password, { ip: this.socket.remoteAddress, service: 'IMAP' });
 		if (result.isvalid) {
 			this.userId = result.useraccount.id;
 			this.username = result.useraccount.username;

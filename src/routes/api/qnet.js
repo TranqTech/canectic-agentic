@@ -34,6 +34,7 @@ import * as networkTransfers from '../../models/networkTransfers.js';
 import * as jobs from '../../queues/jobs.js';
 import { parseBasic, matchNode, looksLikeZip } from '../../utils/qnetAuth.js';
 import { qnetInDir } from '../../utils/qnetPaths.js';
+import { logAuthFail } from '../../utils/authFailLog.js';
 
 function clientIp(req) {
 	return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
@@ -47,8 +48,7 @@ async function qnetAuth(req, res, next) {
 	}
 	if (!conn) {
 		if (creds) {
-			alogger.writeClog(3, '[AUTHFAIL] Failed login for "QWK node ' + creds.user.replace(/"/g, '') +
-				'" from ' + clientIp(req), 'security', 'yellow');
+			logAuthFail('failed', 'QWK node ' + creds.user, clientIp(req), 'QWK HTTP');
 		}
 		res.set('WWW-Authenticate', 'Basic realm="Canectic QWK hub"');
 		return res.status(401).json({ error: 'unauthorized' });

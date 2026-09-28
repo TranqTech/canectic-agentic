@@ -717,7 +717,8 @@ router.post('/profile/password', urlencodedParser, async (req, res) => {
 	var pwmin = appConfig.getNumber('pwmin', 12);
 
 	// Verify current password
-	var authResult = await userAccounts.checkUserPass(session.username, currentPassword);
+	var authResult = await userAccounts.checkUserPass(session.username, currentPassword,
+		{ ip: req.ip || req.socket.remoteAddress, service: 'web password change' });
 	if (!authResult.isvalid) {
 		return res.redirect('/users/profile?error=' + encodeURIComponent('Current password is incorrect'));
 	}
@@ -750,7 +751,8 @@ router.post('/profile/logout-all', urlencodedParser, async (req, res) => {
 	if (!session) return res.redirect('/users/login');
 
 	var password = req.body.password || '';
-	var authResult = await userAccounts.checkUserPass(session.username, password);
+	var authResult = await userAccounts.checkUserPass(session.username, password,
+		{ ip: req.ip || req.socket.remoteAddress, service: 'web profile' });
 	if (!authResult.isvalid) {
 		return res.redirect('/users/profile?error=' + encodeURIComponent('Incorrect password'));
 	}

@@ -9,6 +9,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import appConfig from "../config/appConfig.js";
 import { sessionUpdateUser } from '../middleware/db/sessionstore.js';
 import { newSinceMs } from '../utils/newSince.js';
+import { logAuthFail, normaliseIp } from '../utils/authFailLog.js';
 
 //setup
 dotenv.config();
@@ -250,7 +251,9 @@ async function createNewUser(newrecord) {
 
 async function checkUserPass(username, password, options) {
 	var opts = options || {};
-	var clientIp = opts.ip || 'unknown';
+	// opts.ip: the client address, so a failure is written in a form fail2ban
+	// can act on. opts.service: where the login came from ('IMAP', 'SMTP').
+	var clientIp = normaliseIp(opts.ip);
 
 	var resultobj = {
 		status: false,
@@ -288,10 +291,7 @@ async function checkUserPass(username, password, options) {
 		resultobj.errormessages.push("No User");
 		resultobj.resultmsg = "No User";
 		alogger.writeAlog(5, "No User Found", "redbright");
-		alogger.writeClog(3,
-			'[AUTHFAIL] Login attempt for unknown user "' + username + '" from ' + clientIp,
-			'security', 'yellow'
-		);
+		logAuthFail('unknown', username, clientIp, opts.service);
 		return resultobj;
 	}
 
@@ -313,10 +313,7 @@ async function checkUserPass(username, password, options) {
 		resultobj.useraccount = userobj;
 	} else {
 		alogger.writeAlog(5, "User password incorrect", "redbright");
-		alogger.writeClog(3,
-			'[AUTHFAIL] Failed login for "' + username + '" from ' + clientIp,
-			'security', 'yellow'
-		);
+		logAuthFail('failed', username, clientIp, opts.service);
 		resultobj.errormessages.push("Password BAD");
 		resultobj.resultmsg = "Password BAD";
 	}
