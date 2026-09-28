@@ -136,7 +136,7 @@ Useful for cron jobs, shell scripts, or external integrations.
 
 ### 3. Menu command
 
-Add a menu entry with `command_name: fireEvent` and `command_arg: event_code` (optionally `event_code|{json extra vars}`). Fires for the current session user. The menu editor's Command list does not offer this command yet, so add the entry to an exported menu JSON file and import it (see [MENUS.md](MENUS.md#export-and-import)).
+Add a menu entry with the command **Fire Template Event** (`fireEvent`) and the event code as its argument, optionally followed by `|` and JSON extra variables (`event_code|{json extra vars}`). It fires for the current session user and returns straight to the menu.
 
 Example: fire a custom `door_played` event after a door launch, with the door slug as extra data:
 

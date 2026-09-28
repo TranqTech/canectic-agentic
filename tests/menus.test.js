@@ -10,6 +10,7 @@
 // Run: npx mocha tests/menus.test.js
 
 import assert from 'assert';
+import * as fs from 'fs';
 import {
 	getAvailableCommands,
 	getValidDisplayFileTypes,
@@ -22,6 +23,19 @@ import {
 // ---------------------------------------------------------------------------
 
 describe('getAvailableCommands', function () {
+
+	// #82: fireEvent worked as a command but the editor could not offer it,
+	// because this list is kept by hand. Every command the menu handler runs
+	// must be here, apart from display-file types (another switch in the same
+	// file) and aliases kept for old menus.
+	it('offers every command the menu handler runs', function () {
+		var src = fs.readFileSync(new URL('../src/handlers/menuhandler.js', import.meta.url), 'utf8');
+		var cases = new Set(Array.from(src.matchAll(/case "([A-Za-z]+)":/g)).map(function (m) { return m[1]; }));
+		var skip = new Set(getValidDisplayFileTypes().concat(['fileList']));
+		var offered = new Set(getAvailableCommands().map(function (c) { return c.name; }));
+		var missing = Array.from(cases).filter(function (c) { return !skip.has(c) && !offered.has(c); });
+		assert.deepStrictEqual(missing, []);
+	});
 
 	it('should return an array', function () {
 		var cmds = getAvailableCommands();

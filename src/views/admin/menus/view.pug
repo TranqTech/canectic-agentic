@@ -583,6 +583,9 @@ block content
                     .text-end
                       input.btn.btn-lg.btn-success(type='submit' value='Save Changes')
 
+  datalist#template-event-codes
+    for ev in (templateEvents || [])
+      option(value=ev.code)= ev.label
   script.
     document.addEventListener('DOMContentLoaded', function() {
       var menuId = !{menu ? menu.id : 'null'};
@@ -595,8 +598,15 @@ block content
 
       // Commands that need a free-text argument (no dropdown)
       var textArgCommands = {
-        displayScreen: 'Screen (type:Welcome or subdir/filename):'
+        displayScreen: 'Screen (type:Welcome or subdir/filename):',
+        fireEvent: 'Event code (optionally code|{json}):'
       };
+      var textArgPlaceholders = {
+        displayScreen: 'e.g. type:Welcome or screens/rules',
+        fireEvent: 'e.g. user_logoff or holiday|{"event":{"name":"New Year"}}'
+      };
+      // Event codes are suggested, not enforced: the argument may carry JSON
+      var textArgLists = { fireEvent: 'template-event-codes' };
 
       // Show/hide argument select and populate options based on selected command
       function syncArgField(cmdSel) {
@@ -627,6 +637,9 @@ block content
           if (argText) {
             argText.style.display = '';
             argText.name = 'command_arg';
+            argText.placeholder = textArgPlaceholders[cmd] || '';
+            if (textArgLists[cmd]) argText.setAttribute('list', textArgLists[cmd]);
+            else argText.removeAttribute('list');
           }
           return;
         }

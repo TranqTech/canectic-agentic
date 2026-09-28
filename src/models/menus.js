@@ -413,6 +413,7 @@ function getAvailableCommands() {
 		{ name: 'newsViewer',     label: 'News Viewer',       needsArg: false },
 		{ name: 'notifications',  label: 'Notifications',     needsArg: false },
 		{ name: 'displayScreen',  label: 'Display Screen',    needsArg: true,  argLabel: 'type:Welcome or screens/filename' },
+		{ name: 'fireEvent',      label: 'Fire Template Event', needsArg: true, argLabel: 'event_code or event_code|{json}' },
 	].sort(function(a, b) { return a.label.localeCompare(b.label); });
 }
 

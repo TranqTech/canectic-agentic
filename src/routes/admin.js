@@ -2488,11 +2488,14 @@ router.get('/menus/:id', async (req, res) => {
 	}
 	var entries        = await menus.getEntriesForMenu(menuId);
 	var availCommands  = menus.getAvailableCommands();
+	// Suggestions for the Fire Template Event argument
+	var templateEvents = (await messageTemplates.getAllEvents()) || [];
 	var menuTypes      = menus.getValidMenuTypes();
 	var ansiColors     = menus.getAnsiColors();
 	var allMenus       = await menus.getAllMenus();
 	var allDoors       = await doors.getAllDoors();
 	res.render('admin/menus/view', {
+		templateEvents: templateEvents,
 		sufficientAccess: sufficientAccess,
 		title: menu.name,
 		activelink: 'menus',
