@@ -67,6 +67,10 @@ reported, but neither is derived from the other. Parsing prose to decide what to
 execute on someone's live board works right up until a bullet is reworded, and
 the failure is silent.
 
+### Shipped door lists
+
+`config/doorlists/doorparty.json` and `bbslink.json` (#89) are copies of the door codes DoorParty (wiki.throwbackbbs.com, page `doorcode`) and BBSLink (bbslink.net/sysop) publish. Boards never fetch those pages, so before a stable cut, read both pages and update the files when they have changed: new codes, renamed doors, codes gone. Set `updated`, keep `format` at `canectic-doorlist-v1`, and leave out BBSLink's `test` code. `tests/remoteDoorCatalog.test.js` checks both still parse. A board whose provider checks every day picks the new list up after updating; the daily check's more-than-half rule applies to shipped lists too, so a list cut down by mistake is refused rather than switching a board's doors off.
+
 ---
 
 ## 2. Cutting

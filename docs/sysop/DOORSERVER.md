@@ -42,6 +42,25 @@ Your callers can play doors that run somewhere else: on another Canectic board's
 - **BBSLink.** Apply at bbslink.net for a system code, authorisation code and scheme code, and enter them. Add doors by their BBSLink codes (for example `lord`, `tw`, `bre`); the code `menu` lists every game.
 - **Another RLogin server** (a Synchronet game server, or anything else that speaks RLogin): enter its host and port. The username sent is the template with `{alias}` (the caller's name) and `{tag}` filled in, and the door code goes in the terminal type through its template (`xtrn={door}` for Synchronet).
 
+### Door lists
+
+Each provider can keep a list of the doors it offers, which you tick doors from instead of typing codes. Under **Door list** on the provider's page, choose where it comes from:
+
+- **A list shipped with Canectic.** DoorParty and BBSLink lists come with Canectic (in `config/doorlists/`) and are updated with each release; the DoorParty and BBSLink buttons choose them for you.
+- **A file in a file area**: the newest file whose name matches the pattern you give (`*` and `?` allowed, for example `DPLIST*.ZIP`), either a list file or an archive holding one. This is how a list can reach you by file echo.
+- **Their own list**, for another Canectic board, which sends it over the connection.
+
+**Check the door list** shows what the list would change (new doors, renamed ones, doors no longer offered) before you **Apply** it. The list then appears on the page with a filter; tick doors and **Add the ticked doors**, optionally straight into a collection. Tick **Check every day** and the board checks the list each morning and applies it, sending you a notification of what changed. A door that leaves the list is kept in it, marked "no longer offered", and any door entry for it is made inactive so callers stop seeing it; nothing is deleted. The daily check refuses a list that would remove more than half the doors, or an empty one, and tells you instead, since that is far more likely a damaged file than half a network's doors vanishing overnight. Canectic never reads anyone's web pages for a list: a page changes without notice, and what it then yields is wrong.
+
+A list file is JSON:
+
+```
+{ "format": "canectic-doorlist-v1", "list": "mylist", "title": "My doors", "updated": "2026-09-29",
+  "doors": [ { "code": "lord", "name": "Legend of the Red Dragon", "category": "RPG" } ] }
+```
+
+or plain text, one door per line: the code, then spaces, then the name, optionally a tab and a category. Lines starting with `#` are comments.
+
 A few things worth knowing:
 
 - **Who can use them.** Only callers who are logged in, at the provider's **Minimum security** (blank means the verified level, `verified_security`), so guests and unverified callers are kept out, as DoorParty asks.

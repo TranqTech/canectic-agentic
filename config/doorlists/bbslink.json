@@ -1,0 +1,154 @@
+{
+ "format": "canectic-doorlist-v1",
+ "list": "bbslink",
+ "title": "BBSLink",
+ "kind": "bbslink",
+ "updated": "2026-09-29",
+ "source": "BBSLink door codes, bbslink.net/sysop, as published 2026-09-29",
+ "doors": [
+  {
+   "code": "menu",
+   "name": "BBSLink menu (every game)"
+  },
+  {
+   "code": "lord",
+   "name": "Legend of the Red Dragon"
+  },
+  {
+   "code": "lord2",
+   "name": "Legend of the Red Dragon II: New World"
+  },
+  {
+   "code": "mzkl",
+   "name": "MZK LORD"
+  },
+  {
+   "code": "ooii",
+   "name": "Operation: Overkill II"
+  },
+  {
+   "code": "tw",
+   "name": "Trade Wars 2002 - List of current servers - Recommended option"
+  },
+  {
+   "code": "tw1",
+   "name": "Trade Wars 2002 - Brokedown Palace"
+  },
+  {
+   "code": "tw2",
+   "name": "Trade Wars 2002 - Crazy World BBS"
+  },
+  {
+   "code": "teos",
+   "name": "Planets: The Exploration of Space"
+  },
+  {
+   "code": "gwar",
+   "name": "Global War"
+  },
+  {
+   "code": "ggam",
+   "name": "Global Backgammon"
+  },
+  {
+   "code": "usrp",
+   "name": "Usurper"
+  },
+  {
+   "code": "bre",
+   "name": "Barren Realms Elite"
+  },
+  {
+   "code": "falc",
+   "name": "Falcon's Eye"
+  },
+  {
+   "code": "fhon",
+   "name": "Falcon's Honor"
+  },
+  {
+   "code": "arcl",
+   "name": "The Arcadian Legends"
+  },
+  {
+   "code": "dmud",
+   "name": "DoorMUD"
+  },
+  {
+   "code": "pimp",
+   "name": "Pimp Wars"
+  },
+  {
+   "code": "luna",
+   "name": "Lunatix"
+  },
+  {
+   "code": "netr",
+   "name": "Netrunner"
+  },
+  {
+   "code": "assn",
+   "name": "Assassin"
+  },
+  {
+   "code": "bbsc",
+   "name": "BBS Crash"
+  },
+  {
+   "code": "vsys",
+   "name": "Virtual Sysop"
+  },
+  {
+   "code": "tpit",
+   "name": "The Pit"
+  },
+  {
+   "code": "bord",
+   "name": "Bordello"
+  },
+  {
+   "code": "junk",
+   "name": "Junkyard"
+  },
+  {
+   "code": "mmot",
+   "name": "Murder Motel"
+  },
+  {
+   "code": "dark",
+   "name": "Darklands"
+  },
+  {
+   "code": "hack",
+   "name": "Hackin' Crackin'"
+  },
+  {
+   "code": "mega",
+   "name": "Mega Slots"
+  },
+  {
+   "code": "fish",
+   "name": "Fresh Water Fishing Sim"
+  },
+  {
+   "code": "lmon",
+   "name": "Lemonade"
+  },
+  {
+   "code": "dmas",
+   "name": "Dungeon Master"
+  },
+  {
+   "code": "bcr",
+   "name": "BCR Games Server"
+  },
+  {
+   "code": "legn",
+   "name": "Legion"
+  },
+  {
+   "code": "dkns",
+   "name": ""
+  }
+ ]
+}

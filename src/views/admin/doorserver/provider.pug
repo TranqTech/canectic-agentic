@@ -113,15 +113,39 @@ block content
                   +field('Telnet port', 'bl_telnet_port', v('bl_telnet_port', st.telnet_port), { col: 'col-md-2', type: 'number' })
                   +field('Web address', 'bl_http_base', v('bl_http_base', st.http_base), { col: 'col-md-4' })
 
+                .col-12
+                  h6.mt-2 Door list
+                  small.text-muted Where the list of doors this provider offers comes from. Canectic never reads anyone's web pages for it.
+                - var lsrc = v('list_source', st.list_source || (kind === 'canectic' ? 'remote' : 'none'))
+                .col-md-3
+                  label.form-label.small Source
+                  select.form-control.form-control-sm(name='list_source')
+                    option(value='none' selected=(lsrc === 'none')) None (add doors by code)
+                    option(value='shipped' selected=(lsrc === 'shipped')) A list shipped with Canectic
+                    option(value='file' selected=(lsrc === 'file')) A file in a file area
+                    if kind === 'canectic'
+                      option(value='remote' selected=(lsrc === 'remote')) Their own list
+                .col-md-3
+                  label.form-label.small Shipped list
+                  select.form-control.form-control-sm(name='list_name')
+                    option(value='') -
+                    each l in shippedLists
+                      option(value=l.name selected=(v('list_name', st.list_name) === l.name))= l.title + ' (' + l.count + ' doors, ' + l.updated + ')'
+                +field('File area', 'list_area', v('list_area', st.list_area || ''), { col: 'col-md-2', placeholder: 'shortcode' })
+                +field('File name', 'list_file', v('list_file', st.list_file || ''), { col: 'col-md-2', placeholder: 'e.g. DPLIST*.ZIP', hint: '* and ? allowed; the newest match is used' })
+                .col-md-2
+                  .form-check.mt-4
+                    input#list_auto.form-check-input(type='checkbox' name='list_auto' value='true' checked=!!v('list_auto', st.list_auto))
+                    label.form-check-label.small(for='list_auto') Check every day
                 +field('Notes (sysop only)', 'notes', v('notes', remote.notes || ''), { col: 'col-md-12' })
                 .col-12.mt-2
                   button.btn.btn-sm.btn-warning(type='submit')= mode === 'new' ? 'Add' : 'Save'
 
               if mode === 'edit'
                 .mt-2
-                  if kind === 'canectic'
-                    form.d-inline(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/test')
-                      button.btn.btn-sm.btn-outline-info.me-2(type='submit') Fetch their door list
+                  if (st.list_source || (kind === 'canectic' ? 'remote' : 'none')) !== 'none'
+                    form.d-inline(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/list/check')
+                      button.btn.btn-sm.btn-outline-info.me-2(type='submit') Check the door list
                   if kind === 'rlogin' && st.ssh && remote.host_key
                     form.d-inline(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/hostkey/reset' onsubmit="return confirm('Forget the recorded SSH host key? Only do this when the server really changed its key.')")
                       button.btn.btn-sm.btn-outline-secondary.me-2(type='submit') Forget the SSH host key
@@ -165,34 +189,88 @@ block content
                 else
                   p.text-muted No doors yet.
 
-                if fetched
-                  h5.mt-3 Their door list
-                  - var have = doors.map(function (d) { return d.remote_door; })
+                if listPreview
+                  .card.border-info.mb-3#preview
+                    .card-body
+                      h5 Door list from #{listPreview.from}
+                      p.mb-1 #{listPreview.count} doors: #{listPreview.diff.added.length} new, #{listPreview.diff.changed.length} renamed or moved, #{listPreview.diff.removed.length} no longer offered, #{listPreview.diff.returning.length} offered again, #{listPreview.diff.unchanged.length} unchanged.
+                      if listPreview.diff.added.length
+                        p.small.mb-1
+                          strong New:
+                          |  #{listPreview.diff.added.map(function (x) { return x.name; }).join(', ')}
+                      if listPreview.diff.removed.length
+                        p.small.mb-1.text-warning
+                          strong No longer offered:
+                          |  #{listPreview.diff.removed.join(', ')}. Door entries for these are made inactive.
+                      if listPreview.warnings && listPreview.warnings.length
+                        p.small.text-muted Skipped: #{listPreview.warnings.join('; ')}
+                      if listPreview.autoRefusal
+                        p.small.text-warning The daily check would refuse this list: #{listPreview.autoRefusal}. You can still apply it here.
+                      form(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/list/apply')
+                        button.btn.btn-sm.btn-success(type='submit') Apply this list
+                  script.
+                    document.addEventListener('DOMContentLoaded', function () { var el = document.getElementById('preview'); if (el) el.scrollIntoView(); });
+
+                h5.mt-3#catalog Their door list
+                if !catalog.length
+                  p.text-muted Nothing yet. Choose a door list source above and use Check the door list, or add doors by code below.
+                else
+                  - var have = doors.map(function (d) { return String(d.remote_door || '').toLowerCase(); })
+                  input#catFilter.form-control.form-control-sm.mb-2(type='search' placeholder='Filter by name, code or category' style='max-width:320px')
                   form(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/doors')
-                    table.table.table-sm.align-middle
-                      tbody
-                        each f in fetched
+                    .table-responsive(style='max-height:480px; overflow-y:auto')
+                      table.table.table-sm.align-middle#catTable
+                        thead
                           tr
-                            td(style='width:40px')
-                              if have.includes(f.slug)
-                                span.text-muted -
-                              else
-                                input.form-check-input(type='checkbox' name='pick' value=f.slug id='pick-' + f.slug)
-                                input(type='hidden' name='name_' + f.slug value=f.name)
-                            td
-                              label(for='pick-' + f.slug)= f.name
-                              if have.includes(f.slug)
-                                small.text-muted.ms-2 added
-                            td
-                              code= f.slug
-                    .row.g-2
+                            th(style='width:40px')
+                            th Name
+                            th Code
+                            th Category
+                            th Status
+                        tbody
+                          each c in catalog
+                            - var added = have.includes(String(c.code).toLowerCase())
+                            tr(data-hay=(c.name + ' ' + c.code + ' ' + (c.category || '')).toLowerCase())
+                              td
+                                if added || !c.active
+                                  span.text-muted -
+                                else
+                                  input.form-check-input(type='checkbox' name='pick' value=c.code id='pick-' + c.id)
+                                  input(type='hidden' name='name_' + c.code value=c.name)
+                              td
+                                label(for='pick-' + c.id)= c.name
+                              td
+                                code= c.code
+                              td.small= c.category || ''
+                              td.small
+                                if !c.active
+                                  span.text-warning no longer offered
+                                  if c.removed_at
+                                    |  since 
+                                    +ts(c.removed_at, 'date')
+                                else if added
+                                  span.text-success added
+                                else
+                                  span.text-muted available
+                    .row.g-2.mt-1
                       .col-md-4
                         select.form-select.form-select-sm(name='collection_id')
                           option(value='') -- no collection --
-                          each c in collections
-                            option(value=c.id)= c.name
+                          each col in collections
+                            option(value=col.id)= col.name
                       .col-md-4
                         button.btn.btn-sm.btn-success(type='submit') Add the ticked doors
+                  script.
+                    (function () {
+                      var f = document.getElementById('catFilter');
+                      if (!f) return;
+                      f.addEventListener('input', function () {
+                        var q = f.value.trim().toLowerCase();
+                        document.querySelectorAll('#catTable tbody tr').forEach(function (tr) {
+                          tr.style.display = !q || tr.dataset.hay.indexOf(q) !== -1 ? '' : 'none';
+                        });
+                      });
+                    })();
 
                 h5.mt-3 Add a door
                 form.row.g-2(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/doors')

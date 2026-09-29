@@ -243,6 +243,18 @@ export async function registerSchedules() {
 		scheduleCount++;
 
 		// -----------------------------------------------------------------
+		// Maintenance: daily door list check for door providers that ask
+		// for one (#89 part 3); does nothing for a provider without it
+		// -----------------------------------------------------------------
+		await maintenanceQueue.upsertJobScheduler('check-door-lists-daily', {
+			pattern: '0 45 4 * * *',   // 4:45 AM daily
+		}, {
+			name: 'check-door-lists',
+			data: {},
+		});
+		scheduleCount++;
+
+		// -----------------------------------------------------------------
 		// Maintenance: daily echolist/filebone reconciliation
 		// -----------------------------------------------------------------
 		await maintenanceQueue.upsertJobScheduler('reconcile-echolists-daily', {

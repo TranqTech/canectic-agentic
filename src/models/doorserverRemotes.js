@@ -25,6 +25,7 @@ import { normaliseSystemId } from './doorserver.js';
 var TABLE = 'doorserver_remotes';
 
 var KINDS = ['canectic', 'rlogin', 'bbslink'];
+var LIST_SOURCES = ['none', 'shipped', 'file', 'remote'];
 var KIND_LABELS = { canectic: 'Canectic door server', rlogin: 'RLogin door server', bbslink: 'BBSLink' };
 
 var RLOGIN_DEFAULTS = {
@@ -39,7 +40,8 @@ var PRESETS = {
 	doorparty: {
 		label: 'DoorParty', kind: 'rlogin',
 		settings: { host: 'dp.throwbackbbs.com', port: 513, ssh: true, ssh_host: 'dp.throwbackbbs.com', ssh_port: 2022,
-			username_template: '[{tag}]{alias}', password_mode: 'per_user', terminal_template: '{door}', menu_terminal: 'ansi' },
+			username_template: '[{tag}]{alias}', password_mode: 'per_user', terminal_template: '{door}', menu_terminal: 'ansi',
+			list_source: 'shipped', list_name: 'doorparty' },
 		note: 'Apply on Throwback BBS (telnet bbs.throwbackbbs.com) for a system tag and the SSH username and password.'
 	},
 	synchronet: {
@@ -49,7 +51,7 @@ var PRESETS = {
 	},
 	bbslink: {
 		label: 'BBSLink', kind: 'bbslink',
-		settings: { host: 'games.bbslink.net', http_base: 'http://games.bbslink.net', telnet_port: 23 },
+		settings: { host: 'games.bbslink.net', http_base: 'http://games.bbslink.net', telnet_port: 23, list_source: 'shipped', list_name: 'bbslink' },
 		note: 'Apply at bbslink.net for a system code, authorisation code and scheme code. The door code menu lists every game.'
 	}
 };
@@ -147,6 +149,18 @@ function validateRemote(input, opts, current) {
 		values.url = 'telnet://' + bl.host + ':' + bl.telnet_port;
 	}
 	if (kind !== 'canectic') values.secrets = JSON.stringify(secrets);
+
+	// Where the provider's door list comes from (#89 part 3), every kind
+	var list = {
+		list_source: LIST_SOURCES.indexOf(i.list_source) !== -1 ? i.list_source : (kind === 'canectic' ? 'remote' : 'none'),
+		list_name: text(i.list_name, 32).toLowerCase(), list_area: text(i.list_area, 32), list_file: text(i.list_file, 64),
+		list_auto: checked(i.list_auto)
+	};
+	if (list.list_source === 'remote' && kind !== 'canectic') errors.push('Only a Canectic door server sends its own door list');
+	if (list.list_source === 'shipped' && !/^[a-z0-9_-]{1,32}$/.test(list.list_name)) errors.push('Choose which shipped door list to use');
+	if (list.list_source === 'file' && (!list.list_area || !list.list_file)) errors.push('A door list from a file needs the file area and the file name to look for');
+	var merged = Object.assign(values.settings ? JSON.parse(values.settings) : {}, list);
+	values.settings = JSON.stringify(merged);
 	return { values: values, errors: errors };
 }
 
@@ -274,7 +288,7 @@ async function setHostKey(uuid, fingerprint) {
 }
 
 export {
-	KINDS, KIND_LABELS, PRESETS, RLOGIN_DEFAULTS, BBSLINK_DEFAULTS,
+	KINDS, KIND_LABELS, LIST_SOURCES, PRESETS, RLOGIN_DEFAULTS, BBSLINK_DEFAULTS,
 	validateRemote, settingsOf, secretsOf, minSecurityFor, mayUseRemote, parseRemoteArg, identityFor, rloginName,
 	getAll, getByName, getByUuid, createRemote, updateRemote, deleteRemote, touch, setHostKey
 };

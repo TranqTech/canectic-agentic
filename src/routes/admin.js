@@ -22,7 +22,7 @@ import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
 import * as doorserverModel from '../models/doorserver.js';
 import * as doorserverRemotes from '../models/doorserverRemotes.js';
-import { listDoors as listRemoteDoors } from '../utils/doorserverClient.js';
+import * as remoteDoorCatalog from '../models/remoteDoorCatalog.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as messageTemplates from '../models/messageTemplates.js';
@@ -7679,7 +7679,10 @@ async function renderProvider(req, res, opts) {
 		verifiedSecurity: appConfig.getNumber('verified_security', 60),
 		doors: remote ? await doors.getRemoteDoors(remote.name) : [],
 		collections: (await doorCollections.getAllCollections()) || [],
-		fetched: opts.fetched || null
+		catalog: remote ? await remoteDoorCatalog.getCatalog(remote.id) : [],
+		shippedLists: remoteDoorCatalog.shippedLists(),
+		listSources: doorserverRemotes.LIST_SOURCES,
+		listPreview: opts.listPreview || null
 	});
 }
 
@@ -7711,20 +7714,37 @@ router.post('/doorserver/remotes/:uuid/update', urlencodedParser, requireAdmin, 
 	res.redirect('/admin/doorserver/remotes/' + req.params.uuid);
 });
 
-// A Canectic door server reports its own doors; offer them as door entries.
-router.post('/doorserver/remotes/:uuid/test', urlencodedParser, requireAdmin, async (req, res) => {
+// The provider's door list (#89 part 3): preview what it would change, then
+// apply it. A sysop's apply is not held to the automatic check's more-than-
+// half rule, since they have seen the preview; an empty list is still refused.
+router.post('/doorserver/remotes/:uuid/list/check', urlencodedParser, requireAdmin, async (req, res) => {
 	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
 	if (!remote) return res.redirect('/admin/doorserver#remotes');
-	if ((remote.kind || 'canectic') !== 'canectic') {
-		await flash.setOne(req, 'info', 'Only a Canectic door server can list its doors. Add this provider\'s doors by their codes below.');
+	var loaded = await remoteDoorCatalog.loadListFor(remote, doorserverRemotes.settingsOf(remote));
+	if (!loaded.ok) {
+		await flash.setOne(req, 'danger', 'The door list could not be read: ' + loaded.errors.join('; '));
 		return res.redirect('/admin/doorserver/remotes/' + remote.uuid);
 	}
-	var r = await listRemoteDoors({ url: remote.url, systemId: remote.system_id, secret: remote.secret, timeoutMs: 10000 });
-	if (!r.ok) {
-		await flash.setOne(req, 'danger', remote.name + ': ' + r.reason);
+	var r = await remoteDoorCatalog.applyList(remote, loaded.list.doors, { dryRun: true });
+	var auto = remoteDoorCatalog.safeToApply(await remoteDoorCatalog.getCatalog(remote.id), loaded.list.doors, r.diff);
+	await renderProvider(req, res, { remote: remote, listPreview: { from: loaded.from, count: loaded.list.doors.length, diff: r.diff, warnings: loaded.errors, autoRefusal: auto.ok ? '' : auto.reason } });
+});
+
+router.post('/doorserver/remotes/:uuid/list/apply', urlencodedParser, requireAdmin, async (req, res) => {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	if (!remote) return res.redirect('/admin/doorserver#remotes');
+	var loaded = await remoteDoorCatalog.loadListFor(remote, doorserverRemotes.settingsOf(remote));
+	if (!loaded.ok) {
+		await flash.setOne(req, 'danger', 'The door list could not be read: ' + loaded.errors.join('; '));
 		return res.redirect('/admin/doorserver/remotes/' + remote.uuid);
 	}
-	await renderProvider(req, res, { remote: remote, fetched: r.doors });
+	var r = await remoteDoorCatalog.applyList(remote, loaded.list.doors, {});
+	await flash.setOne(req, r.ok ? 'success' : 'danger', r.ok
+		? 'Door list applied from ' + loaded.from + ': ' + r.diff.added.length + ' new, ' + r.diff.changed.length + ' changed, ' + r.diff.removed.length + ' no longer offered' +
+			(r.diff.returning.length ? ', ' + r.diff.returning.length + ' offered again' : '') + '.' +
+			(r.deactivatedDoors.length ? ' Door entries made inactive: ' + r.deactivatedDoors.join(', ') + '.' : '')
+		: 'Not applied: ' + r.reason);
+	res.redirect('/admin/doorserver/remotes/' + remote.uuid + '#catalog');
 });
 
 // Add door entries: one by code (code, name, slug, collection_id), or several

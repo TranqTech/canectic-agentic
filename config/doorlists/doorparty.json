@@ -1,0 +1,860 @@
+{
+ "format": "canectic-doorlist-v1",
+ "list": "doorparty",
+ "title": "DoorParty",
+ "kind": "rlogin",
+ "updated": "2026-09-29",
+ "source": "DoorParty door codes, wiki.throwbackbbs.com/doku.php?id=doorcode, as published 2026-09-29",
+ "doors": [
+  {
+   "code": "veilfall",
+   "name": "Veilfall (BETA)",
+   "category": "Beta"
+  },
+  {
+   "code": "3pairpok",
+   "name": "3 Pair Poker",
+   "category": "Card and dice"
+  },
+  {
+   "code": "aceyduce",
+   "name": "Acey Deucey",
+   "category": "Card and dice"
+  },
+  {
+   "code": "bbdice",
+   "name": "Baseball Dice",
+   "category": "Card and dice"
+  },
+  {
+   "code": "boxdice",
+   "name": "Box Dice",
+   "category": "Card and dice"
+  },
+  {
+   "code": "crazy8s",
+   "name": "Crazy 8s",
+   "category": "Card and dice"
+  },
+  {
+   "code": "dblsol",
+   "name": "Double Solitaire",
+   "category": "Card and dice"
+  },
+  {
+   "code": "hirolldi",
+   "name": "Hi Roll Dice",
+   "category": "Card and dice"
+  },
+  {
+   "code": "srlotto",
+   "name": "Lotto Mania",
+   "category": "Card and dice"
+  },
+  {
+   "code": "magicp",
+   "name": "Magic Poker Machine",
+   "category": "Card and dice"
+  },
+  {
+   "code": "megaslot",
+   "name": "Mega Slots",
+   "category": "Card and dice"
+  },
+  {
+   "code": "mcsol",
+   "name": "Monte Carlo",
+   "category": "Card and dice"
+  },
+  {
+   "code": "ousol",
+   "name": "Over Under",
+   "category": "Card and dice"
+  },
+  {
+   "code": "srbetsy",
+   "name": "Sunrise Betsy Ross",
+   "category": "Card and dice"
+  },
+  {
+   "code": "srblackj",
+   "name": "Sunrise Blackjack",
+   "category": "Card and dice"
+  },
+  {
+   "code": "srboxpok",
+   "name": "Sunrise Box Poker",
+   "category": "Card and dice"
+  },
+  {
+   "code": "srhilo",
+   "name": "Sunrise Hi Lo",
+   "category": "Card and dice"
+  },
+  {
+   "code": "srkeno",
+   "name": "Sunrise Keno",
+   "category": "Card and dice"
+  },
+  {
+   "code": "trisol",
+   "name": "Triangle Solitaire",
+   "category": "Card and dice"
+  },
+  {
+   "code": "tripleya",
+   "name": "Triple Yahtzee",
+   "category": "Card and dice"
+  },
+  {
+   "code": "vpoker",
+   "name": "Video Poker",
+   "category": "Card and dice"
+  },
+  {
+   "code": "wordzee",
+   "name": "Wordzee",
+   "category": "Card and dice"
+  },
+  {
+   "code": "zombie",
+   "name": "Zombie Slots",
+   "category": "Card and dice"
+  },
+  {
+   "code": "amfv",
+   "name": "A Mind Forever Voyaging",
+   "category": "DOS"
+  },
+  {
+   "code": "advent",
+   "name": "Adventure",
+   "category": "DOS"
+  },
+  {
+   "code": "ballyhoo",
+   "name": "Ballyhoo",
+   "category": "DOS"
+  },
+  {
+   "code": "brim",
+   "name": "Brimstone",
+   "category": "DOS"
+  },
+  {
+   "code": "colossal",
+   "name": "Colossal Cave Adventure",
+   "category": "DOS"
+  },
+  {
+   "code": "cyborg",
+   "name": "Cyborg",
+   "category": "DOS"
+  },
+  {
+   "code": "deadline",
+   "name": "Deadline",
+   "category": "DOS"
+  },
+  {
+   "code": "enchant",
+   "name": "Enchanter",
+   "category": "DOS"
+  },
+  {
+   "code": "infidel",
+   "name": "Infidel",
+   "category": "DOS"
+  },
+  {
+   "code": "phobos",
+   "name": "Leather Goddesses of Phobos",
+   "category": "DOS"
+  },
+  {
+   "code": "moonmist",
+   "name": "Moonmist",
+   "category": "DOS"
+  },
+  {
+   "code": "suspend",
+   "name": "Suspended",
+   "category": "DOS"
+  },
+  {
+   "code": "zork",
+   "name": "Zork",
+   "category": "DOS"
+  },
+  {
+   "code": "zork2",
+   "name": "Zork 2",
+   "category": "DOS"
+  },
+  {
+   "code": "zork3",
+   "name": "Zork 3",
+   "category": "DOS"
+  },
+  {
+   "code": "cutthroa",
+   "name": "Cutthroats",
+   "category": "DOS"
+  },
+  {
+   "code": "drdumont",
+   "name": "Dr Dumont's Wild P.A.R.T.I.",
+   "category": "DOS"
+  },
+  {
+   "code": "dnd",
+   "name": "Game of Dungeons",
+   "category": "DOS"
+  },
+  {
+   "code": "holly",
+   "name": "Hollywood Hijinx",
+   "category": "DOS"
+  },
+  {
+   "code": "seastalk",
+   "name": "Seastalker",
+   "category": "DOS"
+  },
+  {
+   "code": "sorcerer",
+   "name": "Sorcerer",
+   "category": "DOS"
+  },
+  {
+   "code": "spellbre",
+   "name": "Spellbreaker",
+   "category": "DOS"
+  },
+  {
+   "code": "starcros",
+   "name": "Starcross",
+   "category": "DOS"
+  },
+  {
+   "code": "trinity",
+   "name": "Trinity",
+   "category": "DOS"
+  },
+  {
+   "code": "wishbrin",
+   "name": "Wishbringer",
+   "category": "DOS"
+  },
+  {
+   "code": "gbgammon",
+   "name": "Backgammon",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "bordello",
+   "name": "Bordello",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "cwtw2002",
+   "name": "CW TW2002",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "eclectic",
+   "name": "Eclectic Avenue",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "gfest",
+   "name": "Grunt Fest",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "rtbattle",
+   "name": "Real-Time Battleship",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "rtchecke",
+   "name": "Real-Time Checkers",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "rtchess",
+   "name": "Real-Time Chess",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "rtconn",
+   "name": "Real-Time Connect 4",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "rtothell",
+   "name": "Real-Time Othello",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "gwar",
+   "name": "Risk",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "studette",
+   "name": "Studette",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "studs",
+   "name": "Studs",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "tfirma",
+   "name": "Terra Firma",
+   "category": "Multiplayer"
+  },
+  {
+   "code": "dblup",
+   "name": "Double Up",
+   "category": "Mystic"
+  },
+  {
+   "code": "guessnum",
+   "name": "Guess the Number",
+   "category": "Mystic"
+  },
+  {
+   "code": "mmind",
+   "name": "Master Mind",
+   "category": "Mystic"
+  },
+  {
+   "code": "mysticbj",
+   "name": "Mystic Blackjack",
+   "category": "Mystic"
+  },
+  {
+   "code": "ambrosh",
+   "name": "Ambroshia",
+   "category": "RPG"
+  },
+  {
+   "code": "ab1",
+   "name": "Arrowbridge I",
+   "category": "RPG"
+  },
+  {
+   "code": "ab2",
+   "name": "Arrowbridge II",
+   "category": "RPG"
+  },
+  {
+   "code": "bre",
+   "name": "Barren Realms Elite",
+   "category": "RPG"
+  },
+  {
+   "code": "clans",
+   "name": "Clans",
+   "category": "RPG"
+  },
+  {
+   "code": "darkness",
+   "name": "Darkness",
+   "category": "RPG"
+  },
+  {
+   "code": "dark20",
+   "name": "Darkness 2.0",
+   "category": "RPG"
+  },
+  {
+   "code": "deathmas",
+   "name": "Death Masters",
+   "category": "RPG"
+  },
+  {
+   "code": "drake",
+   "name": "Drakeville",
+   "category": "RPG"
+  },
+  {
+   "code": "exitilus",
+   "name": "Exitilus",
+   "category": "RPG"
+  },
+  {
+   "code": "fe",
+   "name": "Falcon's Eye",
+   "category": "RPG"
+  },
+  {
+   "code": "fh",
+   "name": "Falcon's Honor",
+   "category": "RPG"
+  },
+  {
+   "code": "lord2",
+   "name": "LORD 2",
+   "category": "RPG"
+  },
+  {
+   "code": "lord",
+   "name": "Legend of the Red Dragon",
+   "category": "RPG"
+  },
+  {
+   "code": "lore",
+   "name": "LoRE",
+   "category": "RPG"
+  },
+  {
+   "code": "lunatix",
+   "name": "Lunatix",
+   "category": "RPG"
+  },
+  {
+   "code": "mzklord",
+   "name": "MZK LORD",
+   "category": "RPG"
+  },
+  {
+   "code": "netrunne",
+   "name": "Netrunner",
+   "category": "RPG"
+  },
+  {
+   "code": "ook",
+   "name": "Operation: Overkill",
+   "category": "RPG"
+  },
+  {
+   "code": "pimpwars",
+   "name": "Pimp Wars",
+   "category": "RPG"
+  },
+  {
+   "code": "planets",
+   "name": "Planets: TEOS",
+   "category": "RPG"
+  },
+  {
+   "code": "sre",
+   "name": "Solar Realms Elite",
+   "category": "RPG"
+  },
+  {
+   "code": "tw2002",
+   "name": "Tradewars 2002",
+   "category": "RPG"
+  },
+  {
+   "code": "usurper",
+   "name": "Usurper",
+   "category": "RPG"
+  },
+  {
+   "code": "tal",
+   "name": "Arcadian Legends",
+   "category": "RPG"
+  },
+  {
+   "code": "atlantis",
+   "name": "Atlantis",
+   "category": "RPG"
+  },
+  {
+   "code": "colonies",
+   "name": "Colonies",
+   "category": "RPG"
+  },
+  {
+   "code": "cyberare",
+   "name": "Cyber Arena",
+   "category": "RPG"
+  },
+  {
+   "code": "dw2",
+   "name": "Dog World 2",
+   "category": "RPG"
+  },
+  {
+   "code": "doormud",
+   "name": "Doormud",
+   "category": "RPG"
+  },
+  {
+   "code": "dungeonm",
+   "name": "Dungeon Master",
+   "category": "RPG"
+  },
+  {
+   "code": "foodfite",
+   "name": "Food Fight",
+   "category": "RPG"
+  },
+  {
+   "code": "foodwars",
+   "name": "Food Wars",
+   "category": "RPG"
+  },
+  {
+   "code": "hackaram",
+   "name": "Hackarama",
+   "category": "RPG"
+  },
+  {
+   "code": "jedi",
+   "name": "Jedi Knights",
+   "category": "RPG"
+  },
+  {
+   "code": "lod",
+   "name": "LOD",
+   "category": "RPG"
+  },
+  {
+   "code": "lreef",
+   "name": "Leviathan's Reef",
+   "category": "RPG"
+  },
+  {
+   "code": "lis",
+   "name": "Lost in Space",
+   "category": "RPG"
+  },
+  {
+   "code": "mechwars",
+   "name": "Mech Wars",
+   "category": "RPG"
+  },
+  {
+   "code": "gorr",
+   "name": "Mines of Gorr",
+   "category": "RPG"
+  },
+  {
+   "code": "pentasim",
+   "name": "Pentasim",
+   "category": "RPG"
+  },
+  {
+   "code": "simbbs",
+   "name": "Sim-BBS",
+   "category": "RPG"
+  },
+  {
+   "code": "galactic",
+   "name": "Starship Galactica",
+   "category": "RPG"
+  },
+  {
+   "code": "thepit",
+   "name": "The Pit",
+   "category": "RPG"
+  },
+  {
+   "code": "timetrav",
+   "name": "Time Travel",
+   "category": "RPG"
+  },
+  {
+   "code": "vrsysop",
+   "name": "Virtual Sysop III",
+   "category": "RPG"
+  },
+  {
+   "code": "4corners",
+   "name": "4 Corners Checkers",
+   "category": "Single player"
+  },
+  {
+   "code": "bbstris",
+   "name": "BBS*tris",
+   "category": "Single player"
+  },
+  {
+   "code": "barneysp",
+   "name": "Barney Splat!",
+   "category": "Single player"
+  },
+  {
+   "code": "bingo",
+   "name": "Bingo",
+   "category": "Single player"
+  },
+  {
+   "code": "blocked",
+   "name": "Blocked Battleship",
+   "category": "Single player"
+  },
+  {
+   "code": "buzz",
+   "name": "Buzz!",
+   "category": "Single player"
+  },
+  {
+   "code": "chainrea",
+   "name": "Chain Reaction",
+   "category": "Single player"
+  },
+  {
+   "code": "concent",
+   "name": "Concentration",
+   "category": "Single player"
+  },
+  {
+   "code": "cryptogr",
+   "name": "Cryptograms",
+   "category": "Single player"
+  },
+  {
+   "code": "dominoes",
+   "name": "Dominoes",
+   "category": "Single player"
+  },
+  {
+   "code": "doormnia",
+   "name": "Doormania 2",
+   "category": "Single player"
+  },
+  {
+   "code": "fishing",
+   "name": "Fishing",
+   "category": "Single player"
+  },
+  {
+   "code": "hexxwars",
+   "name": "Hexxwars",
+   "category": "Single player"
+  },
+  {
+   "code": "wumpus",
+   "name": "Hunt the Wumpus",
+   "category": "Single player"
+  },
+  {
+   "code": "lmatch",
+   "name": "Letter Match",
+   "category": "Single player"
+  },
+  {
+   "code": "rescue",
+   "name": "Rescue",
+   "category": "Single player"
+  },
+  {
+   "code": "rockinra",
+   "name": "Rockin' Radio",
+   "category": "Single player"
+  },
+  {
+   "code": "srtrivia",
+   "name": "Sunrise Trivia",
+   "category": "Single player"
+  },
+  {
+   "code": "virtuale",
+   "name": "Virtual Escape",
+   "category": "Single player"
+  },
+  {
+   "code": "wof",
+   "name": "Wheel of Fortune",
+   "category": "Single player"
+  },
+  {
+   "code": "wordsear",
+   "name": "Word Search",
+   "category": "Single player"
+  },
+  {
+   "code": "wordshuf",
+   "name": "Word Shuffle",
+   "category": "Single player"
+  },
+  {
+   "code": "stairway",
+   "name": "Word Stairway",
+   "category": "Single player"
+  },
+  {
+   "code": "wordwar",
+   "name": "Word War",
+   "category": "Single player"
+  },
+  {
+   "code": "basket3",
+   "name": "Big League Basketball",
+   "category": "Single player"
+  },
+  {
+   "code": "dbtrivia",
+   "name": "Death By Trivia",
+   "category": "Single player"
+  },
+  {
+   "code": "disneytr",
+   "name": "Disney Trivia",
+   "category": "Single player"
+  },
+  {
+   "code": "escape",
+   "name": "Escape",
+   "category": "Single player"
+  },
+  {
+   "code": "ff2004",
+   "name": "Food Fight 2004",
+   "category": "Single player"
+  },
+  {
+   "code": "goldrush",
+   "name": "Gold Rush",
+   "category": "Single player"
+  },
+  {
+   "code": "gutterbo",
+   "name": "Gutterbowl",
+   "category": "Single player"
+  },
+  {
+   "code": "hobbittr",
+   "name": "Hobbit Trivia",
+   "category": "Single player"
+  },
+  {
+   "code": "lemonade",
+   "name": "Lemonade",
+   "category": "Single player"
+  },
+  {
+   "code": "pegjump",
+   "name": "Peg Jump",
+   "category": "Single player"
+  },
+  {
+   "code": "progolf",
+   "name": "Pro Golf",
+   "category": "Single player"
+  },
+  {
+   "code": "quant",
+   "name": "Quantum Jump",
+   "category": "Single player"
+  },
+  {
+   "code": "scrabble",
+   "name": "Scrabble",
+   "category": "Single player"
+  },
+  {
+   "code": "scramble",
+   "name": "Scramble",
+   "category": "Single player"
+  },
+  {
+   "code": "stackem!",
+   "name": "Stackem! (Tetris)",
+   "category": "Single player"
+  },
+  {
+   "code": "sudoku2",
+   "name": "Sudoku 2",
+   "category": "Single player"
+  },
+  {
+   "code": "thangman",
+   "name": "T-Hangman",
+   "category": "Single player"
+  },
+  {
+   "code": "tictactoe",
+   "name": "Tic-Tac-Toe",
+   "category": "Single player"
+  },
+  {
+   "code": "twordle",
+   "name": "Tourney Wordle",
+   "category": "Single player"
+  },
+  {
+   "code": "whodunit",
+   "name": "Who Dun-It?",
+   "category": "Single player"
+  },
+  {
+   "code": "bublbogl",
+   "name": "Bubble Boggle",
+   "category": "Synchronet"
+  },
+  {
+   "code": "chxdeliv",
+   "name": "Chicken Delivery",
+   "category": "Synchronet"
+  },
+  {
+   "code": "dlance",
+   "name": "Dragonlance",
+   "category": "Synchronet"
+  },
+  {
+   "code": "druglord",
+   "name": "DrugLord",
+   "category": "Synchronet"
+  },
+  {
+   "code": "fatfish",
+   "name": "Fat Fish",
+   "category": "Synchronet"
+  },
+  {
+   "code": "gooble",
+   "name": "Gooble Gooble",
+   "category": "Synchronet"
+  },
+  {
+   "code": "jeopardy",
+   "name": "Jeopardized!",
+   "category": "Synchronet"
+  },
+  {
+   "code": "knk",
+   "name": "Kannons and Katapults",
+   "category": "Synchronet"
+  },
+  {
+   "code": "lemons",
+   "name": "Lemons",
+   "category": "Synchronet"
+  },
+  {
+   "code": "msweeper",
+   "name": "Minesweeper",
+   "category": "Synchronet"
+  },
+  {
+   "code": "startrek",
+   "name": "Star Trek",
+   "category": "Synchronet"
+  },
+  {
+   "code": "sokoban",
+   "name": "Synkroban",
+   "category": "Synchronet"
+  },
+  {
+   "code": "thirsty",
+   "name": "Thirstyville",
+   "category": "Synchronet"
+  },
+  {
+   "code": "uberblox",
+   "name": "Uber Blox!",
+   "category": "Synchronet"
+  }
+ ]
+}

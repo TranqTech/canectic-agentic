@@ -63,6 +63,7 @@ export const MAINTENANCE_JOBS = [
 	'echolist:batch-subscribe',
 	'filebone:batch-subscribe',
 	'scan-echolists',
+	'check-door-lists',
 	'timed-event',
 	'generate-stub',
 	'compile-nodelist',
@@ -354,6 +355,14 @@ export async function runMaintenanceJob(name, data, opts) {
 		case 'scan-echolists': {
 			var echolistScan = await import("./echolistScan.js");
 			await echolistScan.scanForUpdates();
+			return true;
+		}
+
+		// Door providers with a daily door list check (#89 part 3)
+		case 'check-door-lists': {
+			var doorCatalog = await import("../models/remoteDoorCatalog.js");
+			var checked = await doorCatalog.checkAll();
+			if (checked.length) alogger.writeAlog(3, tag + " Door lists checked: " + checked.map(function (c) { return c.remote + (c.ok ? '' : ' (' + c.reason + ')'); }).join(', '), "cyan");
 			return true;
 		}
 
