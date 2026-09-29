@@ -82,3 +82,54 @@ export function charsetForMessage(mode, text, cp) {
 	if (m === 'utf8') return 'utf8';
 	return fitsCp437(text, cp) ? 'cp437' : 'utf8';
 }
+
+// ---------------------------------------------------------------------------
+// Inbound: what a message we RECEIVE is written in (#57)
+// ---------------------------------------------------------------------------
+//
+// A declared CHRS is believed. Without one, FTN's default is CP437, but plenty
+// of software sends UTF-8 and declares nothing, and reading that through the
+// CP437 table stores mojibake permanently (U+2019 as "ΓÇÖ", "Jörg" as
+// "J├╢rg"): the hub held about 18,000 such messages. So an undeclared message
+// is taken as UTF-8 when its bytes are valid UTF-8 and contain at least one
+// multi-byte sequence, and as CP437 otherwise.
+//
+// Genuine CP437 text almost never passes: a lone accented letter (é is 0x82,
+// a continuation byte with no lead) or a run of box drawing (═ is 0xCD, a lead
+// byte followed by another lead) is invalid UTF-8, and it takes one invalid
+// sequence anywhere in the message to fail it. That is why the test is on the
+// whole message and never on a fragment: a pair such as █░ (0xDB 0xB0) is
+// valid UTF-8 by itself, and art full of them would be misread fragment by
+// fragment while the whole message still fails.
+
+var strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Whether bytes are valid UTF-8 carrying at least one multi-byte character.
+ * Pure ASCII answers false: it is the same in either reading.
+ */
+export function looksLikeUtf8(bytes) {
+	if (!bytes || !bytes.length) return false;
+	var multi = false;
+	for (var i = 0; i < bytes.length; i++) {
+		if (bytes[i] >= 0x80) { multi = true; break; }
+	}
+	if (!multi) return false;
+	try {
+		strictUtf8.decode(bytes);
+		return true;
+	} catch (_) {
+		return false;
+	}
+}
+
+/**
+ * The charset to read a received message in.
+ *
+ * declared: 'utf8' | 'latin1' | 'cp437' from a CHRS kludge, or null for none
+ * bytes:    every byte the charset applies to (header strings and body)
+ */
+export function inboundCharset(declared, bytes) {
+	if (declared) return declared;
+	return looksLikeUtf8(bytes) ? 'utf8' : 'cp437';
+}

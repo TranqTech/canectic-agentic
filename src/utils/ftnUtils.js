@@ -614,11 +614,20 @@ function parseOptionalAttributes(stored) {
  * Returns one of 'utf8', 'latin1', 'cp437'.
  */
 function charsetFromKludge(bytes) {
-	if (!bytes || !bytes.length) return 'cp437';
+	return declaredCharset(bytes) || 'cp437';
+}
+
+/**
+ * The charset a CHRS kludge declares, or null when there is none. Unlike
+ * charsetFromKludge this tells "said CP437" from "said nothing", which the
+ * inbound UTF-8 detection (charsetPolicy.inboundCharset) has to know.
+ */
+function declaredCharset(bytes) {
+	if (!bytes || !bytes.length) return null;
 
 	var text = Buffer.isBuffer(bytes) ? bytes.toString('latin1') : String(bytes);
 	var m = /\x01CHRS:?\s*([A-Za-z0-9-]+)/i.exec(text);
-	if (!m) return 'cp437';
+	if (!m) return null;
 
 	var id = m[1].toUpperCase();
 	if (id === 'UTF-8' || id === 'UTF8') return 'utf8';
@@ -663,6 +672,7 @@ export{
 	tzutcFor,
 	parseOptionalAttributes,
 	charsetFromKludge,
+	declaredCharset,
 	chrsValueFor,
 	sanitiseMessageDate,
 	getDateTimeString,

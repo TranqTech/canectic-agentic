@@ -659,31 +659,33 @@ function ReadPkt(filepath) {
 			message.DateTime = dateTimeBytes.toString('ascii').replace(/\0.*$/, '');
 			offset += 20;
 			
-			// Read null-terminated strings
-			message.ToUser = readNullTerminatedString(buffer, offset);
-			offset += message.ToUser.length + 1;
-			
-			message.FromUser = readNullTerminatedString(buffer, offset);
-			offset += message.FromUser.length + 1;
-			
-			message.Subject = readNullTerminatedString(buffer, offset);
-			offset += message.Subject.length + 1;
-			
+			// Header strings are kept as bytes until the charset is known.
+			// They were decoded with Node's 'ascii', which CLEARS THE HIGH BIT
+			// of every byte, so any non-ASCII name or subject was mangled
+			// beyond repair (#57). They are in the same charset as the body.
+			var toBytes = readNullTerminatedByteArray(buffer, offset);
+			offset += toBytes.length + 1;
+			var fromBytes = readNullTerminatedByteArray(buffer, offset);
+			offset += fromBytes.length + 1;
+			var subjectBytes = readNullTerminatedByteArray(buffer, offset);
+			offset += subjectBytes.length + 1;
+
 			var TextBuffer = readNullTerminatedByteArray(buffer, offset);
 
-			// Decode by what the message DECLARES, not by assumption. FTN's
-			// default is CP437 and almost nothing declares otherwise, but a
-			// message that says UTF-8 and is decoded through the CP437 table
-			// turns every multi-byte character into mojibake, permanently,
-			// because body_html is rendered from it at toss time.
-			message.Charset = ftnUtils.charsetFromKludge(TextBuffer);
-			if (message.Charset === 'utf8') {
-				message.RawText = TextBuffer.toString('utf8');
-			} else if (message.Charset === 'latin1') {
-				message.RawText = TextBuffer.toString('latin1');
-			} else {
-				message.RawText = codepageConversions.cp437ToUtf8(TextBuffer);
-			}
+			// Decode by what the message DECLARES, and when it declares
+			// nothing, by what its bytes are: valid UTF-8 with a multi-byte
+			// character is UTF-8, anything else is FTN's CP437 default
+			// (charsetPolicy.inboundCharset). Reading undeclared UTF-8 through
+			// the CP437 table turned every multi-byte character into
+			// mojibake, permanently, because body_html is rendered from it at
+			// toss time.
+			message.Charset = charsetPolicy.inboundCharset(
+				ftnUtils.declaredCharset(TextBuffer),
+				Buffer.concat([toBytes, fromBytes, subjectBytes, TextBuffer]));
+			message.ToUser = decodeInbound(toBytes, message.Charset);
+			message.FromUser = decodeInbound(fromBytes, message.Charset);
+			message.Subject = decodeInbound(subjectBytes, message.Charset);
+			message.RawText = decodeInbound(TextBuffer, message.Charset);
 
 			// Advance by the BYTE length, not the decoded string length. They
 			// are equal for CP437 and latin1, where one byte is one character,
@@ -707,20 +709,18 @@ function ReadPkt(filepath) {
 
 }
 
+function decodeInbound(bytes, charset) {
+	if (charset === 'utf8') return bytes.toString('utf8');
+	if (charset === 'latin1') return bytes.toString('latin1');
+	return codepageConversions.cp437ToUtf8(bytes);
+}
+
 function readNullTerminatedByteArray(buffer, offset){
 	let end = offset;
 	while (end < buffer.length && buffer[end] !== 0) {
 		end++;
 	}
 	return buffer.subarray(offset, end);
-}
-
-function readNullTerminatedString(buffer, offset) {
-	let end = offset;
-	while (end < buffer.length && buffer[end] !== 0) {
-		end++;
-	}
-	return buffer.subarray(offset, end).toString('ascii');
 }
 
 function processMessageText(message) {

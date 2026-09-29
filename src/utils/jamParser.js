@@ -49,6 +49,7 @@
 
 import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'fs';
 import { cp437BufferToUtf8 } from './codepageConversions.js';
+import { inboundCharset } from './charsetPolicy.js';
 
 // --- Constants ---
 
@@ -180,6 +181,8 @@ function parseSubfields(jhrBuf, start, length) {
 			loID: loID,
 			hiID: hiID,
 			data: decodeText(jhrBuf.subarray(pos, pos + datLen)),
+			// Kept so the message can be re-read once its charset is known
+			bytes: jhrBuf.subarray(pos, pos + datLen),
 		});
 		pos += datLen;
 	}
@@ -275,23 +278,78 @@ function extractMessageText(jdtBuf, msgHeader) {
 	return decodeText(jdtBuf.subarray(start, start + len));
 }
 
-// Same, but reading from an open .jdt descriptor instead of a resident buffer.
-// A hub's larger echoes have text files far too big to hold in memory
-// alongside every decoded message, so the streaming path reads only the bytes
-// each message actually needs.
-function readMessageText(fd, fileSize, msgHeader) {
+// The message text as bytes, or null when there is none, read from an open
+// .jdt descriptor rather than a resident buffer: a hub's larger echoes have
+// text files far too big to hold in memory alongside every decoded message,
+// so the streaming path reads only the bytes each message actually needs.
+function readMessageBytes(fd, fileSize, msgHeader) {
 	var start = msgHeader.txtOffset;
 	var len   = msgHeader.txtLen;
 
-	if (!len || start >= fileSize) return '';
+	if (!len || start >= fileSize) return null;
 	if (start + len > fileSize) len = fileSize - start;
-	if (len <= 0) return '';
+	if (len <= 0) return null;
 
 	var buf = Buffer.alloc(len);
 	var got = readSync(fd, buf, 0, len, start);
-	if (got <= 0) return '';
+	if (got <= 0) return null;
+	return got === len ? buf : buf.subarray(0, got);
+}
 
-	return decodeText(got === len ? buf : buf.subarray(0, got));
+// --- Charset (#57) ---
+//
+// The base was read as CP437 throughout, which is right for most JAM bases,
+// but a base written by software sending UTF-8 (declared or not) came out as
+// mojibake: on the hub, years of imported SYNC_PROGRAMMING, EARTH and COOKING.
+// Same rule as the FTN tosser (charsetPolicy.inboundCharset): a CHRS kludge
+// is believed, in a kludge subfield or in the text; without one the message is
+// UTF-8 when its bytes are valid UTF-8 with a multi-byte character.
+
+var TEXT_SUBFIELDS = [SUBFIELD.SENDERNAME, SUBFIELD.RECVRNAME, SUBFIELD.SUBJECT, SUBFIELD.FTSKLUDGE];
+
+function decodeAs(bytes, charset) {
+	if (charset === 'utf8') return bytes.toString('utf8');
+	if (charset === 'latin1') return bytes.toString('latin1');
+	return decodeText(bytes);
+}
+
+function declaredIn(text) {
+	var m = /CHRS:?\s*([A-Za-z0-9-]+)/i.exec(text || '');
+	if (!m) return null;
+	var id = m[1].toUpperCase();
+	if (id === 'UTF-8' || id === 'UTF8') return 'utf8';
+	if (id === 'LATIN-1' || id === 'LATIN1' || id === 'ISO-8859-1') return 'latin1';
+	return 'cp437';
+}
+
+function messageCharset(hdr, bodyBytes) {
+	var declared = null;
+	for (var k of hdr.kludges || []) { declared = declaredIn(k); if (declared) break; }
+	if (!declared && bodyBytes) {
+		var km = /\x01CHRS:?[^\r\n]*/i.exec(bodyBytes.toString('latin1'));
+		if (km) declared = declaredIn(km[0]);
+	}
+	var parts = [];
+	for (var sf of hdr.subfields || []) {
+		if (sf.hiID === 0 && TEXT_SUBFIELDS.indexOf(sf.loID) !== -1 && sf.bytes) parts.push(sf.bytes);
+	}
+	if (bodyBytes) parts.push(bodyBytes);
+	return inboundCharset(declared, Buffer.concat(parts));
+}
+
+// Re-read the text subfields in the message's charset.
+function redecodeHeader(hdr, charset) {
+	hdr.kludges = [];
+	for (var sf of hdr.subfields || []) {
+		if (sf.hiID !== 0 || !sf.bytes || TEXT_SUBFIELDS.indexOf(sf.loID) === -1) continue;
+		sf.data = decodeAs(sf.bytes, charset);
+		switch (sf.loID) {
+			case SUBFIELD.SENDERNAME: hdr.sender    = sf.data; break;
+			case SUBFIELD.RECVRNAME:  hdr.recipient = sf.data; break;
+			case SUBFIELD.SUBJECT:    hdr.subject   = sf.data; break;
+			case SUBFIELD.FTSKLUDGE:  hdr.kludges.push(sf.data); break;
+		}
+	}
 }
 
 // --- Parse index file (.jdx) ---
@@ -353,10 +411,14 @@ function* iterateJAM(jhrPath, jdtPath, jdxPath, options) {
 	}
 
 	function build(hdr) {
+		var bodyBytes = wantText ? readMessageBytes(fd, fileSize, hdr) : null;
+		var charset = messageCharset(hdr, bodyBytes);
+		if (charset !== 'cp437') redecodeHeader(hdr, charset);
 		return {
 			header:   hdr,
-			bodyText: wantText ? readMessageText(fd, fileSize, hdr) : '',
+			bodyText: bodyBytes ? decodeAs(bodyBytes, charset) : '',
 			tailText: '',
+			charset:  charset,
 		};
 	}
 
