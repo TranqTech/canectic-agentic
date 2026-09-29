@@ -1,24 +1,6 @@
 {
   "steps": [],
-  "notices": [
-    {
-      "id": "doorserver-off",
-      "level": "info",
-      "from_max": "0.9.12a",
-      "text": "This release closes a hole that let anyone who could reach your board's web address start your door games. The door server is now off until you turn on doorserver_enabled, only BBSes you register can connect, and they can run only the doors you mark Available to Door Server. If you deactivated the Doorserver pool under Admin > Flows to close the hole, you can leave it that way, or make it active again before switching the door server on. See docs/sysop/DOORSERVER.md."
-    },
-    {
-      "id": "freq-filebox-shared-dir",
-      "level": "info",
-      "from_max": "0.9.12a",
-      "text": "If freq_filebox_dir is still ftn/filebox (the old default), your board serves file requests (FREQ) from the same directory that holds per-peer outbound fileboxes, so any file left at its top level can be requested by any system you link with. New installs now use a separate ftn/freq, which this update creates; your setting is not changed. To separate them, move the files you mean to offer into ftn/freq and set freq_filebox_dir to ftn/freq under Paths on the Configuration page."
-    },
-    {
-      "id": "fix-charset-mojibake",
-      "level": "info",
-      "text": "Messages that arrived in UTF-8 without saying so were stored garbled before this release (\u2019 as \u0393\u00c7\u00d6, J\u00f6rg as J\u251c\u2562rg, Cyrillic and Hebrew as runs of box drawing), including messages imported from JAM bases. New mail is read correctly from now on. To repair what is already stored, run node src/tools/maintenance.js --fix-charset --dry-run with the worker running to see what would change in each area, then without --dry-run to repair it. ANSI art and other genuine CP437 text is left alone. The old text is kept, so node src/tools/maintenance.js --revert-charset puts it all back."
-    }
-  ],
+  "notices": [],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }
