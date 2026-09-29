@@ -2852,6 +2852,7 @@ router.post('/doorCollections/:id/reorder', express.json(), requireAdmin, async 
 
 router.get('/doors', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
+	res.locals.flash = await flash.get(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var doorlist         = await doors.getAllDoors();
 	var launchTypes        = doors.getValidLaunchTypes();
@@ -2977,7 +2978,8 @@ router.post('/doors/:id/update', urlencodedParser, requireAdmin, async (req, res
 
 router.post('/doors/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
 	var doorId = parseInt(req.params.id);
-	await doors.deleteDoor(doorId);
+	var r = await doors.deleteDoor(doorId);
+	if (!r.status) await flash.setOne(req, 'danger', r.errormessages.join('. '));
 	res.redirect('/admin/doors');
 });
 
@@ -7682,6 +7684,7 @@ async function renderProvider(req, res, opts) {
 		catalog: remote ? await remoteDoorCatalog.getCatalog(remote.id) : [],
 		shippedLists: remoteDoorCatalog.shippedLists(),
 		listSources: doorserverRemotes.LIST_SOURCES,
+		suggestedList: remote ? doorserverRemotes.suggestedList(remote) : null,
 		listPreview: opts.listPreview || null
 	});
 }
@@ -7728,6 +7731,50 @@ router.post('/doorserver/remotes/:uuid/list/check', urlencodedParser, requireAdm
 	var r = await remoteDoorCatalog.applyList(remote, loaded.list.doors, { dryRun: true });
 	var auto = remoteDoorCatalog.safeToApply(await remoteDoorCatalog.getCatalog(remote.id), loaded.list.doors, r.diff);
 	await renderProvider(req, res, { remote: remote, listPreview: { from: loaded.from, count: loaded.list.doors.length, diff: r.diff, warnings: loaded.errors, autoRefusal: auto.ok ? '' : auto.reason } });
+});
+
+// Choose a door list and load it in one step (the page's Load button)
+router.post('/doorserver/remotes/:uuid/list/use', urlencodedParser, requireAdmin, async (req, res) => {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	if (!remote) return res.redirect('/admin/doorserver#remotes');
+	await doorserverRemotes.setListSource(remote.uuid, String(req.body.source || ''), String(req.body.name || ''));
+	remote = await doorserverRemotes.getByUuid(remote.uuid);
+	var loaded = await remoteDoorCatalog.loadListFor(remote, doorserverRemotes.settingsOf(remote));
+	if (!loaded.ok) {
+		await flash.setOne(req, 'danger', 'The door list could not be read: ' + loaded.errors.join('; '));
+		return res.redirect('/admin/doorserver/remotes/' + remote.uuid + '#catalog');
+	}
+	var r = await remoteDoorCatalog.applyList(remote, loaded.list.doors, {});
+	await flash.setOne(req, r.ok ? 'success' : 'danger', r.ok
+		? 'Loaded ' + loaded.list.doors.length + ' doors from ' + loaded.from + '. Tick the ones you want and Add the ticked doors.'
+		: 'Not loaded: ' + r.reason);
+	res.redirect('/admin/doorserver/remotes/' + remote.uuid + '#catalog');
+});
+
+// Remove, or switch on or off, a door entry on this provider
+async function providerDoor(req) {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	var door = remote ? await doors.getDoorById(parseInt(req.params.doorId)) : null;
+	if (!door || door.launch_type !== 'Remote' || door.remote_provider !== remote.name) return { remote: remote, door: null };
+	return { remote: remote, door: door };
+}
+
+router.post('/doorserver/remotes/:uuid/doors/:doorId/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var pd = await providerDoor(req);
+	if (!pd.remote) return res.redirect('/admin/doorserver#remotes');
+	if (!pd.door) await flash.setOne(req, 'danger', 'No such door on ' + pd.remote.name + '.');
+	else {
+		var r = await doors.deleteDoor(pd.door.id);
+		await flash.setOne(req, r.status ? 'success' : 'danger', r.status ? 'Removed ' + pd.door.name + '.' : r.errormessages.join('. '));
+	}
+	res.redirect('/admin/doorserver/remotes/' + pd.remote.uuid + '#doors');
+});
+
+router.post('/doorserver/remotes/:uuid/doors/:doorId/active', urlencodedParser, requireAdmin, async (req, res) => {
+	var pd = await providerDoor(req);
+	if (!pd.remote) return res.redirect('/admin/doorserver#remotes');
+	if (pd.door) await doors.setDoorActive(pd.door.id, req.body.active === 'true');
+	res.redirect('/admin/doorserver/remotes/' + pd.remote.uuid + '#doors');
 });
 
 router.post('/doorserver/remotes/:uuid/list/apply', urlencodedParser, requireAdmin, async (req, res) => {

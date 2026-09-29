@@ -239,9 +239,19 @@ async function updateDoor(id, data) {
 	return result;
 }
 
+// Its collection entries go first: they reference the door, so deleting a
+// door in any collection used to fail on the foreign key while this still
+// reported success, and the admin Delete button silently did nothing.
 async function deleteDoor(id) {
-	await postgres.write('DELETE FROM doors WHERE id = $1', [id]);
-	return { status: true };
+	var err = await postgres.write('DELETE FROM door_collection_entries WHERE door_id = $1', [id]);
+	if (!err) err = await postgres.write('DELETE FROM doors WHERE id = $1', [id]);
+	return err ? { status: false, errormessages: ['Could not delete the door: ' + err.message] } : { status: true, errormessages: [] };
+}
+
+/** Switch a door on or off. */
+async function setDoorActive(id, active) {
+	var err = await postgres.write('UPDATE doors SET active = $2, updated_at = NOW() WHERE id = $1', [id, !!active]);
+	return { status: !err };
 }
 
 // Duplicate an existing door. Generates a unique slug (`<slug>-copy`,
@@ -460,6 +470,7 @@ async function getRemoteDoors(provider) {
 export {
 	remoteDoorSlug,
 	createRemoteDoor,
+	setDoorActive,
 	getRemoteDoors,
 	getDoorConfig,
 	getAllDoors,

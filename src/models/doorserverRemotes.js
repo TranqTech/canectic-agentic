@@ -282,6 +282,30 @@ async function identityFor(remote, user) {
 	return { name: settings.keep_first_name ? rloginName(row.remote_name) : current, password: fixed || row.password, created: created };
 }
 
+/**
+ * The door list that fits a provider when none is chosen yet: BBSLink's
+ * shipped list for BBSLink, DoorParty's for an RLogin provider on its
+ * servers, a Canectic board's own list. returns { source, name } or null.
+ */
+function suggestedList(remote) {
+	var kind = (remote && remote.kind) || 'canectic';
+	if (kind === 'canectic') return { source: 'remote', name: '' };
+	if (kind === 'bbslink') return { source: 'shipped', name: 'bbslink' };
+	var st = settingsOf(remote);
+	if (/(^|\.)throwbackbbs\.com$/i.test(st.host || '') || /(^|\.)throwbackbbs\.com$/i.test(st.ssh_host || '')) return { source: 'shipped', name: 'doorparty' };
+	return null;
+}
+
+/** Set where a provider's door list comes from, keeping its other settings. */
+async function setListSource(uuid, source, name) {
+	var r = await getByUuid(uuid);
+	if (!r) return false;
+	var st = settingsOf(r);
+	st.list_source = LIST_SOURCES.indexOf(source) !== -1 ? source : 'none';
+	st.list_name = String(name || '').toLowerCase();
+	return !(await postgres.write('UPDATE ' + TABLE + ' SET settings = $1, updated_at = NOW() WHERE uuid = $2', [JSON.stringify(st), uuid]));
+}
+
 /** Record (or clear, with null) the SSH host key fingerprint seen for a provider. */
 async function setHostKey(uuid, fingerprint) {
 	await postgres.write('UPDATE ' + TABLE + ' SET host_key = $1 WHERE uuid = $2', [fingerprint, uuid]);
@@ -290,5 +314,5 @@ async function setHostKey(uuid, fingerprint) {
 export {
 	KINDS, KIND_LABELS, LIST_SOURCES, PRESETS, RLOGIN_DEFAULTS, BBSLINK_DEFAULTS,
 	validateRemote, settingsOf, secretsOf, minSecurityFor, mayUseRemote, parseRemoteArg, identityFor, rloginName,
-	getAll, getByName, getByUuid, createRemote, updateRemote, deleteRemote, touch, setHostKey
+	getAll, getByName, getByUuid, createRemote, updateRemote, deleteRemote, touch, setHostKey, suggestedList, setListSource
 };

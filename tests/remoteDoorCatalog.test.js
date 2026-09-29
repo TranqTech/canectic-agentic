@@ -162,6 +162,7 @@ describe('door lists for door providers (#89, part 3)', function () {
 		});
 		async function cleanup() {
 			await pg.write("DELETE FROM remote_door_catalog WHERE remote_id IN (SELECT id FROM doorserver_remotes WHERE name LIKE 'zz89%')");
+			await pg.write("DELETE FROM door_collection_entries WHERE door_id IN (SELECT id FROM doors WHERE slug LIKE 'zz89%')");
 			await pg.write("DELETE FROM doors WHERE slug LIKE 'zz89%'");
 			await pg.write("DELETE FROM doorserver_remotes WHERE name LIKE 'zz89%'");
 		}
@@ -173,6 +174,29 @@ describe('door lists for door providers (#89, part 3)', function () {
 			assert.ok(r.status, r.errors.join());
 			return r.remote;
 		}
+
+		it('suggests the list that fits a provider, and sets a source keeping the other settings', async function () {
+			assert.deepStrictEqual(remotes.suggestedList({ kind: 'bbslink' }), { source: 'shipped', name: 'bbslink' });
+			assert.deepStrictEqual(remotes.suggestedList({ kind: 'canectic' }), { source: 'remote', name: '' });
+			assert.deepStrictEqual(remotes.suggestedList({ kind: 'rlogin', settings: { host: 'dp.throwbackbbs.com' } }), { source: 'shipped', name: 'doorparty' });
+			assert.strictEqual(remotes.suggestedList({ kind: 'rlogin', settings: { host: 'games.example' } }), null);
+			var p = await provider({ rl_tag: 'ZZ' });
+			assert.ok(await remotes.setListSource(p.uuid, 'shipped', 'doorparty'));
+			var st = remotes.settingsOf(await remotes.getByUuid(p.uuid));
+			assert.strictEqual(st.list_source, 'shipped');
+			assert.strictEqual(st.list_name, 'doorparty');
+			assert.strictEqual(st.host, 'h', 'the rest of the settings are kept');
+		});
+
+		it('deletes a door that is in a collection (its entries first)', async function () {
+			await provider();
+			var d = await doors.createRemoteDoor({ provider: 'zz89cat', code: 'lord', name: 'LORD' });
+			var coll = await pg.queryOne('SELECT id FROM door_collections ORDER BY id LIMIT 1');
+			if (coll) await pg.write('INSERT INTO door_collection_entries (collection_id, door_id) VALUES ($1, $2)', [coll.id, d.doorId]);
+			var r = await doors.deleteDoor(d.doorId);
+			assert.strictEqual(r.status, true, (r.errormessages || []).join());
+			assert.strictEqual(await pg.queryOne('SELECT id FROM doors WHERE id = $1', [d.doorId]), null, 'the door is gone, not just reported gone');
+		});
 
 		it('applies a list, keeps removed doors, and makes their door entries inactive', async function () {
 			var p = await provider();

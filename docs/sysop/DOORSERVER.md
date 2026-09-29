@@ -44,13 +44,13 @@ Your callers can play doors that run somewhere else: on another Canectic board's
 
 ### Door lists
 
-Each provider can keep a list of the doors it offers, which you tick doors from instead of typing codes. Under **Door list** on the provider's page, choose where it comes from:
+Each provider can keep a list of the doors it offers, which you tick doors from instead of typing codes. On a BBSLink or DoorParty provider's page, the Doors card offers **Load the BBSLink list** (or DoorParty) straight away; on another Canectic board's, **Load the doors it offers**. Loading chooses that list and fills it in. To use another source, choose it under **Door list** in the provider's settings:
 
 - **A list shipped with Canectic.** DoorParty and BBSLink lists come with Canectic (in `config/doorlists/`) and are updated with each release; the DoorParty and BBSLink buttons choose them for you.
 - **A file in a file area**: the newest file whose name matches the pattern you give (`*` and `?` allowed, for example `DPLIST*.ZIP`), either a list file or an archive holding one. This is how a list can reach you by file echo.
 - **Their own list**, for another Canectic board, which sends it over the connection.
 
-**Check the door list** shows what the list would change (new doors, renamed ones, doors no longer offered) before you **Apply** it. The list then appears on the page with a filter; tick doors and **Add the ticked doors**, optionally straight into a collection. Tick **Check every day** and the board checks the list each morning and applies it, sending you a notification of what changed. A door that leaves the list is kept in it, marked "no longer offered", and any door entry for it is made inactive so callers stop seeing it; nothing is deleted. The daily check refuses a list that would remove more than half the doors, or an empty one, and tells you instead, since that is far more likely a damaged file than half a network's doors vanishing overnight. Canectic never reads anyone's web pages for a list: a page changes without notice, and what it then yields is wrong.
+Once a list is loaded, **Check for changes** shows what a newer list would change (new doors, renamed ones, doors no longer offered) before you **Apply** it. The list appears on the page with a filter; tick doors and **Add the ticked doors**, optionally straight into a collection. A door you have added shows **Remove** in the list, and under **Door entries** each door can be switched off or on, or removed. Tick **Check every day** and the board checks the list each morning and applies it, sending you a notification of what changed. A door that leaves the list is kept in it, marked "no longer offered", and any door entry for it is made inactive so callers stop seeing it; nothing is deleted. The daily check refuses a list that would remove more than half the doors, or an empty one, and tells you instead, since that is far more likely a damaged file than half a network's doors vanishing overnight. Canectic never reads anyone's web pages for a list: a page changes without notice, and what it then yields is wrong.
 
 A list file is JSON:
 

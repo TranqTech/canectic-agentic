@@ -29,6 +29,7 @@ block content
                       button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newDoorModal')
                         | Add Door
               .card-body
+                include ../../partials/flash
                 if errormessages && errormessages.length > 0
                   ul.text-danger
                     for error of errormessages
