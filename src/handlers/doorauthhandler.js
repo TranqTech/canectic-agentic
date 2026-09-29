@@ -179,6 +179,8 @@ class DoorAuthHandler extends BaseHandler {
 		var remoteName = clean(user.name, 40) || "Guest";
 
 		call.doorsession = true;
+		// The door server's own mark (#89): a web Play session sets doorsession too
+		call.doorserver_session = true;
 		call.caller_bbs = sys.system_id;
 		call.caller_bbs_name = sys.bbs_name;
 		call.caller_username = (sys.username_prefix || sys.system_id) + "_" + remoteName.replace(/\s+/g, "_");

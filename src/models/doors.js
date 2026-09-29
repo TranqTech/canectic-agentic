@@ -397,9 +397,19 @@ function getDropfileTypeLabels() {
 }
 
 /**
+ * Whether a call is a remote BBS's caller on our door server. Set only by the
+ * door_auth stage. NOT call.doorsession, which a web Play session sets too
+ * (#89): checking that refused every door not offered to the door server
+ * to this board's own users playing on the web, in 0.9.13a.
+ */
+function isDoorServerCall(call) {
+	return !!(call && call.doorserver_session === true);
+}
+
+/**
  * Whether a call may launch a door (#86).
  *
- * A door-server session (a remote BBS's caller, call.doorsession) may launch
+ * A door-server session (a remote BBS's caller, isDoorServerCall) may launch
  * only a door the sysop has made available to the door server. Checked in
  * CallManager.launchDoor, the one place every launch passes through, because
  * the door is named by the remote client and nothing upstream can be trusted
@@ -410,7 +420,7 @@ function getDropfileTypeLabels() {
  */
 function mayLaunchDoor(call, doorConfig) {
 	if (!doorConfig) return { ok: false, reason: 'no such door' };
-	if (call && call.doorsession && !doorConfig.doorserverAvailable) {
+	if (isDoorServerCall(call) && !doorConfig.doorserverAvailable) {
 		return { ok: false, reason: 'not available to door-server callers' };
 	}
 	return { ok: true };
@@ -462,5 +472,6 @@ export {
 	getLaunchTypeLabels,
 	getValidDropfileTypes,
 	getDropfileTypeLabels,
-	mayLaunchDoor
+	mayLaunchDoor,
+	isDoorServerCall
 };

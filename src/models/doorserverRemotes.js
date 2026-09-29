@@ -163,7 +163,7 @@ function minSecurityFor(remote, cfg) {
  * returns { ok, reason }
  */
 function mayUseRemote(call, remote, cfg) {
-	if (call && call.doorsession) return { ok: false, reason: 'Doors on other systems are not available through the door server.' };
+	if (call && call.doorserver_session === true) return { ok: false, reason: 'Doors on other systems are not available through the door server.' };
 	var ur = call && call.user_record;
 	if (!ur || !ur.id) return { ok: false, reason: 'You need to be logged in to use doors on other systems.' };
 	var need = minSecurityFor(remote, cfg);

@@ -98,7 +98,9 @@ describe('doors on other systems (#89)', function () {
 			assert.strictEqual(mayUseRemote({ user_record: { id: 1, security: 60 } }, remote, cfg).ok, true);
 			assert.strictEqual(mayUseRemote({ user_record: { id: 1, security: 59 } }, remote, cfg).ok, false);
 			assert.strictEqual(mayUseRemote({ user_record: null }, remote, cfg).ok, false, 'a caller who never logged in');
-			assert.strictEqual(mayUseRemote({ doorsession: true, user_record: { id: 1, security: 255 } }, remote, cfg).ok, false);
+			assert.strictEqual(mayUseRemote({ doorsession: true, doorserver_session: true, user_record: { id: 1, security: 255 } }, remote, cfg).ok, false);
+			assert.strictEqual(mayUseRemote({ doorsession: true, web_originated: true, user_record: { id: 1, security: 60 } }, remote, cfg).ok, true,
+				'web Play is a door session too, and is this board\'s own caller');
 			assert.strictEqual(mayUseRemote({ user_record: { id: 1, security: 10 } }, { name: 'dp', min_security: 10 }, cfg).ok, true);
 		});
 
