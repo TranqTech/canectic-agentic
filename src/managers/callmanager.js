@@ -37,6 +37,8 @@ import { DisplayScreen } from "../handlers/menucommands/displayScreen.js";
 
 //models
 import {getDoorConfig, mayLaunchDoor} from "../models/doors.js"
+import * as remoteRegistry from "../models/doorserverRemotes.js"
+import { RemoteDoorRunner } from "../handlers/remotedoorrunner.js"
 import {logCall, logCallDuration} from "../models/callers.js"
 import * as themes from "../models/themes.js"
 import appConfig from "../config/appConfig.js"
@@ -755,6 +757,36 @@ class IncomingCall{
 			alogger.writeAlog(3, logmsg, "redbright");
 			this._doorReturn();
 		}
+	}
+
+	// Send the caller to a door on another Canectic door server (#86). arg is
+	// "<remote name>" or "<remote name>:<door slug>" from the menu entry.
+	async launchRemoteDoor(arg, fromMenu) {
+		this._doorFromMenu = fromMenu || false;
+		var parsed = remoteRegistry.parseRemoteArg(arg);
+		var remote = null;
+		try { remote = parsed.name ? await remoteRegistry.getByName(parsed.name) : null; } catch (_) { remote = null; }
+		if (!remote || !remote.active) {
+			alogger.writeAlog(3, this.loggingId + "\n  No active remote door server named: " + parsed.name, "yellowbright");
+			try {
+				this.cmds.senddata("\r\nThat door server is not available.\r\n Press any key to continue...");
+			} catch (_) {}
+			this._waitForKeyThen(() => { this._doorReturn(); });
+			return;
+		}
+
+		if (this.currentHandler) {
+			try { this.currentHandler.clearHandler(); } catch (_) {}
+			this.currentHandler = null;
+		}
+		this.updateNodeStatus("door", "remote:" + remote.name, remote.title || remote.name);
+		this.call_status = "Remote door: " + remote.name + (parsed.door ? ":" + parsed.door : "");
+
+		var handler = new RemoteDoorRunner(this, remote, parsed.door);
+		this.currentHandler = handler;
+		handler.emitter.on("ModuleReturn", () => { this._doorReturn(); });
+		handler.emitter.on("HangupSignal", () => { this.hangUpCall(); });
+		handler.startStage();
 	}
 
 	// Temporarily enters raw mode to wait for a single keypress, then calls the callback

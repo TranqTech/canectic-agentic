@@ -80,6 +80,7 @@ Every new menu automatically gets a `?` hotkey mapped to "Redraw Menu". This giv
 | Exit Stage | No | Advance to next call flow stage |
 | File Browser | No | Browse files in current area |
 | File Search | No | Search files across areas |
+| Remote Door Server | Remote name | Send the caller to a door on another Canectic board's door server, set up under Doors > Door Server > Remote door servers. The name alone shows that board's door list; `name:door` goes straight to one door |
 | Fire Template Event | Event code | Fire a message template event for the caller and return to the menu. `event_code`, or `event_code|{json}` to pass extra variables (see [TEMPLATES.md](TEMPLATES.md)) |
 | Last Callers | No | View recent caller list |
 | List Messages | No | List messages in current area |

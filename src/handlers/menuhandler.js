@@ -1110,6 +1110,14 @@ class MenuHandler extends BaseHandler {
 				}
 				return;
 
+			case "remoteDoor":
+				if (entry.command_arg) {
+					this.call.launchRemoteDoor(entry.command_arg, true);
+				} else {
+					this._drawError("No remote door server configured");
+				}
+				return;
+
 			case "loadMenu":
 				if (entry.command_arg) {
 					var exists = await menuExists(entry.command_arg);

@@ -414,6 +414,7 @@ function getAvailableCommands() {
 		{ name: 'notifications',  label: 'Notifications',     needsArg: false },
 		{ name: 'displayScreen',  label: 'Display Screen',    needsArg: true,  argLabel: 'type:Welcome or screens/filename' },
 		{ name: 'fireEvent',      label: 'Fire Template Event', needsArg: true, argLabel: 'event_code or event_code|{json}' },
+		{ name: 'remoteDoor',     label: 'Remote Door Server', needsArg: true, argLabel: 'remote name, or name:door' },
 	].sort(function(a, b) { return a.label.localeCompare(b.label); });
 }
 

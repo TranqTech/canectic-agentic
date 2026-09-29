@@ -586,6 +586,9 @@ block content
   datalist#template-event-codes
     for ev in (templateEvents || [])
       option(value=ev.code)= ev.label
+  datalist#doorserver-remote-names
+    for r in (doorserverRemotes || [])
+      option(value=r.name)= r.title || r.name
   script.
     document.addEventListener('DOMContentLoaded', function() {
       var menuId = !{menu ? menu.id : 'null'};
@@ -599,14 +602,16 @@ block content
       // Commands that need a free-text argument (no dropdown)
       var textArgCommands = {
         displayScreen: 'Screen (type:Welcome or subdir/filename):',
-        fireEvent: 'Event code (optionally code|{json}):'
+        fireEvent: 'Event code (optionally code|{json}):',
+        remoteDoor: 'Remote door server (name, or name:door):'
       };
       var textArgPlaceholders = {
         displayScreen: 'e.g. type:Welcome or screens/rules',
-        fireEvent: 'e.g. user_logoff or holiday|{"event":{"name":"New Year"}}'
+        fireEvent: 'e.g. user_logoff or holiday|{"event":{"name":"New Year"}}',
+        remoteDoor: 'e.g. hub, or hub:lord to go straight to one door'
       };
       // Event codes are suggested, not enforced: the argument may carry JSON
-      var textArgLists = { fireEvent: 'template-event-codes' };
+      var textArgLists = { fireEvent: 'template-event-codes', remoteDoor: 'doorserver-remote-names' };
 
       // Show/hide argument select and populate options based on selected command
       function syncArgField(cmdSel) {

@@ -21,6 +21,8 @@ import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
 import * as doorserverModel from '../models/doorserver.js';
+import * as doorserverRemotes from '../models/doorserverRemotes.js';
+import { listDoors as listRemoteDoors } from '../utils/doorserverClient.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as messageTemplates from '../models/messageTemplates.js';
@@ -2540,14 +2542,16 @@ router.get('/menus/:id', async (req, res) => {
 	}
 	var entries        = await menus.getEntriesForMenu(menuId);
 	var availCommands  = menus.getAvailableCommands();
-	// Suggestions for the Fire Template Event argument
+	// Suggestions for the Fire Template Event and Remote Door Server arguments
 	var templateEvents = (await messageTemplates.getAllEvents()) || [];
+	var doorserverRemotesList = (await doorserverRemotes.getAll()) || [];
 	var menuTypes      = menus.getValidMenuTypes();
 	var ansiColors     = menus.getAnsiColors();
 	var allMenus       = await menus.getAllMenus();
 	var allDoors       = await doors.getAllDoors();
 	res.render('admin/menus/view', {
 		templateEvents: templateEvents,
+		doorserverRemotes: doorserverRemotesList,
 		sufficientAccess: sufficientAccess,
 		title: menu.name,
 		activelink: 'menus',
@@ -7585,7 +7589,8 @@ router.get('/doorserver', requireAdmin, async (req, res) => {
 		registerSecurity: appConfig.getNumber('doorserver_register_security', 100),
 		autoApprove: appConfig.getBoolean('doorserver_auto_approve', false),
 		defaultMax: appConfig.getNumber('doorserver_max_concurrent', 5),
-		availableDoors: ((await doors.getAllDoors()) || []).filter(function (d) { return d.doorserver_available; })
+		availableDoors: ((await doors.getAllDoors()) || []).filter(function (d) { return d.doorserver_available; }),
+		remotes: await doorserverRemotes.getAll()
 	});
 });
 
@@ -7595,6 +7600,38 @@ router.post('/doorserver/new', urlencodedParser, requireAdmin, async (req, res) 
 	if (!r.status) await flash.setOne(req, 'danger', r.errors.join('. '));
 	else await flash.setOne(req, 'success', 'Registered ' + r.system.system_id + '. Give its sysop this secret now; it is not shown again: ' + r.secret);
 	res.redirect('/admin/doorserver');
+});
+
+// Remote door servers this board connects out to (phase D). Registered
+// before the /doorserver/:uuid routes so 'remotes' is never read as a uuid.
+router.post('/doorserver/remotes/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var r = await doorserverRemotes.createRemote(req.body);
+	await flash.setOne(req, r.status ? 'success' : 'danger', r.status
+		? 'Added remote door server ' + r.remote.name + '. Use Test to check it, then add a Remote Door Server menu entry.'
+		: r.errors.join('. '));
+	res.redirect('/admin/doorserver#remotes');
+});
+
+router.post('/doorserver/remotes/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var r = await doorserverRemotes.updateRemote(req.params.uuid, req.body);
+	await flash.setOne(req, r.status ? 'success' : 'danger', r.status ? 'Saved.' : r.errors.join('. '));
+	res.redirect('/admin/doorserver#remotes');
+});
+
+router.post('/doorserver/remotes/:uuid/test', urlencodedParser, requireAdmin, async (req, res) => {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	if (!remote) return res.redirect('/admin/doorserver#remotes');
+	var r = await listRemoteDoors({ url: remote.url, systemId: remote.system_id, secret: remote.secret, timeoutMs: 10000 });
+	await flash.setOne(req, r.ok ? 'success' : 'danger', r.ok
+		? remote.name + ' answered with ' + r.doors.length + ' door(s): ' + (r.doors.map(function (d) { return d.slug; }).join(', ') || 'none')
+		: remote.name + ': ' + r.reason);
+	res.redirect('/admin/doorserver#remotes');
+});
+
+router.post('/doorserver/remotes/:uuid/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var ok = await doorserverRemotes.deleteRemote(req.params.uuid);
+	await flash.setOne(req, ok ? 'success' : 'danger', ok ? 'Deleted.' : 'Could not delete.');
+	res.redirect('/admin/doorserver#remotes');
 });
 
 router.post('/doorserver/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
