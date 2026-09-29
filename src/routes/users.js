@@ -10,6 +10,7 @@ import mobile from 'is-mobile';
 import * as userAccounts from '../models/useraccounts.js';
 import * as sessionStore from '../middleware/db/sessionstore.js';
 import * as callers from '../models/callers.js';
+import { formatFriendly } from '../utils/dateFormat.js';
 import * as alogger from '../utils/alogger.js';
 import * as apiTokens from '../models/apiTokens.js';
 import appConfig from "../config/appConfig.js";
@@ -646,7 +647,7 @@ router.post('/profile', urlencodedParser, async (req, res) => {
 			var changed = new Date(userRecord.username_changed_at);
 			var nextAllowed = new Date(changed.getTime() + cooldownDays * 24 * 60 * 60 * 1000);
 			if (Date.now() < nextAllowed.getTime()) {
-				errors.push('Username can only be changed every ' + cooldownDays + ' days. Next change allowed: ' + nextAllowed.toLocaleDateString());
+				errors.push('Username can only be changed every ' + cooldownDays + ' days. Next change allowed: ' + formatFriendly(nextAllowed, { dateOnly: true }));
 			}
 		}
 		if (newUsername.length < 3) {

@@ -18,7 +18,8 @@
 // The presence server and notification model are passed in, so this is
 // testable without either.
 
-import { clockTime, countdown } from './terminalDrain.js';
+import { countdown } from './terminalDrain.js';
+import { formatFriendly } from '../utils/dateFormat.js';
 
 /** The presence message for the current state. Pure. */
 function presenceMessage(state) {
@@ -27,7 +28,11 @@ function presenceMessage(state) {
 		type:         'maintenance',
 		deadline:     state.deadline ? new Date(state.deadline).toISOString() : null,
 		reason:       flag.reason || null,
-		expectedBack: state.expectedBack ? new Date(state.expectedBack).toISOString() : null
+		expectedBack: state.expectedBack ? new Date(state.expectedBack).toISOString() : null,
+		// The board's time, formatted here so every open page shows the same
+		// clock (#59); the banner falls back to its own only without these
+		deadlineText:     state.deadline ? formatFriendly(state.deadline) : null,
+		expectedBackText: state.expectedBack ? formatFriendly(state.expectedBack) : null
 	};
 }
 
@@ -37,9 +42,9 @@ function notificationText(state, now) {
 	var when = countdown(state.deadline, now);
 	var body = when === 'now'
 		? 'The board is closing for maintenance now.'
-		: 'The board closes for maintenance at ' + clockTime(state.deadline) + ' (' + when + ').';
+		: 'The board closes for maintenance at ' + formatFriendly(state.deadline) + ' (' + when + ').';
 	if (flag.reason) body += ' ' + flag.reason + '.';
-	if (state.expectedBack) body += ' Expected back around ' + clockTime(state.expectedBack) + '.';
+	if (state.expectedBack) body += ' Expected back around ' + formatFriendly(state.expectedBack) + '.';
 	body += ' Anything you post before then is kept.';
 	return { title: 'The board is closing for maintenance', body: body };
 }

@@ -121,4 +121,43 @@ function timestampMs(value) {
 	return dt ? dt.toMillis() : null;
 }
 
-export { formatListDate, formatListDateFull, formatTimestamp, timestampMs, DEFAULT_RECENT_MONTHS };
+/**
+ * A date for people to read on the user-facing side (#59), in the SERVER'S
+ * time and timezone: much of what happens on a BBS runs by the system's clock
+ * rather than the caller's, so every caller sees the board's time. (Tables
+ * that sort by date use formatTimestamp instead; admin pages are their own
+ * matter.)
+ *
+ *   today                 "17:30"             dateOnly: "Today"
+ *   yesterday             "Yesterday 17:30"   dateOnly: "Yesterday"
+ *   2 to 6 days ago       "3 days ago"
+ *   within 6 months       "Sep 25"
+ *   older                 "Dec 25, 2025"
+ *
+ * Ahead of now, mirrored: today "17:30", "Tomorrow 09:00", "in 3 days", then
+ * the same dates. Days are calendar days on the server's clock, not 24 hour
+ * spans, so 23:50 yesterday is "Yesterday 23:50" at 00:10 today.
+ *
+ * @param {string|number|Date} value
+ * @param {object}   [opts]
+ * @param {boolean}  [opts.dateOnly]  the value is a date without a time
+ * @param {DateTime} [opts.now]       for testing
+ * @returns {string|null} null when missing or unparseable
+ */
+function formatFriendly(value, opts) {
+	opts = opts || {};
+	var dt = toDateTime(value);
+	if (!dt) return null;
+	var now = opts.now || DateTime.now();
+	var days = Math.round(now.startOf('day').diff(dt.startOf('day'), 'days').days);
+	var time = dt.toFormat('HH:mm');
+	if (days === 0) return opts.dateOnly ? 'Today' : time;
+	if (days === 1) return opts.dateOnly ? 'Yesterday' : 'Yesterday ' + time;
+	if (days === -1) return opts.dateOnly ? 'Tomorrow' : 'Tomorrow ' + time;
+	if (days >= 2 && days <= 6) return days + ' days ago';
+	if (days <= -2 && days >= -6) return 'in ' + (-days) + ' days';
+	var months = Math.abs(now.diff(dt, 'months').months);
+	return months < DEFAULT_RECENT_MONTHS ? dt.toFormat('MMM d') : dt.toFormat('MMM d, yyyy');
+}
+
+export { formatListDate, formatListDateFull, formatTimestamp, timestampMs, formatFriendly, DEFAULT_RECENT_MONTHS };

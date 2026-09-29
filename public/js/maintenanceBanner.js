@@ -31,18 +31,21 @@ function formatRemaining(ms) {
 function clock(iso) {
 	var d = new Date(iso);
 	if (isNaN(d.getTime())) return '';
-	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); // pre-#59 fallback: a push without server-formatted times
 }
 
 /**
  * The banner text for a state at a moment. Pure.
  *
- * @param {object} s    { mode: 'countdown'|'admin', deadline, reason, expectedBack }
+ * @param {object} s    { mode: 'countdown'|'admin', deadline, reason, expectedBack,
+ *                      deadlineText, expectedBackText (server-formatted, #59) }
  * @param {number} now  epoch ms
  */
 function bannerText(s, now) {
 	var left = s.deadline ? new Date(s.deadline).getTime() - now : 0;
-	var back = s.expectedBack ? ' Expected back around ' + clock(s.expectedBack) + '.' : '';
+	// The server sends its own formatted times (#59), so every page shows the
+	// board's clock; clock() is only for a push from an older process.
+	var back = s.expectedBack ? ' Expected back around ' + (s.expectedBackText || clock(s.expectedBack)) + '.' : '';
 	var reason = s.reason ? ' ' + s.reason + '.' : '';
 	if (s.mode === 'admin') {
 		var callers = left > 0
@@ -52,7 +55,7 @@ function bannerText(s, now) {
 	}
 	if (left <= 0) return 'The board is closing for maintenance now.' + back;
 	return 'The board closes for maintenance in ' + formatRemaining(left) +
-		' (at ' + clock(s.deadline) + ').' + reason + back + ' Anything you post before then is kept.';
+		' (at ' + (s.deadlineText || clock(s.deadline)) + ').' + reason + back + ' Anything you post before then is kept.';
 }
 
 var state = null;
@@ -108,7 +111,9 @@ function initFromPage() {
 	show({
 		deadline:     box.getAttribute('data-deadline'),
 		reason:       box.getAttribute('data-reason') || null,
-		expectedBack: box.getAttribute('data-back') || null
+		expectedBack: box.getAttribute('data-back') || null,
+		deadlineText: box.getAttribute('data-deadline-text') || null,
+		expectedBackText: box.getAttribute('data-back-text') || null
 	});
 }
 

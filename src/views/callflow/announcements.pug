@@ -16,6 +16,6 @@ if announcements && announcements.length > 0
         small
           | Posted by #{ann.author_name || 'System'}
           if ann.created_at
-            |  on #{new Date(ann.created_at).toLocaleDateString()}
+            | , #{formatFriendly(ann.created_at)}
 else
   p.text-muted No new announcements.

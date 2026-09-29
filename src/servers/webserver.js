@@ -22,7 +22,7 @@ import { activityMiddleware } from '../middleware/webActivity.js';
 import { createErrorHandler } from '../middleware/errorHandler.js';
 import { maintenanceMiddleware } from '../middleware/maintenanceWeb.js';
 import appConfig from '../config/appConfig.js';
-import { formatTimestamp, timestampMs } from '../utils/dateFormat.js';
+import { formatTimestamp, timestampMs, formatFriendly } from '../utils/dateFormat.js';
 
 const node_env = process.env.NODE_ENV || "development"
 var webserver = express();
@@ -106,6 +106,8 @@ webserver.use(function(req, res, next) {
 webserver.use(function(req, res, next) {
 	res.locals.formatTimestamp = formatTimestamp;
 	res.locals.timestampMs = timestampMs;
+	// Friendly dates for user-facing views, in server time (#59): +when
+	res.locals.formatFriendly = formatFriendly;
 	next();
 });
 

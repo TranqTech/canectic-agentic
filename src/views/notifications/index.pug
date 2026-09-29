@@ -31,7 +31,8 @@ block content
                   if n.body
                     p.mb-0.mt-1.text-muted(style='font-size:0.9rem; white-space:pre-line')= n.body
                 .text-end
-                  small.text-muted= n.created_at ? new Date(n.created_at).toLocaleString() : ''
+                  small.text-muted
+                    +when(n.created_at)
                   if n.link
                     a.btn.btn-sm.btn-outline-info.ms-2(href=n.link)
                       i.bi.bi-arrow-right

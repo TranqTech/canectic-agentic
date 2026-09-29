@@ -25,6 +25,7 @@ import { parseFlags } from '../utils/areaAccess.js';
 import { currentMaintenance } from '../maintenance/maintenanceWatch.js';
 import { hashSessionId } from '../maintenance/updateProgress.js';
 import { writeSysopHashes } from '../maintenance/sysopSessions.js';
+import { formatFriendly } from '../utils/dateFormat.js';
 
 // Reachable whatever the state: the admin, the log viewer, the health check,
 // and the way in and out for a sysop.
@@ -70,6 +71,10 @@ function viewModel(state, now) {
 		since:        flag.since || null,
 		deadline:     state && state.deadline ? new Date(state.deadline).toISOString() : null,
 		expectedBack: back ? back.toISOString() : null,
+		// In the board's time, not the viewer's (#59): what the page and the
+		// banner print
+		deadlineText:     state && state.deadline ? formatFriendly(state.deadline) : null,
+		expectedBackText: back ? formatFriendly(back) : null,
 		// Retry-After: when the board expects to be back, or ten minutes if
 		// nobody said, so a crawler neither hammers nor gives up.
 		retryAfter:   back && back.getTime() > t ? Math.ceil((back.getTime() - t) / 1000) : 600

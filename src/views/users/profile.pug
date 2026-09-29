@@ -36,14 +36,14 @@ block content
 											td.text-muted Member Since
 											td
 												if _user.created_at
-													= new Date(_user.created_at).toLocaleDateString()
+													+when(_user.created_at, 'date')
 												else
 													| -
 										tr
 											td.text-muted Last Login
 											td
 												if _user.lastlogon
-													= new Date(_user.lastlogon).toLocaleDateString()
+													+when(_user.lastlogon)
 												else
 													| -
 										tr
@@ -83,7 +83,7 @@ block content
 										if !canChangeUsername && usernameNextChange
 											.form-text.text-warning
 												i.bi.bi-clock.me-1
-												| Next change allowed: #{new Date(usernameNextChange).toLocaleDateString()}
+												| Next change allowed: #{formatFriendly(usernameNextChange, { dateOnly: true })}
 										else
 											.form-text Username changes are limited to once every #{cooldownDays || 90} days
 									.row
@@ -199,11 +199,13 @@ block content
 												span.badge.bg-info= apiScopeLabels[t.scope] || t.scope
 											td
 												if t.last_used_at
-													small= new Date(t.last_used_at).toLocaleDateString()
+													small
+														+when(t.last_used_at)
 												else
 													small.text-muted never
 											td
-												small= new Date(t.created_at).toLocaleDateString()
+												small
+													+when(t.created_at, 'date')
 											td
 												if t.active
 													span.badge.bg-success Active

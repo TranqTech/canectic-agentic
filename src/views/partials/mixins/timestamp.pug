@@ -18,3 +18,17 @@ mixin ts(value, mode)
     span.text-muted -
   else
     time.ts-local(datetime=new Date(tsMs).toISOString() data-ts=tsMs data-ts-mode=(mode === 'date' ? 'date' : mode === 'list' ? 'list' : 'datetime'))= formatTimestamp(tsMs, { dateOnly: mode === 'date' })
+
+//- when: a date for people to read on user-facing views (#59), in the
+//- server's time and timezone, which this does NOT rewrite in the browser:
+//- "17:30", "Yesterday 17:30", "3 days ago", "Sep 25", "Dec 25, 2025".
+//- The exact server time is in the tooltip. Tables that sort by date use +ts.
+//-
+//-   +when(caller.starttime)
+//-   +when(user.created_at, 'date')     Today / Yesterday / 3 days ago / ...
+mixin when(value, mode)
+  - var whenText = formatFriendly(value, { dateOnly: mode === 'date' })
+  if whenText === null
+    span.text-muted -
+  else
+    time.when(datetime=new Date(timestampMs(value)).toISOString() title=formatTimestamp(value, { dateOnly: mode === 'date' }))= whenText

@@ -47,6 +47,7 @@
 
 ### Web
 
+- **Dates on the user side of the web read the same way everywhere, in your board's time.** Profile, notifications, last callers, announcements, the call flow, the maintenance page and the maintenance banner used to show each viewer's own 12-hour date format, differently on each page. They now use the board's clock and one style: a bare time today (`17:30`), `Yesterday 17:30`, `3 days ago` through the week, then `Sep 25`, and `Dec 25, 2025` once it is more than six months back. Hover over one for the exact time. Tables you can sort by date keep the full date and time.
 - **Opening the notification bell now marks your notifications read.** The badge clears as soon as you look, rather than staying lit until you clicked each one or pressed Mark All Read, which is gone from the dropdown (the full Notifications page still has it). New ones stay highlighted until you close the dropdown.
 - **New private mail no longer shows in the notification bell on the web,** since the mail icon already counts it. Callers still see new mail in the terminal's notification list, and reading or deleting the message, on the web, in the terminal, in a mail client or in a QWK packet, now clears it there.
 - Fix: **finishing the web call flow, or posting to the wall from it, returned an error when the request carried no form data.** Browsers always send some, so this was only seen from scripts; the call flow now finishes normally either way.

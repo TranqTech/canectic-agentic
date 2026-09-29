@@ -40,7 +40,8 @@ block content
                     small
                       | Posted by #{ann.author_name || 'System'}
                       if ann.created_at
-                        |  on #{new Date(ann.created_at).toLocaleDateString()}
+                        | , 
+                        +when(ann.created_at)
             else
               .card
                 .card-header.bg-darkblue.text-white

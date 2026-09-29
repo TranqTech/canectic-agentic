@@ -16,7 +16,7 @@
             each c in callers
               tr
                 td: strong.fg-brightmagenta= c.username || 'Unknown'
-                td: span.fg-cyan= c.call_time ? new Date(c.call_time).toLocaleString() : ''
+                td: span.fg-cyan= c.call_time ? formatFriendly(c.call_time) : ''
                 td
                   if c.source === 'Web'
                     span.badge.bg-success Web

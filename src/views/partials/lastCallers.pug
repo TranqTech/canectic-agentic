@@ -28,20 +28,10 @@
                   else
                     strong.fg-brightmagenta= caller.username
                 td
-                  - var d = caller.starttime ? new Date(caller.starttime) : null
-                  if d
-                    - var now = new Date()
-                    - var isToday = d.toDateString() === now.toDateString()
-                    if isSelf
-                      if isToday
-                        span.fg-brightyellow= d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-                      else
-                        span.fg-brightyellow= d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-                    else
-                      if isToday
-                        span.fg-cyan= d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-                      else
-                        span.fg-cyan= d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                  //- Server time, the friendly rule (#59): 17:30, Yesterday 17:30, 3 days ago, Sep 25
+                  - var when = caller.starttime ? formatFriendly(caller.starttime) : null
+                  if when
+                    span(class=isSelf ? 'fg-brightyellow' : 'fg-cyan' title=formatTimestamp(caller.starttime))= when
                   else
                     | -
                 td

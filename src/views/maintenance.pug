@@ -26,7 +26,7 @@ html
             p.mb-1
               | Expected back around
               |
-              strong#maint-back(data-iso=expectedBack)= new Date(expectedBack).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              strong#maint-back(data-iso=expectedBack)= expectedBackText
               span#maint-back-rel.text-muted
           else
             p.mb-1 Please check back a little later.
@@ -39,7 +39,8 @@ html
         if (!el) return;
         var when = new Date(el.getAttribute('data-iso'));
         if (isNaN(when.getTime())) return;
-        el.textContent = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // The time itself is the board's, printed by the server (#59); only
+        // how far away it is is worked out here.
         var mins = Math.round((when.getTime() - Date.now()) / 60000);
         var rel = document.getElementById('maint-back-rel');
         if (rel) rel.textContent = mins > 1 ? ' (in about ' + mins + ' minutes)' : (mins >= 0 ? ' (any minute now)' : ' (running a little late)');
