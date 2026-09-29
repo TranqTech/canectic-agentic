@@ -17,6 +17,7 @@ import * as alogger from "../utils/alogger.js";
 import appConfig from "../config/appConfig.js";
 import { openSession } from "../utils/doorserverClient.js";
 import * as remotes from "../models/doorserverRemotes.js";
+import { createDoorMenu } from "../../bin/doorclient.js";
 
 class RemoteDoorRunner extends BaseHandler {
 	/**
@@ -32,8 +33,7 @@ class RemoteDoorRunner extends BaseHandler {
 		this.session = null;
 		this.streaming = false;
 		this.choosing = false;
-		this.doors = [];
-		this.typed = "";
+		this.menu = null;
 		this.waitingForKey = false;
 		this.loggingId = "RemoteDoor (Node " + call.nodenum + ") [" + remote.name + (door ? ":" + door : "") + "]";
 	}
@@ -69,14 +69,17 @@ class RemoteDoorRunner extends BaseHandler {
 		});
 		remotes.touch(this.remote.uuid).catch(function () {});
 
-		s.on("auth_ok", (doors) => {
-			this.doors = doors || [];
+		s.on("auth_ok", (doors, collections) => {
 			if (this.door) return;
-			if (!this.doors.length) { this._end("That door server has no doors on offer."); return; }
+			if (!doors || !doors.length) { this._end("That door server has no doors on offer."); return; }
 			this.choosing = true;
-			this._say("\r\nDoors on " + (this.remote.title || this.remote.name) + ":\r\n\r\n");
-			this.doors.forEach((d, n) => this._say("  " + String(n + 1).padStart(2) + ") " + d.name + "\r\n"));
-			this._say("\r\nChoose a number (Q to go back): ");
+			this.menu = createDoorMenu({
+				doors: doors, collections: collections, title: this.remote.title || this.remote.name, quitWord: "go back",
+				write: (t) => this._say(t),
+				onPick: (slug) => { this.choosing = false; this.session.launch(slug); },
+				onQuit: () => { this.choosing = false; this.session.close(); this._finish(); }
+			});
+			this.menu.start();
 		});
 		s.on("launch_ok", () => {
 			this.streaming = true;
@@ -100,17 +103,8 @@ class RemoteDoorRunner extends BaseHandler {
 		if (this.streaming) { this.session.send(Buffer.from(data)); return; }
 		if (!this.choosing) return;
 		for (var ch of Buffer.from(data).toString("latin1")) {
-			if (ch === "q" || ch === "Q") { this.choosing = false; this.session.close(); this._finish(); return; }
-			if (ch === "\r" || ch === "\n") {
-				var pick = this.doors[parseInt(this.typed) - 1];
-				this.typed = "";
-				if (!pick) { this._say("\r\nChoose a number (Q to go back): "); continue; }
-				this._say("\r\n");
-				this.choosing = false;
-				this.session.launch(pick.slug);
-				return;
-			}
-			if (/[0-9]/.test(ch) && this.typed.length < 3) { this.typed += ch; this._say(ch); }
+			this.menu.key(ch);
+			if (!this.choosing) return;
 		}
 	}
 

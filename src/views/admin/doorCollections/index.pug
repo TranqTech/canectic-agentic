@@ -41,6 +41,7 @@ block content
                         th Name
                         th Slug
                         th Doors
+                        th Shown to
                         th Status
                         th(style='width:140px') Actions
                     tbody#sortableCollections
@@ -59,6 +60,9 @@ block content
                           td
                             span.badge.bg-info= doorCounts[col.id] || 0
                           td
+                            - var aud = col.audience || 'local'
+                            span.badge(class=aud === 'local' ? 'bg-secondary' : aud === 'doorserver' ? 'bg-warning text-dark' : 'bg-primary')= audienceLabels[aud] || aud
+                          td
                             if col.active
                               span.badge.bg-success Active
                             else
@@ -75,6 +79,7 @@ block content
                               data-icon_url=col.icon_url || ''
                               data-sort_order=col.sort_order || 0
                               data-active=(col.active ? 'true' : 'false')
+                              data-audience=(col.audience || 'local')
                             )
                               i.bi.bi-pencil
                             form.d-inline(action='/admin/doorCollections/delete/' + col.id method='POST')
@@ -103,6 +108,11 @@ block content
               small.form-text.text-muted.d-block.mb-2 Rich text with ANSI colour palette. Plain text still works — use colour for highlights/labels.
               label.form-label Icon URL (PNG/SVG):
               input.form-control.mb-2(type='text' name='icon_url' placeholder='/images/doors/action.png')
+              label.form-label Shown to:
+              select.form-select.mb-1(name='audience')
+                each a in audiences
+                  option(value=a selected=(a === 'local'))= audienceLabels[a]
+              small.form-text.text-muted.d-block.mb-2 This board's callers, BBSes connecting to your door server, or both. Doors added to a collection the door server sees are offered to it; untick them on the collection's page.
               .row
                 .col-6
                   label.form-label Sort Order:
@@ -129,6 +139,11 @@ block content
               textarea#ec_description.form-control.mb-2(name='description' rows='4')
               label.form-label Icon URL (PNG/SVG):
               input#ec_icon_url.form-control.mb-2(type='text' name='icon_url')
+              label.form-label Shown to:
+              select#ec_audience.form-select.mb-1(name='audience')
+                each a in audiences
+                  option(value=a)= audienceLabels[a]
+              small.form-text.text-muted.d-block.mb-2 Starting to show a collection to the door server asks which of its doors to offer before it takes effect.
               .row
                 .col-6
                   label.form-label Sort Order:
@@ -230,6 +245,7 @@ block content
           document.getElementById('ec_icon_url').value = d.icon_url;
           document.getElementById('ec_sort_order').value = d.sort_order;
           document.getElementById('ec_active').checked = d.active === 'true';
+          document.getElementById('ec_audience').value = d.audience || 'local';
           editModal.show();
         });
       });

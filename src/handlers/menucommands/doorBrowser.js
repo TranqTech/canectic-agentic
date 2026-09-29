@@ -1,5 +1,5 @@
 import { BaseSubModule } from "../basesubmodule.js";
-import { getActiveCollections, getDoorsInCollection, getCollectionCounts } from "../../models/doorCollections.js";
+import { getLocalCollections, getDoorsInCollection, getCollectionCounts, doorIdsHiddenLocally } from "../../models/doorCollections.js";
 import { getAllDoors } from "../../models/doors.js";
 import { htmlToTerminalText } from "../../models/announcements.js";
 
@@ -422,7 +422,8 @@ class doorBrowser extends BaseSubModule {
 		var savedState = this.call._doorBrowserState || null;
 		this.call._doorBrowserState = null;
 
-		getActiveCollections()
+		// Collections shown to the door server only are not this board's (#89)
+		getLocalCollections()
 			.then(async (collections) => {
 				if (!this.active) return;
 				this._collections = collections || [];
@@ -430,7 +431,8 @@ class doorBrowser extends BaseSubModule {
 				// If no collections, fall back to flat door list as a single "collection"
 				if (this._collections.length === 0) {
 					var allDoorList = await getAllDoors();
-					this._doors = (allDoorList || []).filter(function(d) { return d.active; });
+					var hidden = await doorIdsHiddenLocally();
+					this._doors = (allDoorList || []).filter(function(d) { return d.active && !hidden.has(d.id); });
 					this._state = STATE_DOORS;
 					this._currentCollection = { name: 'Door Games', description: '' };
 				} else if (savedState && savedState.collectionSlug) {

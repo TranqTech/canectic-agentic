@@ -99,6 +99,84 @@ function takeJsonLines(text) {
 }
 
 // ---------------------------------------------------------------------------
+// The door menu
+// ---------------------------------------------------------------------------
+
+/**
+ * The numbered door menu shown when no door is named. With more than one
+ * collection it has two levels, the collections and then the doors in the
+ * one chosen; otherwise it is the door list. The one definition: the RLogin
+ * wrapper and Canectic's own remote door runner import it from here, so this
+ * file can stay a single file with no dependencies.
+ *
+ *   doors        [{slug, name}]
+ *   collections  [{slug, name, doors: [slug...]}] (optional; auth_ok since #89)
+ *   title        the server's name, for the headings
+ *   quitWord     "quit" or "go back", for the top level's prompt
+ *   write(text)  output; onPick(slug); onQuit()
+ *
+ * returns { start(), key(ch) }; key() takes one character at a time.
+ */
+function createDoorMenu(opts) {
+	var doors = opts.doors || [];
+	var bySlug = {};
+	for (var d of doors) bySlug[d.slug] = d;
+	var groups = (opts.collections || []).map(function (c) {
+		return { name: c.name, doors: (c.doors || []).map(function (slug) { return bySlug[slug]; }).filter(Boolean) };
+	}).filter(function (g) { return g.doors.length; });
+	var twoLevel = groups.length > 1;
+	var where = opts.title ? ' on ' + opts.title : ' on this server';
+	var top = 'Q to ' + (opts.quitWord || 'quit');
+	var level = twoLevel ? 'collections' : 'doors';
+	var list = twoLevel ? null : doors;
+	var typed = '';
+	var write = opts.write;
+
+	function prompt() {
+		write('\r\nChoose a number (' + (level === 'doors' && twoLevel ? 'Q to go back' : top) + '): ');
+	}
+	function show() {
+		typed = '';
+		if (level === 'collections') {
+			write('\r\nDoor collections' + where + ':\r\n\r\n');
+			groups.forEach(function (g, n) { write('  ' + String(n + 1).padStart(2) + ') ' + g.name + ' (' + g.doors.length + ')\r\n'); });
+		} else {
+			write('\r\n' + (twoLevel ? list.heading : 'Doors' + where) + ':\r\n\r\n');
+			list.forEach(function (x, n) { write('  ' + String(n + 1).padStart(2) + ') ' + x.name + '\r\n'); });
+		}
+		prompt();
+	}
+	function key(ch) {
+		if (ch === 'q' || ch === 'Q') {
+			if (level === 'doors' && twoLevel) { level = 'collections'; show(); return; }
+			write('\r\n');
+			opts.onQuit();
+			return;
+		}
+		if (ch === '\r' || ch === '\n') {
+			var n = parseInt(typed); typed = '';
+			if (level === 'collections') {
+				var g = groups[n - 1];
+				if (!g) { prompt(); return; }
+				list = g.doors.slice();
+				list.heading = g.name;
+				level = 'doors';
+				write('\r\n');
+				show();
+				return;
+			}
+			var pick = list[n - 1];
+			if (!pick) { prompt(); return; }
+			write('\r\n');
+			opts.onPick(pick.slug);
+			return;
+		}
+		if (/[0-9]/.test(ch) && typed.length < 3) { typed += ch; write(ch); }
+	}
+	return { start: show, key: key };
+}
+
+// ---------------------------------------------------------------------------
 // Running
 // ---------------------------------------------------------------------------
 
@@ -118,7 +196,7 @@ function run(o, io) {
 		// that it is not an import that went missing.
 		var ws = new globalThis.WebSocket(o.server);
 		ws.binaryType = 'arraybuffer';
-		var streaming = false, pending = '', doors = [], choosing = false, typed = '';
+		var streaming = false, pending = '', doors = [], choosing = false, menu = null;
 		var say = function (s) { stdout.write(s); };
 
 		var finish = function (code) {
@@ -152,9 +230,12 @@ function run(o, io) {
 						for (var d2 of doors) say(d2.slug + '\t' + d2.name + '\n');
 					} else if (!o.door) {
 						choosing = true;
-						say('\r\nDoors on this server:\r\n\r\n');
-						doors.forEach(function (d3, n) { say('  ' + String(n + 1).padStart(2) + ') ' + d3.name + '\r\n'); });
-						say('\r\nChoose a number (Q to quit): ');
+						menu = createDoorMenu({
+							doors: doors, collections: f.collections, write: say,
+							onPick: function (slug) { choosing = false; ws.send(JSON.stringify({ type: 'launch', door: slug })); },
+							onQuit: function () { choosing = false; finish(0); }
+						});
+						menu.start();
 					}
 				} else if (f.type === 'launch_ok') {
 					streaming = true; choosing = false;
@@ -175,17 +256,8 @@ function run(o, io) {
 			if (streaming) { if (ws.readyState === 1) ws.send(chunk); return; }
 			if (!choosing) return;
 			for (var ch of chunk.toString('latin1')) {
-				if (ch === 'q' || ch === 'Q') { say('\r\n'); finish(0); return; }
-				if (ch === '\r' || ch === '\n') {
-					var n = parseInt(typed); typed = '';
-					var pick = doors[n - 1];
-					if (!pick) { say('\r\nChoose a number (Q to quit): '); continue; }
-					say('\r\n');
-					ws.send(JSON.stringify({ type: 'launch', door: pick.slug }));
-					choosing = false;
-					return;
-				}
-				if (/[0-9]/.test(ch)) { typed += ch; say(ch); }
+				menu.key(ch);
+				if (!choosing) return;
 			}
 		});
 		if (stdin.setRawMode && stdin.isTTY) stdin.setRawMode(true);
@@ -208,4 +280,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
 	main(process.argv.slice(2)).then(function (code) { process.exit(code || 0); });
 }
 
-export { parseArgs, readDropfile, problems, takeJsonLines, run, PROTOCOL };
+export { parseArgs, readDropfile, problems, takeJsonLines, createDoorMenu, run, PROTOCOL };

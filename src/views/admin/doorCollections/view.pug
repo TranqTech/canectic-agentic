@@ -32,6 +32,18 @@ block content
                       a.button.btn.btn-sm.btn-info(href='/admin/doorCollections')
                         | Back
               .card-body
+                include ../../partials/flash
+                - var aud = (collection && collection.audience) || 'local'
+                - var offersDs = aud === 'doorserver' || aud === 'both'
+                p.mb-3
+                  | Shown to: 
+                  span.badge(class=aud === 'local' ? 'bg-secondary' : aud === 'doorserver' ? 'bg-warning text-dark' : 'bg-primary')= audienceLabels[aud] || aud
+                  if offersDs
+                    span.text-muted.ms-2 Ticked doors are offered to BBSes connecting to your door server. Doors added here are offered unless you untick them.
+                    if !doorserverEnabled
+                      span.text-warning.ms-1 The door server is switched off, so nothing is offered until you turn on doorserver_enabled.
+                  else
+                    span.text-muted.ms-2 Change it with Edit on the collections list to offer these doors to the door server.
                 //- Add door form
                 .row.mb-3
                   .col-8
@@ -55,6 +67,8 @@ block content
                         th Slug
                         th Type
                         th Status
+                        if offersDs
+                          th Door server
                         th(style='width:80px') Actions
                     tbody#sortableDoors
                       for door in collectionDoors
@@ -70,6 +84,20 @@ block content
                               span.badge.bg-success Active
                             else
                               span.badge.bg-danger Inactive
+                          if offersDs
+                            td
+                              if neverOffered.includes(door.launch_type)
+                                span.text-muted.small never (a door on another system)
+                              else
+                                form.d-inline(action='/admin/doorCollections/' + collection.id + '/offer/' + door.id method='POST')
+                                  input(type='hidden' name='offered' value=(door.offered ? 'false' : 'true'))
+                                  if door.offered
+                                    button.btn.btn-xs.btn-success(type='submit' title='Offered. Click to stop offering it')
+                                      i.bi.bi-check-lg.me-1
+                                      | Offered
+                                  else
+                                    button.btn.btn-xs.btn-outline-secondary(type='submit' title='Not offered. Click to offer it')
+                                      | Not offered
                           td
                             form.d-inline(action='/admin/doorCollections/' + collection.id + '/removeDoor/' + door.id method='POST')
                               button.btn.btn-xs.btn-outline-danger(type='submit' title='Remove from collection')

@@ -2725,7 +2725,9 @@ router.get('/doorCollections', async (req, res) => {
 		currentuser: currentuser,
 		collections: collections,
 		doorCounts: counts,
-		allDoors: allDoors
+		allDoors: allDoors,
+		audiences: doorCollections.AUDIENCES,
+		audienceLabels: doorCollections.AUDIENCE_LABELS
 	});
 });
 
@@ -2735,8 +2737,50 @@ router.post('/doorCollections/new', urlencodedParser, requireAdmin, async (req, 
 });
 
 router.post('/doorCollections/update/:id', urlencodedParser, requireAdmin, async (req, res) => {
-	await doorCollections.updateCollection(parseInt(req.params.id), req.body);
+	var id = parseInt(req.params.id);
+	var result = await doorCollections.updateCollection(id, req.body);
+	// Starting to offer a collection to the door server: show which doors
+	// that offers before it takes effect (#89).
+	if (result.pendingAudience) return res.redirect('/admin/doorCollections/' + id + '/audience?to=' + encodeURIComponent(result.pendingAudience));
 	res.redirect('/admin/doorCollections');
+});
+
+// Confirm offering a collection to the door server: its doors, all ticked
+router.get('/doorCollections/:id/audience', async (req, res) => {
+	var currentuser      = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var id = parseInt(req.params.id);
+	var collection = await doorCollections.getCollectionById(id);
+	if (!collection) return res.redirect('/admin/doorCollections');
+	var to = doorCollections.normaliseAudience(req.query.to, null);
+	if (!to || !doorCollections.offersToDoorserver(to)) return res.redirect('/admin/doorCollections');
+	res.render('admin/doorCollections/audience', {
+		sufficientAccess: sufficientAccess,
+		title: 'Offer ' + collection.name + ' to the door server',
+		activelink: 'doorCollections',
+		currentuser: currentuser,
+		collection: collection,
+		to: to,
+		audienceLabels: doorCollections.AUDIENCE_LABELS,
+		neverOffered: doorCollections.NEVER_OFFERED_TYPES,
+		collectionDoors: await doorCollections.getAllDoorsInCollection(id),
+		doorserverEnabled: appConfig.getBoolean('doorserver_enabled', false)
+	});
+});
+
+router.post('/doorCollections/:id/audience', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	var offered = req.body.offer === undefined ? [] : [].concat(req.body.offer);
+	var r = await doorCollections.setAudience(id, req.body.audience, offered);
+	if (!r.status) await flash.setOne(req, 'danger', r.errormessages.join('; '));
+	res.redirect('/admin/doorCollections/' + id);
+});
+
+// Offer or stop offering one door of a collection to the door server
+router.post('/doorCollections/:id/offer/:doorId', urlencodedParser, requireAdmin, async (req, res) => {
+	var id = parseInt(req.params.id);
+	await doorCollections.setEntryOffered(id, parseInt(req.params.doorId), doorCollections.checkboxValue(req.body.offered));
+	res.redirect('/admin/doorCollections/' + id);
 });
 
 router.post('/doorCollections/delete/:id', urlencodedParser, requireAdmin, async (req, res) => {
@@ -2746,6 +2790,7 @@ router.post('/doorCollections/delete/:id', urlencodedParser, requireAdmin, async
 
 router.get('/doorCollections/:id', async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
+	res.locals.flash = await flash.get(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var collection       = await doorCollections.getCollectionById(parseInt(req.params.id));
 	var collectionDoors  = await doorCollections.getAllDoorsInCollection(parseInt(req.params.id));
@@ -2759,7 +2804,10 @@ router.get('/doorCollections/:id', async (req, res) => {
 		collection: collection,
 		collectionDoors: collectionDoors,
 		allDoors: allDoors,
-		launchTypeLabels: doors.getLaunchTypeLabels()
+		launchTypeLabels: doors.getLaunchTypeLabels(),
+		audienceLabels: doorCollections.AUDIENCE_LABELS,
+		neverOffered: doorCollections.NEVER_OFFERED_TYPES,
+		doorserverEnabled: appConfig.getBoolean('doorserver_enabled', false)
 	});
 });
 
@@ -2832,7 +2880,8 @@ router.get('/doors', async (req, res) => {
 		dropfileTypeLabels: dropfileTypeLabels,
 		configVars: configVars,
 		collections: collections || [],
-		doorCollectionMap: doorCollectionMap
+		doorCollectionMap: doorCollectionMap,
+		offeredSlugs: doorCollections.flattenOffered(await doorCollections.offeredCollections()).map(function (d) { return d.slug; })
 	});
 });
 
@@ -2947,7 +2996,8 @@ router.post('/doors/:id/duplicate', urlencodedParser, requireAdmin, async (req, 
 					var existing = await doorCollections.getAllDoorsInCollection(coll.id);
 					nextSort = Math.max(0, ...(existing || []).map(e => parseInt(e.collection_sort) || 0)) + 1;
 				} catch (_) {}
-				await doorCollections.addDoorToCollection(coll.id, dup.doorId, nextSort);
+				// Not offered to the door server until the sysop says so
+				await doorCollections.addDoorToCollection(coll.id, dup.doorId, nextSort, { offered: false });
 			}
 		} catch (err) {
 			alogger.writeAlog(3, 'duplicateDoor: collection copy failed for door ' + srcId + ': ' + err.message, 'yellow');
@@ -7590,7 +7640,7 @@ router.get('/doorserver', requireAdmin, async (req, res) => {
 		autoApproveSecurity: appConfig.getNumber('doorserver_auto_approve_security', null),
 		autoApproveFlags: String(appConfig.get('doorserver_auto_approve_flags', '') || '').split(',').map(function (f) { return f.trim(); }).filter(Boolean),
 		defaultMax: appConfig.getNumber('doorserver_max_concurrent', 5),
-		availableDoors: ((await doors.getAllDoors()) || []).filter(function (d) { return d.doorserver_available; }),
+		dsOffers: await doorCollections.offeredCollections(),
 		remotes: await doorserverRemotes.getAll()
 	});
 });

@@ -1144,7 +1144,8 @@ router.get('/doors', async (req, res) => {
 	res.locals.currentuser = currentuser;
 	res.locals.doorserverEnabled = appConfig.getBoolean('doorserver_enabled', false);
 
-	var collections = await doorCollections.getActiveCollections();
+	// Collections shown to the door server only are not this board's (#89)
+	var collections = await doorCollections.getLocalCollections();
 	var counts = await doorCollections.getCollectionCounts();
 
 	var theme = await getDefaultTheme();
@@ -1152,7 +1153,8 @@ router.get('/doors', async (req, res) => {
 
 	// If no collections exist, fall back to a flat door list
 	if (collections.length === 0) {
-		var doorList = await doors.getAllDoors();
+		var hidden = await doorCollections.doorIdsHiddenLocally();
+		var doorList = ((await doors.getAllDoors()) || []).filter(function (d) { return !hidden.has(d.id); });
 		return res.render('doors/index', {
 			title: 'Door Games',
 			activelink: 'doors',
@@ -1178,7 +1180,7 @@ router.get('/doors/collection/:slug', async (req, res) => {
 	res.locals.currentuser = currentuser;
 
 	var collection = await doorCollections.getCollectionBySlug(req.params.slug);
-	if (!collection) return res.redirect('/doors');
+	if (!collection || !collection.active || !doorCollections.showsLocally(collection.audience || 'local')) return res.redirect('/doors');
 
 	var collectionDoors = await doorCollections.getDoorsInCollection(collection.id);
 	var theme = await getDefaultTheme();

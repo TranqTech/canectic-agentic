@@ -1,0 +1,61 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      if !ismobile
+        br
+        br
+      .row
+        .col-lg-8.offset-lg-2.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              h2= title
+            .card-body
+              p
+                | Showing
+                strong  #{collection.name}
+                |  to #{to === 'both' ? "this board's callers and the door server" : 'the door server only'} offers the ticked doors to every BBS registered on your door server.
+                if to === 'doorserver'
+                  |  The collection is then hidden from this board's own callers; a door in it still shows to them through any other collection it is in.
+              if !doorserverEnabled
+                .alert.alert-warning The door server is switched off (doorserver_enabled), so nothing is offered until you turn it on.
+              form(method='POST' action='/admin/doorCollections/' + collection.id + '/audience')
+                input(type='hidden' name='audience' value=to)
+                if collectionDoors.length
+                  table.table.table-sm.align-middle
+                    thead
+                      tr
+                        th(style='width:40px')
+                        th Door
+                        th Slug
+                        th Status
+                    tbody
+                      each d in collectionDoors
+                        tr
+                          td
+                            if neverOffered.includes(d.launch_type)
+                              span.text-muted -
+                            else
+                              input.form-check-input(type='checkbox' name='offer' value=d.id checked id='offer-' + d.id)
+                          td
+                            label(for='offer-' + d.id)= d.name
+                            if neverOffered.includes(d.launch_type)
+                              small.text-muted.ms-2 a door on another system is never offered
+                          td.text-muted= d.slug
+                          td
+                            if d.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-danger Inactive
+                else
+                  p.text-muted This collection has no doors yet; doors you add to it will be offered.
+                .text-end
+                  a.btn.btn-secondary.me-2(href='/admin/doorCollections') Cancel
+                  button.btn.btn-warning(type='submit') Offer the ticked doors

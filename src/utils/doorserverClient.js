@@ -34,7 +34,7 @@ function takeJsonLines(text) {
  * opts: { url, systemId, secret, user: {name, real_name},
  *         term: {width, height, encoding, type}, door?, list?, timeoutMs? }
  *
- * Events: 'auth_ok' (doors), 'auth_fail' (reason), 'launch_ok' (slug),
+ * Events: 'auth_ok' (doors, collections), 'auth_fail' (reason), 'launch_ok' (slug),
  *         'error_frame' (reason), 'data' (Buffer, the door's screen),
  *         'close' (), 'error' (message)
  * Methods: launch(slug), send(Buffer|string), close()
@@ -84,7 +84,7 @@ function openSession(opts) {
 				}));
 			} else if (f.type === 'auth_ok') {
 				clearTimeout(timer);
-				ev.emit('auth_ok', f.doors || []);
+				ev.emit('auth_ok', f.doors || [], f.collections || []);
 			} else if (f.type === 'auth_fail') {
 				clearTimeout(timer);
 				ev.emit('auth_fail', f.reason || 'refused');
@@ -112,7 +112,7 @@ function listDoors(opts) {
 		var done = false;
 		var finish = function (r) { if (done) return; done = true; s.close(); resolve(r); };
 		var s = openSession(Object.assign({}, opts, { list: true, user: { name: 'doorlist' }, term: { width: 80, height: 25, encoding: 'cp437' } }));
-		s.on('auth_ok', function (doors) { finish({ ok: true, doors: doors, reason: '' }); });
+		s.on('auth_ok', function (doors, collections) { finish({ ok: true, doors: doors, collections: collections || [], reason: '' }); });
 		s.on('auth_fail', function (reason) { finish({ ok: false, doors: [], reason: reason }); });
 		s.on('error', function (reason) { finish({ ok: false, doors: [], reason: reason }); });
 		s.on('close', function () { finish({ ok: false, doors: [], reason: 'closed without an answer' }); });

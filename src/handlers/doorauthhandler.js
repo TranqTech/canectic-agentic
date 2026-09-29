@@ -6,7 +6,9 @@
 //   client  {"type":"auth","system_id","secret","user":{"name","real_name"},
 //            "door":"<slug>"?, "term":{"width","height","encoding","type"},
 //            "list":false?}
-//   server  {"type":"auth_ok","node":N,"doors":[{slug,name,description}]}
+//   server  {"type":"auth_ok","node":N,"doors":[{slug,name,description}],
+//            "collections":[{slug,name,description,doors:[slug...]}]}
+//            (collections since #89; a client that ignores them uses doors)
 //        or {"type":"auth_fail","reason":"..."} and hang up
 //   list:true   the door list is the whole answer; hang up
 //   door given  launch it
@@ -15,12 +17,13 @@
 //
 // After that the socket carries the terminal stream. Whatever the client
 // names, CallManager.launchDoor checks doors.mayLaunchDoor again: a
-// door-server session can only ever reach a door made available to it.
+// door-server session can only ever reach a door offered through a
+// collection shown to the door server.
 
 import { BaseHandler } from "./basehandler.js";
 import * as alogger from "../utils/alogger.js";
 import * as doorserver from "../models/doorserver.js";
-import { getAllDoors } from "../models/doors.js";
+import { offeredCollections, flattenOffered } from "../models/doorCollections.js";
 import { logAuthFail } from "../utils/authFailLog.js";
 import appConfig from "../config/appConfig.js";
 
@@ -54,11 +57,15 @@ function takeFrames(buffer) {
 	return { frames: frames, rest: rest };
 }
 
-/** The doors a door-server caller may choose from. */
+/**
+ * What a door-server caller may choose from (#89): the offered doors of every
+ * collection shown to the door server, as collections and as one flat list.
+ * The flat list is what 0.9.13a clients read; the collections let a client
+ * show a menu by collection.
+ */
 async function availableDoors() {
-	var all = await getAllDoors();
-	return (all || []).filter(function (d) { return d.active && d.doorserver_available === true; })
-		.map(function (d) { return { slug: d.slug, name: d.name, description: d.description || "" }; });
+	var collections = await offeredCollections();
+	return { collections: collections, doors: flattenOffered(collections) };
 }
 
 /** Live door-server sessions for a system, in this call's pool. */
@@ -80,6 +87,7 @@ class DoorAuthHandler extends BaseHandler {
 		this.authenticated = false;
 		this.awaitingLaunch = false;
 		this.doors = [];
+		this.collections = [];
 		this.previousRawmode = false;
 		this.previousRawtarget = null;
 	}
@@ -150,7 +158,9 @@ class DoorAuthHandler extends BaseHandler {
 				this._authFailed("Too many sessions for " + sys.system_id + " (limit " + limit + ")");
 				return;
 			}
-			this.doors = await availableDoors();
+			var offer = await availableDoors();
+			this.doors = offer.doors;
+			this.collections = offer.collections;
 			if (!this.active) return;
 			this._authSuccess(sys, frame);
 		} catch (err) {
@@ -193,7 +203,12 @@ class DoorAuthHandler extends BaseHandler {
 			} catch (_) {}
 		}
 
-		this._sendResponse({ type: "auth_ok", node: call.nodenum, doors: this.doors });
+		this._sendResponse({
+			type: "auth_ok", node: call.nodenum, doors: this.doors,
+			collections: this.collections.map(function (c) {
+				return { slug: c.slug, name: c.name, description: c.description, doors: c.doors.map(function (d) { return d.slug; }) };
+			})
+		});
 
 		if (frame.list) { this._finish(true); return; }
 		var slug = clean(frame.door, 64);

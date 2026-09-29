@@ -3,6 +3,7 @@
 // Replaces the hardcoded testingarray with database queries.
 
 import * as postgres from '../middleware/db/postgres.js';
+import { isDoorOffered } from './doorCollections.js';
 
 // Valid launch types — keep in sync with doorrunner.js LAUNCH_TYPES
 const VALID_LAUNCH_TYPES = [
@@ -48,7 +49,10 @@ async function getDoorConfig(slugname) {
 	if (!door) return null;
 
 	// Normalize DB column names to the camelCase keys the DoorRunner expects
-	return normalizeDoorConfig(door);
+	var config = normalizeDoorConfig(door);
+	// Offered to the door server through a collection (#89), never per door
+	config.doorserverAvailable = await isDoorOffered(door.id);
+	return config;
 }
 
 async function getAllDoors() {
@@ -129,7 +133,6 @@ async function createDoor(data) {
 		db_subdir: (data.db_subdir || '').trim() || null,
 		usereal_local: data.usereal_local === 'true' || data.usereal_local === true,
 		usereal_doorsession: data.usereal_doorsession === 'true' || data.usereal_doorsession === true,
-		doorserver_available: data.doorserver_available === 'true' || data.doorserver_available === true,
 		pause_on_exit: data.pause_on_exit !== 'false' && data.pause_on_exit !== false,
 		fixed_size: data.fixed_size === 'true' || data.fixed_size === true,
 		max_nodes: parseInt(data.max_nodes) || 0,
@@ -201,7 +204,6 @@ async function updateDoor(id, data) {
 		db_subdir: (data.db_subdir || '').trim() || null,
 		usereal_local: data.usereal_local === 'true' || data.usereal_local === true,
 		usereal_doorsession: data.usereal_doorsession === 'true' || data.usereal_doorsession === true,
-		doorserver_available: data.doorserver_available === 'true' || data.doorserver_available === true,
 		pause_on_exit: data.pause_on_exit !== 'false' && data.pause_on_exit !== false,
 		fixed_size: data.fixed_size === 'true' || data.fixed_size === true,
 		max_nodes: parseInt(data.max_nodes) || 0,
@@ -258,8 +260,6 @@ async function duplicateDoor(id) {
 		db_subdir:           src.db_subdir || null,
 		usereal_local:       !!src.usereal_local,
 		usereal_doorsession: !!src.usereal_doorsession,
-		// A copy is not offered to remote systems until the sysop says so
-		doorserver_available: false,
 		pause_on_exit:       src.pause_on_exit !== false,
 		fixed_size:          !!src.fixed_size,
 		max_nodes:           parseInt(src.max_nodes) || 0,
@@ -341,7 +341,8 @@ function normalizeDoorConfig(row) {
 		fixedSize: row.fixed_size || false,
 		maxnodes: row.max_nodes || 0,
 		active: row.active !== undefined ? row.active : true,
-		doorserverAvailable: row.doorserver_available === true,
+		// Set by getDoorConfig from the door's collections (#89)
+		doorserverAvailable: false,
 	};
 
 	// Parse JSONB door_args if it came back as string

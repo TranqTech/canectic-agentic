@@ -4,7 +4,13 @@
 
 ### Administration
 
+- **The doors your door server offers are now chosen by collection.** A door collection's new **Shown to** setting is This board, Door server or Both, and on a collection shown to the door server each door has an **Offered** switch; doors you add to such a collection are offered at once. A remote BBS's caller who does not name a door now gets a menu of your offered collections and then the doors in the one they pick, through `doorclient.js`, RLogin and another Canectic board alike. A collection shown to the door server only is hidden from your own callers. Changing a collection to include the door server first shows you its doors to choose from. The **Available to Door Server** setting on each door is gone; the doors you had marked are still offered (see Upgrade Notes). A door running on another system can never be offered.
+- Fix: **unticking Active on a door collection did not switch it off.** The collection stayed active whatever the box said.
 - **Every admin page now has a card on the admin dashboard.** Door Server (under Doors), Call Flows and Timed Events (under System) and Template Events (under Content) were reachable only from the admin navbar.
+
+### Upgrade Notes
+
+- **Door server doors are now offered by collection.** Each door you had marked Available to Door Server is still offered: it is ticked in every collection it belongs to, a collection holding one now shows to Both, and one that was in no collection is in a new Door Server collection shown to the door server only. Nothing else in those collections is offered. Check Admin > Doors > Door Collections.
 
 ## v0.9.13a (2026-09-29)
 

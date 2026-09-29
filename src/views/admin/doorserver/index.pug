@@ -35,7 +35,9 @@ block content
                   a(href='/admin/config')  Configuration page
                   | .
               p.text-muted
-                | Other BBSes registered here can send their callers to the doors you make available to the door server (in each door's settings).
+                | Other BBSes registered here can send their callers to the doors you offer to the door server: set a collection's audience to Door server or Both under
+                a(href='/admin/doorCollections')  Door Collections
+                | , and choose which of its doors are offered.
                 |  Each BBS connects with its System ID and a secret, which is shown once when the BBS is added and again only if you make a new one.
                 |  Verified users (security #{registerSecurity} or above) can register their own BBS on the Door Server page (linked from Doors on the web). It then waits here for your approval
                 if autoApproveSecurity !== null && autoApproveSecurity !== undefined && autoApproveFlags.length
@@ -46,13 +48,19 @@ block content
                   | , unless the user has the #{autoApproveFlags.join(' or ')} flag, which approves it at once.
                 else
                   | .
-              p
-                strong Doors available to the door server:
-                if availableDoors.length
-                  each d, i in availableDoors
-                    span.badge.bg-info.me-1= d.name
-                else
-                  span.text-muted  none yet (set "Available to Door Server" on a door)
+              p.mb-1
+                strong Offered to the door server:
+                if !dsOffers.length
+                  span.text-muted  nothing yet (offer a collection under
+                    a(href='/admin/doorCollections') Door Collections
+                    | )
+              if dsOffers.length
+                ul.list-unstyled.ms-3
+                  each c in dsOffers
+                    li.mb-1
+                      span.me-2= c.name
+                      each d in c.doors
+                        span.badge.bg-info.me-1= d.name
 
               if systems.length
                 .table-responsive

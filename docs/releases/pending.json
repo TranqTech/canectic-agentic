@@ -1,6 +1,13 @@
 {
   "steps": [],
-  "notices": [],
+  "notices": [
+    {
+      "id": "doorserver-offers-by-collection",
+      "level": "info",
+      "from_min": "0.9.13a",
+      "text": "The doors your door server offers are now chosen by collection instead of the Available to Door Server setting on each door. Every door you had marked is still offered: it is ticked in each collection it belongs to, a collection that holds one is now shown to Both (your callers and the door server), and a marked door that was in no collection is in a new collection called Door Server, shown to the door server only. Nothing else in those collections is offered. Review them under Admin > Doors > Door Collections."
+    }
+  ],
   "min_upgrade_from": "0.9.0a",
   "node_min": null
 }

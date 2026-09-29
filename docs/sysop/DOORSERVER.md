@@ -4,7 +4,10 @@ The door server lets other BBSes send their callers to door games you run, and l
 
 ## Offering your doors to other BBSes
 
-1. **Choose the doors.** In Admin > Doors > Door Games, edit each door you want to share and set **Available to Door Server** to Yes. A door you have not marked can never be reached from outside, whatever a remote BBS asks for. Your own callers are not affected by this setting.
+1. **Choose the doors, by collection.** In Admin > Doors > Door Collections, set a collection's **Shown to** to **Door server** (only BBSes connecting to your door server see it) or **Both** (your callers and theirs). When you change an existing collection, you are shown its doors, all ticked, and choose which to offer before the change takes effect. On the collection's page each door has an **Offered** button to switch it on or off, and a door you add to such a collection is offered straight away. A door that is not offered in any collection shown to the door server can never be reached from outside, whatever a remote BBS asks for.
+   - A collection shown to the door server only is hidden from your own callers; a door in it still shows to them through any other collection it is in.
+   - A remote BBS's caller who does not name a door gets a menu of your offered collections, then the doors in the one they pick (straight to the doors if you offer one collection).
+   - A door that runs on another system (a remote door) is never offered through your door server.
 2. **Switch it on.** On the Configuration page, under Doors, turn on `doorserver_enabled`. Until then every door-server connection is refused.
 3. **Register the BBSes that may connect.** Either:
    - **Add them yourself** in Admin > Doors > Door Server with **Add BBS**. Give it a System ID (2 to 12 letters, digits, `_` or `-`, such as `UNDERMINE`) and its details. It is approved at once, and you are shown its **secret** once: send that to the other sysop. If it is lost, use **New secret**; the old one stops working at once.

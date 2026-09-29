@@ -8,6 +8,7 @@ Lets other BBSes send their callers to doors hosted here, and lets this board se
 - **B, done:** `doorserver_systems` + `src/models/doorserver.js` (create by sysop or user, pending/approved/suspended/rejected, bcrypt secret shown once, `verifyLogin`, `recordSession`); `src/handlers/doorauthhandler.js` speaks `canectic-doorserver/1` (string-aware `takeFrames`, auth, list, door or a later `launch` frame, per-system concurrency from the pool's live calls, caller identity and `doorserver_security`, caller log source `Doorserver`); admin page `/admin/doorserver` (Doors menu); user page `/doorserver` (router `src/routes/doorserver.js`) for users at `doorserver_register_security`, linked from `/doors`; "Available to Door Server" in the door editor. Checked live on the dev board: list, wrong secret (logged), unflagged door refused, launch by name and by launch frame, concurrency refusal; and in headless Chromium: admin add, user registration pending, approval notifying the owner.
 - **C, done:** `bin/doorclient.js` (pure parts `parseArgs`, `readDropfile`, `problems`, `takeJsonLines`; `run(opts, io)`), offered to eligible users as a download at `/doorserver/doorclient.js` with a command line filled in. Tested against a stub `ws` server and live against the dev gateway (list, door by name, numbered menu).
 - **D, done:** `src/utils/doorserverClient.js` (`openSession`, `listDoors`), `doorserver_remotes` + `src/models/doorserverRemotes.js` (secret stored as given, never shown back; blank on update keeps it), `src/handlers/remotedoorrunner.js` adopted by `CallManager.launchRemoteDoor(arg, fromMenu)` like a local door (numbered menu when no door is named, door inactivity without the warning text, "press any key" then `_doorReturn`), menu command `remoteDoor` (editor suggests remote names), admin section "Remote door servers" on `/admin/doorserver` with Test (door list). Checked live as a loopback on the dev board: admin Test listed the door, and the runner took a caller through the menu into it.
+- **#89 collections, done:** what the door server offers moved from the per-door flag to collections (below). Remote doors as door entries, DoorParty and BBSLink are the next parts of #89.
 - **E, done:** `src/servers/rloginserver.js`, started by the gateway only with `doorserver_rlogin_enabled` (restart). The connection becomes an ordinary Doorserver-pool call and its wrapper speaks the JSON protocol for the RLogin client (auth frame from the handshake, numbered menu into a launch frame), so every rule of the WebSocket path applies. Default port 5513, not 513: ports below 1024 need root. Checked live: list and choose, door slug, wrong secret refused.
 
 ## Why this was rewritten
@@ -22,7 +23,10 @@ The first design (self-registration on a public page, username and password, Web
 
 ## Access control
 
-- **Per door:** `doors.doorserver_available` (default false). A door-server session may launch only a door with this set, enforced in `CallManager.launchDoor` for every door-server path, whatever the client asks for. Local callers are unaffected: their door access is decided, as before, by the menu entry that offers the door.
+- **By collection (#89):** `door_collections.audience` is `local` (this board's callers, the default), `doorserver` or `both`, and in a collection the door server sees each `door_collection_entries.doorserver` says whether that door is offered. A door-server session may launch only a door ticked in at least one active collection shown to the door server (`doorCollections.isDoorOffered`, which `doors.getDoorConfig` puts in `doorserverAvailable` for `doors.mayLaunchDoor`), enforced in `CallManager.launchDoor` for every door-server path, whatever the client asks for. A door of launch type `Remote` (a door on another system) is never offered (`NEVER_OFFERED_TYPES`): it would be passed on under our credentials and could loop.
+  - A door added to a collection the door server sees is offered at once; a duplicated door is not. Changing a collection to include the door server does not take effect until the sysop confirms which of its doors are offered (`/admin/doorCollections/:id/audience`, all ticked); narrowing needs no confirmation.
+  - A `doorserver` collection is hidden from local callers (`getLocalCollections`; the web collection page refuses it), and a door only in such collections is left out of the flat door list shown when a board has no local collections (`doorIdsHiddenLocally`). A door in any local collection still shows. Local callers can still launch any door their menus name: hidden is not forbidden.
+  - `doors.doorserver_available`, the per-door setting 0.9.13a shipped, is no longer read or written; migration `0011-doorserver-collections` carried it over (ticks the door's entries, widens a `local` collection holding one to `both`, puts an uncollected one in a new `doorserver` collection "Door Server"). A later release drops the column.
 - **Per system:** status must be `approved`; `max_concurrent` sessions at once.
 - **Global:** `doorserver_enabled` (default false). Off, the pool refuses every connection.
 - **Failed logins** are written to `security.log` through `authFailLog.logAuthFail` (`via door server`), which the shipped fail2ban filter matches.
@@ -47,15 +51,17 @@ The first design (self-registration on a public page, username and password, Web
 
 `doorserver_remotes` (door servers THIS board connects out to, phase D): `name`, `url`, `system_id`, `secret` (our own credential for that server, stored as given since it has to be sent), `active`.
 
+`door_collections.audience` (`local` default, `doorserver`, `both`) and `door_collection_entries.doorserver` (boolean, default false; set true by `addDoorToCollection` when the collection's audience includes the door server) decide what the door server offers (#89).
+
 ## WebSocket protocol (`canectic-doorserver/1`)
 
 1. Client opens `wss://<board>/ws/doorserver`.
 2. Server sends `{"type":"hello","protocol":"canectic-doorserver/1","board":"<name>"}`.
 3. Client sends one frame: `{"type":"auth","system_id":"...","secret":"...","user":{"name":"...","real_name":"..."},"door":"<slug or omitted>","term":{"width":80,"height":25,"encoding":"cp437"|"utf8","type":"ansi"},"list":false}`.
-4. Server answers `{"type":"auth_ok","node":N,"doors":[{"slug","name","description"}]}` or `{"type":"auth_fail","reason":"..."}` and closes.
+4. Server answers `{"type":"auth_ok","node":N,"doors":[{"slug","name","description"}],"collections":[{"slug","name","description","doors":["slug",...]}]}` or `{"type":"auth_fail","reason":"..."}` and closes. `doors` is every offered door once; `collections` (since #89) groups them, and a client that ignores it still works.
    - `list: true`: the server answers with the door list and closes. How a client builds its own menu.
    - `door` given: the door launches.
-   - neither: the server shows a door list, the doors available to door-server callers, and launches the one chosen.
+   - neither: the client shows a menu and sends `{"type":"launch","door":"<slug>"}`. With more than one collection the menu has two levels, collections then doors (Q goes back); otherwise it is the door list. The menu is `createDoorMenu` in `bin/doorclient.js`, exported so the RLogin wrapper and `RemoteDoorRunner` import the same one while the client stays a single file.
 5. After `auth_ok` the socket carries the terminal stream, as any other pool.
 
 The earlier stub frame (`system_id` + `auth_token`) is not accepted.

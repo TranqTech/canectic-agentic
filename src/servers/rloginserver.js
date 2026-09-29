@@ -20,6 +20,7 @@
 import * as net from 'net';
 import { v4 as uuidv4 } from 'uuid';
 import * as alogger from '../utils/alogger.js';
+import { createDoorMenu } from '../../bin/doorclient.js';
 
 var TERMINAL_TYPES = /^(ansi|ansi-bbs|pc-ansi|scoansi|vt\d+|xterm.*|linux|dumb|syncterm|netrunner|screen.*|tmux.*|cp437|utf-?8)$/i;
 
@@ -67,8 +68,7 @@ class RloginConnection {
 		this.handshake = Buffer.alloc(0);
 		this.phase = 'handshake';   // handshake -> auth -> choosing -> streaming
 		this.auth = null;
-		this.doors = [];
-		this.typed = '';
+		this.menu = null;
 
 		socket.on('data', (data) => this._onData(data));
 		socket.once('close', () => this.announceClose());
@@ -96,17 +96,8 @@ class RloginConnection {
 		if (this.phase === 'streaming') { if (this.callhandler) this.callhandler.handleData(data); return; }
 		if (this.phase !== 'choosing') return;
 		for (var ch of data.toString('latin1')) {
-			if (ch === 'q' || ch === 'Q') { this.socket.end("\r\n"); return; }
-			if (ch === '\r' || ch === '\n') {
-				var pick = this.doors[parseInt(this.typed) - 1];
-				this.typed = '';
-				if (!pick) { this.socket.write("\r\nChoose a number (Q to quit): "); continue; }
-				this.socket.write("\r\n");
-				this.phase = 'auth';
-				this.callhandler.handleData(Buffer.from(JSON.stringify({ type: 'launch', door: pick.slug })));
-				return;
-			}
-			if (/[0-9]/.test(ch) && this.typed.length < 3) { this.typed += ch; this.socket.write(ch); }
+			this.menu.key(ch);
+			if (this.phase !== 'choosing') return;
 		}
 	}
 
@@ -123,11 +114,17 @@ class RloginConnection {
 			} else if (f.type === 'auth_fail') {
 				this.socket.write("\r\nThe door server refused the connection: " + f.reason + "\r\n");
 			} else if (f.type === 'auth_ok' && !this.auth.door) {
-				this.doors = f.doors || [];
 				this.phase = 'choosing';
-				this.socket.write("\r\nDoors on this server:\r\n\r\n");
-				this.doors.forEach((d, n) => this.socket.write("  " + String(n + 1).padStart(2) + ") " + d.name + "\r\n"));
-				this.socket.write("\r\nChoose a number (Q to quit): ");
+				this.menu = createDoorMenu({
+					doors: f.doors || [], collections: f.collections,
+					write: (t) => this.socket.write(t),
+					onPick: (slug) => {
+						this.phase = 'auth';
+						this.callhandler.handleData(Buffer.from(JSON.stringify({ type: 'launch', door: slug })));
+					},
+					onQuit: () => { this.phase = 'done'; this.socket.end(); }
+				});
+				this.menu.start();
 			} else if (f.type === 'launch_ok') {
 				this.phase = 'streaming';
 			} else if (f.type === 'error') {
