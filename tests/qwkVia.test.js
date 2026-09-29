@@ -127,12 +127,15 @@ describe('QWK hub passes mail on, and delivers netmail-form mail (#70)', functio
 		await pg.write("DELETE FROM peers WHERE name = 'ZZ QWK Via Test Peer'");
 		var u = await pg.queryOne('SELECT id FROM users WHERE username = $1', [USER]);
 		if (u) {
+			// Each delivered PM raises a "New PM" notification referring to it
+			await pg.write("DELETE FROM notifications WHERE ref IN (SELECT 'pm:' || id FROM pm_inbox WHERE user_id = $1)", [u.id]);
 			await pg.write('DELETE FROM pm_inbox WHERE user_id = $1', [u.id]);
 			await pg.write('DELETE FROM users WHERE id = $1', [u.id]);
 		}
 		await pg.write("DELETE FROM pm_undeliverable WHERE subject LIKE 'zz via %'");
 		await pg.write("DELETE FROM notifications WHERE body LIKE '%zz via %'");
 		// notifySysops writes a real message to every sysop's inbox.
+		await pg.write("DELETE FROM notifications WHERE ref IN (SELECT 'pm:' || id FROM pm_inbox WHERE subject LIKE 'Undeliverable QWK PM from ZZ%' AND from_user = 'SYSTEM')");
 		await pg.write("DELETE FROM pm_inbox WHERE subject LIKE 'Undeliverable QWK PM from ZZ%' AND from_user = 'SYSTEM'");
 		await pg.write("DELETE FROM pm_outbox WHERE subject LIKE 'zz via %' OR subject LIKE 'BADADDR: ZZ%'");
 		await pg.write("DELETE FROM netmail_relay_log WHERE packet_source = 'ZZNODEA'");

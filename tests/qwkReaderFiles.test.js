@@ -94,6 +94,8 @@ describe('offline-reader files in personal packets (#75)', function () {
 			await pg.write('DELETE FROM user_msg_pointers WHERE user_id = $1', [u.id]).catch(function () {});
 			var inbox = await pg.query('SELECT uuid FROM pm_inbox WHERE user_id = $1', [u.id]);
 			for (var m of inbox || []) await pg.write('DELETE FROM pm_attachments WHERE message_uuid = $1', [m.uuid]);
+			// Each delivered PM raises a "New PM" notification, and the user's own
+			await pg.write('DELETE FROM notifications WHERE user_id = $1', [u.id]);
 			await pg.write('DELETE FROM pm_inbox WHERE user_id = $1', [u.id]);
 			await pg.write('DELETE FROM users WHERE id = $1', [u.id]);
 		}
