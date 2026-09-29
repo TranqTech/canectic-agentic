@@ -448,6 +448,20 @@ export async function enqueueFixCharset(opts = {}) {
 }
 
 /**
+ * Move file area directories after the setting that places them changed
+ * (#28). moves come from fileAreaRelocation.movesToRun(plan), made before
+ * the save; reason names the change for the sysop notification.
+ * Called by: admin (group base_dir, area sub_dir, global file_base_dir).
+ */
+export async function enqueueRelocateFileAreas(moves, reason) {
+	return addDeduped(maintenanceQueue, 'relocate-file-areas', { moves: moves || [], reason: reason || '' }, {
+		// A fresh id each time: two changes in a row are two separate moves.
+		jobId: 'relocate-file-areas--' + Date.now(),
+		...KEEP_RESULT,
+	});
+}
+
+/**
  * Regenerate body_html for PM inbox/outbox.
  * Called by: admin panel, CLI, scheduler.
  */

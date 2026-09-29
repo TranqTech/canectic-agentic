@@ -150,9 +150,11 @@ async function resolveFile(filename, connectionId) {
 	// Layer 3: File entries (scoped to peer's subscribed areas)
 	if (connectionId) {
 		var entry = await postgres.queryOne(
-			`SELECT fe.*, fa.id AS area_id
+			`SELECT fe.*, fa.id AS area_id, fa.shortcode AS area_code, fa.sub_dir AS area_sub_dir,
+			        fg.base_dir AS group_base_dir
 			 FROM file_entries fe
 			 JOIN file_areas fa ON fa.id = fe.area_id
+			 LEFT JOIN file_groups fg ON fg.id = fa.group_id
 			 JOIN file_peer_subscriptions fps ON fps.file_area_id = fa.id
 			 WHERE fps.peer_connection_id = $1
 			   AND fps.allowed = true AND fps.enabled = true
@@ -160,8 +162,17 @@ async function resolveFile(filename, connectionId) {
 			 LIMIT 1`,
 			[connectionId, name]
 		);
-		if (entry && entry.disk_path && fs.existsSync(entry.disk_path)) {
-			return { found: true, filePath: entry.disk_path, source: 'fileentry' };
+		// disk_path is a filename within the area's directory, not a path:
+		// it used to be tested as one, against the working directory, so a
+		// file area entry was never found (#28).
+		if (entry && entry.disk_path) {
+			var fileAreasModel = await import('./fileAreas.js');
+			var areaDir = fileAreasModel.resolveAreaPath(
+				{ base_dir: entry.group_base_dir }, { shortcode: entry.area_code, sub_dir: entry.area_sub_dir });
+			var entryPath = path.join(areaDir, path.basename(entry.disk_path));
+			if (fs.existsSync(entryPath)) {
+				return { found: true, filePath: entryPath, source: 'fileentry' };
+			}
 		}
 	}
 

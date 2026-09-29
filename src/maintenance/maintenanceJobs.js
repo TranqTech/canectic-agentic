@@ -45,6 +45,7 @@ export const MAINTENANCE_JOBS = [
 	'regen-html',
 	'regen-pm-html',
 	'fix-charset',
+	'relocate-file-areas',
 	'revert-charset',
 	'purge-pm-trash',
 	'pm-purged-cleanup',
@@ -140,6 +141,32 @@ export async function runMaintenanceJob(name, data, opts) {
 				signal: signal,
 			});
 			onResult(Object.assign({ kind: 'charset', dryRun: !!data.dryRun }, fixed));
+			return true;
+		}
+
+		case 'relocate-file-areas': {
+			var relocation = await import('./fileAreaRelocation.js');
+			// Each destination is checked against where its area resolves
+			// now, and a file_base_dir change reaches this process as a
+			// CONFIG_CHANGED reload that may not have landed yet.
+			var relocConfig = (await import('../config/appConfig.js')).default;
+			try { await relocConfig.reload(); } catch (_) {}
+			var moved = await relocation.executeMoves(data.moves || []);
+			var total = moved.reduce(function (n, r) { return n + r.moved; }, 0);
+			var left = moved.reduce(function (n, r) { return n + r.conflicts.length; }, 0);
+			var errs = moved.filter(function (r) { return r.errors.length; });
+			try {
+				var notifications = await import('../models/notifications.js');
+				await notifications.createSysop('file_relocation',
+					(errs.length ? 'File area move finished with problems' : 'File area move finished') + (data.reason ? ': ' + data.reason : ''),
+					moved.map(function (r) {
+						return r.shortcode + ': ' + r.moved + ' moved' +
+							(r.conflicts.length ? ', ' + r.conflicts.length + ' left in ' + r.from + ' (already at the destination: ' + r.conflicts.slice(0, 5).join(', ') + (r.conflicts.length > 5 ? ', ...' : '') + ')' : '') +
+							(r.errors.length ? ', ' + r.errors.join('; ') : '');
+					}).join('\n'),
+					{ severity: errs.length || left ? 'warning' : 'success', icon: 'folder', link: '/admin/fileGroups' });
+			} catch (_) {}
+			onResult({ kind: 'relocation', moved: total, conflicts: left, errors: errs.length, areas: moved.length });
 			return true;
 		}
 

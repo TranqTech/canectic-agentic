@@ -254,7 +254,17 @@ All three levels support `%X` variable substitution via `configvars.js` (e.g. `%
 
 Example: If `file_base_dir = '/data/files'`, group has `base_dir = '/data/files'`, and area has `sub_dir = 'dos_games'`, the resolved path is `/data/files/dos_games/`.
 
-If a group has a custom `base_dir`, that replaces the global base entirely. The area's `sub_dir` is always appended.
+At each level an absolute path (or `~/...`) stands on its own and a relative one hangs off the level above: a relative group `base_dir` sits under `file_base_dir`, a relative area `sub_dir` under the group's directory. An absolute `sub_dir` means exactly that directory; before #28 it was joined under the group anyway (`/data/x` became `<base>/data/x`). `resolveAreaPath(group, area, { globalBase })` resolves against a given `file_base_dir`, which relocation uses to compute paths before a change.
+
+### Relocation (#28)
+
+Changing a group's `base_dir`, an area's `sub_dir` or the global `file_base_dir` used to leave every file at the old path. `src/maintenance/fileAreaRelocation.js` plans and performs the move; nothing in the database changes, because `file_entries.disk_path` is a bare filename (true of every row on the dev board and the hub) and every reader resolves the area path when it needs it.
+
+- **Plan** (`planGroupChange`, `planAreaChange`, `planGlobalChange`, all through `inspectMove`): each area's path before and after, classified `same` (an absolute sub_dir, or not affected), `empty` (nothing at the old path), `move`, or `conflict` (names already at the destination, listed).
+- **Gate**: the admin group and area update routes, `POST /admin/config` for `file_base_dir` and its reset route take the plan BEFORE saving (afterwards old and new are equal). When files would move and the form carries no `relocate`, `admin/fileRelocate/confirm.pug` shows the plan and re-posts the form with `relocate=move` or `relocate=leave`.
+- **Move**: job `relocate-file-areas` (`jobs.enqueueRelocateFileAreas`) runs after the save, reloads config, and skips any area whose current path is no longer the planned destination. Entries move ONE AT A TIME (`moveArea`): rename, or copy with preserved times then delete across filesystems; a name already at the destination is left in place and reported, never overwritten; a destination inside the source is not moved into itself; the old directory is removed only when emptied. So a TIC arriving mid-move lands in the new place and an existing destination is merged into. The sysops get a `file_relocation` notification with per-area counts.
+
+FREQ's file-entry layer resolves the entry's area directory the same way; it used to test the bare `disk_path` filename against the working directory and never found a file.
 
 ### Disk Layout
 

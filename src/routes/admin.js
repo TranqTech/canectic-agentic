@@ -23,6 +23,7 @@ import * as doors from '../models/doors.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as messageTemplates from '../models/messageTemplates.js';
+import * as fileAreaRelocation from '../maintenance/fileAreaRelocation.js';
 import * as apiTokens from '../models/apiTokens.js';
 import * as wall from '../models/wall.js';
 import * as bulletins from '../models/bulletins.js';
@@ -1913,17 +1914,57 @@ router.post('/fileGroup/:shortcode/newArea', urlencodedParser, requireAdmin, asy
 	}
 });
 
+// Moving file area directories (#28). A change to a group's base_dir, an
+// area's sub_dir or the global file_base_dir used to leave every file at the
+// old path. Each save plans the move first; when files would move and the
+// form has not said what to do (relocate=move|leave), the sysop is shown the
+// plan and the form is re-posted with their choice. The plan is always taken
+// BEFORE the save, since afterwards old and new paths are the same.
+async function relocationGate(req, res, plan, reason, cancelUrl) {
+	var choice = req.body.relocate;
+	if (!plan || !plan.needsMove || choice === 'move' || choice === 'leave') return false;
+	res.render('admin/fileRelocate/confirm', {
+		sufficientAccess: true,
+		title: 'Move files?',
+		activelink: 'fileGroups',
+		currentuser: await getCurrentUser(req),
+		plan: plan,
+		reason: reason,
+		formAction: req.originalUrl,
+		hiddenFields: req.body,
+		cancelUrl: cancelUrl
+	});
+	return true;
+}
+
+// After a successful save: queue the moves if the sysop chose to move.
+async function relocationAfterSave(req, plan, reason) {
+	if (!plan || !plan.needsMove) return;
+	if (req.body.relocate === 'move') {
+		await jobs.enqueueRelocateFileAreas(fileAreaRelocation.movesToRun(plan), reason);
+		alogger.writeAlog(3, '[Relocate] queued: ' + reason, 'cyan');
+		await flash.setOne(req, 'info', 'Moving ' + plan.entries + ' file(s) in the background; you will get a notification when it is done.');
+	} else {
+		alogger.writeAlog(2, '[Relocate] ' + reason + ': saved WITHOUT moving ' + plan.entries + ' file(s); they are still at the old path', 'yellow');
+	}
+}
+
 router.post('/fileGroup/:shortcode/update', urlencodedParser, requireAdmin, async (req, res) => {
 	var currentuser      = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var shortcode        = req.params.shortcode.toUpperCase().trim();
 	var formObj          = req.body;
+	var relocationPlan   = formObj.base_dir !== undefined
+		? await fileAreaRelocation.planGroupChange(shortcode, formObj.base_dir) : null;
+	var relocationReason = 'the base directory of file group ' + shortcode;
+	if (await relocationGate(req, res, relocationPlan, relocationReason, '/admin/fileGroup/' + shortcode)) return;
 	if (currentuser) {
 		formObj.updatedByName = currentuser.username;
 		formObj.updatedByUUID = currentuser.uuid;
 	}
 	var result = await fileGroups.updateGroup(shortcode, formObj);
 	if (result.status === true) {
+		await relocationAfterSave(req, relocationPlan, relocationReason);
 		res.redirect(`/admin/fileGroup/${shortcode}`);
 	} else {
 		alogger.writeAlog(3, "updateFileGroup failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
@@ -2080,8 +2121,13 @@ router.post('/fileArea/:shortcode/update', urlencodedParser, requireAdmin, async
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var shortcode        = req.params.shortcode.toUpperCase().trim();
 	var formObj          = req.body;
+	var relocationPlan   = formObj.sub_dir !== undefined
+		? await fileAreaRelocation.planAreaChange(shortcode, formObj.sub_dir) : null;
+	var relocationReason = 'the directory of file area ' + shortcode;
+	if (await relocationGate(req, res, relocationPlan, relocationReason, '/admin/fileGroup/' + (formObj.groupshortcode || ''))) return;
 	var result           = await fileAreas.updateArea(shortcode, formObj);
 	if (result.status === true) {
+		await relocationAfterSave(req, relocationPlan, relocationReason);
 		res.redirect('/admin/fileGroup/' + (formObj.groupshortcode || ''));
 	} else {
 		alogger.writeAlog(3, "updateFileArea failed for " + shortcode + ": " + result.errormessages.join(", "), "redbright");
@@ -3120,8 +3166,18 @@ router.post('/config', urlencodedParser, requireAdmin, async (req, res) => {
 		await flash.setOne(req, 'warning', 'Not a valid choice, left unchanged: ' + rejected.join(', '));
 	}
 
+	// Changing file_base_dir moves every area that hangs off it (#28)
+	var baseChange = kvArray.find(function (kv) { return kv.key === 'file_base_dir'; });
+	var relocationPlan = null;
+	var relocationReason = 'the global file base directory (file_base_dir)';
+	if (baseChange && String(baseChange.value) !== String(appConfig.get('file_base_dir', 'files'))) {
+		relocationPlan = await fileAreaRelocation.planGlobalChange(baseChange.value);
+		if (await relocationGate(req, res, relocationPlan, relocationReason, '/admin/config')) return;
+	}
+
 	if (kvArray.length > 0) {
 		var ok = await configStore.setValues(kvArray);
+		if (ok) await relocationAfterSave(req, relocationPlan, relocationReason);
 		if (ok) {
 			alogger.writeAlog(3, "[admin/config] Saved " + kvArray.length + " " + category + " settings", "cyan");
 			await flash.setOne(req, 'success', 'Saved ' + kvArray.length + ' ' + category + ' setting(s).');
@@ -3142,7 +3198,15 @@ router.post('/config/reset/:key', urlencodedParser, requireAdmin, async (req, re
 		return res.redirect('/admin/config');
 	}
 
+	var relocationPlan = null;
+	var relocationReason = 'the global file base directory (file_base_dir), reset to its default';
+	if (key === 'file_base_dir' && String(def.defaultValue) !== String(appConfig.get('file_base_dir', 'files'))) {
+		relocationPlan = await fileAreaRelocation.planGlobalChange(def.defaultValue);
+		if (await relocationGate(req, res, relocationPlan, relocationReason, '/admin/config')) return;
+	}
+
 	var ok = await configStore.setValue(key, def.defaultValue);
+	if (ok) await relocationAfterSave(req, relocationPlan, relocationReason);
 	if (ok) {
 		alogger.writeAlog(3, "[admin/config] Reset " + key + " to default: " + def.defaultValue, "cyan");
 		await flash.setOne(req, 'success', 'Reset ' + key + ' to default (' + def.defaultValue + ').');

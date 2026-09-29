@@ -37,10 +37,21 @@ function normalizeFlags(input) {
 
 /**
  * Resolve the filesystem path for a file area.
- * Three-level hierarchy: global file_base_dir → group base_dir → area sub_dir
+ * Three-level hierarchy: global file_base_dir → group base_dir → area sub_dir.
+ * At each level an absolute path (or one starting ~/) stands on its own and a
+ * relative one hangs off the level above.
+ *
+ * An absolute sub_dir used to be joined onto the group directory anyway, so
+ * `/data/x` meant `<base>/data/x` (#28). It now means /data/x, as an absolute
+ * group base_dir always has; relocation skips such an area, since moving its
+ * group does not move it.
+ *
+ * opts.globalBase: resolve against this file_base_dir instead of the
+ * configured one (relocation needs the path before and after a change).
  */
-function resolveAreaPath(group, area) {
-	var globalBase = expandHome(substitute(appConfig.get('file_base_dir', 'files')));
+function resolveAreaPath(group, area, opts) {
+	var configuredBase = opts && opts.globalBase !== undefined ? opts.globalBase : appConfig.get('file_base_dir', 'files');
+	var globalBase = expandHome(substitute(configuredBase));
 	var root;
 	if (group && group.base_dir) {
 		var groupDir = expandHome(substitute(group.base_dir));
@@ -49,8 +60,15 @@ function resolveAreaPath(group, area) {
 	} else {
 		root = globalBase;
 	}
-	var sub = (area && area.sub_dir) ? substitute(area.sub_dir) : (area ? area.shortcode.toLowerCase() : '');
+	var sub = (area && area.sub_dir) ? expandHome(substitute(area.sub_dir)) : (area ? area.shortcode.toLowerCase() : '');
+	if (path.isAbsolute(sub)) return path.normalize(sub);
 	return path.join(root, sub);
+}
+
+// Whether an area's directory stands on its own rather than under its group.
+function hasAbsoluteSubDir(area) {
+	if (!area || !area.sub_dir) return false;
+	return path.isAbsolute(expandHome(substitute(area.sub_dir)));
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +390,8 @@ async function recalculateFileCounts() {
 export {
 	normalizeFlags,
 	resolveAreaPath,
+	hasAbsoluteSubDir,
+	expandHome,
 	newArea,
 	updateArea,
 	removeArea,

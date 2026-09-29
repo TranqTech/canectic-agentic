@@ -1,0 +1,71 @@
+//- Confirmation before a change that moves file area directories (#28).
+//- Re-posts the submitted form (hidden) with relocate=move or relocate=leave.
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+      .row.justify-content-center
+        .col-12.col-lg-10
+          .card
+            .card-header.bg-darkblue.text-white
+              h2 Move files?
+            .card-body
+              p
+                | Saving this changes where files are kept: 
+                strong= reason
+                | . The files are not moved unless you choose to move them;
+                |  if you save without moving, the affected areas will look empty until the files are put in their new place.
+              p.text-muted
+                | Files are moved one at a time after the change is saved, in the background, and you get a notification when it is done.
+                |  A file whose name is already at the destination is left where it is and listed, never overwritten.
+              .table-responsive
+                table.table.table-sm.table-dark.align-middle
+                  thead
+                    tr
+                      th Area
+                      th From
+                      th To
+                      th.text-end Files
+                      th Note
+                  tbody
+                    each m in plan.moves
+                      if m.status !== 'same'
+                        tr
+                          td= m.shortcode
+                          td
+                            code= m.from
+                          td
+                            code= m.to
+                          td.text-end= m.entries
+                          td.text-nowrap
+                            if m.status === 'empty'
+                              span.text-muted Nothing to move
+                            else if m.status === 'conflict'
+                              span.text-warning= m.conflicts.length + ' already at the destination, left in place: ' + m.conflicts.slice(0, 5).join(', ') + (m.conflicts.length > 5 ? ', ...' : '')
+                            else
+                              span.text-success Will move
+              - var unchanged = plan.moves.filter(function (m) { return m.status === 'same'; }).length
+              if unchanged
+                p.text-muted= unchanged + ' area(s) keep their directory (their sub-directory is an absolute path, or does not depend on this setting).'
+              form(method='POST' action=formAction)
+                each value, key in hiddenFields
+                  if key !== 'relocate'
+                    if Array.isArray(value)
+                      each v in value
+                        input(type='hidden' name=key value=v)
+                    else
+                      input(type='hidden' name=key value=value)
+                .d-flex.flex-wrap.gap-2
+                  button.btn.btn-success(type='submit' name='relocate' value='move')= 'Save and move ' + plan.entries + ' file(s)'
+                  button.btn.btn-warning(type='submit' name='relocate' value='leave') Save without moving
+                  a.btn.btn-secondary(href=cancelUrl) Cancel

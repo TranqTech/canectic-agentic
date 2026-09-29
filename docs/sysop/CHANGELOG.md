@@ -32,6 +32,12 @@
 - Fix: **the First Message Post, Nth Message Post, First File Upload and Nth File Upload template events never fired,** so a template attached to one was never sent. They now fire when a user posts a message (on the web, in the terminal or in a QWK reply packet) or uploads a file. Each user's count starts from what your board already held, so nobody with a posting history is greeted as a first-time poster; messages that arrived from a network are never counted.
 - **Fire Template Event is now in the menu editor's Command list.** A menu entry could already fire a message template event, but the editor did not offer the command, so it had to be added by importing menu JSON. Its argument box suggests the event codes your board has.
 
+### Files
+
+- **Changing where a file area's files are kept now moves them.** Changing a file group's base directory, a file area's directory, or the file base directory on the Configuration page used to leave every file behind at the old path, so the areas looked empty. Saving such a change now shows which areas are affected, where their files are and where they would go, and asks whether to move them. They are moved in the background, one at a time, and you get a notification when it is done. A file whose name is already at the new location is left where it is and listed, never overwritten.
+- Fix: **a file area directory set to a full path (starting with `/` or `~/`) was put inside the group's directory anyway.** It is now used as given, like a group's base directory, and moving the group leaves it alone.
+- Fix: **file requests (FREQ) never found files held in file areas.** Only the FREQ filebox and magic names worked. Files in the areas a linked system is subscribed to can now be requested.
+
 ### Security
 
 - Fix: **failed logins from mail clients and rejected API tokens could not be banned by fail2ban.** A wrong IMAP or SMTP password was logged without the caller's address, and an API request with a bad token was not logged at all. Both are now written to `security.log` with the address, in the form the shipped filter in `examples/fail2ban/` already matches, and each line now says which service it came from (`via IMAP`, `via SMTP`, `via API`). A wrong current password when changing your password, on the web or in the terminal, is logged the same way. No change to the filter is needed.
