@@ -37,11 +37,15 @@ block content
               p.text-muted
                 | Other BBSes registered here can send their callers to the doors you make available to the door server (in each door's settings).
                 |  Each BBS connects with its System ID and a secret, which is shown once when the BBS is added and again only if you make a new one.
-                |  Users with security #{registerSecurity} or above can register their own BBS on the Door Server page (linked from Doors on the web), which
-                if autoApprove
-                  |  is approved at once (auto-approve is on).
+                |  Verified users (security #{registerSecurity} or above) can register their own BBS on the Door Server page (linked from Doors on the web). It then waits here for your approval
+                if autoApproveSecurity !== null && autoApproveSecurity !== undefined && autoApproveFlags.length
+                  | , unless the user has security #{autoApproveSecurity} or above or the #{autoApproveFlags.join(' or ')} flag, which approves it at once.
+                else if autoApproveSecurity !== null && autoApproveSecurity !== undefined
+                  | , unless the user has security #{autoApproveSecurity} or above, which approves it at once.
+                else if autoApproveFlags.length
+                  | , unless the user has the #{autoApproveFlags.join(' or ')} flag, which approves it at once.
                 else
-                  |  then waits here for your approval.
+                  | .
               p
                 strong Doors available to the door server:
                 if availableDoors.length

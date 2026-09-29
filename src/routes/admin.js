@@ -7586,8 +7586,9 @@ router.get('/doorserver', requireAdmin, async (req, res) => {
 		currentuser: currentuser,
 		systems: await doorserverModel.getAll(),
 		enabled: appConfig.getBoolean('doorserver_enabled', false),
-		registerSecurity: appConfig.getNumber('doorserver_register_security', 100),
-		autoApprove: appConfig.getBoolean('doorserver_auto_approve', false),
+		registerSecurity: doorserverModel.registerSecurity(),
+		autoApproveSecurity: appConfig.getNumber('doorserver_auto_approve_security', null),
+		autoApproveFlags: String(appConfig.get('doorserver_auto_approve_flags', '') || '').split(',').map(function (f) { return f.trim(); }).filter(Boolean),
 		defaultMax: appConfig.getNumber('doorserver_max_concurrent', 5),
 		availableDoors: ((await doors.getAllDoors()) || []).filter(function (d) { return d.doorserver_available; }),
 		remotes: await doorserverRemotes.getAll()

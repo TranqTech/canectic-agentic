@@ -3,13 +3,15 @@
 
 import assert from 'assert';
 import { dbAvailable } from './helpers/dbAvailable.js';
-import { normaliseSystemId, validateDetails, mayRegister } from '../src/models/doorserver.js';
+import { normaliseSystemId, validateDetails, mayRegister, autoApproves, registerSecurity } from '../src/models/doorserver.js';
 import { takeFrames } from '../src/handlers/doorauthhandler.js';
 
 function cfg(values) {
+	var has = function (k) { return values[k] !== undefined && values[k] !== ''; };
 	return {
-		getBoolean: function (k, d) { return values[k] !== undefined ? values[k] : d; },
-		getNumber: function (k, d) { return values[k] !== undefined ? values[k] : d; }
+		getBoolean: function (k, d) { return has(k) ? values[k] : d; },
+		getNumber: function (k, d) { return has(k) ? values[k] : d; },
+		get: function (k, d) { return has(k) ? values[k] : d; }
 	};
 }
 
@@ -32,12 +34,37 @@ describe('door server systems (#86, phase B)', function () {
 			assert.strictEqual(ok.values.username_prefix, 'MYBBS', 'the prefix defaults to the system id');
 		});
 
-		it('lets only users at the configured level register, and only when the door server is on', function () {
-			var on = cfg({ doorserver_enabled: true, doorserver_register_security: 100 });
-			assert.strictEqual(mayRegister({ security: 100 }, on), true);
-			assert.strictEqual(mayRegister({ security: 99 }, on), false);
+		it('lets verified users register, and only when the door server is on', function () {
+			var on = cfg({ doorserver_enabled: true, verified_security: 60 });
+			assert.strictEqual(registerSecurity(on), 60, 'blank follows verified_security');
+			assert.strictEqual(mayRegister({ security: 60 }, on), true);
+			assert.strictEqual(mayRegister({ security: 50 }, on), false, 'a new, unverified account');
 			assert.strictEqual(mayRegister(null, on), false);
 			assert.strictEqual(mayRegister({ security: 255 }, cfg({ doorserver_enabled: false })), false);
+		});
+
+		it('refuses a user still marked Unverified, whatever their level', function () {
+			var on = cfg({ doorserver_enabled: true, verified_security: 60 });
+			assert.strictEqual(mayRegister({ security: 100, restrictionflags: ['Unverified'] }, on), false);
+			assert.strictEqual(mayRegister({ security: 100, restrictionflags: '["Unverified"]' }, on), false, 'as a session stores it');
+		});
+
+		it('takes its own registration level when the sysop sets one', function () {
+			assert.strictEqual(registerSecurity(cfg({ doorserver_register_security: 80, verified_security: 60 })), 80);
+		});
+
+		it('approves at once by level or by flag, and never when both are blank', function () {
+			var none = cfg({});
+			assert.strictEqual(autoApproves({ security: 255, permissionflags: ['Sysop'] }, none), false, 'the default: every registration waits');
+			var byLevel = cfg({ doorserver_auto_approve_security: 100 });
+			assert.strictEqual(autoApproves({ security: 100 }, byLevel), true);
+			assert.strictEqual(autoApproves({ security: 99 }, byLevel), false);
+			var byFlag = cfg({ doorserver_auto_approve_flags: 'Trusted, DoorServer' });
+			assert.strictEqual(autoApproves({ security: 60, permissionflags: ['trusted'] }, byFlag), true, 'flags match without case');
+			assert.strictEqual(autoApproves({ security: 60, permissionflags: '["DoorServer"]' }, byFlag), true);
+			assert.strictEqual(autoApproves({ security: 60, permissionflags: ['Mod'] }, byFlag), false);
+			var everyone = cfg({ verified_security: 60, doorserver_auto_approve_security: 60 });
+			assert.strictEqual(autoApproves({ security: 60 }, everyone), true, 'level set to the registration level approves every registration');
 		});
 	});
 
@@ -93,6 +120,13 @@ describe('door server systems (#86, phase B)', function () {
 			assert.strictEqual((await ds.verifyLogin('ZZ86A', r.secret)).ok, true);
 			await ds.setStatus(r.system.uuid, 'suspended', 'sysop');
 			assert.strictEqual((await ds.verifyLogin('ZZ86A', r.secret)).ok, false);
+		});
+
+		it('approves a qualifying user registration at once', async function () {
+			var r = await ds.createSystem(details, { ownerUserId: 987654, user: { security: 60, permissionflags: ['Trusted'] },
+				cfg: cfg({ doorserver_auto_approve_flags: 'Trusted' }) });
+			assert.strictEqual(r.system.status, 'approved');
+			assert.strictEqual((await ds.verifyLogin('ZZ86A', r.secret)).ok, true);
 		});
 
 		it('refuses a second registration of the same system id', async function () {

@@ -17,7 +17,7 @@ The first design (self-registration on a public page, username and password, Web
 ## Decisions (2026-09-29)
 
 - **WebSocket is the primary transport, with a shipped client program.** WebSocket over the board's own HTTPS port lets the client send structured details (who the caller is, terminal size and encoding, which door) in one authenticated frame, and keeps the secret off any plaintext protocol. RLogin is supported for software that can only speak it, **off by default**.
-- **Registration is by the sysop, or by this board's own users.** No public form. The sysop can add a system by hand in admin. A logged-in user at or above a configurable security level can register their BBS and keep its details current; the registration is tied to their account, which is the contact. A self-registration waits for the sysop's approval unless auto-approve is on.
+- **Registration is by the sysop, or by this board's own verified users.** No public form. The sysop can add a system by hand in admin. A verified user (the verified security level by default, never one still marked Unverified) can register their BBS and keep its details current; the registration is tied to their account, which is the contact. It waits for the sysop's approval unless the user reaches an auto-approve security level or holds an auto-approve flag, so long-standing or trusted users skip review (decided 2026-09-29, replacing an on/off auto-approve).
 - **Canectic is also a client.** A board can add a remote Canectic door server (address, system id, secret) and give its callers a menu command that connects them to a door there.
 
 ## Access control
@@ -77,8 +77,9 @@ Admin page of remote door servers. Menu command `remoteDoor`, argument `<remote 
 | Key | Default | |
 |---|---|---|
 | `doorserver_enabled` | false | accept door-server connections at all |
-| `doorserver_register_security` | 100 | lowest security level that may register a BBS |
-| `doorserver_auto_approve` | false | approve self-registrations without review |
+| `doorserver_register_security` | blank | lowest security level that may register a BBS; blank follows `verified_security`; users with the `Unverified` restriction never can (`doorserver.mayRegister`) |
+| `doorserver_auto_approve_security` | blank | a registration by a user at or above this level is approved at once (`doorserver.autoApproves`) |
+| `doorserver_auto_approve_flags` | blank | or by a user holding any of these permission flags (comma-separated, case-insensitive); both blank means every registration waits |
 | `doorserver_max_concurrent` | 5 | default sessions per system |
 | `doorserver_security` | 50 | security level door-server callers carry in drop files |
 | `doorserver_rlogin_enabled` | false | phase E |

@@ -1,10 +1,12 @@
 // doorserver.js -- a user's own BBS registrations with this board's door
 // server (#86). Mounted at /doorserver.
 //
-// Only logged-in users at or above doorserver_register_security, with the
-// door server switched on, may register; there is no public form. A
-// registration is tied to the user's account, which makes them its contact,
-// and waits for the sysop unless doorserver_auto_approve is on. The secret is
+// Only verified users (doorserver_register_security, by default the verified
+// level, and not marked Unverified), with the door server switched on, may
+// register; there is no public form. A registration is tied to the user's
+// account, which makes them its contact, and waits for the sysop unless the
+// user reaches doorserver_auto_approve_security or holds one of
+// doorserver_auto_approve_flags. The secret is
 // shown once, in the flash, when the system is made or given a new one.
 
 import express from 'express';
@@ -43,8 +45,8 @@ router.get('/', async (req, res) => {
 		systems: await doorserver.getForOwner(parseInt(user.id)),
 		mayRegister: doorserver.mayRegister(user),
 		enabled: appConfig.getBoolean('doorserver_enabled', false),
-		autoApprove: appConfig.getBoolean('doorserver_auto_approve', false),
-		registerSecurity: appConfig.getNumber('doorserver_register_security', 100),
+		autoApprove: doorserver.autoApproves(user),
+		registerSecurity: doorserver.registerSecurity(),
 		boardAddress: (req.protocol === 'https' ? 'wss://' : 'ws://') + req.get('host') + '/ws/doorserver'
 	});
 });
@@ -66,7 +68,7 @@ router.post('/register', urlencodedParser, async (req, res) => {
 		await flash.setOne(req, 'danger', 'Your account cannot register a BBS with this door server.');
 		return res.redirect('/doorserver');
 	}
-	var r = await doorserver.createSystem(req.body, { ownerUserId: parseInt(user.id), actor: user.username });
+	var r = await doorserver.createSystem(req.body, { ownerUserId: parseInt(user.id), actor: user.username, user: user });
 	if (!r.status) {
 		await flash.setOne(req, 'danger', r.errors.join('. '));
 		return res.redirect('/doorserver');

@@ -8,7 +8,8 @@ The door server lets other BBSes send their callers to door games you run, and l
 2. **Switch it on.** On the Configuration page, under Doors, turn on `doorserver_enabled`. Until then every door-server connection is refused.
 3. **Register the BBSes that may connect.** Either:
    - **Add them yourself** in Admin > Doors > Door Server with **Add BBS**. Give it a System ID (2 to 12 letters, digits, `_` or `-`, such as `UNDERMINE`) and its details. It is approved at once, and you are shown its **secret** once: send that to the other sysop. If it is lost, use **New secret**; the old one stops working at once.
-   - **Or let your users register their own BBS.** A logged-in user whose security level is at least `doorserver_register_security` (100 by default) sees a link on the Doors page to the Door Server page, where they register their BBS and are shown its secret once. You get a notification; the registration waits for you to **Approve** or **Reject** it (unless `doorserver_auto_approve` is on), and they are notified of your decision. The registration stays tied to their account, and they can update its details or make a new secret themselves.
+   - **Or let your users register their own BBS.** Any verified user can: their security level must reach `doorserver_register_security`, which left blank is the level verifying an address gives (`verified_security`, 60 by default), and they must not still be marked Unverified. They find a link on the Doors page to the Door Server page, register their BBS there and are shown its secret once. The registration stays tied to their account, and they can update its details or make a new secret themselves.
+   - **Approval.** You get a notification of each registration, and it waits for you to **Approve** or **Reject** it; the user is notified of your decision. Users you trust can skip that: a registration is approved at once when the user's security reaches `doorserver_auto_approve_security`, or when they hold any permission flag listed in `doorserver_auto_approve_flags` (add one such as `Trusted` to `custom_permission_flags` and give it to the users you choose). Leave both blank to review every registration; set the level to the registration level to approve them all.
 4. **Limits.** Each BBS may have `doorserver_max_concurrent` callers on at once (5 by default; change it per BBS with Edit). **Suspend** stops a BBS connecting until you approve it again.
 
 A remote caller appears on your board as `<prefix>_<their name>` (the prefix is the System ID unless you set another), with the security level `doorserver_security` in the door's drop file. Door-server callers are listed in your caller log with their BBS's name. A failed door-server login is written to `security.log` in the form the fail2ban filter in `examples/fail2ban/` matches.
@@ -40,8 +41,9 @@ It reads the caller's name from DOOR32.SYS or DOOR.SYS. Without `--door SLUG` th
 | Setting | Default | |
 |---|---|---|
 | `doorserver_enabled` | off | accept door-server connections |
-| `doorserver_register_security` | 100 | lowest security level that may register a BBS |
-| `doorserver_auto_approve` | off | approve user registrations without review |
+| `doorserver_register_security` | blank | lowest security level that may register a BBS; blank means `verified_security` |
+| `doorserver_auto_approve_security` | blank | registrations by users at or above this level are approved at once |
+| `doorserver_auto_approve_flags` | blank | registrations by users holding any of these flags are approved at once |
 | `doorserver_max_concurrent` | 5 | callers per BBS at once (per BBS in its settings) |
 | `doorserver_security` | 50 | security level remote callers carry in drop files |
 | `doorserver_rlogin_enabled` | off | RLogin access (restart to apply) |

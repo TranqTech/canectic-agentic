@@ -4,7 +4,8 @@
 // Until #86 getClientBBS returned one hardcoded test BBS for ANY system id,
 // with an auth token published in the repository. Systems are now rows in
 // doorserver_systems, added by the sysop or registered by one of this board's
-// own users above doorserver_register_security, and a system logs in with its
+// own verified users (doorserver_register_security, by default the verified
+// level), and a system logs in with its
 // system id and a generated secret, stored only as a bcrypt hash and shown
 // once when it is made.
 
@@ -14,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
+import { parseFlags } from '../utils/areaAccess.js';
 
 var TABLE = 'doorserver_systems';
 var SECRET_PREFIX = 'cds_';
@@ -68,12 +70,43 @@ function validateDetails(input, opts) {
 	return { values: values, errors: errors };
 }
 
-/** May this user register a BBS? cfg defaults to appConfig (tests pass one). */
+/**
+ * The lowest security level that may register: doorserver_register_security,
+ * or, left blank, the level address verification grants (verified_security).
+ */
+function registerSecurity(cfg) {
+	var c = cfg || appConfig;
+	return c.getNumber('doorserver_register_security', c.getNumber('verified_security', 60));
+}
+
+/**
+ * May this user register a BBS? A verified user can: at or above the
+ * registration level, and not still marked Unverified (a hand-raised level
+ * without a verified address does not count, and the address is the contact
+ * a registration is tied to). cfg defaults to appConfig (tests pass one).
+ */
 function mayRegister(user, cfg) {
 	var c = cfg || appConfig;
 	if (!user) return false;
 	if (!c.getBoolean('doorserver_enabled', false)) return false;
-	return (parseInt(user.security) || 0) >= c.getNumber('doorserver_register_security', 100);
+	if (parseFlags(user.restrictionflags).indexOf('Unverified') !== -1) return false;
+	return (parseInt(user.security) || 0) >= registerSecurity(c);
+}
+
+/**
+ * Is this user's registration approved without waiting for the sysop? Yes at
+ * or above doorserver_auto_approve_security, or holding any permission flag
+ * in doorserver_auto_approve_flags. Both blank (the default): never.
+ */
+function autoApproves(user, cfg) {
+	var c = cfg || appConfig;
+	if (!user) return false;
+	var level = c.getNumber('doorserver_auto_approve_security', null);
+	if (level !== null && (parseInt(user.security) || 0) >= level) return true;
+	var wanted = String(c.get('doorserver_auto_approve_flags', '') || '').split(',')
+		.map(function (f) { return f.trim().toLowerCase(); }).filter(Boolean);
+	if (!wanted.length) return false;
+	return parseFlags(user.permissionflags).some(function (f) { return wanted.indexOf(String(f).toLowerCase()) !== -1; });
 }
 
 function generateSecret() {
@@ -110,7 +143,8 @@ async function getBySystemId(systemId) {
 
 /**
  * Register a system. By the sysop (opts.bySysop) it is approved at once; by
- * a user it is theirs and waits for approval unless doorserver_auto_approve.
+ * a user (opts.user, the session user) it is theirs and waits for approval
+ * unless autoApproves(user).
  * returns { status, errors, system, secret } -- secret only here, once.
  */
 async function createSystem(input, opts) {
@@ -120,7 +154,7 @@ async function createSystem(input, opts) {
 	if (await getBySystemId(check.values.system_id)) {
 		return { status: false, errors: ['System ID ' + check.values.system_id + ' is already registered'] };
 	}
-	var approved = !!o.bySysop || appConfig.getBoolean('doorserver_auto_approve', false);
+	var approved = !!o.bySysop || autoApproves(o.user, o.cfg);
 	var secret = generateSecret();
 	var row = Object.assign({}, check.values, {
 		uuid: uuidv4(),
@@ -216,7 +250,7 @@ async function getClientBBS(systemId) {
 
 export {
 	STATUSES, SECRET_PREFIX,
-	normaliseSystemId, normalisePrefix, validateDetails, mayRegister, generateSecret,
+	normaliseSystemId, normalisePrefix, validateDetails, mayRegister, registerSecurity, autoApproves, generateSecret,
 	getAll, getForOwner, getByUuid, getBySystemId, getClientBBS,
 	createSystem, updateDetails, setStatus, regenerateSecret, deleteSystem,
 	verifyLogin, recordSession
