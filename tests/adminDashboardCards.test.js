@@ -8,10 +8,7 @@ import fs from 'fs';
 
 // Navbar pages deliberately without a card. Add one here only on purpose.
 var NO_CARD = [
-	'/admin',                  // the dashboard itself
-	'/admin/callflows',        // top-level navbar item (Flows)
-	'/admin/timed-events',     // top-level navbar item (Events)
-	'/admin/template-events'
+	'/admin'                   // the dashboard itself
 ];
 
 describe('admin dashboard cards', function () {
