@@ -2,6 +2,10 @@
 
 ## Pending (since v0.9.13a)
 
+### Administration
+
+- **The Door Server page has a card on the admin dashboard,** under Doors. It was reachable only from the Doors menu in the admin navbar.
+
 ## v0.9.13a (2026-09-29)
 
 ### Messages
