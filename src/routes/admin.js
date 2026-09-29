@@ -23,6 +23,7 @@ import * as doors from '../models/doors.js';
 import * as doorserverModel from '../models/doorserver.js';
 import * as doorserverRemotes from '../models/doorserverRemotes.js';
 import * as remoteDoorCatalog from '../models/remoteDoorCatalog.js';
+import { screenCounts } from '../servers/terminalGate.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as messageTemplates from '../models/messageTemplates.js';
@@ -7466,7 +7467,9 @@ router.get('/nodespy', async (req, res) => {
 		title: 'Node Spy',
 		activelink: 'nodespy',
 		currentuser: await getCurrentUser(req),
-		nodes: nodes
+		nodes: nodes,
+		screenCounts: await screenCounts(7),
+		screenEnabled: appConfig.getBoolean('terminal_screen_enabled', true)
 	});
 });
 

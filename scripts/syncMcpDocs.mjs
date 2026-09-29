@@ -210,6 +210,7 @@ var TOPIC_TAGS = {
     'INSTALL.md':                   ['installation', 'setup'],
     'MENUS.md':                     ['menus', 'configuration'],
     'DOORSERVER.md':                ['doors', 'doorserver', 'configuration'],
+    'SECURITY.md':                  ['security', 'terminal', 'fail2ban', 'configuration'],
     'THEMES.md':                    ['themes', 'configuration'],
     'API.md':                       ['api', 'authentication'],
     'MAIL.md':                      ['mail', 'smtp', 'imap'],

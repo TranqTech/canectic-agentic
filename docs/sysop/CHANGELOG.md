@@ -2,6 +2,14 @@
 
 ## Pending (since v0.9.14a)
 
+### Security
+
+- **New: scanners on the terminal port are turned away before they get a node.** Every new telnet or TCP connection is screened first. A real terminal passes at once by answering the board's cursor query, so callers see nothing different; a client that cannot answer is asked to press ESC twice. A connection whose first words are a router login or command (`root`, `admin`, `enable`, `/bin/busybox`, your honeypot names) is closed at once and written to `security.log` as a honeypot attempt, which the shipped fail2ban honeypot filter already bans; anything else is closed after `terminal_screen_timeout` seconds (15). Screened-out connections no longer fill the caller log, Who's Online or the system log, and Node Spy shows how many were let in and turned away. Switch it off with `terminal_screen_enabled`. See `docs/sysop/SECURITY.md`, which also covers setting up fail2ban, including banning the port your board really listens on when the router forwards 23 to another.
+
+### Upgrade Notes
+
+- **Terminal connections are screened.** Callers whose terminal program cannot answer a cursor position query are asked to press ESC twice before the board appears.
+
 ## v0.9.14a (2026-09-29)
 
 ### Doors

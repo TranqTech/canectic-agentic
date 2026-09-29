@@ -10,6 +10,7 @@ import * as net from 'net';
 import * as alogger from "../utils/alogger.js";
 import { currentMaintenance } from "../maintenance/maintenanceWatch.js";
 import { refuseNewCaller } from "../maintenance/terminalDrain.js";
+import { screenThenAdmit } from "./terminalGate.js";
 
 // ---------------------------------------------------------------------------
 // TcpConnection — wraps a single TCP socket (mirrors WsConnection)
@@ -45,8 +46,10 @@ class TcpConnection {
 	}
 
 	announceConnection() {
+		// Level 4: port 23 draws scanners by the hundred; a caller who passes
+		// the terminal screen is logged at level 3 there
 		var msg = "TCP connection from " + this.socket.remoteAddress;
-		alogger.writeAlog(3, msg, "magenta", true);
+		alogger.writeAlog(4, msg, "magenta", true);
 
 		// Maintenance mode: refuse before a node is allocated or anything is
 		// negotiated, with the reason and when the board expects to be back.
@@ -59,9 +62,14 @@ class TcpConnection {
 		}
 
 		if (this.parentPool.forwardtoPool) {
-			alogger.writeAlog(4, "Forwarding TCP call to pool " + this.parentPool.callPool.name, "cyan");
-			this.callhandler = this.parentPool.callPool.createCall(this);
-			this.callhandler.setupCall();
+			// A node only for a caller who passes the terminal screen (bots
+			// never get one); see terminalGate.js
+			screenThenAdmit(this, () => {
+				if (this.socket.destroyed) return;
+				alogger.writeAlog(4, "Forwarding TCP call to pool " + this.parentPool.callPool.name, "cyan");
+				this.callhandler = this.parentPool.callPool.createCall(this);
+				this.callhandler.setupCall();
+			});
 		} else {
 			this.socket.write("Sorry, no call handlers available. Goodbye.\r\n");
 			this.socket.destroy();
@@ -69,8 +77,10 @@ class TcpConnection {
 	}
 
 	announceClose() {
+		if (this.screen) { this.screen.stop(); this.screen = null; }
 		var msg = this.loggingId + "\n  TCP connection closed";
-		alogger.writeAlog(3, msg, "magenta");
+		// A connection the terminal screen turned away is not worth level 3
+		alogger.writeAlog(this.callhandler ? 3 : 4, msg, "magenta");
 		this.callStatus = "Disconnected";
 
 		if (this.callhandler) {
@@ -90,6 +100,7 @@ class TcpConnection {
 	}
 
 	handleData(data) {
+		if (this.screen) { this.screen.feed(data); return; }
 		if (this.callhandler) {
 			this.callhandler.handleData(data);
 		}

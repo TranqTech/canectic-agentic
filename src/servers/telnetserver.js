@@ -15,6 +15,7 @@ import * as net from 'net';
 import * as alogger from "../utils/alogger.js";
 import { currentMaintenance } from "../maintenance/maintenanceWatch.js";
 import { refuseNewCaller } from "../maintenance/terminalDrain.js";
+import { screenThenAdmit } from "./terminalGate.js";
 
 // --- Telnet constants ---
 var IAC  = 0xFF;  // Interpret As Command
@@ -327,8 +328,10 @@ class TelnetConnection {
 	}
 
 	announceConnection() {
+		// Level 4: port 23 draws scanners by the hundred; a caller who passes
+		// the terminal screen is logged at level 3 there
 		var msg = "Telnet connection from " + this.socket.remoteAddress;
-		alogger.writeAlog(3, msg, "magenta", true);
+		alogger.writeAlog(4, msg, "magenta", true);
 
 		// Maintenance mode: refuse before a node is allocated or anything is
 		// negotiated, with the reason and when the board expects to be back.
@@ -341,9 +344,14 @@ class TelnetConnection {
 		}
 
 		if (this.parentPool.forwardtoPool) {
-			alogger.writeAlog(4, "Forwarding Telnet call to pool " + this.parentPool.callPool.name, "cyan");
-			this.callhandler = this.parentPool.callPool.createCall(this);
-			this.callhandler.setupCall();
+			// A node only for a caller who passes the terminal screen (bots
+			// never get one); see terminalGate.js
+			screenThenAdmit(this, () => {
+				if (this.socket.destroyed) return;
+				alogger.writeAlog(4, "Forwarding Telnet call to pool " + this.parentPool.callPool.name, "cyan");
+				this.callhandler = this.parentPool.callPool.createCall(this);
+				this.callhandler.setupCall();
+			});
 		} else {
 			this.socket.write("Sorry, no call handlers available. Goodbye.\r\n");
 			this.socket.destroy();
@@ -352,8 +360,10 @@ class TelnetConnection {
 
 	announceClose() {
 		var msg = this.loggingId + "\n  Telnet connection closed";
-		alogger.writeAlog(3, msg, "magenta");
+		// A connection the terminal screen turned away is not worth level 3
+		alogger.writeAlog(this.callhandler ? 3 : 4, msg, "magenta");
 		this.callStatus = "Disconnected";
+		if (this.screen) { this.screen.stop(); this.screen = null; }
 
 		if (this.callhandler) {
 			this.callhandler.connectionClosed(this);
@@ -369,6 +379,12 @@ class TelnetConnection {
 	}
 
 	handleData(data) {
+		if (this.screen) {
+			// Still being screened: negotiation is answered, the rest is the screen's
+			var screened = this.telnetParser.filterInbound(data);
+			if (screened.length > 0 && this.screen) this.screen.feed(screened);
+			return;
+		}
 		if (this.callhandler) {
 			// Filter IAC commands from inbound data
 			var clean = this.telnetParser.filterInbound(data);

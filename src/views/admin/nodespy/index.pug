@@ -5,9 +5,17 @@ block content
     br
     .row
       .col-lg-10.offset-lg-1.col-12
-        h2.mb-4
+        h2.mb-2
           i.bi.bi-eye.me-2
           span.fg-brightgreen Node Spy
+        if screenCounts && screenCounts.length
+          - var sc0 = screenCounts[0]
+          - var sc7 = screenCounts.reduce(function (a, d) { return { passed: a.passed + d.passed, bot: a.bot + d.bot, timeout: a.timeout + d.timeout }; }, { passed: 0, bot: 0, timeout: 0 })
+          p.small.text-muted.mb-4
+            | Terminal screen today: #{sc0.passed} let in, #{sc0.bot} scanners dropped, #{sc0.timeout} closed without an answer.
+            |  Last 7 days: #{sc7.passed} let in, #{sc7.bot} scanners, #{sc7.timeout} without an answer.
+            if !screenEnabled
+              |  Screening is switched off (terminal_screen_enabled).
 
         #nodeGrid
           //- Initial server-rendered content
