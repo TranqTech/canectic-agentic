@@ -44,6 +44,8 @@ function keepDays(name, data) {
 export const MAINTENANCE_JOBS = [
 	'regen-html',
 	'regen-pm-html',
+	'fix-charset',
+	'revert-charset',
 	'purge-pm-trash',
 	'pm-purged-cleanup',
 	'purge-notifications',
@@ -127,6 +129,24 @@ export async function runMaintenanceJob(name, data, opts) {
 				signal: signal,
 			});
 			onResult(regenSummary(pmRegen, data.dryRun));
+			return true;
+		}
+
+		case 'fix-charset': {
+			var charsetRepair = await import('./charsetRepair.js');
+			var fixed = await charsetRepair.repairTable(data.table, {
+				dryRun: data.dryRun || false,
+				batchSize: data.batchSize,
+				signal: signal,
+			});
+			onResult(Object.assign({ kind: 'charset', dryRun: !!data.dryRun }, fixed));
+			return true;
+		}
+
+		case 'revert-charset': {
+			var charsetRevert = await import('./charsetRepair.js');
+			var restored = await charsetRevert.revertTable(data.table, {});
+			onResult({ kind: 'charset-revert', table: data.table, restored: restored });
 			return true;
 		}
 

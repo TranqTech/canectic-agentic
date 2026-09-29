@@ -23,6 +23,9 @@
 //   node src/tools/maintenance.js --recalc-counts              Recalculate message area counts
 //   node src/tools/maintenance.js --fix-msgids                 Repair legacy full-string MSGIDs
 //   node src/tools/maintenance.js --fix-msgids --dry-run       Report what would be repaired
+//   node src/tools/maintenance.js --fix-charset --dry-run      Report text stored as mojibake (UTF-8 read as CP437)
+//   node src/tools/maintenance.js --fix-charset                Repair it, keeping the old text in charset_repairs
+//   node src/tools/maintenance.js --revert-charset             Put back what --fix-charset changed
 //   node src/tools/maintenance.js --help                       Show usage
 
 import * as dotenv from 'dotenv';
@@ -46,9 +49,11 @@ function parseArgs() {
 		console.log('  --recalc-counts    Recalculate message area counts');
 		console.log('  --rethread         Rebuild thread assignments for message areas');
 		console.log('  --fix-msgids       Split legacy full-string MSGIDs into the msg_id/msg_orig_addr tuple');
+		console.log('  --fix-charset      Repair text stored as mojibake (UTF-8 that was read as CP437); try --dry-run first');
+		console.log('  --revert-charset   Put back everything --fix-charset changed (old text is kept in charset_repairs)');
 		console.log('');
 		console.log('Options:');
-		console.log('  --area SHORTCODE   Limit regen-html, rethread or fix-msgids to specific area(s) (repeatable)');
+		console.log('  --area SHORTCODE   Limit regen-html, rethread, fix-msgids or fix-charset to specific area(s) (repeatable)');
 		console.log('  --dry-run          Preview without writing changes');
 		console.log('  --width N          Force column width for HTML generation');
 		console.log('  --batch N          Batch size (default: 100)');
@@ -67,6 +72,8 @@ function parseArgs() {
 	var recalcCounts = args.includes('--recalc-counts');
 	var rethread = args.includes('--rethread');
 	var fixMsgIds = args.includes('--fix-msgids');
+	var fixCharset = args.includes('--fix-charset');
+	var revertCharset = args.includes('--revert-charset');
 	var width = null;
 	var batchSize = 100;
 	var days = null;
@@ -87,7 +94,7 @@ function parseArgs() {
 		}
 	}
 
-	return { regenHtml, regenPmHtml, purgePmTrash, recalcCounts, rethread, fixMsgIds, areas, dryRun, width, batchSize, days };
+	return { regenHtml, regenPmHtml, purgePmTrash, recalcCounts, rethread, fixMsgIds, fixCharset, revertCharset, areas, dryRun, width, batchSize, days };
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +104,8 @@ function parseArgs() {
 // What a job is, for the progress lines: its name plus the area it covers.
 function jobLabel(job) {
 	var areas = job && job.data && job.data.areas;
-	return job.name + (areas && areas.length ? ' (' + areas.join(', ') + ')' : '');
+	var table = job && job.data && job.data.table;
+	return job.name + (areas && areas.length ? ' (' + areas.join(', ') + ')' : table ? ' (' + table + ')' : '');
 }
 
 // No overall time limit. A whole-board regen runs one area job after another
@@ -163,6 +171,16 @@ async function waitForJobs(enqueuedJobs) {
 					continue;
 				}
 				var state = await current.getState();
+				// Finished before the listener was ready: jobs that report a
+				// result are kept for a while, so read it from the job itself.
+				if (state === 'completed') {
+					finish(jobId, '  \u2713 ' + jobLabel(j) + ' completed' + describeResult(current.returnvalue), false);
+					continue;
+				}
+				if (state === 'failed') {
+					finish(jobId, '  \u2717 ' + jobLabel(j) + ' failed: ' + current.failedReason, true);
+					continue;
+				}
 				if (state === 'active') counts.active++;
 				else if (state === 'waiting' || state === 'prioritized' || state === 'delayed') counts.waiting++;
 				else counts.other++;
@@ -184,6 +202,14 @@ function describeResult(returnvalue) {
 	if (typeof r === 'string') {
 		try { r = JSON.parse(r); } catch (_) { return ''; }
 	}
+	if (r && r.kind === 'charset') {
+		if (!r.repaired) return ': ' + r.scanned + ' checked, nothing to repair';
+		return ': ' + r.scanned + ' checked, ' + r.repaired + (r.dryRun ? ' would be repaired' : ' repaired') +
+			' (' + Object.keys(r.fields).map(function (f) { return f + ' ' + r.fields[f]; }).join(', ') + ')' +
+			(r.replacementChars ? ', ' + r.replacementChars + ' already destroyed by the sender (hold U+FFFD)' : '') +
+			(r.sampleIds && r.sampleIds.length ? ' (e.g. ids ' + r.sampleIds.join(', ') + ')' : '');
+	}
+	if (r && r.kind === 'charset-revert') return ': ' + r.restored + ' value(s) restored';
 	if (!r || typeof r !== 'object' || r.processed === undefined) return '';
 	return ': ' + r.processed + ' checked, ' + r.updated + (r.dryRun ? ' would change' : ' updated') +
 		', ' + r.unchanged + ' unchanged' +
@@ -216,7 +242,7 @@ function reportQueued(queued) {
 async function main() {
 	var opts = parseArgs();
 
-	if (!opts.regenHtml && !opts.regenPmHtml && !opts.purgePmTrash && !opts.recalcCounts && !opts.rethread && !opts.fixMsgIds) {
+	if (!opts.regenHtml && !opts.regenPmHtml && !opts.purgePmTrash && !opts.recalcCounts && !opts.rethread && !opts.fixMsgIds && !opts.fixCharset && !opts.revertCharset) {
 		console.log('No task specified. Use --help for usage.');
 		process.exit(1);
 	}
@@ -284,6 +310,19 @@ async function main() {
 			console.log('    ' + (opts.areas.length > 0 ? '' : '(all areas) ') + (opts.dryRun ? '[dry run] ' : '') +
 				'Progress is logged by the worker. Check: pm2 logs worker');
 			enqueuedJobs.push(job);
+		}
+
+		if (opts.fixCharset || opts.revertCharset) {
+			if (opts.fixCharset && opts.revertCharset) throw new Error('--fix-charset and --revert-charset cannot be combined');
+			var charsetJobs = await jobs.enqueueFixCharset({
+				areas: opts.areas.length > 0 ? opts.areas : null,
+				dryRun: opts.dryRun,
+				batchSize: opts.batchSize,
+				revert: opts.revertCharset,
+			});
+			if (opts.fixCharset && opts.dryRun) console.log('  [dry run] nothing will be written; each table reports what would be repaired');
+			reportQueued(charsetJobs);
+			enqueuedJobs.push(...charsetJobs);
 		}
 
 		if (enqueuedJobs.length === 0) {

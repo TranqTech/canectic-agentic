@@ -57,6 +57,13 @@ export async function addDeduped(queue, name, data, opts) {
 	return queue.add(name, data, opts);
 }
 
+// For jobs whose result the CLI prints: keep the finished job for an hour
+// rather than deleting it at once, so a job that finishes before the CLI is
+// listening can still be read back (it used to show only as "finished before
+// its result was seen"). addDeduped removes a finished job before re-adding
+// the same id, so this does not block a rerun.
+var KEEP_RESULT = { removeOnComplete: { age: 3600 }, removeOnFail: { age: 3600 } };
+
 /**
  * A jobId for a singleton job that carries options: the base alone when
  * there are none, else the base plus a short hash of the options. Equal
@@ -377,7 +384,7 @@ export async function enqueueRegenHtml(opts = {}) {
 	for (var req of regenHtmlRequests(areas, opts)) {
 		queued.push(await addDeduped(maintenanceQueue, 'regen-html', req.data, {
 			jobId: req.jobId,
-			removeOnComplete: true, removeOnFail: true,
+			...KEEP_RESULT,
 		}));
 	}
 	return queued;
@@ -411,6 +418,33 @@ async function activeAreaShortcodes() {
 	var rows = await postgres.query(
 		'SELECT shortcode FROM message_areas WHERE active ORDER BY shortcode ASC', []);
 	return (rows || []).map(function (r) { return r.shortcode; });
+}
+
+/**
+ * Repair text stored as mojibake (UTF-8 read as CP437, #57), ONE JOB PER
+ * TABLE: each message area, and with no areas given also pm_inbox and
+ * pm_outbox. Same shape as enqueueRegenHtml, for the same reasons.
+ * Called by: CLI (maintenance.js --fix-charset / --revert-charset).
+ */
+export async function enqueueFixCharset(opts = {}) {
+	var tables = [];
+	if (opts.areas && opts.areas.length > 0) {
+		tables = opts.areas.map(function (a) { return 'mb_' + String(a).toLowerCase().trim() + '_msgs'; });
+	} else {
+		tables = (await activeAreaShortcodes()).map(function (a) { return 'mb_' + a.toLowerCase() + '_msgs'; });
+		tables.push('pm_inbox', 'pm_outbox');
+	}
+	var name = opts.revert ? 'revert-charset' : 'fix-charset';
+	var queued = [];
+	for (var table of tables) {
+		var data = { table: table, dryRun: opts.dryRun || false, batchSize: opts.batchSize || 500 };
+		if (opts.revert) delete data.dryRun;
+		queued.push(await addDeduped(maintenanceQueue, name, data, {
+			jobId: optionJobId(name, data),
+			...KEEP_RESULT,
+		}));
+	}
+	return queued;
 }
 
 /**
