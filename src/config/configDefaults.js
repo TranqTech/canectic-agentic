@@ -150,6 +150,8 @@ var CONFIG_DEFINITIONS = [
 	{ key: 'doorserver_auto_approve', defaultValue: 'false',     type: 'boolean', category: 'doors',       description: 'Approve BBS registrations made by users without waiting for the sysop' },
 	{ key: 'doorserver_max_concurrent', defaultValue: '5',       type: 'number',  category: 'doors',       description: 'Default number of door-server sessions a registered BBS may have at once' },
 	{ key: 'doorserver_security',   defaultValue: '50',          type: 'number',  category: 'doors',       description: 'Security level a remote BBS caller carries in door drop files' },
+	{ key: 'doorserver_rlogin_enabled', defaultValue: 'false', type: 'boolean', category: 'doors', restart: true, description: 'Also accept door-server connections over RLogin, for BBS software that cannot run the WebSocket client (restart the gateway to apply)' },
+	{ key: 'doorserver_rlogin_port', defaultValue: '5513',       type: 'number',  category: 'doors', restart: true, description: 'Port for RLogin door-server connections. Ports below 1024 (RLogin is traditionally 513) need the board to run as root.' },
 	{ key: 'xtrnTO',                defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'Door launch timeout (ms)' },
 	{ key: 'doorInactivityTO',      defaultValue: '5',           type: 'number',  category: 'doors',       description: 'Door inactivity timeout in minutes (default 5)' },
 	{ key: 'syncjsdoorTO',          defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'SyncJS door launch timeout (ms)' },

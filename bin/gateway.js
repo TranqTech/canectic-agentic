@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import * as alogger from "../src/utils/alogger.js"
 import {WsManager, WsPool} from "../src/servers/websockets.js"
 import { TcpPool, TcpServer } from "../src/servers/tcpserver.js"
+import { RloginServer } from "../src/servers/rloginserver.js"
 import { TelnetPool, TelnetServer } from "../src/servers/telnetserver.js"
 import { TerminalPool, TerminalServer } from "../src/servers/terminalserver.js"
 import { ImapServer } from "../src/servers/imapServer.js"
@@ -70,6 +71,7 @@ var primaryNodeManager
 var socatManager
 var httpServer
 var tcpServer         // TCP terminal server (legacy, use terminalServer instead)
+var rloginServer      // RLogin door-server access (#86), when enabled
 var telnetServer      // Telnet terminal server (legacy, use terminalServer instead)
 var terminalServer    // Unified TCP/Telnet auto-detect server
 var imapServer        // IMAP server for PM access
@@ -326,6 +328,20 @@ async function startTcpServer(){
 	tcpServer.start();
 	servercount += 1;
 	callservcount += 1;
+}
+
+// RLogin door-server access (#86), off unless doorserver_rlogin_enabled
+async function startRloginServer(){
+	if (!appConfig.getBoolean('doorserver_rlogin_enabled', false)) return;
+	var port = appConfig.getNumber('doorserver_rlogin_port', 5513);
+	var targetPool = callPoolMap["Doorserver"];
+	if (!port || !targetPool) {
+		alogger.writeAlog(2, "  RLogin door server not started (no port, or no Doorserver pool)", "yellow");
+		return;
+	}
+	rloginServer = new RloginServer(port, targetPool);
+	rloginServer.start();
+	servercount += 1;
 }
 
 async function startTelnetServer(){
@@ -614,6 +630,7 @@ async function main(){
 	await startTerminalServer()
 	// Legacy dedicated servers (only if their ports are explicitly set)
 	await startTcpServer()
+	await startRloginServer()
 	await startTelnetServer()
 
 	// Mode-dependent startup

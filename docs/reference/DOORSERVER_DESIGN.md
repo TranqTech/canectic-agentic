@@ -2,12 +2,13 @@
 
 Lets other BBSes send their callers to doors hosted here, and lets this board send its callers to doors hosted on another Canectic board. Tracked in #86 (which absorbs #9).
 
-**Status: in progress (#86).** Decisions made 2026-09-29, recorded below. Build order: A security, B server, C shipped client, D Canectic as a client, E RLogin. This header is updated as each phase lands.
+**Status: built (#86), all five phases; sysop guide `docs/sysop/DOORSERVER.md`.** Decisions made 2026-09-29, recorded below. Build order: A security, B server, C shipped client, D Canectic as a client, E RLogin. This header is updated as each phase lands.
 
 - **A, done:** stub login refuses every system; `doorserver_enabled` (off) refuses every connection before auth; `doors.doorserver_available` (default false) checked by `doors.mayLaunchDoor` in `CallManager.launchDoor`; failed logins to `security.log`; stale `bin/doorserver.js` deleted.
 - **B, done:** `doorserver_systems` + `src/models/doorserver.js` (create by sysop or user, pending/approved/suspended/rejected, bcrypt secret shown once, `verifyLogin`, `recordSession`); `src/handlers/doorauthhandler.js` speaks `canectic-doorserver/1` (string-aware `takeFrames`, auth, list, door or a later `launch` frame, per-system concurrency from the pool's live calls, caller identity and `doorserver_security`, caller log source `Doorserver`); admin page `/admin/doorserver` (Doors menu); user page `/doorserver` (router `src/routes/doorserver.js`) for users at `doorserver_register_security`, linked from `/doors`; "Available to Door Server" in the door editor. Checked live on the dev board: list, wrong secret (logged), unflagged door refused, launch by name and by launch frame, concurrency refusal; and in headless Chromium: admin add, user registration pending, approval notifying the owner.
 - **C, done:** `bin/doorclient.js` (pure parts `parseArgs`, `readDropfile`, `problems`, `takeJsonLines`; `run(opts, io)`), offered to eligible users as a download at `/doorserver/doorclient.js` with a command line filled in. Tested against a stub `ws` server and live against the dev gateway (list, door by name, numbered menu).
 - **D, done:** `src/utils/doorserverClient.js` (`openSession`, `listDoors`), `doorserver_remotes` + `src/models/doorserverRemotes.js` (secret stored as given, never shown back; blank on update keeps it), `src/handlers/remotedoorrunner.js` adopted by `CallManager.launchRemoteDoor(arg, fromMenu)` like a local door (numbered menu when no door is named, door inactivity without the warning text, "press any key" then `_doorReturn`), menu command `remoteDoor` (editor suggests remote names), admin section "Remote door servers" on `/admin/doorserver` with Test (door list). Checked live as a loopback on the dev board: admin Test listed the door, and the runner took a caller through the menu into it.
+- **E, done:** `src/servers/rloginserver.js`, started by the gateway only with `doorserver_rlogin_enabled` (restart). The connection becomes an ordinary Doorserver-pool call and its wrapper speaks the JSON protocol for the RLogin client (auth frame from the handshake, numbered menu into a launch frame), so every rule of the WebSocket path applies. Default port 5513, not 513: ports below 1024 need root. Checked live: list and choose, door slug, wrong secret refused.
 
 ## Why this was rewritten
 
@@ -69,7 +70,7 @@ Admin page of remote door servers. Menu command `remoteDoor`, argument `<remote 
 
 ## RLogin (phase E, off by default)
 
-`doorserver_rlogin_enabled`, `doorserver_rlogin_port`. Handshake fields: client user = the system's secret, server user = `<SYSTEM_ID>:<username>`, terminal type = door slug (or blank for the list). Same systems, flags and limits as WebSocket.
+`doorserver_rlogin_enabled`, `doorserver_rlogin_port` (default 5513). Handshake fields: client user = the system's secret, server user = `<SYSTEM_ID>:<username>`, terminal type = door slug, or a terminal type such as `ansi` for the door list. Same systems, flags and limits as WebSocket.
 
 ## Config keys
 
@@ -81,7 +82,7 @@ Admin page of remote door servers. Menu command `remoteDoor`, argument `<remote 
 | `doorserver_max_concurrent` | 5 | default sessions per system |
 | `doorserver_security` | 50 | security level door-server callers carry in drop files |
 | `doorserver_rlogin_enabled` | false | phase E |
-| `doorserver_rlogin_port` | 513 | phase E |
+| `doorserver_rlogin_port` | 5513 | phase E (513 needs root) |
 
 ## Sessions
 

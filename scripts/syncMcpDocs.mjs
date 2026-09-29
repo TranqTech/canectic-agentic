@@ -209,6 +209,7 @@ var TOPIC_TAGS = {
     // sysop
     'INSTALL.md':                   ['installation', 'setup'],
     'MENUS.md':                     ['menus', 'configuration'],
+    'DOORSERVER.md':                ['doors', 'doorserver', 'configuration'],
     'THEMES.md':                    ['themes', 'configuration'],
     'API.md':                       ['api', 'authentication'],
     'MAIL.md':                      ['mail', 'smtp', 'imap'],
