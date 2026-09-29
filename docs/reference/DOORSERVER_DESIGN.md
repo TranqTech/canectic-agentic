@@ -1,196 +1,87 @@
-# Door Server BBS Registration Design
+# Door Server Design
 
-Allows external BBS systems to connect via the WebSocket doorserver pool, authenticate with registered credentials, and launch shared door games for their users. Enables multi-BBS door game sharing without requiring each BBS to host the games locally.
+Lets other BBSes send their callers to doors hosted here, and lets this board send its callers to doors hosted on another Canectic board. Tracked in #86 (which absorbs #9).
 
-**Status: not implemented.** None of the registration, schema, admin, web page or config-key parts below exist yet (no `doorserver_bbs` table, no `doorserver_available`/`doorserver_visible` columns, no `/doorserver/*` or `/admin/doorserver` routes, no `doorserver_*` config keys). Only the pre-existing pool and its stub auth, described in the next paragraph, are in the code.
+**Status: in progress (#86).** Decisions made 2026-09-29, recorded below. Build order: A security, B server, C shipped client, D Canectic as a client, E RLogin. This header is updated as each phase lands.
 
-## Overview
+- **A, done:** stub login refuses every system; `doorserver_enabled` (off) refuses every connection before auth; `doors.doorserver_available` (default false) checked by `doors.mayLaunchDoor` in `CallManager.launchDoor`; failed logins to `security.log`; stale `bin/doorserver.js` deleted.
 
-The doorserver WebSocket pool (`/ws/doorserver`, pool `Doorserver`, flow `Doorserver`: `door_auth -> door_launch -> goodbye`, seeded in `src/models/callFlows.js`) already exists. Its `door_auth` stage (`src/handlers/doorauthhandler.js`) sends `{"prompt":"[!SendAuth]"}`, then reads one JSON object `{system_id, auth_token, username?, real_name?, door_id?, term_width?, term_height?}` and answers `{status:"ok", message, node}` or `{status:"error", message}`. It validates against `getClientBBS()` in `src/models/doorserver.js`, which is a stub returning one hardcoded test BBS regardless of the id asked for, so this pool is not usable in production yet. `door_id` sets the door to launch. The one-time Redis token auth is the separate WebDoor pool (`/ws/webdoor`, `webdoor_auth` stage in `src/handlers/webdoorauthhandler.js`), used by the web door launcher. This design extends the doorserver pool with:
+## Why this was rewritten
 
-1. **BBS registration**: external sysops self-register their BBS, get persistent credentials
-2. **Door access flags**: per-door "available to doorserver" toggle
-3. **Doorserver menu/collection**: what remote clients see when connecting without a target door slug
-4. **Credential management**: API keys or username/password for doorserver authentication
-5. **Usage tracking**: which external BBSes are using which doors, session counts
+The first design (self-registration on a public page, username and password, WebSocket only) was never built. What existed was a pool, `/ws/doorserver` (pool and flow `Doorserver`: `door_auth -> door_launch -> goodbye`), whose auth was a stub: `src/models/doorserver.js` `getClientBBS()` returned one hardcoded test BBS for ANY system id with the token `12345654`, published in the repo, and `CallManager.launchDoor()` launched any door named in the auth frame with no check at all. Confirmed on the dev board 2026-09-28: every board running it, the hub included, let anyone reaching the web port launch any configured door. Phase A closes that before anything else.
 
-## BBS Registration
+## Decisions (2026-09-29)
 
-### Self-registration flow
+- **WebSocket is the primary transport, with a shipped client program.** WebSocket over the board's own HTTPS port lets the client send structured details (who the caller is, terminal size and encoding, which door) in one authenticated frame, and keeps the secret off any plaintext protocol. RLogin is supported for software that can only speak it, **off by default**.
+- **Registration is by the sysop, or by this board's own users.** No public form. The sysop can add a system by hand in admin. A logged-in user at or above a configurable security level can register their BBS and keep its details current; the registration is tied to their account, which is the contact. A self-registration waits for the sysop's approval unless auto-approve is on.
+- **Canectic is also a client.** A board can add a remote Canectic door server (address, system id, secret) and give its callers a menu command that connects them to a door there.
 
-1. External sysop visits `/doorserver/register` (public page)
-2. Fills in: BBS name, sysop name, sysop email, location
-3. Creates a username + password for doorserver authentication
-4. Account created in `doorserver_bbs` table with `pending` status
-5. Local sysop reviews and approves/rejects via admin panel
-6. On approval, the external BBS can connect
+## Access control
 
-### Alternative: invite-based
+- **Per door:** `doors.doorserver_available` (default false). A door-server session may launch only a door with this set, enforced in `CallManager.launchDoor` for every door-server path, whatever the client asks for. Local callers are unaffected: their door access is decided, as before, by the menu entry that offers the door.
+- **Per system:** status must be `approved`; `max_concurrent` sessions at once.
+- **Global:** `doorserver_enabled` (default false). Off, the pool refuses every connection.
+- **Failed logins** are written to `security.log` through `authFailLog.logAuthFail` (`via door server`), which the shipped fail2ban filter matches.
 
-Local sysop generates an invite code in admin. External sysop uses the code during registration to auto-approve. Simpler for small networks where the sysop knows who they're inviting.
+## Schema
 
-### Schema: doorserver_bbs
+`doorserver_systems` (one row per registered remote BBS):
 
-```sql
-CREATE TABLE IF NOT EXISTS doorserver_bbs (
-    id SERIAL PRIMARY KEY,
-    uuid VARCHAR(64) UNIQUE NOT NULL,
-    bbs_name VARCHAR(128) NOT NULL,
-    sysop_name VARCHAR(128) NOT NULL,
-    sysop_email VARCHAR(256),
-    location VARCHAR(128),
-    username VARCHAR(64) UNIQUE NOT NULL,
-    password_hash VARCHAR(128) NOT NULL,
-    status VARCHAR(16) DEFAULT 'pending',   -- pending, approved, suspended
-    max_concurrent INTEGER DEFAULT 5,
-    created_at TIMESTAMP DEFAULT NOW(),
-    approved_at TIMESTAMP,
-    last_connect TIMESTAMP,
-    session_count INTEGER DEFAULT 0,
-    notes TEXT
-);
-```
+| column | notes |
+|---|---|
+| `id`, `uuid` | |
+| `system_id` | the tag the client sends; unique, 2-12 of `[A-Z0-9_-]`, stored upper case |
+| `bbs_name`, `sysop_name`, `contact_email`, `location`, `address` | descriptive; `address` is where the BBS itself is reached |
+| `owner_user_id` | the local user who registered it; null when the sysop added it |
+| `secret_hash`, `secret_prefix` | bcrypt of the generated secret, and its first characters for recognising it; the secret is shown once |
+| `username_prefix` | prefixed to remote usernames here (`<prefix>_<name>`); defaults to the system id |
+| `status` | `pending`, `approved`, `suspended`, `rejected` |
+| `max_concurrent` | default `doorserver_max_concurrent` |
+| `notes` | sysop only |
+| `created_at`, `updated_at`, `approved_at`, `approved_by` | |
+| `last_connect`, `session_count` | |
 
-Status values:
-- `pending`: awaiting sysop approval
-- `approved`: active, can connect
-- `suspended`: temporarily disabled by sysop
+`doorserver_remotes` (door servers THIS board connects out to, phase D): `name`, `url`, `system_id`, `secret` (our own credential for that server, stored as given since it has to be sent), `active`.
 
-## Door Access Control
+## WebSocket protocol (`canectic-doorserver/1`)
 
-### Per-door doorserver flag
+1. Client opens `wss://<board>/ws/doorserver`.
+2. Server sends `{"type":"hello","protocol":"canectic-doorserver/1","board":"<name>"}`.
+3. Client sends one frame: `{"type":"auth","system_id":"...","secret":"...","user":{"name":"...","real_name":"..."},"door":"<slug or omitted>","term":{"width":80,"height":25,"encoding":"cp437"|"utf8","type":"ansi"},"list":false}`.
+4. Server answers `{"type":"auth_ok","node":N,"doors":[{"slug","name","description"}]}` or `{"type":"auth_fail","reason":"..."}` and closes.
+   - `list: true`: the server answers with the door list and closes. How a client builds its own menu.
+   - `door` given: the door launches.
+   - neither: the server shows a door list, the doors available to door-server callers, and launches the one chosen.
+5. After `auth_ok` the socket carries the terminal stream, as any other pool.
 
-Add a `doorserver_available` boolean to the `doors` table (default false). Only doors with this flag set are visible and launchable by doorserver clients.
+The earlier stub frame (`system_id` + `auth_token`) is not accepted.
 
-```sql
-ALTER TABLE doors ADD COLUMN IF NOT EXISTS doorserver_available BOOLEAN DEFAULT false;
-```
+## Client program (phase C)
 
-Admin door editor gets a checkbox: "Available to Door Server clients"
+`bin/doorclient.js`: one file, no dependencies (Node's built-in `WebSocket`), shipped for sysops of other BBS software to run as a standard-I/O door. Reads the caller's name, real name and terminal from a DOOR32.SYS or DOOR.SYS path, or takes them as arguments; connects; bridges stdin/stdout to the socket. Options: server URL, system id, secret (or a file holding it), door slug, encoding.
 
-### Why per-door not per-collection
+## Canectic as a client (phase D)
 
-Some doors may have licensing, capacity, or technical restrictions that make them unsuitable for remote access. The sysop needs granular control. Collections can then be built from doorserver-available doors.
+Admin page of remote door servers. Menu command `remoteDoor`, argument `<remote name>[:<door slug>]`, connects the caller over WebSocket, sending their name, terminal size and encoding, and bridges their session until the remote door ends.
 
-## Doorserver Menu/Collection
+## RLogin (phase E, off by default)
 
-When a remote BBS connects without specifying a door slug, they need to see what's available. Two approaches:
+`doorserver_rlogin_enabled`, `doorserver_rlogin_port`. Handshake fields: client user = the system's secret, server user = `<SYSTEM_ID>:<username>`, terminal type = door slug (or blank for the list). Same systems, flags and limits as WebSocket.
 
-### Option A: Dedicated doorserver collection
+## Config keys
 
-A special collection (or collections) flagged as "doorserver visible". The remote client gets a list of doors in these collections. Simplest to implement -- reuses existing collection infrastructure.
+| Key | Default | |
+|---|---|---|
+| `doorserver_enabled` | false | accept door-server connections at all |
+| `doorserver_register_security` | 100 | lowest security level that may register a BBS |
+| `doorserver_auto_approve` | false | approve self-registrations without review |
+| `doorserver_max_concurrent` | 5 | default sessions per system |
+| `doorserver_security` | 50 | security level door-server callers carry in drop files |
+| `doorserver_rlogin_enabled` | false | phase E |
+| `doorserver_rlogin_port` | 513 | phase E |
 
-### Option B: Auto-generated from doorserver_available flag
+## Sessions
 
-The server dynamically builds a list of all doors where `doorserver_available = true`. No extra configuration needed, but less control over presentation.
-
-### Recommendation: Option A with fallback to B
-
-If a doorserver collection is configured, use it. If not, fall back to listing all doorserver-available doors. This gives sysops control while working out of the box.
-
-Add `doorserver_visible` boolean to `door_collections` table:
-
-```sql
-ALTER TABLE door_collections ADD COLUMN IF NOT EXISTS doorserver_visible BOOLEAN DEFAULT false;
-```
-
-## Authentication
-
-### WebSocket auth flow (doorserver pool)
-
-Currently the doorserver pool accepts a JSON frame with `system_id` + `auth_token` checked against the hardcoded stub in `src/models/doorserver.js` (see Overview). For BBS-to-BBS connections, we need persistent credential auth:
-
-1. Remote BBS connects to `/ws/doorserver`
-2. Sends auth frame: `{ type: 'auth', username: '...', password: '...', bbs_name: '...' }`
-3. Server validates against `doorserver_bbs` table (bcrypt password check)
-4. If approved: sends `{ type: 'auth_ok', doors: [...] }` with available door list
-5. If failed: sends `{ type: 'auth_fail', reason: '...' }` and closes
-
-### Session management
-
-Each authenticated doorserver connection gets tracked:
-- Connection counted against `max_concurrent` limit
-- `last_connect` and `session_count` updated
-- Active connections visible in admin dashboard
-
-## Remote Door Launch
-
-After auth, the remote client can launch doors:
-
-1. Client sends: `{ type: 'launch', slug: 'lord' }`
-2. Server checks door exists and `doorserver_available = true`
-3. Server checks concurrent capacity (door-level `max_users` + doorserver-level `max_concurrent`)
-4. Creates a call session with the doorserver BBS as the "user"
-5. Door output streams to WebSocket, input streams from WebSocket (existing mechanism)
-6. On door exit: session cleaned up, client can launch another or disconnect
-
-### Drop file user info
-
-Drop files (DOOR.SYS, etc.) need user info. For doorserver sessions:
-- Username: provided by the remote BBS (their user's name)
-- BBS name: from `doorserver_bbs.bbs_name`
-- Security level: configurable default for doorserver users
-- Node number: allocated from the doorserver node pool
-
-## Admin Panel
-
-### Doorserver Management (`/admin/doorserver`)
-
-**BBS Registrations tab:**
-- List of registered BBSes with status badges
-- Approve/suspend/delete actions
-- Edit max_concurrent, notes
-- Session count and last connect timestamp
-
-**Doorserver Settings tab:**
-- Enable/disable doorserver (global toggle)
-- Default max concurrent per BBS
-- Default security level for doorserver users
-- Doorserver node pool range (separate from local nodes?)
-
-### Door Editor additions
-
-- "Available to Door Server" checkbox per door
-- Visible in door list table as a badge
-
-### Collection Editor additions
-
-- "Visible to Door Server" checkbox per collection
-
-## Web Pages
-
-### `/doorserver/register` (public)
-
-Registration form for external sysops. Fields: BBS name, sysop name, email, location, username, password.
-
-### `/doorserver/profile` (authenticated)
-
-External sysop manages their BBS registration: update BBS name, location, change password. View usage stats.
-
-## Config Keys
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `doorserver_enabled` | boolean | `false` | Enable doorserver BBS registration and remote access |
-| `doorserver_max_concurrent` | number | `5` | Default max concurrent sessions per registered BBS |
-| `doorserver_security` | number | `50` | Security level for doorserver user sessions |
-| `doorserver_auto_approve` | boolean | `false` | Auto-approve new BBS registrations (skip manual review) |
-
-## Implementation Order
-
-1. Schema: `doorserver_bbs` table, `doorserver_available` on doors, `doorserver_visible` on collections
-2. Registration: public registration page + admin approval workflow
-3. WebSocket auth: credential-based auth on doorserver pool
-4. Door listing: available doors endpoint for authenticated clients
-5. Door launch: session creation with doorserver user context
-6. Admin: BBS management page, door/collection flag editors
-7. Usage tracking: session counts, concurrent limit enforcement
-8. Profile: external sysop self-service page
-
-## Considerations
-
-- **Node allocation**: doorserver sessions use the same node pool as local sessions (single gateway process, shared event loop). No separate range needed. Door-level `max_users` and BBS-level `max_concurrent` handle capacity.
-- **Caller logging**: doorserver sessions should log as a distinct source type (like "Doorserver") in the callers table.
-- **Who's Online**: doorserver sessions should show with a "Doorserver" badge and the remote BBS name.
-- **Capacity planning**: a popular door could have many remote BBSes launching it simultaneously. The door-level `max_users` setting already handles this, but sysops need visibility.
-- **Dropfile paths**: doorserver sessions need their own dropfile directories. The existing `%X` variable system handles this via unique node numbers.
+- Identity: `<username_prefix>_<remote username>`; the drop file handler already falls back to `call.caller_username` / `caller_fullname` and user number 512 when there is no local account.
+- Logged in the caller log as source `Doorserver` with the remote BBS name; shown in Who's Online with the remote BBS.
+- `last_connect` and `session_count` updated per session; concurrency counted from live calls.

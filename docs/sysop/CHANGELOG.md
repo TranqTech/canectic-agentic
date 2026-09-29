@@ -40,6 +40,7 @@
 
 ### Security
 
+- Fix: **anyone who could reach your board's web address could start any of your door games.** The door server connection (`/ws/doorserver`), meant for other BBSes to send their callers to your doors, accepted a built-in test login that was published with the source code, and then ran whatever door it was asked for. It now refuses every connection unless you switch the door server on (`doorserver_enabled`, off by default), no remote system can log in until you register it, and a remote caller can only run a door you have marked as available to the door server. If you want to close it on a board you have not updated yet, deactivate the Doorserver pool under Admin > Flows and restart the gateway.
 - Fix: **failed logins from mail clients and rejected API tokens could not be banned by fail2ban.** A wrong IMAP or SMTP password was logged without the caller's address, and an API request with a bad token was not logged at all. Both are now written to `security.log` with the address, in the form the shipped filter in `examples/fail2ban/` already matches, and each line now says which service it came from (`via IMAP`, `via SMTP`, `via API`). A wrong current password when changing your password, on the web or in the terminal, is logged the same way. No change to the filter is needed.
 
 ### Web

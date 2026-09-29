@@ -36,7 +36,7 @@ import { mailVerifyCheck } from "../handlers/menucommands/mailVerifyCheck.js";
 import { DisplayScreen } from "../handlers/menucommands/displayScreen.js";
 
 //models
-import {getDoorConfig} from "../models/doors.js"
+import {getDoorConfig, mayLaunchDoor} from "../models/doors.js"
 import {logCall, logCallDuration} from "../models/callers.js"
 import * as themes from "../models/themes.js"
 import appConfig from "../config/appConfig.js"
@@ -682,6 +682,16 @@ class IncomingCall{
 
 		if (!doorConfig) {
 			alogger.writeAlog(3, this.loggingId + "\n  No door config found for: " + slugname, "yellowbright")
+			this._doorReturn()
+			return
+		}
+
+		// A remote BBS's caller may run only doors made available to the
+		// door server (#86). The slug comes from the remote client.
+		var launchCheck = mayLaunchDoor(this, doorConfig)
+		if (!launchCheck.ok) {
+			alogger.writeAlog(2, this.loggingId + "\n  Refused door " + slugname + " for " + (this.caller_username || '?') +
+				(this.caller_bbs ? " from " + this.caller_bbs : "") + ": " + launchCheck.reason, "yellowbright")
 			this._doorReturn()
 			return
 		}

@@ -1,22 +1,12 @@
-//imports
-import * as dotenv from 'dotenv';
-import { v4 as uuidv4 } from 'uuid';
-import * as bcrypt from 'bcrypt';
-import { DateTime } from "luxon";
+// doorserver.js -- registered door-server client systems (#86).
+//
+// Until #86 this returned one hardcoded test BBS for ANY system id, with an
+// auth token published in the repository, so anyone could log in to the
+// door-server pool. Until registered systems exist (phase B), no system is
+// known and every door-server login is refused.
 
-//internal modules
-import * as postgres from '../middleware/db/postgres.js'
-
-var testBBS = {
-	id: "MY_BBS_01",
-	auth_token: "12345654",
-	name: "Test BBS",
-	username_prefix: "test",
-	location: "Calgary, AB",
+async function getClientBBS(bbsid) {
+	return null;
 }
 
-async function getClientBBS(bbsid){
-	return testBBS
-}
-
-export {getClientBBS}
+export { getClientBBS };

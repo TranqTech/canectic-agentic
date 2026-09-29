@@ -15,7 +15,7 @@ For the process model, job queues, and inter-process signaling, see `PROCESS_ARC
 
 ## Startup Sequence
 
-Entry point: `bin/gateway.js` (renamed from `doorserver.js`; an older `bin/doorserver.js` is still in the tree but is not one of the four processes in `ecosystem.config.cjs`). Orchestrates the gateway process startup:
+Entry point: `bin/gateway.js` (renamed from `doorserver.js`; the stale copy left at `bin/doorserver.js` was deleted in #86). Orchestrates the gateway process startup:
 
 1. **Pre-run maintenance** (`prerunMaint()`): `ensureConstraintsAndIndexes()` for `userMsgPointers`, `userAreaSubs`, `userFilePointers`, `userFileSubs`, then QWK conference numbers, several `ensureTable()` calls (news files, PM attachments, notifications, FREQ, seasonal art), and call flow/pool seeding plus loading. Runs after `appConfig.load()` and the theme, nodelist flag and template event seeds.
 2. **Node manager** — Tracks active terminal nodes (allocated slots for connected users).

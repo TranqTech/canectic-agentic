@@ -2,6 +2,7 @@ import { BaseHandler } from "./basehandler.js";
 import * as alogger from "../utils/alogger.js";
 
 import { getClientBBS } from "../models/doorserver.js";
+import { logAuthFail } from "../utils/authFailLog.js";
 import appConfig from "../config/appConfig.js";
 const maxAuthBuffer = 4096; // Max bytes we'll accept before giving up
 
@@ -137,10 +138,12 @@ class DoorAuthHandler extends BaseHandler {
 
 		var bbs = await getClientBBS(authData.system_id);
 		if (!bbs) {
+			logAuthFail('unknown', 'door server system ' + authData.system_id, this.call && this.call.callerId, 'door server');
 			return { valid: false, reason: "Unknown System ID" };
 		}
 
 		if (authData.auth_token !== bbs.auth_token) {
+			logAuthFail('failed', 'door server system ' + authData.system_id, this.call && this.call.callerId, 'door server');
 			return { valid: false, reason: "Auth Token Incorrect" };
 		}
 
@@ -219,6 +222,13 @@ class DoorAuthHandler extends BaseHandler {
 
 	startStage() {
 		try {
+			// Off by default (#86): the pool is mounted on every board, and
+			// until door-server access is switched on nobody gets past here.
+			if (!appConfig.getBoolean('doorserver_enabled', false)) {
+				this._enableRawMode();
+				this._authFailed("Door server is not enabled on this board");
+				return;
+			}
 			this._enableRawMode();
 			this._sendResponse({ prompt: "[!SendAuth]" });
 			this.setInactivityTimeouts();

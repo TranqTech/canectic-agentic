@@ -145,6 +145,7 @@ var CONFIG_DEFINITIONS = [
 	// -----------------------------------------------------------------------
 	// Doors
 	// -----------------------------------------------------------------------
+	{ key: 'doorserver_enabled',    defaultValue: 'false',       type: 'boolean', category: 'doors',       description: 'Accept door-server connections from registered remote BBSes (/ws/doorserver). Off, every connection is refused.' },
 	{ key: 'xtrnTO',                defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'Door launch timeout (ms)' },
 	{ key: 'doorInactivityTO',      defaultValue: '5',           type: 'number',  category: 'doors',       description: 'Door inactivity timeout in minutes (default 5)' },
 	{ key: 'syncjsdoorTO',          defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'SyncJS door launch timeout (ms)' },

@@ -337,6 +337,7 @@ function normalizeDoorConfig(row) {
 		fixedSize: row.fixed_size || false,
 		maxnodes: row.max_nodes || 0,
 		active: row.active !== undefined ? row.active : true,
+		doorserverAvailable: row.doorserver_available === true,
 	};
 
 	// Parse JSONB door_args if it came back as string
@@ -372,6 +373,26 @@ function getDropfileTypeLabels() {
 	return DROPFILE_TYPE_LABELS;
 }
 
+/**
+ * Whether a call may launch a door (#86).
+ *
+ * A door-server session (a remote BBS's caller, call.doorsession) may launch
+ * only a door the sysop has made available to the door server. Checked in
+ * CallManager.launchDoor, the one place every launch passes through, because
+ * the door is named by the remote client and nothing upstream can be trusted
+ * to have filtered it. Local callers are unaffected: their door access is
+ * decided by the menu entry that offers the door.
+ *
+ * returns { ok: boolean, reason?: string }
+ */
+function mayLaunchDoor(call, doorConfig) {
+	if (!doorConfig) return { ok: false, reason: 'no such door' };
+	if (call && call.doorsession && !doorConfig.doorserverAvailable) {
+		return { ok: false, reason: 'not available to door-server callers' };
+	}
+	return { ok: true };
+}
+
 export {
 	getDoorConfig,
 	getAllDoors,
@@ -383,5 +404,6 @@ export {
 	getValidLaunchTypes,
 	getLaunchTypeLabels,
 	getValidDropfileTypes,
-	getDropfileTypeLabels
+	getDropfileTypeLabels,
+	mayLaunchDoor
 };
