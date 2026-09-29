@@ -270,7 +270,7 @@ async function initializeMsgidCounter() {
 	// Table is empty. Scan outbound tables for current-format (8-char)
 	// msg_ids grouped by day-prefix, inserting one row per day with the
 	// highest counter found.
-	var tables = ['netmail_out', 'pm_outbox'];
+	var tables = ['pm_outbox'];
 	try {
 		var msgAreas = await import('../models/msgAreas.js');
 		if (typeof msgAreas.getAllShortcodes === 'function') {
@@ -400,7 +400,7 @@ async function allocateHistoricalSerial(originalDate, sourceTag) {
 	return await _nextMsgIdSerial(days, sourceTag || 'import');
 }
 
-// FTS-0009 MSGID serial: exactly 8 hex characters. Used by `netmail.js`
+// FTS-0009 MSGID serial: exactly 8 hex characters. Was used by the retired `netmail.js`
 // when stamping outbound netmail with an @MSGID kludge.
 async function genMsgId() {
 	return await _nextMsgIdSerial();

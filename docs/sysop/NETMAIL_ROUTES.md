@@ -10,7 +10,7 @@ Inbound netmail flows through `ftnNetmailAdapter.importFtnNetmail()` in these st
 
 1. Is the destination address ours? (relay/reject if not)
 2. **Custom routes match?** (alias / dump / ignore)
-3. Is `to_user` a built-in processor? (`areafix`, `areamgr`, `filefix`, `filemgr`, `tic`, `raidfix`, `ping`; `raidfix` is recognised but has no handler, so mail to it is consumed without a reply)
+3. Is `to_user` a built-in processor? (`areafix`, `areamgr`, `filefix`, `filemgr`, `tic`, `raidfix`, `ping`; `raidfix` is answered by FileFix, since RAID's RaidFix is its file echo manager)
 4. Resolve `to_user` to a local user account, deliver to PM inbox
 
 Custom routes beat built-in processors, so a route aliasing `areamanager` to `areafix` wins over the hardcoded list. A route with `action=ignore` wins over everything else -- the message is dropped before any dispatch.

@@ -88,7 +88,7 @@ async function importFtnNetmail(ftnMessage, pktOrigin) {
           nextHop:      relayResult && relayResult.nextHop,
           routeMethod:  relayResult && relayResult.routeMethod,
           viaStamped:   relayResult && relayResult.viaStamped,
-          // The netmail_out row, so delivery can be followed from here.
+          // The pm_outbox row, so delivery can be followed from here.
           outboundUuid: relayResult && relayResult.outboundUuid
         }));
       }
@@ -175,7 +175,8 @@ async function importFtnNetmail(ftnMessage, pktOrigin) {
     alogger.writeAlog(1, "FTN netmail routed to processor: " + retObj.processor, "cyan");
 
     // Route to the appropriate processor handler
-    if (retObj.processor === 'areafix' || retObj.processor === 'areamgr') {
+    var kind = processorKind(retObj.processor);
+    if (kind === 'areafix') {
       try {
         var areafix = await import('./areafix.js');
         var afResult = await areafix.handleRequest(ftnMessage);
@@ -185,7 +186,7 @@ async function importFtnNetmail(ftnMessage, pktOrigin) {
       } catch (afErr) {
         alogger.writeAlog(3, "AreaFix handler error: " + afErr.message, "redbright");
       }
-    } else if (retObj.processor === 'ping') {
+    } else if (kind === 'ping') {
       try {
         var netmailPing = await import('./netmailPing.js');
         var pingResult = await netmailPing.handleRequest(ftnMessage);
@@ -196,7 +197,7 @@ async function importFtnNetmail(ftnMessage, pktOrigin) {
       } catch (pingErr) {
         alogger.writeAlog(3, "Ping handler error: " + pingErr.message, "redbright");
       }
-    } else if (retObj.processor === 'filefix' || retObj.processor === 'filemgr' || retObj.processor === 'tic') {
+    } else if (kind === 'filefix') {
       try {
         var filefix = await import('./filefix.js');
         var ffResult = await filefix.handleRequest(ftnMessage);
@@ -916,6 +917,18 @@ async function _processFileAttach(ftnMessage, inboxUuid) {
   }
 }
 
+// Which handler answers a robot name. Every name isAutomatedProcessor accepts
+// must map here: one that does not is consumed with no handler and no reply.
+// RaidFix (RAID's file echo manager) was exactly that until #84; its
+// subscribe/unsubscribe requests are FileFix's business.
+function processorKind(name) {
+  var n = String(name || '').trim().toLowerCase();
+  if (n === 'areafix' || n === 'areamgr') return 'areafix';
+  if (n === 'filefix' || n === 'filemgr' || n === 'tic' || n === 'raidfix') return 'filefix';
+  if (n === 'ping') return 'ping';
+  return null;
+}
+
 export {
   importFtnNetmail,
   privateMessageToFtn,
@@ -928,5 +941,6 @@ export {
   RELAY_ON,
   localAddressStrings,
   ftnToPrivateMessage,
-  isLocalAddress
+  isLocalAddress,
+  processorKind
 };

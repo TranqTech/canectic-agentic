@@ -39,7 +39,6 @@ class MailerManager extends EventEmitter {
 		this._wss           = null;      // WebSocketServer instance (separate mode)
 		this._wsPool        = null;      // WsPool from WsManager (embedded mode)
 		this._bsoScanner    = null;      // BsoScanner instance
-		this._pollTimers    = new Map(); // connectionUUID -> timer
 		this._nodelistBackoff = new Map(); // address -> { failures, nextAllowedAt }
 		this._running       = false;
 		this._maintenance   = false;     // closed for maintenance mode: no new sessions either way
@@ -187,12 +186,6 @@ class MailerManager extends EventEmitter {
 			this._bsoScanner.stop();
 			this._bsoScanner = null;
 		}
-
-		// Stop poll timers
-		for (var [uuid, timer] of this._pollTimers) {
-			clearInterval(timer);
-		}
-		this._pollTimers.clear();
 
 		// Close TCP server
 		if (this._tcpServer) {

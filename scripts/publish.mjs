@@ -139,6 +139,29 @@ function signatureProblem(dir) {
 	}
 }
 
+/**
+ * An unsigned SHA256SUMS must never go over a signed one (#84). Publishing
+ * never deletes, so the host's SHA256SUMS.asc would stay behind, now signing
+ * a list it does not match, and bootstrap.sh refuses a signature that fails
+ * to verify: every new install would stop until someone removed it by hand.
+ *
+ * localSigned: dist/releases has SHA256SUMS.asc
+ * remote:      the fetchStatus() result for the host's SHA256SUMS.asc
+ * returns a reason to refuse, or null
+ */
+function unsignedOverSigned(localSigned, remote) {
+	if (localSigned) return null;
+	if (!remote || remote.status === 0) {
+		return 'could not tell whether the host has a signed ' + SUMS_FILENAME + ' (' + ((remote && remote.error) || 'no answer') +
+			'), and publishing an unsigned one over it would break every new install; sign it (release.mjs --sign) or try again';
+	}
+	if (remote.status === 200) {
+		return 'the host has a signed ' + SUMS_FILENAME + ' and this one is unsigned. The old signature would stay behind ' +
+			'and fail against the new list, and bootstrap.sh refuses that, so every new install would stop. Sign it: release.mjs --sign';
+	}
+	return null;
+}
+
 async function fetchStatus(url) {
 	try {
 		var res = await fetch(url, { redirect: 'follow' });
@@ -192,6 +215,11 @@ async function main(argv) {
 		var problems = checkSums(RELEASES_DIR);
 		var sig = signatureProblem(RELEASES_DIR);
 		if (sig) problems.push(sig);
+		var localSigned = fs.existsSync(path.join(RELEASES_DIR, SUMS_FILENAME + '.asc'));
+		if (!localSigned) {
+			var overSigned = unsignedOverSigned(false, await fetchStatus(SITE + '/releases/' + SUMS_FILENAME + '.asc'));
+			if (overSigned) problems.push(overSigned);
+		}
 		if (problems.length) fail('refusing to publish ' + RELEASES_DIR, problems);
 		releaseFiles = fs.readdirSync(RELEASES_DIR, { withFileTypes: true })
 			.filter(function (e) { return e.isFile(); })
@@ -265,4 +293,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 	});
 }
 
-export { publishedVersions, notesPlan, checkSums, rsyncCommands };
+export { publishedVersions, notesPlan, checkSums, rsyncCommands, unsignedOverSigned };

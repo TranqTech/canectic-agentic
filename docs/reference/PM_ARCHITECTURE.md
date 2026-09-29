@@ -1075,8 +1075,7 @@ The `YYYY-MM` prefix provides natural archiving and prevents any single director
 
 - **Conversation grouping**: `transport_data` preserves `msg_id` / `reply_to` for future `conversation_id` threading
 - **Meshtastic transport adapter**: LoRa mesh radio message delivery
-- **`netmail.js` retirement**: Old FTN-specific module can be dropped once all paths confirmed working through the unified PM system
-- **Old `netmail_in` / `netmail_out` tables**: Can be dropped or renamed to `_legacy` after migration verified
+- **`netmail.js` and the `netmail_in` / `netmail_out` tables**: retired in #84 (module deleted; tables dropped by migration 0010 where empty)
 - **Terminal reader pagination**: Currently loads a single batch of 50 messages per folder. Lazy-loading of older/newer batches (like `msgReader`) for mailboxes exceeding the batch size
 - **Terminal address book**: Quick-select from recent recipients or known network addresses rather than typing addresses manually
 

@@ -453,8 +453,6 @@ var MSGID_TABLES = [
 	{ name: 'pm_inbox',         hasReplyTo: false },
 	{ name: 'pm_outbox',        hasReplyTo: false },
 	{ name: 'pm_undeliverable', hasReplyTo: false },
-	{ name: 'netmail_in',       hasReplyTo: false },
-	{ name: 'netmail_out',      hasReplyTo: false },
 	{ name: 'echomail_bad',     hasReplyTo: true  },
 ];
 

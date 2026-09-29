@@ -283,7 +283,6 @@ ftn/
 | `file_allowed_extensions` | `''` (all) | Comma-separated whitelist (empty = allow all) |
 | `tic_staging_dir` | `'ftn/tic_staging'` | TIC processing staging directory |
 | `tic_inbound_dir` | `''` | TIC inbound dir (defaults to `ftninbound`) |
-| `tic_auto_forward` | `'true'` | Described as auto-forwarding received TIC files; read by nothing, forwarding is unconditional |
 | `zmodem_default_crc` | `'auto'` | ZMODEM CRC mode for downloads (`auto` / `zbin32` / `zbin_crc16`) |
 
 ---

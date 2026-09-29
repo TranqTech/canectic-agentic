@@ -350,7 +350,7 @@ The current `_startPollScheduling()` in MailerManager sets up `setInterval` time
 - **Poll scheduling** (existing) remains responsible for periodic receive-only polls. A poll connects to a peer to check for inbound mail even when we have nothing to send. This is needed because FTN is a "call and exchange" model — you must call to receive.
 - **BSO scanner** is responsible for triggering send-driven connections. When it finds outbound mail, it triggers a connection (which will also receive any waiting inbound mail as a side effect).
 
-`_startPollScheduling()` has been removed; periodic polls are BullMQ repeatable `poll-scheduled` jobs registered in `schedules.js`. A vestigial `_pollTimers` Map remains on MailerManager: nothing populates it, and `stop()` only clears it.
+`_startPollScheduling()` has been removed; periodic polls are BullMQ repeatable `poll-scheduled` jobs registered in `schedules.js`. The vestigial `_pollTimers` Map that was left on MailerManager was removed in #84.
 
 ---
 
@@ -508,7 +508,7 @@ External tool drops .flo/.pkt into ftn/out/
 **`src/mailer/manager.js`:**
 - `BsoScanner` instantiated and managed in `start()` / `stop()`
 - `scanOutboundNow()` public method
-- `_startPollScheduling()` removed (the `_pollTimers` Map was left behind, unused)
+- `_startPollScheduling()` removed (the `_pollTimers` Map it left behind went in #84)
 
 ### What does NOT change
 
