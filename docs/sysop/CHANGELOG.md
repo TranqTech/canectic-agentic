@@ -1,6 +1,8 @@
 # Canectic BBS - Changelog
 
-## Pending (since v0.9.13a)
+## Pending (since v0.9.14a)
+
+## v0.9.14a (2026-09-29)
 
 ### Doors
 
