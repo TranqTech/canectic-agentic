@@ -162,37 +162,40 @@ block content
             .card-header.bg-darkblue.text-white
               h3.mb-0
                 i.bi.bi-box-arrow-up-right.me-2
-                | Remote door servers
+                | Doors on other systems
             .card-body
               p.text-muted
-                | Other Canectic boards whose door servers your callers can visit. Register this board with each of them first (on their Door Server page,
-                |  or ask their sysop) to get a System ID and secret, add them here, then add a menu entry with the command
+                | Door providers are other systems your callers can visit: another Canectic board's door server, an RLogin door server such as DoorParty (through SSH), or BBSLink.
+                |  Add a provider, then add its doors on its page. Each becomes a door entry you can put in a collection or a menu, like any other.
+                |  A menu entry with the command
                 strong  Remote Door Server
-                |  and the name below (or #[code name:door] to go straight to one door).
+                |  and a provider's name (or #[code name:door]) still works too.
               if remotes.length
                 .table-responsive
                   table.table.table-sm.align-middle
                     thead
                       tr
                         th Name
+                        th Kind
                         th Address
-                        th System ID
+                        th Doors
                         th Status
                         th Last used
-                        th Actions
                     tbody
                       each r in remotes
                         tr
                           td
-                            code= r.name
+                            a(href='/admin/doorserver/remotes/' + r.uuid)
+                              code= r.name
                             if r.title && r.title !== r.name
                               br
                               small= r.title
                           td
+                            small= kindLabels[r.kind || 'canectic'] || r.kind
+                          td
                             small
                               code= r.url
-                          td
-                            code= r.system_id
+                          td= remoteDoorCounts[r.name] || 0
                           td
                             if r.active
                               span.badge.bg-success active
@@ -204,56 +207,15 @@ block content
                                 +ts(r.last_used)
                             else
                               small.text-muted never
-                          td.text-nowrap
-                            form.d-inline(method='POST' action='/admin/doorserver/remotes/' + r.uuid + '/test')
-                              button.btn.btn-xs.btn-outline-info.me-1(type='submit') Test
-                            button.btn.btn-xs.btn-outline-warning.me-1(type='button' data-bs-toggle='collapse' data-bs-target='#redit-' + r.uuid) Edit
-                            form.d-inline(method='POST' action='/admin/doorserver/remotes/' + r.uuid + '/delete' onsubmit="return confirm('Delete remote " + r.name + "?')")
-                              button.btn.btn-xs.btn-outline-danger(type='submit') Delete
-                        tr.collapse(id='redit-' + r.uuid)
-                          td(colspan='6')
-                            form.row.g-2(method='POST' action='/admin/doorserver/remotes/' + r.uuid + '/update')
-                              .col-md-3
-                                label.form-label.small Title
-                                input.form-control.form-control-sm(name='title' value=r.title || '')
-                              .col-md-5
-                                label.form-label.small Address
-                                input.form-control.form-control-sm(name='url' value=r.url required)
-                              .col-md-2
-                                label.form-label.small System ID
-                                input.form-control.form-control-sm(name='system_id' value=r.system_id required)
-                              .col-md-2
-                                label.form-label.small Active
-                                select.form-control.form-control-sm(name='active')
-                                  option(value='true' selected=r.active) Yes
-                                  option(value='false' selected=!r.active) No
-                              .col-md-6
-                                label.form-label.small New secret (leave blank to keep the current one)
-                                input.form-control.form-control-sm(type='password' name='secret' autocomplete='new-password')
-                              .col-md-6
-                                label.form-label.small Notes
-                                input.form-control.form-control-sm(name='notes' value=r.notes || '')
-                              .col-12
-                                button.btn.btn-sm.btn-warning(type='submit') Save
-              h5.mt-3 Add a remote door server
-              form.row.g-2(method='POST' action='/admin/doorserver/remotes/new')
-                .col-md-2
-                  label.form-label.small Name
-                  input.form-control.form-control-sm(name='name' required pattern='[a-z0-9_-]{1,32}' placeholder='e.g. hub' title='a-z, 0-9, _ or -; used in menu entries')
-                .col-md-3
-                  label.form-label.small Title
-                  input.form-control.form-control-sm(name='title' placeholder='shown to callers')
-                .col-md-4
-                  label.form-label.small Address
-                  input.form-control.form-control-sm(name='url' required placeholder='wss://their.board/ws/doorserver')
-                .col-md-3
-                  label.form-label.small System ID
-                  input.form-control.form-control-sm(name='system_id' required)
-                .col-md-6
-                  label.form-label.small Secret
-                  input.form-control.form-control-sm(type='password' name='secret' required autocomplete='new-password')
-                .col-md-6.d-flex.align-items-end
-                  button.btn.btn-sm.btn-success(type='submit') Add
+              else
+                p.text-muted No door providers yet.
+              .mt-2
+                span.me-2 Add:
+                a.btn.btn-sm.btn-outline-success.me-1(href='/admin/doorserver/remotes/new?kind=canectic') Canectic board
+                a.btn.btn-sm.btn-outline-success.me-1(href='/admin/doorserver/remotes/new?preset=doorparty') DoorParty
+                a.btn.btn-sm.btn-outline-success.me-1(href='/admin/doorserver/remotes/new?preset=bbslink') BBSLink
+                a.btn.btn-sm.btn-outline-success.me-1(href='/admin/doorserver/remotes/new?preset=synchronet') Synchronet game server
+                a.btn.btn-sm.btn-outline-success(href='/admin/doorserver/remotes/new?kind=rlogin') Other RLogin server
 
       #newSystemModal.modal.fade(tabindex='-1' aria-hidden='true')
         .modal-dialog.modal-lg

@@ -1,0 +1,210 @@
+extends ../../layouts/admin
+
+//- A door provider (#89): another system this board sends callers to.
+//- mode 'new' (kind fixed by the preset chosen) or 'edit' (kind fixed).
+mixin field(label, name, value, opts)
+  - opts = opts || {}
+  div(class=opts.col || 'col-md-4')
+    label.form-label.small= label
+    input.form-control.form-control-sm(name=name value=value type=opts.type || 'text' placeholder=opts.placeholder required=opts.required autocomplete=(opts.type === 'password' ? 'new-password' : undefined))
+    if opts.hint
+      small.form-text.text-muted= opts.hint
+
+mixin secretField(label, name, isSet, required)
+  .col-md-4
+    label.form-label.small= label
+    input.form-control.form-control-sm(type='password' name=name autocomplete='new-password' required=(required && !isSet))
+    small.form-text.text-muted= isSet ? 'Set. Leave blank to keep it.' : 'Not set.'
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      - var v = function (k, d) { return form[k] !== undefined ? form[k] : d; }
+      - var st = settings
+      .row
+        .col-12
+          br
+      .row
+        .col-lg-10.offset-lg-1.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-box-arrow-up-right.me-2
+                    = title
+                  small= kindLabels[kind]
+                .col-4.text-end
+                  a.btn.btn-sm.btn-outline-light(href='/admin/doorserver#remotes') Back
+            .card-body
+              include ../../partials/flash
+              if errors.length
+                .alert.alert-danger
+                  each e in errors
+                    div= e
+              if presetNote
+                .alert.alert-info= presetNote
+
+              form.row.g-2(method='POST' action=(mode === 'new' ? '/admin/doorserver/remotes/new' : '/admin/doorserver/remotes/' + remote.uuid + '/update'))
+                if mode === 'new'
+                  input(type='hidden' name='kind' value=kind)
+                  input(type='hidden' name='preset' value=preset)
+                  +field('Name (used in menu entries)', 'name', v('name', ''), { col: 'col-md-3', required: true, placeholder: 'e.g. doorparty' })
+                +field('Title (shown to callers)', 'title', v('title', remote.title || ''), { col: 'col-md-5' })
+                .col-md-2
+                  label.form-label.small Active
+                  select.form-control.form-control-sm(name='active')
+                    option(value='true' selected=(mode === 'new' || remote.active)) Yes
+                    option(value='false' selected=(mode === 'edit' && !remote.active)) No
+                +field('Minimum security', 'min_security', v('min_security', remote.min_security === null || remote.min_security === undefined ? '' : remote.min_security), { col: 'col-md-2', type: 'number', placeholder: String(verifiedSecurity), hint: 'Blank: the verified level (' + verifiedSecurity + '). Callers must be logged in.' })
+
+                if kind === 'canectic'
+                  +field('Address', 'url', v('url', remote.url || ''), { col: 'col-md-6', required: true, placeholder: 'wss://their.board/ws/doorserver' })
+                  +field('Your System ID there', 'system_id', v('system_id', remote.system_id || ''), { col: 'col-md-2', required: true })
+                  +secretField('Secret', 'secret', secretSet.secret, true)
+
+                if kind === 'rlogin'
+                  .col-12
+                    h6.mt-2 RLogin
+                  +field('Host', 'rl_host', v('rl_host', st.host), { col: 'col-md-4', required: true })
+                  +field('Port', 'rl_port', v('rl_port', st.port), { col: 'col-md-2', type: 'number' })
+                  +field('Username template', 'rl_username_template', v('rl_username_template', st.username_template), { col: 'col-md-3', hint: '{alias} is the caller\'s name, {tag} your system tag' })
+                  +field('System tag', 'rl_tag', v('rl_tag', st.tag), { col: 'col-md-3', hint: 'DoorParty: the tag you were given, without brackets' })
+                  .col-md-3
+                    label.form-label.small Password sent
+                    select.form-control.form-control-sm(name='rl_password_mode')
+                      option(value='per_user' selected=(v('rl_password_mode', st.password_mode) === 'per_user')) One per caller, made here and kept
+                      option(value='fixed' selected=(v('rl_password_mode', st.password_mode) === 'fixed')) The same for every caller
+                  +secretField('Password (same for every caller)', 'rl_password', secretSet.password, false)
+                  +field('Terminal type for a door', 'rl_terminal_template', v('rl_terminal_template', st.terminal_template), { col: 'col-md-3', hint: '{door} is the door code, e.g. xtrn={door} for Synchronet' })
+                  +field('Terminal type for their menu', 'rl_menu_terminal', v('rl_menu_terminal', st.menu_terminal), { col: 'col-md-2' })
+                  .col-md-4
+                    .form-check.mt-4
+                      input#rl_keep.form-check-input(type='checkbox' name='rl_keep_first_name' value='true' checked=!!v('rl_keep_first_name', st.keep_first_name))
+                      label.form-check-label.small(for='rl_keep') Keep sending the name a caller first used, even after they change it
+                  .col-12
+                    h6.mt-2 SSH tunnel
+                  .col-md-2
+                    .form-check.mt-4
+                      input#rl_ssh.form-check-input(type='checkbox' name='rl_ssh' value='true' checked=!!v('rl_ssh', st.ssh))
+                      label.form-check-label.small(for='rl_ssh') Connect through SSH
+                  +field('SSH host', 'rl_ssh_host', v('rl_ssh_host', st.ssh_host), { col: 'col-md-3', placeholder: 'the RLogin host' })
+                  +field('SSH port', 'rl_ssh_port', v('rl_ssh_port', st.ssh_port), { col: 'col-md-2', type: 'number' })
+                  +field('SSH username', 'rl_ssh_user', v('rl_ssh_user', st.ssh_user), { col: 'col-md-2' })
+                  +secretField('SSH password', 'rl_ssh_password', secretSet.ssh_password, false)
+                  if mode === 'edit' && st.ssh
+                    .col-12.small
+                      if remote.host_key
+                        | SSH host key recorded: #[code= remote.host_key]. A different key is refused.
+                      else
+                        span.text-muted No SSH host key recorded yet; the first connection records it.
+
+                if kind === 'bbslink'
+                  +field('System code', 'bl_system_code', v('bl_system_code', st.system_code), { col: 'col-md-3', required: true })
+                  +secretField('Authorisation code', 'bl_auth_code', secretSet.auth_code, true)
+                  +secretField('Scheme code', 'bl_scheme_code', secretSet.scheme_code, true)
+                  +field('Game server', 'bl_host', v('bl_host', st.host), { col: 'col-md-4' })
+                  +field('Telnet port', 'bl_telnet_port', v('bl_telnet_port', st.telnet_port), { col: 'col-md-2', type: 'number' })
+                  +field('Web address', 'bl_http_base', v('bl_http_base', st.http_base), { col: 'col-md-4' })
+
+                +field('Notes (sysop only)', 'notes', v('notes', remote.notes || ''), { col: 'col-md-12' })
+                .col-12.mt-2
+                  button.btn.btn-sm.btn-warning(type='submit')= mode === 'new' ? 'Add' : 'Save'
+
+              if mode === 'edit'
+                .mt-2
+                  if kind === 'canectic'
+                    form.d-inline(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/test')
+                      button.btn.btn-sm.btn-outline-info.me-2(type='submit') Fetch their door list
+                  if kind === 'rlogin' && st.ssh && remote.host_key
+                    form.d-inline(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/hostkey/reset' onsubmit="return confirm('Forget the recorded SSH host key? Only do this when the server really changed its key.')")
+                      button.btn.btn-sm.btn-outline-secondary.me-2(type='submit') Forget the SSH host key
+                  form.d-inline(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/delete' onsubmit="return confirm('Delete " + remote.name + "?')")
+                    button.btn.btn-sm.btn-outline-danger(type='submit') Delete
+
+      if mode === 'edit'
+        .row.mt-4
+          .col-lg-10.offset-lg-1.col-12
+            .card
+              .card-header.bg-darkblue.text-white
+                h3.mb-0 Doors on #{remote.title || remote.name}
+              .card-body
+                p.text-muted
+                  | Each is a door entry like any other: put it in a collection your callers see, or in a menu with the Door command and its slug.
+                  |  A door on another system is never offered through your own door server.
+                if doors.length
+                  table.table.table-sm.align-middle
+                    thead
+                      tr
+                        th Name
+                        th Slug
+                        th Door code
+                        th Status
+                    tbody
+                      each d in doors
+                        tr
+                          td= d.name
+                          td
+                            code= d.slug
+                          td
+                            if d.remote_door
+                              code= d.remote_door
+                            else
+                              span.text-muted their menu
+                          td
+                            if d.active
+                              span.badge.bg-success Active
+                            else
+                              span.badge.bg-danger Inactive
+                else
+                  p.text-muted No doors yet.
+
+                if fetched
+                  h5.mt-3 Their door list
+                  - var have = doors.map(function (d) { return d.remote_door; })
+                  form(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/doors')
+                    table.table.table-sm.align-middle
+                      tbody
+                        each f in fetched
+                          tr
+                            td(style='width:40px')
+                              if have.includes(f.slug)
+                                span.text-muted -
+                              else
+                                input.form-check-input(type='checkbox' name='pick' value=f.slug id='pick-' + f.slug)
+                                input(type='hidden' name='name_' + f.slug value=f.name)
+                            td
+                              label(for='pick-' + f.slug)= f.name
+                              if have.includes(f.slug)
+                                small.text-muted.ms-2 added
+                            td
+                              code= f.slug
+                    .row.g-2
+                      .col-md-4
+                        select.form-select.form-select-sm(name='collection_id')
+                          option(value='') -- no collection --
+                          each c in collections
+                            option(value=c.id)= c.name
+                      .col-md-4
+                        button.btn.btn-sm.btn-success(type='submit') Add the ticked doors
+
+                h5.mt-3 Add a door
+                form.row.g-2(method='POST' action='/admin/doorserver/remotes/' + remote.uuid + '/doors')
+                  +field('Door code', 'code', '', { col: 'col-md-2', placeholder: kind === 'bbslink' ? 'e.g. lord' : 'e.g. lord', hint: 'Blank: their own door menu' + (kind === 'bbslink' ? ' (BBSLink: menu)' : '') })
+                  +field('Name', 'name', '', { col: 'col-md-3', placeholder: 'shown to callers' })
+                  +field('Slug', 'slug', '', { col: 'col-md-3', placeholder: remote.name + '-<code>', hint: 'Blank: ' + remote.name + '-<code>' })
+                  .col-md-2
+                    label.form-label.small Collection
+                    select.form-select.form-select-sm(name='collection_id')
+                      option(value='') none
+                      each c in collections
+                        option(value=c.id)= c.name
+                  .col-md-2
+                    label.form-label.small &nbsp;
+                    button.btn.btn-sm.btn-success.d-block(type='submit') Add

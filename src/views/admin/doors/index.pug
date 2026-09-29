@@ -67,6 +67,8 @@ block content
                           data-door_dir=door.door_dir || ''
                           data-door_args=JSON.stringify(door.door_args || [])
                           data-launch_type=door.launch_type
+                          data-remote_provider=door.remote_provider || ''
+                          data-remote_door=door.remote_door || ''
                           data-dropfile_type=door.dropfile_type || ''
                           data-dropfile_dir=door.dropfile_dir || ''
                           data-db_subdir=door.db_subdir || ''
@@ -265,9 +267,27 @@ block content
                           input.form-control.mb-2(type='text' name='slug' required placeholder='e.g. lord' pattern='[a-z0-9_-]+')
                         .col-6
                           label.form-label Launch Type:
-                          select.form-control.mb-2(name='launch_type')
+                          select#nd_launch_type.form-control.mb-2(name='launch_type')
                             for lt in launchTypes
                               option(value=lt)= launchTypeLabels[lt] || lt
+
+                      .remote-fields.border.rounded.p-2.mb-2(id='nd_remote_fields' style='display:none')
+                        h6 Door on another system
+                        .row
+                          .col-6
+                            label.form-label Provider:
+                            select.form-control.mb-2(id='nd_remote_provider' name='remote_provider')
+                              option(value='') -- choose --
+                              each r in (remotes || [])
+                                option(value=r.name)= (r.title || r.name) + ' (' + r.name + ')'
+                          .col-6
+                            label.form-label(data-bs-toggle='tooltip' title='The door code on that system. Blank runs its own door menu (BBSLink: menu).')
+                              | Door code
+                              i.bi.bi-info-circle.text-muted
+                            input.form-control.mb-2(type='text' id='nd_remote_door' name='remote_door' placeholder='e.g. lord')
+                        small.text-muted Providers are set up under
+                          a(href='/admin/doorserver#remotes')  Door Server
+                          | . The executable and dropfile settings below are not used.
 
                       h5 Executable
                       label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables -- see reference below.')
@@ -434,6 +454,24 @@ block content
                           select#ed_launch_type.form-control.mb-2(name='launch_type')
                             for lt in launchTypes
                               option(value=lt)= launchTypeLabels[lt] || lt
+
+                      .remote-fields.border.rounded.p-2.mb-2(id='ed_remote_fields' style='display:none')
+                        h6 Door on another system
+                        .row
+                          .col-6
+                            label.form-label Provider:
+                            select.form-control.mb-2(id='ed_remote_provider' name='remote_provider')
+                              option(value='') -- choose --
+                              each r in (remotes || [])
+                                option(value=r.name)= (r.title || r.name) + ' (' + r.name + ')'
+                          .col-6
+                            label.form-label(data-bs-toggle='tooltip' title='The door code on that system. Blank runs its own door menu (BBSLink: menu).')
+                              | Door code
+                              i.bi.bi-info-circle.text-muted
+                            input.form-control.mb-2(type='text' id='ed_remote_door' name='remote_door' placeholder='e.g. lord')
+                        small.text-muted Providers are set up under
+                          a(href='/admin/doorserver#remotes')  Door Server
+                          | . The executable and dropfile settings below are not used.
 
                       h5 Executable
                       label.form-label(data-bs-toggle='tooltip' title='Working directory for the door process. Supports %X variables.')
@@ -698,6 +736,18 @@ block content
         tab.show();
       });
 
+      // ---- Remote doors (#89): provider fields only for the Remote type ----
+      function syncRemoteFields(pfx) {
+        var sel = document.getElementById(pfx + '_launch_type');
+        var box = document.getElementById(pfx + '_remote_fields');
+        if (sel && box) box.style.display = sel.value === 'Remote' ? '' : 'none';
+      }
+      ['nd', 'ed'].forEach(function (pfx) {
+        var sel = document.getElementById(pfx + '_launch_type');
+        if (sel) sel.addEventListener('change', function () { syncRemoteFields(pfx); });
+        syncRemoteFields(pfx);
+      });
+
       // ---- Edit button ----
       document.querySelectorAll('.edit-door-btn').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
@@ -709,6 +759,9 @@ block content
           document.getElementById('ed_name').value             = d.name;
           document.getElementById('ed_slug').value             = d.slug;
           document.getElementById('ed_launch_type').value      = d.launch_type;
+          document.getElementById('ed_remote_provider').value  = d.remote_provider || '';
+          document.getElementById('ed_remote_door').value      = d.remote_door || '';
+          syncRemoteFields('ed');
           document.getElementById('ed_cmd').value              = d.cmd;
           document.getElementById('ed_door_script').value      = d.door_script;
           document.getElementById('ed_door_dir').value         = d.door_dir;

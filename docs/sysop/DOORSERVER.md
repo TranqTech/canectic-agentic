@@ -33,11 +33,22 @@ It reads the caller's name from DOOR32.SYS or DOOR.SYS. Without `--door SLUG` th
 
 **RLogin**, for software that can open RLogin connections but cannot run the client: turn on `doorserver_rlogin_enabled` and restart the gateway. It listens on `doorserver_rlogin_port` (5513; the traditional 513 needs the board to run as root). The RLogin user name is `THEIRID:username`, the password is the secret, and the terminal type names a door, or is a terminal type such as `ansi` for the list. The same approval, limits and door settings apply. RLogin sends the secret unencrypted, so prefer the WebSocket client where you can.
 
-## Visiting another Canectic board's doors
+## Doors on other systems
 
-1. Register your board on theirs (their Door Server page, or ask their sysop) to get a System ID and secret.
-2. In Admin > Doors > Door Server, under **Remote door servers**, add it: a short name (used in menu entries), a title your callers see, their address (`wss://their.board/ws/doorserver`), your System ID and secret. **Test** checks the connection and lists their doors. The secret is kept but never shown again; leave it blank when editing to keep it.
-3. Add a menu entry with the command **Remote Door Server** and the remote's name. Callers get that board's door list; `name:door` sends them straight to one door. They return to your menu when the door ends.
+Your callers can play doors that run somewhere else: on another Canectic board's door server, on DoorParty, on BBSLink, or on any RLogin door server such as a Synchronet game server. In Admin > Doors > Door Server, under **Doors on other systems**, add a **door provider** with the button for its kind, then add its doors on the provider's page. Each door becomes an ordinary door entry (launch type **Remote**): put it in a collection your callers see, or in a menu with the Door command and its slug, exactly like a door of your own. A door on another system is never offered through your own door server.
+
+- **A Canectic board.** Register your board on theirs (their Door Server page, or ask their sysop) to get a System ID and secret, and enter their address (`wss://their.board/ws/doorserver`) with those. **Fetch their door list** shows what they offer; tick the doors you want and they are added, optionally straight into a collection.
+- **DoorParty.** Apply on Throwback BBS (`telnet bbs.throwbackbbs.com`, "apply for DoorParty") for a system tag and an SSH username and password. The DoorParty button fills in their servers; enter the tag (without brackets) and the SSH details. Canectic opens the SSH tunnel itself; you do not need their connector program. Add doors by their DoorParty door codes (their wiki lists them, for example `lord`, `tw2002`, `bre`); a door with no code opens DoorParty's own menu.
+- **BBSLink.** Apply at bbslink.net for a system code, authorisation code and scheme code, and enter them. Add doors by their BBSLink codes (for example `lord`, `tw`, `bre`); the code `menu` lists every game.
+- **Another RLogin server** (a Synchronet game server, or anything else that speaks RLogin): enter its host and port. The username sent is the template with `{alias}` (the caller's name) and `{tag}` filled in, and the door code goes in the terminal type through its template (`xtrn={door}` for Synchronet).
+
+A few things worth knowing:
+
+- **Who can use them.** Only callers who are logged in, at the provider's **Minimum security** (blank means the verified level, `verified_security`), so guests and unverified callers are kept out, as DoorParty asks.
+- **Each caller's password.** For an RLogin provider set to "One per caller", Canectic makes each caller a password the first time they visit and always sends the same one. DoorParty and Synchronet create the player's account on that first visit and tie it to the password. The name sent is the caller's current name, so a caller who changes their username starts again there as a new player, unless you tick **Keep sending the name a caller first used**. BBSLink knows players by their user number on your board, which never changes.
+- **The SSH host key.** The first connection through SSH records the server's key, and a different key is refused after that, so nobody can pose as the server. If the server really did change its key, use **Forget the SSH host key** on the provider page.
+- **Character sets.** DoorParty, BBSLink and RLogin servers send CP437; a caller with a UTF-8 terminal sees it converted, as with your own DOS doors.
+- A menu entry with the command **Remote Door Server** and a provider's name (or `name:door`) still works too.
 
 ## Settings
 

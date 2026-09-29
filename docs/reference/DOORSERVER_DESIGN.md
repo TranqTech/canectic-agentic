@@ -8,7 +8,8 @@ Lets other BBSes send their callers to doors hosted here, and lets this board se
 - **B, done:** `doorserver_systems` + `src/models/doorserver.js` (create by sysop or user, pending/approved/suspended/rejected, bcrypt secret shown once, `verifyLogin`, `recordSession`); `src/handlers/doorauthhandler.js` speaks `canectic-doorserver/1` (string-aware `takeFrames`, auth, list, door or a later `launch` frame, per-system concurrency from the pool's live calls, caller identity and `doorserver_security`, caller log source `Doorserver`); admin page `/admin/doorserver` (Doors menu); user page `/doorserver` (router `src/routes/doorserver.js`) for users at `doorserver_register_security`, linked from `/doors`; "Available to Door Server" in the door editor. Checked live on the dev board: list, wrong secret (logged), unflagged door refused, launch by name and by launch frame, concurrency refusal; and in headless Chromium: admin add, user registration pending, approval notifying the owner.
 - **C, done:** `bin/doorclient.js` (pure parts `parseArgs`, `readDropfile`, `problems`, `takeJsonLines`; `run(opts, io)`), offered to eligible users as a download at `/doorserver/doorclient.js` with a command line filled in. Tested against a stub `ws` server and live against the dev gateway (list, door by name, numbered menu).
 - **D, done:** `src/utils/doorserverClient.js` (`openSession`, `listDoors`), `doorserver_remotes` + `src/models/doorserverRemotes.js` (secret stored as given, never shown back; blank on update keeps it), `src/handlers/remotedoorrunner.js` adopted by `CallManager.launchRemoteDoor(arg, fromMenu)` like a local door (numbered menu when no door is named, door inactivity without the warning text, "press any key" then `_doorReturn`), menu command `remoteDoor` (editor suggests remote names), admin section "Remote door servers" on `/admin/doorserver` with Test (door list). Checked live as a loopback on the dev board: admin Test listed the door, and the runner took a caller through the menu into it.
-- **#89 collections, done:** what the door server offers moved from the per-door flag to collections (below). Remote doors as door entries, DoorParty and BBSLink are the next parts of #89.
+- **#89 collections, done:** what the door server offers moved from the per-door flag to collections (below).
+- **#89 remote doors, done:** door providers of three kinds and Remote door entries (section "Doors on other systems" below). Tested against in-process RLogin, SSH (ssh2 Server) and telnet servers and through `IncomingCall.launchDoor`; not yet against the real DoorParty or BBSLink, which need approved credentials. Next in #89: distributed door lists with optional file/echo updates.
 - **E, done:** `src/servers/rloginserver.js`, started by the gateway only with `doorserver_rlogin_enabled` (restart). The connection becomes an ordinary Doorserver-pool call and its wrapper speaks the JSON protocol for the RLogin client (auth frame from the handshake, numbered menu into a launch frame), so every rule of the WebSocket path applies. Default port 5513, not 513: ports below 1024 need root. Checked live: list and choose, door slug, wrong secret refused.
 
 ## Why this was rewritten
@@ -30,6 +31,27 @@ The first design (self-registration on a public page, username and password, Web
 - **Per system:** status must be `approved`; `max_concurrent` sessions at once.
 - **Global:** `doorserver_enabled` (default false). Off, the pool refuses every connection.
 - **Failed logins** are written to `security.log` through `authFailLog.logAuthFail` (`via door server`), which the shipped fail2ban filter matches.
+
+## Doors on other systems (#89)
+
+**Providers** are rows of `doorserver_remotes` (`src/models/doorserverRemotes.js`) with a `kind`:
+
+| kind | settings (JSONB) | secrets (JSONB, never shown back; blank on update keeps) |
+|---|---|---|
+| `canectic` | `url`, `system_id` (columns) | `secret` (column) |
+| `rlogin` | `host`, `port`, `ssh`, `ssh_host`, `ssh_port`, `ssh_user`, `username_template` (`{alias}`, `{tag}`), `tag`, `password_mode` (`per_user`/`fixed`), `terminal_template` (`{door}`), `menu_terminal`, `keep_first_name` | `ssh_password`, `password` (fixed) |
+| `bbslink` | `system_code`, `host`, `http_base`, `telnet_port` | `auth_code`, `scheme_code` |
+
+plus `min_security` (null = `verified_security`) and `host_key` (SSH, `SHA256:...`, recorded on first connect by `rloginClient`'s host verifier, refused when different, cleared by the provider page's Forget button). `PRESETS` (doorparty, synchronet, bbslink) only fill the new-provider form. Admin: the Door Server page lists providers and has an Add button per kind/preset; each provider has a page `/admin/doorserver/remotes/:uuid` (settings, its doors, add a door by code, Canectic Fetch list with tick-to-add into a collection). A provider with doors cannot be deleted.
+
+**Remote door entries** are `doors` rows with `launch_type = 'Remote'`, `remote_provider` (provider name) and `remote_door` (code, blank = the provider's menu). `doors.createRemoteDoor` slugs them `<provider>-<code>`. They appear wherever doors do. `IncomingCall.launchDoor` hands them to `_launchRemote(name, door, fromMenu, label)`, which the `remoteDoor` menu command also uses; it refuses an inactive provider and anything `mayUseRemote` refuses (a door-server session; a caller with no `user_record`; security below the provider's minimum). `NEVER_OFFERED_TYPES` keeps them out of the door server.
+
+**Sessions** (`src/utils/doorProviders.js` `openProviderSession`) share one event interface for `RemoteDoorRunner`: `auth_ok(doors, collections)` (Canectic only, drives the menu), `launch_ok`, `data`, `auth_fail`/`error`/`error_frame`, `close`; `send`, `launch`, `close`; `cp437: true` for RLogin and BBSLink, whose output the runner converts with `DoorOutputParser` for a UTF-8 caller.
+
+- **RLogin** (`src/utils/rloginClient.js`): `\0<client-user>\0<server-user>\0<terminal>\0`, server acknowledges `\0` (not passed on). client-user is the caller's password from `identityFor` (`door_remote_identities`: one row per provider and user, oldest wins, random 12-character password made once and never changed, `remote_name` first used) or the fixed secret; server-user is the template; terminal is the door code through `terminal_template`, or `menu_terminal`. Through SSH (`ssh2` Client, a direct dependency since #89; it was already present through ssh2-sftp-client, native cpu-features skipped by allowScripts): password login, `forwardOut` to the RLogin host/port, RLogin inside. DoorParty's servers: SSH `dp.throwbackbbs.com:2022`, RLogin `dp.throwbackbbs.com:513` inside the tunnel, username `[TAG]alias`, door code as terminal type.
+- **BBSLink** (`src/utils/bbslinkClient.js`, reimplemented from their connector scripts, which ask not to be redistributed): random 6-character `xkey`; `GET <http_base>/token.php?key=xkey`; `GET auth.php?key=xkey` with `X-User` (users.id), `X-System`, `X-Auth`=md5(auth code+token), `X-Code`=md5(scheme code+token), `X-Rows`, `X-Key`, `X-Door` (lower case), `X-Token`, `X-Type: Canectic`, `X-Version`; body `complete` means go, anything else is the reason shown; then telnet to `host:telnet_port`. Minimal telnet (`createTelnet`): DO ECHO/SGA/BINARY to the server's WILL, WILL TTYPE (IS "ANSI") and NAWS (our size) to its DO, refuse the rest; IAC sequences stripped, IAC IAC read as 0xFF, 0xFF in input doubled.
+
+Accepted risk (decided 2026-09-29): a caller who renames starts over on DoorParty unless the provider keeps the first name.
 
 ## Schema
 

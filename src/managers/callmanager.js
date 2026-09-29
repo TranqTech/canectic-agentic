@@ -722,6 +722,12 @@ class IncomingCall{
 			return;
 		}
 
+		// A door on another system (#89): its provider runs it
+		if (doorConfig.launchType === "Remote") {
+			await this._launchRemote(doorConfig.remoteProvider, doorConfig.remoteDoor || "", fromMenu, doorConfig.name || slugname);
+			return;
+		}
+
 		// Clean up current handler
 		if (this.currentHandler) {
 			try { this.currentHandler.clearHandler(); } catch (_) {}
@@ -762,16 +768,31 @@ class IncomingCall{
 	// Send the caller to a door on another Canectic door server (#86). arg is
 	// "<remote name>" or "<remote name>:<door slug>" from the menu entry.
 	async launchRemoteDoor(arg, fromMenu) {
-		this._doorFromMenu = fromMenu || false;
 		var parsed = remoteRegistry.parseRemoteArg(arg);
+		await this._launchRemote(parsed.name, parsed.door, fromMenu, null);
+	}
+
+	// Run door `door` (a code, or '' for the provider's own menu) on the door
+	// provider named `name`, from a Remote door entry or a remoteDoor menu
+	// command. The caller must be logged in at the provider's minimum security.
+	async _launchRemote(name, door, fromMenu, label) {
+		this._doorFromMenu = fromMenu || false;
+		var parsed = { name: String(name || "").toLowerCase(), door: door || "" };
 		var remote = null;
 		try { remote = parsed.name ? await remoteRegistry.getByName(parsed.name) : null; } catch (_) { remote = null; }
-		if (!remote || !remote.active) {
-			alogger.writeAlog(3, this.loggingId + "\n  No active remote door server named: " + parsed.name, "yellowbright");
-			try {
-				this.cmds.senddata("\r\nThat door server is not available.\r\n Press any key to continue...");
-			} catch (_) {}
+		var refuse = (reason) => {
+			try { this.cmds.senddata("\r\n" + reason + "\r\n Press any key to continue..."); } catch (_) {}
 			this._waitForKeyThen(() => { this._doorReturn(); });
+		};
+		if (!remote || !remote.active) {
+			alogger.writeAlog(3, this.loggingId + "\n  No active door provider named: " + parsed.name, "yellowbright");
+			refuse("That door server is not available.");
+			return;
+		}
+		var may = remoteRegistry.mayUseRemote(this, remote, appConfig);
+		if (!may.ok) {
+			alogger.writeAlog(3, this.loggingId + "\n  Refused door on " + remote.name + " for " + (this.caller_username || "?") + ": " + may.reason, "yellowbright");
+			refuse(may.reason);
 			return;
 		}
 
@@ -779,7 +800,7 @@ class IncomingCall{
 			try { this.currentHandler.clearHandler(); } catch (_) {}
 			this.currentHandler = null;
 		}
-		this.updateNodeStatus("door", "remote:" + remote.name, remote.title || remote.name);
+		this.updateNodeStatus("door", "remote:" + remote.name + (parsed.door ? ":" + parsed.door : ""), label || remote.title || remote.name);
 		this.call_status = "Remote door: " + remote.name + (parsed.door ? ":" + parsed.door : "");
 
 		var handler = new RemoteDoorRunner(this, remote, parsed.door);
@@ -909,4 +930,4 @@ class CallManager{
 	}
 }
 
-export{CallManager, CallPool, loadFlowsFromDB}
+export{CallManager, CallPool, IncomingCall, loadFlowsFromDB}

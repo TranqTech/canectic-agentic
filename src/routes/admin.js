@@ -2881,7 +2881,8 @@ router.get('/doors', async (req, res) => {
 		configVars: configVars,
 		collections: collections || [],
 		doorCollectionMap: doorCollectionMap,
-		offeredSlugs: doorCollections.flattenOffered(await doorCollections.offeredCollections()).map(function (d) { return d.slug; })
+		offeredSlugs: doorCollections.flattenOffered(await doorCollections.offeredCollections()).map(function (d) { return d.slug; }),
+		remotes: await doorserverRemotes.getAll()
 	});
 });
 
@@ -2926,6 +2927,7 @@ router.post('/doors/new', urlencodedParser, requireAdmin, async (req, res) => {
 			configVars: configVars,
 			collections: await doorCollections.getActiveCollections() || [],
 			doorCollectionMap: {},
+			remotes: await doorserverRemotes.getAll(),
 			errormessages: result.errormessages
 		});
 	}
@@ -7641,7 +7643,10 @@ router.get('/doorserver', requireAdmin, async (req, res) => {
 		autoApproveFlags: String(appConfig.get('doorserver_auto_approve_flags', '') || '').split(',').map(function (f) { return f.trim(); }).filter(Boolean),
 		defaultMax: appConfig.getNumber('doorserver_max_concurrent', 5),
 		dsOffers: await doorCollections.offeredCollections(),
-		remotes: await doorserverRemotes.getAll()
+		remotes: await doorserverRemotes.getAll(),
+		kindLabels: doorserverRemotes.KIND_LABELS,
+		remoteDoorCounts: ((await postgres.query("SELECT remote_provider, count(*)::int AS n FROM doors WHERE launch_type = 'Remote' GROUP BY 1")) || [])
+			.reduce(function (m, r) { m[r.remote_provider] = r.n; return m; }, {})
 	});
 });
 
@@ -7653,33 +7658,109 @@ router.post('/doorserver/new', urlencodedParser, requireAdmin, async (req, res) 
 	res.redirect('/admin/doorserver');
 });
 
-// Remote door servers this board connects out to (phase D). Registered
-// before the /doorserver/:uuid routes so 'remotes' is never read as a uuid.
+// Door providers: other systems this board sends callers to (#86 phase D,
+// kinds #89). Registered before the /doorserver/:uuid routes so 'remotes' is
+// never read as a uuid.
+async function renderProvider(req, res, opts) {
+	var currentuser = await getCurrentUser(req);
+	res.locals.flash = await flash.get(req);
+	var remote = opts.remote || null;
+	var kind = remote ? remote.kind || 'canectic' : opts.kind;
+	var settings = remote ? doorserverRemotes.settingsOf(remote)
+		: Object.assign({}, kind === 'rlogin' ? doorserverRemotes.RLOGIN_DEFAULTS : kind === 'bbslink' ? doorserverRemotes.BBSLINK_DEFAULTS : {}, opts.presetSettings || {});
+	var secrets = remote ? doorserverRemotes.secretsOf(remote) : {};
+	res.render('admin/doorserver/provider', {
+		sufficientAccess: checkAdminAccess(currentuser), activelink: 'doorserver', currentuser: currentuser,
+		title: remote ? (remote.title || remote.name) : 'Add a ' + (doorserverRemotes.KIND_LABELS[kind] || 'door provider'),
+		mode: remote ? 'edit' : 'new', kind: kind, remote: remote || {}, settings: settings,
+		secretSet: { ssh_password: !!secrets.ssh_password, password: !!secrets.password, auth_code: !!secrets.auth_code, scheme_code: !!secrets.scheme_code, secret: !!(remote && remote.secret) },
+		form: opts.form || {}, errors: opts.errors || [], preset: opts.preset || '', presetNote: opts.presetNote || '',
+		kindLabels: doorserverRemotes.KIND_LABELS,
+		verifiedSecurity: appConfig.getNumber('verified_security', 60),
+		doors: remote ? await doors.getRemoteDoors(remote.name) : [],
+		collections: (await doorCollections.getAllCollections()) || [],
+		fetched: opts.fetched || null
+	});
+}
+
+router.get('/doorserver/remotes/new', requireAdmin, async (req, res) => {
+	var preset = doorserverRemotes.PRESETS[String(req.query.preset || '')];
+	var kind = preset ? preset.kind : (doorserverRemotes.KINDS.indexOf(String(req.query.kind || '')) !== -1 ? String(req.query.kind) : 'canectic');
+	await renderProvider(req, res, { kind: kind, preset: String(req.query.preset || ''), presetSettings: preset ? preset.settings : {}, presetNote: preset ? preset.note : '' });
+});
+
 router.post('/doorserver/remotes/new', urlencodedParser, requireAdmin, async (req, res) => {
 	var r = await doorserverRemotes.createRemote(req.body);
-	await flash.setOne(req, r.status ? 'success' : 'danger', r.status
-		? 'Added remote door server ' + r.remote.name + '. Use Test to check it, then add a Remote Door Server menu entry.'
-		: r.errors.join('. '));
-	res.redirect('/admin/doorserver#remotes');
+	if (!r.status) {
+		var kind = doorserverRemotes.KINDS.indexOf(req.body.kind) !== -1 ? req.body.kind : 'canectic';
+		return renderProvider(req, res, { kind: kind, form: req.body, errors: r.errors, preset: req.body.preset || '' });
+	}
+	await flash.setOne(req, 'success', 'Added ' + r.remote.name + '. Add its doors below, then put them in a collection or a menu.');
+	res.redirect('/admin/doorserver/remotes/' + r.remote.uuid);
+});
+
+router.get('/doorserver/remotes/:uuid', requireAdmin, async (req, res) => {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	if (!remote) return res.redirect('/admin/doorserver#remotes');
+	await renderProvider(req, res, { remote: remote });
 });
 
 router.post('/doorserver/remotes/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
 	var r = await doorserverRemotes.updateRemote(req.params.uuid, req.body);
 	await flash.setOne(req, r.status ? 'success' : 'danger', r.status ? 'Saved.' : r.errors.join('. '));
-	res.redirect('/admin/doorserver#remotes');
+	res.redirect('/admin/doorserver/remotes/' + req.params.uuid);
 });
 
+// A Canectic door server reports its own doors; offer them as door entries.
 router.post('/doorserver/remotes/:uuid/test', urlencodedParser, requireAdmin, async (req, res) => {
 	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
 	if (!remote) return res.redirect('/admin/doorserver#remotes');
+	if ((remote.kind || 'canectic') !== 'canectic') {
+		await flash.setOne(req, 'info', 'Only a Canectic door server can list its doors. Add this provider\'s doors by their codes below.');
+		return res.redirect('/admin/doorserver/remotes/' + remote.uuid);
+	}
 	var r = await listRemoteDoors({ url: remote.url, systemId: remote.system_id, secret: remote.secret, timeoutMs: 10000 });
-	await flash.setOne(req, r.ok ? 'success' : 'danger', r.ok
-		? remote.name + ' answered with ' + r.doors.length + ' door(s): ' + (r.doors.map(function (d) { return d.slug; }).join(', ') || 'none')
-		: remote.name + ': ' + r.reason);
-	res.redirect('/admin/doorserver#remotes');
+	if (!r.ok) {
+		await flash.setOne(req, 'danger', remote.name + ': ' + r.reason);
+		return res.redirect('/admin/doorserver/remotes/' + remote.uuid);
+	}
+	await renderProvider(req, res, { remote: remote, fetched: r.doors });
+});
+
+// Add door entries: one by code (code, name, slug, collection_id), or several
+// ticked from a fetched list (pick[] of code, with name_<code>).
+router.post('/doorserver/remotes/:uuid/doors', urlencodedParser, requireAdmin, async (req, res) => {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	if (!remote) return res.redirect('/admin/doorserver#remotes');
+	var wanted = req.body.pick !== undefined
+		? [].concat(req.body.pick).map(function (code) { return { code: code, name: req.body['name_' + code] || code }; })
+		: [{ code: req.body.code, name: req.body.name, slug: req.body.slug }];
+	var collectionId = parseInt(req.body.collection_id) || null;
+	var added = [], problems = [];
+	for (var w of wanted) {
+		var r = await doors.createRemoteDoor({ provider: remote.name, code: w.code, name: w.name, slug: w.slug });
+		if (!r.status) { problems.push((w.code || 'menu') + ': ' + r.errormessages.join(', ')); continue; }
+		added.push(w.name || w.code);
+		if (collectionId) await doorCollections.addDoorToCollection(collectionId, r.doorId);
+	}
+	if (added.length) await flash.setOne(req, 'success', 'Added ' + added.length + ' door(s): ' + added.join(', ') + (collectionId ? '' : '. Put them in a collection or a menu so callers can reach them.'));
+	if (problems.length) await flash.setOne(req, 'danger', problems.join('. '));
+	res.redirect('/admin/doorserver/remotes/' + remote.uuid);
+});
+
+router.post('/doorserver/remotes/:uuid/hostkey/reset', urlencodedParser, requireAdmin, async (req, res) => {
+	await doorserverRemotes.setHostKey(req.params.uuid, null);
+	await flash.setOne(req, 'success', 'Forgot the recorded SSH host key. The next connection records the key the server presents.');
+	res.redirect('/admin/doorserver/remotes/' + req.params.uuid);
 });
 
 router.post('/doorserver/remotes/:uuid/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var remote = await doorserverRemotes.getByUuid(req.params.uuid);
+	var inUse = remote ? (await doors.getRemoteDoors(remote.name)).length : 0;
+	if (inUse) {
+		await flash.setOne(req, 'danger', 'Delete or change the ' + inUse + ' door(s) on ' + remote.name + ' first.');
+		return res.redirect('/admin/doorserver/remotes/' + remote.uuid);
+	}
 	var ok = await doorserverRemotes.deleteRemote(req.params.uuid);
 	await flash.setOne(req, ok ? 'success' : 'danger', ok ? 'Deleted.' : 'Could not delete.');
 	res.redirect('/admin/doorserver#remotes');

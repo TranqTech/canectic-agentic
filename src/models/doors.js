@@ -12,6 +12,7 @@ const VALID_LAUNCH_TYPES = [
 	'Dosemu',
 	'DosemuPty',
 	'SyncJSDoor',
+	'Remote',
 ];
 
 // Legacy DB values that map to current types
@@ -27,6 +28,7 @@ const LAUNCH_TYPE_LABELS = {
 	'Dosemu':         'Dosemu (Console Only)',
 	'DosemuPty':      'Dosemu (Full)',
 	'SyncJSDoor':     'SyncJS Door',
+	'Remote':         'Remote (another system)',
 };
 
 const VALID_DROPFILE_TYPES = [
@@ -99,6 +101,10 @@ async function createDoor(data) {
 		result.errormessages.push('Invalid launch type: ' + launchType);
 		return result;
 	}
+	if (launchType === 'Remote' && !String(data.remote_provider || '').trim()) {
+		result.errormessages.push('A remote door needs a provider');
+		return result;
+	}
 
 	// Check slug uniqueness
 	var existing = await postgres.queryOne('SELECT id FROM doors WHERE slug = $1', [slug]);
@@ -131,6 +137,8 @@ async function createDoor(data) {
 		dropfile_type: (data.dropfile_type || '').trim() || null,
 		dropfile_dir: (data.dropfile_dir || '').trim() || null,
 		db_subdir: (data.db_subdir || '').trim() || null,
+		remote_provider: String(data.remote_provider || '').trim().toLowerCase() || null,
+		remote_door: String(data.remote_door || '').trim().slice(0, 64) || null,
 		usereal_local: data.usereal_local === 'true' || data.usereal_local === true,
 		usereal_doorsession: data.usereal_doorsession === 'true' || data.usereal_doorsession === true,
 		pause_on_exit: data.pause_on_exit !== 'false' && data.pause_on_exit !== false,
@@ -163,6 +171,10 @@ async function updateDoor(id, data) {
 	launchType = LEGACY_LAUNCH_TYPES[launchType] || launchType;
 	if (launchType && !VALID_LAUNCH_TYPES.includes(launchType)) {
 		result.errormessages.push('Invalid launch type: ' + launchType);
+		return result;
+	}
+	if (launchType === 'Remote' && !String(data.remote_provider || '').trim()) {
+		result.errormessages.push('A remote door needs a provider');
 		return result;
 	}
 
@@ -202,6 +214,8 @@ async function updateDoor(id, data) {
 		dropfile_type: (data.dropfile_type || '').trim() || null,
 		dropfile_dir: (data.dropfile_dir || '').trim() || null,
 		db_subdir: (data.db_subdir || '').trim() || null,
+		remote_provider: String(data.remote_provider || '').trim().toLowerCase() || null,
+		remote_door: String(data.remote_door || '').trim().slice(0, 64) || null,
 		usereal_local: data.usereal_local === 'true' || data.usereal_local === true,
 		usereal_doorsession: data.usereal_doorsession === 'true' || data.usereal_doorsession === true,
 		pause_on_exit: data.pause_on_exit !== 'false' && data.pause_on_exit !== false,
@@ -258,6 +272,8 @@ async function duplicateDoor(id) {
 		dropfile_type:       src.dropfile_type || null,
 		dropfile_dir:        src.dropfile_dir || null,
 		db_subdir:           src.db_subdir || null,
+		remote_provider:     src.remote_provider || null,
+		remote_door:         src.remote_door || null,
 		usereal_local:       !!src.usereal_local,
 		usereal_doorsession: !!src.usereal_doorsession,
 		pause_on_exit:       src.pause_on_exit !== false,
@@ -335,6 +351,8 @@ function normalizeDoorConfig(row) {
 		dropfileType: row.dropfile_type || undefined,
 		dropfileDir: row.dropfile_dir || undefined,
 		dbSubdir: row.db_subdir || undefined,
+		remoteProvider: row.remote_provider || undefined,
+		remoteDoor: row.remote_door || undefined,
 		usereal_local: row.usereal_local || false,
 		usereal_doorsession: row.usereal_doorsession || false,
 		pauseOnExit: row.pause_on_exit !== undefined ? row.pause_on_exit : true,
@@ -398,7 +416,41 @@ function mayLaunchDoor(call, doorConfig) {
 	return { ok: true };
 }
 
+// --- Remote doors (#89) ---
+
+/** The slug a remote door gets unless the sysop gives one: provider-code. */
+function remoteDoorSlug(provider, code) {
+	var base = (String(provider || '') + '-' + String(code || 'menu')).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+	return base.slice(0, 64);
+}
+
+/**
+ * Create a door entry for a door on another system. input: provider (name),
+ * code (the door's code there; blank = the provider's own menu), name, slug?,
+ * description?. Created active; not in any collection.
+ */
+async function createRemoteDoor(input) {
+	var provider = String(input.provider || '').trim().toLowerCase();
+	var code = String(input.code || '').trim().slice(0, 64);
+	var name = String(input.name || '').trim() || code || 'Door menu';
+	var slug = String(input.slug || '').trim().toLowerCase() || remoteDoorSlug(provider, code);
+	return await createDoor({
+		slug: slug, name: name, launch_type: 'Remote', remote_provider: provider, remote_door: code,
+		description: input.description || '', active: 'true', pause_on_exit: 'false'
+	});
+}
+
+/** Door entries that run on a provider, by provider name. */
+async function getRemoteDoors(provider) {
+	return (await postgres.query(
+		"SELECT * FROM doors WHERE launch_type = 'Remote' AND remote_provider = $1 ORDER BY name ASC",
+		[String(provider || '').toLowerCase()])) || [];
+}
+
 export {
+	remoteDoorSlug,
+	createRemoteDoor,
+	getRemoteDoors,
 	getDoorConfig,
 	getAllDoors,
 	getDoorById,
