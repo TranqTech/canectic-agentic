@@ -1,0 +1,87 @@
+extends ../layouts/user
+block content
+	.container-fluid.main-wrapper
+		if !ismobile
+			br
+		.row
+			.col-lg-10.offset-lg-1.col-12
+				h2.mb-3 Door Server
+				include ../partials/flash
+				if !enabled
+					.alert.alert-info This board is not running a door server at the moment.
+				else
+					p
+						| If you run a BBS, you can register it here and send your callers to the doors this board offers. 
+						| Your BBS connects to 
+						code= boardAddress
+						|  with its System ID and a secret, using the door-server client that comes with Canectic (another Canectic board can add this one as a remote door server).
+
+				if systems.length
+					h4.mt-4 Your registrations
+					each s in systems
+						.card.mb-3
+							.card-body
+								.d-flex.flex-wrap.justify-content-between.align-items-start
+									div
+										h5.mb-1
+											= s.bbs_name
+											|  
+											code= s.system_id
+										- var badge = { pending: "bg-warning text-dark", approved: "bg-success", suspended: "bg-secondary", rejected: "bg-danger" }[s.status] || "bg-secondary"
+										span.badge(class=badge)= s.status
+										if s.status === "pending"
+											small.text-muted.ms-2 waiting for the sysop
+										if s.last_connect
+											small.text-muted.ms-2
+												| last connected 
+												+ts(s.last_connect)
+									form(method="POST" action="/doorserver/" + s.uuid + "/secret" onsubmit="return confirm(\x27Make a new secret? The current one stops working at once.\x27)")
+										button.btn.btn-sm.btn-outline-warning(type="submit") New secret
+								details.mt-2
+									summary Edit details
+									form.row.g-2.mt-1(method="POST" action="/doorserver/" + s.uuid + "/update")
+										.col-md-6
+											label.form-label.small BBS name
+											input.form-control.form-control-sm(name="bbs_name" value=s.bbs_name required)
+										.col-md-6
+											label.form-label.small Sysop name
+											input.form-control.form-control-sm(name="sysop_name" value=s.sysop_name required)
+										.col-md-6
+											label.form-label.small Contact email
+											input.form-control.form-control-sm(type="email" name="contact_email" value=s.contact_email || "")
+										.col-md-6
+											label.form-label.small Location
+											input.form-control.form-control-sm(name="location" value=s.location || "")
+										.col-12
+											label.form-label.small BBS address
+											input.form-control.form-control-sm(name="address" value=s.address || "")
+										.col-12
+											button.btn.btn-sm.btn-warning(type="submit") Save
+
+				if mayRegister
+					h4.mt-4 Register a BBS
+					if !autoApprove
+						p.text-muted The sysop reviews each registration before it can connect; you will get a notification.
+					form.row.g-2(method="POST" action="/doorserver/register")
+						.col-md-4
+							label.form-label System ID
+							input.form-control(name="system_id" required pattern="[A-Za-z0-9_-]{2,12}" title="2 to 12 letters, digits, _ or -" placeholder="e.g. MYBBS")
+						.col-md-8
+							label.form-label BBS name
+							input.form-control(name="bbs_name" required)
+						.col-md-6
+							label.form-label Sysop name
+							input.form-control(name="sysop_name" required value=currentuser.fullname || currentuser.username)
+						.col-md-6
+							label.form-label Contact email
+							input.form-control(type="email" name="contact_email")
+						.col-md-6
+							label.form-label Location
+							input.form-control(name="location")
+						.col-md-6
+							label.form-label BBS address
+							input.form-control(name="address" placeholder="telnet or web address of your BBS")
+						.col-12
+							button.btn.btn-success(type="submit") Register
+				else if enabled && !systems.length
+					p.text-muted Registering a BBS needs security level #{registerSecurity} or higher on this board; ask the sysop if you run one.

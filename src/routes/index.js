@@ -1142,6 +1142,7 @@ router.post('/messages/area/:shortcode/thread/:uuid/reply', urlencodedParser, as
 router.get('/doors', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	res.locals.currentuser = currentuser;
+	res.locals.doorserverEnabled = appConfig.getBoolean('doorserver_enabled', false);
 
 	var collections = await doorCollections.getActiveCollections();
 	var counts = await doorCollections.getCollectionCounts();

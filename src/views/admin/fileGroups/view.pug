@@ -10,6 +10,7 @@ block content
     else if !sufficientAccess
       include ../../partials/status/unauthorized.pug
     else
+      include ../../partials/flash
       if !ismobile
         .row
           .col-12

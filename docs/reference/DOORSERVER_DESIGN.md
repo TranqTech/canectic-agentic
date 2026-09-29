@@ -5,6 +5,7 @@ Lets other BBSes send their callers to doors hosted here, and lets this board se
 **Status: in progress (#86).** Decisions made 2026-09-29, recorded below. Build order: A security, B server, C shipped client, D Canectic as a client, E RLogin. This header is updated as each phase lands.
 
 - **A, done:** stub login refuses every system; `doorserver_enabled` (off) refuses every connection before auth; `doors.doorserver_available` (default false) checked by `doors.mayLaunchDoor` in `CallManager.launchDoor`; failed logins to `security.log`; stale `bin/doorserver.js` deleted.
+- **B, done:** `doorserver_systems` + `src/models/doorserver.js` (create by sysop or user, pending/approved/suspended/rejected, bcrypt secret shown once, `verifyLogin`, `recordSession`); `src/handlers/doorauthhandler.js` speaks `canectic-doorserver/1` (string-aware `takeFrames`, auth, list, door or a later `launch` frame, per-system concurrency from the pool's live calls, caller identity and `doorserver_security`, caller log source `Doorserver`); admin page `/admin/doorserver` (Doors menu); user page `/doorserver` (router `src/routes/doorserver.js`) for users at `doorserver_register_security`, linked from `/doors`; "Available to Door Server" in the door editor. Checked live on the dev board: list, wrong secret (logged), unflagged door refused, launch by name and by launch frame, concurrency refusal; and in headless Chromium: admin add, user registration pending, approval notifying the owner.
 
 ## Why this was rewritten
 

@@ -1,0 +1,184 @@
+extends ../../layouts/admin
+
+block content
+  .container-fluid.main-wrapper
+    if !currentuser
+      - loginMode = 'guard'
+      - loginRedirect = currentPath
+      include ../../partials/users/login.pug
+    else if !sufficientAccess
+      include ../../partials/status/unauthorized.pug
+    else
+      .row
+        .col-12
+          br
+      .row
+        .col-lg-10.offset-lg-1.col-12
+          .card
+            .card-header.bg-darkblue.text-white
+              .row
+                .col-8
+                  h2
+                    i.bi.bi-hdd-network.me-2
+                    | Door Server
+                .col-4
+                  .text-end
+                    a.btn.btn-sm.btn-outline-light.me-2(href='/admin') Exit
+                    button.btn.btn-sm.btn-success(data-bs-toggle='modal' data-bs-target='#newSystemModal')
+                      i.bi.bi-plus-circle.me-1
+                      | Add BBS
+            .card-body
+              include ../../partials/flash
+              if !enabled
+                .alert.alert-warning
+                  | The door server is switched off, so no remote BBS can connect. Turn on #[code doorserver_enabled] under Doors on the
+                  a(href='/admin/config')  Configuration page
+                  | .
+              p.text-muted
+                | Other BBSes registered here can send their callers to the doors you make available to the door server (in each door's settings).
+                |  Each BBS connects with its System ID and a secret, which is shown once when the BBS is added and again only if you make a new one.
+                |  Users with security #{registerSecurity} or above can register their own BBS from their menu, which
+                if autoApprove
+                  |  is approved at once (auto-approve is on).
+                else
+                  |  then waits here for your approval.
+              p
+                strong Doors available to the door server:
+                if availableDoors.length
+                  each d, i in availableDoors
+                    span.badge.bg-info.me-1= d.name
+                else
+                  span.text-muted  none yet (set "Available to Door Server" on a door)
+
+              if systems.length
+                .table-responsive
+                  table.table.table-sm.table-hover.align-middle
+                    thead
+                      tr
+                        th System ID
+                        th BBS
+                        th Sysop / contact
+                        th Registered by
+                        th Status
+                        th.text-end Limit
+                        th Last connect
+                        th.text-end Sessions
+                        th Actions
+                    tbody
+                      each s in systems
+                        tr
+                          td
+                            code= s.system_id
+                            if s.secret_prefix
+                              br
+                              small.text-muted(title='The start of the current secret')= s.secret_prefix + '...'
+                          td
+                            = s.bbs_name
+                            if s.address
+                              br
+                              small.text-muted= s.address
+                          td
+                            = s.sysop_name
+                            if s.contact_email
+                              br
+                              small.text-muted= s.contact_email
+                          td= s.owner_username || 'sysop'
+                          td
+                            - var badge = { pending: 'bg-warning text-dark', approved: 'bg-success', suspended: 'bg-secondary', rejected: 'bg-danger' }[s.status] || 'bg-secondary'
+                            span.badge(class=badge)= s.status
+                          td.text-end= s.max_concurrent || defaultMax
+                          td(data-order=timestampMs(s.last_connect) || 0)
+                            if s.last_connect
+                              small
+                                +ts(s.last_connect)
+                            else
+                              small.text-muted never
+                          td.text-end= s.session_count || 0
+                          td.text-nowrap
+                            if s.status !== 'approved'
+                              form.d-inline(method='POST' action='/admin/doorserver/' + s.uuid + '/status')
+                                input(type='hidden' name='status' value='approved')
+                                button.btn.btn-xs.btn-success.me-1(type='submit' title='Approve') Approve
+                            if s.status === 'pending'
+                              form.d-inline(method='POST' action='/admin/doorserver/' + s.uuid + '/status')
+                                input(type='hidden' name='status' value='rejected')
+                                button.btn.btn-xs.btn-outline-danger.me-1(type='submit') Reject
+                            if s.status === 'approved'
+                              form.d-inline(method='POST' action='/admin/doorserver/' + s.uuid + '/status')
+                                input(type='hidden' name='status' value='suspended')
+                                button.btn.btn-xs.btn-outline-warning.me-1(type='submit') Suspend
+                            button.btn.btn-xs.btn-outline-info.me-1(type='button' data-bs-toggle='collapse' data-bs-target='#edit-' + s.uuid) Edit
+                            form.d-inline(method='POST' action='/admin/doorserver/' + s.uuid + '/secret' onsubmit="return confirm('Make a new secret for " + s.system_id + "? The current one stops working at once.')")
+                              button.btn.btn-xs.btn-outline-light.me-1(type='submit') New secret
+                            form.d-inline(method='POST' action='/admin/doorserver/' + s.uuid + '/delete' onsubmit="return confirm('Delete " + s.system_id + "?')")
+                              button.btn.btn-xs.btn-outline-danger(type='submit') Delete
+                        tr.collapse(id='edit-' + s.uuid)
+                          td(colspan='9')
+                            form.row.g-2(method='POST' action='/admin/doorserver/' + s.uuid + '/update')
+                              .col-md-3
+                                label.form-label.small BBS name
+                                input.form-control.form-control-sm(name='bbs_name' value=s.bbs_name required)
+                              .col-md-3
+                                label.form-label.small Sysop name
+                                input.form-control.form-control-sm(name='sysop_name' value=s.sysop_name required)
+                              .col-md-3
+                                label.form-label.small Contact email
+                                input.form-control.form-control-sm(name='contact_email' value=s.contact_email || '')
+                              .col-md-3
+                                label.form-label.small Location
+                                input.form-control.form-control-sm(name='location' value=s.location || '')
+                              .col-md-4
+                                label.form-label.small BBS address
+                                input.form-control.form-control-sm(name='address' value=s.address || '')
+                              .col-md-2
+                                label.form-label.small Username prefix
+                                input.form-control.form-control-sm(name='username_prefix' value=s.username_prefix || '')
+                              .col-md-2
+                                label.form-label.small Session limit
+                                input.form-control.form-control-sm(type='number' min='1' name='max_concurrent' value=s.max_concurrent || defaultMax)
+                              .col-md-4
+                                label.form-label.small Notes (sysop only)
+                                input.form-control.form-control-sm(name='notes' value=s.notes || '')
+                              .col-12
+                                button.btn.btn-sm.btn-warning(type='submit') Save
+              else
+                p.text-muted No BBS is registered yet.
+
+      #newSystemModal.modal.fade(tabindex='-1' aria-hidden='true')
+        .modal-dialog.modal-lg
+          .modal-content
+            form(method='POST' action='/admin/doorserver/new')
+              .modal-header
+                h5.modal-title Add a BBS
+                button.btn-close(type='button' data-bs-dismiss='modal')
+              .modal-body.row.g-2
+                .col-md-4
+                  label.form-label System ID
+                  input.form-control(name='system_id' required pattern='[A-Za-z0-9_-]{2,12}' placeholder='e.g. UNDERMINE' title='2 to 12 letters, digits, _ or -')
+                .col-md-8
+                  label.form-label BBS name
+                  input.form-control(name='bbs_name' required)
+                .col-md-6
+                  label.form-label Sysop name
+                  input.form-control(name='sysop_name' required)
+                .col-md-6
+                  label.form-label Contact email
+                  input.form-control(type='email' name='contact_email')
+                .col-md-6
+                  label.form-label Location
+                  input.form-control(name='location')
+                .col-md-6
+                  label.form-label BBS address
+                  input.form-control(name='address' placeholder='telnet or web address of the BBS')
+                .col-md-4
+                  label.form-label Username prefix
+                  input.form-control(name='username_prefix' placeholder='defaults to the System ID')
+                .col-md-4
+                  label.form-label Session limit
+                  input.form-control(type='number' min='1' name='max_concurrent' value=defaultMax)
+                .col-12
+                  label.form-label Notes (sysop only)
+                  input.form-control(name='notes')
+              .modal-footer
+                button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+                button.btn.btn-success(type='submit') Add and show secret

@@ -1,10 +1,75 @@
+// doorauthhandler.js -- the door_auth stage of the door-server pool (#86).
+//
+// Protocol canectic-doorserver/1 (docs/reference/DOORSERVER_DESIGN.md):
+//
+//   server  {"type":"hello","protocol":"canectic-doorserver/1","board":"..."}
+//   client  {"type":"auth","system_id","secret","user":{"name","real_name"},
+//            "door":"<slug>"?, "term":{"width","height","encoding","type"},
+//            "list":false?}
+//   server  {"type":"auth_ok","node":N,"doors":[{slug,name,description}]}
+//        or {"type":"auth_fail","reason":"..."} and hang up
+//   list:true   the door list is the whole answer; hang up
+//   door given  launch it
+//   neither     wait for {"type":"launch","door":"<slug>"} naming one of the
+//               listed doors; the client draws its own menu
+//
+// After that the socket carries the terminal stream. Whatever the client
+// names, CallManager.launchDoor checks doors.mayLaunchDoor again: a
+// door-server session can only ever reach a door made available to it.
+
 import { BaseHandler } from "./basehandler.js";
 import * as alogger from "../utils/alogger.js";
-
-import { getClientBBS } from "../models/doorserver.js";
+import * as doorserver from "../models/doorserver.js";
+import { getAllDoors } from "../models/doors.js";
 import { logAuthFail } from "../utils/authFailLog.js";
 import appConfig from "../config/appConfig.js";
+
+const PROTOCOL = "canectic-doorserver/1";
 const maxAuthBuffer = 4096; // Max bytes we'll accept before giving up
+
+/**
+ * Split complete top-level JSON objects off the front of a buffer, braces
+ * inside strings ignored. Returns { frames: [text], rest }.
+ */
+function takeFrames(buffer) {
+	var frames = [];
+	var depth = 0, inString = false, escaped = false, start = -1;
+	for (var i = 0; i < buffer.length; i++) {
+		var ch = buffer[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (ch === "\\") escaped = true;
+			else if (ch === '"') inString = false;
+			continue;
+		}
+		if (ch === '"') { inString = true; continue; }
+		if (ch === "{") { if (depth === 0) start = i; depth++; }
+		else if (ch === "}") {
+			depth--;
+			if (depth === 0 && start !== -1) { frames.push(buffer.slice(start, i + 1)); start = -1; }
+			if (depth < 0) depth = 0;
+		}
+	}
+	var rest = start !== -1 ? buffer.slice(start) : "";
+	return { frames: frames, rest: rest };
+}
+
+/** The doors a door-server caller may choose from. */
+async function availableDoors() {
+	var all = await getAllDoors();
+	return (all || []).filter(function (d) { return d.active && d.doorserver_available === true; })
+		.map(function (d) { return { slug: d.slug, name: d.name, description: d.description || "" }; });
+}
+
+/** Live door-server sessions for a system, in this call's pool. */
+function liveSessionsFor(call, systemId) {
+	var calls = (call && call.callPool && call.callPool.connectedcalls) || [];
+	return calls.filter(function (c) { return c && c !== call && c.doorsession && c.caller_bbs === systemId; }).length;
+}
+
+function clean(value, max) {
+	return String(value === undefined || value === null ? "" : value).replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, max);
+}
 
 class DoorAuthHandler extends BaseHandler {
 	constructor(call) {
@@ -13,13 +78,14 @@ class DoorAuthHandler extends BaseHandler {
 		this.warnMsg = ""; // No warn for machine clients
 		this.authBuffer = "";
 		this.authenticated = false;
+		this.awaitingLaunch = false;
+		this.doors = [];
 		this.previousRawmode = false;
 		this.previousRawtarget = null;
 	}
 
 	// --- Raw mode management ---
 	_enableRawMode() {
-		// Save previous state in case we're nested
 		this.previousRawmode = this.call.rawmode;
 		this.previousRawtarget = this.call.rawtarget;
 		this.call.rawmode = true;
@@ -40,164 +106,134 @@ class DoorAuthHandler extends BaseHandler {
 		if (!this.active) return;
 		try {
 			this.resetInactivityTimeouts();
-
-			// Append incoming buffer to our auth string
 			this.authBuffer += data.toString("utf8");
-
-			// Guard against oversized payloads
 			if (this.authBuffer.length > maxAuthBuffer) {
 				this._authFailed("Auth payload too large");
 				return;
 			}
-
-			// Try to parse — client may send in chunks
-			this._tryParseAuth();
+			var parsed = takeFrames(this.authBuffer);
+			this.authBuffer = parsed.rest;
+			for (var text of parsed.frames) {
+				if (!this.active || this.finished) break;
+				var frame;
+				try { frame = JSON.parse(text); } catch (_) { this._authFailed("Malformed JSON"); return; }
+				if (!this.authenticated) this._processAuth(frame);
+				else if (this.awaitingLaunch) this._processLaunch(frame);
+			}
 		} catch (err) {
 			this._handleError("Raw data handling error", err);
 		}
 	}
 
-	_tryParseAuth() {
-		// Look for a complete JSON object
-		// Trim any trailing newlines/carriage returns the client might send
-		var trimmed = this.authBuffer.trim();
-
-		// Quick check — does it look like we have a complete object?
-		if (!trimmed.startsWith("{")) {
-			// Not JSON yet, could be partial or garbage
-			if (trimmed.length > 0 && !"{".startsWith(trimmed[0])) {
-				this._authFailed("Invalid auth format");
-			}
-			return;
-		}
-
-		// Check for balanced braces as a simple completeness test
-		var depth = 0;
-		for (var i = 0; i < trimmed.length; i++) {
-			if (trimmed[i] === "{") depth++;
-			if (trimmed[i] === "}") depth--;
-			if (depth === 0 && i > 0) {
-				// We have a complete object
-				var jsonString = trimmed.substring(0, i + 1);
-				this._processAuth(jsonString);
+	async _processAuth(frame) {
+		if (this._authInFlight) return;
+		this._authInFlight = true;
+		try {
+			var systemId = doorserver.normaliseSystemId(frame.system_id);
+			if (frame.type !== "auth" || !systemId || !frame.secret) {
+				this._authFailed("Expected an auth frame with system_id and secret");
 				return;
 			}
-		}
-		// Braces not yet balanced — wait for more data
-	}
-
-	_processAuth(jsonString) {
-		var authData;
-		try {
-			authData = JSON.parse(jsonString);
+			var ip = this.call && this.call.callerId;
+			var check = await doorserver.verifyLogin(systemId, frame.secret);
+			if (!this.active) return;
+			if (!check.ok) {
+				// Wrong credentials are logged for fail2ban; a real system that
+				// is pending or suspended is not an attack, just refused.
+				if (!check.system) logAuthFail(check.unknown ? 'unknown' : 'failed', 'door server system ' + systemId, ip, 'door server');
+				this._authFailed(check.reason);
+				return;
+			}
+			var sys = check.system;
+			var limit = parseInt(sys.max_concurrent) || appConfig.getNumber('doorserver_max_concurrent', 5);
+			if (liveSessionsFor(this.call, sys.system_id) >= limit) {
+				this._authFailed("Too many sessions for " + sys.system_id + " (limit " + limit + ")");
+				return;
+			}
+			this.doors = await availableDoors();
+			if (!this.active) return;
+			this._authSuccess(sys, frame);
 		} catch (err) {
-			this._authFailed("Malformed JSON");
-			return;
+			this._authFailed("Auth validation error");
+			alogger.writeAlog(2, this.loggingId + "\n  Door auth error: " + (err.stack || err), "redbright");
+		} finally {
+			this._authInFlight = false;
 		}
-
-		// Validate required fields
-		if (!authData.system_id || !authData.auth_token) {
-			this._authFailed("Missing required auth fields");
-			return;
-		}
-
-		// Validate credentials
-		this._validateDoorAuth(authData)
-			.then(result => {
-				if (!this.active) return;
-				if (result.valid) {
-					this._authSuccess(authData, result);
-				} else {
-					this._authFailed(result.reason || "Invalid credentials");
-				}
-			})
-			.catch(err => {
-				if (!this.active) return;
-				this._authFailed("Auth validation error: " + err.message);
-			});
 	}
 
-	async _validateDoorAuth(authData) {
-		// authData contains at minimum:
-		//   system_id   - the remote BBS system identifier
-		//   auth_token  - shared secret or session token
-		//
-		// May also contain:
-		//   username    - the remote user's name
-		//   real_name   - user's real/full name
-		//   door_id     - which door game they want to launch (sets doorTarget)
-		//   term_type   - remote terminal capabilities
-		//   term_width  - remote terminal width
-		//   term_height - remote terminal height
-		//
-		// Returns: { valid: true/false, reason: "...", bbs: {...} }
-
-		if (!authData.system_id || !authData.auth_token) {
-			return { valid: false, reason: "Missing System ID or Auth Token" };
-		}
-
-		var bbs = await getClientBBS(authData.system_id);
-		if (!bbs) {
-			logAuthFail('unknown', 'door server system ' + authData.system_id, this.call && this.call.callerId, 'door server');
-			return { valid: false, reason: "Unknown System ID" };
-		}
-
-		if (authData.auth_token !== bbs.auth_token) {
-			logAuthFail('failed', 'door server system ' + authData.system_id, this.call && this.call.callerId, 'door server');
-			return { valid: false, reason: "Auth Token Incorrect" };
-		}
-
-		return { valid: true, bbs: bbs };
-	}
-
-	// --- Auth results ---
-	_authSuccess(authData, result) {
+	_authSuccess(sys, frame) {
 		this.authenticated = true;
-		var logmsg = this.loggingId + "\n  Door auth successful from system: " + authData.system_id;
-		alogger.writeAlog(4, logmsg, "greenbright");
+		var call = this.call;
+		var user = frame.user || {};
+		var term = frame.term || {};
+		var remoteName = clean(user.name, 40) || "Guest";
 
-		var bbs = result.bbs || {};
+		call.doorsession = true;
+		call.caller_bbs = sys.system_id;
+		call.caller_bbs_name = sys.bbs_name;
+		call.caller_username = (sys.username_prefix || sys.system_id) + "_" + remoteName.replace(/\s+/g, "_");
+		call.caller_fullname = clean(user.real_name, 60) || remoteName;
+		call.caller_location = sys.bbs_name;
+		call.security = appConfig.getNumber('doorserver_security', 50);
+		call.term_type = "Door Client";
+		var enc = String(term.encoding || "").toLowerCase();
+		call.term_encoding = (enc === "utf8" || enc === "utf-8") ? "UTF-8" : "CP437";
+		var w = parseInt(term.width), h = parseInt(term.height);
+		if (w >= 20 && w <= 400) call.term_width = w;
+		if (h >= 10 && h <= 200) call.term_height = h;
 
-		// Store connection info on the call object
-		this.call.doorsession = true;
-		this.call.caller_bbs = authData.system_id;
-		this.call.term_type = "Door Client";
-		this.call.term_encoding = "CP437";
+		alogger.writeAlog(3, this.loggingId + "\n  Door server login: " + call.caller_username + " from " + sys.system_id +
+			" (" + sys.bbs_name + ")", "greenbright");
+		doorserver.recordSession(sys.uuid).catch(function () {});
+		if (typeof call.logCallStart === 'function') call.logCallStart().catch(function () {});
+		if (call.nodeManager) {
+			try {
+				call.nodeManager.setNodeUsername(call.nodenum, call.caller_username);
+				call.nodeManager.setNodeCallId(call.nodenum, call.uuid);
+			} catch (_) {}
+		}
 
-		// Build caller identity from BBS prefix + remote username
-		var prefix = bbs.username_prefix ? bbs.username_prefix + "_" : "";
-		this.call.caller_username = prefix + (authData.username || "Guest");
-		if (authData.real_name) this.call.caller_fullname = authData.real_name;
-		if (bbs.name) this.call.caller_location = bbs.name;
+		this._sendResponse({ type: "auth_ok", node: call.nodenum, doors: this.doors });
 
-		// Door target — if the client requested a specific door
-		if (authData.door_id) this.call.doorTarget = authData.door_id;
+		if (frame.list) { this._finish(true); return; }
+		var slug = clean(frame.door, 64);
+		if (slug) { this._chooseDoor(slug); return; }
+		// No door named: the client shows the list and sends a launch frame.
+		this.awaitingLaunch = true;
+	}
 
-		// Terminal dimensions from client
-		if (authData.term_width) this.call.term_width = authData.term_width;
-		if (authData.term_height) this.call.term_height = authData.term_height;
+	_processLaunch(frame) {
+		if (frame.type !== "launch" || !frame.door) {
+			this._sendResponse({ type: "error", reason: "Expected a launch frame naming a door" });
+			return;
+		}
+		this._chooseDoor(clean(frame.door, 64));
+	}
 
-		// Send success response
-		this._sendResponse({
-			status: "ok",
-			message: "Authenticated",
-			node: this.call.nodenum
-		});
+	_chooseDoor(slug) {
+		var found = this.doors.find(function (d) { return d.slug.toLowerCase() === slug.toLowerCase(); });
+		if (!found) {
+			this._sendResponse({ type: "error", reason: "No such door on this door server: " + slug });
+			if (!this.awaitingLaunch) this._finish(true);
+			return;
+		}
+		this.awaitingLaunch = false;
+		this.call.doorTarget = found.slug;
+		this._sendResponse({ type: "launch_ok", door: found.slug });
+		this._finish(false);
+	}
 
+	// hangUp: the list request is done, or a named door does not exist.
+	_finish(hangUp) {
 		this._disableRawMode();
 		this.finished = true;
+		if (hangUp) { if (this.call) this.call.hangUpCall(); return; }
 		this.signalReturn();
 	}
 
 	_authFailed(reason) {
-		var logmsg = this.loggingId + "\n  Door auth failed: " + reason;
-		alogger.writeAlog(3, logmsg, "yellowbright");
-
-		this._sendResponse({
-			status: "error",
-			message: reason
-		});
-
+		alogger.writeAlog(3, this.loggingId + "\n  Door auth failed: " + reason, "yellowbright");
+		this._sendResponse({ type: "auth_fail", reason: reason });
 		this._disableRawMode();
 		this.finished = true;
 		this.emitter.emit("AuthFailed");
@@ -211,26 +247,16 @@ class DoorAuthHandler extends BaseHandler {
 		} catch (_) {}
 	}
 
-	// --- Lifecycle ---
-	signalReturn() {
-		if (this.authenticated) {
-			this.emitter.emit("DoorAuthOK");
-		} else {
-			this.emitter.emit("ModuleReturn");
-		}
-	}
-
 	startStage() {
 		try {
+			this._enableRawMode();
 			// Off by default (#86): the pool is mounted on every board, and
 			// until door-server access is switched on nobody gets past here.
 			if (!appConfig.getBoolean('doorserver_enabled', false)) {
-				this._enableRawMode();
 				this._authFailed("Door server is not enabled on this board");
 				return;
 			}
-			this._enableRawMode();
-			this._sendResponse({ prompt: "[!SendAuth]" });
+			this._sendResponse({ type: "hello", protocol: PROTOCOL, board: appConfig.get('boardname', 'Canectic BBS') });
 			this.setInactivityTimeouts();
 		} catch (err) {
 			this._handleError("startStage error", err);
@@ -240,10 +266,7 @@ class DoorAuthHandler extends BaseHandler {
 	// Override inactivity kick to send JSON instead of terminal text
 	onInactivityKick() {
 		if (this.call) {
-			this._sendResponse({
-				status: "error",
-				message: "Auth timeout"
-			});
+			this._sendResponse({ type: "auth_fail", reason: "Timed out" });
 			this.call.hangUpCall();
 		}
 	}
@@ -256,4 +279,4 @@ class DoorAuthHandler extends BaseHandler {
 	}
 }
 
-export { DoorAuthHandler };
+export { DoorAuthHandler, takeFrames, PROTOCOL };

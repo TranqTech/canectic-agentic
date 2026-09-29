@@ -146,6 +146,10 @@ var CONFIG_DEFINITIONS = [
 	// Doors
 	// -----------------------------------------------------------------------
 	{ key: 'doorserver_enabled',    defaultValue: 'false',       type: 'boolean', category: 'doors',       description: 'Accept door-server connections from registered remote BBSes (/ws/doorserver). Off, every connection is refused.' },
+	{ key: 'doorserver_register_security', defaultValue: '100', type: 'number', category: 'doors',     description: 'Lowest security level at which a user may register their own BBS with this door server' },
+	{ key: 'doorserver_auto_approve', defaultValue: 'false',     type: 'boolean', category: 'doors',       description: 'Approve BBS registrations made by users without waiting for the sysop' },
+	{ key: 'doorserver_max_concurrent', defaultValue: '5',       type: 'number',  category: 'doors',       description: 'Default number of door-server sessions a registered BBS may have at once' },
+	{ key: 'doorserver_security',   defaultValue: '50',          type: 'number',  category: 'doors',       description: 'Security level a remote BBS caller carries in door drop files' },
 	{ key: 'xtrnTO',                defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'Door launch timeout (ms)' },
 	{ key: 'doorInactivityTO',      defaultValue: '5',           type: 'number',  category: 'doors',       description: 'Door inactivity timeout in minutes (default 5)' },
 	{ key: 'syncjsdoorTO',          defaultValue: '30000',       type: 'number',  category: 'doors',       description: 'SyncJS door launch timeout (ms)' },

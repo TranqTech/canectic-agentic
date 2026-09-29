@@ -653,12 +653,22 @@ class IncomingCall{
 			} catch (err) {
 				console.log(err);
 			}
+		} else if (this.doorsession) {
+			// A remote BBS's caller (#86): no local account, logged under the
+			// prefixed name with the remote BBS as the location.
+			try {
+				var dres = await logCall({ username: this.caller_username, logoncount: 0 }, 'Doorserver', this.callerId,
+					this.caller_bbs_name || this.caller_bbs);
+				if (dres) this.call_id = dres;
+			} catch (err) {
+				console.log(err);
+			}
 		}
 	}
 
 	logCallEnd(){
 		if (this.loggedend) return;
-		if ((this.user_record)&&(this.call_id)){
+		if ((this.user_record || this.doorsession)&&(this.call_id)){
 			this.loggedend = true	;		
 			logCallDuration(this.call_id)
 		}

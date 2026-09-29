@@ -13,6 +13,7 @@ import {router as usersRouter} from '../routes/users.js';
 import { router as pmRouter } from '../routes/pm.js';
 import { router as adminLogRouter, registerLogWebSocket } from "../routes/adminLogs.js";
 import { router as filesRouter } from '../routes/files.js';
+import { router as doorserverRouter } from '../routes/doorserver.js';
 import { router as callflowRouter } from '../routes/callflow.js';
 import { router as apiV1Router } from '../routes/api.js';
 import { pgpool } from '../middleware/db/postgres.js';
@@ -126,6 +127,7 @@ webserver.use('/adminlogs', adminLogRouter);
 webserver.use('/users', usersRouter);
 webserver.use('/pm', pmRouter);
 webserver.use('/files', filesRouter);
+webserver.use('/doorserver', doorserverRouter);
 webserver.use('/callflow', callflowRouter);
 
 // Health check endpoint — DB and Redis connectivity

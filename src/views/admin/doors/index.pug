@@ -76,6 +76,7 @@ block content
                           data-fixed_size=(door.fixed_size ? 'true' : 'false')
                           data-max_nodes=door.max_nodes
                           data-active=(door.active ? 'true' : 'false')
+                          data-doorserver_available=(door.doorserver_available ? 'true' : 'false')
                           data-sort_order=door.sort_order
                           data-icon_url=door.icon_url || ''
                         )
@@ -101,6 +102,8 @@ block content
                               span.badge.bg-success Active
                             else
                               span.badge.bg-danger Inactive
+                            if door.doorserver_available
+                              span.badge.bg-info.ms-1(title='Remote BBSes can run this door through the door server') Door server
                           td
                             button.btn.btn-xs.btn-outline-warning.me-1.edit-door-btn(type='button' title='Edit')
                               i.bi.bi-pencil
@@ -320,6 +323,14 @@ block content
                             option(value='true') Yes
                             option(value='false') No
                       .row
+                        .col-8
+                          label.form-label(data-bs-toggle='tooltip' title='Let callers from BBSes registered with your door server run this door. Off by default; only doors you switch on can be reached from outside.')
+                            | Available to Door Server
+                            i.bi.bi-info-circle.text-muted
+                          select.form-control.mb-2(name='doorserver_available')
+                            option(value='false') No
+                            option(value='true') Yes
+                      .row
                         .col-4
                           label.form-label(data-bs-toggle='tooltip' title='Show "Press any key to continue" after the door process exits.')
                             | Pause on Exit
@@ -481,6 +492,14 @@ block content
                           select#ed_active.form-control.mb-2(name='active')
                             option(value='true') Yes
                             option(value='false') No
+                      .row
+                        .col-8
+                          label.form-label(data-bs-toggle='tooltip' title='Let callers from BBSes registered with your door server run this door. Off by default; only doors you switch on can be reached from outside.')
+                            | Available to Door Server
+                            i.bi.bi-info-circle.text-muted
+                          select#ed_doorserver_available.form-control.mb-2(name='doorserver_available')
+                            option(value='false') No
+                            option(value='true') Yes
                       .row
                         .col-4
                           label.form-label(data-bs-toggle='tooltip' title='Show "Press any key to continue" after the door process exits.')
@@ -708,6 +727,7 @@ block content
           document.getElementById('ed_max_nodes').value        = d.max_nodes;
           document.getElementById('ed_sort_order').value       = d.sort_order;
           document.getElementById('ed_active').value           = d.active;
+          document.getElementById('ed_doorserver_available').value = d.doorserver_available || 'false';
           document.getElementById('ed_pause').value            = d.pause_on_exit;
           document.getElementById('ed_fixed_size').value       = d.fixed_size;
           document.getElementById('ed_usereal_local').value    = d.usereal_local;

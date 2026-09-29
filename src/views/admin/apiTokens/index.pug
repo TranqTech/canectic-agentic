@@ -29,6 +29,7 @@ block content
                       i.bi.bi-plus-circle.me-1
                       | Issue Token
             .card-body
+              include ../../partials/flash
               p.text-muted
                 | API tokens authorise scripted access to #[code /api/v1] endpoints using #[code Authorization: Bearer <token>]. Tokens are shown exactly once at creation. Use this page to audit all tokens system-wide and revoke compromised ones. Users can manage their own tokens from their profile page.
 

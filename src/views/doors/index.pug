@@ -8,6 +8,10 @@ block content
 		.row
 			.col-lg-10.offset-lg-1.col-12
 				h2.mb-4 Door Games
+				if currentuser && doorserverEnabled
+					p.small.text-muted
+						| Run a BBS? 
+						a(href='/doorserver') Offer these doors to your own callers through our door server.
 
 				if !currentuser
 					.alert.alert-info You must be logged in to play door games.

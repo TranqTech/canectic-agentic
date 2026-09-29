@@ -20,6 +20,7 @@ import * as msgAreas from '../models/msgAreas.js';
 import * as messages from '../models/messages.js';
 import * as peers from '../models/peers.js';
 import * as doors from '../models/doors.js';
+import * as doorserverModel from '../models/doorserver.js';
 import * as doorCollections from '../models/doorCollections.js';
 import * as announcements from '../models/announcements.js';
 import * as messageTemplates from '../models/messageTemplates.js';
@@ -2080,6 +2081,7 @@ router.get('/fileGroup/:shortcode', async (req, res, next) => {
 	var fileGroup   = await fileGroups.getGroupByShortcode(shortcode);
 	var arealist    = await fileAreas.getAreasInGroup(shortcode);
 	var title       = fileGroup ? fileGroup.name : "Unknown File Group";
+	res.locals.flash = await flash.get(req);
 	res.render('admin/fileGroups/view', {
 		sufficientAccess: sufficientAccess,
 		title: title,
@@ -7500,6 +7502,9 @@ router.get('/nodespy/:nodenum', async (req, res) => {
 
 router.get('/api-tokens', requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
+	// A new token is shown once, in the flash; this page never loaded it, so
+	// a token issued here was shown to nobody and could not be recovered.
+	res.locals.flash = await flash.get(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
 	var tokens = await apiTokens.getAllForAdmin();
 	res.render('admin/apiTokens/index', {
@@ -7554,6 +7559,78 @@ router.post('/api-tokens/:id/delete', urlencodedParser, requireAdmin, async (req
 		await flash.setOne(req, 'success', 'Token deleted');
 	}
 	res.redirect('/admin/api-tokens');
+});
+
+// -------------------------------------------------------
+// Door server: registered remote BBSes (#86)
+// -------------------------------------------------------
+
+
+async function notifyDoorserverOwner(sys, title, body) {
+	if (!sys || !sys.owner_user_id) return;
+	try {
+		var notif = await import('../models/notifications.js');
+		await notif.create(sys.owner_user_id, 'doorserver_status', title, body, { link: '/doorserver', icon: 'controller', severity: 'info' });
+	} catch (_) {}
+}
+
+router.get('/doorserver', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.flash = await flash.get(req);
+	res.render('admin/doorserver/index', {
+		sufficientAccess: checkAdminAccess(currentuser), title: 'Door Server', activelink: 'doorserver',
+		currentuser: currentuser,
+		systems: await doorserverModel.getAll(),
+		enabled: appConfig.getBoolean('doorserver_enabled', false),
+		registerSecurity: appConfig.getNumber('doorserver_register_security', 100),
+		autoApprove: appConfig.getBoolean('doorserver_auto_approve', false),
+		defaultMax: appConfig.getNumber('doorserver_max_concurrent', 5),
+		availableDoors: ((await doors.getAllDoors()) || []).filter(function (d) { return d.doorserver_available; })
+	});
+});
+
+router.post('/doorserver/new', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var r = await doorserverModel.createSystem(req.body, { bySysop: true, actor: currentuser && currentuser.username });
+	if (!r.status) await flash.setOne(req, 'danger', r.errors.join('. '));
+	else await flash.setOne(req, 'success', 'Registered ' + r.system.system_id + '. Give its sysop this secret now; it is not shown again: ' + r.secret);
+	res.redirect('/admin/doorserver');
+});
+
+router.post('/doorserver/:uuid/update', urlencodedParser, requireAdmin, async (req, res) => {
+	var r = await doorserverModel.updateDetails(req.params.uuid, req.body, { bySysop: true });
+	await flash.setOne(req, r.status ? 'success' : 'danger', r.status ? 'Saved.' : r.errors.join('. '));
+	res.redirect('/admin/doorserver');
+});
+
+router.post('/doorserver/:uuid/status', urlencodedParser, requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var status = String(req.body.status || '');
+	var sys = await doorserverModel.getByUuid(req.params.uuid);
+	if (!sys || !(await doorserverModel.setStatus(req.params.uuid, status, currentuser && currentuser.username))) {
+		await flash.setOne(req, 'danger', 'Could not change the status.');
+	} else {
+		await flash.setOne(req, 'success', sys.system_id + ' is now ' + status + '.');
+		var words = { approved: 'approved: it can connect now', rejected: 'not approved', suspended: 'suspended: it cannot connect until reinstated' };
+		await notifyDoorserverOwner(sys, 'Door server: ' + sys.bbs_name + ' ' + (status === 'approved' ? 'approved' : status),
+			'Your registration of ' + sys.bbs_name + ' (' + sys.system_id + ') was ' + (words[status] || status) + '.');
+	}
+	res.redirect('/admin/doorserver');
+});
+
+router.post('/doorserver/:uuid/secret', urlencodedParser, requireAdmin, async (req, res) => {
+	var sys = await doorserverModel.getByUuid(req.params.uuid);
+	var secret = sys ? await doorserverModel.regenerateSecret(sys.uuid) : null;
+	if (!secret) await flash.setOne(req, 'danger', 'Could not make a new secret.');
+	else await flash.setOne(req, 'success', 'New secret for ' + sys.system_id + ' (the old one no longer works). It is not shown again: ' + secret);
+	res.redirect('/admin/doorserver');
+});
+
+router.post('/doorserver/:uuid/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	var sys = await doorserverModel.getByUuid(req.params.uuid);
+	var ok = sys && await doorserverModel.deleteSystem(sys.uuid);
+	await flash.setOne(req, ok ? 'success' : 'danger', ok ? 'Deleted ' + sys.system_id + '.' : 'Could not delete.');
+	res.redirect('/admin/doorserver');
 });
 
 export { router };
