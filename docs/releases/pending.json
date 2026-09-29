@@ -2,6 +2,12 @@
   "steps": [],
   "notices": [
     {
+      "id": "doorserver-off",
+      "level": "info",
+      "from_max": "0.9.12a",
+      "text": "This release closes a hole that let anyone who could reach your board's web address start your door games. The door server is now off until you turn on doorserver_enabled, only BBSes you register can connect, and they can run only the doors you mark Available to Door Server. If you deactivated the Doorserver pool under Admin > Flows to close the hole, you can leave it that way, or make it active again before switching the door server on. See docs/sysop/DOORSERVER.md."
+    },
+    {
       "id": "freq-filebox-shared-dir",
       "level": "info",
       "from_max": "0.9.12a",

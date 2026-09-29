@@ -52,6 +52,13 @@
 - **New private mail no longer shows in the notification bell on the web,** since the mail icon already counts it. Callers still see new mail in the terminal's notification list, and reading or deleting the message, on the web, in the terminal, in a mail client or in a QWK packet, now clears it there.
 - Fix: **finishing the web call flow, or posting to the wall from it, returned an error when the request carried no form data.** Browsers always send some, so this was only seen from scripts; the call flow now finishes normally either way.
 
+### Upgrade Notes
+
+- **The door server is off** until you turn on `doorserver_enabled`. A Doorserver pool you deactivated to close the hole on 0.9.12a can stay that way; make it active again before switching the door server on.
+- **Repair garbled messages already stored** with `node src/tools/maintenance.js --fix-charset --dry-run`, then without `--dry-run`, with the worker running. `--revert-charset` puts everything back.
+- **If `freq_filebox_dir` is still `ftn/filebox`,** move the files you mean to offer into `ftn/freq` and point the setting there, so the per-peer fileboxes cannot be requested.
+- **The `netmail_in` and `netmail_out` tables are removed** only if empty; the update says so if it keeps yours.
+
 ## v0.9.12a (2026-09-27)
 
 ### Updates
