@@ -13,6 +13,10 @@ import * as flash from '../middleware/db/flash.js';
 import * as doorserver from '../models/doorserver.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+var ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 var router = express.Router();
 var urlencodedParser = express.urlencoded({ extended: false });
@@ -43,6 +47,16 @@ router.get('/', async (req, res) => {
 		registerSecurity: appConfig.getNumber('doorserver_register_security', 100),
 		boardAddress: (req.protocol === 'https' ? 'wss://' : 'ws://') + req.get('host') + '/ws/doorserver'
 	});
+});
+
+// The client other BBS software runs (bin/doorclient.js), for anyone who may
+// register or already has a registration: they may not run Canectic.
+router.get('/doorclient.js', async (req, res) => {
+	var user = await currentUser(req);
+	if (!user) return res.redirect('/users/login');
+	var mine = await doorserver.getForOwner(parseInt(user.id));
+	if (!mine.length && !doorserver.mayRegister(user)) return res.status(403).send('Not available');
+	res.download(path.join(ROOT, 'bin', 'doorclient.js'), 'doorclient.js');
 });
 
 router.post('/register', urlencodedParser, async (req, res) => {

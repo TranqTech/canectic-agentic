@@ -58,6 +58,18 @@ block content
 										.col-12
 											button.btn.btn-sm.btn-warning(type="submit") Save
 
+				if systems.length || mayRegister
+					h4.mt-4 Connecting your BBS
+					p
+						| Download 
+						a(href='/doorserver/doorclient.js') doorclient.js
+						|  (one file; it needs Node 22 or later and nothing else) and set it up as a standard-I/O door on your BBS, passing the drop file your BBS writes:
+					pre.bg-dark.text-light.p-2.small
+						| node doorclient.js --server #{boardAddress} \
+						|   --system #{systems.length ? systems[0].system_id : 'YOUR_ID'} --secret-file /path/to/secret \
+						|   --dropfile /path/to/DOOR32.SYS
+					p.small.text-muted
+						| Add #[code --door SLUG] to go straight to one door, #[code --encoding utf8] for a UTF-8 terminal, or run it once with #[code --list] to see the doors on offer. Another Canectic board does not need this: it can add this board as a remote door server.
 				if mayRegister
 					h4.mt-4 Register a BBS
 					if !autoApprove
