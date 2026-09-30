@@ -73,7 +73,7 @@ describe('where the baseline comes from', function () {
 
 describe('nothing moves a pointer any more', function () {
 	var consumers = [
-		'src/routes/files.js', 'src/routes/callflow.js',
+		'src/routes/files.js', 'src/webBlocks/newFiles.js',
 		'src/handlers/menucommands/fileBrowser.js', 'src/handlers/menucommands/fileAreaSelector.js',
 		'src/handlers/menucommands/fileNewscan.js'
 	];

@@ -2,7 +2,7 @@
 
 A guided login experience for web users, mirroring the terminal call flow. Walks users through what's new since their last visit rather than dropping them on a static home page.
 
-**Status: implemented** (`src/routes/callflow.js`, mounted at `/callflow`; views in `src/views/callflow/`; trigger rule in `src/utils/callflowTrigger.js`). The build adds a Welcome stage and a News stage to the sequence below, and `POST /callflow/complete` answers JSON rather than redirecting; details inline.
+**Status: implemented** (`src/routes/callflow.js`, mounted at `/callflow`; stages are web blocks in `src/webBlocks/`; views in `src/views/callflow/`; trigger rule in `src/utils/callflowTrigger.js`). The build adds a Welcome stage and a News stage to the sequence below, and `POST /callflow/complete` answers JSON rather than redirecting; details inline. The stage order is still fixed (`DEFAULT_WEB_FLOW`); making it a sysop-editable flow is #91 phase 2, see "Stages are web blocks" below.
 
 ## Entry Modes
 
@@ -93,9 +93,10 @@ This keeps the server logic simple (one JSON endpoint + partials per stage) and 
 ```
 GET  /callflow              -- main page (layout + stage container + JS driver)
 GET  /callflow/stages.json  -- list of active stages for this user (pre-filtered)
-GET  /callflow/stage/:name  -- HTML partial for a specific stage (one route per stage:
-                               welcome, announcements, lastcallers, whosonline, wall,
-                               newsfiles, newmsgs, newfiles; rendered with layout: false)
+GET  /callflow/stage/:name  -- HTML partial for one web block (welcome, announcements,
+                               lastcallers, whosonline, wall, newsfiles, newmsgs,
+                               newfiles; rendered with layout: false). Unknown name 404,
+                               a block that needs a user 401 for a visitor
 POST /callflow/wall         -- post a wall message inline (AJAX), answers { status }
 POST /callflow/complete     -- mark call flow complete, clear flags, answer { redirect: <url> }
 ```
@@ -169,11 +170,31 @@ The call flow page uses the standard user layout (nav bar, footer). The stage co
 
 Progress indicator (dots or step counter) shows position in the sequence.
 
+## Stages are web blocks (#91)
+
+Each stage is a block in `src/webBlocks/`, one file per block, registered in `src/webBlocks/index.js`. The same definitions are meant to serve the landing page (#87), which shows several blocks at once where the call flow shows one at a time. A block declares:
+
+| Field | Meaning |
+|-------|---------|
+| `name` | Stable identifier, the value stored in a flow. Never rename one |
+| `label` | Shown to the user and the sysop |
+| `view` | Pug partial rendered with `load()`'s result |
+| `requiresUser` | True when it means nothing to a visitor (announcements, newmsgs, newfiles) |
+| `available(ctx)` | Optional. `null` means nothing to show, skip the stage; an object is extra detail for the stage list (`count`, `areas`). Omitted means always shown |
+| `load(ctx)` | The view's locals |
+
+`available()` and `load()` are separate because the stage list is computed for every stage up front and must stay cheap; rendering news files reads each file from disk. `buildStageList(ctx, flow)` walks the flow in order, builds `{name, label, ...detail}` (detail cannot overwrite `name` or `label`), and leaves out and logs (level 1) a block that throws, so one broken query costs one stage instead of the whole call flow. An unknown name in a flow is skipped and logged at level 2.
+
+`createContext(req, user)` makes one context per request: `user`, `userId`, `nodeManager`, `lastCallflowAt()`, and `once(key, fn)`, which memoises the promise so blocks needing the same lookup (the newscan, the relevant announcements) share one query, including between `available()` and `load()` in the same request.
+
+`DEFAULT_WEB_FLOW` is the order the call flow has always had. Phase 2 of #91 replaces it with a seeded, editable flow (a `kind` column on `call_flows`); until then it is the flow. `tests/webBlocks.test.js` pins the order, labels, paths, and the failure isolation.
+
 ## Files to create/modify
 
 | File | Changes |
 |------|---------|
-| `src/routes/callflow.js` | New router: main page, stages.json, stage partials, wall post, complete |
+| `src/routes/callflow.js` | Router: main page, stages.json, `/stage/:name` from the block registry, wall post, complete |
+| `src/webBlocks/` | The stage definitions (added by #91): `index.js` registry, `context.js`, one file per block |
 | `src/views/callflow/index.pug` | Main page with stage container and JS driver |
 | `src/views/callflow/welcome.pug` | Welcome stage partial (added in the build) |
 | `src/views/callflow/announcements.pug` | Announcement stage partial |

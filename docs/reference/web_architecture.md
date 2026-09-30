@@ -62,7 +62,7 @@ Express 5 (`express` ^5.2.1) with the Pug view engine. Under Express 5 `req.body
 | `/pm` | `pmRouter` (`src/routes/pm.js`) | Private messaging — webmail UI, compose/reply with multer file attachments, attachment download (`/pm/attachment/:id` with ownership check), AJAX reader, admin undeliverable queue. See `PM_ARCHITECTURE.md`. |
 | `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
 | `/adminlogs` | `adminLogRouter` (`src/routes/adminLogs.js`) | Admin log viewer (plus the `/ws/adminlogs` socket) |
-| `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion |
+| `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion. Stages are web blocks from `src/webBlocks/` (see `WEB_CALLFLOW_DESIGN.md`) |
 
 There is no separate doors or notifications router: `/doors*` and `/notifications*` are routes in `index.js`. `GET /health` (DB and Redis ping, 503 when degraded) is defined directly in `webserver.js`, after the routers.
 

@@ -1,0 +1,57 @@
+// whosOnline.js -- Web block: terminal nodes in node order, then web users
+// who are not also on a node, alphabetically.
+
+import { getOnlineUsers } from '../middleware/webActivity.js';
+import { formatActivity } from '../utils/activityMap.js';
+
+export default {
+	name: 'whosonline',
+	label: "Who's Online",
+	view: 'callflow/whosonline',
+	requiresUser: false,
+
+	async load(ctx) {
+		var terminalNodes = [];
+		if (ctx.nodeManager) {
+			terminalNodes = ctx.nodeManager.getActiveNodes();
+			terminalNodes.sort(function(a, b) { return a.nodenum - b.nodenum; });
+		}
+
+		var webUsers = [];
+		try { webUsers = await getOnlineUsers(); } catch (_) {}
+
+		var onlineUsers = [];
+		var webNodeUsers = {};
+
+		for (var node of terminalNodes) {
+			if (node.web_originated && node.username) {
+				webNodeUsers[node.username.toLowerCase()] = true;
+			}
+			var connType = node.connection_type || '';
+			var connLabel = (connType === 'Websock' || connType === 'Websocket' || connType === 'TCP' || connType === 'Telnet')
+				? 'Terminal' : (connType || 'Unknown');
+			if (node.web_originated) connLabel = 'Web';
+
+			onlineUsers.push({
+				nodenum: node.nodenum,
+				username: node.username || '',
+				activity: formatActivity(node.status, node.detail, node.detail_display),
+				connection: connLabel
+			});
+		}
+
+		webUsers.sort(function(a, b) { return (a.username || '').localeCompare(b.username || ''); });
+		for (var wu of webUsers) {
+			if (!wu.username) continue;
+			if (webNodeUsers[wu.username.toLowerCase()]) continue;
+			onlineUsers.push({
+				nodenum: null,
+				username: wu.username,
+				activity: wu.activity || 'Browsing Web',
+				connection: 'Web'
+			});
+		}
+
+		return { onlineUsers: onlineUsers };
+	}
+};

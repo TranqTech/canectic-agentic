@@ -69,6 +69,10 @@ describe('friendly dates (#59)', function () {
 			var rp = path.join(ROOT, 'src/routes', r);
 			if (fs.existsSync(rp)) files.push(rp);
 		}
+		// Web blocks (#91) load what the call flow and landing page show
+		for (var wb of fs.readdirSync(path.join(ROOT, 'src/webBlocks'))) {
+			if (/\.js$/.test(wb)) files.push(path.join(ROOT, 'src/webBlocks', wb));
+		}
 		files.push(path.join(ROOT, 'public/js/maintenanceBanner.js'));
 		var offenders = [];
 		for (var file of files) {
