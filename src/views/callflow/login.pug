@@ -1,0 +1,25 @@
+//- Log In block: the same form the login page posts (/users/login)
+if !loggedIn
+  .card.mb-3
+    .card-header.bg-primary
+      i.bi.bi-box-arrow-in-right.me-2
+      | Log In
+    .card-body
+      form(action='/users/login' method='POST')
+        input(type='hidden' name='redirect' value='/')
+        .row.g-2
+          .col-md-6
+            label.form-label(for='blk_login_user') User Name
+            input.form-control#blk_login_user(type='text' name='username' required autocomplete='username')
+          .col-md-6
+            label.form-label(for='blk_login_pass') Password
+            input.form-control#blk_login_pass(type='password' name='password' required autocomplete='current-password')
+        .form-check.mt-2
+          input.form-check-input#blk_login_remember(type='checkbox' name='remember_me')
+          label.form-check-label(for='blk_login_remember') Remember Me (#{rememberDays} Days)
+        .d-flex.justify-content-between.align-items-end.mt-3
+          small
+            | No account? #[a(href='/users/register') Register Now]
+            br
+            a(href='/users/forgot') Forgot Password?
+          button.btn.btn-primary(type='submit') Log In

@@ -66,7 +66,7 @@ describe('web blocks: the registry', function () {
 	it('blocks that mean nothing to a visitor say so', function () {
 		var needUser = webBlocks.listBlocks().filter(function (b) { return b.requiresUser; })
 			.map(function (b) { return b.name; }).sort();
-		assert.deepStrictEqual(needUser, ['announcements', 'newfiles', 'newmail', 'newmsgs', 'verifymail']);
+		assert.deepStrictEqual(needUser, ['newfiles', 'newmail', 'newmsgs', 'verifymail']);
 	});
 
 	it('an unknown name is a miss, including names every object has', function () {
@@ -176,7 +176,7 @@ describe('web blocks: the call flow routes', function () {
 	});
 
 	it('a stage that needs a user refuses a visitor', async function () {
-		for (var n of ['announcements', 'newmsgs', 'newfiles']) {
+		for (var n of ['newmsgs', 'newfiles', 'newmail', 'verifymail']) {
 			assert.strictEqual((await fetch(base + '/callflow/stage/' + n)).status, 401, n);
 		}
 	});

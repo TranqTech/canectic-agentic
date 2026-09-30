@@ -210,7 +210,34 @@ async function usesOf(id) {
 	if ((stages || []).some(function (s) { return s && s.stage === 'page' && s.options && Number(s.options.page) === Number(id); })) {
 		uses.push('the web call flow');
 	}
+	// The home page layouts. The table is newer than web_pages, so a board
+	// whose database update has not created it has no home page uses
+	try {
+		var homes = await postgres.query('SELECT audience, blocks FROM web_home_layouts', []) || [];
+		for (var h of homes) {
+			var blocks = typeof h.blocks === 'string' ? JSON.parse(h.blocks) : h.blocks;
+			if ((blocks || []).some(function (s) { return s && s.stage === 'page' && s.options && Number(s.options.page) === Number(id); })) {
+				uses.push(h.audience === 'users' ? 'the home page for logged-in users' : 'the home page for visitors');
+			}
+		}
+	} catch (_) { /* no layouts table yet */ }
 	return uses;
+}
+
+/**
+ * For a list of web blocks about to be saved (a call flow or a home page
+ * layout): an error for each Page block naming a page that does not exist.
+ * The catalog cannot check this, since it reads no database. A draft is
+ * fine: the block is simply skipped while it is one.
+ */
+async function missingPages(stages) {
+	var errors = [];
+	for (var st of stages || []) {
+		if (!st || st.stage !== 'page' || !st.options) continue;
+		var row = await postgres.queryOne('SELECT id FROM web_pages WHERE id = $1', [st.options.page]);
+		if (!row) errors.push('Page: there is no page ' + st.options.page + ' (it may have been removed)');
+	}
+	return errors;
 }
 
 async function deletePage(id) {
@@ -241,5 +268,6 @@ export {
 	createPage,
 	updatePage,
 	usesOf,
+	missingPages,
 	deletePage
 };

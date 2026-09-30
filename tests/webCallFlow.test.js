@@ -131,7 +131,7 @@ describe('web call flow: the terminal side is kept apart', function () {
 		// safe; but it should be a decision, so a new one fails here first.
 		var terminal = new Set(callFlows.getAvailableStages().map(function (s) { return s.name; }).concat(callFlows.TERMINAL_EXTRA_STAGES));
 		var shared = catalog.CATALOG.map(function (e) { return e.name; }).filter(function (n) { return terminal.has(n); });
-		assert.deepStrictEqual(shared.sort(), ['announcements', 'bulletins', 'sysinfo', 'wall']);
+		assert.deepStrictEqual(shared.sort(), ['announcements', 'bulletins', 'login', 'sysinfo', 'wall']);
 		// ...and each kind still refuses the other's stages
 		assert.deepStrictEqual(catalog.normaliseWebStages(['check_email']).errors, ['Not a web stage: check_email']);
 		assert.deepStrictEqual(callFlows.normaliseTerminalStages(['welcome']).errors, ['welcome is a web stage; a terminal flow cannot use it']);

@@ -41,6 +41,7 @@ import * as callFlowsModel from '../models/callFlows.js';
 import * as webBlockCatalog from '../webBlocks/catalog.js';
 import * as webNavModel from '../models/webNav.js';
 import * as webPagesModel from '../models/webPages.js';
+import * as webHomeModel from '../models/webHome.js';
 import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as managedNodes from '../models/managedNodes.js';
@@ -7253,6 +7254,45 @@ router.get('/inbound-log', requireAdmin, async (req, res) => {
 // -------------------------------------------------------
 
 // -------------------------------------------------------
+// Home page (#87, #91 phase 5): web block layouts for visitors and users
+// -------------------------------------------------------
+
+router.get('/webhome', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var layouts = {};
+	for (var a of webHomeModel.AUDIENCES) layouts[a.value] = await webHomeModel.getLayout(a.value);
+	res.locals.flash = await flash.get(req);
+	res.render('admin/webhome/index', {
+		sufficientAccess: checkAdminAccess(currentuser), title: 'Home Page', activelink: 'webhome', activenav: 'content',
+		currentuser, layouts,
+		audiences: webHomeModel.AUDIENCES,
+		displays: webHomeModel.DISPLAYS,
+		webStages: webBlockCatalog.CATALOG,
+		describeWebOptions: webBlockCatalog.describeOptions,
+		webCatalogEntry: webBlockCatalog.catalogEntry,
+		webPagesList: await webPagesModel.getAllPages().catch(function () { return []; })
+	});
+});
+
+router.post('/webhome/:audience/blocks', express.json(), requireAdmin, async (req, res) => {
+	if (!req.body || !Array.isArray(req.body.stages)) {
+		return res.status(400).json({ status: false, errormessages: ['Blocks must be a list'] });
+	}
+	var result = await webHomeModel.saveLayout(req.params.audience, { blocks: req.body.stages });
+	res.json({ status: !!result.status, errormessages: result.errormessages || [] });
+});
+
+router.post('/webhome/:audience/display', urlencodedParser, requireAdmin, async (req, res) => {
+	await flashModelResult(req, await webHomeModel.saveLayout(req.params.audience, { display: req.body.display }), 'Home page saved.');
+	res.redirect('/admin/webhome');
+});
+
+router.post('/webhome/:audience/reset', urlencodedParser, requireAdmin, async (req, res) => {
+	await flashModelResult(req, await webHomeModel.resetLayout(req.params.audience), 'Home page put back as it was.');
+	res.redirect('/admin/webhome');
+});
+
+// -------------------------------------------------------
 // Web pages (#91 phase 4): sysop-written pages at /page/<slug>
 // -------------------------------------------------------
 
@@ -7389,7 +7429,9 @@ router.get('/callflows', requireAdmin, async (req, res) => {
 		describeWebOptions: webBlockCatalog.describeOptions,
 		webCatalogEntry: webBlockCatalog.catalogEntry,
 		callflowEnabled: appConfig.getBoolean('callflow_enabled', true),
-		webPagesList: await webPagesModel.getAllPages().catch(function () { return []; })
+		webPagesList: await webPagesModel.getAllPages().catch(function () { return []; }),
+		// Everyone in the call flow is logged in, so the Log In block has no place there
+		callflowBlocks: webBlockCatalog.CATALOG.map(function (e) { return e.name; }).filter(function (n) { return n !== 'login'; })
 	});
 });
 

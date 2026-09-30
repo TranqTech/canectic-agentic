@@ -568,3 +568,14 @@ span[style*="color: rgb(1, 1, 1)"] {
 .dash-card:hover i.bi {
 	color: #fff;
 }
+
+/* Bulletins web block (call flow and home page): Bootstrap paints an open
+   accordion header in pale primary, which the yellow title cannot be read on */
+#cf-bulletins .accordion-button:not(.collapsed) {
+  background-color: #303030;
+  color: #fff;
+  box-shadow: none;
+}
+#cf-bulletins .accordion-button:not(.collapsed)::after {
+  filter: invert(1);
+}

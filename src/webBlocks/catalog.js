@@ -15,17 +15,22 @@ function countOption(fallback) {
 
 var CATALOG = Object.freeze([
 	{
-		name: 'welcome', label: 'Welcome', requiresUser: false,
+		name: 'welcome', label: 'Welcome', icon: 'house', requiresUser: false,
 		hint: 'Greeting with a random piece of web art.',
 		options: []
 	},
 	{
-		name: 'announcements', label: 'Announcements', requiresUser: true,
-		hint: 'Shown when there is an announcement new since their last visit, or a pinned one.',
-		options: []
+		name: 'announcements', label: 'Announcements', icon: 'megaphone', requiresUser: false,
+		hint: 'Announcements new since their last visit plus pinned ones, or every current one. Shown only when there are some.',
+		options: [
+			{ key: 'show', label: 'Show', type: 'select', default: 'new', choices: [
+				{ value: 'new', label: 'New since their last visit, and pinned ones' },
+				{ value: 'all', label: 'Every current announcement' }
+			] }
+		]
 	},
 	{
-		name: 'lastcallers', label: 'Last Callers', requiresUser: false,
+		name: 'lastcallers', label: 'Last Callers', icon: 'people', requiresUser: false,
 		hint: 'The most recent callers, terminal and web.',
 		options: [
 			{ key: 'show', label: 'Show', type: 'select', default: 'always', choices: [
@@ -36,7 +41,7 @@ var CATALOG = Object.freeze([
 		]
 	},
 	{
-		name: 'whosonline', label: "Who's Online", requiresUser: false,
+		name: 'whosonline', label: "Who's Online", icon: 'broadcast', requiresUser: false,
 		hint: 'Terminal nodes and web users online now.',
 		options: [
 			{ key: 'show', label: 'Show', type: 'select', default: 'always', choices: [
@@ -46,7 +51,7 @@ var CATALOG = Object.freeze([
 		]
 	},
 	{
-		name: 'wall', label: 'The Wall', requiresUser: false,
+		name: 'wall', label: 'The Wall', icon: 'chat-square-text', requiresUser: false,
 		hint: 'Recent wall messages, with the post box for users allowed to post.',
 		options: [
 			{ key: 'show', label: 'Show', type: 'select', default: 'always', choices: [
@@ -57,22 +62,22 @@ var CATALOG = Object.freeze([
 		]
 	},
 	{
-		name: 'newsfiles', label: 'News', requiresUser: false,
+		name: 'newsfiles', label: 'News', icon: 'newspaper', requiresUser: false,
 		hint: 'Active news and score files. Shown only when there are some.',
 		options: []
 	},
 	{
-		name: 'newmsgs', label: 'New Messages', requiresUser: true,
+		name: 'newmsgs', label: 'New Messages', icon: 'envelope-open', requiresUser: true,
 		hint: 'Unread messages in their subscribed areas. Shown only when there are some.',
 		options: []
 	},
 	{
-		name: 'newfiles', label: 'New Files', requiresUser: true,
+		name: 'newfiles', label: 'New Files', icon: 'file-earmark-arrow-down', requiresUser: true,
 		hint: 'Files new since their previous visit in subscribed file areas. Shown only when there are some.',
 		options: []
 	},
 	{
-		name: 'bulletins', label: 'Bulletins', requiresUser: false,
+		name: 'bulletins', label: 'Bulletins', icon: 'journal-text', requiresUser: false,
 		hint: 'Your bulletins, each opening in place; ones new or changed since their last visit are opened already. Shown only when there are some.',
 		options: [
 			{ key: 'show', label: 'Show', type: 'select', default: 'always', choices: [
@@ -82,25 +87,30 @@ var CATALOG = Object.freeze([
 		]
 	},
 	{
-		name: 'sysinfo', label: 'System Info', requiresUser: false,
+		name: 'sysinfo', label: 'System Info', icon: 'info-circle', requiresUser: false,
 		hint: 'Board name, sysop, location, version, and counts of users, calls, areas and files.',
 		options: []
 	},
 	{
-		name: 'newmail', label: 'New Mail', requiresUser: true,
+		name: 'newmail', label: 'New Mail', icon: 'envelope', requiresUser: true,
 		hint: 'Their unread private mail, with a button to open it. Shown only when there is some.',
 		options: [countOption(5)]
 	},
 	{
-		name: 'verifymail', label: 'Verify Address', requiresUser: true,
+		name: 'verifymail', label: 'Verify Address', icon: 'shield-exclamation', requiresUser: true,
 		hint: 'Asks them to verify their mail address, with a button to do it. Shown only to users who have not.',
+		options: []
+	},
+	{
+		name: 'login', label: 'Log In', icon: 'box-arrow-in-right', requiresUser: false,
+		hint: 'A login form with links to register and to reset a password. Shown only to visitors who are not logged in.',
 		options: []
 	},
 	{
 		// One of the sysop's Web Pages, shown as a stage: the web counterpart
 		// of the terminal's Display Screen. It may appear more than once, one
 		// page each, so "repeatable" names the setting that tells them apart.
-		name: 'page', label: 'Page', requiresUser: false, repeatable: 'page',
+		name: 'page', label: 'Page', icon: 'file-earmark-richtext', requiresUser: false, repeatable: 'page',
 		hint: 'One of your Web Pages. Shown only to those allowed to read that page; add it more than once for more pages.',
 		options: [
 			{ key: 'page', label: 'Page', type: 'page', default: null }

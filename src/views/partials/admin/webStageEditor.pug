@@ -1,0 +1,67 @@
+//- The web block list editor (#91): the web call flow on /admin/callflows
+//- and the home page layouts on /admin/webhome. One of these per list, and
+//- webStageEditorAssets once per page.
+//-
+//- Needs locals: webStages (the catalog), webCatalogEntry, describeWebOptions,
+//- webPagesList. Saves POST { stages } as JSON to saveUrl; the page reloads
+//- to show what was stored, after saying why when it was refused.
+
+mixin webStageList(stages, saveUrl, allowed)
+  - var inList = (stages || []).map(function(x) { return typeof x === 'string' ? x : x.stage; })
+  .web-stage-editor(data-save-url=saveUrl)
+    .wstage-badges
+      each stg, idx in (stages || [])
+        - var wName = typeof stg === 'string' ? stg : (stg.stage || '')
+        - var wEntry = webCatalogEntry(wName)
+        - var wOpts = (typeof stg === 'object' && stg.options) ? stg.options : {}
+        - var wDesc = describeWebOptions(wEntry, wOpts)
+        //- A Page block is named by its page
+        - var wPage = wName === 'page' ? (webPagesList || []).find(function(p) { return p.id === Number(wOpts.page); }) : null
+        .badge.bg-info.text-dark.me-1.mb-1.wstage-badge.p-2(
+          draggable='true'
+          data-stage=wName
+          data-options=JSON.stringify(wOpts)
+          title=(wEntry ? wEntry.hint : 'Unknown block')
+          style='cursor:grab;font-size:0.85rem'
+        )
+          span.me-1= (idx + 1) + '.'
+          if wName === 'page'
+            | Page: #{wPage ? wPage.title : 'removed'}
+            if wPage && !wPage.active
+              small.ms-1.text-warning (draft, skipped)
+          else
+            = wEntry ? wEntry.label : wName
+          if wDesc
+            small.ms-1.text-muted (#{wDesc})
+          |
+          if wEntry && wEntry.options.length > 0
+            span.wstage-options.ms-1(style='cursor:pointer;opacity:0.6' title='Settings' data-bs-toggle='modal' data-bs-target='#stageOptionsModal')
+              i.bi.bi-gear-fill(style='font-size:0.7rem')
+          span.wstage-remove.ms-1(style='cursor:pointer;opacity:0.6' title='Remove') &times;
+      if !stages || stages.length === 0
+        p.small.text-muted.mb-0 Nothing here yet: add a block below.
+    .mt-2
+      .input-group.input-group-sm(style='max-width:420px')
+        select.form-select.form-select-sm.wstage-add-select
+          option(value='') + Add...
+          each w in webStages
+            if (!allowed || allowed.indexOf(w.name) !== -1) && (w.repeatable || inList.indexOf(w.name) === -1)
+              option(value=w.name title=w.hint)= w.label + (w.repeatable ? ' (one of your Web Pages)' : '')
+        button.btn.btn-sm.btn-success.wstage-add-btn(type='button') Add
+
+mixin webStageEditorAssets()
+  .modal.fade#stageOptionsModal(tabindex='-1')
+    .modal-dialog
+      .modal-content
+        .modal-header
+          h5.modal-title#soTitle Settings
+          button.btn-close(type='button' data-bs-dismiss='modal')
+        .modal-body
+          p.small.text-muted#soHint
+          #soFields
+        .modal-footer
+          button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+          button.btn.btn-primary#soSave(type='button') Save
+  script#webStageCatalog(type='application/json')!= JSON.stringify(webStages).replace(/</g, '\\u003c')
+  script#webPagesList(type='application/json')!= JSON.stringify((webPagesList || []).map(function(p) { return { id: p.id, title: p.title, active: p.active }; })).replace(/</g, '\\u003c')
+  script(src='/js/webStageEditor.js')

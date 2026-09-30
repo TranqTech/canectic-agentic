@@ -158,16 +158,6 @@ block content
     })();
 
   style.
-    /* Bulletins stage: Bootstrap paints an open accordion header in pale
-       primary, which the yellow title cannot be read on */
-    #cf-bulletins .accordion-button:not(.collapsed) {
-      background-color: #303030;
-      color: #fff;
-      box-shadow: none;
-    }
-    #cf-bulletins .accordion-button:not(.collapsed)::after {
-      filter: invert(1);
-    }
     #cf-stage-container {
       transition: opacity 0.15s ease-in-out;
       min-height: 200px;

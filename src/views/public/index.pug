@@ -11,44 +11,58 @@ block content
       .col-12.col-lg-8
         h1.mb-4= title
 
-        ul.nav.nav-tabs.mb-3(role='tablist')
-          li.nav-item(role='presentation')
-            button.nav-link.active#ann-tab(data-bs-toggle='tab' data-bs-target='#ann-pane' type='button' role='tab' aria-controls='ann-pane' aria-selected='true')
-              i.bi.bi-megaphone.me-1
-              | Announcements
-          if currentuser
-            li.nav-item(role='presentation')
-              button.nav-link#wall-tab(data-bs-toggle='tab' data-bs-target='#wall-pane' type='button' role='tab' aria-controls='wall-pane' aria-selected='false')
-                i.bi.bi-chat-square-text.me-1
-                | The Wall
+        //- blocks: the sysop's layout for this visitor (/admin/webhome),
+        //- already rendered, each with its label and icon
+        if !blocks || blocks.length === 0
+          .card
+            .card-header.bg-darkblue.text-white
+              | Welcome
+            .card-body
+              p Welcome to #{title}. There are no announcements at this time.
+        else if display === 'stacked'
+          each b in blocks
+            .home-block.mb-3(data-block=b.name)!= b.html
+        else
+          ul.nav.nav-tabs.mb-3(role='tablist')
+            each b, i in blocks
+              li.nav-item(role='presentation')
+                button.nav-link(
+                  id='home-tab-' + i
+                  class=i === 0 ? 'active' : ''
+                  data-bs-toggle='tab'
+                  data-bs-target='#home-pane-' + i
+                  type='button'
+                  role='tab'
+                  aria-controls='home-pane-' + i
+                  aria-selected=i === 0 ? 'true' : 'false'
+                )
+                  if b.icon
+                    i.bi.me-1(class='bi-' + b.icon)
+                  = b.label
+          .tab-content
+            each b, i in blocks
+              .tab-pane.fade.home-block(
+                id='home-pane-' + i
+                class=i === 0 ? 'show active' : ''
+                role='tabpanel'
+                aria-labelledby='home-tab-' + i
+                data-block=b.name
+              )!= b.html
 
-        .tab-content
-          #ann-pane.tab-pane.fade.show.active(role='tabpanel' aria-labelledby='ann-tab')
-            if announcements && announcements.length > 0
-              each ann in announcements
-                .card.mb-3
-                  .card-header.bg-darkblue.text-white
-                    if ann.pinned
-                      span.badge.bg-warning.me-2 Pinned
-                    = ann.title
-                  .card-body.bg-black(style=themeTextColour ? 'color: ' + themeTextColour : '')
-                    if ann.body_html
-                      != ann.body_html
-                    else if ann.body_text
-                      p= ann.body_text
-                  .card-footer.text-muted
-                    small
-                      | Posted by #{ann.author_name || 'System'}
-                      if ann.created_at
-                        | , 
-                        +when(ann.created_at)
-            else
-              .card
-                .card-header.bg-darkblue.text-white
-                  | Welcome
-                .card-body
-                  p Welcome to #{title}. There are no announcements at this time.
-
-          if currentuser
-            #wall-pane.tab-pane.fade(role='tabpanel' aria-labelledby='wall-tab')
-              include ../partials/wall
+  script.
+    // The Wall block's post box, as the call flow page wires it
+    (function() {
+      var form = document.getElementById('cf-wall-form');
+      if (!form) return;
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var input = document.getElementById('cf-wall-input');
+        var text = (input ? input.value : '').trim();
+        if (!text) return;
+        fetch('/callflow/wall', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'message=' + encodeURIComponent(text)
+        }).then(function() { location.reload(); });
+      });
+    })();

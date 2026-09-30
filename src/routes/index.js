@@ -151,6 +151,8 @@ function resolvePostName(sessionUser, msgArea) {
 
 // Access check helpers — shared with qwkUser.js and other consumers
 import { parseFlags, checkAreaReadAccess, checkAreaPostAccess, canModerateArea } from '../utils/areaAccess.js';
+import * as webHome from '../models/webHome.js';
+import * as webBlocks from '../webBlocks/index.js';
 
 /* GET home page. */
 router.get('/', async function(req, res, next) {
@@ -165,11 +167,17 @@ router.get('/', async function(req, res, next) {
 	return res.redirect('/callflow');
   }
 
-  var activeAnnouncements = await announcements.getActiveAnnouncements(10);
-  var wallMessages = await getWallMessages(15);
-  var theme = await getDefaultTheme();
-  var themeTextColour = resolveWebColour(theme, 'announcements');
-  res.render('public/index', { title: appConfig.get('boardname'), announcements: activeAnnouncements, wallMessages: wallMessages, themeTextColour: themeTextColour });
+  // The sysop's home page (#87, #91): web blocks laid out for visitors or
+  // for logged-in users, at /admin/webhome. Each block renders its own
+  // partial with the app's view engine, so it gets res.locals as a page does.
+  var layout = await webHome.getLayout(currentuser ? 'users' : 'public');
+  var ctx = webBlocks.createContext(req, currentuser);
+  var blocks = await webBlocks.renderBlocks(ctx, layout.blocks, function(view, locals) {
+	return new Promise(function(resolve, reject) {
+		res.render(view, locals, function(err, html) { return err ? reject(err) : resolve(html); });
+	});
+  });
+  res.render('public/index', { title: appConfig.get('boardname'), blocks: blocks, display: layout.display });
 });
 
 // -------------------------------------------------------

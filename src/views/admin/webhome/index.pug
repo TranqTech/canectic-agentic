@@ -1,0 +1,42 @@
+extends ../../layouts/admin
+include ../../partials/admin/webStageEditor
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-2
+          i.bi.bi-house.me-2
+          | Home Page
+        p.text-muted
+          | What the website's home page shows, from the same blocks as the web call flow: one layout for visitors who are not logged in, one for logged-in users. A block with nothing to show is left out. Changes show at once.
+          |  For pages of your own (how to connect, house rules), write them under #[a(href='/admin/webpages') Web Pages] and add a Page block.
+        include ../../partials/flash
+
+        each a in audiences
+          - var layout = layouts[a.value]
+          .card.mb-4
+            .card-header.bg-primary
+              .d-flex.justify-content-between.align-items-center
+                h5.mb-0= a.label
+                if layout.isDefault
+                  span.badge.bg-secondary As shipped
+            .card-body
+              +webStageList(layout.blocks, '/admin/webhome/' + a.value + '/blocks', null)
+              hr
+              .d-flex.flex-wrap.gap-3.align-items-end
+                form.d-flex.gap-2.align-items-end(method='POST' action='/admin/webhome/' + a.value + '/display')
+                  div
+                    label.form-label.small.mb-1(for='display-' + a.value) Show the blocks as
+                    select.form-select.form-select-sm(id='display-' + a.value name='display')
+                      each d in displays
+                        option(value=d.value selected=layout.display === d.value)= d.label
+                  button.btn.btn-sm.btn-outline-primary(type='submit') Save
+                if !layout.isDefault
+                  form(method='POST' action='/admin/webhome/' + a.value + '/reset')
+                    button.btn.btn-sm.btn-outline-secondary(type='submit' onclick='return confirm("Put this home page back as it was shipped?")') Put back as shipped
+              if a.value === 'public'
+                p.small.text-muted.mt-3.mb-0 Blocks that only mean something to a logged-in user (New Messages, New Mail and so on) are never shown here, even if added.
+
+    +webStageEditorAssets()

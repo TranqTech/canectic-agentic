@@ -15,6 +15,11 @@
       "id": "web-navigation-editable",
       "level": "info",
       "text": "The links across the top of the website are now edited under Menus > Web Navigation in the admin panel. They start out as they were (Messages, Files, Doors, Chat, Wall), so nothing changes until you edit them. If you had changed src/views/includes/user-nav.pug by hand, this update replaces it: make those changes on the new page instead. You can also write your own pages under Content > Web Pages, link them from the bar and show them in the web call flow. See docs/sysop/WEBSITE.md."
+    },
+    {
+      "id": "web-home-editable",
+      "level": "info",
+      "text": "The website's home page can now be laid out separately for visitors and for logged-in users, under Content > Home Page, from the same blocks as the web call flow, plus a login form for visitors. It starts out as it was (announcements, and the wall for users, as tabs), so nothing changes until you edit it. See docs/sysop/WEBSITE.md."
     }
   ],
   "min_upgrade_from": "0.9.0a",

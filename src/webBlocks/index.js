@@ -38,13 +38,14 @@ import bulletins from './bulletins.js';
 import sysInfo from './sysInfo.js';
 import newMail from './newMail.js';
 import verifyMail from './verifyMail.js';
+import login from './login.js';
 import page from './page.js';
 
 // Every catalog entry implemented, nothing implemented that is not in the
 // catalog: a flow is validated against the catalog and run against this.
 var BLOCKS = new Map();
 for (var block of [welcome, announcements, lastCallers, whosOnline, wall, newsFiles, newMessages, newFiles,
-	bulletins, sysInfo, newMail, verifyMail, page]) {
+	bulletins, sysInfo, newMail, verifyMail, login, page]) {
 	if (!catalogEntry(block.name)) throw new Error('webBlocks: ' + block.name + ' is not in the catalog');
 	if (BLOCKS.has(block.name)) throw new Error('webBlocks: duplicate block name ' + block.name);
 	BLOCKS.set(block.name, Object.freeze(block));
@@ -140,7 +141,46 @@ async function buildStageList(ctx, flow, registry) {
 	return stages;
 }
 
+/**
+ * Render a list of blocks for a page that shows several at once (the home
+ * page). Returns [{ name, label, icon, html }] for the blocks this visitor
+ * gets, in order. A block that needs a user is left out for a visitor, one
+ * with nothing to show is left out, and one that throws is left out and
+ * logged, so one broken block costs its own space, not the page.
+ *
+ * render(view, locals) -> Promise<html>: the app's view renderer.
+ */
+async function renderBlocks(ctx, items, render, registry) {
+	registry = registry || BLOCKS;
+	var out = [];
+	for (var item of items || []) {
+		var name = stageName(item);
+		var block = getBlock(name, registry);
+		if (!block) {
+			alogger.writeAlog(2, 'Web blocks: layout names unknown block "' + name + '", skipped', 'yellow');
+			continue;
+		}
+		if (block.requiresUser && !ctx.user) continue;
+		try {
+			var opts = optionsFor(block, item);
+			var detail = block.available ? await block.available(ctx, opts) : {};
+			if (!detail) continue;
+			var html = await render(block.view, Object.assign({ layout: false }, await block.load(ctx, opts)));
+			out.push({
+				name: block.name,
+				label: (detail && typeof detail.label === 'string' && detail.label) ? detail.label : block.label,
+				icon: block.icon || null,
+				html: html
+			});
+		} catch (err) {
+			alogger.writeAlog(1, 'Web blocks: ' + block.name + ' failed, left out: ' + (err && err.stack || err), 'redbright');
+		}
+	}
+	return out;
+}
+
 export {
+	renderBlocks,
 	BLOCKS,
 	DEFAULT_WEB_FLOW,
 	getBlock,

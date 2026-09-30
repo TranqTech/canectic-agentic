@@ -31,7 +31,7 @@ A stage with nothing to show is always skipped, whatever you set: nobody sees an
 | Stage | Shows | Settings |
 |-------|-------|----------|
 | Welcome | A greeting with a random piece of web art | none |
-| Announcements | Announcements posted since the user's last visit, plus any pinned announcement | none |
+| Announcements | Announcements posted since the user's last visit, plus any pinned announcement | **Show**: new since their last visit and pinned ones (the default here), or every current one (the home page's default) |
 | Last Callers | The most recent callers, terminal and web | **Show**: always, or only when someone else has called since the user's last visit. **How many**: 1 to 50, default 15 |
 | Who's Online | Terminal nodes and web users online now | **Show**: always, or only when someone else is online |
 | The Wall | Recent wall messages, with the post box for users allowed to post | **Show**: always, or only when someone else has posted since the user's last visit. **How many**: 1 to 50, default 15 |
@@ -43,6 +43,8 @@ A stage with nothing to show is always skipped, whatever you set: nobody sees an
 | New Mail | The user's unread private mail, newest first, with a **Go to Mail** button | **How many**: 1 to 50, default 5 (the count shown is always all of it). Shown only when there is unread mail |
 | Verify Address | Asks a user who has not verified their mail address to do it, with a **Verify Now** button and, when `unverified_retention_days` is set, how many days the account has left | none; shown only to users who have not verified |
 | Page | One of your Web Pages (see `WEBSITE.md`), labelled with its title. The web counterpart of the terminal's Display Screen | **Page**: which one. Can be added more than once, one page each. Skipped for anyone who may not read the page, and while it is a draft |
+
+The same blocks make up the home page (see `WEBSITE.md`), which has one more, **Log In**, not offered here since everyone in the call flow is logged in.
 
 The last five are not in the flow as shipped; add them from the list if you want them. Adding a Page stage picks the first of your pages not already in the flow; change it with the gear. Following **Go to Mail**, a message, or **Verify Now** finishes the call flow first and then goes there, so the user is not offered the flow again when they come back.
 
@@ -60,7 +62,7 @@ Terminal flows are listed on the same page. They use terminal stages (Terminal N
 
 The page will not save a change that would break callers, and it tells you why:
 
-- **A web stage in a terminal flow, or a terminal stage in the web flow.** The terminal side disconnects a caller when it reaches a stage it does not know. Four stage names exist on both sides (Announcements, Bulletins, System Info and The Wall), and each kind has its own version.
+- **A web stage in a terminal flow, or a terminal stage in the web flow.** The terminal side disconnects a caller when it reaches a stage it does not know. Five stage names exist on both sides (Announcements, Bulletins, Log In, System Info and The Wall), and each kind has its own version.
 - **A stage name the terminal side cannot run**, for example a typo in a flow's initial stages.
 - **A pool on the web flow.** Pools run terminal flows only; the Web flow is not offered in the pool form. Even if a pool somehow named it, terminal callers would get the Standard flow instead.
 - **A setting out of range**, such as asking Last Callers for 500.

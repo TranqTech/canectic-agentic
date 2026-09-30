@@ -18,6 +18,7 @@
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import { DEFAULT_WEB_FLOW, normaliseWebStages, catalogEntry } from '../webBlocks/catalog.js';
+import { missingPages } from './webPages.js';
 
 var FLOW_KINDS = Object.freeze(['terminal', 'web']);
 
@@ -224,18 +225,6 @@ function normaliseTerminalStages(input) {
 
 function normaliseStagesFor(kind, input) {
 	return kind === 'web' ? normaliseWebStages(input) : normaliseTerminalStages(input);
-}
-
-// A Page stage must name a page that exists; the catalog cannot know, since
-// it reads no database. Unpublished is fine: the stage is simply skipped.
-async function missingPages(stages) {
-	var errors = [];
-	for (var st of stages) {
-		if (st.stage !== 'page' || !st.options) continue;
-		var row = await postgres.queryOne('SELECT id FROM web_pages WHERE id = $1', [st.options.page]);
-		if (!row) errors.push('Page: there is no page ' + st.options.page + ' (it may have been removed)');
-	}
-	return errors;
 }
 
 function flowKind(row) {

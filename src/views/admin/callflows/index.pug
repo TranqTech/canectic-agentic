@@ -1,4 +1,5 @@
 extends ../../layouts/admin
+include ../../partials/admin/webStageEditor
 block content
   .container-fluid
     br
@@ -60,38 +61,9 @@ block content
                         | ; switch it with
                         code.ms-1 callflow_enabled
                         |  on the Configuration page.
-                    .stage-list(data-flow-id=flow.id data-kind=(isWeb ? 'web' : 'terminal'))
-                      if isWeb
-                        each stg, idx in stages
-                          - var wName = typeof stg === 'string' ? stg : (stg.stage || '')
-                          - var wEntry = webCatalogEntry(wName)
-                          - var wOpts = (typeof stg === 'object' && stg.options) ? stg.options : {}
-                          - var wDesc = describeWebOptions(wEntry, wOpts)
-                          //- A Page stage is named by its page
-                          - var wPage = wName === 'page' ? (webPagesList || []).find(function(p) { return p.id === Number(wOpts.page); }) : null
-                          .badge.bg-info.text-dark.me-1.mb-1.stage-badge.p-2(
-                            draggable='true'
-                            data-stage=wName
-                            data-options=JSON.stringify(wOpts)
-                            data-idx=idx
-                            title=(wEntry ? wEntry.hint : 'Unknown stage')
-                            style='cursor:grab;font-size:0.85rem'
-                          )
-                            span.me-1= (idx + 1) + '.'
-                            if wName === 'page'
-                              | Page: #{wPage ? wPage.title : 'removed'}
-                              if wPage && !wPage.active
-                                small.ms-1.text-warning (draft, skipped)
-                            else
-                              = wEntry ? wEntry.label : wName
-                            if wDesc
-                              small.ms-1.text-muted (#{wDesc})
-                            |
-                            if wEntry && wEntry.options.length > 0
-                              span.edit-stage-options.ms-1(style='cursor:pointer;opacity:0.6' title='Settings' data-bs-toggle='modal' data-bs-target='#stageOptionsModal')
-                                i.bi.bi-gear-fill(style='font-size:0.7rem')
-                            span.remove-stage.ms-1(style='cursor:pointer;opacity:0.6' title='Remove') &times;
-                      else
+                      +webStageList(stages, '/admin/callflows/' + flow.id + '/stages', callflowBlocks)
+                    else
+                      .stage-list(data-flow-id=flow.id data-kind='terminal')
                         each stg, idx in stages
                           - var stageName = typeof stg === 'string' ? stg : (stg.stage || '')
                           - var stageArg = typeof stg === 'object' && stg.arg ? stg.arg : ''
@@ -113,21 +85,14 @@ block content
                             span.edit-stage-arg.ms-1(style='cursor:pointer;opacity:0.6' title='Edit argument')
                               i.bi.bi-pencil-fill(style='font-size:0.7rem')
                             span.remove-stage(style='cursor:pointer;opacity:0.6' title='Remove') &times;
-                    .mt-2
-                      .input-group.input-group-sm(style='max-width:400px')
-                        select.form-select.form-select-sm.add-stage-select
-                          option(value='') + Add Stage...
-                          if isWeb
-                            //- A web stage appears once, so offer only those not in the flow
-                            - var inFlow = stages.map(function(x) { return typeof x === 'string' ? x : x.stage; })
-                            each w in webStages
-                              if w.repeatable || inFlow.indexOf(w.name) === -1
-                                option(value=w.name title=w.hint)= w.label + (w.repeatable ? ' (one of your Web Pages)' : '')
-                          else
+                      .mt-2
+                        .input-group.input-group-sm(style='max-width:400px')
+                          select.form-select.form-select-sm.add-stage-select
+                            option(value='') + Add Stage...
                             each s in availableStages
                               option(value=s.name data-needsarg=s.needsArg || false)= s.label
-                        input.form-control.form-control-sm.add-stage-arg(type='text' placeholder='arg' style='display:none;max-width:150px')
-                        button.btn.btn-sm.btn-success.add-stage-btn(type='button') Add
+                          input.form-control.form-control-sm.add-stage-arg(type='text' placeholder='arg' style='display:none;max-width:150px')
+                          button.btn.btn-sm.btn-success.add-stage-btn(type='button') Add
             else
               p.text-muted No call flows configured.
 
@@ -306,22 +271,7 @@ block content
               button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
               button.btn.btn-primary(type='submit') Save
 
-    //- Web stage settings modal: fields built from the stage's definition
-    .modal.fade#stageOptionsModal(tabindex='-1')
-      .modal-dialog
-        .modal-content
-          .modal-header
-            h5.modal-title#soTitle Stage settings
-            button.btn-close(type='button' data-bs-dismiss='modal')
-          .modal-body
-            p.small.text-muted#soHint
-            #soFields
-          .modal-footer
-            button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
-            button.btn.btn-primary#soSave(type='button') Save
-
-    script#webStageCatalog(type='application/json')!= JSON.stringify(webStages).replace(/</g, '\\u003c')
-    script#webPagesList(type='application/json')!= JSON.stringify((webPagesList || []).map(function(p) { return { id: p.id, title: p.title, active: p.active }; })).replace(/</g, '\\u003c')
+    +webStageEditorAssets()
 
     script.
       // Edit Flow modal
@@ -371,19 +321,7 @@ block content
           // Collect current stages
           var stageList = btn.closest('.card-body').querySelector('.stage-list');
           var stages = collectStages(stageList);
-          // Web stages take settings, not an argument
-          var newStage = (stageArg && stageList.dataset.kind !== 'web') ? { stage: stageName, arg: stageArg } : { stage: stageName };
-          // A Page stage needs a page: take the first not already in the flow,
-          // changed afterwards with its gear
-          if (stageList.dataset.kind === 'web' && stageName === 'page') {
-            var used = stages.filter(function(x) { return x.stage === 'page' && x.options; }).map(function(x) { return Number(x.options.page); });
-            var free = webPagesList.filter(function(p) { return used.indexOf(p.id) === -1; });
-            if (free.length === 0) {
-              alert(webPagesList.length ? 'Every one of your Web Pages is already in the flow.' : 'Write a page under Content > Web Pages first.');
-              return;
-            }
-            newStage.options = { page: free[0].id };
-          }
+          var newStage = stageArg ? { stage: stageName, arg: stageArg } : { stage: stageName };
           stages.push(newStage);
 
           saveStages(flowId, stages, stageList);
@@ -478,19 +416,14 @@ block content
         saveStages(flowId, stages, stageList);
       });
 
+      // Terminal flows only: the web flow's list is the shared editor
+      // (public/js/webStageEditor.js)
       function collectStages(stageList) {
         var badges = stageList.querySelectorAll('.stage-badge');
-        var isWeb = stageList.dataset.kind === 'web';
         var stages = [];
         badges.forEach(function(b) {
           var s = { stage: b.dataset.stage };
-          if (isWeb) {
-            var opts = {};
-            try { opts = JSON.parse(b.dataset.options || '{}'); } catch (_) {}
-            if (opts && Object.keys(opts).length > 0) s.options = opts;
-          } else if (b.dataset.arg) {
-            s.arg = b.dataset.arg;
-          }
+          if (b.dataset.arg) s.arg = b.dataset.arg;
           stages.push(s);
         });
         return stages;
@@ -516,88 +449,3 @@ block content
         });
       }
 
-      // Web stage settings
-      var webCatalog = [];
-      try { webCatalog = JSON.parse(document.getElementById('webStageCatalog').textContent); } catch (_) {}
-      var webPagesList = [];
-      try { webPagesList = JSON.parse(document.getElementById('webPagesList').textContent); } catch (_) {}
-      var optionsBadge = null;
-
-      var stageOptionsModal = document.getElementById('stageOptionsModal');
-      stageOptionsModal.addEventListener('show.bs.modal', function(e) {
-        optionsBadge = e.relatedTarget ? e.relatedTarget.closest('.stage-badge') : null;
-        var fields = document.getElementById('soFields');
-        fields.innerHTML = '';
-        if (!optionsBadge) return;
-        var entry = webCatalog.find(function(w) { return w.name === optionsBadge.dataset.stage; });
-        if (!entry) return;
-        var current = {};
-        try { current = JSON.parse(optionsBadge.dataset.options || '{}'); } catch (_) {}
-        document.getElementById('soTitle').textContent = entry.label + ' settings';
-        document.getElementById('soHint').textContent = entry.hint || '';
-        entry.options.forEach(function(def) {
-          var value = Object.prototype.hasOwnProperty.call(current, def.key) ? current[def.key] : def.default;
-          var wrap = document.createElement('div');
-          wrap.className = 'mb-3';
-          var label = document.createElement('label');
-          label.className = 'form-label';
-          label.textContent = def.label;
-          wrap.appendChild(label);
-          var input;
-          if (def.type === 'page') {
-            input = document.createElement('select');
-            input.className = 'form-select';
-            webPagesList.forEach(function(p) {
-              var o = document.createElement('option');
-              o.value = String(p.id);
-              o.textContent = p.title + (p.active ? '' : ' (draft)');
-              if (Number(value) === p.id) o.selected = true;
-              input.appendChild(o);
-            });
-          } else if (def.type === 'select') {
-            input = document.createElement('select');
-            input.className = 'form-select';
-            def.choices.forEach(function(c) {
-              var o = document.createElement('option');
-              o.value = c.value;
-              o.textContent = c.label;
-              if (c.value === value) o.selected = true;
-              input.appendChild(o);
-            });
-          } else {
-            input = document.createElement('input');
-            input.type = 'number';
-            input.className = 'form-control';
-            input.min = def.min;
-            input.max = def.max;
-            input.step = 1;
-            input.value = value;
-            var help = document.createElement('div');
-            help.className = 'form-text';
-            help.textContent = def.min + ' to ' + def.max + ', default ' + def.default;
-            wrap.appendChild(input);
-            wrap.appendChild(help);
-          }
-          input.dataset.key = def.key;
-          input.dataset.type = def.type;
-          input.dataset.default = String(def.default);
-          if (!input.parentNode) wrap.appendChild(input);
-          fields.appendChild(wrap);
-        });
-      });
-
-      document.getElementById('soSave').addEventListener('click', function() {
-        if (!optionsBadge) return;
-        // Only what differs from the default is stored, so a later change of
-        // default reaches every stage the sysop never touched
-        var opts = {};
-        document.querySelectorAll('#soFields [data-key]').forEach(function(input) {
-          var v = (input.dataset.type === 'number' || input.dataset.type === 'page') ? parseInt(input.value, 10) : input.value;
-          // Which page is never a default: it is what the stage is
-          if (input.dataset.type === 'page' || String(v) !== input.dataset.default) opts[input.dataset.key] = (input.dataset.type === 'number' && isNaN(v)) ? input.value : v;
-        });
-        optionsBadge.dataset.options = JSON.stringify(opts);
-        var stageList = optionsBadge.closest('.stage-list');
-        bootstrap.Modal.getInstance(stageOptionsModal).hide();
-        saveStages(stageList.dataset.flowId, collectStages(stageList), stageList);
-      });

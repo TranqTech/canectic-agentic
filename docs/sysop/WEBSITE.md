@@ -2,10 +2,23 @@
 
 What a sysop can change about the website without touching code. Everything here is edited in the admin panel and survives updates.
 
+- **Home page**: what the front page shows visitors and logged-in users (below).
 - **Navigation bar**: the links across the top (below).
 - **Web pages**: pages you write, each at its own address (below).
 - **Web call flow**: the tour of what is new that users get after logging in. See `CALLFLOWS.md`.
 - **Look**: colours and styles go in `public/css/custom.css`, which updates never overwrite; see `THEMES.md` for the theme colours the web shares with the terminal.
+
+## Home page
+
+Edited under **Content > Home Page** (`/admin/webhome`). There are two: one for visitors who are not logged in, and one for logged-in users, since someone finding the board for the first time needs different things (what the board is, how to connect, how to log in) from a caller coming back.
+
+Each is a list of blocks, the same ones the web call flow uses (see `CALLFLOWS.md` for what each shows and its settings), plus **Log In**, a login form with links to register and to reset a password, shown only to visitors. Add, remove, drag to reorder and change settings exactly as on the Call Flows page. A block with nothing to show is left out, and blocks that only mean something to a logged-in user (New Messages, New Mail and so on) are never shown on the visitors' page even if added.
+
+**Show the blocks as**: tabs, one block each (the home page as it has always been), or one above the other.
+
+As shipped, visitors see Announcements and logged-in users see Announcements and The Wall, as tabs: the home page as it was before it could be edited. Announcements on the home page is set to show every current announcement; in the call flow it shows only new and pinned ones, and either can be changed with its gear. **Put back as shipped** returns a layout to that.
+
+To put your own words on the home page (a welcome, how to connect, the rules), write a page under **Content > Web Pages** and add a **Page** block. If every block is empty, the home page shows a short welcome rather than nothing.
 
 ## Navigation bar
 

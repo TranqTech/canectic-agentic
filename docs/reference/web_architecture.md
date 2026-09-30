@@ -63,6 +63,7 @@ Express 5 (`express` ^5.2.1) with the Pug view engine. Under Express 5 `req.body
 | `/files` | `filesRouter` (`src/routes/files.js`) | File browsing -- group/area/file listing, file detail, download, JSON pagination |
 | `/adminlogs` | `adminLogRouter` (`src/routes/adminLogs.js`) | Admin log viewer (plus the `/ws/adminlogs` socket) |
 | `/callflow` | `callflowRouter` (`src/routes/callflow.js`) | Web login call flow -- AJAX stage sequence, wall post, completion. Stages are web blocks from `src/webBlocks/` (see `WEB_CALLFLOW_DESIGN.md`) |
+| `/` (home) | `indexRouter` (`src/routes/index.js`) | The home page: the sysop's layout for visitors or users (`web_home_layouts`, `src/models/webHome.js`, admin `/admin/webhome`) rendered by `webBlocks.renderBlocks` as tabs or stacked, after the existing redirect to `/callflow` when one is due (#87, see `WEB_CALLFLOW_DESIGN.md`) |
 | `/page` | `pagesRouter` (`src/routes/pages.js`) | Sysop Web Pages (#91 phase 4): `GET /page/:slug` from `web_pages`; unpublished or missing falls through to the 404, a visitor who could read it logged in is redirected to `/users/login?redirect=`, a logged-in user who may not is 403 (`status/unauthorized`). Body HTML is rendered as written (admin-authored, as bulletins) |
 
 There is no separate doors or notifications router: `/doors*` and `/notifications*` are routes in `index.js`. `GET /health` (DB and Redis ping, 503 when degraded) is defined directly in `webserver.js`, after the routers.
