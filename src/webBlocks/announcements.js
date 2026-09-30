@@ -1,6 +1,7 @@
 // announcements.js -- Web block: announcements new since the user's last
 // call flow, plus any pinned one whatever its age.
 
+import { catalogEntry } from './catalog.js';
 import * as announcementsModel from '../models/announcements.js';
 import { getDefaultTheme, resolveWebColour } from '../models/themes.js';
 
@@ -23,11 +24,8 @@ async function relevantAnnouncements(ctx) {
 	});
 }
 
-export default {
-	name: 'announcements',
-	label: 'Announcements',
+export default Object.assign({}, catalogEntry('announcements'), {
 	view: 'callflow/announcements',
-	requiresUser: true,
 
 	async available(ctx) {
 		var shown = await relevantAnnouncements(ctx);
@@ -41,4 +39,4 @@ export default {
 			themeTextColour: resolveWebColour(theme, 'announcements')
 		};
 	}
-};
+});

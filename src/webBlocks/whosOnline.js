@@ -1,16 +1,14 @@
 // whosOnline.js -- Web block: terminal nodes in node order, then web users
 // who are not also on a node, alphabetically.
+//
+// Setting: show always, or only when someone other than this user is online.
 
+import { catalogEntry } from './catalog.js';
 import { getOnlineUsers } from '../middleware/webActivity.js';
 import { formatActivity } from '../utils/activityMap.js';
 
-export default {
-	name: 'whosonline',
-	label: "Who's Online",
-	view: 'callflow/whosonline',
-	requiresUser: false,
-
-	async load(ctx) {
+async function onlineUsersFor(ctx) {
+	return ctx.once('onlineUsers', async function () {
 		var terminalNodes = [];
 		if (ctx.nodeManager) {
 			terminalNodes = ctx.nodeManager.getActiveNodes();
@@ -51,7 +49,21 @@ export default {
 				connection: 'Web'
 			});
 		}
+		return onlineUsers;
+	});
+}
 
-		return { onlineUsers: onlineUsers };
+export default Object.assign({}, catalogEntry('whosonline'), {
+	view: 'callflow/whosonline',
+
+	async available(ctx, opts) {
+		if (opts.show !== 'others') return {};
+		var me = ctx.user ? ctx.user.username.toLowerCase() : '';
+		var users = await onlineUsersFor(ctx);
+		return users.some(function (u) { return u.username && u.username.toLowerCase() !== me; }) ? {} : null;
+	},
+
+	async load(ctx) {
+		return { onlineUsers: await onlineUsersFor(ctx) };
 	}
-};
+});

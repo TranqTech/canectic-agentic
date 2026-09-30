@@ -58,4 +58,18 @@ async function getLastCallers(callercount) {
 	return rows;
 }
 
-export { logCall, logCallDuration, getLastCallers };
+/**
+ * Whether anyone other than username has called since the given time. For
+ * the web call flow's "only when someone else has called" setting; asked
+ * directly rather than read off the recent list, which one user's repeated
+ * logins can fill.
+ */
+async function hasCallsSince(since, username) {
+	var row = await postgres.queryOne(
+		'SELECT 1 AS found FROM calls WHERE starttime > $1 AND LOWER(COALESCE(username, \'\')) <> LOWER($2) LIMIT 1',
+		[since, username || '']
+	);
+	return !!row;
+}
+
+export { logCall, logCallDuration, getLastCallers, hasCallsSince };

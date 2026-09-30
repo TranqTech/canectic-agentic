@@ -38,6 +38,7 @@ import * as fileWildcards from '../models/fileWildcards.js';
 import * as netmailRoutes from '../models/netmailRoutes.js';
 import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
+import * as webBlockCatalog from '../webBlocks/catalog.js';
 import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as managedNodes from '../models/managedNodes.js';
@@ -7255,47 +7256,64 @@ router.get('/callflows', requireAdmin, async (req, res) => {
 	var flows = await callFlowsModel.getAllFlows();
 	var pools = await callFlowsModel.getAllPools();
 	var availableStages = callFlowsModel.getAvailableStages();
+	res.locals.flash = await flash.get(req);
 	res.render('admin/callflows/index', {
 		sufficientAccess, title: 'Call Flows', activelink: 'callflows', activenav: 'system',
-		currentuser, flows, pools, availableStages
+		currentuser, flows, pools, availableStages,
+		webStages: webBlockCatalog.CATALOG,
+		describeWebOptions: webBlockCatalog.describeOptions,
+		webCatalogEntry: webBlockCatalog.catalogEntry,
+		callflowEnabled: appConfig.getBoolean('callflow_enabled', true)
 	});
 });
 
+// The model refuses a save it cannot accept (a stage of the wrong kind, a
+// pool on the web flow) and says why; these routes used to drop that, so a
+// refused save looked exactly like one that worked.
+async function flashCallflowResult(req, result, doneText) {
+	if (result && result.status) {
+		if (doneText) await flash.setOne(req, 'success', doneText);
+	} else {
+		await flash.setOne(req, 'danger', 'Not saved: ' + ((result && result.errormessages) || ['unknown error']).join('; '));
+	}
+}
+
 router.post('/callflows/new', urlencodedParser, requireAdmin, async (req, res) => {
-	await callFlowsModel.createFlow(req.body);
+	await flashCallflowResult(req, await callFlowsModel.createFlow(req.body), 'Call flow created.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callflows/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
-	await callFlowsModel.updateFlow(parseInt(req.params.id), req.body);
+	await flashCallflowResult(req, await callFlowsModel.updateFlow(parseInt(req.params.id), req.body), 'Call flow saved.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callflows/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
-	await callFlowsModel.deleteFlow(parseInt(req.params.id));
+	await flashCallflowResult(req, await callFlowsModel.deleteFlow(parseInt(req.params.id)), 'Call flow deleted.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callflows/:id/stages', express.json(), requireAdmin, async (req, res) => {
 	var id = parseInt(req.params.id);
-	if (req.body && Array.isArray(req.body.stages)) {
-		await callFlowsModel.updateFlow(id, { stages: req.body.stages });
+	if (!req.body || !Array.isArray(req.body.stages)) {
+		return res.status(400).json({ status: false, errormessages: ['Stages must be a list'] });
 	}
-	res.json({ status: true });
+	var result = await callFlowsModel.updateFlow(id, { stages: req.body.stages });
+	res.json({ status: !!result.status, errormessages: result.errormessages || [] });
 });
 
 router.post('/callpools/new', urlencodedParser, requireAdmin, async (req, res) => {
-	await callFlowsModel.createPool(req.body);
+	await flashCallflowResult(req, await callFlowsModel.createPool(req.body), 'Call pool created.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callpools/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
-	await callFlowsModel.updatePool(parseInt(req.params.id), req.body);
+	await flashCallflowResult(req, await callFlowsModel.updatePool(parseInt(req.params.id), req.body), 'Call pool saved.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callpools/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
-	await callFlowsModel.deletePool(parseInt(req.params.id));
+	await flashCallflowResult(req, await callFlowsModel.deletePool(parseInt(req.params.id)), 'Call pool deleted.');
 	res.redirect('/admin/callflows');
 });
 

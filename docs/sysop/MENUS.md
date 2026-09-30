@@ -173,7 +173,7 @@ The `main` menu is loaded automatically after the login flow completes. The stan
 negotiate -> logon -> last_callers -> check_online -> announcements -> wall -> verify_mail -> check_email -> check_batch -> menu -> goodbye
 ```
 
-Flows are edited under **Flows** (`/admin/callflows`) in the admin panel.
+Flows are edited under **Flows** (`/admin/callflows`) in the admin panel; see `CALLFLOWS.md`, which also covers the web call flow.
 
 The `menu` stage loads the menu specified by `call.currentMenu` (defaults to `main`). When the menu handler's `exitStage` command is invoked, the flow advances to `goodbye` and the session ends.
 

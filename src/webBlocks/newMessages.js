@@ -1,6 +1,7 @@
 // newMessages.js -- Web block: unread messages in the user's subscribed
 // areas, per area.
 
+import { catalogEntry } from './catalog.js';
 import * as msgAreas from '../models/msgAreas.js';
 import * as userAreaSubs from '../models/userAreaSubs.js';
 import * as userMsgPointers from '../models/userMsgPointers.js';
@@ -18,11 +19,8 @@ async function newscan(ctx) {
 	});
 }
 
-export default {
-	name: 'newmsgs',
-	label: 'New Messages',
+export default Object.assign({}, catalogEntry('newmsgs'), {
 	view: 'callflow/newmsgs',
-	requiresUser: true,
 
 	async available(ctx) {
 		var scan = await newscan(ctx);
@@ -48,4 +46,4 @@ export default {
 		}
 		return { items: items };
 	}
-};
+});

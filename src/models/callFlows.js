@@ -6,9 +6,20 @@
 //
 // Flows are arrays of stage objects: [{ stage: "negotiate" }, { stage: "displayScreen", arg: "type:Welcome" }]
 // Pools map a name to a flow and optionally define WebSocket paths.
+//
+// A flow has a kind (#91). 'terminal' flows are run by CallManager for the
+// pools that name them. The one 'web' flow is the web call flow, its stages
+// are web blocks (src/webBlocks/catalog.js), and it belongs to no pool. The
+// two vocabularies must never mix: CallManager hangs up on a stage it does
+// not know, so a web flow reaching a terminal pool would disconnect every
+// caller on it. Saves are therefore checked per kind, pools accept only
+// terminal flows, and CallManager loads only terminal flows.
 
 import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
+import { DEFAULT_WEB_FLOW, normaliseWebStages, catalogEntry } from '../webBlocks/catalog.js';
+
+var FLOW_KINDS = Object.freeze(['terminal', 'web']);
 
 // ---------------------------------------------------------------------------
 // Built-in defaults (seeded on first run, used as fallback)
@@ -18,7 +29,7 @@ var DEFAULT_FLOWS = [
 	{
 		name: 'Standard', title: 'Standard Login',
 		description: 'Full BBS login experience with call flow stages',
-		is_system: true,
+		is_system: true, kind: 'terminal',
 		stages: [
 			{ stage: 'negotiate' },
 			{ stage: 'logon' },
@@ -36,7 +47,7 @@ var DEFAULT_FLOWS = [
 	{
 		name: 'Doorserver', title: 'Door Server',
 		description: 'Direct door game launch for dedicated door servers',
-		is_system: true,
+		is_system: true, kind: 'terminal',
 		stages: [
 			{ stage: 'door_auth' },
 			{ stage: 'door_launch' },
@@ -46,12 +57,20 @@ var DEFAULT_FLOWS = [
 	{
 		name: 'WebDoor', title: 'Web Door',
 		description: 'Web-based door game launch via token authentication',
-		is_system: true,
+		is_system: true, kind: 'terminal',
 		stages: [
 			{ stage: 'webdoor_auth' },
 			{ stage: 'door_launch' },
 			{ stage: 'goodbye' }
 		]
+	},
+	{
+		// Seeded by kind, not name: a board may already have a flow of its
+		// own called Web (see seedDefaults)
+		name: 'Web', title: 'Web Login',
+		description: 'Guided web login: what is new since the last visit',
+		is_system: true, kind: 'web',
+		stages: DEFAULT_WEB_FLOW.map(function (n) { return { stage: n }; })
 	}
 ];
 
@@ -92,16 +111,45 @@ function invalidateCache() {
 // Seeding
 // ---------------------------------------------------------------------------
 
+// The web flow is found by kind, so it is seeded when no web flow exists,
+// under the first free name: an older board may have made its own "Web".
+// Names compare case-insensitively, as getFlowByName and CallManager do.
+function firstFreeFlowName(preferred, existingNames) {
+	var taken = new Set((existingNames || []).map(function (n) { return String(n).toLowerCase(); }));
+	var candidates = [preferred, 'WebLogin'];
+	for (var n = 2; n < 100; n++) candidates.push('WebLogin' + n);
+	for (var name of candidates) {
+		if (!taken.has(name.toLowerCase())) return name;
+	}
+	return null;
+}
+
+async function seedWebFlowName(preferred) {
+	var rows = await postgres.query('SELECT name FROM call_flows', []) || [];
+	return firstFreeFlowName(preferred, rows.map(function (r) { return r.name; }));
+}
+
 async function seedDefaults() {
 	var seeded = 0;
 
 	for (var def of DEFAULT_FLOWS) {
-		var existing = await postgres.queryOne(
-			'SELECT id FROM call_flows WHERE name = $1', [def.name]
-		);
+		var existing;
+		var seedName = def.name;
+		if (def.kind === 'web') {
+			existing = await postgres.queryOne("SELECT id FROM call_flows WHERE kind = 'web' LIMIT 1", []);
+			if (!existing) {
+				seedName = await seedWebFlowName(def.name);
+				if (!seedName) continue;
+			}
+		} else {
+			existing = await postgres.queryOne(
+				'SELECT id FROM call_flows WHERE name = $1', [def.name]
+			);
+		}
 		if (!existing) {
 			await postgres.insertObject({
-				name: def.name,
+				kind: def.kind || 'terminal',
+				name: seedName,
 				title: def.title || def.name,
 				description: def.description || '',
 				stages: JSON.stringify(def.stages),
@@ -132,8 +180,69 @@ async function seedDefaults() {
 	}
 
 	if (seeded > 0) {
+		invalidateCache();
 		alogger.writeAlog(3, '[callFlows] Seeded ' + seeded + ' default flow/pool record(s)', 'cyan');
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage validation, per kind
+// ---------------------------------------------------------------------------
+
+// Stages CallManager runs that the admin dropdown does not offer: aliases and
+// older names still in its handler registry. A test checks this set plus the
+// dropdown against the registry itself.
+var TERMINAL_EXTRA_STAGES = Object.freeze(['event_login', 'whos_online']);
+
+function terminalStageNames() {
+	var names = new Set(TERMINAL_EXTRA_STAGES);
+	for (var s of getAvailableStages()) names.add(s.name);
+	return names;
+}
+
+/**
+ * Check a terminal flow's stages. Returns { stages, errors }; stages keep the
+ * shape they were given (a bare name or { stage, arg }).
+ */
+function normaliseTerminalStages(input) {
+	if (!Array.isArray(input)) return { stages: [], errors: ['Stages must be a list'] };
+	var known = terminalStageNames();
+	var errors = [];
+	var stages = [];
+	for (var item of input) {
+		var name = typeof item === 'string' ? item : (item && typeof item.stage === 'string' ? item.stage : null);
+		if (name && known.has(name)) {
+			stages.push(item);
+		} else if (name && catalogEntry(name)) {
+			errors.push(name + ' is a web stage; a terminal flow cannot use it');
+		} else {
+			errors.push('Not a terminal stage: ' + (name === null ? JSON.stringify(item) : name));
+		}
+	}
+	return { stages: stages, errors: errors };
+}
+
+function normaliseStagesFor(kind, input) {
+	return kind === 'web' ? normaliseWebStages(input) : normaliseTerminalStages(input);
+}
+
+function flowKind(row) {
+	return row && row.kind === 'web' ? 'web' : 'terminal';
+}
+
+// Stages arrive as a JSON string from a form or an array from the editor.
+// undefined means not submitted; a string that is not JSON is an error, not
+// an empty flow.
+function parseStagesInput(raw) {
+	if (raw === undefined) return { value: undefined };
+	if (Array.isArray(raw)) return { value: raw };
+	if (typeof raw === 'string') {
+		if (!raw.trim()) return { value: [] };
+		try { return { value: JSON.parse(raw) }; } catch (_) {
+			return { error: 'Stages are not valid JSON' };
+		}
+	}
+	return { error: 'Stages must be a list' };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,13 +294,21 @@ async function createFlow(formObj) {
 		return returnObj;
 	}
 
-	var stages = formObj.stages;
-	if (typeof stages === 'string') {
-		try { stages = JSON.parse(stages); } catch (_) { stages = []; }
+	// New flows are terminal flows: there is one web flow, seeded
+	var parsed = parseStagesInput(formObj.stages === undefined ? [] : formObj.stages);
+	if (parsed.error) {
+		returnObj.errormessages.push(parsed.error);
+		return returnObj;
 	}
-	if (!Array.isArray(stages)) stages = [];
+	var checked = normaliseTerminalStages(parsed.value);
+	if (checked.errors.length > 0) {
+		returnObj.errormessages = checked.errors;
+		return returnObj;
+	}
+	var stages = checked.stages;
 
 	var dbObj = {
+		kind: 'terminal',
 		name: name,
 		title: formObj.title ? formObj.title.trim() : name,
 		description: formObj.description ? formObj.description.trim() : null,
@@ -223,19 +340,26 @@ async function updateFlow(id, formObj) {
 		return returnObj;
 	}
 
+	var kind = flowKind(existing);
 	var updateObj = { updated_at: new Date() };
 	if (formObj.title !== undefined) updateObj.title = formObj.title.trim();
 	if (formObj.description !== undefined) updateObj.description = formObj.description ? formObj.description.trim() : null;
-	if (formObj.active !== undefined) updateObj.active = formObj.active !== 'false' && formObj.active !== false;
+	// The web flow is always on: callflow_enabled is the switch for the web
+	// call flow, and two switches for one thing is one too many
+	if (formObj.active !== undefined && kind !== 'web') updateObj.active = formObj.active !== 'false' && formObj.active !== false;
 
 	if (formObj.stages !== undefined) {
-		var stages = formObj.stages;
-		if (typeof stages === 'string') {
-			try { stages = JSON.parse(stages); } catch (_) { stages = []; }
+		var parsed = parseStagesInput(formObj.stages);
+		if (parsed.error) {
+			returnObj.errormessages.push(parsed.error);
+			return returnObj;
 		}
-		if (Array.isArray(stages)) {
-			updateObj.stages = JSON.stringify(stages);
+		var checked = normaliseStagesFor(kind, parsed.value);
+		if (checked.errors.length > 0) {
+			returnObj.errormessages = checked.errors;
+			return returnObj;
 		}
+		updateObj.stages = JSON.stringify(checked.stages);
 	}
 
 	// System flows: name cannot be changed
@@ -284,6 +408,14 @@ async function deleteFlow(id) {
 // Pool CRUD
 // ---------------------------------------------------------------------------
 
+// Why a pool may not use this flow, or null when it may.
+async function poolFlowProblem(flowName) {
+	var flow = await getFlowByName(flowName);
+	if (!flow) return 'No call flow is called ' + flowName;
+	if (flowKind(flow) !== 'terminal') return (flow.title || flow.name) + ' is the web call flow; a pool needs a terminal flow';
+	return null;
+}
+
 async function getAllPools() {
 	if (_poolCache) return _poolCache;
 	var rows = await postgres.query('SELECT * FROM call_pools ORDER BY is_system DESC, name ASC') || [];
@@ -324,6 +456,12 @@ async function createPool(formObj) {
 	var existing = await getPoolByName(name);
 	if (existing) {
 		returnObj.errormessages.push('A pool with this name already exists');
+		return returnObj;
+	}
+
+	var flowProblem = await poolFlowProblem(formObj.flow_name.trim());
+	if (flowProblem) {
+		returnObj.errormessages.push(flowProblem);
 		return returnObj;
 	}
 
@@ -369,7 +507,14 @@ async function updatePool(id, formObj) {
 	}
 
 	var updateObj = { updated_at: new Date() };
-	if (formObj.flow_name !== undefined) updateObj.flow_name = formObj.flow_name.trim();
+	if (formObj.flow_name !== undefined) {
+		var flowProblem = await poolFlowProblem(formObj.flow_name.trim());
+		if (flowProblem) {
+			returnObj.errormessages.push(flowProblem);
+			return returnObj;
+		}
+		updateObj.flow_name = formObj.flow_name.trim();
+	}
 	if (formObj.description !== undefined) updateObj.description = formObj.description ? formObj.description.trim() : null;
 	if (formObj.active !== undefined) updateObj.active = formObj.active !== 'false' && formObj.active !== false;
 
@@ -437,7 +582,34 @@ async function deletePool(id) {
 async function getFlowStages(flowName) {
 	var flow = await getFlowByName(flowName);
 	if (!flow) return null;
+	// A terminal runtime helper: a web flow's stages mean nothing to CallManager
+	if (flowKind(flow) !== 'terminal') return null;
 
+	var stages = flow.stages;
+	if (typeof stages === 'string') {
+		try { stages = JSON.parse(stages); } catch (_) { stages = []; }
+	}
+	return Array.isArray(stages) ? stages : [];
+}
+
+/**
+ * The web call flow's row, or null when there is none (the seed failed).
+ *
+ * Read from the database every time, not through the flow cache: that cache
+ * lives for the whole process and is cleared only by writes made in the same
+ * process, so an edit made anywhere else went unseen until a restart. A
+ * one-row query a few times per login costs nothing.
+ */
+async function getWebFlow() {
+	return await postgres.queryOne(
+		"SELECT * FROM call_flows WHERE kind = 'web' ORDER BY is_system DESC, id ASC LIMIT 1", []
+	);
+}
+
+/** The web call flow's stages, or null when there is no web flow. */
+async function getWebFlowStages() {
+	var flow = await getWebFlow();
+	if (!flow) return null;
 	var stages = flow.stages;
 	if (typeof stages === 'string') {
 		try { stages = JSON.parse(stages); } catch (_) { stages = []; }
@@ -494,7 +666,15 @@ export {
 	updatePool,
 	deletePool,
 	getFlowStages,
+	getWebFlow,
+	getWebFlowStages,
 	getAvailableStages,
+	normaliseTerminalStages,
+	normaliseStagesFor,
+	poolFlowProblem,
+	firstFreeFlowName,
+	FLOW_KINDS,
+	TERMINAL_EXTRA_STAGES,
 	getDefaultFlows,
 	getDefaultPools
 };

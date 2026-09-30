@@ -8,11 +8,14 @@
 
 ### Web
 
+- **New: edit the web call flow.** The guided tour of what is new that website users get after logging in is now a flow on the Call Flows page (**Flows** in the admin menu), marked **Web**, next to your terminal flows. Drag stages to reorder them, remove the ones you do not want, and add them back from the list. Last Callers, Who's Online and The Wall have settings behind a gear: show them always, or only when someone else has called, is online or has posted since the user's last visit, and how many callers or wall messages to list. Changes take effect at once. It starts out exactly as the call flow was, so nothing changes until you edit it; `callflow_enabled` still turns it off. See `docs/sysop/CALLFLOWS.md`.
+- **Fixed: the Call Flows page no longer throws away a refused change without saying so.** Whatever the page could not save (a pool with no flow chosen, for example) redirected back as though it had worked. It now says what was refused and why. It also now refuses a stage the terminal side cannot run, such as a mistyped name in a new flow's stages. Before, that was saved and every caller on the flow was disconnected on reaching it.
 - **Fixed: one failing call flow stage no longer skips the whole call flow.** If working out any one stage failed (a database error while counting new messages, say), the web call flow quietly marked itself done and sent the user straight on, so they saw no announcements, callers or wall either. Now only that stage is left out, and the failure is written to the system log.
 
 ### Upgrade Notes
 
 - **Terminal connections are screened.** Callers whose terminal program cannot answer a cursor position query are asked to press ESC twice before the board appears.
+- **The Call Flows page lists a new flow, Web.** It is the web call flow, set up as it has always been. It cannot be given to a call pool and has no Active switch; `callflow_enabled` turns it off. If your board already had a flow of its own called Web, the new one is called WebLogin.
 
 ## v0.9.14a (2026-09-29)
 

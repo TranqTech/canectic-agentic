@@ -13,6 +13,15 @@ async function getRecentMessages(limit) {
 	return rows ? rows.reverse() : [];
 }
 
+/** Whether anyone other than username has posted since the given time. */
+async function hasMessagesSince(since, username) {
+	var row = await postgres.queryOne(
+		'SELECT 1 AS found FROM wall_messages WHERE created_at > $1 AND LOWER(username) <> LOWER($2) LIMIT 1',
+		[since, username || '']
+	);
+	return !!row;
+}
+
 async function addMessage(userId, username, message) {
 	var obj = {
 		user_id: userId || null,
@@ -86,6 +95,7 @@ function canPost(user) {
 
 export {
 	getRecentMessages,
+	hasMessagesSince,
 	getAllMessages,
 	addMessage,
 	deleteMessage,

@@ -1,15 +1,13 @@
 // newsFiles.js -- Web block: the active news and score files (door scores,
 // BBS news), rendered from their ANSI/text source.
 
+import { catalogEntry } from './catalog.js';
 import fs from 'fs';
 import * as newsFilesModel from '../models/newsFiles.js';
 import { formatBodyHtml } from '../utils/terminalText.js';
 
-export default {
-	name: 'newsfiles',
-	label: 'News',
+export default Object.assign({}, catalogEntry('newsfiles'), {
 	view: 'callflow/newsfiles',
-	requiresUser: false,
 
 	async available(ctx) {
 		var active = await ctx.once('newsFiles', function () { return newsFilesModel.getActiveNewsFiles(); });
@@ -51,4 +49,4 @@ export default {
 
 		return { items: items };
 	}
-};
+});

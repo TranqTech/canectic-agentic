@@ -2,7 +2,7 @@
 
 A guided login experience for web users, mirroring the terminal call flow. Walks users through what's new since their last visit rather than dropping them on a static home page.
 
-**Status: implemented** (`src/routes/callflow.js`, mounted at `/callflow`; stages are web blocks in `src/webBlocks/`; views in `src/views/callflow/`; trigger rule in `src/utils/callflowTrigger.js`). The build adds a Welcome stage and a News stage to the sequence below, and `POST /callflow/complete` answers JSON rather than redirecting; details inline. The stage order is still fixed (`DEFAULT_WEB_FLOW`); making it a sysop-editable flow is #91 phase 2, see "Stages are web blocks" below.
+**Status: implemented** (`src/routes/callflow.js`, mounted at `/callflow`; stages are web blocks in `src/webBlocks/`; views in `src/views/callflow/`; trigger rule in `src/utils/callflowTrigger.js`). The build adds a Welcome stage and a News stage to the sequence below, and `POST /callflow/complete` answers JSON rather than redirecting; details inline. Since #91 phase 2 the stages, their order and their settings come from the web flow, the `kind = 'web'` row of `call_flows`, edited at `/admin/callflows`; see "Stages are web blocks" and "The editable web flow" below. Sysop guide: `docs/sysop/CALLFLOWS.md`.
 
 ## Entry Modes
 
@@ -180,14 +180,30 @@ Each stage is a block in `src/webBlocks/`, one file per block, registered in `sr
 | `label` | Shown to the user and the sysop |
 | `view` | Pug partial rendered with `load()`'s result |
 | `requiresUser` | True when it means nothing to a visitor (announcements, newmsgs, newfiles) |
-| `available(ctx)` | Optional. `null` means nothing to show, skip the stage; an object is extra detail for the stage list (`count`, `areas`). Omitted means always shown |
-| `load(ctx)` | The view's locals |
+| `options` | The settings a sysop may give it in a flow (`select` with `choices`, or `number` with `min`/`max`), each with a `default` |
+| `hint` | One line for the admin page |
+| `available(ctx, opts)` | Optional. `null` means nothing to show, skip the stage; an object is extra detail for the stage list (`count`, `areas`). Omitted means always shown |
+| `load(ctx, opts)` | The view's locals |
+
+`name`, `label`, `requiresUser`, `options` and `hint` live in `src/webBlocks/catalog.js`, which imports nothing, so the call flow model and the admin page can validate a web flow without loading every model a block reads; each implementation spreads its entry from there, and the registry refuses to load if the two disagree. `opts` is always complete: `resolveOptions` fills every declared setting with the flow's value or its default, and quietly takes the default for a stored value that is no longer valid, since it runs for every visitor.
 
 `available()` and `load()` are separate because the stage list is computed for every stage up front and must stay cheap; rendering news files reads each file from disk. `buildStageList(ctx, flow)` walks the flow in order, builds `{name, label, ...detail}` (detail cannot overwrite `name` or `label`), and leaves out and logs (level 1) a block that throws, so one broken query costs one stage instead of the whole call flow. An unknown name in a flow is skipped and logged at level 2.
 
 `createContext(req, user)` makes one context per request: `user`, `userId`, `nodeManager`, `lastCallflowAt()`, and `once(key, fn)`, which memoises the promise so blocks needing the same lookup (the newscan, the relevant announcements) share one query, including between `available()` and `load()` in the same request.
 
-`DEFAULT_WEB_FLOW` is the order the call flow has always had. Phase 2 of #91 replaces it with a seeded, editable flow (a `kind` column on `call_flows`); until then it is the flow. `tests/webBlocks.test.js` pins the order, labels, paths, and the failure isolation.
+`DEFAULT_WEB_FLOW` is the order the call flow has always had: what the seeded web flow holds, and what runs when there is no web flow row at all. `tests/webBlocks.test.js` pins the order, labels, paths, and the failure isolation.
+
+## The editable web flow (#91 phase 2)
+
+`call_flows.kind` is `terminal` (default, every existing row) or `web`. There is one web flow: `seedDefaults` inserts it when no `kind = 'web'` row exists, found by kind rather than name because a board may already have a flow of its own called Web (`firstFreeFlowName`: `Web`, else `WebLogin`, `WebLogin2`...). New flows made on the admin page are always terminal. The web flow is always active; `updateFlow` ignores `active` for it, since `callflow_enabled` is the switch.
+
+Stored stages are `{ stage }` or `{ stage, options }`. Saving goes through `normaliseWebStages` (strict: unknown or terminal stage, a stage twice, a setting out of range are refused with a reason; unknown option keys are dropped; only valid values are stored). The editor stores only settings that differ from the default, so a later change of default reaches every stage nobody touched.
+
+The route reads the flow through `callFlows.getWebFlowStages()`, which queries the database every time rather than using the model's flow cache: that cache lives for the process and is cleared only by writes in the same process. With no web flow, or a read error (logged at level 1), it runs `DEFAULT_WEB_FLOW`. `/stage/:name` looks the block up in the flow for its settings (`findStage` + `optionsFor`) and uses the defaults for a block not in the flow.
+
+Settings as built: Last Callers `show` (always | new) and `count` (1-50, 15); Who's Online `show` (always | others); The Wall `show` (always | new) and `count` (1-50, 15). "New" is since `users.last_callflow_at`, excluding the user's own calls or posts, and asked directly (`callers.hasCallsSince`, `wall.hasMessagesSince`) rather than read off the recent list, which one user's repeated logins can fill. Someone who has never completed the flow sees everything.
+
+The guards between the kinds, because CallManager hangs up on a stage it does not know: saves checked per kind, pools refuse a web flow (`poolFlowProblem`), `getFlowStages` returns null for a web flow, and CallManager's `loadFlowsFromDB` skips non-terminal rows so a pool naming the web flow falls back to Standard. Two names exist on both sides (`announcements`, `wall`); that is safe since the guard is the kind, and `tests/webCallFlow.test.js` pins the overlap so a new one is a decision.
 
 ## Files to create/modify
 

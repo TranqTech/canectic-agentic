@@ -5,6 +5,11 @@
       "id": "terminal-screen",
       "level": "info",
       "text": "New telnet and TCP connections are now screened before they get a node, which turns away the scanners port 23 attracts. A real terminal passes at once by answering a cursor query; a caller whose terminal program cannot answer is asked to press ESC twice. A connection that sends a router login such as root or admin is closed and written to security.log as a honeypot attempt, which the fail2ban honeypot filter in examples/fail2ban bans. If your router forwards port 23 to another port on the board, ban that port in the jail. Settings are under Security on the Configuration page (terminal_screen_enabled); see docs/sysop/SECURITY.md."
+    },
+    {
+      "id": "web-callflow-editable",
+      "level": "info",
+      "text": "The web call flow (the guided tour of what is new that website users get after logging in) can now be edited. It appears on the Call Flows page (Flows in the admin menu) as a flow marked Web, set up exactly as it was, so nothing changes until you edit it. You can reorder or remove stages, and set Last Callers, Who's Online and The Wall to show only when there is something new. Saving a terminal flow now refuses a stage the terminal side cannot run, rather than saving it and disconnecting callers when they reach it. See docs/sysop/CALLFLOWS.md."
     }
   ],
   "min_upgrade_from": "0.9.0a",

@@ -1,6 +1,7 @@
 // newFiles.js -- Web block: files new since the start of the user's previous
 // visit in their subscribed file areas (the rule is src/utils/newSince.js).
 
+import { catalogEntry } from './catalog.js';
 import * as fileAreas from '../models/fileAreas.js';
 import * as userFileSubs from '../models/userFileSubs.js';
 import * as fileEntries from '../models/fileEntries.js';
@@ -27,11 +28,8 @@ async function newFilesByArea(ctx) {
 	});
 }
 
-export default {
-	name: 'newfiles',
-	label: 'New Files',
+export default Object.assign({}, catalogEntry('newfiles'), {
 	view: 'callflow/newfiles',
-	requiresUser: true,
 
 	async available(ctx) {
 		var items = await newFilesByArea(ctx);
@@ -44,4 +42,4 @@ export default {
 	async load(ctx) {
 		return { items: await newFilesByArea(ctx) };
 	}
-};
+});

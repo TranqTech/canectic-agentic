@@ -1,13 +1,11 @@
 // welcome.js -- Web block: the greeting, with a random piece of web art.
 
+import { catalogEntry } from './catalog.js';
 import appConfig from '../config/appConfig.js';
 import { getRandomWebArt } from '../utils/webArt.js';
 
-export default {
-	name: 'welcome',
-	label: 'Welcome',
+export default Object.assign({}, catalogEntry('welcome'), {
 	view: 'callflow/welcome',
-	requiresUser: false,
 
 	async load(ctx) {
 		var artPath = await getRandomWebArt('welcome');
@@ -17,4 +15,4 @@ export default {
 			artUrl: artPath ? '/' + artPath : null
 		};
 	}
-};
+});

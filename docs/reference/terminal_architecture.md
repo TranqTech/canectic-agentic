@@ -48,7 +48,7 @@ Shared singleton managing node number allocation and a registry of active sessio
 
 ## Call Flows
 
-DB-backed (`call_flows` / `call_pools` tables via `src/models/callFlows.js`, editable at `/admin/callflows`); the `callFlows` object in `callmanager.js` is the fallback when the table is empty. The reserved name `"goodbye"` triggers hangup.
+DB-backed (`call_flows` / `call_pools` tables via `src/models/callFlows.js`, editable at `/admin/callflows`); the `callFlows` object in `callmanager.js` is the fallback when the table is empty. The reserved name `"goodbye"` triggers hangup. Only rows with `kind = 'terminal'` are loaded (`loadFlowsFromDB` skips the rest): the one `kind = 'web'` row is the web call flow (#91, see `WEB_CALLFLOW_DESIGN.md`), whose stages are web blocks this registry would hang up on, so a pool naming it falls back to Standard. Saves are checked per kind (`normaliseTerminalStages`: the dropdown's stages plus `TERMINAL_EXTRA_STAGES` `event_login`/`whos_online`, a set `tests/webCallFlow.test.js` checks against `handlerRegistry`), and pools refuse a web flow (`poolFlowProblem`).
 
 ```
 Standard:   negotiate -> logon -> last_callers -> check_online -> announcements -> wall -> verify_mail -> check_email -> check_batch -> menu -> goodbye

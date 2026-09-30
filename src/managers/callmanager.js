@@ -97,6 +97,10 @@ async function loadFlowsFromDB() {
 		var dbFlows = await callFlowsModel.getActiveFlows();
 		if (dbFlows && dbFlows.length > 0) {
 			for (var row of dbFlows) {
+				// Terminal flows only. The web call flow's stages are web
+				// blocks, which the handler registry would hang up on, and a
+				// pool naming it must fall back to Standard rather than run it.
+				if (row.kind && row.kind !== 'terminal') continue;
 				var stages = row.stages;
 				if (typeof stages === 'string') {
 					try { stages = JSON.parse(stages); } catch (_) { stages = []; }

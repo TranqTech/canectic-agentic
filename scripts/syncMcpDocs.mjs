@@ -208,6 +208,7 @@ var TOPIC_TAGS = {
     'Pointer INTEGRATION_GUIDE.md': ['messages', 'pointers', 'integration', 'guide'],
     // sysop
     'INSTALL.md':                   ['installation', 'setup'],
+    'CALLFLOWS.md':                 ['callflow', 'web', 'terminal', 'configuration'],
     'MENUS.md':                     ['menus', 'configuration'],
     'DOORSERVER.md':                ['doors', 'doorserver', 'configuration'],
     'SECURITY.md':                  ['security', 'terminal', 'fail2ban', 'configuration'],

@@ -15,6 +15,7 @@ import * as sessionStore from '../middleware/db/sessionstore.js';
 import * as postgres from '../middleware/db/postgres.js';
 import { addMessage as addWallMessage, canPost as canPostWall, purgeOldMessages as purgeWall } from '../models/wall.js';
 import * as webBlocks from '../webBlocks/index.js';
+import * as callFlowsModel from '../models/callFlows.js';
 import appConfig from '../config/appConfig.js';
 
 // ---------------------------------------------------------------------------
@@ -99,6 +100,20 @@ router.get('/', async (req, res) => {
 	});
 });
 
+// The sysop's web flow (the kind 'web' row of call_flows, editable at
+// /admin/callflows). Without one, the flow as it has always been, so a
+// failed seed or an unreadable table costs the sysop their edits, not the
+// call flow.
+async function currentWebFlow() {
+	try {
+		var stages = await callFlowsModel.getWebFlowStages();
+		if (stages) return stages;
+	} catch (err) {
+		alogger.writeAlog(1, 'Callflow: could not read the web flow, using the default: ' + err.message, 'redbright');
+	}
+	return webBlocks.DEFAULT_WEB_FLOW;
+}
+
 // ---------------------------------------------------------------------------
 // Stages JSON -- list of stages with data for this user
 // ---------------------------------------------------------------------------
@@ -111,7 +126,7 @@ router.get('/stages.json', async (req, res) => {
 	if (!currentuser) return res.json({ stages: [] });
 
 	var ctx = webBlocks.createContext(req, currentuser);
-	res.json({ stages: await webBlocks.buildStageList(ctx) });
+	res.json({ stages: await webBlocks.buildStageList(ctx, await currentWebFlow()) });
 });
 
 // ---------------------------------------------------------------------------
@@ -125,8 +140,11 @@ router.get('/stage/:name', async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	if (block.requiresUser && !currentuser) return res.status(401).send('');
 
+	// Settings come from the flow; a block not in it (fetched directly) gets
+	// its defaults
+	var item = webBlocks.findStage(await currentWebFlow(), block.name);
 	var ctx = webBlocks.createContext(req, currentuser);
-	var locals = await block.load(ctx);
+	var locals = await block.load(ctx, webBlocks.optionsFor(block, item));
 	res.render(block.view, Object.assign({ layout: false }, locals));
 });
 
