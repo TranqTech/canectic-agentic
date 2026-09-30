@@ -16,6 +16,8 @@ import { router as filesRouter } from '../routes/files.js';
 import { router as doorserverRouter } from '../routes/doorserver.js';
 import { router as callflowRouter } from '../routes/callflow.js';
 import * as webNav from '../models/webNav.js';
+import * as webPages from '../models/webPages.js';
+import { router as pagesRouter } from '../routes/pages.js';
 import { router as apiV1Router } from '../routes/api.js';
 import { pgpool } from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
@@ -117,6 +119,12 @@ webserver.use(async function(req, res, next) {
 	} catch (_) {
 		res.locals.webNavItems = webNav.DEFAULT_ITEMS;
 	}
+	// Links to sysop pages need the pages' own rules (#91 phase 4)
+	try {
+		res.locals.webNavPages = await webPages.getPagesForRender();
+	} catch (_) {
+		res.locals.webNavPages = new Map();
+	}
 	res.locals.buildWebNav = webNav.buildNav;
 	res.locals.navPath = req.path;
 	next();
@@ -142,6 +150,7 @@ webserver.use('/pm', pmRouter);
 webserver.use('/files', filesRouter);
 webserver.use('/doorserver', doorserverRouter);
 webserver.use('/callflow', callflowRouter);
+webserver.use('/page', pagesRouter);
 
 // Health check endpoint — DB and Redis connectivity
 webserver.get('/health', async function(req, res) {

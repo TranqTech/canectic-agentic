@@ -16,6 +16,7 @@ import * as postgres from '../middleware/db/postgres.js';
 import * as alogger from '../utils/alogger.js';
 import appConfig from '../config/appConfig.js';
 import { checkEntryAccess, parseFlags } from '../utils/areaAccess.js';
+import { pageVisibleTo, getPageById } from './webPages.js';
 
 // Pages a link can point at by name. activelink is what the page's route
 // passes its view, so the bar can highlight it; pages that pass nothing are
@@ -37,6 +38,7 @@ var BUILTINS = Object.freeze([
 var TARGET_TYPES = Object.freeze([
 	{ value: 'builtin',  label: 'A page on this board' },
 	{ value: 'url',      label: 'An address (another site, or a path here)' },
+	{ value: 'page',     label: 'A page you wrote (Web Pages)' },
 	{ value: 'dropdown', label: 'A menu holding other links' }
 ]);
 
@@ -109,6 +111,8 @@ function validateItem(form) {
 	var target = typeof form.target === 'string' ? form.target.trim() : '';
 	if (type === 'builtin' && !builtin(target)) errors.push('Choose a page on this board');
 	if (type === 'url' && !isAllowedUrl(target)) errors.push('The address must start with http://, https:// or / (a path on this board)');
+	// A page by its id, so renaming the page's address does not break the link
+	if (type === 'page' && !/^[1-9]\d{0,9}$/.test(target)) errors.push('Choose one of your pages');
 	if (type === 'dropdown') target = null;
 
 	var parentId = (form.parent_id === undefined || form.parent_id === null || form.parent_id === '') ? null : parseInt(form.parent_id, 10);
@@ -154,7 +158,7 @@ function isActivePath(href, path) {
 	return path === href || path.indexOf(href + '/') === 0;
 }
 
-function visibleTo(item, user, isEnabled) {
+function visibleTo(item, user, isEnabled, pages) {
 	if (!item.active) return false;
 	if (item.audience === 'public' && user) return false;
 	if (item.audience === 'users' && !user) return false;
@@ -164,12 +168,22 @@ function visibleTo(item, user, isEnabled) {
 		if (!b) return false;
 		if (b.enabledKey && !isEnabled(b.enabledKey)) return false;
 	}
+	// A link to a page follows the page's own rules too: nobody is shown a
+	// link to a page they cannot open, or to one that is unpublished or gone
+	if (item.target_type === 'page') {
+		var page = pages && pages.get(parseInt(item.target, 10));
+		if (!page || !pageVisibleTo(page, user)) return false;
+	}
 	return true;
 }
 
 function linkFor(item, ctx) {
 	var href = null, active = false;
-	if (item.target_type === 'builtin') {
+	if (item.target_type === 'page') {
+		var page = ctx.pages && ctx.pages.get(parseInt(item.target, 10));
+		href = page ? '/page/' + page.slug : null;
+		active = isActivePath(href, ctx.path);
+	} else if (item.target_type === 'builtin') {
 		var b = builtin(item.target);
 		href = b.href;
 		active = (b.activelink && ctx.activelink === b.activelink) || isActivePath(b.href, ctx.path);
@@ -194,7 +208,8 @@ function linkFor(item, ctx) {
  * out, and a link whose parent is gone or not a menu is shown at the top
  * level rather than lost.
  *
- * ctx: { user (session or null), activelink, path, isEnabled(key) }
+ * ctx: { user (session or null), activelink, path, isEnabled(key),
+ *        pages (Map of page id -> page, from webPages.getPagesForRender) }
  */
 function buildNav(items, ctx) {
 	ctx = ctx || {};
@@ -210,9 +225,9 @@ function buildNav(items, ctx) {
 	var byMenu = new Map();
 	for (var row of rows) {
 		var inMenu = row.parent_id && menus.has(row.parent_id) && row.target_type !== 'dropdown';
-		if (!visibleTo(row, user, isEnabled)) continue;
+		if (!visibleTo(row, user, isEnabled, ctx.pages)) continue;
 		if (inMenu) {
-			if (!visibleTo(menus.get(row.parent_id), user, isEnabled)) continue;
+			if (!visibleTo(menus.get(row.parent_id), user, isEnabled, ctx.pages)) continue;
 			if (!byMenu.has(row.parent_id)) byMenu.set(row.parent_id, []);
 			byMenu.get(row.parent_id).push(linkFor(row, ctx));
 		} else if (row.target_type === 'dropdown') {
@@ -302,11 +317,16 @@ function dbObject(item) {
 	});
 }
 
+async function targetProblem(item) {
+	if (item.target_type !== 'page') return null;
+	return (await getPageById(item.target)) ? null : 'That page no longer exists';
+}
+
 async function createItem(form) {
 	var result = { status: false, errormessages: [], insertId: 0 };
 	var checked = validateItem(form);
 	if (checked.errors.length) { result.errormessages = checked.errors; return result; }
-	var problem = await parentProblem(checked.item, null);
+	var problem = (await parentProblem(checked.item, null)) || (await targetProblem(checked.item));
 	if (problem) { result.errormessages.push(problem); return result; }
 
 	var last = await postgres.queryOne(
@@ -329,7 +349,7 @@ async function updateItem(id, form) {
 	if (!existing) { result.errormessages.push('That link no longer exists'); return result; }
 	var checked = validateItem(form);
 	if (checked.errors.length) { result.errormessages = checked.errors; return result; }
-	var problem = await parentProblem(checked.item, existing.id);
+	var problem = (await parentProblem(checked.item, existing.id)) || (await targetProblem(checked.item));
 	if (problem) { result.errormessages.push(problem); return result; }
 	if (existing.target_type === 'dropdown' && checked.item.target_type !== 'dropdown') {
 		var kids = await postgres.queryOne('SELECT COUNT(*)::int AS n FROM web_nav_items WHERE parent_id = $1', [existing.id]);

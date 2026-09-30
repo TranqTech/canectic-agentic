@@ -141,8 +141,12 @@ router.get('/stage/:name', async (req, res) => {
 	if (block.requiresUser && !currentuser) return res.status(401).send('');
 
 	// Settings come from the flow; a block not in it (fetched directly) gets
-	// its defaults
-	var item = webBlocks.findStage(await currentWebFlow(), block.name);
+	// its defaults. A repeatable block (a Page) exists only as placed in the
+	// flow, so one not in it is not served: its setting is which page, and a
+	// default of "none" means nothing to show.
+	var which = block.repeatable ? req.query[block.repeatable] : undefined;
+	var item = webBlocks.findStage(await currentWebFlow(), block.name, which);
+	if (block.repeatable && !item) return res.status(404).send('');
 	var ctx = webBlocks.createContext(req, currentuser);
 	var locals = await block.load(ctx, webBlocks.optionsFor(block, item));
 	res.render(block.view, Object.assign({ layout: false }, locals));

@@ -97,11 +97,11 @@ describe('web blocks: building the stage list', function () {
 	it('keeps the flow order, adds detail after name and label, skips a block with nothing', async function () {
 		var stages = await webBlocks.buildStageList(fakeCtx(), ['b', 'c', 'a'], reg);
 		assert.deepStrictEqual(stages, [
-			{ name: 'b', label: 'B', count: 3, areas: 2 },
-			{ name: 'a', label: 'A' }
+			{ name: 'b', label: 'B', count: 3, areas: 2, path: '/callflow/stage/b' },
+			{ name: 'a', label: 'A', path: '/callflow/stage/a' }
 		]);
-		// Key order is what the client and the old JSON had
-		assert.deepStrictEqual(Object.keys(stages[0]), ['name', 'label', 'count', 'areas']);
+		// Key order is what the client and the old JSON had, plus where to fetch it
+		assert.deepStrictEqual(Object.keys(stages[0]), ['name', 'label', 'count', 'areas', 'path']);
 	});
 
 	it('leaves out a block that throws and still lists the rest', async function () {
@@ -114,9 +114,13 @@ describe('web blocks: building the stage list', function () {
 		assert.deepStrictEqual(stages.map(function (s) { return s.name; }), ['a', 'b']);
 	});
 
-	it('detail cannot rename a stage', async function () {
+	it('detail can relabel a stage but not rename it or move where it is fetched from', async function () {
 		var stages = await webBlocks.buildStageList(fakeCtx(), ['e'], reg);
-		assert.deepStrictEqual(stages, [{ name: 'e', label: 'E', count: 1 }]);
+		assert.deepStrictEqual(stages, [{ name: 'e', label: 'Hijack', count: 1, path: '/callflow/stage/e' }]);
+		var sneaky = { name: 'f', label: 'F', view: 'v', requiresUser: false, load: async function () { return {}; },
+			available: async function () { return { path: '/elsewhere', label: '' }; } };
+		var stages2 = await webBlocks.buildStageList(fakeCtx(), ['f'], registryOf([sneaky]));
+		assert.deepStrictEqual(stages2, [{ name: 'f', label: 'F', path: '/callflow/stage/f' }], 'an empty label keeps the block\'s own');
 	});
 });
 
@@ -251,6 +255,14 @@ describe('web blocks: every stage renders for a real user', function () {
 	});
 
 	webBlocksNames().forEach(function (name) {
+		var block = webBlocks.getBlock(name);
+		if (block.repeatable) {
+			// A Page exists only as placed in the flow (tests/webPages.test.js)
+			it('/callflow/stage/' + name + ' is not served unless it is in the flow', async function () {
+				assert.strictEqual((await fetch(base + '/callflow/stage/' + name + '?page=999999')).status, 404);
+			});
+			return;
+		}
 		it('/callflow/stage/' + name + ' renders', async function () {
 			var res = await fetch(base + '/callflow/stage/' + name);
 			var text = await res.text();

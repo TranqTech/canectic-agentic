@@ -1,0 +1,17 @@
+extends ../layouts/user
+block content
+  .container-fluid.main-wrapper
+    if !ismobile
+      br
+      br
+
+    .row
+      .col-lg-8.offset-lg-2.col-12
+        if page.show_title
+          h2.mb-4= page.title
+        .card.mb-4
+          .card-body(style=themeTextColour ? 'color: ' + themeTextColour : '')
+            if page.body_html
+              != page.body_html
+            else
+              p.text-muted This page is empty.

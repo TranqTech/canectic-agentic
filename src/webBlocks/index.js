@@ -38,12 +38,13 @@ import bulletins from './bulletins.js';
 import sysInfo from './sysInfo.js';
 import newMail from './newMail.js';
 import verifyMail from './verifyMail.js';
+import page from './page.js';
 
 // Every catalog entry implemented, nothing implemented that is not in the
 // catalog: a flow is validated against the catalog and run against this.
 var BLOCKS = new Map();
 for (var block of [welcome, announcements, lastCallers, whosOnline, wall, newsFiles, newMessages, newFiles,
-	bulletins, sysInfo, newMail, verifyMail]) {
+	bulletins, sysInfo, newMail, verifyMail, page]) {
 	if (!catalogEntry(block.name)) throw new Error('webBlocks: ' + block.name + ' is not in the catalog');
 	if (BLOCKS.has(block.name)) throw new Error('webBlocks: duplicate block name ' + block.name);
 	BLOCKS.set(block.name, Object.freeze(block));
@@ -62,10 +63,32 @@ function listBlocks() {
 	return Array.from(BLOCKS.values());
 }
 
-/** The item for block name in a flow, or null when the flow does not have it. */
-function findStage(flow, name) {
-	for (var item of flow || []) if (stageName(item) === name) return item;
+/**
+ * The item for block name in a flow, or null when the flow does not have it.
+ * A repeatable block (a Page) is matched on its telling-apart setting too,
+ * given as which (the value from the stage's address).
+ */
+function findStage(flow, name, which) {
+	var entry = catalogEntry(name);
+	for (var item of flow || []) {
+		if (stageName(item) !== name) continue;
+		if (!entry || !entry.repeatable) return item;
+		var v = item && item.options ? item.options[entry.repeatable] : undefined;
+		if (v !== undefined && String(v) === String(which)) return item;
+	}
 	return null;
+}
+
+// Where the call flow page fetches a stage from. A repeatable stage carries
+// its setting in the address, since its name alone is not unique.
+function stagePath(block, item) {
+	var path = '/callflow/stage/' + block.name;
+	var entry = catalogEntry(block.name);
+	if (entry && entry.repeatable) {
+		var v = item && item.options ? item.options[entry.repeatable] : '';
+		path += '?' + entry.repeatable + '=' + encodeURIComponent(String(v === undefined ? '' : v));
+	}
+	return path;
 }
 
 /** A block's complete settings as a flow item gives them. */
@@ -103,10 +126,15 @@ async function buildStageList(ctx, flow, registry) {
 		}
 		if (!detail) continue;
 
+		// detail may relabel a stage (a Page is labelled with the page's
+		// title) but never rename it, since the name is how it is fetched
 		var stage = { name: block.name, label: block.label };
 		for (var key of Object.keys(detail)) {
-			if (key !== 'name' && key !== 'label') stage[key] = detail[key];
+			if (key === 'name' || key === 'path') continue;
+			if (key === 'label' && (typeof detail.label !== 'string' || !detail.label)) continue;
+			stage[key] = detail[key];
 		}
+		stage.path = stagePath(block, item);
 		stages.push(stage);
 	}
 	return stages;
@@ -118,6 +146,7 @@ export {
 	getBlock,
 	listBlocks,
 	findStage,
+	stagePath,
 	optionsFor,
 	buildStageList,
 	createContext,

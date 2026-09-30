@@ -40,6 +40,7 @@ import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
 import * as webBlockCatalog from '../webBlocks/catalog.js';
 import * as webNavModel from '../models/webNav.js';
+import * as webPagesModel from '../models/webPages.js';
 import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as managedNodes from '../models/managedNodes.js';
@@ -7252,6 +7253,85 @@ router.get('/inbound-log', requireAdmin, async (req, res) => {
 // -------------------------------------------------------
 
 // -------------------------------------------------------
+// Web pages (#91 phase 4): sysop-written pages at /page/<slug>
+// -------------------------------------------------------
+
+function webPageFormLocals(extra) {
+	return Object.assign({
+		audiences: webPagesModel.AUDIENCES,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions()
+	}, extra);
+}
+
+router.get('/webpages', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var pages = [], loadError = null;
+	try { pages = await webPagesModel.getAllPages(); } catch (err) { loadError = err.message; }
+	var usedBy = {};
+	for (var p of pages) usedBy[p.id] = await webPagesModel.usesOf(p.id);
+	res.locals.flash = await flash.get(req);
+	res.render('admin/webpages/index', webPageFormLocals({
+		sufficientAccess: checkAdminAccess(currentuser), title: 'Web Pages', activelink: 'webpages', activenav: 'content',
+		currentuser, pages, usedBy, loadError
+	}));
+});
+
+router.get('/webpages/new', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	res.locals.flash = await flash.get(req);
+	res.render('admin/webpages/edit', webPageFormLocals({
+		sufficientAccess: checkAdminAccess(currentuser), title: 'New Web Page', activelink: 'webpages', activenav: 'content',
+		currentuser, page: null, form: null
+	}));
+});
+
+router.get('/webpages/:id', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var page = await webPagesModel.getPageById(req.params.id);
+	if (!page) {
+		await flash.setOne(req, 'danger', 'That page no longer exists.');
+		return res.redirect('/admin/webpages');
+	}
+	res.locals.flash = await flash.get(req);
+	res.render('admin/webpages/edit', webPageFormLocals({
+		sufficientAccess: checkAdminAccess(currentuser), title: 'Edit ' + page.title, activelink: 'webpages', activenav: 'content',
+		currentuser, page, form: null
+	}));
+});
+
+// A refused save re-renders the form with what was typed, rather than
+// redirecting and losing a page of writing to a typo in the address.
+async function saveWebPage(req, res, id) {
+	var result = id ? await webPagesModel.updatePage(id, req.body) : await webPagesModel.createPage(req.body);
+	if (result.status) {
+		await flash.setOne(req, 'success', 'Page saved.');
+		return res.redirect('/admin/webpages');
+	}
+	var currentuser = await getCurrentUser(req);
+	res.locals.flash = [{ type: 'danger', text: 'Not saved: ' + result.errormessages.join('; ') }];
+	var existing = id ? await webPagesModel.getPageById(id) : null;
+	res.status(400).render('admin/webpages/edit', webPageFormLocals({
+		sufficientAccess: checkAdminAccess(currentuser), title: existing ? 'Edit ' + existing.title : 'New Web Page',
+		activelink: 'webpages', activenav: 'content', currentuser,
+		page: existing, form: webPagesModel.validatePage(req.body).page
+	}));
+}
+
+router.post('/webpages/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await saveWebPage(req, res, null);
+});
+
+router.post('/webpages/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await saveWebPage(req, res, parseInt(req.params.id));
+});
+
+router.post('/webpages/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await flashModelResult(req, await webPagesModel.deletePage(parseInt(req.params.id)), 'Page removed.');
+	res.redirect('/admin/webpages');
+});
+
+// -------------------------------------------------------
 // Web navigation bar (#91): the left side of the user navbar
 // -------------------------------------------------------
 
@@ -7261,10 +7341,12 @@ router.get('/webnav', requireAdmin, async (req, res) => {
 	var items = [];
 	var loadError = null;
 	try { items = await webNavModel.getAllItems(); } catch (err) { loadError = err.message; }
+	var pages = [];
+	try { pages = await webPagesModel.getAllPages(); } catch (_) {}
 	res.locals.flash = await flash.get(req);
 	res.render('admin/webnav/index', {
 		sufficientAccess, title: 'Web Navigation', activelink: 'webnav', activenav: 'menus',
-		currentuser, items, loadError,
+		currentuser, items, loadError, pages,
 		builtins: webNavModel.BUILTINS,
 		targetTypes: webNavModel.TARGET_TYPES,
 		audiences: webNavModel.AUDIENCES,
@@ -7306,7 +7388,8 @@ router.get('/callflows', requireAdmin, async (req, res) => {
 		webStages: webBlockCatalog.CATALOG,
 		describeWebOptions: webBlockCatalog.describeOptions,
 		webCatalogEntry: webBlockCatalog.catalogEntry,
-		callflowEnabled: appConfig.getBoolean('callflow_enabled', true)
+		callflowEnabled: appConfig.getBoolean('callflow_enabled', true),
+		webPagesList: await webPagesModel.getAllPages().catch(function () { return []; })
 	});
 });
 

@@ -27,6 +27,15 @@ mixin navTable(rows, parentKey)
             if item.target_type === 'dropdown'
               span.badge.bg-info.text-dark Menu
               small.text-muted.ms-1= kids.length + ' link' + (kids.length === 1 ? '' : 's')
+            else if item.target_type === 'page'
+              - var pg = pages.find(function(x) { return String(x.id) === String(item.target); })
+              if pg
+                | Page: #{pg.title}
+                code.ms-1= '/page/' + pg.slug
+                if !pg.active
+                  small.text-warning.d-block A draft, so the link is not shown
+              else
+                span.text-danger The page is gone
             else if item.target_type === 'builtin'
               if b
                 = b.label
@@ -154,6 +163,15 @@ block content
                 select.form-select#lmBuiltin
                   each b in builtins
                     option(value=b.key data-label=b.label)= b.label + ' (' + b.href + ')' + (b.enabledKey ? ', while ' + b.enabledKey + ' is on' : '')
+              .mb-3#lmPageWrap
+                label.form-label(for='lmPage') Page
+                if pages && pages.length
+                  select.form-select#lmPage
+                    each pg in pages
+                      option(value=pg.id data-label=pg.title)= pg.title + ' (/page/' + pg.slug + ')' + (pg.active ? '' : ', draft')
+                  .form-text The link is shown only to people who can read the page, and follows it if its address changes.
+                else
+                  p.text-muted.mb-0 No pages yet: write one under #[a(href='/admin/webpages') Web Pages].
               .mb-3#lmUrlWrap
                 label.form-label(for='lmUrl') Address
                 input.form-control#lmUrl(maxlength='512' placeholder='https://example.org or /doors/play/lord')
@@ -212,6 +230,7 @@ block content
         function showFor(t) {
           document.getElementById('lmBuiltinWrap').style.display = t === 'builtin' ? '' : 'none';
           document.getElementById('lmUrlWrap').style.display = t === 'url' ? '' : 'none';
+          document.getElementById('lmPageWrap').style.display = t === 'page' ? '' : 'none';
           // A menu goes on the bar itself: one level only
           document.getElementById('lmParentWrap').style.display = t === 'dropdown' ? 'none' : '';
           if (t === 'dropdown') document.getElementById('lmParent').value = '';
@@ -226,6 +245,10 @@ block content
         builtinSel.addEventListener('change', function() {
           if (!label.value.trim()) label.value = builtinSel.options[builtinSel.selectedIndex].dataset.label || '';
         });
+        var pageSelect = document.getElementById('lmPage');
+        if (pageSelect) pageSelect.addEventListener('change', function() {
+          if (!label.value.trim()) label.value = pageSelect.options[pageSelect.selectedIndex].dataset.label || '';
+        });
 
         modal.addEventListener('show.bs.modal', function(e) {
           var btn = e.relatedTarget;
@@ -239,6 +262,8 @@ block content
           label.value = item ? item.label : '';
           icon.value = item && item.icon ? item.icon : '';
           if (t === 'builtin' && item) builtinSel.value = item.target;
+          var pageSel = document.getElementById('lmPage');
+          if (pageSel && t === 'page' && item) pageSel.value = item.target;
           url.value = (item && t === 'url') ? item.target : '';
           document.getElementById('lmNewTab').checked = !!(item && item.new_tab);
           document.getElementById('lmParent').value = item && item.parent_id ? String(item.parent_id) : '';
@@ -253,7 +278,10 @@ block content
 
         // The hidden target carries whichever of page or address applies
         form.addEventListener('submit', function() {
-          target.value = type.value === 'builtin' ? builtinSel.value : (type.value === 'url' ? url.value.trim() : '');
+          var pageSel = document.getElementById('lmPage');
+          target.value = type.value === 'builtin' ? builtinSel.value
+            : type.value === 'url' ? url.value.trim()
+            : type.value === 'page' ? (pageSel ? pageSel.value : '') : '';
           // The checked box and the hidden false share a name; send one
           var active = document.getElementById('lmActive');
           form.querySelector('input[type=hidden][name=active]').disabled = active.checked;

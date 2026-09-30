@@ -1,0 +1,12 @@
+//- A sysop Web Page as a call flow stage
+if page
+  .card.mb-3
+    if page.show_title
+      .card-header.bg-primary= page.title
+    .card-body(style='background: #000;' + (themeTextColour ? ' color: ' + themeTextColour : ''))
+      if page.body_html
+        != page.body_html
+      else
+        p.text-muted This page is empty.
+else
+  p.text-muted This page is not available.

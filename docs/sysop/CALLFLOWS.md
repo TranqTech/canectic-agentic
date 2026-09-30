@@ -42,8 +42,9 @@ A stage with nothing to show is always skipped, whatever you set: nobody sees an
 | System Info | Board name, sysop, location, version, and counts of users, calls, message areas and files | none |
 | New Mail | The user's unread private mail, newest first, with a **Go to Mail** button | **How many**: 1 to 50, default 5 (the count shown is always all of it). Shown only when there is unread mail |
 | Verify Address | Asks a user who has not verified their mail address to do it, with a **Verify Now** button and, when `unverified_retention_days` is set, how many days the account has left | none; shown only to users who have not verified |
+| Page | One of your Web Pages (see `WEBSITE.md`), labelled with its title. The web counterpart of the terminal's Display Screen | **Page**: which one. Can be added more than once, one page each. Skipped for anyone who may not read the page, and while it is a draft |
 
-The last four are not in the flow as shipped; add them from the list if you want them. Following **Go to Mail**, a message, or **Verify Now** finishes the call flow first and then goes there, so the user is not offered the flow again when they come back.
+The last five are not in the flow as shipped; add them from the list if you want them. Adding a Page stage picks the first of your pages not already in the flow; change it with the gear. Following **Go to Mail**, a message, or **Verify Now** finishes the call flow first and then goes there, so the user is not offered the flow again when they come back.
 
 "Since their last visit" means since the last time they went through the web call flow. Someone going through it for the first time sees everything.
 

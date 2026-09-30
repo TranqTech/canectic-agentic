@@ -52,7 +52,8 @@ block content
         var stage = stages[currentIdx];
         updateProgress();
 
-        fetch('/callflow/stage/' + stage.name)
+        // path carries a Page stage's page; older servers sent none
+        fetch(stage.path || ('/callflow/stage/' + stage.name))
           .then(function(r) { return r.text(); })
           .then(function(html) {
             var container = document.getElementById('cf-stage-container');

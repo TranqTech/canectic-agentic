@@ -1,0 +1,76 @@
+extends ../../layouts/admin
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-2
+          i.bi.bi-file-earmark-richtext.me-2
+          | Web Pages
+        p.text-muted
+          | Pages you write for the website, each at its own address. Link to one from the navigation bar (#[a(href='/admin/webnav') Web Navigation]) or show one as a stage in the web call flow (#[a(href='/admin/callflows') Call Flows]).
+        include ../../partials/flash
+
+        if loadError
+          .alert.alert-danger
+            | Could not read the pages (#{loadError}). The table is created by the database update (#[code node src/tools/dbmigrations.js]).
+
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Pages
+              a.btn.btn-sm.btn-success(href='/admin/webpages/new')
+                i.bi.bi-plus-circle.me-1
+                | New Page
+          .card-body
+            if pages && pages.length > 0
+              table.table.table-sm.table-hover.mb-0
+                thead
+                  tr
+                    th Title
+                    th Address
+                    th Who can read it
+                    th Used by
+                    th Status
+                    th(style='width:100px')
+                tbody
+                  each p in pages
+                    - var aud = audiences.find(function(a) { return a.value === p.audience; })
+                    tr
+                      td
+                        a(href='/admin/webpages/' + p.id)
+                          strong= p.title
+                      td
+                        if p.active
+                          a(href='/page/' + p.slug target='_blank' rel='noopener')
+                            code= '/page/' + p.slug
+                        else
+                          code.text-muted= '/page/' + p.slug
+                      td
+                        small= aud ? aud.label : p.audience
+                        if p.min_security !== null && p.min_security !== undefined
+                          small.d-block.text-muted Security #{p.min_security}+
+                        if p.required_flags && p.required_flags.length
+                          small.d-block.text-muted Needs: #{p.required_flags.join(', ')}
+                        if p.prohibited_flags && p.prohibited_flags.length
+                          small.d-block.text-muted Not for: #{p.prohibited_flags.join(', ')}
+                      td
+                        if usedBy[p.id] && usedBy[p.id].length
+                          each u in usedBy[p.id]
+                            small.d-block= u
+                        else
+                          small.text-muted nothing yet
+                      td
+                        if p.active
+                          span.badge.bg-success Published
+                        else
+                          span.badge.bg-secondary Draft
+                      td
+                        a.btn.btn-sm.btn-primary.me-1(href='/admin/webpages/' + p.id title='Edit')
+                          i.bi.bi-pencil
+                        form.d-inline(method='POST' action='/admin/webpages/' + p.id + '/delete')
+                          button.btn.btn-sm.btn-danger(type='submit' title='Remove' onclick='return confirm("Remove this page?")')
+                            i.bi.bi-trash
+            else if !loadError
+              p.text-muted.mb-0 No pages yet.

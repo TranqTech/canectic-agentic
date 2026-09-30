@@ -67,6 +67,8 @@ block content
                           - var wEntry = webCatalogEntry(wName)
                           - var wOpts = (typeof stg === 'object' && stg.options) ? stg.options : {}
                           - var wDesc = describeWebOptions(wEntry, wOpts)
+                          //- A Page stage is named by its page
+                          - var wPage = wName === 'page' ? (webPagesList || []).find(function(p) { return p.id === Number(wOpts.page); }) : null
                           .badge.bg-info.text-dark.me-1.mb-1.stage-badge.p-2(
                             draggable='true'
                             data-stage=wName
@@ -76,7 +78,12 @@ block content
                             style='cursor:grab;font-size:0.85rem'
                           )
                             span.me-1= (idx + 1) + '.'
-                            = wEntry ? wEntry.label : wName
+                            if wName === 'page'
+                              | Page: #{wPage ? wPage.title : 'removed'}
+                              if wPage && !wPage.active
+                                small.ms-1.text-warning (draft, skipped)
+                            else
+                              = wEntry ? wEntry.label : wName
                             if wDesc
                               small.ms-1.text-muted (#{wDesc})
                             |
@@ -114,8 +121,8 @@ block content
                             //- A web stage appears once, so offer only those not in the flow
                             - var inFlow = stages.map(function(x) { return typeof x === 'string' ? x : x.stage; })
                             each w in webStages
-                              if inFlow.indexOf(w.name) === -1
-                                option(value=w.name title=w.hint)= w.label
+                              if w.repeatable || inFlow.indexOf(w.name) === -1
+                                option(value=w.name title=w.hint)= w.label + (w.repeatable ? ' (one of your Web Pages)' : '')
                           else
                             each s in availableStages
                               option(value=s.name data-needsarg=s.needsArg || false)= s.label
@@ -314,6 +321,7 @@ block content
             button.btn.btn-primary#soSave(type='button') Save
 
     script#webStageCatalog(type='application/json')!= JSON.stringify(webStages).replace(/</g, '\\u003c')
+    script#webPagesList(type='application/json')!= JSON.stringify((webPagesList || []).map(function(p) { return { id: p.id, title: p.title, active: p.active }; })).replace(/</g, '\\u003c')
 
     script.
       // Edit Flow modal
@@ -365,6 +373,17 @@ block content
           var stages = collectStages(stageList);
           // Web stages take settings, not an argument
           var newStage = (stageArg && stageList.dataset.kind !== 'web') ? { stage: stageName, arg: stageArg } : { stage: stageName };
+          // A Page stage needs a page: take the first not already in the flow,
+          // changed afterwards with its gear
+          if (stageList.dataset.kind === 'web' && stageName === 'page') {
+            var used = stages.filter(function(x) { return x.stage === 'page' && x.options; }).map(function(x) { return Number(x.options.page); });
+            var free = webPagesList.filter(function(p) { return used.indexOf(p.id) === -1; });
+            if (free.length === 0) {
+              alert(webPagesList.length ? 'Every one of your Web Pages is already in the flow.' : 'Write a page under Content > Web Pages first.');
+              return;
+            }
+            newStage.options = { page: free[0].id };
+          }
           stages.push(newStage);
 
           saveStages(flowId, stages, stageList);
@@ -500,6 +519,8 @@ block content
       // Web stage settings
       var webCatalog = [];
       try { webCatalog = JSON.parse(document.getElementById('webStageCatalog').textContent); } catch (_) {}
+      var webPagesList = [];
+      try { webPagesList = JSON.parse(document.getElementById('webPagesList').textContent); } catch (_) {}
       var optionsBadge = null;
 
       var stageOptionsModal = document.getElementById('stageOptionsModal');
@@ -523,7 +544,17 @@ block content
           label.textContent = def.label;
           wrap.appendChild(label);
           var input;
-          if (def.type === 'select') {
+          if (def.type === 'page') {
+            input = document.createElement('select');
+            input.className = 'form-select';
+            webPagesList.forEach(function(p) {
+              var o = document.createElement('option');
+              o.value = String(p.id);
+              o.textContent = p.title + (p.active ? '' : ' (draft)');
+              if (Number(value) === p.id) o.selected = true;
+              input.appendChild(o);
+            });
+          } else if (def.type === 'select') {
             input = document.createElement('select');
             input.className = 'form-select';
             def.choices.forEach(function(c) {
@@ -561,8 +592,9 @@ block content
         // default reaches every stage the sysop never touched
         var opts = {};
         document.querySelectorAll('#soFields [data-key]').forEach(function(input) {
-          var v = input.dataset.type === 'number' ? parseInt(input.value, 10) : input.value;
-          if (String(v) !== input.dataset.default) opts[input.dataset.key] = input.dataset.type === 'number' && isNaN(v) ? input.value : v;
+          var v = (input.dataset.type === 'number' || input.dataset.type === 'page') ? parseInt(input.value, 10) : input.value;
+          // Which page is never a default: it is what the stage is
+          if (input.dataset.type === 'page' || String(v) !== input.dataset.default) opts[input.dataset.key] = (input.dataset.type === 'number' && isNaN(v)) ? input.value : v;
         });
         optionsBadge.dataset.options = JSON.stringify(opts);
         var stageList = optionsBadge.closest('.stage-list');

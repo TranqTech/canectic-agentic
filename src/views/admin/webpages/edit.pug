@@ -1,0 +1,111 @@
+extends ../../layouts/admin
+block content
+  //- f is what the form shows: what was just typed (after a refused save),
+  //- else the stored page, else a new page's defaults
+  - var f = form || page || { title: '', slug: '', show_title: true, body_html: '', audience: 'all', min_security: null, required_flags: [], prohibited_flags: [], active: false }
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        .d-flex.justify-content-between.align-items-center.mb-3
+          h2.mb-0
+            i.bi.bi-file-earmark-richtext.me-2
+            = page ? 'Edit Page' : 'New Page'
+          a.btn.btn-outline-secondary.btn-sm(href='/admin/webpages')
+            i.bi.bi-arrow-left.me-1
+            | All pages
+        include ../../partials/flash
+
+        form#pageForm(method='POST' action=page ? '/admin/webpages/' + page.id + '/update' : '/admin/webpages/new')
+          .card.mb-3
+            .card-body
+              .row
+                .col-md-7.mb-3
+                  label.form-label(for='wpTitle') Title
+                  input.form-control#wpTitle(name='title' required maxlength='128' value=f.title)
+                  .form-check.mt-2
+                    input.form-check-input#wpShowTitle(type='checkbox' name='show_title' value='true' checked=!!f.show_title)
+                    label.form-check-label(for='wpShowTitle') Show the title above the page
+                    input(type='hidden' name='show_title' value='false')
+                .col-md-5.mb-3
+                  label.form-label(for='wpSlug') Address
+                  .input-group
+                    span.input-group-text /page/
+                    input.form-control#wpSlug(name='slug' maxlength='64' value=f.slug placeholder='made from the title')
+                  .form-text Lower-case letters, digits and hyphens. Links and call flow stages follow the page if you change it.
+              label.form-label(for='wpBody') Page
+              textarea#wpBody(name='body_html' rows='16')= f.body_html || ''
+
+          .card.mb-3
+            .card-header Who can read it
+            .card-body
+              .row
+                .col-md-6.mb-3
+                  label.form-label(for='wpAudience') Readers
+                  select.form-select#wpAudience(name='audience')
+                    each a in audiences
+                      option(value=a.value selected=f.audience === a.value)= a.label
+                .col-md-6.mb-3
+                  label.form-label(for='wpSecurity') Lowest security #[small.text-muted (optional)]
+                  input.form-control#wpSecurity(name='min_security' type='number' min='0' max='255' placeholder='anyone' value=(f.min_security === null || f.min_security === undefined) ? '' : f.min_security)
+              .row
+                .col-md-6
+                  label.form-label Needs all of these flags
+                  each fl in availablePermissions
+                    .form-check
+                      input.form-check-input(type='checkbox' name='required_flags' value=fl id='wpReq-' + fl checked=(f.required_flags || []).indexOf(fl) !== -1)
+                      label.form-check-label(for='wpReq-' + fl)= fl
+                .col-md-6
+                  label.form-label Not for anyone with
+                  each fl in availableRestrictions
+                    .form-check
+                      input.form-check-input(type='checkbox' name='prohibited_flags' value=fl id='wpPro-' + fl checked=(f.prohibited_flags || []).indexOf(fl) !== -1)
+                      label.form-check-label(for='wpPro-' + fl)= fl
+              p.small.text-muted.mt-3.mb-0 A navigation link or call flow stage showing this page is shown only to people who can read it.
+
+          .d-flex.justify-content-between.align-items-center.mb-5
+            .form-check
+              input.form-check-input#wpActive(type='checkbox' name='active' value='true' checked=!!f.active)
+              label.form-check-label(for='wpActive') Published
+              input(type='hidden' name='active' value='false')
+              .form-text An unpublished page is a draft: its address answers as though there were no page.
+            button.btn.btn-primary(type='submit')
+              i.bi.bi-save.me-1
+              | Save
+
+    script(src='/js/tinymce/tinymce.min.js')
+    script.
+      // The same editor and colour list as announcements and bulletins
+      var ansiColorMap = [
+        '010101', 'Theme Default', 'AA0000', 'Red', '00AA00', 'Green', 'AA5500', 'Yellow (dark)',
+        '0000AA', 'Blue', 'AA00AA', 'Magenta', '00AAAA', 'Cyan', 'AAAAAA', 'White (grey)',
+        '000000', 'Black', 'FF5555', 'Bright Red', '55FF55', 'Bright Green', 'FFFF55', 'Bright Yellow',
+        '5555FF', 'Bright Blue', 'FF55FF', 'Bright Magenta', '55FFFF', 'Bright Cyan', 'FFFFFF', 'Bright White',
+        '555555', 'Bright Black'
+      ];
+      tinymce.init({
+        selector: '#wpBody',
+        license_key: 'gpl',
+        menubar: false,
+        height: 420,
+        plugins: 'lists link autolink image table code',
+        toolbar: 'blocks | bold italic underline strikethrough | forecolor backcolor | bullist numlist | link image table | removeformat code',
+        skin: 'oxide-dark',
+        content_css: 'dark',
+        content_style: 'span[style*="color: #010101"], span[style*="color: rgb(1, 1, 1)"] { color: inherit !important; }',
+        color_map: ansiColorMap,
+        color_cols: 9,
+        custom_colors: false,
+        branding: false,
+        promotion: false,
+        setup: function(editor) { editor.on('change', function() { editor.save(); }); }
+      });
+      // Each checkbox shares its name with a hidden "false"; send one
+      document.getElementById('pageForm').addEventListener('submit', function() {
+        if (window.tinymce && tinymce.get('wpBody')) tinymce.get('wpBody').save();
+        ['wpShowTitle', 'wpActive'].forEach(function(id) {
+          var box = document.getElementById(id);
+          box.parentNode.querySelector('input[type=hidden]').disabled = box.checked;
+        });
+      });

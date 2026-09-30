@@ -9,7 +9,7 @@ nav.navbar.navbar-expand-lg.bg-primary.fixed-top(data-bs-theme='dark')
         //- The sysop's links (web_nav_items, /admin/webnav). Built here rather
         //- than in middleware because only the route knows currentuser and
         //- activelink.
-        - var navLinks = buildWebNav ? buildWebNav(webNavItems, { user: currentuser || null, activelink: activenav, path: navPath }) : []
+        - var navLinks = buildWebNav ? buildWebNav(webNavItems, { user: currentuser || null, activelink: activenav, path: navPath, pages: webNavPages }) : []
         each link, li in navLinks
           if link.children && link.children.length > 0
             li.nav-item.dropdown

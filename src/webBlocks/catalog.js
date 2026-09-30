@@ -95,6 +95,16 @@ var CATALOG = Object.freeze([
 		name: 'verifymail', label: 'Verify Address', requiresUser: true,
 		hint: 'Asks them to verify their mail address, with a button to do it. Shown only to users who have not.',
 		options: []
+	},
+	{
+		// One of the sysop's Web Pages, shown as a stage: the web counterpart
+		// of the terminal's Display Screen. It may appear more than once, one
+		// page each, so "repeatable" names the setting that tells them apart.
+		name: 'page', label: 'Page', requiresUser: false, repeatable: 'page',
+		hint: 'One of your Web Pages. Shown only to those allowed to read that page; add it more than once for more pages.',
+		options: [
+			{ key: 'page', label: 'Page', type: 'page', default: null }
+		]
 	}
 ].map(function (e) {
 	e.options = Object.freeze(e.options.map(function (o) {
@@ -129,6 +139,11 @@ function checkOption(def, raw) {
 	if (def.type === 'select') {
 		for (var c of def.choices) if (c.value === raw) return raw;
 		return undefined;
+	}
+	if (def.type === 'page') {
+		// A page by id, so renaming its address does not break the flow
+		var id = typeof raw === 'number' ? raw : (typeof raw === 'string' && /^\s*[1-9]\d{0,9}\s*$/.test(raw) ? parseInt(raw, 10) : NaN);
+		return Number.isInteger(id) && id > 0 ? id : undefined;
 	}
 	if (def.type === 'number') {
 		var n = typeof raw === 'number' ? raw : (typeof raw === 'string' && /^\s*\d+\s*$/.test(raw) ? parseInt(raw, 10) : NaN);
@@ -176,11 +191,24 @@ function normaliseWebStages(input) {
 			errors.push('Not a web stage: ' + (name === null ? JSON.stringify(item) : name));
 			continue;
 		}
-		if (seen.has(name)) {
-			errors.push(entry.label + ' is in the flow twice; a web stage can appear once');
+		// A repeatable stage is told apart by one setting (which page); every
+		// other stage may appear once, since its name is its address
+		var identity = name;
+		if (entry.repeatable) {
+			var raw = (item && typeof item === 'object' && item.options) ? item.options[entry.repeatable] : undefined;
+			var def0 = entry.options.find(function (o) { return o.key === entry.repeatable; });
+			var idv = raw === undefined ? undefined : checkOption(def0, raw);
+			if (idv === undefined) {
+				errors.push(entry.label + ': choose which ' + def0.label.toLowerCase());
+				continue;
+			}
+			identity = name + ':' + idv;
+		}
+		if (seen.has(identity)) {
+			errors.push(entry.label + ' is in the flow twice' + (entry.repeatable ? ' with the same ' + entry.repeatable : '; a web stage can appear once'));
 			continue;
 		}
-		seen.add(name);
+		seen.add(identity);
 
 		var out = { stage: name };
 		var given = (item && typeof item === 'object' && item.options && typeof item.options === 'object') ? item.options : null;
@@ -210,6 +238,8 @@ function describeOptions(entry, stored) {
 	var parts = [];
 	for (var def of entry.options) {
 		if (resolved[def.key] === def.default) continue;
+		// Which page is shown by name on the admin page, which knows the titles
+		if (def.type === 'page') continue;
 		if (def.type === 'select') {
 			var c = def.choices.find(function (x) { return x.value === resolved[def.key]; });
 			parts.push(c ? c.label.toLowerCase() : String(resolved[def.key]));
