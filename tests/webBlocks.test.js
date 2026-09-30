@@ -66,7 +66,7 @@ describe('web blocks: the registry', function () {
 	it('blocks that mean nothing to a visitor say so', function () {
 		var needUser = webBlocks.listBlocks().filter(function (b) { return b.requiresUser; })
 			.map(function (b) { return b.name; }).sort();
-		assert.deepStrictEqual(needUser, ['announcements', 'newfiles', 'newmsgs']);
+		assert.deepStrictEqual(needUser, ['announcements', 'newfiles', 'newmail', 'newmsgs', 'verifymail']);
 	});
 
 	it('an unknown name is a miss, including names every object has', function () {
@@ -259,7 +259,7 @@ describe('web blocks: every stage renders for a real user', function () {
 	});
 });
 
-// Names for the per-stage cases, known when the file is loaded
+// Every block, not only the default flow's: a sysop can add any of them
 function webBlocksNames() {
-	return webBlocks ? webBlocks.DEFAULT_WEB_FLOW.slice() : [];
+	return webBlocks ? webBlocks.listBlocks().map(function (b) { return b.name; }) : [];
 }

@@ -34,11 +34,16 @@ import wall from './wall.js';
 import newsFiles from './newsFiles.js';
 import newMessages from './newMessages.js';
 import newFiles from './newFiles.js';
+import bulletins from './bulletins.js';
+import sysInfo from './sysInfo.js';
+import newMail from './newMail.js';
+import verifyMail from './verifyMail.js';
 
 // Every catalog entry implemented, nothing implemented that is not in the
 // catalog: a flow is validated against the catalog and run against this.
 var BLOCKS = new Map();
-for (var block of [welcome, announcements, lastCallers, whosOnline, wall, newsFiles, newMessages, newFiles]) {
+for (var block of [welcome, announcements, lastCallers, whosOnline, wall, newsFiles, newMessages, newFiles,
+	bulletins, sysInfo, newMail, verifyMail]) {
 	if (!catalogEntry(block.name)) throw new Error('webBlocks: ' + block.name + ' is not in the catalog');
 	if (BLOCKS.has(block.name)) throw new Error('webBlocks: duplicate block name ' + block.name);
 	BLOCKS.set(block.name, Object.freeze(block));

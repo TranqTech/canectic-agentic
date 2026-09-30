@@ -38,6 +38,12 @@ A stage with nothing to show is always skipped, whatever you set: nobody sees an
 | News | Your active news and score files (see News Files under Content) | none; shown only when there are some |
 | New Messages | Unread messages in the user's subscribed areas | none; shown only when there are some |
 | New Files | Files new since the user's previous visit in their subscribed file areas | none; shown only when there are some |
+| Bulletins | Your bulletins, each opening in place so reading one does not leave the flow. One new or changed since the user's last visit is marked New and opened already | **Show**: always, or only when a bulletin is new or changed since the user's last visit. Shown only when you have bulletins |
+| System Info | Board name, sysop, location, version, and counts of users, calls, message areas and files | none |
+| New Mail | The user's unread private mail, newest first, with a **Go to Mail** button | **How many**: 1 to 50, default 5 (the count shown is always all of it). Shown only when there is unread mail |
+| Verify Address | Asks a user who has not verified their mail address to do it, with a **Verify Now** button and, when `unverified_retention_days` is set, how many days the account has left | none; shown only to users who have not verified |
+
+The last four are not in the flow as shipped; add them from the list if you want them. Following **Go to Mail**, a message, or **Verify Now** finishes the call flow first and then goes there, so the user is not offered the flow again when they come back.
 
 "Since their last visit" means since the last time they went through the web call flow. Someone going through it for the first time sees everything.
 
@@ -53,7 +59,7 @@ Terminal flows are listed on the same page. They use terminal stages (Terminal N
 
 The page will not save a change that would break callers, and it tells you why:
 
-- **A web stage in a terminal flow, or a terminal stage in the web flow.** The terminal side disconnects a caller when it reaches a stage it does not know. Two stage names exist on both sides, Announcements and The Wall, and each kind has its own version.
+- **A web stage in a terminal flow, or a terminal stage in the web flow.** The terminal side disconnects a caller when it reaches a stage it does not know. Four stage names exist on both sides (Announcements, Bulletins, System Info and The Wall), and each kind has its own version.
 - **A stage name the terminal side cannot run**, for example a typo in a flow's initial stages.
 - **A pool on the web flow.** Pools run terminal flows only; the Web flow is not offered in the pool form. Even if a pool somehow named it, terminal callers would get the Standard flow instead.
 - **A setting out of range**, such as asking Last Callers for 500.

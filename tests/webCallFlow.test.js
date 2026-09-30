@@ -131,7 +131,7 @@ describe('web call flow: the terminal side is kept apart', function () {
 		// safe; but it should be a decision, so a new one fails here first.
 		var terminal = new Set(callFlows.getAvailableStages().map(function (s) { return s.name; }).concat(callFlows.TERMINAL_EXTRA_STAGES));
 		var shared = catalog.CATALOG.map(function (e) { return e.name; }).filter(function (n) { return terminal.has(n); });
-		assert.deepStrictEqual(shared.sort(), ['announcements', 'wall']);
+		assert.deepStrictEqual(shared.sort(), ['announcements', 'bulletins', 'sysinfo', 'wall']);
 		// ...and each kind still refuses the other's stages
 		assert.deepStrictEqual(catalog.normaliseWebStages(['check_email']).errors, ['Not a web stage: check_email']);
 		assert.deepStrictEqual(callFlows.normaliseTerminalStages(['welcome']).errors, ['welcome is a web stage; a terminal flow cannot use it']);
@@ -186,6 +186,53 @@ describe('web call flow: settings change what a block shows', function () {
 			ctx.once('lastCallflowAt', function () { return null; });
 			assert.deepStrictEqual(await webBlocks.getBlock(name).available(ctx, { show: 'new', count: 15 }), {}, name);
 		}
+	});
+
+	function ctxWith(memo) {
+		var ctx = webBlocks.createContext({ app: { locals: {} } }, { id: '1', username: 'me' });
+		for (var k of Object.keys(memo)) (function (v) { ctx.once(k, function () { return v; }); })(memo[k]);
+		return ctx;
+	}
+
+	it('Bulletins: skipped with none, and on "new" skipped unless one is new or changed', async function () {
+		var block = webBlocks.getBlock('bulletins');
+		var since = new Date(Date.now() - 86400000);
+		assert.strictEqual(await block.available(ctxWith({ bulletins: [], lastCallflowAt: since }), { show: 'always' }), null);
+		var old = [{ title: 'Rules', _isNew: false }];
+		var fresh = [{ title: 'Rules', _isNew: false }, { title: 'Hours', _isNew: true }];
+		assert.deepStrictEqual(await block.available(ctxWith({ bulletins: old, lastCallflowAt: since }), { show: 'always' }), {});
+		assert.strictEqual(await block.available(ctxWith({ bulletins: old, lastCallflowAt: since }), { show: 'new' }), null);
+		assert.deepStrictEqual(await block.available(ctxWith({ bulletins: fresh, lastCallflowAt: since }), { show: 'new' }), { count: 1 });
+		assert.deepStrictEqual(await block.available(ctxWith({ bulletins: old, lastCallflowAt: null }), { show: 'new' }), {},
+			'never been through the flow: shown');
+	});
+
+	it('Bulletins: marks new only what changed since the last visit, and nothing for a first visit', async function () {
+		var { changedSince } = await import('../src/webBlocks/bulletins.js');
+		var since = new Date('2026-09-20T00:00:00Z');
+		assert.strictEqual(changedSince({ created_at: '2026-09-10', updated_at: '2026-09-21' }, since), true, 'edited after');
+		assert.strictEqual(changedSince({ created_at: '2026-09-21' }, since), true, 'created after, never edited');
+		assert.strictEqual(changedSince({ created_at: '2026-09-10', updated_at: '2026-09-11' }, since), false);
+		assert.strictEqual(changedSince({ created_at: '2026-09-21', updated_at: '2026-09-21' }, null), false, 'first visit');
+		assert.strictEqual(changedSince({}, since), false, 'no dates');
+	});
+
+	it('New Mail: shown only with unread mail, counting all of it', async function () {
+		var block = webBlocks.getBlock('newmail');
+		assert.strictEqual(await block.available(ctxWith({ unreadMail: 0 }), { count: 5 }), null);
+		assert.deepStrictEqual(await block.available(ctxWith({ unreadMail: 12 }), { count: 5 }), { count: 12 });
+	});
+
+	it('Verify Address: shown only to an unverified user, with the days they have left', async function () {
+		var block = webBlocks.getBlock('verifymail');
+		assert.strictEqual(await block.available(ctxWith({ mailAccount: { mailverified: true } }), {}), null);
+		assert.deepStrictEqual(await block.available(ctxWith({ mailAccount: { mailverified: false } }), {}), {});
+		assert.deepStrictEqual(await block.available(ctxWith({ mailAccount: { mailverified: null } }), {}), {}, 'never set is not verified');
+		var appConfig = (await import('../src/config/appConfig.js')).default;
+		var retention = appConfig.getNumber('unverified_retention_days', 14);
+		var locals = await block.load(ctxWith({ mailAccount: { mailaddress: 'a@b.c', mailverified: false, created_at: new Date() } }), {});
+		assert.strictEqual(locals.address, 'a@b.c');
+		assert.strictEqual(locals.daysRemaining, retention > 0 ? retention : null);
 	});
 
 	it('the stage list passes each stage its settings', async function () {

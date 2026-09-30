@@ -9,7 +9,7 @@
     {
       "id": "web-callflow-editable",
       "level": "info",
-      "text": "The web call flow (the guided tour of what is new that website users get after logging in) can now be edited. It appears on the Call Flows page (Flows in the admin menu) as a flow marked Web, set up exactly as it was, so nothing changes until you edit it. You can reorder or remove stages, and set Last Callers, Who's Online and The Wall to show only when there is something new. Saving a terminal flow now refuses a stage the terminal side cannot run, rather than saving it and disconnecting callers when they reach it. See docs/sysop/CALLFLOWS.md."
+      "text": "The web call flow (the guided tour of what is new that website users get after logging in) can now be edited. It appears on the Call Flows page (Flows in the admin menu) as a flow marked Web, set up exactly as it was, so nothing changes until you edit it. You can reorder or remove stages, set Last Callers, Who's Online and The Wall to show only when there is something new, and add four new stages: Bulletins, System Info, New Mail and Verify Address. Saving a terminal flow now refuses a stage the terminal side cannot run, rather than saving it and disconnecting callers when they reach it. See docs/sysop/CALLFLOWS.md."
     }
   ],
   "min_upgrade_from": "0.9.0a",

@@ -70,6 +70,31 @@ var CATALOG = Object.freeze([
 		name: 'newfiles', label: 'New Files', requiresUser: true,
 		hint: 'Files new since their previous visit in subscribed file areas. Shown only when there are some.',
 		options: []
+	},
+	{
+		name: 'bulletins', label: 'Bulletins', requiresUser: false,
+		hint: 'Your bulletins, each opening in place; ones new or changed since their last visit are opened already. Shown only when there are some.',
+		options: [
+			{ key: 'show', label: 'Show', type: 'select', default: 'always', choices: [
+				SHOW_ALWAYS,
+				{ value: 'new', label: 'Only when a bulletin is new or changed since their last visit' }
+			] }
+		]
+	},
+	{
+		name: 'sysinfo', label: 'System Info', requiresUser: false,
+		hint: 'Board name, sysop, location, version, and counts of users, calls, areas and files.',
+		options: []
+	},
+	{
+		name: 'newmail', label: 'New Mail', requiresUser: true,
+		hint: 'Their unread private mail, with a button to open it. Shown only when there is some.',
+		options: [countOption(5)]
+	},
+	{
+		name: 'verifymail', label: 'Verify Address', requiresUser: true,
+		hint: 'Asks them to verify their mail address, with a button to do it. Shown only to users who have not.',
+		options: []
 	}
 ].map(function (e) {
 	e.options = Object.freeze(e.options.map(function (o) {

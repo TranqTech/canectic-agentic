@@ -1,0 +1,30 @@
+//- Bulletins stage: each opens in place, so reading one never leaves the
+//- call flow. New or changed since the last visit: marked and open already.
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-journal-text.me-2
+    | Bulletins
+  .card-body
+    if bulletins && bulletins.length > 0
+      .accordion#cf-bulletins
+        each b, i in bulletins
+          .accordion-item
+            h2.accordion-header
+              button.accordion-button(
+                type='button'
+                class=b._isNew ? '' : 'collapsed'
+                data-bs-toggle='collapse'
+                data-bs-target='#cf-bulletin-' + i
+                aria-expanded=b._isNew ? 'true' : 'false'
+              )
+                if b._isNew
+                  span.badge.bg-success.me-2 New
+                span.fg-brightyellow= b.title
+            .accordion-collapse.collapse(id='cf-bulletin-' + i class=b._isNew ? 'show' : '')
+              .accordion-body(style='background: #000;' + (themeTextColour ? ' color: ' + themeTextColour : ''))
+                if b.body_html
+                  != b.body_html
+                else
+                  p.text-muted No web content for this bulletin.
+    else
+      p.text-muted No bulletins.

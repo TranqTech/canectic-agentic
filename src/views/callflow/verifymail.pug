@@ -1,0 +1,20 @@
+//- Verify Address stage, shown only to a user who has not verified
+.card.mb-3
+  .card-header.bg-warning.text-dark
+    i.bi.bi-shield-exclamation.me-2
+    | Verify Your Address
+  .card-body
+    p
+      | Your address
+      if address
+        |  #[strong= address]
+      |  has not been verified yet. Verifying it lets the board send you mail and confirms the account is yours.
+    if daysRemaining !== null
+      p.fg-brightyellow
+        if daysRemaining > 0
+          | Unverified accounts are removed after a while: yours has #{daysRemaining} day#{daysRemaining === 1 ? '' : 's'} left.
+        else
+          | Unverified accounts are removed after a while, and yours is due to be removed. Verify it now to keep it.
+    a.btn.btn-sm.btn-warning(href='/users/verify' data-cf-finish='/users/verify')
+      i.bi.bi-envelope-check.me-1
+      | Verify Now

@@ -1,0 +1,28 @@
+//- New Mail stage. Links carry data-cf-finish: the call flow page finishes
+//- the flow and then goes there, so opening mail does not leave it half done.
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-envelope.me-2
+    | New Mail
+  .card-body
+    if unread > 0
+      p.fg-cyan
+        | You have #{unread} unread message#{unread === 1 ? '' : 's'}
+        if messages.length < unread
+          | ; the newest #{messages.length}:
+        else
+          | :
+      .list-group.mb-3
+        each m in messages
+          a.list-group-item.list-group-item-action(href='/pm/inbox/' + m.uuid data-cf-finish='/pm/inbox/' + m.uuid)
+            .d-flex.justify-content-between.gap-2
+              span
+                span.fg-brightyellow= m.from_user || 'Unknown'
+                span.text-muted= ': '
+                span.fg-brightcyan= m.subject || '(no subject)'
+              small.text-muted.text-nowrap= formatFriendly(m.system_time || m.created_at)
+      a.btn.btn-sm.btn-outline-info(href='/pm/inbox' data-cf-finish='/pm/inbox')
+        i.bi.bi-envelope-open.me-1
+        | Go to Mail
+    else
+      p.text-muted No unread mail.

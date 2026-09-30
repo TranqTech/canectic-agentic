@@ -117,6 +117,20 @@ block content
         });
       }
 
+      // A link in a stage marked data-cf-finish="/somewhere" (Go to Mail,
+      // Verify Now) finishes the call flow and then goes there, so following
+      // it does not leave the flow half done to be offered again. Local
+      // paths only.
+      document.addEventListener('click', function(e) {
+        var link = e.target.closest ? e.target.closest('[data-cf-finish]') : null;
+        if (!link) return;
+        var dest = link.getAttribute('data-cf-finish') || '';
+        if (dest.charAt(0) !== '/' || dest.charAt(1) === '/' || dest.charAt(1) === '\\') return;
+        e.preventDefault();
+        returnUrl = dest;
+        complete();
+      });
+
       // Button handlers
       document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('cf-continue').addEventListener('click', nextStage);
@@ -143,6 +157,16 @@ block content
     })();
 
   style.
+    /* Bulletins stage: Bootstrap paints an open accordion header in pale
+       primary, which the yellow title cannot be read on */
+    #cf-bulletins .accordion-button:not(.collapsed) {
+      background-color: #303030;
+      color: #fff;
+      box-shadow: none;
+    }
+    #cf-bulletins .accordion-button:not(.collapsed)::after {
+      filter: invert(1);
+    }
     #cf-stage-container {
       transition: opacity 0.15s ease-in-out;
       min-height: 200px;

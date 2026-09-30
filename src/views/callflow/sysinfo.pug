@@ -1,0 +1,28 @@
+//- System Info stage: the details /stats shows, in one card
+.card.mb-3
+  .card-header.bg-primary
+    i.bi.bi-info-circle.me-2
+    | System Info
+  .card-body
+    .row
+      .col-md-6
+        dl.row.mb-0
+          dt.col-sm-5.fg-brightyellow Board Name
+          dd.col-sm-7.fg-brightcyan= stats.boardName
+          dt.col-sm-5.fg-brightyellow Sysop
+          dd.col-sm-7.fg-brightcyan= stats.sysopName
+          if stats.boardLocation
+            dt.col-sm-5.fg-brightyellow Location
+            dd.col-sm-7.fg-brightcyan= stats.boardLocation
+          dt.col-sm-5.fg-brightyellow Version
+          dd.col-sm-7.fg-brightcyan= stats.systemVersion
+      .col-md-6
+        dl.row.mb-0
+          dt.col-sm-5.fg-brightyellow Users
+          dd.col-sm-7.fg-brightcyan= stats.totalUsers.toLocaleString()
+          dt.col-sm-5.fg-brightyellow Total Calls
+          dd.col-sm-7.fg-brightcyan= stats.totalCalls.toLocaleString()
+          dt.col-sm-5.fg-brightyellow Message Areas
+          dd.col-sm-7.fg-brightcyan= stats.totalAreas.toLocaleString()
+          dt.col-sm-5.fg-brightyellow Files
+          dd.col-sm-7.fg-brightcyan= stats.totalFiles.toLocaleString() + ' (' + formatFileSize(stats.totalFileSize) + ')'
