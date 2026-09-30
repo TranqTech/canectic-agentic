@@ -183,6 +183,15 @@ async function prerunMaint(){
 	await callFlowsModel.seedDefaults();
 	await loadFlowsFromDB();
 
+	// Seed the web navigation bar into an empty table (#91). A failure is
+	// not fatal: the bar draws its defaults when the table cannot be read.
+	try {
+		var webNavModel = await import('../src/models/webNav.js');
+		await webNavModel.seedDefaults();
+	} catch (err) {
+		alogger.writeAlog(2, 'Web nav: seeding skipped: ' + err.message, 'yellow');
+	}
+
 	// Build runtime pool/path arrays from DB (fallback to hardcoded)
 	try {
 		var dbPools = await callFlowsModel.getActivePools();

@@ -87,4 +87,25 @@ function canModerateArea(user, area) {   // eslint-disable-line no-unused-vars
 	return parseFlags(user.permissionflags).includes('Sysop');
 }
 
-export { parseFlags, checkAreaReadAccess, checkAreaPostAccess, canModerateArea };
+// The rule terminal menu entries use (menuhandler._isEntryAccessible), for
+// anything else that carries min_security / required_flags /
+// prohibited_flags, such as web navigation items: security at least
+// min_security when it is set, ALL required flags, and NONE of the
+// prohibited flags, which count whether the user holds them as permissions
+// or as restrictions. A visitor (no user) is security 0 with no flags.
+function checkEntryAccess(user, entry) {
+	if (!entry) return false;
+	var security = user ? (parseInt(user.security) || 0) : 0;
+	if (entry.min_security !== undefined && entry.min_security !== null && entry.min_security !== '') {
+		if (security < (parseInt(entry.min_security) || 0)) return false;
+	}
+	var perms  = user ? parseFlags(user.permissionflags) : [];
+	var restrs = user ? parseFlags(user.restrictionflags) : [];
+	var required = parseFlags(entry.required_flags);
+	var prohibited = parseFlags(entry.prohibited_flags);
+	if (!required.every(function(f) { return perms.includes(f); })) return false;
+	if (prohibited.some(function(f) { return perms.includes(f) || restrs.includes(f); })) return false;
+	return true;
+}
+
+export { parseFlags, checkAreaReadAccess, checkAreaPostAccess, canModerateArea, checkEntryAccess };

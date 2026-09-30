@@ -39,6 +39,7 @@ import * as netmailRoutes from '../models/netmailRoutes.js';
 import * as timedEvents from '../models/timedEvents.js';
 import * as callFlowsModel from '../models/callFlows.js';
 import * as webBlockCatalog from '../webBlocks/catalog.js';
+import * as webNavModel from '../models/webNav.js';
 import * as badEchomail from '../models/badEchomail.js';
 import * as inboundFileLog from '../models/inboundFileLog.js';
 import * as managedNodes from '../models/managedNodes.js';
@@ -7250,6 +7251,48 @@ router.get('/inbound-log', requireAdmin, async (req, res) => {
 // Call Flows
 // -------------------------------------------------------
 
+// -------------------------------------------------------
+// Web navigation bar (#91): the left side of the user navbar
+// -------------------------------------------------------
+
+router.get('/webnav', requireAdmin, async (req, res) => {
+	var currentuser = await getCurrentUser(req);
+	var sufficientAccess = checkAdminAccess(currentuser);
+	var items = [];
+	var loadError = null;
+	try { items = await webNavModel.getAllItems(); } catch (err) { loadError = err.message; }
+	res.locals.flash = await flash.get(req);
+	res.render('admin/webnav/index', {
+		sufficientAccess, title: 'Web Navigation', activelink: 'webnav', activenav: 'menus',
+		currentuser, items, loadError,
+		builtins: webNavModel.BUILTINS,
+		targetTypes: webNavModel.TARGET_TYPES,
+		audiences: webNavModel.AUDIENCES,
+		availablePermissions: getAvailablePermissions(),
+		availableRestrictions: getAvailableRestrictions()
+	});
+});
+
+router.post('/webnav/new', urlencodedParser, requireAdmin, async (req, res) => {
+	await flashModelResult(req, await webNavModel.createItem(req.body), 'Link added.');
+	res.redirect('/admin/webnav');
+});
+
+router.post('/webnav/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
+	await flashModelResult(req, await webNavModel.updateItem(parseInt(req.params.id), req.body), 'Link saved.');
+	res.redirect('/admin/webnav');
+});
+
+router.post('/webnav/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
+	await flashModelResult(req, await webNavModel.deleteItem(parseInt(req.params.id)), 'Link removed.');
+	res.redirect('/admin/webnav');
+});
+
+router.post('/webnav/reorder', express.json(), requireAdmin, async (req, res) => {
+	var result = await webNavModel.reorderItems(req.body && req.body.ids);
+	res.json({ status: !!result.status, errormessages: result.errormessages || [] });
+});
+
 router.get('/callflows', requireAdmin, async (req, res) => {
 	var currentuser = await getCurrentUser(req);
 	var sufficientAccess = checkAdminAccess(currentuser);
@@ -7270,7 +7313,7 @@ router.get('/callflows', requireAdmin, async (req, res) => {
 // The model refuses a save it cannot accept (a stage of the wrong kind, a
 // pool on the web flow) and says why; these routes used to drop that, so a
 // refused save looked exactly like one that worked.
-async function flashCallflowResult(req, result, doneText) {
+async function flashModelResult(req, result, doneText) {
 	if (result && result.status) {
 		if (doneText) await flash.setOne(req, 'success', doneText);
 	} else {
@@ -7279,17 +7322,17 @@ async function flashCallflowResult(req, result, doneText) {
 }
 
 router.post('/callflows/new', urlencodedParser, requireAdmin, async (req, res) => {
-	await flashCallflowResult(req, await callFlowsModel.createFlow(req.body), 'Call flow created.');
+	await flashModelResult(req, await callFlowsModel.createFlow(req.body), 'Call flow created.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callflows/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
-	await flashCallflowResult(req, await callFlowsModel.updateFlow(parseInt(req.params.id), req.body), 'Call flow saved.');
+	await flashModelResult(req, await callFlowsModel.updateFlow(parseInt(req.params.id), req.body), 'Call flow saved.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callflows/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
-	await flashCallflowResult(req, await callFlowsModel.deleteFlow(parseInt(req.params.id)), 'Call flow deleted.');
+	await flashModelResult(req, await callFlowsModel.deleteFlow(parseInt(req.params.id)), 'Call flow deleted.');
 	res.redirect('/admin/callflows');
 });
 
@@ -7303,17 +7346,17 @@ router.post('/callflows/:id/stages', express.json(), requireAdmin, async (req, r
 });
 
 router.post('/callpools/new', urlencodedParser, requireAdmin, async (req, res) => {
-	await flashCallflowResult(req, await callFlowsModel.createPool(req.body), 'Call pool created.');
+	await flashModelResult(req, await callFlowsModel.createPool(req.body), 'Call pool created.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callpools/:id/update', urlencodedParser, requireAdmin, async (req, res) => {
-	await flashCallflowResult(req, await callFlowsModel.updatePool(parseInt(req.params.id), req.body), 'Call pool saved.');
+	await flashModelResult(req, await callFlowsModel.updatePool(parseInt(req.params.id), req.body), 'Call pool saved.');
 	res.redirect('/admin/callflows');
 });
 
 router.post('/callpools/:id/delete', urlencodedParser, requireAdmin, async (req, res) => {
-	await flashCallflowResult(req, await callFlowsModel.deletePool(parseInt(req.params.id)), 'Call pool deleted.');
+	await flashModelResult(req, await callFlowsModel.deletePool(parseInt(req.params.id)), 'Call pool deleted.');
 	res.redirect('/admin/callflows');
 });
 

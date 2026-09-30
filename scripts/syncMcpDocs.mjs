@@ -209,6 +209,7 @@ var TOPIC_TAGS = {
     // sysop
     'INSTALL.md':                   ['installation', 'setup'],
     'CALLFLOWS.md':                 ['callflow', 'web', 'terminal', 'configuration'],
+    'WEBSITE.md':                   ['web', 'navigation', 'configuration'],
     'MENUS.md':                     ['menus', 'configuration'],
     'DOORSERVER.md':                ['doors', 'doorserver', 'configuration'],
     'SECURITY.md':                  ['security', 'terminal', 'fail2ban', 'configuration'],

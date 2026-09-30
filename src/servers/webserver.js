@@ -15,6 +15,7 @@ import { router as adminLogRouter, registerLogWebSocket } from "../routes/adminL
 import { router as filesRouter } from '../routes/files.js';
 import { router as doorserverRouter } from '../routes/doorserver.js';
 import { router as callflowRouter } from '../routes/callflow.js';
+import * as webNav from '../models/webNav.js';
 import { router as apiV1Router } from '../routes/api.js';
 import { pgpool } from '../middleware/db/postgres.js';
 import * as redis from '../middleware/db/redis.js';
@@ -103,11 +104,21 @@ webserver.use(function(req, res, next) {
 // The table timestamp formatter, for the `ts` mixin the layouts include. Set
 // here rather than per router so an admin page and a user page cannot end up
 // formatting dates two ways.
-webserver.use(function(req, res, next) {
+webserver.use(async function(req, res, next) {
 	res.locals.formatTimestamp = formatTimestamp;
 	res.locals.timestampMs = timestampMs;
 	// Friendly dates for user-facing views, in server time (#59): +when
 	res.locals.formatFriendly = formatFriendly;
+	// The sysop's navigation links (#91). The rows are loaded here, cached;
+	// the navbar builds what this visitor sees, since only the route knows
+	// currentuser and activelink by the time the page renders.
+	try {
+		res.locals.webNavItems = await webNav.getItemsForRender();
+	} catch (_) {
+		res.locals.webNavItems = webNav.DEFAULT_ITEMS;
+	}
+	res.locals.buildWebNav = webNav.buildNav;
+	res.locals.navPath = req.path;
 	next();
 });
 

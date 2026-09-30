@@ -10,6 +10,11 @@
       "id": "web-callflow-editable",
       "level": "info",
       "text": "The web call flow (the guided tour of what is new that website users get after logging in) can now be edited. It appears on the Call Flows page (Flows in the admin menu) as a flow marked Web, set up exactly as it was, so nothing changes until you edit it. You can reorder or remove stages, set Last Callers, Who's Online and The Wall to show only when there is something new, and add four new stages: Bulletins, System Info, New Mail and Verify Address. Saving a terminal flow now refuses a stage the terminal side cannot run, rather than saving it and disconnecting callers when they reach it. See docs/sysop/CALLFLOWS.md."
+    },
+    {
+      "id": "web-navigation-editable",
+      "level": "info",
+      "text": "The links across the top of the website are now edited under Menus > Web Navigation in the admin panel. They start out as they were (Messages, Files, Doors, Chat, Wall), so nothing changes until you edit them. If you had changed src/views/includes/user-nav.pug by hand, this update replaces it: make those changes on the new page instead. See docs/sysop/WEBSITE.md."
     }
   ],
   "min_upgrade_from": "0.9.0a",

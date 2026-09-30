@@ -1,0 +1,291 @@
+extends ../../layouts/admin
+
+//- One table of links: the top level, or the links inside one menu. Rows are
+//- dragged to reorder within their own table only.
+mixin navTable(rows, parentKey)
+  table.table.table-sm.table-hover.mb-0.webnav-table(data-parent=parentKey)
+    thead
+      tr
+        th(style='width:30px')
+        th Label
+        th Points at
+        th Who sees it
+        th Status
+        th(style='width:100px')
+    tbody
+      each item in rows
+        - var b = item.target_type === 'builtin' ? builtins.find(function(x) { return x.key === item.target; }) : null
+        - var kids = items.filter(function(x) { return x.parent_id === item.id; })
+        tr(draggable='true' data-id=item.id)
+          td.drag-handle.text-muted(style='cursor:grab' title='Drag to reorder')
+            i.bi.bi-grip-vertical
+          td
+            if item.icon
+              i.bi.me-1(class='bi-' + item.icon)
+            strong= item.label
+          td
+            if item.target_type === 'dropdown'
+              span.badge.bg-info.text-dark Menu
+              small.text-muted.ms-1= kids.length + ' link' + (kids.length === 1 ? '' : 's')
+            else if item.target_type === 'builtin'
+              if b
+                = b.label
+                code.ms-1= b.href
+                if b.enabledKey
+                  small.text-muted.d-block Shown only while #[code= b.enabledKey] is on
+              else
+                span.text-danger Unknown page: #{item.target}
+            else
+              code= item.target
+              if item.new_tab
+                small.text-muted.ms-1 (new tab)
+          td
+            - var aud = audiences.find(function(a) { return a.value === item.audience; })
+            small= aud ? aud.label : item.audience
+            if item.min_security !== null && item.min_security !== undefined
+              small.d-block.text-muted Security #{item.min_security}+
+            if item.required_flags && item.required_flags.length
+              small.d-block.text-muted Needs: #{item.required_flags.join(', ')}
+            if item.prohibited_flags && item.prohibited_flags.length
+              small.d-block.text-muted Not for: #{item.prohibited_flags.join(', ')}
+          td
+            if item.active
+              span.badge.bg-success Shown
+            else
+              span.badge.bg-secondary Hidden
+          td
+            button.btn.btn-sm.btn-primary.me-1(
+              type='button'
+              data-bs-toggle='modal' data-bs-target='#linkModal'
+              data-item=JSON.stringify(item)
+              title='Edit'
+            )
+              i.bi.bi-pencil
+            form.d-inline(method='POST' action='/admin/webnav/' + item.id + '/delete')
+              button.btn.btn-sm.btn-danger(type='submit' title='Remove' onclick='return confirm("Remove this link?")')
+                i.bi.bi-trash
+
+block content
+  .container-fluid
+    br
+    br
+    .row
+      .col-lg-10.offset-lg-1.col-12
+        h2.mb-2
+          i.bi.bi-menu-button-wide.me-2
+          | Web Navigation
+        p.text-muted
+          | The links on the left of the website's navigation bar, in order. The right side (Dashboard, Mail, notifications, the account menu and Login) is fixed, so there is always a way into the admin and out of an account.
+          |  Hiding a link does #[strong not] switch the page off: it stays reachable at its address.
+        include ../../partials/flash
+
+        if loadError
+          .alert.alert-danger
+            | Could not read the links (#{loadError}). The website is drawing the default bar until this is fixed; the table is created by the database update (#[code node src/tools/dbmigrations.js]).
+
+        - var topLevel = items.filter(function(x) { return !x.parent_id; })
+        - var menus = topLevel.filter(function(x) { return x.target_type === 'dropdown'; })
+        - var orphans = items.filter(function(x) { return x.parent_id && !menus.some(function(m) { return m.id === x.parent_id; }); })
+
+        .card.mb-4
+          .card-header.bg-primary
+            .d-flex.justify-content-between.align-items-center
+              h5.mb-0 Navigation bar
+              button.btn.btn-sm.btn-success(type='button' data-bs-toggle='modal' data-bs-target='#linkModal')
+                i.bi.bi-plus-circle.me-1
+                | Add Link
+          .card-body
+            if topLevel.length > 0
+              +navTable(topLevel, 'top')
+              small.text-muted.mt-2.d-block Drag rows to reorder.
+            else if !loadError
+              p.text-muted.mb-0
+                | No links. The website is drawing the default bar (Messages, Files, Doors, Chat, Wall), and the next gateway start puts those back here. To show no links at all, keep them and switch them off.
+
+        each menu in menus
+          - var kids = items.filter(function(x) { return x.parent_id === menu.id; })
+          .card.mb-4
+            .card-header.bg-dark
+              h6.mb-0
+                if menu.icon
+                  i.bi.me-1(class='bi-' + menu.icon)
+                | In the menu #[strong= menu.label]
+            .card-body
+              if kids.length > 0
+                +navTable(kids, String(menu.id))
+              else
+                p.text-muted.mb-0 No links in this menu yet, so it is not shown. Add one and choose this menu under "Put it in".
+
+        if orphans.length > 0
+          .card.mb-4.border-warning
+            .card-header.bg-warning.text-dark
+              h6.mb-0 Links whose menu is gone
+            .card-body
+              p.small.text-muted These are shown at the top level. Edit each to put it somewhere.
+              +navTable(orphans, 'orphans')
+
+    //- Add / edit a link
+    .modal.fade#linkModal(tabindex='-1')
+      .modal-dialog.modal-lg
+        .modal-content
+          .modal-header
+            h5.modal-title#lmTitle Add Link
+            button.btn-close(type='button' data-bs-dismiss='modal')
+          form#linkForm(method='POST' action='/admin/webnav/new')
+            .modal-body
+              .row
+                .col-md-7.mb-3
+                  label.form-label(for='lmLabel') Label
+                  input.form-control#lmLabel(name='label' required maxlength='64')
+                .col-md-5.mb-3
+                  label.form-label(for='lmIcon') Icon #[small.text-muted (optional)]
+                  .input-group
+                    span.input-group-text: i#lmIconPreview.bi
+                    input.form-control#lmIcon(name='icon' maxlength='64' placeholder='e.g. chat-dots')
+                  .form-text
+                    | A #[a(href='https://icons.getbootstrap.com/' target='_blank' rel='noopener') Bootstrap icon] name.
+              .mb-3
+                label.form-label(for='lmType') Points at
+                select.form-select#lmType(name='target_type')
+                  each t in targetTypes
+                    option(value=t.value)= t.label
+              .mb-3#lmBuiltinWrap
+                label.form-label(for='lmBuiltin') Page
+                select.form-select#lmBuiltin
+                  each b in builtins
+                    option(value=b.key data-label=b.label)= b.label + ' (' + b.href + ')' + (b.enabledKey ? ', while ' + b.enabledKey + ' is on' : '')
+              .mb-3#lmUrlWrap
+                label.form-label(for='lmUrl') Address
+                input.form-control#lmUrl(maxlength='512' placeholder='https://example.org or /doors/play/lord')
+                .form-check.mt-2
+                  input.form-check-input#lmNewTab(type='checkbox' name='new_tab' value='true')
+                  label.form-check-label(for='lmNewTab') Open in a new tab
+              input#lmTarget(type='hidden' name='target')
+              .mb-3#lmParentWrap
+                label.form-label(for='lmParent') Put it in
+                select.form-select#lmParent(name='parent_id')
+                  option(value='') The bar itself
+                  each m in menus
+                    option(value=m.id)= 'The menu ' + m.label
+              .row
+                .col-md-6.mb-3
+                  label.form-label(for='lmAudience') Who sees it
+                  select.form-select#lmAudience(name='audience')
+                    each a in audiences
+                      option(value=a.value)= a.label
+                .col-md-6.mb-3
+                  label.form-label(for='lmSecurity') Lowest security #[small.text-muted (optional)]
+                  input.form-control#lmSecurity(name='min_security' type='number' min='0' max='255' placeholder='anyone')
+              .row
+                .col-md-6.mb-3
+                  label.form-label Needs all of these flags
+                  each f in availablePermissions
+                    .form-check
+                      input.form-check-input.lm-req(type='checkbox' name='required_flags' value=f id='lmReq-' + f)
+                      label.form-check-label(for='lmReq-' + f)= f
+                .col-md-6.mb-3
+                  label.form-label Hidden from anyone with
+                  each f in availableRestrictions
+                    .form-check
+                      input.form-check-input.lm-pro(type='checkbox' name='prohibited_flags' value=f id='lmPro-' + f)
+                      label.form-check-label(for='lmPro-' + f)= f
+              .form-check
+                input.form-check-input#lmActive(type='checkbox' name='active' value='true' checked)
+                label.form-check-label(for='lmActive') Shown
+              input(type='hidden' name='active' value='false')
+            .modal-footer
+              button.btn.btn-secondary(type='button' data-bs-dismiss='modal') Cancel
+              button.btn.btn-primary(type='submit') Save
+
+    script.
+      (function() {
+        var modal = document.getElementById('linkModal');
+        var form = document.getElementById('linkForm');
+        var type = document.getElementById('lmType');
+        var builtinSel = document.getElementById('lmBuiltin');
+        var url = document.getElementById('lmUrl');
+        var target = document.getElementById('lmTarget');
+        var label = document.getElementById('lmLabel');
+        var icon = document.getElementById('lmIcon');
+        var iconPreview = document.getElementById('lmIconPreview');
+
+        function showFor(t) {
+          document.getElementById('lmBuiltinWrap').style.display = t === 'builtin' ? '' : 'none';
+          document.getElementById('lmUrlWrap').style.display = t === 'url' ? '' : 'none';
+          // A menu goes on the bar itself: one level only
+          document.getElementById('lmParentWrap').style.display = t === 'dropdown' ? 'none' : '';
+          if (t === 'dropdown') document.getElementById('lmParent').value = '';
+        }
+        function previewIcon() {
+          var name = (icon.value || '').trim().replace(/^bi-/, '');
+          iconPreview.className = 'bi' + (/^[a-z0-9-]+$/.test(name) ? ' bi-' + name : '');
+        }
+        type.addEventListener('change', function() { showFor(type.value); });
+        icon.addEventListener('input', previewIcon);
+        // Picking a page fills an empty label with its name
+        builtinSel.addEventListener('change', function() {
+          if (!label.value.trim()) label.value = builtinSel.options[builtinSel.selectedIndex].dataset.label || '';
+        });
+
+        modal.addEventListener('show.bs.modal', function(e) {
+          var btn = e.relatedTarget;
+          var item = null;
+          try { item = btn && btn.dataset.item ? JSON.parse(btn.dataset.item) : null; } catch (_) {}
+          form.reset();
+          document.getElementById('lmTitle').textContent = item ? 'Edit Link' : 'Add Link';
+          form.action = item ? '/admin/webnav/' + item.id + '/update' : '/admin/webnav/new';
+          var t = item ? item.target_type : 'builtin';
+          type.value = t;
+          label.value = item ? item.label : '';
+          icon.value = item && item.icon ? item.icon : '';
+          if (t === 'builtin' && item) builtinSel.value = item.target;
+          url.value = (item && t === 'url') ? item.target : '';
+          document.getElementById('lmNewTab').checked = !!(item && item.new_tab);
+          document.getElementById('lmParent').value = item && item.parent_id ? String(item.parent_id) : '';
+          document.getElementById('lmAudience').value = item ? item.audience : 'all';
+          document.getElementById('lmSecurity').value = item && item.min_security !== null && item.min_security !== undefined ? item.min_security : '';
+          document.querySelectorAll('.lm-req').forEach(function(c) { c.checked = !!(item && (item.required_flags || []).indexOf(c.value) !== -1); });
+          document.querySelectorAll('.lm-pro').forEach(function(c) { c.checked = !!(item && (item.prohibited_flags || []).indexOf(c.value) !== -1); });
+          document.getElementById('lmActive').checked = item ? !!item.active : true;
+          showFor(t);
+          previewIcon();
+        });
+
+        // The hidden target carries whichever of page or address applies
+        form.addEventListener('submit', function() {
+          target.value = type.value === 'builtin' ? builtinSel.value : (type.value === 'url' ? url.value.trim() : '');
+          // The checked box and the hidden false share a name; send one
+          var active = document.getElementById('lmActive');
+          form.querySelector('input[type=hidden][name=active]').disabled = active.checked;
+        });
+
+        // Drag to reorder, within one table
+        document.querySelectorAll('.webnav-table tbody').forEach(function(tbody) {
+          var dragRow = null;
+          tbody.addEventListener('dragstart', function(e) {
+            dragRow = e.target.closest('tr');
+            if (dragRow) e.dataTransfer.effectAllowed = 'move';
+          });
+          tbody.addEventListener('dragover', function(e) {
+            if (!dragRow) return;
+            var over = e.target.closest('tr');
+            if (!over || over === dragRow || over.parentNode !== tbody) return;
+            e.preventDefault();
+            var rect = over.getBoundingClientRect();
+            tbody.insertBefore(dragRow, (e.clientY < rect.top + rect.height / 2) ? over : over.nextSibling);
+          });
+          tbody.addEventListener('dragend', function() {
+            if (!dragRow) return;
+            dragRow = null;
+            var ids = Array.prototype.map.call(tbody.querySelectorAll('tr[data-id]'), function(r) { return parseInt(r.dataset.id, 10); });
+            fetch('/admin/webnav/reorder', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: ids })
+            }).then(function(r) { return r.json(); }).then(function(res) {
+              if (!res.status) alert('Not saved:\n' + (res.errormessages || []).join('\n'));
+              location.reload();
+            }).catch(function(err) { alert('Not saved: ' + err.message); location.reload(); });
+          });
+        });
+      })();
